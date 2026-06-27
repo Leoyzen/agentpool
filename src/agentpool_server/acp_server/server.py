@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-SubagentDisplayMode = Literal["legacy", "zed"]
+SubagentDisplayMode = Literal["legacy", "zed", "qwen"]
 
 
 def _coerce_subagent_display_mode(value: str) -> SubagentDisplayMode:
@@ -46,6 +46,9 @@ def _coerce_subagent_display_mode(value: str) -> SubagentDisplayMode:
     if value == "zed":
         logger.info("Subagent display mode set to 'zed'")
         return "zed"
+    if value == "qwen":
+        logger.info("Subagent display mode set to 'qwen'")
+        return "qwen"
     logger.warning("Unknown subagent display mode '%s', falling back to 'legacy'", value)
     return "legacy"
 

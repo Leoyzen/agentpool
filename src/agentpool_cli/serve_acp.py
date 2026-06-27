@@ -152,10 +152,10 @@ def acp_command(  # noqa: PLR0915
         ),
     ] = None,
     subagent_display_mode: Annotated[
-        Literal["legacy", "zed"] | None,
+        Literal["legacy", "zed", "qwen"] | None,
         t.Option(
             "--subagent-display-mode",
-            help="Display subagent: 'legacy' or 'zed'",
+            help="Display subagent: 'legacy', 'zed', or 'qwen'",
         ),
     ] = None,
 ) -> None:

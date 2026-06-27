@@ -172,13 +172,14 @@ class ACPPoolServerConfig(BasePoolServerConfig):
     )
     """Whether to raise exceptions during server start."""
 
-    subagent_display_mode: Literal["legacy", "zed"] = Field(
+    subagent_display_mode: Literal["legacy", "zed", "qwen"] = Field(
         default="legacy",
         title="Subagent display mode",
     )
     """How to display nested agent output in ACP clients:
     - "legacy": Original display mode (backward compat for "inline"/"tool_box")
     - "zed": Zed editor optimized display mode
+    - "qwen": Qwen compatible display mode
     """
 
     @field_validator("subagent_display_mode", mode="before")

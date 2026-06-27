@@ -76,7 +76,7 @@ class ACPSessionManager:
         session_id: str | None = None,
         client_capabilities: ClientCapabilities | None = None,
         client_info: Implementation | None = None,
-        subagent_display_mode: Literal["legacy", "zed"] = "legacy",
+        subagent_display_mode: Literal["legacy", "zed", "qwen"] = "legacy",
         parent_session_id: str | None = None,
     ) -> str:
         """Create a new ACP session.
@@ -200,7 +200,7 @@ class ACPSessionManager:
         acp_agent: AgentPoolACPAgent,
         client_capabilities: ClientCapabilities | None = None,
         client_info: Implementation | None = None,
-        subagent_display_mode: Literal["legacy", "zed"] = "legacy",
+        subagent_display_mode: Literal["legacy", "zed", "qwen"] = "legacy",
         mcp_servers: Sequence[McpServer] | None = None,
     ) -> ACPSession | None:
         """Resume a session from storage.

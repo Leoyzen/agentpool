@@ -224,8 +224,8 @@ class AgentPoolACPAgent(ACPAgent):
     server: ACPServer | None = field(default=None)
     """Reference to the ACPServer for pool hot-switching."""
 
-    subagent_display_mode: Literal["legacy", "zed"] = "legacy"
-    """Display mode for subagent outputs ("legacy" or "zed")."""
+    subagent_display_mode: Literal["legacy", "zed", "qwen"] = "legacy"
+    """Display mode for subagent outputs ("legacy", "zed", or "qwen")."""
 
     _skill_bridge: ACPSkillBridge | None = field(init=False, default=None)
     """Bridge for exposing skill commands as ACP slash commands."""
