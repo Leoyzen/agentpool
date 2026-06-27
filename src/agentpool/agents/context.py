@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
 import time
-from typing import TYPE_CHECKING, Any, Literal
 import uuid
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal
+
+import anyio
 
 from agentpool.agents.prompt_injection import PromptInjectionManager
 from agentpool.log import get_logger
@@ -53,11 +55,12 @@ class _DeprecatedField:
         obj.__dict__["session_id"] = value
 
 
-def _create_set_event() -> asyncio.Event:
-    """Create an asyncio.Event that is initially set (0 pending = complete)."""
-    event = asyncio.Event()
-    event.set()
-    return event
+MAX_SUBAGENT_DEPTH: int = 5
+"""Maximum nesting depth for subagent delegations."""
+
+
+class SubagentDepthError(Exception):
+    """Raised when subagent nesting exceeds MAX_SUBAGENT_DEPTH."""
 
 
 @dataclass(kw_only=True)
@@ -121,29 +124,8 @@ class AgentRunContext:
     _run_handle: RunHandle | None = None
     """Run handle for this execution, set by TurnRunner._run_turn_unlocked()."""
 
-    pending_background_tasks: int = 0
-    """Counter for active background tasks. Tools that spawn background tasks
-    should use this pattern:
-
-        async def my_tool(ctx: AgentContext):
-            run_ctx = ctx.run_ctx
-            async def bg_task():
-                try:
-                    result = await do_work()
-                    if run_ctx.steer_callback is not None:
-                        await run_ctx.steer_callback(run_ctx.session_id, f"Result: {result}")
-                finally:
-                    run_ctx.pending_background_tasks -= 1
-                    if run_ctx.pending_background_tasks == 0:
-                        run_ctx.background_tasks_complete.set()
-            run_ctx.pending_background_tasks += 1
-            run_ctx.background_tasks_complete.clear()
-            asyncio.create_task(bg_task())
-            return "Background task started"
-    """
-
-    background_tasks_complete: asyncio.Event = field(default_factory=_create_set_event)
-    """Event, initially SET. Cleared when counter > 0, set when counter returns to 0."""
+    child_done_events: dict[str, anyio.Event] = field(default_factory=dict)
+    """Per-child-session done events for tracking subagent completion."""
 
     queued_steer_messages: list[str] = field(default_factory=list)
     """Steer messages queued during post-iteration wait window."""

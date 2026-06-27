@@ -177,6 +177,9 @@ class ACPEventConverter:
     _child_sessions: set[str] = field(default_factory=set)
     """Track child session IDs that have been spawned."""
 
+    _subagent_tool_call_ids: dict[str, str] = field(default_factory=dict)
+    """Map child_session_id to tool_call_id for zed mode subagent tracking."""
+
     _current_message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     """Message ID for the current agent response."""
 
@@ -220,6 +223,7 @@ class ACPEventConverter:
         self.last_usage = None
         self._subagent_content.clear()
         self._child_sessions.clear()
+        self._subagent_tool_call_ids.clear()
         self.cleanup()
 
     def cleanup(self) -> None:
@@ -278,6 +282,31 @@ class ACPEventConverter:
                 yield ToolCallProgress(tool_call_id=tool_call_id, status="completed")
         # Clean up all state
         self.reset()
+
+    async def build_subagent_completed(
+        self,
+        child_session_id: str,
+    ) -> AsyncIterator[ToolCallProgress]:
+        """Emit a completion notification for a subagent session in zed mode.
+
+        Yields a ToolCallProgress with status="completed" and subagent
+        field metadata, closing the tool call lifecycle started by
+        SpawnSessionStart in zed mode. In legacy mode, this is a no-op.
+
+        Args:
+            child_session_id: The child session ID that has completed.
+        """
+        if self.subagent_display_mode != "zed":
+            return
+        tool_call_id = self._subagent_tool_call_ids.pop(child_session_id, None)
+        if not tool_call_id:
+            return
+        field_meta = self._build_subagent_field_meta(child_session_id=child_session_id)
+        yield ToolCallProgress(
+            tool_call_id=tool_call_id,
+            status="completed",
+            field_meta=field_meta,
+        )
 
     def _get_or_create_tool_state(
         self,
@@ -646,14 +675,15 @@ class ACPEventConverter:
                     yield AgentMessageChunk.text(text, message_id=self._current_message_id)
                     self._child_sessions.add(child_session_id)
                 elif self.subagent_display_mode == "zed":
-                    tool_call_id = str(uuid.uuid4())
+                    tool_call_id = event.tool_call_id or str(uuid.uuid4())
+                    self._subagent_tool_call_ids[child_session_id] = tool_call_id
                     _meta = self._build_subagent_field_meta(
                         child_session_id=child_session_id, message_start_index=0
                     )
                     yield ToolCallStart(
                         tool_call_id=tool_call_id,
                         title=f"{source_name}: {description}" if description else source_name,
-                        kind="other",
+                        kind="subagent",
                         status="pending",
                         field_meta=_meta,
                     )
