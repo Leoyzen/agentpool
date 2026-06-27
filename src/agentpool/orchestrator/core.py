@@ -1552,43 +1552,6 @@ class SessionController:
             s for s in self._sessions.values() if s.agent_name == agent_name and not s.is_closing
         ]
 
-    def _use_run_turn(self, agent: BaseAgent[Any, Any] | None) -> bool:
-        """Check whether the new RunTurn code path should be used.
-
-        Returns True when either:
-        - ``AGENTPOOL_USE_RUN_TURN`` is set AND the agent is a native
-          :class:`Agent`.
-        - ``AGENTPOOL_USE_RUN_TURN_FOR_ACP`` is set AND the agent is an
-          :class:`ACPAgent`.
-
-        Args:
-            agent: The agent resolved for the session, or None.
-
-        Returns:
-            True if the new RunTurn path should be used.
-        """
-        if agent is None:
-            return False
-        from agentpool.agents.acp_agent import ACPAgent
-        from agentpool.agents.native_agent import Agent
-
-        native_flag = os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in (
-            "1",
-            "true",
-            "yes",
-        )
-        acp_flag = os.environ.get(
-            "AGENTPOOL_USE_RUN_TURN_FOR_ACP", ""
-        ).lower() in (
-            "1",
-            "true",
-            "yes",
-        )
-        return (
-            (isinstance(agent, Agent) and native_flag)
-            or (isinstance(agent, ACPAgent) and acp_flag)
-        )
-
     async def _consume_run(self, run_handle: RunHandle, initial_prompt: str) -> None:
         """Drive a RunHandle.start() async generator to completion.
 
@@ -1715,11 +1678,8 @@ class SessionController:
     ) -> RunHandle | None:
         """Receive an incoming request for a session.
 
-        When either feature flag is set — ``AGENTPOOL_USE_RUN_TURN`` for
-        native :class:`Agent` or ``AGENTPOOL_USE_RUN_TURN_FOR_ACP`` for
-        :class:`ACPAgent` — routes through the new RunHandle path (idle
-        creates a RunHandle, busy calls ``steer()`` / ``followup()``).
-        Otherwise, falls back to the legacy TurnRunner path.
+        Routes through the RunHandle path: idle sessions create a
+        RunHandle, busy sessions call ``steer()`` / ``followup()``.
 
         Args:
             session_id: Target session.
@@ -1735,11 +1695,9 @@ class SessionController:
         if session is None:
             return None
         agent = self._session_agents.get(session_id)
-        if not self._use_run_turn(agent) or agent is None:
-            return await self._receive_request_turn_runner(
-                session, session_id, content, priority, **kwargs
-            )
-        # New RunTurn path
+        if agent is None:
+            return None
+        # RunHandle path (always)
         resolved = {"steer": "asap", "followup": "when_idle"}.get(priority, priority)
         async with session._request_lock:
             if session.closing or session.is_closing:
@@ -1760,14 +1718,6 @@ class SessionController:
         Args:
             session_id: The session whose run should be cancelled.
         """
-        if os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in ("1", "true", "yes"):
-            warnings.warn(
-                "cancel_run_for_session is deprecated when AGENTPOOL_USE_RUN_TURN is enabled. "
-                "Use RunHandle methods directly.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            return
         session = self.get_session(session_id)
         if session is None:
             return
