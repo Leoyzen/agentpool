@@ -11,6 +11,7 @@ import anyio
 
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunErrorEvent, RunStartedEvent, StreamCompleteEvent
+from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
@@ -22,6 +23,9 @@ if TYPE_CHECKING:
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.agents.events.events import RichAgentStreamEvent
     from agentpool.orchestrator.core import EventBus, SessionState
+
+
+logger = get_logger(__name__)
 
 
 def _create_set_event() -> asyncio.Event:
@@ -110,7 +114,7 @@ class RunHandle:
     # New session-level lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self, initial_prompt: str) -> AsyncGenerator[RichAgentStreamEvent]:
+    async def start(self, initial_prompt: str) -> AsyncGenerator[RichAgentStreamEvent]:  # noqa: PLR0915
         """Start the idle/wake/turn loop as an async generator.
 
         Yields :class:`RichAgentStreamEvent` tokens from each turn's
@@ -184,6 +188,34 @@ class RunHandle:
 
                 if not turn_failed:
                     self._message_history = turn.message_history
+
+                # Between turns: wait for background child tasks to complete,
+                # then collect their steer messages as prompts for next turn.
+                if self.run_ctx.child_done_events:
+                    try:
+                        async with asyncio.timeout(30):
+                            await asyncio.gather(
+                                *[
+                                    e.wait()
+                                    for e in self.run_ctx.child_done_events.values()
+                                ]
+                            )
+                    except TimeoutError:
+                        logger.warning(
+                            "Timeout waiting for child_done_events",
+                            run_id=self.run_id,
+                            pending=len(self.run_ctx.child_done_events),
+                        )
+
+                    # Collect queued steer messages from completed children
+                    # as prompts for the next turn.
+                    if self.run_ctx.queued_steer_messages:
+                        self._message_queue.extend(
+                            self.run_ctx.queued_steer_messages
+                        )
+                        self.run_ctx.queued_steer_messages.clear()
+
+                    self.run_ctx.child_done_events.clear()
 
                 current_prompts = list(self._message_queue)
                 self._message_queue.clear()

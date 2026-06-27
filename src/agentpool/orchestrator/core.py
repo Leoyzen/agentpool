@@ -1555,9 +1555,11 @@ class SessionController:
     def _use_run_turn(self, agent: BaseAgent[Any, Any] | None) -> bool:
         """Check whether the new RunTurn code path should be used.
 
-        Returns True only when both conditions hold:
-        - ``AGENTPOOL_USE_RUN_TURN`` env var is set to a truthy value.
-        - The agent is a native :class:`Agent` instance.
+        Returns True when either:
+        - ``AGENTPOOL_USE_RUN_TURN`` is set AND the agent is a native
+          :class:`Agent`.
+        - ``AGENTPOOL_USE_RUN_TURN_FOR_ACP`` is set AND the agent is an
+          :class:`ACPAgent`.
 
         Args:
             agent: The agent resolved for the session, or None.
@@ -1567,14 +1569,24 @@ class SessionController:
         """
         if agent is None:
             return False
+        from agentpool.agents.acp_agent import ACPAgent
         from agentpool.agents.native_agent import Agent
 
-        if not isinstance(agent, Agent):
-            return False
-        return os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in (
+        native_flag = os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in (
             "1",
             "true",
             "yes",
+        )
+        acp_flag = os.environ.get(
+            "AGENTPOOL_USE_RUN_TURN_FOR_ACP", ""
+        ).lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        return (
+            (isinstance(agent, Agent) and native_flag)
+            or (isinstance(agent, ACPAgent) and acp_flag)
         )
 
     async def _consume_run(self, run_handle: RunHandle, initial_prompt: str) -> None:
@@ -1601,7 +1613,7 @@ class SessionController:
 
         Args:
             session: The session state.
-            agent: The native agent instance.
+            agent: The agent instance (native or ACP).
             session_id: The session identifier.
             content: The initial prompt text.
 
@@ -1703,10 +1715,11 @@ class SessionController:
     ) -> RunHandle | None:
         """Receive an incoming request for a session.
 
-        When ``AGENTPOOL_USE_RUN_TURN`` is set and the agent is a native
-        :class:`Agent`, routes through the new RunHandle path (idle creates
-        a RunHandle, busy calls ``steer()`` / ``followup()``). Otherwise,
-        falls back to the legacy TurnRunner path.
+        When either feature flag is set — ``AGENTPOOL_USE_RUN_TURN`` for
+        native :class:`Agent` or ``AGENTPOOL_USE_RUN_TURN_FOR_ACP`` for
+        :class:`ACPAgent` — routes through the new RunHandle path (idle
+        creates a RunHandle, busy calls ``steer()`` / ``followup()``).
+        Otherwise, falls back to the legacy TurnRunner path.
 
         Args:
             session_id: Target session.
