@@ -14,7 +14,6 @@ from uuid import uuid4
 
 from agentpool.agents.events import (
     RunErrorEvent,
-    RunStartedEvent,
     StreamCompleteEvent,
 )
 from agentpool.orchestrator.turn import Turn
@@ -126,11 +125,7 @@ class ACPTurn(Turn):
             convert_to_acp_content,
         )
 
-        run_id = str(uuid4())
-        yield RunStartedEvent(
-            session_id=self._session_id,
-            run_id=run_id,
-        )
+        run_id = self._run_ctx.run_id
 
         # Convert all user prompts to ACP ContentBlock list.
         # Join all prompts instead of taking only the last one.

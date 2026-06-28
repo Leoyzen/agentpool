@@ -140,6 +140,8 @@ class RunHandle:
         self.run_ctx.steer_callback = self._steer_callback_wrapper
         # Set _run_handle on run_ctx so NativeTurn can access active_agent_run
         self.run_ctx._run_handle = self
+        # Set current_task so cancel() can interrupt the running turn.
+        self.run_ctx.current_task = asyncio.current_task()
 
         try:
             async with session.turn_lock:

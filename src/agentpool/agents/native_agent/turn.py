@@ -18,7 +18,6 @@ from pydantic_graph import End
 
 from agentpool.agents.events.events import (
     RunErrorEvent,
-    RunStartedEvent,
     StreamCompleteEvent,
     ToolCallCompleteEvent,
 )
@@ -138,11 +137,6 @@ class NativeTurn(Turn):
 
         agent_run: Any = None
         try:
-            yield RunStartedEvent(
-                agent_name=self._agent.name,
-                run_id=self._run_ctx.run_id or self._message_id,
-                session_id=self._run_ctx.session_id,
-            )
             async with agentlet.iter(
                 effective_prompts,
                 deps=agent_deps,
