@@ -67,7 +67,7 @@ class TestProcessPromptTurnCompleteFlag:
     ) -> None:
         """When client_capabilities.turn_complete=True, ACPEventConverter must be
 created with client_supports_turn_complete=True."""
-        agent = agent_pool.manifest.agents["test_agent"].get_agent(pool=pool)
+        agent = agent_pool.manifest.agents["test_agent"].get_agent(pool=agent_pool)
         mock_client = AsyncMock()
 
         session = ACPSession(
@@ -111,7 +111,7 @@ created with client_supports_turn_complete=True."""
     ) -> None:
         """When client_capabilities.turn_complete=False, ACPEventConverter must be
 created with client_supports_turn_complete=False."""
-        agent = agent_pool.manifest.agents["test_agent"].get_agent(pool=pool)
+        agent = agent_pool.manifest.agents["test_agent"].get_agent(pool=agent_pool)
         mock_client = AsyncMock()
 
         session = ACPSession(
@@ -153,7 +153,7 @@ created with client_supports_turn_complete=False."""
     ) -> None:
         """When client_capabilities.turn_complete=None, ACPEventConverter must be
 created with client_supports_turn_complete=False (default)."""
-        agent = agent_pool.manifest.agents["test_agent"].get_agent(pool=pool)
+        agent = agent_pool.manifest.agents["test_agent"].get_agent(pool=agent_pool)
         mock_client = AsyncMock()
 
         session = ACPSession(

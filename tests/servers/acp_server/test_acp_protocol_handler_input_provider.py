@@ -38,6 +38,8 @@ def mock_pool() -> MagicMock:
     # Mock sessions registry
     sessions_registry = MagicMock()
     sessions_registry.get_or_create_session_agent = AsyncMock(return_value=MagicMock())
+    sessions_registry.store = MagicMock()
+    sessions_registry.store.load = AsyncMock(return_value=None)
     session_pool.sessions = sessions_registry
 
     from tests._helpers.mock_stream import EmptyReceiveStream

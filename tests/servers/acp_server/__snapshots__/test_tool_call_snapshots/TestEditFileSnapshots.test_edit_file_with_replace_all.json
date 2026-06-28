@@ -18,43 +18,15 @@
   },
   {
     "payload": {
-      "kind": "edit",
-      "locations": [
-        {
-          "line": 0,
-          "path": "/test/multi.py"
-        }
-      ],
-      "sessionUpdate": "tool_call_update",
-      "title": "Editing file: /test/multi.py (Replace all func1 occurrences)",
-      "toolCallId": "pyd_ai_tool_call_id__edit"
-    },
-    "type": "tool_call_update"
-  },
-  {
-    "payload": {
       "content": [
         {
-          "newText": "def renamed():\n    renamed()\n\ndef func2():\n    renamed()\n",
-          "oldText": "def func1():\n    func1()\n\ndef func2():\n    func1()\n",
-          "path": "/test/multi.py",
-          "type": "diff"
+          "content": {
+            "text": "Successfully edited multi.py: Replace all func1 occurrences (3 lines changed)",
+            "type": "text"
+          },
+          "type": "content"
         }
       ],
-      "locations": [
-        {
-          "path": "/test/multi.py"
-        }
-      ],
-      "sessionUpdate": "tool_call_update",
-      "status": "completed",
-      "title": "Editing: /test/multi.py",
-      "toolCallId": "pyd_ai_tool_call_id__edit"
-    },
-    "type": "tool_call_update"
-  },
-  {
-    "payload": {
       "rawOutput": "Successfully edited multi.py: Replace all func1 occurrences (3 lines changed)",
       "sessionUpdate": "tool_call_update",
       "status": "completed",

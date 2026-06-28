@@ -86,7 +86,7 @@ async def test_skill_command_injects_into_staged_content(agent_pool_with_skill: 
     When a user sends a slash command like /test-skill, the instructions
     should be staged so the agent can process them.
     """
-    agent = agent_pool_with_skill.get_agent("test_agent")
+    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(pool=agent_pool_with_skill)
 
     # Create a skill command
     skill_cmd = agent_pool_with_skill._skill_commands.get("test-skill")  # type: ignore[reportPrivateUsage]
@@ -128,7 +128,7 @@ async def test_skill_command_with_staged_content_triggers_agent_run(
     injects content into staged_content, the agent should run rather than
     returning end_turn immediately.
     """
-    agent = agent_pool_with_skill.get_agent("test_agent")
+    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(pool=agent_pool_with_skill)
     mock_client = AsyncMock()
     mock_acp_agent = Mock()
     mock_acp_agent.tasks = Mock()

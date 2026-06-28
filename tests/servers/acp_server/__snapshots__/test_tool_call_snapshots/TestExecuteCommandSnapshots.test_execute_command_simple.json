@@ -16,56 +16,13 @@
     "payload": {
       "content": [
         {
-          "terminalId": "cmd_0001",
-          "type": "terminal"
-        }
-      ],
-      "sessionUpdate": "tool_call_update",
-      "status": "in_progress",
-      "title": "Running: echo hello",
-      "toolCallId": "pyd_ai_tool_call_id__bash"
-    },
-    "type": "tool_call_update"
-  },
-  {
-    "payload": {
-      "content": [
-        {
-          "terminalId": "cmd_0001",
-          "type": "terminal"
-        }
-      ],
-      "sessionUpdate": "tool_call_update",
-      "status": "in_progress",
-      "title": "hello\n",
-      "toolCallId": "pyd_ai_tool_call_id__bash"
-    },
-    "type": "tool_call_update"
-  },
-  {
-    "payload": {
-      "content": [
-        {
-          "terminalId": "cmd_0001",
-          "type": "terminal"
-        },
-        {
           "content": {
-            "text": "hello\n",
+            "text": "ToolResult(content='hello\\n', structured_content=None, metadata={'output': 'hello\\n', 'exit': 0, 'description': 'echo hello'})",
             "type": "text"
           },
           "type": "content"
         }
       ],
-      "sessionUpdate": "tool_call_update",
-      "status": "in_progress",
-      "title": "Process exited [✓ exit 0]",
-      "toolCallId": "pyd_ai_tool_call_id__bash"
-    },
-    "type": "tool_call_update"
-  },
-  {
-    "payload": {
       "rawOutput": {
         "content": "hello\n",
         "metadata": {

@@ -139,7 +139,15 @@ class ToolCallTestHarness:
         manifest = AgentsManifest(agents={"harness_test_agent": agent_config})
         # Create pool and session
         async with AgentPool(manifest) as pool:
-            agent = pool.manifest.agents["harness_test_agent"]
+            agent = agent_config.get_agent(pool=pool)
+            agent.env = self.mock_env
+            # Patch session pool to set mock_env on session agents
+            original_get_agent = pool.session_pool.sessions.get_or_create_session_agent
+            async def _patched_get_agent(*args: Any, **kwargs: Any) -> Any:
+                session_agent = await original_get_agent(*args, **kwargs)
+                session_agent.env = self.mock_env
+                return session_agent
+            pool.session_pool.sessions.get_or_create_session_agent = _patched_get_agent
             capabilities = ClientCapabilities(fs=None, terminal=False)
             session = ACPSession(
                 session_id=self.session_id,
@@ -149,9 +157,6 @@ class ToolCallTestHarness:
                 acp_agent=self._mock_acp_agent,
                 client_capabilities=capabilities,
             )
-            # Override agent.env AFTER session creation
-            for agent in pool.manifest.agents.values():
-                agent.env = self.mock_env
             # Clear and execute
             self.client.clear()
             content_blocks = [TextContentBlock(text=prompt)]
@@ -183,7 +188,15 @@ class ToolCallTestHarness:
         )
         manifest = AgentsManifest(agents={"harness_test_agent": agent_config})
         async with AgentPool(manifest) as pool:
-            harness_agent = pool.manifest.agents["harness_test_agent"]
+            harness_agent = agent_config.get_agent(pool=pool)
+            harness_agent.env = self.mock_env
+            # Patch session pool to set mock_env on session agents
+            original_get_agent = pool.session_pool.sessions.get_or_create_session_agent
+            async def _patched_get_agent(*args: Any, **kwargs: Any) -> Any:
+                session_agent = await original_get_agent(*args, **kwargs)
+                session_agent.env = self.mock_env
+                return session_agent
+            pool.session_pool.sessions.get_or_create_session_agent = _patched_get_agent
             capabilities = ClientCapabilities(fs=None, terminal=False)
             session = ACPSession(
                 session_id=self.session_id,
@@ -194,8 +207,6 @@ class ToolCallTestHarness:
                 client_capabilities=capabilities,
             )
 
-            for agent in pool.manifest.agents.values():
-                agent.env = self.mock_env
             self.client.clear()
             content_blocks = [TextContentBlock(text=prompt)]
             await session.process_prompt(content_blocks)

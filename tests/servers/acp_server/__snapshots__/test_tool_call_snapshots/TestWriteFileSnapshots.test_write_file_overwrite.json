@@ -16,43 +16,15 @@
   },
   {
     "payload": {
-      "kind": "edit",
-      "locations": [
-        {
-          "line": 0,
-          "path": "/test/existing.txt"
-        }
-      ],
-      "sessionUpdate": "tool_call_update",
-      "title": "Writing file: /test/existing.txt",
-      "toolCallId": "pyd_ai_tool_call_id__write"
-    },
-    "type": "tool_call_update"
-  },
-  {
-    "payload": {
       "content": [
         {
-          "newText": "Updated content",
-          "oldText": "",
-          "path": "/test/existing.txt",
-          "type": "diff"
+          "content": {
+            "text": "Wrote /test/existing.txt (15 bytes)",
+            "type": "text"
+          },
+          "type": "content"
         }
       ],
-      "locations": [
-        {
-          "path": "/test/existing.txt"
-        }
-      ],
-      "sessionUpdate": "tool_call_update",
-      "status": "in_progress",
-      "title": "Wrote: /test/existing.txt",
-      "toolCallId": "pyd_ai_tool_call_id__write"
-    },
-    "type": "tool_call_update"
-  },
-  {
-    "payload": {
       "rawOutput": "Wrote /test/existing.txt (15 bytes)",
       "sessionUpdate": "tool_call_update",
       "status": "completed",

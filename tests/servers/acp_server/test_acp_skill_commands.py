@@ -62,7 +62,7 @@ def agent_pool_with_skill() -> AgentPool:
 def mock_acp_agent_with_skills(agent_pool_with_skill: AgentPool) -> AgentPoolACPAgent:
     """Create an ACP agent with skills configured."""
     mock_connection = Mock()
-    agent = agent_pool_with_skill.get_agent("test_agent")
+    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(pool=agent_pool_with_skill)
     return AgentPoolACPAgent(client=mock_connection, default_agent=agent)
 
 
@@ -119,7 +119,7 @@ async def test_session_update_exposes_skill_commands(
     Per RFC-0032, skill commands must be sent via available_commands_update
     session notification, not in the initialize response.
     """
-    agent = agent_pool_with_skill.get_agent("test_agent")
+    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(pool=agent_pool_with_skill)
     mock_client = AsyncMock()
     mock_acp_agent = Mock()
     mock_acp_agent.tasks = Mock()

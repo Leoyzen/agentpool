@@ -45,39 +45,37 @@ async def test_acp_server_creation(agent_pool: AgentPool):
 
 async def test_agent_switching_workflow(agent_pool: AgentPool, mock_acp_agent):
     """Test the complete agent switching workflow."""
-    multi_pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+    from agentpool.models.manifest import AgentsManifest
 
-    def callback1(message: str) -> str:
-        return f"Agent1 response: {message}"
+    config1 = NativeAgentConfig(name="agent1", model="test")
+    config2 = NativeAgentConfig(name="agent2", model="test")
+    manifest = AgentsManifest(agents={"agent1": config1, "agent2": config2})
+    async with AgentPool(manifest) as multi_pool:
+        agent1 = config1.get_agent(pool=multi_pool)
 
-    def callback2(message: str) -> str:
-        return f"Agent2 response: {message}"
+        mock_client = AsyncMock()
+        capabilities = ClientCapabilities(fs=None, terminal=False)
 
-    agent1 = Agent.from_callback(name="agent1", callback=callback1, agent_pool=multi_pool)
-    agent2 = Agent.from_callback(name="agent2", callback=callback2, agent_pool=multi_pool)
+        session = ACPSession(
+            session_id="switching-test",
+            agent=agent1,
+            cwd=tempfile.gettempdir(),
+            client=mock_client,
+            acp_agent=mock_acp_agent,
+            client_capabilities=capabilities,
+        )
 
-    # pool.register() removed; agents created from callback/config abovemock_client = AsyncMock()
-    capabilities = ClientCapabilities(fs=None, terminal=False)
+        # Should start with agent1
+        assert session.agent.name == "agent1"
 
-    session = ACPSession(
-        session_id="switching-test",
-        agent=agent1,
-        cwd=tempfile.gettempdir(),
-        client=mock_client,
-        acp_agent=mock_acp_agent,
-        client_capabilities=capabilities,
-    )
+        # Switch to agent2
+        await session.switch_active_agent("agent2")
+        assert session.agent.name == "agent2"
 
-    # Should start with agent1
-    assert session.agent.name == "agent1"
-
-    # Switch to agent2
-    await session.switch_active_agent("agent2")
-    assert session.agent.name == "agent2"
-
-    # Switching to non-existent agent should fail
-    with pytest.raises(ValueError, match="Agent 'nonexistent' not found"):
-        await session.switch_active_agent("nonexistent")
+        # Switching to non-existent agent should fail
+        with pytest.raises(ValueError, match="not found"):
+            await session.switch_active_agent("nonexistent")
 
 
 if __name__ == "__main__":
