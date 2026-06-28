@@ -13,7 +13,6 @@ from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     RunErrorEvent,
     RunFailedEvent,
-    RunStartedEvent,
     StreamCompleteEvent,
 )
 from agentpool.log import get_logger
@@ -179,14 +178,8 @@ class RunHandle:
                         run_ctx=self.run_ctx,
                         message_history=self._message_history,
                     )
-                    await event_bus.publish(
-                        self.session_id,
-                        RunStartedEvent(
-                            run_id=self.run_id,
-                            session_id=self.session_id,
-                            agent_name=self.agent_type,
-                        ),
-                    )
+                    # RunStartedEvent is yielded by turn.execute() itself;
+                    # no need to create and publish it separately here.
 
                     # Set _current_input_provider ContextVar so MCP
                     # elicitation can access it during turn execution.

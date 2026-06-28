@@ -18,6 +18,7 @@ from pydantic_graph import End
 
 from agentpool.agents.events.events import (
     RunErrorEvent,
+    RunStartedEvent,
     StreamCompleteEvent,
     ToolCallCompleteEvent,
 )
@@ -66,6 +67,7 @@ class NativeTurn(Turn):
         prompts: list[str],
         run_ctx: AgentRunContext,
         message_history: list[ModelMessage],
+        parent_id: str | None = None,
     ) -> None:
         """Initialize the turn.
 
@@ -75,6 +77,7 @@ class NativeTurn(Turn):
             run_ctx: Per-run isolated context (cancellation, deps, etc.).
             message_history: Incoming message history as pydantic-ai
                 ModelMessage list.
+            parent_id: Optional parent message ID for threading.
         """
         super().__init__()
         self._agent = agent
@@ -82,6 +85,7 @@ class NativeTurn(Turn):
         self._run_ctx = run_ctx
         self._message_history_input = message_history
         self._message_id = uuid4().hex
+        self._parent_id = parent_id
 
     async def execute(self) -> AsyncGenerator[RichAgentStreamEvent[Any]]:  # noqa: PLR0915
         """Execute one reactive cycle of the pydantic-ai agent loop.
@@ -93,6 +97,12 @@ class NativeTurn(Turn):
         Raises:
             asyncio.CancelledError: If the turn is cancelled mid-execution.
         """
+        yield RunStartedEvent(
+            run_id=self._run_ctx.run_id,
+            session_id=self._run_ctx.session_id,
+            agent_name=self._agent.name,
+        )
+
         agentlet = await self._agent.get_agentlet(
             model=None,
             output_type=None,
@@ -217,6 +227,7 @@ class NativeTurn(Turn):
                     name=self._agent.name,
                     message_id=self._message_id,
                     session_id=self._run_ctx.session_id,
+                    parent_id=self._parent_id,
                 )
                 return
             raise
@@ -249,6 +260,7 @@ class NativeTurn(Turn):
             name=self._agent.name,
             message_id=self._message_id,
             session_id=self._run_ctx.session_id,
+            parent_id=self._parent_id,
         )
 
         # Belt-and-suspenders: if cancelled during execution (e.g.
