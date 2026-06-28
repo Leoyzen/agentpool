@@ -8,6 +8,8 @@ Mapping rules:
     - ``FunctionToolCallEvent`` → :class:`ToolCallStartEvent`
     - ``PartStartEvent`` with ``BaseToolCallPart`` → :class:`ToolCallStartEvent`
     - ``FunctionToolResultEvent`` → :class:`ToolCallCompleteEvent`
+    - pydantic-ai ``PartDeltaEvent`` → AgentPool :class:`PartDeltaEvent` subclass
+    - pydantic-ai ``PartStartEvent`` (non-tool) → AgentPool :class:`PartStartEvent` subclass
     - Already-mapped :class:`RichAgentStreamEvent` instances pass through.
     - Unknown objects return ``None``.
 """
@@ -22,10 +24,13 @@ from pydantic_ai import (
     BaseToolReturnPart,
     FunctionToolCallEvent,
     FunctionToolResultEvent,
-    PartStartEvent,
+    PartDeltaEvent as PyAIPartDeltaEvent,
+    PartStartEvent as PyAIPartStartEvent,
 )
 
 from agentpool.agents.events.events import (
+    PartDeltaEvent,
+    PartStartEvent,
     RichAgentStreamEvent,
     ToolCallCompleteEvent,
     ToolCallStartEvent,
@@ -69,13 +74,26 @@ class EventMapper:
                 tool_part, BaseToolCallPart
             ):
                 return self._emit_tool_call_start(tool_part)
-            case PartStartEvent(part=tool_part) if isinstance(
+            case PyAIPartStartEvent(part=tool_part) if isinstance(
                 tool_part, BaseToolCallPart
             ):
                 return self._emit_tool_call_start(tool_part)
             case FunctionToolResultEvent(part=tool_return):
                 return self._emit_tool_call_complete(tool_return)
             case _:
+                # Convert pydantic-ai events to AgentPool subclasses so
+                # downstream isinstance checks (e.g. EventBus coalescing)
+                # work correctly.  Without this, pydantic-ai's base
+                # PartDeltaEvent / PartStartEvent bypass coalescing because
+                # ``isinstance(base, subclass)`` is False.
+                if isinstance(event, PyAIPartDeltaEvent) and not isinstance(
+                    event, PartDeltaEvent
+                ):
+                    return PartDeltaEvent(index=event.index, delta=event.delta)
+                if isinstance(event, PyAIPartStartEvent) and not isinstance(
+                    event, PartStartEvent
+                ):
+                    return PartStartEvent(index=event.index, part=event.part)
                 if self._is_rich_event(event):
                     return event
                 return None
