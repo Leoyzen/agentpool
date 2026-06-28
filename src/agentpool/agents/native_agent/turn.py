@@ -16,7 +16,12 @@ from pydantic_ai import CallToolsNode, ModelRequestNode
 from pydantic_ai.exceptions import UndrainedPendingMessagesError
 from pydantic_graph import End
 
-from agentpool.agents.events.events import RunErrorEvent, RunStartedEvent, ToolCallCompleteEvent
+from agentpool.agents.events.events import (
+    RunErrorEvent,
+    RunStartedEvent,
+    StreamCompleteEvent,
+    ToolCallCompleteEvent,
+)
 from agentpool.agents.native_agent.helpers import extract_text_from_messages
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
@@ -213,3 +218,4 @@ class NativeTurn(Turn):
                 message_id=self._message_id,
                 session_id=self._run_ctx.session_id,
             )
+            yield StreamCompleteEvent(message=self._final_message)

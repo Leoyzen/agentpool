@@ -278,6 +278,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         spawn_mechanism: str = "foreground",
         description: str = "",
         tool_call_id: str | None = None,
+        input_provider: Any = None,
         **metadata: Any,
     ) -> str:
         """Create a child session for a subagent delegation.
@@ -294,6 +295,12 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         ``done_event`` is registered on ``run_ctx.child_done_events`` so
         that callers can await subagent completion.
 
+        The agent is eagerly registered under the child session_id via
+        ``get_or_create_session_agent()`` so that ``receive_request()`` and
+        ``run_stream()`` can find it without a separate call.  If
+        ``input_provider`` is given, it is passed to the agent registration
+        call so it is baked into the cached agent instance.
+
         Args:
             agent_name: Name of the child agent.
             agent_type: Type of the child agent (``"native"``, ``"claude"``, etc.).
@@ -303,6 +310,9 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                 for synchronous delegation, ``"task"`` for background.
             description: Human-readable description of the spawn operation.
             tool_call_id: ID of the tool call that triggered the spawn.
+            input_provider: Optional input provider for the child agent.
+                Passed to ``get_or_create_session_agent`` so it is available
+                on the cached agent instance.
             **metadata: Additional metadata to attach to the child session.
 
         Returns:
@@ -317,14 +327,23 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             if isinstance(effective_parent, str):
                 from agentpool.utils.identifiers import generate_session_id
 
-                child_session = await pool.session_pool.create_session(
-                    session_id=generate_session_id(),
+                child_sid = generate_session_id()
+                await pool.session_pool.create_session(
+                    session_id=child_sid,
                     agent_name=agent_name,
                     parent_session_id=effective_parent,
                     agent_type=agent_type,
                     **metadata,
                 )
-                child_sid = child_session.session_id
+                # Eagerly register agent under child session_id so that
+                # receive_request / run_stream can find it without a
+                # separate get_or_create_session_agent call.
+                agent_kwargs: dict[str, Any] = {}
+                if input_provider is not None:
+                    agent_kwargs["input_provider"] = input_provider
+                await pool.session_pool.sessions.get_or_create_session_agent(
+                    child_sid, agent_name, **agent_kwargs,
+                )
             else:
                 from agentpool.utils.identifiers import generate_session_id
 

@@ -20,7 +20,12 @@ from pydantic_ai.models.test import TestModel
 
 from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events.events import RunErrorEvent, ToolCallCompleteEvent
+from agentpool.agents.events.events import (
+    RunErrorEvent,
+    RunStartedEvent,
+    StreamCompleteEvent,
+    ToolCallCompleteEvent,
+)
 from agentpool.agents.native_agent.turn import NativeTurn
 from agentpool.tasks.exceptions import RunAbortedError
 
@@ -287,3 +292,69 @@ async def test_message_history_and_final_message_after_execute() -> None:
         assert msg.name == "test-props-after"
         assert "final response" in msg.content
         assert msg.session_id == "test-session"
+
+
+# ---------------------------------------------------------------------------
+# Regression: StreamCompleteEvent must be yielded as last event
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_execute_yields_stream_complete_as_last_event() -> None:
+    """NativeTurn.execute() must yield StreamCompleteEvent as its final event.
+
+    Without this, RunHandle.start() never sees StreamCompleteEvent, the
+    EventBus consumer (e.g. xeno-agent background task) hangs forever
+    waiting for it, and the task times out after 1800s.
+
+    This is a regression test for the bug where NativeTurn was missing
+    ``yield StreamCompleteEvent(...)`` at the end of execute().
+    """
+    agent = Agent(
+        name="test-stream-complete",
+        model=TestModel(custom_output_text="final response"),
+    )
+    async with agent:
+        run_ctx = AgentRunContext(session_id="test-session")
+        turn = NativeTurn(
+            agent=agent,
+            prompts=["test"],
+            run_ctx=run_ctx,
+            message_history=[],
+        )
+
+        events: list[Any] = []
+        async for event in turn.execute():
+            events.append(event)
+
+        # Must have at least RunStartedEvent + StreamCompleteEvent
+        assert len(events) >= 2, (
+            f"Expected at least 2 events, got {len(events)}"
+        )
+
+        # First event must be RunStartedEvent
+        assert isinstance(events[0], RunStartedEvent), (
+            f"First event must be RunStartedEvent, got {type(events[0]).__name__}"
+        )
+
+        # Last event must be StreamCompleteEvent
+        assert isinstance(events[-1], StreamCompleteEvent), (
+            f"Last event must be StreamCompleteEvent, got {type(events[-1]).__name__}"
+        )
+
+        # StreamCompleteEvent must have a non-None message
+        assert events[-1].message is not None, (
+            "StreamCompleteEvent.message must not be None"
+        )
+        assert "final response" in events[-1].message.content, (
+            f"Expected 'final response' in message, got {events[-1].message.content!r}"
+        )
+
+        # Must have exactly one StreamCompleteEvent
+        stream_complete_count = sum(
+            1 for e in events if isinstance(e, StreamCompleteEvent)
+        )
+        assert stream_complete_count == 1, (
+            f"Expected exactly one StreamCompleteEvent, got {stream_complete_count}"
+        )

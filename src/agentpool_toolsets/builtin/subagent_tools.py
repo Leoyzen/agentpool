@@ -202,8 +202,23 @@ class SubagentTools(StaticResourceProvider):
                 raw_model = agent_cfg.model
                 node_model_id = str(raw_model) if raw_model else None
 
+        # Resolve input_provider BEFORE creating child session so it can be
+        # passed to create_child_session, which eagerly registers the agent
+        # via get_or_create_session_agent with the input_provider baked in.
+        try:
+            input_provider = ctx.get_input_provider()
+        except RuntimeError:
+            logger.warning(
+                "No input_provider available in parent context; "
+                "subagent will not support elicitation",
+                agent=agent_or_team,
+            )
+            input_provider = None
+
         # Create child session with metadata for event wrapping.
         # SpawnSessionStart is auto-emitted by create_child_session().
+        # The agent is eagerly registered under child_session_id with
+        # input_provider — no separate get_or_create_session_agent needed.
         child_session_id = await ctx.create_child_session(
             agent_name=agent_or_team,
             agent_type=agent_type_str,
@@ -215,37 +230,14 @@ class SubagentTools(StaticResourceProvider):
             source_type=source_type,
             depth=child_depth,
             model_id=node_model_id,
+            input_provider=input_provider,
         )
 
-        # Resolve input_provider BEFORE creating the subagent so it can be
-        # passed to get_or_create_session_agent. Without this, the subagent
-        # is cached with _input_provider=None, and later run_stream calls
-        # can't fix it due to cache hit ignoring the parameter.
-        try:
-            input_provider = ctx.get_input_provider()
-        except RuntimeError:
-            logger.warning(
-                "No input_provider available in parent context; "
-                "subagent will not support elicitation",
-                agent=agent_or_team,
-                child_session_id=child_session_id,
-            )
-            input_provider = None
-
-        # Resolve the actual node via SessionPool
+        # For teams, we still need to create the team node directly
+        # (SessionPool does not manage team instances).
         is_team_node = team_cfg is not None
-        node: SupportsRunStream[Any]
-        if not is_team_node:
-            # Agent: bind to the child session
-            node = await session_pool.sessions.get_or_create_session_agent(
-                child_session_id, agent_name=agent_or_team,
-                input_provider=input_provider,
-            )
-            if not isinstance(node, SupportsRunStream):
-                msg = f"Agent {agent_or_team} does not support streaming"
-                raise ToolError(msg)
-        else:
-            # Team: create team from config
+        node: SupportsRunStream[Any] | None = None
+        if is_team_node:
             assert team_cfg is not None
             node = await session_pool.create_team_from_config(agent_or_team, team_cfg)
             if not isinstance(node, SupportsRunStream):

@@ -138,6 +138,8 @@ class RunHandle:
         # Wire steer_callback so complete_background_task() can inject
         # messages into the active turn via RunHandle.steer().
         self.run_ctx.steer_callback = self._steer_callback_wrapper
+        # Set _run_handle on run_ctx so NativeTurn can access active_agent_run
+        self.run_ctx._run_handle = self
 
         async with session.turn_lock:
             current_prompts: list[str] = [initial_prompt]
@@ -187,7 +189,10 @@ class RunHandle:
                     )
 
                 if not turn_failed:
-                    self._message_history = turn.message_history
+                    try:
+                        self._message_history = turn.message_history
+                    except RuntimeError:
+                        pass
 
                 # Between turns: wait for background child tasks to complete,
                 # then collect their steer messages as prompts for next turn.
