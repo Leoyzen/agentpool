@@ -1,5 +1,8 @@
-## MODIFIED Requirements
+# session-orchestration Specification
 
+## Purpose
+TBD - created by archiving change cancel-turn-not-run. Update Purpose after archive.
+## Requirements
 ### Requirement: RunHandle cancel interrupts current turn, not the run loop
 
 `RunHandle.cancel()` SHALL set `run_ctx.cancelled = True` and wake `_idle_event` to unblock idle waits. `cancel()` SHALL call `agent._interrupt()` which cancels only the `_iteration_task` (the LLM API call task). `cancel()` SHALL NOT cancel `run_ctx.current_task` (the `start()` task). After cancellation, the `start()` loop SHALL return to idle state and accept new `steer()` / `followup()` messages.
@@ -116,3 +119,4 @@
 - **AND** `self._runs.get("run-1")` returns a RunHandle with `status == RunStatus.failed`
 - **THEN** `session.current_run_id` is set to `None`
 - **AND** a new RunHandle is created and started
+
