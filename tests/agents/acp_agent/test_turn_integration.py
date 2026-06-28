@@ -19,7 +19,6 @@ from agentpool.agents.acp_agent.turn import ACPTurn
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     PartDeltaEvent,
-    RunStartedEvent,
     StreamCompleteEvent,
 )
 from agentpool.messaging import ChatMessage
@@ -106,16 +105,15 @@ async def test_acp_turn_full_cycle_with_mock_client() -> None:
     assert len(client.prompt_calls) == 1
     assert client.prompt_calls[0][0] == "test-session"
 
-    # Verify event sequence: RunStarted → PartDelta → PartDelta → StreamComplete
-    assert len(events) == 4
-    assert isinstance(events[0], RunStartedEvent)
-    assert events[0].session_id == "test-session"
+    # Verify event sequence: PartDelta → PartDelta → StreamComplete
+    # (RunStartedEvent is published by RunHandle.start(), not Turn.execute())
+    assert len(events) == 3
 
+    assert isinstance(events[0], PartDeltaEvent)
     assert isinstance(events[1], PartDeltaEvent)
-    assert isinstance(events[2], PartDeltaEvent)
 
-    assert isinstance(events[3], StreamCompleteEvent)
-    assert events[3].message.content == "Hello world"
+    assert isinstance(events[2], StreamCompleteEvent)
+    assert events[2].message.content == "Hello world"
 
     # Verify message_history is populated after execute()
     history = turn.message_history
@@ -125,7 +123,7 @@ async def test_acp_turn_full_cycle_with_mock_client() -> None:
     final = turn.final_message
     assert final.role == "assistant"
     assert final.content == "Hello world"
-    assert events[3].message is final
+    assert events[2].message is final
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +245,6 @@ def test_acp_agent_create_turn_returns_acp_turn_with_correct_fields() -> None:
     assert turn._acp_client is mock_api
     assert turn._prompts == ["hello world"]
     assert turn._run_ctx is run_ctx
-    assert turn._initial_message_history is message_history
     # session_id should use _sdk_session_id when available
     assert turn._session_id == "acp-session-123"
 

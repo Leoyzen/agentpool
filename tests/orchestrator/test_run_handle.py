@@ -12,14 +12,19 @@ Covers the new session-level idle/wake/turn loop:
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import inspect
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+from pydantic_ai.models.test import TestModel
 import pytest
 
+from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunErrorEvent, RunStartedEvent, StreamCompleteEvent
 from agentpool.messaging import ChatMessage
+from agentpool.orchestrator.core import EventBus, SessionState
 from agentpool.orchestrator.run import RunHandle, RunStatus
 from agentpool.orchestrator.turn import Turn
 
@@ -571,3 +576,440 @@ async def test_cancelled_property_reflects_run_ctx() -> None:
 
     handle.run_ctx.cancelled = True
     assert handle.cancelled is True
+
+
+# ---------------------------------------------------------------------------
+# Tests from PR #64 review (RunHandle lifecycle fixes)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_complete_event_set_after_start_completes() -> None:
+    """RunHandle.start() must set complete_event when it finishes.
+
+    Without this, close_session() hangs for 30s waiting for
+    complete_event.wait() when closing sessions started via
+    process_prompt or run_stream.
+    """
+    agent = Agent(
+        name="test-complete-event",
+        model=TestModel(custom_output_text="done"),
+    )
+    async with agent:
+        event_bus = EventBus()
+        session = SessionState(
+            session_id="test-ce-session",
+            agent_name="test-complete-event",
+        )
+        run_ctx = AgentRunContext(
+            session_id="test-ce-session",
+            event_bus=event_bus,
+        )
+        run_handle = RunHandle(
+            run_id="test-ce-run",
+            session_id="test-ce-session",
+            agent_type="test-complete-event",
+            agent=agent,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=run_ctx,
+        )
+
+        # Drive start() — close after first turn to terminate the loop
+        gen = run_handle.start("hello")
+        try:
+            async for event in gen:
+                if isinstance(event, StreamCompleteEvent):
+                    run_handle.close()
+                    break
+        finally:
+            # Ensure generator is properly closed so finally block runs
+            await gen.aclose()
+
+        # complete_event must be set
+        assert run_handle.complete_event.is_set(), (
+            "complete_event was not set after start() completed — "
+            "close_session() will hang for 30s"
+        )
+
+
+@pytest.mark.asyncio
+async def test_complete_event_set_when_start_cancelled() -> None:
+    """complete_event must be set even if start() is cancelled."""
+    agent = Agent(
+        name="test-ce-cancel",
+        model=TestModel(custom_output_text="done"),
+    )
+    async with agent:
+        event_bus = EventBus()
+        session = SessionState(
+            session_id="test-ce-cancel-session",
+            agent_name="test-ce-cancel",
+        )
+        run_ctx = AgentRunContext(
+            session_id="test-ce-cancel-session",
+            event_bus=event_bus,
+        )
+        run_handle = RunHandle(
+            run_id="test-ce-cancel-run",
+            session_id="test-ce-cancel-session",
+            agent_type="test-ce-cancel",
+            agent=agent,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=run_ctx,
+        )
+
+        gen = run_handle.start("hello")
+        task = asyncio.create_task(gen.__anext__())
+        await asyncio.sleep(0.1)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        with contextlib.suppress(Exception):
+            await gen.aclose()
+
+        # Even on cancel, complete_event should be set
+        assert run_handle.complete_event.is_set(), (
+            "complete_event was not set after start() was cancelled"
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_error_event_yielded_to_consumer() -> None:
+    """RunHandle.start() must yield RunErrorEvent when turn.execute() raises.
+
+    Without yielding, create_run_stream and other direct consumers
+    hang indefinitely waiting for an event that never arrives.
+    """
+    agent = Agent(
+        name="test-error-yield",
+        model=TestModel(custom_output_text="ok"),
+    )
+    async with agent:
+        event_bus = EventBus()
+        session = SessionState(
+            session_id="test-err-session",
+            agent_name="test-error-yield",
+        )
+        run_ctx = AgentRunContext(
+            session_id="test-err-session",
+            event_bus=event_bus,
+        )
+        run_handle = RunHandle(
+            run_id="test-err-run",
+            session_id="test-err-session",
+            agent_type="test-error-yield",
+            agent=agent,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=run_ctx,
+        )
+
+        # Patch agent.create_turn to return a turn that raises
+        class FailingTurn:
+            async def execute(self) -> Any:
+                raise RuntimeError("turn failed")
+                yield  # noqa: unreachable — make it an async generator
+
+        agent.create_turn = MagicMock(return_value=FailingTurn())  # type: ignore[method-assign]
+
+        events: list[Any] = []
+        gen = run_handle.start("test")
+        try:
+            async with asyncio.timeout(5):
+                async for event in gen:
+                    events.append(event)
+                    if isinstance(event, RunErrorEvent):
+                        run_handle.close()
+                        break
+        except TimeoutError:
+            pytest.fail(
+                "start() hung waiting for RunErrorEvent — it was published "
+                "to EventBus but never yielded to the consumer"
+            )
+        finally:
+            with contextlib.suppress(Exception):
+                await gen.aclose()
+
+        # RunErrorEvent must have been yielded
+        error_events = [e for e in events if isinstance(e, RunErrorEvent)]
+        assert len(error_events) == 1, (
+            f"Expected 1 RunErrorEvent, got {len(error_events)}. "
+            f"Events: {[type(e).__name__ for e in events]}"
+        )
+        assert "turn failed" in error_events[0].message
+
+
+@pytest.mark.asyncio
+async def test_input_provider_contextvar_set_during_turn() -> None:
+    """RunHandle.start() must set _current_input_provider ContextVar.
+
+    MCP elicitation depends on this ContextVar. Without it,
+    _current_input_provider.get() returns None during turn execution.
+    """
+    from agentpool.mcp_server.manager import _current_input_provider
+
+    captured_provider: list[Any] = []
+
+    def capture_tool() -> str:
+        """Tool that captures the current input provider."""
+        captured_provider.append(_current_input_provider.get())
+        return "captured"
+
+    agent = Agent(
+        name="test-ctxvar",
+        model=TestModel(call_tools=["capture_tool"], custom_output_text="ok"),
+        tools=[capture_tool],
+    )
+    async with agent:
+        event_bus = EventBus()
+        session = SessionState(
+            session_id="test-ctxvar-session",
+            agent_name="test-ctxvar",
+        )
+        run_ctx = AgentRunContext(
+            session_id="test-ctxvar-session",
+            event_bus=event_bus,
+        )
+
+        mock_provider = MagicMock()
+        session.input_provider = mock_provider
+
+        run_handle = RunHandle(
+            run_id="test-ctxvar-run",
+            session_id="test-ctxvar-session",
+            agent_type="test-ctxvar",
+            agent=agent,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=run_ctx,
+        )
+
+        gen = run_handle.start("test")
+        try:
+            async for event in gen:
+                if isinstance(event, StreamCompleteEvent):
+                    run_handle.close()
+                    break
+        finally:
+            await gen.aclose()
+
+        # The tool should have captured the input provider
+        assert len(captured_provider) > 0, "Tool was never called"
+        assert captured_provider[0] is mock_provider, (
+            f"ContextVar was not set — got {captured_provider[0]!r}, "
+            f"expected {mock_provider!r}"
+        )
+
+        # After start() completes, ContextVar should be reset
+        assert _current_input_provider.get() is None, (
+            "ContextVar was not reset after turn execution"
+        )
+
+
+@pytest.mark.asyncio
+async def test_turn_failure_breaks_loop_not_continue_to_idle() -> None:
+    """When turn.execute() raises, start() must break, not continue to idle.
+
+    Without the break, the loop continues: current_prompts becomes empty
+    → idle → _idle_event.wait() → deadlock for legacy clients that wait
+    on complete_event (which is only set after start() returns).
+    """
+    agent = Agent(
+        name="test-turn-fail-break",
+        model=TestModel(custom_output_text="ok"),
+    )
+    async with agent:
+        event_bus = EventBus()
+        session = SessionState(
+            session_id="test-fail-break-session",
+            agent_name="test-turn-fail-break",
+        )
+        run_ctx = AgentRunContext(
+            session_id="test-fail-break-session",
+            event_bus=event_bus,
+        )
+        run_handle = RunHandle(
+            run_id="test-fail-break-run",
+            session_id="test-fail-break-session",
+            agent_type="test-turn-fail-break",
+            agent=agent,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=run_ctx,
+        )
+
+        class FailingTurn:
+            async def execute(self) -> Any:
+                raise RuntimeError("turn failed")
+                yield  # noqa: unreachable
+
+        agent.create_turn = MagicMock(return_value=FailingTurn())  # type: ignore[method-assign]
+
+        events: list[Any] = []
+        gen = run_handle.start("test")
+        try:
+            async with asyncio.timeout(5):
+                async for event in gen:
+                    events.append(event)
+                    if isinstance(event, RunErrorEvent):
+                        break
+        except TimeoutError:
+            pytest.fail(
+                "start() hung after turn failure — loop continued to idle "
+                "instead of breaking"
+            )
+        finally:
+            with contextlib.suppress(Exception):
+                await gen.aclose()
+
+        error_events = [e for e in events if isinstance(e, RunErrorEvent)]
+        assert len(error_events) == 1
+
+        # complete_event must be set (loop exited, not stuck in idle)
+        assert run_handle.complete_event.is_set(), (
+            "complete_event not set — loop is stuck in idle after turn failure"
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_error_event_sets_turn_failed_and_breaks_loop() -> None:
+    """When turn.execute() yields RunErrorEvent, turn_failed must be True.
+
+    Without setting turn_failed, the loop breaks from the inner async-for
+    but then continues to the idle branch instead of breaking the outer
+    while-loop. This causes a deadlock for clients waiting on complete_event.
+    """
+    agent = Agent(
+        name="test-runevent-break",
+        model=TestModel(custom_output_text="ok"),
+    )
+    async with agent:
+        event_bus = EventBus()
+        session = SessionState(
+            session_id="test-runevent-session",
+            agent_name="test-runevent-break",
+        )
+        run_ctx = AgentRunContext(
+            session_id="test-runevent-session",
+            event_bus=event_bus,
+        )
+        run_handle = RunHandle(
+            run_id="test-runevent-run",
+            session_id="test-runevent-session",
+            agent_type="test-runevent-break",
+            agent=agent,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=run_ctx,
+        )
+
+        class ErrorTurn:
+            async def execute(self) -> Any:
+                yield RunErrorEvent(
+                    message="simulated error",
+                    run_id="test-runevent-run",
+                    agent_name="test-runevent-break",
+                )
+
+        agent.create_turn = MagicMock(return_value=ErrorTurn())  # type: ignore[method-assign]
+
+        events: list[Any] = []
+        gen = run_handle.start("test")
+        try:
+            async with asyncio.timeout(5):
+                async for event in gen:
+                    events.append(event)
+                    if isinstance(event, RunErrorEvent):
+                        break
+        except TimeoutError:
+            pytest.fail(
+                "start() hung after RunErrorEvent — loop continued to idle "
+                "instead of breaking because turn_failed was not set"
+            )
+        finally:
+            with contextlib.suppress(Exception):
+                await gen.aclose()
+
+        error_events = [e for e in events if isinstance(e, RunErrorEvent)]
+        assert len(error_events) == 1
+
+        # complete_event must be set (loop exited, not stuck in idle)
+        assert run_handle.complete_event.is_set(), (
+            "complete_event not set — loop is stuck in idle after RunErrorEvent"
+        )
+
+
+def test_start_sets_current_task() -> None:
+    """RunHandle.start() must set run_ctx.current_task.
+
+    Without this, cancel() in _interrupt() gets None for current_task
+    and cannot interrupt the running turn.
+    """
+    import agentpool.orchestrator.run as run_module
+
+    source = inspect.getsource(run_module.RunHandle.start)
+    assert "current_task" in source, (
+        "run_ctx.current_task must be set in start() so cancel() can "
+        "interrupt the running turn"
+    )
+    assert "asyncio.current_task()" in source, (
+        "current_task must be set to asyncio.current_task()"
+    )
+
+
+@pytest.mark.asyncio
+async def test_current_task_set_during_start_execution() -> None:
+    """Verify run_ctx.current_task is populated during start() execution."""
+    agent = Agent(
+        name="test-current-task",
+        model=TestModel(custom_output_text="ok"),
+    )
+    async with agent:
+        event_bus = EventBus()
+        session = SessionState(
+            session_id="test-current-task-session",
+            agent_name="test-current-task",
+        )
+        run_ctx = AgentRunContext(
+            session_id="test-current-task-session",
+            event_bus=event_bus,
+        )
+        run_handle = RunHandle(
+            run_id="test-current-task-run",
+            session_id="test-current-task-session",
+            agent_type="test-current-task",
+            agent=agent,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=run_ctx,
+        )
+
+        captured_tasks: list[Any] = []
+
+        class CapturingTurn:
+            async def execute(self) -> Any:
+                # Capture current_task from run_ctx during turn execution
+                captured_tasks.append(run_ctx.current_task)
+                yield StreamCompleteEvent(message=MagicMock())
+
+        agent.create_turn = MagicMock(return_value=CapturingTurn())  # type: ignore[method-assign]
+
+        gen = run_handle.start("test")
+        try:
+            async with asyncio.timeout(5):
+                async for event in gen:
+                    if isinstance(event, StreamCompleteEvent):
+                        break
+        finally:
+            with contextlib.suppress(Exception):
+                await gen.aclose()
+
+        assert len(captured_tasks) == 1
+        assert captured_tasks[0] is not None, (
+            "run_ctx.current_task was not set during start() execution"
+        )
+        assert captured_tasks[0] is asyncio.current_task(), (
+            "run_ctx.current_task should be the current asyncio task"
+        )

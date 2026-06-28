@@ -10,6 +10,7 @@ Covers five scenarios:
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -222,3 +223,109 @@ async def test_session_closing_returns_none(
     result = await controller.receive_request("sess-closing", "hello")
 
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Tests from PR #64 review (receive_request behavior)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_receive_request_uses_get_or_create_session_agent() -> None:
+    """receive_request should use get_or_create_session_agent, not .get().
+
+    When agent is not yet cached (new top-level sessions), .get()
+    returns None and receive_request silently does nothing.
+    """
+    from agentpool.orchestrator.core import SessionController
+
+    mock_pool = MagicMock()
+    mock_pool.main_agent = MagicMock()
+    mock_pool.main_agent.name = "main-agent"
+    mock_pool.manifest = MagicMock()
+    mock_pool.manifest.agents = {}
+
+    controller = SessionController(pool=mock_pool)
+    event_bus = EventBus()
+    controller._event_bus = event_bus
+
+    mock_agent = MagicMock()
+    mock_agent.AGENT_TYPE = "native"
+
+    session_id = "sess-lazy"
+    controller._sessions[session_id] = MagicMock()
+    controller._sessions[session_id].session_id = session_id
+    controller._sessions[session_id].current_run_id = None
+    controller._sessions[session_id].closing = False
+    controller._sessions[session_id].is_closing = False
+    controller._sessions[session_id]._request_lock = asyncio.Lock()
+    controller._sessions[session_id].turn_lock = asyncio.Lock()
+    controller._sessions[session_id].input_provider = None
+    # Deliberately do NOT pre-register agent in _session_agents
+
+    # Mock get_or_create_session_agent to return the agent
+    controller.get_or_create_session_agent = AsyncMock(return_value=mock_agent)  # type: ignore[method-assign]
+    controller._consume_run = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    result = await controller.receive_request(session_id, "hello")
+
+    # get_or_create_session_agent should have been called
+    controller.get_or_create_session_agent.assert_called_once_with(session_id)
+    assert result is not None, (
+        "receive_request returned None because agent was not in _session_agents cache"
+    )
+
+
+@pytest.mark.asyncio
+async def test_receive_request_list_content_joins_elements() -> None:
+    """receive_request must join list elements, not str(["hello"]).
+
+    str(["hello"]) produces "['hello']" which is not what the model
+    should receive. Lists should be joined with spaces.
+    """
+    from agentpool.orchestrator.core import SessionController
+
+    mock_pool = MagicMock()
+    mock_pool.main_agent = MagicMock()
+    mock_pool.main_agent.name = "main-agent"
+    mock_pool.manifest = MagicMock()
+    mock_pool.manifest.agents = {}
+
+    controller = SessionController(pool=mock_pool)
+    controller._event_bus = EventBus()
+
+    mock_agent = MagicMock()
+    mock_agent.AGENT_TYPE = "native"
+
+    session_id = "sess-list-content"
+    controller._sessions[session_id] = MagicMock()
+    controller._sessions[session_id].session_id = session_id
+    controller._sessions[session_id].current_run_id = None
+    controller._sessions[session_id].closing = False
+    controller._sessions[session_id].is_closing = False
+    controller._sessions[session_id]._request_lock = asyncio.Lock()
+    controller._sessions[session_id].turn_lock = asyncio.Lock()
+    controller._sessions[session_id].input_provider = None
+    controller._session_agents[session_id] = mock_agent
+
+    captured_content: list[str] = []
+
+    async def _capture(run_handle: Any, initial_prompt: str) -> None:
+        captured_content.append(initial_prompt)
+
+    controller._consume_run = _capture  # type: ignore[method-assign]
+    controller.get_or_create_session_agent = AsyncMock(return_value=mock_agent)  # type: ignore[method-assign]
+
+    # Pass a list with actual content
+    await controller.receive_request(session_id, ["hello", "world"])
+
+    await asyncio.sleep(0.1)
+
+    assert len(captured_content) > 0
+    assert captured_content[0] == "hello world", (
+        f"Expected 'hello world', got {captured_content[0]!r} — "
+        "list was not properly joined"
+    )
+    assert "['hello'" not in captured_content[0], (
+        "List was stringified with repr() instead of joined"
+    )

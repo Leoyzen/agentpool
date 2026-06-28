@@ -7,6 +7,7 @@ and MCP process limit enforcement.
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,6 +15,7 @@ import pytest
 
 from agentpool.orchestrator.core import (
     DEFAULT_SESSION_TTL_SECONDS,
+    EventBus,
     SessionController,
     SessionState,
 )
@@ -534,3 +536,100 @@ def test_closing_alias_writes_is_closing() -> None:
     state.closing = True
     assert state.is_closing is True
     assert state.closing is True
+
+
+# ---------------------------------------------------------------------------
+# Tests from PR #64 review (SessionController internals)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_steer_followup_inside_request_lock() -> None:
+    """steer()/followup() must be called inside _request_lock.
+
+    Without this, current_run_id can be cleared between the check and
+    the steer()/followup() call, causing silent message drops.
+    """
+    from agentpool.orchestrator.core import SessionController
+
+    mock_pool = MagicMock()
+    mock_pool.main_agent = MagicMock()
+    mock_pool.main_agent.name = "main-agent"
+    mock_pool.manifest = MagicMock()
+    mock_pool.manifest.agents = {}
+
+    controller = SessionController(pool=mock_pool)
+    controller._event_bus = EventBus()
+
+    mock_agent = MagicMock()
+    mock_agent.AGENT_TYPE = "native"
+
+    session_id = "sess-toctou"
+    controller._sessions[session_id] = MagicMock()
+    controller._sessions[session_id].session_id = session_id
+    controller._sessions[session_id].current_run_id = "fake-run-id"
+    controller._sessions[session_id].closing = False
+    controller._sessions[session_id].is_closing = False
+    controller._sessions[session_id]._request_lock = asyncio.Lock()
+    controller._sessions[session_id].turn_lock = asyncio.Lock()
+    controller._sessions[session_id].input_provider = None
+    controller._sessions[session_id].is_per_session_agent = False
+    controller._session_agents[session_id] = mock_agent
+
+    # Track if steer is called while lock is held
+    lock_was_held_during_steer = False
+    fake_run = MagicMock()
+    lock = controller._sessions[session_id]._request_lock
+
+    def _check_lock_and_steer(content: str) -> None:
+        nonlocal lock_was_held_during_steer
+        lock_was_held_during_steer = lock.locked()
+
+    fake_run.steer = _check_lock_and_steer
+    fake_run.followup = MagicMock()
+    controller._runs["fake-run-id"] = fake_run
+
+    await controller.receive_request(session_id, "steer me", priority="asap")
+
+    assert lock_was_held_during_steer, (
+        "steer() was called outside _request_lock — TOCTOU race possible"
+    )
+
+
+def test_background_task_strong_reference() -> None:
+    """_start_run_handle must keep strong reference to background task.
+
+    Without a strong reference, Python's GC can destroy the task mid-execution.
+    """
+    import agentpool.orchestrator.core as core_module
+
+    source = inspect.getsource(core_module.SessionController._start_run_handle)
+    assert "_background_tasks" in source, (
+        "_start_run_handle must store task in _background_tasks set "
+        "to prevent GC from destroying it mid-execution"
+    )
+    assert "add_done_callback" in source, (
+        "task must have done callback to discard from _background_tasks"
+    )
+
+
+def test_closing_property_sets_is_closing() -> None:
+    """session.closing = True already sets session.is_closing = True.
+
+    The `closing` property is an alias for `is_closing` — its setter
+    writes to `self.is_closing`. So setting `session.closing = True`
+    is equivalent to setting `session.is_closing = True`.
+    """
+    session = SessionState(
+        session_id="test-property",
+        agent_name="test",
+    )
+    assert session.is_closing is False
+    assert session.closing is False
+
+    session.closing = True
+    assert session.is_closing is True, (
+        "Setting session.closing = True should also set session.is_closing = True "
+        "via the property setter"
+    )
+    assert session.closing is True

@@ -12,11 +12,12 @@ Covers four scenarios:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool.orchestrator.core import SessionController, SessionState
+from agentpool.orchestrator.core import EventBus, SessionController, SessionState
 from agentpool.orchestrator.run import RunHandle
 
 
@@ -183,3 +184,72 @@ async def test_flag_on_no_active_run(
 
     assert session.is_closing is True
     assert "sess-4" not in controller._sessions
+
+
+# ---------------------------------------------------------------------------
+# Tests from PR #64 review (close_session behavior)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_close_session_releases_lock_on_cancelled() -> None:
+    """close_session must release turn_lock even if cancelled mid-wait.
+
+    Without try/finally, CancelledError during complete_event.wait()
+    skips the lock release, leaving the session permanently locked.
+    """
+    from agentpool.orchestrator.core import SessionController
+
+    mock_pool = MagicMock()
+    mock_pool.main_agent = MagicMock()
+    mock_pool.main_agent.name = "main-agent"
+    mock_pool.manifest = MagicMock()
+    mock_pool.manifest.agents = {}
+
+    controller = SessionController(pool=mock_pool)
+    controller._event_bus = EventBus()
+
+    session_id = "sess-close-cancel"
+    controller._sessions[session_id] = MagicMock()
+    controller._sessions[session_id].session_id = session_id
+    controller._sessions[session_id].current_run_id = "fake-run-id"
+    controller._sessions[session_id].closing = False
+    controller._sessions[session_id].is_closing = False
+    controller._sessions[session_id]._request_lock = asyncio.Lock()
+    controller._sessions[session_id].turn_lock = asyncio.Lock()
+    controller._sessions[session_id].input_provider = None
+    controller._sessions[session_id].is_per_session_agent = False
+    controller._sessions[session_id].cancel_scope = None
+
+    # Create a fake run_handle that never completes
+    fake_run = MagicMock()
+    fake_run.close = MagicMock()
+    fake_run.cancel = MagicMock()
+    fake_run.complete_event = asyncio.Event()  # never set
+    controller._runs["fake-run-id"] = fake_run
+
+    # Lock is NOT pre-acquired — close_session will acquire it,
+    # then wait on complete_event (which never sets).
+    # We cancel during the wait to test that the lock is released.
+    lock = controller._sessions[session_id].turn_lock
+
+    async def _close() -> None:
+        await controller._close_session_run_turn(session_id)
+
+    task = asyncio.create_task(_close())
+    await asyncio.sleep(0.1)  # Let it acquire lock and start waiting
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    # Lock should be released because try/finally in _close_session_run_turn
+    try:
+        async with asyncio.timeout(1):
+            await lock.acquire()
+    except TimeoutError:
+        pytest.fail(
+            "turn_lock was not released after CancelledError in close_session"
+        )
+    finally:
+        if lock.locked():
+            lock.release()
