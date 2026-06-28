@@ -1554,6 +1554,16 @@ class SessionController:
         async with session._request_lock:
             if session.closing or session.is_closing:
                 return None
+            # Stale-run detection: if current_run_id points to a missing
+            # or terminal run, clear it and start a new run.
+            if session.current_run_id is not None:
+                existing_run = self._runs.get(session.current_run_id)
+                if existing_run is None or existing_run._status in (
+                    RunStatus.failed,
+                    RunStatus.completed,
+                    RunStatus.done,
+                ):
+                    session.current_run_id = None
             if session.current_run_id is None:
                 return self._start_run_handle(session, agent, session_id, content_str)
             run = self._runs.get(session.current_run_id) if session.current_run_id else None
