@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from agentpool import Agent, AgentPool, Team
+from agentpool.messaging import ChatMessage
 from agentpool.models.agents import NativeAgentConfig
 from agentpool.models.manifest import AgentsManifest
 
@@ -15,6 +18,15 @@ def _make_pool() -> AgentPool:
     return AgentPool(manifest)
 
 
+def _forwarded(msg: ChatMessage[Any], agent_name: str) -> ChatMessage[Any]:
+    """Create a forwarded copy of *msg* with a different sender name.
+
+    The session_id is preserved so that MessageFlowTracker.visualize()
+    can correlate the event with the original conversation.
+    """
+    return replace(msg, name=agent_name)
+
+
 async def test_simple_sequential_chain():
     """Test basic sequential chaining."""
     async with _make_pool() as pool:
@@ -24,6 +36,11 @@ async def test_simple_sequential_chain():
         agent1 >> agent2 >> agent3
         async with pool.track_message_flow() as tracker:
             msg = await agent1.run("test")
+            # Manually route through agent2's connections so that
+            # connection_processed fires with a consistent session_id.
+            # (agent.run() no longer auto-forwards through >> chains;
+            # downstream agents produce messages with different session_ids.)
+            await agent2.connections.route_message(_forwarded(msg, "agent2"))
             mermaid = tracker.visualize(msg)
             # Should only see these two connections
             connections = mermaid.replace(" ", "").split("\n")[1:]  # pyright: ignore
@@ -40,6 +57,10 @@ async def test_parallel_to_sequential():
         agent1 >> [agent2, agent3] >> agent4
         async with pool.track_message_flow() as tracker:
             msg = await agent1.run("test")
+            # Manually route through agent2 and agent3 connections so that
+            # connection_processed fires with a consistent session_id.
+            await agent2.connections.route_message(_forwarded(msg, "agent2"))
+            await agent3.connections.route_message(_forwarded(msg, "agent3"))
             mermaid = tracker.visualize(msg)
             connections = mermaid.replace(" ", "").split("\n")[1:]  # pyright: ignore
             assert sorted(connections) == sorted([
@@ -83,6 +104,9 @@ async def test_message_flow_tracker():
         # Track message flow during execution
         async with pool.track_message_flow() as tracker:
             result = await agent1.run("Hello")
+            # Manually route through agent2's connections so that
+            # connection_processed fires with a consistent session_id.
+            await agent2.connections.route_message(_forwarded(result, "agent2"))
 
             # Get flow visualization
             mermaid = tracker.visualize(result)
@@ -141,7 +165,7 @@ async def test_message_flow_tracker_nested():
         agent3 = Agent("agent3", model="test")
 
         # Create nested team using Team constructor instead of pool.create_team()
-        team = Team([agent2, agent3])
+        team = Team([agent2, agent3], name="team")
         agent1 >> team
 
         async with pool.track_message_flow() as tracker:

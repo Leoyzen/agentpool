@@ -124,11 +124,11 @@ class TestSessionPoolConfiguration:
         async with AgentPool(manifest, enable_session_pool=True) as pool:
             sp = pool.session_pool
             assert sp is not None
-            assert sp.turns._enable_auto_resume is False
+            assert sp._enable_auto_resume is False
             assert sp._enable_event_bus is False
             assert sp.sessions._session_ttl_seconds == 1800.0
             assert sp.sessions._mcp_max_processes == 50
-            assert sp.turns.event_bus._max_queue_size == 500
+            assert sp.event_bus._max_queue_size == 500
 
     @pytest.mark.integration
     async def test_explicit_config_overrides_manifest(
@@ -145,7 +145,7 @@ class TestSessionPoolConfiguration:
         ) as pool:
             sp = pool.session_pool
             assert sp is not None
-            assert sp.turns._max_auto_resume == 99
+            assert pool._session_pool_config.max_auto_resume == 99
 
 
 # =============================================================================
@@ -318,7 +318,12 @@ class TestMixedMode:
             basic_manifest,
             enable_session_pool=True,
         ) as pool:
-            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
+            sp = pool.session_pool
+            assert sp is not None
+            # Create session and get per-session agent so TestModel
+            # is set on the agent that session_pool.run_stream() will use.
+            await sp.create_session("ses_test", agent_name="test_agent")
+            agent = await sp.sessions.get_or_create_session_agent("ses_test")
             assert isinstance(agent, Agent)
             await agent.set_model(TestModel(custom_output_text="enabled"))
             result = await agent.run("hello", session_id="ses_test")
@@ -329,11 +334,16 @@ class TestMixedMode:
         self,
         basic_manifest: AgentsManifest,
     ) -> None:
-        """Agent should produce output when SessionPool is disabled."""
+        """Agent should produce output when SessionPool is disabled.
+
+        Since SessionPool is always enabled now, this tests the direct
+        execution path by creating an agent without a pool reference.
+        """
         from pydantic_ai.models.test import TestModel
 
         async with AgentPool(basic_manifest) as pool:
-            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
+            # Create agent without pool reference to bypass SessionPool
+            agent = pool.manifest.agents["test_agent"].get_agent()
             assert isinstance(agent, Agent)
             await agent.set_model(TestModel(custom_output_text="disabled"))
             result = await agent.run("hello", session_id="ses_test")
@@ -352,14 +362,17 @@ class TestMixedMode:
             basic_manifest,
             enable_session_pool=True,
         ) as pool_enabled:
-            agent_enabled = pool_enabled.get_agent("test_agent")
+            sp = pool_enabled.session_pool
+            assert sp is not None
+            await sp.create_session("ses_test", agent_name="test_agent")
+            agent_enabled = await sp.sessions.get_or_create_session_agent("ses_test")
             assert isinstance(agent_enabled, Agent)
             await agent_enabled.set_model(TestModel(custom_output_text="same"))
             result_enabled = await agent_enabled.run("hello", session_id="ses_test")
 
-        # With SessionPool disabled
+        # With SessionPool disabled (direct execution)
         async with AgentPool(basic_manifest) as pool_disabled:
-            agent_disabled = pool_disabled.get_agent("test_agent")
+            agent_disabled = pool_disabled.manifest.agents["test_agent"].get_agent()
             assert isinstance(agent_disabled, Agent)
             await agent_disabled.set_model(TestModel(custom_output_text="same"))
             result_disabled = await agent_disabled.run("hello", session_id="ses_test")
@@ -377,10 +390,10 @@ class TestMixedMode:
             basic_manifest,
             enable_session_pool=True,
         ) as pool_enabled:
-            agent_enabled = pool_enabled.get_agent("test_agent")
+            agent_enabled = pool_enabled.manifest.agents["test_agent"].get_agent(pool=pool_enabled)
 
         async with AgentPool(basic_manifest) as pool_disabled:
-            agent_disabled = pool_disabled.get_agent("test_agent")
+            agent_disabled = pool_disabled.manifest.agents["test_agent"].get_agent(pool=pool_disabled)
 
         assert type(agent_enabled) is Agent
         assert type(agent_disabled) is Agent
@@ -426,7 +439,10 @@ class TestRestart:
         pool = AgentPool(basic_manifest)
 
         async with pool:
-            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
+            sp = pool.session_pool
+            assert sp is not None
+            await sp.create_session("ses_test", agent_name="test_agent")
+            agent = await sp.sessions.get_or_create_session_agent("ses_test")
             assert isinstance(agent, Agent)
             await agent.set_model(TestModel(custom_output_text="before"))
             result_before = await agent.run("hello", session_id="ses_test")
@@ -434,7 +450,10 @@ class TestRestart:
 
         pool_after = AgentPool(basic_manifest)
         async with pool_after:
-            agent_after = pool_after.get_agent("test_agent")
+            sp_after = pool_after.session_pool
+            assert sp_after is not None
+            await sp_after.create_session("ses_test", agent_name="test_agent")
+            agent_after = await sp_after.sessions.get_or_create_session_agent("ses_test")
             assert isinstance(agent_after, Agent)
             await agent_after.set_model(TestModel(custom_output_text="after"))
             result_after = await agent_after.run("hello", session_id="ses_test")
