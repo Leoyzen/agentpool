@@ -76,7 +76,9 @@ class MCPConnectionPool:
             idle_timeout_seconds: Idle connections (active_sessions == 0)
                 are terminated after this many seconds.
         """
-        self._servers: list[MCPServerConfig] = list(servers or [])
+        self._servers: list[MCPServerConfig] = (
+            list(servers) if isinstance(servers, (list, tuple)) else []
+        )
         self._connections: dict[str, _PooledConnection] = {}
         self._max_processes = max_processes
         self._idle_timeout = idle_timeout_seconds
