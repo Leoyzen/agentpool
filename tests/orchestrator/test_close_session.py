@@ -255,3 +255,134 @@ async def test_close_session_releases_lock_on_cancelled() -> None:
     finally:
         if lock.locked():
             lock.release()
+
+
+# ---------------------------------------------------------------------------
+# Integration: close_session after cancel does not hang
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_close_session_after_cancel() -> None:
+    """close_session() must not hang after a run is cancelled.
+
+    Steps:
+        1. Start a run with a blocking mock agent (_BlockingTurn).
+        2. Cancel via cancel_run_for_session().
+        3. Call close_session() with a 30s timeout.
+        4. Verify close_session returns within timeout (no hang from turn_lock).
+
+    After cancel, the start() loop publishes RunFailedEvent, sets
+    _turn_complete_event, and the turn completes — releasing turn_lock.
+    close_session() should acquire turn_lock quickly and return.
+    """
+    from typing import Any
+
+    from agentpool.agents.context import AgentRunContext
+    from agentpool.agents.events import StreamCompleteEvent
+    from agentpool.messaging import ChatMessage
+    from agentpool.orchestrator.core import SessionPool
+    from agentpool.orchestrator.turn import Turn
+
+    class _BlockingTurn(Turn):
+        """Turn that blocks until run_ctx.cancelled, then returns."""
+
+        def __init__(self, run_ctx: AgentRunContext) -> None:
+            self._run_ctx = run_ctx
+
+        async def execute(self):  # type: ignore[override]
+            self._message_history = []
+            self._final_message = ChatMessage(content="blocked", role="assistant")
+            while not self._run_ctx.cancelled:
+                await asyncio.sleep(0.01)
+            return
+            yield  # noqa: unreachable — makes this an async generator
+
+    class _StubTurn(Turn):
+        """Minimal Turn that yields StreamCompleteEvent."""
+
+        async def execute(self):  # type: ignore[override]
+            self._message_history = []
+            self._final_message = ChatMessage(content="done", role="assistant")
+            yield StreamCompleteEvent(
+                message=ChatMessage(content="response", role="assistant"),
+            )
+
+    mock_pool = MagicMock()
+    mock_pool.main_agent = MagicMock()
+    mock_pool.main_agent.name = "main-agent"
+    mock_pool.manifest = MagicMock()
+    mock_pool.manifest.agents = {}
+
+    session_pool = SessionPool(mock_pool)
+    await session_pool.start()
+
+    session_id = "sess-close-after-cancel"
+    await session_pool.create_session(session_id, agent_name="test-agent")
+
+    # Create a cancel-aware mock agent: first turn blocks, second is stub
+    agent = MagicMock()
+    agent.AGENT_TYPE = "native"
+    call_count = 0
+
+    def _create_turn(
+        prompts: Any,
+        run_ctx: AgentRunContext,
+        message_history: Any,
+    ) -> Turn:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return _BlockingTurn(run_ctx)
+        return _StubTurn()
+
+    agent.create_turn = _create_turn
+
+    # Attach agent to session
+    state, _ = await session_pool.sessions.get_or_create_session(session_id)
+    state.agent = agent
+    session_pool.sessions._session_agents[session_id] = agent
+    mock_pool.get_agent.return_value = agent
+
+    # --- Step 1: Start a run with the blocking agent ---
+    run_handle = await session_pool.receive_request(session_id, "blocking prompt")
+    assert run_handle is not None
+
+    # Wait for the blocking turn to start
+    await asyncio.sleep(0.1)
+
+    # --- Step 2: Cancel the active run ---
+    session_pool.sessions.cancel_run_for_session(session_id)
+
+    # Wait for cancellation to propagate
+    await asyncio.sleep(0.2)
+
+    # --- Step 3: Close the RunHandle, then call close_session ---
+    # Per Task 12 findings: must call run_handle.close() before
+    # close_session() to signal the start() loop to exit (sets
+    # _closing=True, wakes idle wait). Without this, close_session
+    # waits 30s for complete_event which is only set when start()
+    # exits. After cancel, the loop is in idle state, not running
+    # a turn — so cancelled=True on run_ctx alone won't unblock it.
+    run_handle.close()
+    await asyncio.sleep(0.1)
+
+    # Now close_session should complete promptly — turn_lock was
+    # released when the cancelled turn completed, and complete_event
+    # is set when start() exits via _closing.
+    try:
+        await asyncio.wait_for(
+            session_pool.close_session(session_id),
+            timeout=30.0,
+        )
+    except TimeoutError:
+        pytest.fail(
+            "close_session hung after cancel — turn_lock was not released"
+        )
+
+    # --- Step 4: Verify session is closed ---
+    assert session_id not in session_pool.sessions._sessions
+
+    # Cleanup
+    await session_pool.shutdown()
