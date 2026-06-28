@@ -22,7 +22,7 @@ import pytest
 
 from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import RunErrorEvent, RunStartedEvent, StreamCompleteEvent
+from agentpool.agents.events import RunErrorEvent, RunFailedEvent, RunStartedEvent, StreamCompleteEvent
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, SessionState
 from agentpool.orchestrator.run import RunHandle, RunStatus
@@ -66,6 +66,21 @@ class _StubTurn(Turn):
             yield event
 
 
+class _BlockingTurn(Turn):
+    """Turn that blocks until run_ctx.cancelled, then returns without StreamCompleteEvent."""
+
+    def __init__(self, run_ctx: AgentRunContext) -> None:
+        self._run_ctx = run_ctx
+
+    async def execute(self):  # type: ignore[override]
+        self._message_history = []
+        self._final_message = ChatMessage(content="blocked", role="assistant")
+        while not self._run_ctx.cancelled:
+            await asyncio.sleep(0.01)
+        return
+        yield  # noqa: unreachable — makes this an async generator
+
+
 def _make_run_handle(
     *,
     agent: Any | None = None,
@@ -96,6 +111,12 @@ def _make_run_handle(
 
 def _stream_complete_event() -> StreamCompleteEvent[Any]:
     return StreamCompleteEvent(message=ChatMessage(content="done", role="assistant"))
+
+
+async def _consume_gen(gen: Any) -> None:
+    """Consume an async generator to completion, discarding all events."""
+    async for _ in gen:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -418,9 +439,10 @@ async def test_cancel_with_cancel_fn_delegates() -> None:
 
 
 @pytest.mark.unit
-async def test_cancel_with_current_task_cancels_task() -> None:
+async def test_cancel_does_not_cancel_current_task() -> None:
     """Given a RunHandle with current_task set and no _cancel_fn, cancel()
-    cancels the task.
+    does NOT cancel current_task — the start() loop must keep running to
+    process the cancelled flag and emit stream-complete events gracefully.
     """
     handle = _make_run_handle()
     mock_task = MagicMock()
@@ -431,13 +453,13 @@ async def test_cancel_with_current_task_cancels_task() -> None:
 
     assert handle.run_ctx.cancelled is True
     assert handle._idle_event.is_set()
-    mock_task.cancel.assert_called_once()
+    mock_task.cancel.assert_not_called()
 
 
 @pytest.mark.unit
 async def test_cancel_with_done_task_does_not_cancel() -> None:
     """Given a RunHandle with current_task already done, cancel() does not
-    re-cancel it.
+    cancel it (cancel() never cancels current_task regardless of state).
     """
     handle = _make_run_handle()
     mock_task = MagicMock()
@@ -1014,3 +1036,145 @@ async def test_current_task_set_during_start_execution() -> None:
         assert captured_tasks[0] is asyncio.current_task(), (
             "run_ctx.current_task should be the current asyncio task"
         )
+
+
+# ---------------------------------------------------------------------------
+# Task 8: Cancel returns to idle + cancel during LLM call
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_cancel_returns_to_idle() -> None:
+    """After cancel, RunHandle returns to idle (not done) and _turn_complete_event is set."""
+    handle = _make_run_handle()
+    blocking_turn = _BlockingTurn(handle.run_ctx)
+    stub_turn = _StubTurn(events=[_stream_complete_event()], message_history=["m"])
+    handle.agent.create_turn = MagicMock(side_effect=[blocking_turn, stub_turn])
+
+    gen = handle.start("hello")
+    consumer_task = asyncio.create_task(_consume_gen(gen))
+    await asyncio.sleep(0.05)
+
+    handle.cancel()
+    await asyncio.sleep(0.1)
+
+    assert handle._status == RunStatus.idle
+    assert handle._turn_complete_event.is_set()
+
+    handle.close()
+    await asyncio.sleep(0.05)
+    await consumer_task
+
+
+@pytest.mark.unit
+async def test_cancel_during_llm_call() -> None:
+    """Cancel during LLM call: no StreamCompleteEvent, RunFailedEvent published, returns to idle."""
+    handle = _make_run_handle()
+    blocking_turn = _BlockingTurn(handle.run_ctx)
+    # Second turn has empty events — no StreamCompleteEvent.
+    # This proves the cancelled turn ended via RunFailedEvent, not StreamCompleteEvent.
+    stub_turn = _StubTurn(events=[], message_history=["m"])
+    handle.agent.create_turn = MagicMock(side_effect=[blocking_turn, stub_turn])
+
+    events: list[Any] = []
+    gen = handle.start("hello")
+
+    async def _consume() -> None:
+        async for event in gen:
+            events.append(event)
+
+    consumer_task = asyncio.create_task(_consume())
+    await asyncio.sleep(0.05)
+
+    handle.cancel()
+    await asyncio.sleep(0.1)
+
+    # No StreamCompleteEvent from cancelled turn (or subsequent turn)
+    assert not any(isinstance(e, StreamCompleteEvent) for e in events)
+
+    # RunFailedEvent was published
+    published = [call.args[1] for call in handle.event_bus.publish.call_args_list]
+    assert any(isinstance(e, RunFailedEvent) for e in published)
+
+    # Returns to idle
+    assert handle._status == RunStatus.idle
+
+    handle.close()
+    await asyncio.sleep(0.05)
+    await consumer_task
+
+
+# ---------------------------------------------------------------------------
+# Task 10: No double turn_complete on cancel
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_no_double_turn_complete_on_cancel() -> None:
+    """Cancel publishes RunFailedEvent but NOT StreamCompleteEvent."""
+    handle = _make_run_handle()
+    blocking_turn = _BlockingTurn(handle.run_ctx)
+    handle.agent.create_turn = MagicMock(return_value=blocking_turn)
+
+    gen = handle.start("hello")
+    consumer_task = asyncio.create_task(_consume_gen(gen))
+    await asyncio.sleep(0.05)
+
+    handle.cancel()
+    handle.close()  # Prevent second turn from starting
+    await asyncio.sleep(0.1)
+    await consumer_task
+
+    published = [call.args[1] for call in handle.event_bus.publish.call_args_list]
+    assert any(isinstance(e, RunFailedEvent) for e in published)
+    assert not any(isinstance(e, StreamCompleteEvent) for e in published)
+
+
+# ---------------------------------------------------------------------------
+# Task 11: _turn_complete_event reset between turns
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_turn_complete_event_reset_between_turns() -> None:
+    """_turn_complete_event is cleared at turn start and set at turn end across turns."""
+
+    class _CapturingTurn(Turn):
+        """Turn that captures _turn_complete_event state at execute() start."""
+
+        def __init__(self, tce: asyncio.Event) -> None:
+            self._tce = tce
+            self.captured_start: bool | None = None
+
+        async def execute(self):  # type: ignore[override]
+            self.captured_start = self._tce.is_set()
+            self._message_history = ["m"]
+            self._final_message = ChatMessage(content="done", role="assistant")
+            yield _stream_complete_event()
+
+    handle = _make_run_handle()
+    turn1 = _CapturingTurn(handle._turn_complete_event)
+    turn2 = _CapturingTurn(handle._turn_complete_event)
+    handle.agent.create_turn = MagicMock(side_effect=[turn1, turn2])
+
+    gen = handle.start("first")
+    consumer_task = asyncio.create_task(_consume_gen(gen))
+    await asyncio.sleep(0.05)
+
+    # After first turn: idle, event set, was cleared at start
+    assert handle._status == RunStatus.idle
+    assert handle._turn_complete_event.is_set()
+    assert turn1.captured_start is False
+
+    # Steer to wake for second turn
+    handle.steer("second")
+    await asyncio.sleep(0.1)
+
+    # After second turn: idle, event set, was cleared at start (was set between turns)
+    assert handle._status == RunStatus.idle
+    assert handle._turn_complete_event.is_set()
+    assert turn2.captured_start is False
+
+    handle.close()
+    await asyncio.sleep(0.05)
+    await consumer_task

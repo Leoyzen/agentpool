@@ -9,7 +9,8 @@ from __future__ import annotations
 from pydantic_ai import FunctionToolCallEvent, PartDeltaEvent, PartStartEvent, TextPart, TextPartDelta, ToolCallPart
 import pytest
 
-from acp.schema import AgentMessageChunk, ToolCallProgress
+from acp.schema import AgentMessageChunk, ToolCallProgress, TurnCompleteUpdate
+from agentpool.agents.events import RunFailedEvent
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 
 
@@ -143,5 +144,27 @@ class TestACPEventConverter:
         # Should yield nothing
         assert len(cancellations) == 0
         assert len(converter._tool_states) == 0
+
+
+@pytest.mark.anyio
+async def test_cancelled_turn_emits_single_turn_complete():
+    """RunFailedEvent with 'cancelled' emits exactly one TurnCompleteUpdate(stop_reason='cancelled').
+
+    No preceding StreamCompleteEvent — the whole point is that cancel
+    does NOT emit StreamCompleteEvent.
+    """
+    converter = ACPEventConverter()
+    converter.client_supports_turn_complete = True
+    event = RunFailedEvent(
+        run_id="test",
+        session_id="test",
+        exception=RuntimeError("Run cancelled"),
+    )
+
+    updates = await collect_updates(converter, event)
+
+    turn_completes = [u for u in updates if isinstance(u, TurnCompleteUpdate)]
+    assert len(turn_completes) == 1
+    assert turn_completes[0].stop_reason == "cancelled"
 
 
