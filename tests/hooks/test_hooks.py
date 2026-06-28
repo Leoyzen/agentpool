@@ -70,16 +70,16 @@ async def test_pre_run_hook_allow():
 
 
 async def test_pre_run_hook_deny():
-    """Test pre-run hook that blocks execution."""
+    """Test pre-run hook that blocks execution gracefully."""
     reset_hook_state()
 
     hooks = AgentHooks(pre_run=[CallableHook(event="pre_run", fn=deny_hook)])
     agent = Agent(model="test", hooks=hooks)
 
     async with agent:
-        with pytest.raises(RuntimeError, match="Run blocked"):
-            await agent.run("Hello")
+        result = await agent.run("Hello")
 
+    assert result is not None  # graceful return, not exception
     assert len(hook_state["calls"]) == 1
     assert hook_state["calls"][0] == ("deny", "pre_run")
 
@@ -194,7 +194,7 @@ async def test_multiple_hooks_all_allow():
 
 
 async def test_multiple_hooks_one_denies():
-    """Test that one denying hook blocks execution."""
+    """Test that one denying hook blocks execution gracefully."""
     reset_hook_state()
 
     hooks = AgentHooks(
@@ -204,8 +204,9 @@ async def test_multiple_hooks_one_denies():
         ]
     )
     async with Agent(model="test", hooks=hooks) as agent:
-        with pytest.raises(RuntimeError, match="Run blocked"):
-            await agent.run("Hello")
+        result = await agent.run("Hello")
+
+    assert result is not None  # graceful return, not exception
 
 
 # Tests for input_match

@@ -4,12 +4,17 @@ from pydantic_ai.models.test import TestModel
 import pytest
 
 from agentpool import Agent, AgentPool
+from agentpool.models.agents import NativeAgentConfig
+from agentpool.models.manifest import AgentsManifest
 
 
 @pytest.fixture
 async def pool():
     """Create agent pool with test agents."""
-    pool = AgentPool()
+    manifest = AgentsManifest(
+        agents={"agent1": NativeAgentConfig(name="agent1", model="test")}
+    )
+    pool = AgentPool(manifest)
 
     async with pool:
         yield pool
@@ -20,8 +25,8 @@ async def test_registry_captures_agent_interaction(pool: AgentPool):
     messages = []
     pool.connection_registry.message_flow.connect(messages.append)
 
-    # Create agents directly
-    agent1 = Agent("agent1", model=TestModel())
+    # Create agents directly with pool reference
+    agent1 = Agent("agent1", model=TestModel(), agent_pool=pool)
     agent2 = Agent("agent2", model=TestModel())
     agent1.connect_to(agent2, name="test_talk")
     await agent1.run("Test message")
@@ -37,9 +42,9 @@ async def test_chained_communication(pool: AgentPool):
     messages = []
     pool.connection_registry.message_flow.connect(messages.append)
 
-    # Create agents directly
-    agent1 = Agent("agent1", model=TestModel())
-    agent2 = Agent("agent2", model=TestModel())
+    # Create agents directly with pool reference
+    agent1 = Agent("agent1", model=TestModel(), agent_pool=pool)
+    agent2 = Agent("agent2", model=TestModel(), agent_pool=pool)
     agent3 = Agent("agent3", model=TestModel())
 
     # Create chain with named connections
@@ -62,8 +67,8 @@ async def test_broadcast_communication(pool: AgentPool):
     messages = []
     pool.connection_registry.message_flow.connect(messages.append)
 
-    # Create agents directly
-    agent1 = Agent("agent1", model=TestModel())
+    # Create agents directly with pool reference
+    agent1 = Agent("agent1", model=TestModel(), agent_pool=pool)
     agent2 = Agent("agent2", model=TestModel())
     agent3 = Agent("agent3", model=TestModel())
 
