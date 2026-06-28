@@ -2436,10 +2436,13 @@ class SessionPool:
             return
 
         run_handle = self._create_run_handle(session, agent, session_id)
+        gen = run_handle.start(content)
         try:
-            async for _event in run_handle.start(content):
-                pass
+            async for _event in gen:
+                if isinstance(_event, StreamCompleteEvent | RunErrorEvent):
+                    break
         finally:
+            await gen.aclose()
             session.current_run_id = None
             self.sessions._runs.pop(run_handle.run_id, None)
 
@@ -2604,12 +2607,14 @@ class SessionPool:
 
         # No active run — create RunHandle and yield from start()
         run_handle = self._create_run_handle(session, agent, session_id)
+        gen = run_handle.start(content)
         try:
-            async for event in run_handle.start(content):
+            async for event in gen:
                 yield event
                 if isinstance(event, StreamCompleteEvent | RunErrorEvent):
                     break
         finally:
+            await gen.aclose()
             session.current_run_id = None
             self.sessions._runs.pop(run_handle.run_id, None)
 
