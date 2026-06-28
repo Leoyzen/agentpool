@@ -21,7 +21,10 @@ from pydantic_ai import (
     FunctionToolResultEvent,
     NativeToolCallPart,
     NativeToolReturnPart,
+    OutputToolCallEvent,
+    OutputToolResultEvent,
     PartDeltaEvent,
+    PartEndEvent,
     PartStartEvent,
     RetryPromptPart,
     TextPart,
@@ -50,19 +53,25 @@ from acp.schema.tool_call import SubagentRunInfo
 from acp.utils import generate_tool_title, infer_tool_kind, to_acp_content_blocks
 from agentpool.agents.events import (
     CompactionEvent,
+    CustomEvent,
     DiffContentItem,
     FileContentItem,
     LocationContentItem,
     PlanUpdateEvent,
     RunErrorEvent,
     RunFailedEvent,
+    RunStartedEvent,
+    SessionResumeEvent,
     SpawnSessionStart,
     StreamCompleteEvent,
+    SubAgentEvent,
     TerminalContentItem,
     TextContentItem,
+    ToolCallCompleteEvent,
     ToolCallDeferredEvent,
     ToolCallProgressEvent,
     ToolCallStartEvent,
+    ToolResultMetadataEvent,
 )
 from agentpool.log import get_logger
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
@@ -640,6 +649,59 @@ class ACPEventConverter:
                 if acp_content:
                     state.has_content = True
 
+            case ToolCallCompleteEvent(
+                tool_call_id=tc_id,
+                tool_name=tool_name,
+                tool_result=result,
+                metadata=meta,
+            ):
+                # ToolCallCompleteEvent is produced by EventMapper from
+                # FunctionToolResultEvent. When metadata contains
+                # ``is_error=True``, the original part was a
+                # RetryPromptPart (tool failure).
+                is_error = bool(meta and meta.get("is_error"))
+                completion_status: Literal["completed", "failed"] = (
+                    "failed" if is_error else "completed"
+                )
+                tool_state = self._tool_states.get(tc_id)
+                if is_error:
+                    error_text = str(result) if result else "Tool execution failed"
+                    content = ContentToolCallContent.text(f"Error: {error_text}")
+                    yield ToolCallProgress(
+                        tool_call_id=tc_id,
+                        status=completion_status,
+                        content=[content],
+                    )
+                elif tool_state and tool_state.has_content:
+                    yield ToolCallProgress(
+                        tool_call_id=tc_id,
+                        status=completion_status,
+                        raw_output=result,
+                    )
+                else:
+                    converted = to_acp_content_blocks(result)
+                    content_items = [ContentToolCallContent(content=block) for block in converted]
+                    yield ToolCallProgress(
+                        tool_call_id=tc_id,
+                        status=completion_status,
+                        raw_output=result,
+                        content=content_items,
+                    )
+                self._cleanup_tool_state(tc_id)
+
+            case ToolResultMetadataEvent(tool_call_id=tc_id, metadata=_meta):
+                # Sidechannel metadata for tool results (e.g., diffs,
+                # diagnostics stripped by Claude SDK). Enrich existing
+                # tool state if present; otherwise log and skip.
+                meta_state = self._tool_states.get(tc_id)
+                if meta_state:
+                    meta_state.has_content = True
+                else:
+                    logger.debug(
+                        "ToolResultMetadataEvent for unknown tool call",
+                        tool_call_id=tc_id,
+                    )
+
             case FinalResultEvent():
                 pass  # No notification needed
 
@@ -686,6 +748,13 @@ class ACPEventConverter:
                 text = get_compaction_text(trigger)
                 yield AgentMessageChunk.text(text, message_id=self._current_message_id)
 
+            case CompactionEvent(phase="completed"):
+                # Signal compaction completion to the client
+                yield AgentMessageChunk.text(
+                    "\n\n---\n\n✅ **Context compaction complete.**\n\n---\n\n",
+                    message_id=self._current_message_id,
+                )
+
             case SpawnSessionStart(
                 child_session_id=child_session_id,
                 source_name=source_name,
@@ -725,6 +794,76 @@ class ACPEventConverter:
                         status="pending",
                     )
 
+            case RunStartedEvent(run_id=run_id, agent_name=agent_name):
+                # ACP has no explicit "run started" notification.
+                # Log for debugging; clients infer start from first event.
+                logger.debug("Run started", run_id=run_id, agent_name=agent_name)
+
+            case SubAgentEvent(
+                source_name=source_name,
+                event=inner_event,
+                depth=depth,
+                child_session_id=child_session_id,
+            ):
+                # SubAgentEvent wraps events from delegated agents/teams.
+                # Child sessions have their own consumer that handles
+                # their events directly. This wrapper provides metadata
+                # for protocols that want to annotate nested activity.
+                # For ACP, we skip re-converting the inner event (it's
+                # already handled by the child consumer) and just log.
+                logger.debug(
+                    "SubAgent event",
+                    source_name=source_name,
+                    depth=depth,
+                    child_session_id=child_session_id,
+                    inner_event_type=type(inner_event).__name__,
+                )
+
+            case SessionResumeEvent(
+                session_id=_sess_id,
+                resolved_call_count=call_count,
+                source=resume_source,
+            ):
+                # Signal session resumption to the client
+                yield AgentMessageChunk.text(
+                    f"\n\n🔄 **Session resumed** ({call_count} deferred call(s) resolved"
+                    + (f" from {resume_source}" if resume_source else "")
+                    + ").\n\n",
+                    message_id=self._current_message_id,
+                )
+
+            case CustomEvent(event_type=ev_type, source=ev_source):
+                # Generic custom events — log for debugging, no ACP output
+                logger.debug(
+                    "Custom event",
+                    event_type=ev_type,
+                    source=ev_source,
+                )
+
+            case PartEndEvent(index=idx, part=ended_part):
+                # Part boundary detection — no ACP notification needed,
+                # but log for debugging.
+                logger.debug(
+                    "Part ended",
+                    index=idx,
+                    part_kind=ended_part.part_kind,
+                )
+
+            case OutputToolCallEvent(part=part):
+                # Output tool calls (structured output submission) —
+                # no ACP notification needed, handled internally by
+                # PydanticAI for result validation.
+                logger.debug(
+                    "Output tool call",
+                    tool_name=part.tool_name,
+                )
+
+            case OutputToolResultEvent(part=part):
+                # Output tool results — no ACP notification needed.
+                logger.debug(
+                    "Output tool result",
+                    tool_name=part.tool_name,
+                )
 
             case RunErrorEvent(message=message, agent_name=agent_name):
                 # Display error as agent text with formatting
@@ -736,14 +875,14 @@ class ACPEventConverter:
                 # Display run failure as agent text and signal turn completion.
                 # Unlike RunErrorEvent (agent-level), RunFailedEvent indicates
                 # the run itself crashed — the session cannot continue.
-                
+
                 # Check if this is a cancellation (session/cancel notification)
                 import asyncio
-                is_cancellation = (
-                    isinstance(exc, asyncio.CancelledError)
-                    or (isinstance(exc, RuntimeError) and "cancelled" in str(exc).lower())
+
+                is_cancellation = isinstance(exc, asyncio.CancelledError) or (
+                    isinstance(exc, RuntimeError) and "cancelled" in str(exc).lower()
                 )
-                
+
                 if is_cancellation:
                     # For cancellation, emit turn_complete with cancelled stop_reason
                     # Don't show error text since cancellation is user-initiated
@@ -786,5 +925,3 @@ class ACPEventConverter:
                 # Graceful fallback for unknown event types
                 # Handles future events like ToolRequiresAuthEvent without crashing
                 logger.debug("Unhandled event", event_type=type(event).__name__)
-
-

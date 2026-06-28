@@ -26,6 +26,7 @@ from pydantic_ai import (
     FunctionToolResultEvent,
     PartDeltaEvent as PyAIPartDeltaEvent,
     PartStartEvent as PyAIPartStartEvent,
+    RetryPromptPart,
 )
 
 from agentpool.agents.events.events import (
@@ -70,13 +71,9 @@ class EventMapper:
             RichAgentStreamEvent, or ``None`` if the event is unrecognized.
         """
         match event:
-            case FunctionToolCallEvent(part=tool_part) if isinstance(
-                tool_part, BaseToolCallPart
-            ):
+            case FunctionToolCallEvent(part=tool_part) if isinstance(tool_part, BaseToolCallPart):
                 return self._emit_tool_call_start(tool_part)
-            case PyAIPartStartEvent(part=tool_part) if isinstance(
-                tool_part, BaseToolCallPart
-            ):
+            case PyAIPartStartEvent(part=tool_part) if isinstance(tool_part, BaseToolCallPart):
                 return self._emit_tool_call_start(tool_part)
             case FunctionToolResultEvent(part=tool_return):
                 return self._emit_tool_call_complete(tool_return)
@@ -86,13 +83,9 @@ class EventMapper:
                 # work correctly.  Without this, pydantic-ai's base
                 # PartDeltaEvent / PartStartEvent bypass coalescing because
                 # ``isinstance(base, subclass)`` is False.
-                if isinstance(event, PyAIPartDeltaEvent) and not isinstance(
-                    event, PartDeltaEvent
-                ):
+                if isinstance(event, PyAIPartDeltaEvent) and not isinstance(event, PartDeltaEvent):
                     return PartDeltaEvent(index=event.index, delta=event.delta)
-                if isinstance(event, PyAIPartStartEvent) and not isinstance(
-                    event, PartStartEvent
-                ):
+                if isinstance(event, PyAIPartStartEvent) and not isinstance(event, PartStartEvent):
                     return PartStartEvent(index=event.index, part=event.part)
                 if self._is_rich_event(event):
                     return event
@@ -125,18 +118,26 @@ class EventMapper:
 
     def _emit_tool_call_complete(
         self,
-        tool_return: BaseToolReturnPart,
+        tool_return: BaseToolReturnPart | RetryPromptPart,
     ) -> ToolCallCompleteEvent | None:
         """Create a ToolCallCompleteEvent from a tool return part.
 
         Returns ``None`` if no matching tool call start was seen (i.e. the
         ``tool_call_id`` is not in ``_pending_tool_calls``).
+
+        Note:
+            ``RetryPromptPart`` is not a ``BaseToolReturnPart`` but shares
+            the ``tool_call_id`` and ``content`` attributes. When the part
+            is a ``RetryPromptPart``, ``metadata={"is_error": True}`` is
+            set so downstream consumers can distinguish failures from
+            successful completions.
         """
         call_id = tool_return.tool_call_id
         tool_name = self._pending_tool_calls.pop(call_id, None)
         if tool_name is None:
             return None
         tool_input = self._pending_tool_inputs.pop(call_id, {})
+        is_error = isinstance(tool_return, RetryPromptPart)
         return ToolCallCompleteEvent(
             tool_name=tool_name,
             tool_call_id=call_id,
@@ -144,6 +145,7 @@ class EventMapper:
             tool_result=tool_return.content,
             agent_name=self._agent_name,
             message_id=self._message_id,
+            metadata={"is_error": True} if is_error else None,
         )
 
     @staticmethod
@@ -157,7 +159,5 @@ class EventMapper:
         ``isinstance`` at runtime).
         """
         if dataclasses.is_dataclass(event):
-            return any(
-                f.name == "event_kind" for f in dataclasses.fields(event)
-            )
+            return any(f.name == "event_kind" for f in dataclasses.fields(event))
         return False
