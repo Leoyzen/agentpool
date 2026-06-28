@@ -980,7 +980,16 @@ class SessionController:
         """
         async with self._lock:
             if session_id in self._session_agents:
-                return self._session_agents[session_id]
+                agent = self._session_agents[session_id]
+                # Update input_provider on cached agent if a new one is provided.
+                # Without this, the agent keeps the stale (or None) input_provider
+                # from when it was first cached, causing elicitation failures.
+                if input_provider is not None:
+                    session = self._sessions.get(session_id)
+                    if session is not None:
+                        session.input_provider = input_provider
+                    agent._input_provider = input_provider
+                return agent
 
             session, _was_created = await self._get_or_create_session_locked(session_id, agent_name)
             agent_name = agent_name or session.agent_name
@@ -1517,6 +1526,13 @@ class SessionController:
         agent = self._session_agents.get(session_id)
         if agent is None:
             return None
+        # Extract input_provider from kwargs and set on session/agent.
+        # Without this, input_provider passed by protocol handlers is lost
+        # because _start_run_handle doesn't accept **kwargs.
+        input_provider = kwargs.pop("input_provider", None)
+        if input_provider is not None:
+            session.input_provider = input_provider
+            agent._input_provider = input_provider
         # RunHandle path (always)
         resolved = {"steer": "asap", "followup": "when_idle"}.get(priority, priority)
         async with session._request_lock:
@@ -2431,6 +2447,12 @@ class SessionPool:
         agent = self.sessions._session_agents.get(session_id)
         if agent is None:
             return
+        # Extract input_provider from kwargs and set on session/agent.
+        # Without this, input_provider passed by protocol handlers is lost.
+        input_provider = kwargs.pop("input_provider", None)
+        if input_provider is not None:
+            session.input_provider = input_provider
+            agent._input_provider = input_provider
         content = " ".join(str(p) for p in prompts) if prompts else ""
 
         run_id = session.current_run_id
