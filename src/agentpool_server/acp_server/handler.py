@@ -517,11 +517,13 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             if run_handle is not None and not (
                 self.client_capabilities is not None and self.client_capabilities.turn_complete
             ):
-                await run_handle.complete_event.wait()
-                # Check if run was cancelled after completing.
+                await run_handle._turn_complete_event.wait()
+                # Check if run was cancelled after the turn completed.
                 # When client sends session/cancel, cancel_session() calls
-                # run_handle.fail() which sets cancelled flag and complete_event.
-                # We need to detect this to return stopReason="cancelled".
+                # cancel_run_for_session() which sets run_ctx.cancelled.
+                # The start() loop then publishes RunFailedEvent, which sets
+                # _turn_complete_event. We detect the cancelled flag to
+                # return stopReason="cancelled".
                 if run_handle.cancelled:
                     stop_reason = "cancelled"
         except asyncio.CancelledError:
@@ -543,9 +545,11 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         According to ACP protocol spec, session/cancel is a notification
         (no response expected). The agent must respond to the ORIGINAL
         session/prompt request with stopReason: "cancelled". This is achieved
-        by calling run_handle.fail() which sets the complete_event that
-        handle_prompt() is waiting on, and marks the run as cancelled so
-        handle_prompt() can detect it and return the correct stop_reason.
+        without calling ``run_handle.fail()``: the ``start()`` loop detects
+        the cancellation, publishes ``RunFailedEvent``, and sets
+        ``_turn_complete_event`` — which ``handle_prompt()`` is waiting on.
+        The ``cancelled`` flag on ``run_ctx`` is set by ``cancel()``, so
+        ``handle_prompt()`` can detect it and return the correct stop_reason.
 
         The event consumer is NOT stopped here to allow the RunFailedEvent
         to be converted and sent as session/update before the turn completes.
@@ -561,29 +565,16 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
 
         session_pool.sessions.cancel_run_for_session(session_id)
 
-        # Explicitly complete the run to unblock handle_prompt().
-        # When client sends session/cancel, the original session/prompt request
-        # is still in progress, waiting on complete_event. We need to complete
-        # the run so handle_prompt() can unblock and return stopReason="cancelled".
-        session = session_pool.sessions.get_session(session_id)
-        if session is not None and session.current_run_id is not None:
-            # Use public API get_run() instead of accessing private _runs
-            run_handle = session_pool.get_run(session.current_run_id)
-            if run_handle is not None:
-                run_handle.fail(
-                    exception=RuntimeError("Session cancelled by client"),
-                    event_bus=session_pool.event_bus,
-                )
-                logger.debug(
-                    "Run completed as cancelled",
-                    session_id=session_id,
-                    run_id=session.current_run_id,
-                )
+        # The start() loop detects the cancelled flag, publishes
+        # RunFailedEvent (which sets _turn_complete_event), and the
+        # event consumer converts it to session/update with
+        # stop_reason="cancelled". handle_prompt() unblocks on
+        # _turn_complete_event and returns the cancelled stop_reason.
+        # No explicit fail() call is needed here.
 
         # Note: Event consumer is NOT stopped here. It will continue running
         # until the RunFailedEvent is processed, which emits the appropriate
         # session/update (turn_complete with stop_reason="cancelled").
-        # This is done via EventBus publish in run_handle.fail().
 
     async def _cancel_subagents(self, parent_sid: str) -> None:
         """Recursively cancel all child sessions of parent_sid.
