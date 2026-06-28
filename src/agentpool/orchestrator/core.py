@@ -985,7 +985,16 @@ class SessionController:
         """
         async with self._lock:
             if session_id in self._session_agents:
-                return self._session_agents[session_id]
+                agent = self._session_agents[session_id]
+                # Update input_provider on cached agent if a new one is provided.
+                # Without this, the agent keeps the stale (or None) input_provider
+                # from when it was first cached, causing elicitation failures.
+                if input_provider is not None:
+                    session = self._sessions.get(session_id)
+                    if session is not None:
+                        session.input_provider = input_provider
+                    agent._input_provider = input_provider
+                return agent
 
             session, _was_created = await self._get_or_create_session_locked(session_id, agent_name)
             agent_name = agent_name or session.agent_name
@@ -1894,6 +1903,14 @@ class TurnRunner:
             from agentpool.mcp_server.manager import _current_input_provider
 
             _elicitation_token = _current_input_provider.set(input_provider)
+            # Also set session.input_provider so that AgentContext.get_input_provider()
+            # can find it via Source 2 (session_state.input_provider).
+            # This is critical for the run_stream → process_prompt → run_loop path,
+            # which does NOT go through receive_request (the only place that
+            # previously set session.input_provider).
+            _session_for_provider = self.sessions.get_session(session_id)
+            if _session_for_provider is not None:
+                _session_for_provider.input_provider = input_provider
         agent = await self.sessions.get_or_create_session_agent(
             session_id, input_provider=input_provider
         )
