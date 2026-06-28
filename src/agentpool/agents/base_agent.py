@@ -1081,14 +1081,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         token: Token[AgentRunContext | None] | None = None
         try:
             token = _current_run_ctx_var.set(run_ctx)
+
+            # Producer runs inside a task group; consumer (with yield) stays
+            # OUTSIDE so that generator cleanup (aclose/GC) never crosses a
+            # cancel scope boundary. See: fix-cancel-scope-lifecycle design.
             async with anyio.create_task_group() as tg:
                 # Start execution in background — events go to EventBus
                 if self.AGENT_TYPE == "native":
-                    # Native agents: _stream_events() calls executor.execute()
-                    # which publishes events directly to EventBus. The
-                    # _run_stream_once() generator yields nothing (events
-                    # are on EventBus). We publish any yielded events for
-                    # test/mock agents that override _run_stream_once.
                     async def _native_runner() -> None:
                         try:
                             async for event in self._run_stream_once(
@@ -1116,9 +1115,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
                     tg.start_soon(_native_runner)
                 else:
-                    # Non-native agents: _run_stream_once() still yields events
-                    # (they don't use NativeTurn). Each yielded event is
-                    # published to EventBus.
                     async def _non_native_publisher() -> None:
                         try:
                             async for event in self._run_stream_once(
@@ -1146,17 +1142,14 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
                     tg.start_soon(_non_native_publisher)
 
-                # Consumer: yield events from EventBus subscription with drain-and-merge.
-                # RunStartedEvent is yielded by NativeTurn.execute() and
-                # flows through EventBus — no need to yield it separately.
-                async for envelope in drain_and_merge(stream):
-                    event = envelope.event
-                    yield event
-                    if isinstance(event, (StreamCompleteEvent, RunErrorEvent)):
-                        break
-
-                # Cancel the task group after consumer exits
-                tg.cancel_scope.cancel()
+            # Consumer: yield events from EventBus subscription.
+            # OUTSIDE the task group — no cancel scope wrapping the yield,
+            # so generator cleanup (aclose/GC) is safe in any task context.
+            async for envelope in drain_and_merge(stream):
+                event = envelope.event
+                yield event
+                if isinstance(event, (StreamCompleteEvent, RunErrorEvent)):
+                    break
         finally:
             if token is not None:
                 # Suppress ValueError when token was created in a different async

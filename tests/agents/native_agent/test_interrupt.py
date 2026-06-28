@@ -486,13 +486,6 @@ async def test_opencode_abort_flow_stops_agent(slow_agent: Agent[None]) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason="Pre-existing anyio cancel scope issue: run_stream() has yield inside "
-           "create_task_group(), so generator cleanup from the first run interferes "
-           "with the second. Not related to _iteration_task wiring.",
-    raises=asyncio.CancelledError,
-    strict=True,
-)
 async def test_subsequent_run_after_interrupt(fast_agent: Agent[None]) -> None:
     """After interrupt(), the agent should be able to run again.
 

@@ -117,7 +117,7 @@ class RunHandle:
     _message_queue: list[str] = field(default_factory=list)
     _message_history: list[ModelMessage] = field(default_factory=list)
     _turn_complete_event: asyncio.Event = field(default_factory=asyncio.Event)
-    _interrupt_tasks: set[asyncio.Task[None]] = field(default_factory=set)
+    _interrupt_task: asyncio.Task[None] | None = None
 
     # ------------------------------------------------------------------
     # New session-level lifecycle
@@ -151,6 +151,9 @@ class RunHandle:
         self.run_ctx._run_handle = self
         # Set current_task so cancel() can interrupt the running turn.
         self.run_ctx.current_task = asyncio.current_task()
+        # Wire _cancel_fn so cancel() triggers agent._interrupt() (ACP
+        # CancelNotification, native _iteration_task cancel).
+        self._cancel_fn = self._create_cancel_fn()
 
         try:
             async with session.turn_lock:
@@ -420,10 +423,9 @@ class RunHandle:
         """Cancel the run without triggering synchronous cleanup.
 
         Sets the cancelled flag on the run context and wakes the idle
-        event to unblock the turn loop. Delegates to the registered
-        cancel function if available, otherwise schedules
-        ``agent._interrupt()`` as a fire-and-forget task so that
-        subclass-specific cleanup (e.g. ACP CancelNotification) runs.
+        event to unblock the turn loop. Calls the registered cancel
+        function (wired in ``start()``) which schedules
+        ``agent._interrupt()`` for subclass-specific cleanup.
 
         The ``start()`` loop task is NOT cancelled here — it must
         continue running to process the ``cancelled`` flag, emit
@@ -434,17 +436,25 @@ class RunHandle:
 
         if self._cancel_fn is not None:
             self._cancel_fn()
-            return
 
-        # Schedule agent._interrupt() for subclass-specific cleanup
-        # (ACP sends CancelNotification, native cancels iteration_task).
+    def _create_cancel_fn(self) -> Callable[[], None]:
+        """Create a cancel function that schedules ``agent._interrupt()``.
+
+        Returns a callable that, when invoked, schedules the agent's
+        ``_interrupt`` coroutine as a background task. The task reference
+        is stored in ``self._interrupt_task`` to prevent GC.
+        """
         agent = self.agent
-        if agent is not None:
-            coro = agent._interrupt(self.run_ctx)
+        run_ctx = self.run_ctx
+
+        def _cancel() -> None:
+            if agent is None:
+                return
+            coro = agent._interrupt(run_ctx)
             if asyncio.iscoroutine(coro):
-                task = asyncio.create_task(coro)
-                self._interrupt_tasks.add(task)
-                task.add_done_callback(self._interrupt_tasks.discard)
+                self._interrupt_task = asyncio.create_task(coro)
+
+        return _cancel
 
     def _cleanup_run(self) -> None:
         """Invoke cleanup callback and signal completion.

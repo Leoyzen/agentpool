@@ -524,10 +524,14 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                     finally:
                         await send_stream.aclose()
 
+                # Forwarders run inside a task group; the consumer loop
+                # (with yield) stays OUTSIDE so generator cleanup never
+                # crosses a cancel scope boundary.
                 async with anyio.create_task_group() as tg:
                     tg.start_soon(_forward_acp_events)
                     tg.start_soon(_forward_secondary_events)
-                    async for event in receive_stream:
+
+                async for event in receive_stream:
                         if isinstance(event, EventEnvelope):
                             event = event.event
                         if isinstance(event, ToolResultMetadataEvent):
