@@ -825,10 +825,13 @@ async def test_input_provider_contextvar_set_during_turn() -> None:
             f"expected {mock_provider!r}"
         )
 
-        # After start() completes, ContextVar should be reset
-        assert _current_input_provider.get() is None, (
-            "ContextVar was not reset after turn execution"
-        )
+        # Note: We intentionally do NOT reset _current_input_provider.
+        # start() runs inside an asyncio.Task which copies the parent
+        # Context, so set() only affects this task's private context copy.
+        # When the task ends the context is discarded. Calling reset()
+        # is unnecessary and can raise ValueError when the async generator
+        # is GC-collected in a different Context (race between task
+        # cancellation and generator suspension at a yield point).
 
 
 @pytest.mark.asyncio
@@ -1178,3 +1181,99 @@ async def test_turn_complete_event_reset_between_turns() -> None:
     handle.close()
     await asyncio.sleep(0.05)
     await consumer_task
+
+
+# ---------------------------------------------------------------------------
+# Regression: ContextVar cross-context ValueError on generator GC
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_no_value_error_when_generator_abandoned_in_different_context() -> None:
+    """No ValueError when async generator is GC'd in a different Context.
+
+    Regression test for the bug where ``_current_input_provider.reset(token)``
+    in the ``finally`` block of ``start()`` raised ``ValueError`` when the
+    async generator was GC-collected in a different asyncio Context.
+
+    The race occurs when:
+    1. ``start()`` runs inside an ``asyncio.create_task()`` (Path A via
+       ``_consume_run``), which copies the parent Context.
+    2. ``set()`` creates a token bound to the task's Context copy.
+    3. The task is cancelled between ``__anext__()`` calls, leaving the
+       generator suspended at a ``yield`` point.
+    4. GC later runs ``athrow(GeneratorExit)`` in a fresh Context.
+    5. ``finally`` calls ``reset(token)`` → ``ValueError`` because the
+       token was created in a different Context.
+
+    Fix: remove ``reset()`` entirely. ``set()`` only affects the task's
+    private Context copy, which is discarded when the task ends.
+    """
+    agent = Agent(
+        name="test-gc-ctxvar",
+        model=TestModel(custom_output_text="done"),
+    )
+    async with agent:
+        event_bus = EventBus()
+        session = SessionState(
+            session_id="test-gc-session",
+            agent_name="test-gc-ctxvar",
+        )
+        session.input_provider = MagicMock()
+
+        run_handle = RunHandle(
+            run_id="test-gc-run",
+            session_id="test-gc-session",
+            agent_type="test-gc-ctxvar",
+            agent=agent,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=AgentRunContext(
+                session_id="test-gc-session",
+                event_bus=event_bus,
+            ),
+        )
+
+        # Capture unhandled exceptions from GC-driven generator cleanup
+        gc_exceptions: list[BaseException] = []
+        loop = asyncio.get_event_loop()
+        original_handler = loop.get_exception_handler()
+
+        def _exception_handler(loop: Any, context: Any) -> None:
+            exc = context.get("exception")
+            if exc and "_current_input_provider" in str(exc):
+                gc_exceptions.append(exc)
+
+        loop.set_exception_handler(_exception_handler)
+
+        try:
+            gen = run_handle.start("test")
+            # Step into the generator so set() is called and it suspends
+            # at the first yield (an event from turn.execute()).
+            task = asyncio.create_task(gen.__anext__())
+            await asyncio.sleep(0.1)
+
+            # Cancel the task — generator is left suspended at yield.
+            # This simulates the race: task cancelled between __anext__()
+            # calls, generator abandoned.
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+            # Do NOT call aclose() — let GC collect the generator.
+            # Before the fix, this would trigger athrow(GeneratorExit)
+            # in a fresh Context, causing reset(token) to raise
+            # ValueError.
+            del gen
+            import gc
+
+            gc.collect()
+            # Yield to event loop so any GC callbacks can fire
+            await asyncio.sleep(0.05)
+        finally:
+            loop.set_exception_handler(original_handler)
+
+        assert not gc_exceptions, (
+            f"ValueError(s) raised during generator GC cleanup: "
+            f"{[str(e) for e in gc_exceptions]}"
+        )

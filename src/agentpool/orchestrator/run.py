@@ -186,13 +186,18 @@ class RunHandle:
 
                     # Set _current_input_provider ContextVar so MCP
                     # elicitation can access it during turn execution.
-                    _elicitation_token = None
+                    # Only set() without reset(): start() runs inside an
+                    # asyncio.Task which copies the parent Context, so
+                    # set() only affects this task's private context copy.
+                    # When the task ends the context is discarded. Calling
+                    # reset() is unnecessary and can raise ValueError when
+                    # the async generator is GC-collected in a different
+                    # Context (race between task cancellation and generator
+                    # suspension at a yield point).
                     if session.input_provider is not None:
                         from agentpool.mcp_server.manager import _current_input_provider
 
-                        _elicitation_token = _current_input_provider.set(
-                            session.input_provider
-                        )
+                        _current_input_provider.set(session.input_provider)
 
                     turn_failed = False
                     try:
@@ -213,11 +218,6 @@ class RunHandle:
                         )
                         await event_bus.publish(self.session_id, error_event)
                         yield error_event
-                    finally:
-                        if _elicitation_token is not None:
-                            from agentpool.mcp_server.manager import _current_input_provider
-
-                            _current_input_provider.reset(_elicitation_token)
 
                     if self.run_ctx.cancelled:
                         # Turn was cancelled — publish RunFailedEvent, set turn
