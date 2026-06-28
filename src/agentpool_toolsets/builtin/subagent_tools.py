@@ -217,6 +217,21 @@ class SubagentTools(StaticResourceProvider):
             model_id=node_model_id,
         )
 
+        # Resolve input_provider BEFORE creating the subagent so it can be
+        # passed to get_or_create_session_agent. Without this, the subagent
+        # is cached with _input_provider=None, and later run_stream calls
+        # can't fix it due to cache hit ignoring the parameter.
+        try:
+            input_provider = ctx.get_input_provider()
+        except RuntimeError:
+            logger.warning(
+                "No input_provider available in parent context; "
+                "subagent will not support elicitation",
+                agent=agent_or_team,
+                child_session_id=child_session_id,
+            )
+            input_provider = None
+
         # Resolve the actual node via SessionPool
         is_team_node = team_cfg is not None
         node: SupportsRunStream[Any]
@@ -224,6 +239,7 @@ class SubagentTools(StaticResourceProvider):
             # Agent: bind to the child session
             node = await session_pool.sessions.get_or_create_session_agent(
                 child_session_id, agent_name=agent_or_team,
+                input_provider=input_provider,
             )
             if not isinstance(node, SupportsRunStream):
                 msg = f"Agent {agent_or_team} does not support streaming"
@@ -235,11 +251,6 @@ class SubagentTools(StaticResourceProvider):
             if not isinstance(node, SupportsRunStream):
                 msg = f"Team {agent_or_team} does not support streaming"
                 raise ToolError(msg)
-
-        try:
-            input_provider = ctx.get_input_provider()
-        except RuntimeError:
-            input_provider = None
 
         if async_mode:
             # Generate task ID and start background task

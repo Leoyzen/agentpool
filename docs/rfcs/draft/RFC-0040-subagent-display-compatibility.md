@@ -4,7 +4,7 @@ title: Subagent Display Compatibility — qwen-code Meta Protocol
 status: REVIEW
 author: yuchen.liu
 created: 2026-06-27
-last_updated: 2026-06-27
+last_updated: 2026-06-28
 ---
 
 # RFC-0040: Subagent Display Compatibility — qwen-code Meta Protocol
@@ -304,3 +304,93 @@ case SpawnSessionStart(...):
 ## Decision Record
 
 _Pending — awaiting stakeholder approval._
+
+## Errata & Fix (2026-06-28)
+
+After implementing Option E and testing with SEED, two bugs were discovered that prevent subagent cards from rendering. Both are addressed in the `fix-qwen-meta-stamping` OpenSpec change.
+
+### Bug 1: `_meta` stamped on wrong object
+
+**Original design (wrong)**: The RFC states `_meta` is on `SessionNotification` (the wrapper), and the handler stamps `field_meta=converter.subagent_meta` on the notification. Section "Key architectural fact" (line 20) explicitly says: "`_meta` is on the **notification wrapper**, not on individual update types."
+
+**qwen-code's actual behavior (correct)**: qwen-code stamps `_meta` directly on the **SessionUpdate object** (`update._meta`), not on the notification wrapper. Specifically:
+- `ToolCallEmitter.emitStart()` (ToolCallEmitter.ts:94) sets `_meta: { toolName, ...subagentMeta, provenance }` on the update payload
+- `Session.sendUpdate()` (Session.ts:1890-1897) builds `SessionNotification(sessionId, update)` WITHOUT `field_meta`
+- The normalizer's `extractParentToolCallId(update)` reads `update._meta.parentToolCallId`
+
+**Fix**: Move `_meta` stamping from `SessionNotification.field_meta` (handler) to `SessionUpdate.field_meta` (converter). The converter's `convert()` method stamps `field_meta=self.subagent_meta` on each yielded update via a `_stamp_meta()` helper. The handler removes `field_meta=converter.subagent_meta` from `SessionNotification` construction.
+
+**RFC sections affected**: "Key architectural fact" (line 20) is incorrect — `_meta` should go on the update, not the notification. Option E's `_handle_event` code (line 154) shows `field_meta=converter.subagent_meta` on the notification — this is wrong. The display mode table (line 51-55) column "`_meta` on notification" should be "`_meta` on update".
+
+### Bug 2: Tool call ID collision
+
+**Original design (wrong)**: The qwen mode `SpawnSessionStart` handler (line 280) uses `tool_call_id = event.tool_call_id or str(uuid.uuid4())` — reusing the parent's tool call ID for the child's `ToolCallStart`.
+
+**qwen-code's actual behavior (correct)**: qwen-code's normalizer has a self-reference guard (`rawParentToolCallId !== toolCallId ? rawParentToolCallId : undefined`). When the child's `toolCallId` equals `parentToolCallId`, the normalizer drops the `parentToolCallId` — defeating the correlation. qwen-code uses the parent's `callId` only for `SubAgentTracker.parentToolCallId`, not for the child's own tool call IDs.
+
+**Fix**: In qwen mode's `SpawnSessionStart` handler, always generate `tool_call_id = str(uuid.uuid4())`. The parent's `event.tool_call_id` is carried in `SubagentContext.parent_tool_call_id` → `_meta.parentToolCallId`, never as the child's `tool_call_id`.
+
+**RFC sections affected**: Option E's qwen mode code (line 280) shows `tool_call_id = event.tool_call_id or str(uuid.uuid4())` — this is wrong. Should be `tool_call_id = str(uuid.uuid4())`.
+
+### Updated display mode table
+
+| Mode | kind | SubagentRunInfo | `_meta` on **update** | `tool_call_id` source | Target client |
+|------|------|-----------------|------------------------|----------------------|---------------|
+| `legacy` | No ToolCallStart | N/A | N/A | N/A | Plain text |
+| `zed` | `"other"` (hotfixed) | ✅ | `subagent_session_info` | `event.tool_call_id` or UUID | Zed (draft PR #855) |
+| `qwen` | `"other"` | ❌ | `parentToolCallId` + `subagentType` + `provenance` | **Unique UUID** (never parent's ID) | SEED / qwen-code SDK |
+
+### Updated data flow (post-fix)
+
+```
+_on_spawn_session_start(parent_sid, envelope):
+  event = envelope.event  # SpawnSessionStart
+  converter = ACPEventConverter(
+      subagent_display_mode=...,
+      subagent_context=SubagentContext(
+          parent_tool_call_id=event.tool_call_id,  # Parent's ID → _meta.parentToolCallId
+          subagent_type=event.source_name,
+      ),
+  )
+  self._converters[child_sid] = converter
+  await self.start_event_consumer(child_sid)
+
+_before_consumer_loop(child_sid):
+  if child_sid in self._converters:
+      return  # Already created by _on_spawn_session_start
+  self._converters[child_sid] = ACPEventConverter(...)
+
+_handle_event(session_id, envelope):
+  converter = self._converters.get(effective_sid)
+  async for update in converter.convert(envelope.event):
+      # update.field_meta already stamped by converter._stamp_meta()
+      notification = SessionNotification(
+          session_id=effective_sid,
+          update=update,  # _meta is INSIDE the update, not on the notification
+      )
+      await self.client.session_update(notification)
+
+# In converter.convert(), qwen mode SpawnSessionStart:
+elif self.subagent_display_mode == "qwen":
+    tool_call_id = str(uuid.uuid4())  # Unique ID, NEVER event.tool_call_id
+    yield self._stamp_meta(ToolCallStart(
+        tool_call_id=tool_call_id,
+        title=f"{source_name}: {description}" if description else source_name,
+        kind="other",
+        status="pending",
+    ))
+
+# _stamp_meta helper:
+def _stamp_meta(self, update):
+    if self.subagent_context is not None:
+        update.field_meta = self.subagent_meta
+    return update
+```
+
+### zed mode compatibility note
+
+The zed mode's `ToolCallStart` already sets `field_meta` with `subagent_session_info` at construction time (event_converter.py line 717). The `_stamp_meta()` helper must NOT overwrite this existing `field_meta`. The helper should either:
+- Only stamp when `update.field_meta is None` (merge strategy), OR
+- Only stamp for qwen mode (mode-gated strategy)
+
+The `fix-qwen-meta-stamping` design uses the "only stamp when `subagent_context is not None`" approach, which works because zed mode's `ToolCallStart` is yielded from the **parent** converter (which has `subagent_context=None`), while child event updates flow through the **child** converter (which has `subagent_context` set but doesn't yield `SpawnSessionStart`).
