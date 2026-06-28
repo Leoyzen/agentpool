@@ -1,6 +1,6 @@
 """Diagnostic test: does calling agent.run() twice hang (without pipeline)?
 
-If the second call hangs, the issue is in Agent/RunExecutor level.
+If the second call hangs, the issue is in the Agent level.
 If it works, the issue is specific to the pydantic-graph TaskGroup interaction.
 """
 import asyncio

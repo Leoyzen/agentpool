@@ -149,14 +149,12 @@ class _BlockingTurn(Turn):
 
 
 @pytest.mark.unit
-async def test_run_handle_steer_for_acp_path(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_run_handle_steer_for_acp_path() -> None:
     """Given a RunHandle with a mocked ACPAgent, steer() queues to run_ctx.
 
     While the turn is running, steer() queues the message to
     queued_steer_messages (ACP path does not set active_agent_run).
     """
-    monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN_FOR_ACP", "true")
-
     release_event = asyncio.Event()
 
     # Create a mocked ACPAgent (avoid subprocess/ACP initialization)

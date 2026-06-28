@@ -4,7 +4,6 @@ Covers:
 - PydanticAI PendingMessageDrainCapability drain behavior (asap, when_idle)
 - enqueue() during tool execution on native agents
 - inject_prompt() tool result augmentation pipeline
-- RunExecutor event stream parity with _stream_events()
 - Non-native agents use manual queue
 - Native agent interrupt() via SessionPool
 - receive_request() routing for native agents
@@ -14,34 +13,30 @@ Covers:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
 
 import anyio
-
-import pytest
-from pydantic_ai import Agent as PydanticAIAgent, RunContext
+from pydantic_ai import Agent as PydanticAIAgent, RunContext  # noqa: TC002
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import Tool
+import pytest
 
 from agentpool import Agent
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.context import AgentRunContext
-from agentpool.agents.prompt_injection import PromptInjectionManager
 from agentpool.agents.events import (
-    PartDeltaEvent as AgentPoolPartDeltaEvent,
-    PartStartEvent as AgentPoolPartStartEvent,
     RunStartedEvent,
     StreamCompleteEvent,
-    ToolCallCompleteEvent,
-    ToolCallStartEvent,
 )
+from agentpool.agents.prompt_injection import PromptInjectionManager
 from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.orchestrator.core import SessionController, SessionPool
-from agentpool.orchestrator.run import RunHandle, RunStatus
-from agentpool.orchestrator.run_executor import RunExecutor
+from agentpool.orchestrator.turn import Turn
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 pytestmark = pytest.mark.unit
@@ -119,56 +114,13 @@ def session_pool(mock_pool: MagicMock) -> SessionPool:
 # ---------------------------------------------------------------------------
 
 
-async def _collect_run_executor_events(
-    executor: RunExecutor,
-    *,
-    prompts: list[str],
-    run_ctx: AgentRunContext,
-    user_msg: ChatMessage[Any],
-    message_history: MessageHistory,
-    session_id: str = "test-session",
-) -> list[Any]:
-    """Execute RunExecutor and collect all events."""
-    from agentpool.agents.events import RunErrorEvent
-    from agentpool.orchestrator.core import EventBus
-
-    event_bus = EventBus()
-    run_ctx.event_bus = event_bus
-    stream = await event_bus.subscribe(session_id, scope="session")
-
-    events: list[Any] = []
-
-    execute_task = asyncio.ensure_future(
-        executor.execute(
-            prompts=prompts,
-            run_ctx=run_ctx,
-            user_msg=user_msg,
-            message_history=message_history,
-            message_id="msg-1",
-            session_id=session_id,
-            event_bus=event_bus,
-        )
-    )
-
-    async for envelope in stream:
-        events.append(envelope.event)
-        if isinstance(envelope.event, (StreamCompleteEvent, RunErrorEvent)):
-            break
-
-    await execute_task
-    return events
-
-
 async def _collect_agent_stream_events(
     agent: Agent[Any, Any],
     *prompts: Any,
     session_id: str = "test-session",
 ) -> list[Any]:
     """Run agent.run_stream() and collect all events."""
-    events: list[Any] = []
-    async for event in agent.run_stream(*prompts, session_id=session_id):
-        events.append(event)
-    return events
+    return [event async for event in agent.run_stream(*prompts, session_id=session_id)]
 
 
 def _event_type_names(events: list[Any]) -> list[str]:
@@ -180,6 +132,15 @@ class _MockNonNativeAgent(BaseAgent):
     """Minimal concrete non-native agent for routing tests."""
 
     AGENT_TYPE = "acp"  # type: ignore[misc]
+
+    def create_turn(
+        self,
+        prompts: list[str],
+        run_ctx: AgentRunContext,
+        message_history: list[Any],
+    ) -> Turn:
+        """Return a mock Turn — not exercised in routing tests."""
+        return MagicMock(spec=Turn)
 
     @property
     def model_name(self) -> str | None:
@@ -322,7 +283,8 @@ async def test_when_idle_drained_after_tool_calls() -> None:
                 break
 
     assert when_idle_drained_at == "CallToolsNode", (
-        f"when_idle should be drained at after_node_run of CallToolsNode, got {when_idle_drained_at}"
+        f"when_idle should be drained at after_node_run of CallToolsNode, "
+        f"got {when_idle_drained_at}"
     )
 
 
@@ -454,70 +416,11 @@ async def test_inject_prompt_tool_augmentation_pipeline() -> None:
 
     manager.inject("augment this result")
     assert manager.has_pending()
-    assert not manager.has_queued()
 
     consumed = await manager.consume()
     assert consumed is not None
     assert "augment this result" in consumed
     assert not manager.has_pending()
-
-    # Unconsumed injections become queued on flush
-    manager.inject("unconsumed message")
-    manager.flush_pending_to_queue()
-    assert manager.has_queued()
-    queued = manager.pop_queued()
-    assert queued is not None
-    assert "unconsumed message" in queued[0]
-
-
-# ---------------------------------------------------------------------------
-# 7. Event stream from RunExecutor matches current _stream_events() output
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.anyio
-async def test_run_executor_event_stream_matches_stream_events(
-    native_agent: Agent[None],
-    run_ctx: AgentRunContext,
-    message_history: MessageHistory,
-) -> None:
-    """RunExecutor.execute() yields the same event types as agent.run_stream()."""
-
-    # Collect events via RunExecutor
-    executor = RunExecutor(native_agent)
-    user_msg = ChatMessage.user_prompt("Say hello")
-    executor_events = await _collect_run_executor_events(
-        executor,
-        prompts=["Say hello"],
-        run_ctx=run_ctx,
-        user_msg=user_msg,
-        message_history=message_history,
-        session_id="run-exec-session",
-    )
-
-    # Collect events via agent.run_stream() (which calls _stream_events)
-    stream_events = await _collect_agent_stream_events(
-        native_agent,
-        "Say hello",
-        session_id="stream-session",
-    )
-
-    executor_types = _event_type_names(executor_events)
-    stream_types = _event_type_names(stream_events)
-
-    # Both should contain RunStartedEvent and StreamCompleteEvent
-    assert "RunStartedEvent" in executor_types
-    assert "RunStartedEvent" in stream_types
-    assert "StreamCompleteEvent" in executor_types
-    assert "StreamCompleteEvent" in stream_types
-
-    # Both should yield a ChatMessage in StreamCompleteEvent
-    exec_complete = [e for e in executor_events if isinstance(e, StreamCompleteEvent)]
-    stream_complete = [e for e in stream_events if isinstance(e, StreamCompleteEvent)]
-    assert len(exec_complete) == 1
-    assert len(stream_complete) == 1
-    assert isinstance(exec_complete[0].message, ChatMessage)
-    assert isinstance(stream_complete[0].message, ChatMessage)
 
 
 # ---------------------------------------------------------------------------
@@ -612,11 +515,11 @@ async def test_receive_request_inject_prompt_into_active_run(
         while True:
             event = await asyncio.wait_for(queue.receive(), timeout=1.0)
             events.append(event)
-    except (asyncio.TimeoutError, anyio.EndOfStream):
+    except (TimeoutError, anyio.EndOfStream):
         pass
 
     # Should have at least one RunStartedEvent
-    started_events = [e for e in events if isinstance(getattr(e, 'event', e), RunStartedEvent)]
+    started_events = [e for e in events if isinstance(getattr(e, "event", e), RunStartedEvent)]
     assert len(started_events) >= 1
 
 
@@ -676,6 +579,6 @@ async def test_receive_request_ignores_unknown_kwargs_gracefully(
     # Wait for execution
     try:
         while True:
-            event = await asyncio.wait_for(queue.receive(), timeout=2.0)
-    except (asyncio.TimeoutError, anyio.EndOfStream):
+            await asyncio.wait_for(queue.receive(), timeout=2.0)
+    except (TimeoutError, anyio.EndOfStream):
         pass

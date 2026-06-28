@@ -480,11 +480,6 @@ async def test_1000_concurrent_sessions_with_agents(
     await asyncio.gather(*[session_pool.close_session(f"sess-{i}") for i in range(session_count)])
     assert len(session_pool.sessions._sessions) == 0
 
-    # Verify no leaked locks or injection state
-    assert len(session_pool.turns._injection_locks) == 0
-    assert len(session_pool.turns._post_turn_injections) == 0
-    assert len(session_pool.turns._post_turn_prompts) == 0
-
     await session_pool.shutdown()
 
 

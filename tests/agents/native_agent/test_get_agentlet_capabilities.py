@@ -157,8 +157,9 @@ async def test_get_agentlet_uses_hook_manager_capability_directly(
 ) -> None:
     """HookManager.as_capability() is used directly when event_bus is available.
 
-    RunExecutor already publishes RunStartedEvent, ToolCallStartEvent,
-    and ToolCallCompleteEvent, so no adapter wrapping is needed.
+    The native agent run loop already publishes RunStartedEvent,
+    ToolCallStartEvent, and ToolCallCompleteEvent, so no adapter wrapping is
+    needed.
     """
     mock_agent._hook_manager = mock_hook_manager
 

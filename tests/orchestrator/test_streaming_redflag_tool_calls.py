@@ -131,11 +131,11 @@ async def test_tool_call_only_response_has_no_text_deltas() -> None:
         f"got {len(text_deltas_before_tool_complete)}. Frontend has nothing to render until tool completes."
     )
 
-    # Tool call lifecycle: RunExecutor now emits ToolCallStartEvent for
+    # Tool call lifecycle: native agent emits ToolCallStartEvent for
     # FunctionToolCallEvent / PartStartEvent with BaseToolCallPart, even
     # when running outside SessionPool.
     assert len(tool_call_starts) == 1, (
-        "ToolCallStartEvent should be emitted by RunExecutor for tool-call-only responses."
+        "ToolCallStartEvent should be emitted for tool-call-only responses."
     )
     assert len(tool_call_completes) >= 1, "ToolCallCompleteEvent should be emitted"
 

@@ -1,9 +1,9 @@
 """Tests for SessionController.receive_request() ACP RunHandle path.
 
 Covers three scenarios:
-1. ACP flag ON + ACPAgent + idle -> creates RunHandle.
-2. ACP flag ON + ACPAgent + busy + asap -> calls RunHandle.steer().
-3. ACP flag ON + ACPAgent + busy + when_idle -> calls RunHandle.followup().
+1. ACPAgent + idle -> creates RunHandle.
+2. ACPAgent + busy + asap -> calls RunHandle.steer().
+3. ACPAgent + busy + when_idle -> calls RunHandle.followup().
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ def _setup_session(
 
 
 # ---------------------------------------------------------------------------
-# Test 1: ACP flag ON + ACPAgent + idle -> creates RunHandle
+# Test 1: ACPAgent + idle -> creates RunHandle
 # ---------------------------------------------------------------------------
 
 
@@ -85,10 +85,8 @@ async def test_acp_flag_on_idle_creates_run_handle(
     controller: SessionController,
     event_bus: EventBus,
     mock_acp_agent: MagicMock,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When ACP flag is ON and session is idle, a RunHandle is created."""
-    monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN_FOR_ACP", "true")
+    """When session is idle, a RunHandle is created."""
     controller._event_bus = event_bus
     _setup_session(controller, "sess-1", mock_acp_agent)
 
@@ -109,7 +107,7 @@ async def test_acp_flag_on_idle_creates_run_handle(
 
 
 # ---------------------------------------------------------------------------
-# Test 2: ACP flag ON + ACPAgent + busy + asap -> calls steer()
+# Test 2: ACPAgent + busy + asap -> calls steer()
 # ---------------------------------------------------------------------------
 
 
@@ -118,10 +116,8 @@ async def test_acp_flag_on_busy_asap_calls_steer(
     controller: SessionController,
     event_bus: EventBus,
     mock_acp_agent: MagicMock,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When ACP flag is ON and busy with asap, RunHandle.steer() is called."""
-    monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN_FOR_ACP", "true")
+    """When busy with asap, RunHandle.steer() is called."""
     controller._event_bus = event_bus
     _setup_session(controller, "sess-2", mock_acp_agent)
 
@@ -139,7 +135,7 @@ async def test_acp_flag_on_busy_asap_calls_steer(
 
 
 # ---------------------------------------------------------------------------
-# Test 3: ACP flag ON + ACPAgent + busy + when_idle -> calls followup()
+# Test 3: ACPAgent + busy + when_idle -> calls followup()
 # ---------------------------------------------------------------------------
 
 
@@ -148,10 +144,8 @@ async def test_acp_flag_on_busy_when_idle_calls_followup(
     controller: SessionController,
     event_bus: EventBus,
     mock_acp_agent: MagicMock,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When ACP flag is ON and busy with when_idle, followup() is called."""
-    monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN_FOR_ACP", "true")
+    """When busy with when_idle, followup() is called."""
     controller._event_bus = event_bus
     _setup_session(controller, "sess-3", mock_acp_agent)
 

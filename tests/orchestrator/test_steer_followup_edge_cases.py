@@ -7,26 +7,22 @@ Covers 8 edge cases:
 4. RunHandle cleanup on UndrainedPendingMessagesError: active_agent_run cleared
 5. Session close during steer race: TOCTOU-safe — no crash
 6. Tool result augmentation preserved: injection_manager.consume() still works
-7. RunExecutor non-event_bus branch: uniform event production
-8. ACP snapshot regression: verified via `uv run pytest -m acp_snapshot -v`
+7. ACP snapshot regression: verified via `uv run pytest -m acp_snapshot -v`
 """
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
 
 import pytest
-from pydantic_ai.models.test import TestModel
 
-from agentpool import Agent
-from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
-from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.orchestrator.core import SessionController
-from agentpool.orchestrator.run import RunHandle, RunStatus
-from agentpool.orchestrator.run_executor import RunExecutor
+from agentpool.orchestrator.run import RunHandle
+
+
+if TYPE_CHECKING:
+    from agentpool.agents.context import AgentRunContext
 
 
 pytestmark = pytest.mark.unit
@@ -124,107 +120,6 @@ def _make_run_handle(
 # Test 3: Multiple followup chain — when_idle messages create correct chain
 # =============================================================================
 # =============================================================================
-# Test 4: RunHandle cleanup on UndrainedPendingMessagesError
-# =============================================================================
-
-
-@pytest.mark.anyio
-async def test_active_agent_run_cleared_on_undrained_error() -> None:
-    """active_agent_run is cleared even when UndrainedPendingMessagesError is raised.
-
-    Edge case: When PydanticAI raises UndrainedPendingMessagesError (e.g.,
-    from bare async for usage), the RunExecutor's finally block must still
-    clear active_agent_run to prevent stale references.
-    """
-    from contextlib import asynccontextmanager
-
-    from pydantic_ai._agent_graph import ModelRequestNode
-    from pydantic_ai.exceptions import UndrainedPendingMessagesError
-
-    test_agent = Agent(
-        name="undrained-error-test",
-        model=TestModel(custom_output_text="hello"),
-    )
-
-    run_ctx = AgentRunContext(session_id="sess-undrained")
-    user_msg = ChatMessage.user_prompt("test")
-    message_history = MessageHistory()
-    run_handle = RunHandle(
-        run_id="run-undrained",
-        session_id="sess-undrained",
-        agent_type="native",
-    )
-
-    run_ctx._run_handle = run_handle
-    executor = RunExecutor(test_agent)
-
-    # Build a mock first node whose stream is an empty async iterable
-    first_node = MagicMock(spec=ModelRequestNode)
-
-    @asynccontextmanager  # type: ignore[arg-type]
-    async def empty_stream(_ctx: Any) -> Any:
-        yield _AsyncListIterator([])
-
-    first_node.stream = empty_stream
-
-    # Monkey-patch get_agentlet to return a mock whose iter() yields a
-    # mock agent_run that raises UndrainedPendingMessagesError on next().
-    original_get_agentlet = test_agent.get_agentlet
-
-    async def broken_get_agentlet(*args: Any, **kwargs: Any) -> Any:
-        agentlet = await original_get_agentlet(*args, **kwargs)
-
-        @asynccontextmanager  # type: ignore[arg-type]
-        async def broken_iter(*iargs: Any, **ikwargs: Any) -> Any:
-            mock_agent_run = MagicMock()
-            mock_agent_run.next_node = first_node
-            mock_agent_run.ctx = MagicMock()
-            # First next() returns a ModelRequestNode-like node,
-            # second call raises UndrainedPendingMessagesError
-            mock_agent_run.next = AsyncMock(
-                side_effect=[
-                    first_node,
-                    UndrainedPendingMessagesError(
-                        "Bare async for usage detected — "
-                        "PendingMessageDrainCapability hooks not fired. "
-                        "Use agent_run.next(node) instead."
-                    ),
-                ]
-            )
-
-            yield mock_agent_run
-
-        agentlet.iter = broken_iter  # type: ignore[method-assign]
-        return agentlet
-
-    test_agent.get_agentlet = broken_get_agentlet  # type: ignore[method-assign]
-
-    try:
-        from agentpool.orchestrator.core import EventBus
-
-        event_bus = EventBus()
-        run_ctx.event_bus = event_bus
-        with pytest.raises(UndrainedPendingMessagesError):
-            await executor.execute(
-                prompts=["Say hello"],
-                run_ctx=run_ctx,
-                user_msg=user_msg,
-                message_history=message_history,
-                message_id="msg-1",
-                session_id="sess-undrained",
-                event_bus=event_bus,
-            )
-    finally:
-        test_agent.get_agentlet = original_get_agentlet  # type: ignore[method-assign]
-
-    # active_agent_run MUST be None after UndrainedPendingMessagesError
-    assert run_handle.active_agent_run is None, (
-        f"Expected active_agent_run to be None after UndrainedPendingMessagesError, "
-        f"got {run_handle.active_agent_run}"
-    )
-
-
-# =============================================================================
 # Test 5: Session close during steer race — TOCTOU-safe, no crash
 # =============================================================================
 # =============================================================================
@@ -279,114 +174,3 @@ async def test_tool_result_augmentation_consume_all_preserved() -> None:
     assert len(results) == 3, f"Expected 3 consumed results, got {len(results)}"
     assert all("<injected-context>" in r for r in results)
     assert not manager.has_pending(), "All pending should be cleared"
-
-
-@pytest.mark.anyio
-async def test_tool_result_augmentation_flush_to_queue() -> None:
-    """Unconsumed injections fall back to queue via flush_pending_to_queue().
-
-    Edge case: If no tool executes, unconsumed injections should be
-    moved to the queued prompts so they still get processed.
-    """
-    from agentpool.agents.prompt_injection import PromptInjectionManager
-
-    manager = PromptInjectionManager()
-
-    manager.inject("orphaned injection")
-    assert manager.has_pending()
-    assert not manager.has_queued()
-
-    manager.flush_pending_to_queue()
-
-    assert not manager.has_pending(), "Pending should be cleared after flush"
-    assert manager.has_queued(), "Injection should be in queue after flush"
-
-    queued = manager.pop_queued()
-    assert queued is not None
-    assert queued[0] == "orphaned injection"
-
-
-# =============================================================================
-# Test 7: RunExecutor non-event_bus branch — uniform event production
-# =============================================================================
-
-
-@pytest.mark.anyio
-async def test_run_agentlet_core_non_event_bus_branch() -> None:
-    """RunExecutor works correctly when event_bus is None.
-
-    Edge case: When run_ctx.event_bus is None, RunExecutor still produces
-    events through the same process_tool_event path. Both event_bus and
-    non-event_bus modes work identically with RunExecutor.
-    """
-    agent = Agent(
-        name="non-eventbus-test",
-        model=TestModel(custom_output_text="response from non-eventbus path"),
-    )
-
-    from agentpool.orchestrator.core import EventBus
-
-    event_bus = EventBus()
-    run_ctx = AgentRunContext(
-        session_id="sess-non-eventbus",
-        event_bus=event_bus,
-    )
-    user_msg = ChatMessage.user_prompt("test prompt")
-    message_history = MessageHistory()
-
-    executor = RunExecutor(agent)
-    events: list[Any] = []
-    response_msg: Any = None
-
-    stream = await event_bus.subscribe("sess-non-eventbus", scope="session")
-    execute_task = asyncio.ensure_future(
-        executor.execute(
-            prompts=["test prompt"],
-            run_ctx=run_ctx,
-            user_msg=user_msg,
-            message_history=message_history,
-            message_id="msg-non-eb",
-            session_id="sess-non-eventbus",
-            event_bus=event_bus,
-        )
-    )
-    async for envelope in stream:
-        events.append(envelope.event)
-        if isinstance(envelope.event, StreamCompleteEvent):
-            response_msg = envelope.event.message
-        if isinstance(envelope.event, (StreamCompleteEvent, RunErrorEvent)):
-            break
-    await execute_task
-
-    assert response_msg is not None, "Response message should not be None"
-    assert "response from non-eventbus path" in str(response_msg.content), (
-        f"Expected model response in content, got: {response_msg.content}"
-    )
-
-    # Events should have been yielded by RunExecutor
-    assert len(events) > 0, "RunExecutor should yield events from non-event_bus path"
-
-
-@pytest.mark.anyio
-async def test_run_agentlet_core_non_event_bus_branch_streaming() -> None:
-    """RunExecutor-based streaming works standalone (no SessionPool/EventBus).
-
-    Edge case: When an agent is used standalone (no SessionPool/EventBus),
-    run_stream() should work correctly through RunExecutor.
-    """
-    agent = Agent(
-        name="standalone-stream-test",
-        model=TestModel(custom_output_text="standalone streaming works"),
-    )
-
-    events: list[Any] = []
-    async for event in agent.run_stream("hello standalone"):
-        events.append(event)
-
-    complete_events = [e for e in events if isinstance(e, StreamCompleteEvent)]
-    assert len(complete_events) == 1, (
-        f"Expected 1 StreamCompleteEvent, got {len(complete_events)}"
-    )
-    assert "standalone streaming works" in str(complete_events[0].message.content), (
-        "Expected streaming output in final message"
-    )

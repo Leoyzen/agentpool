@@ -866,9 +866,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Legacy path for non-native agents and standalone native agents
         # CRITICAL: Check run_ctx.completed to avoid injecting into a turn that
         # has already finished (e.g., after end_turn).  If the turn is complete,
-        # the message would be stuck in injection_manager.pending forever because
-        # flush_pending_to_queue() has already been called and won't be called
-        # again.  In that case, delegate to SessionPool for auto-resume.
+        # the message would be stuck in injection_manager.pending forever.
+        # In that case, delegate to SessionPool for auto-resume.
         if run_ctx is not None and not run_ctx.completed and run_ctx.injection_manager is not None:
             run_ctx.injection_manager.inject(message)
             return
@@ -908,17 +907,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             agent_name=self.name,
         )
 
-    def has_queued_prompts(self, session_id: str | None = None) -> bool:
-        """Check if there are queued prompts waiting to be processed.
-
-        Args:
-            session_id: Optional session ID for SessionPool fallback lookup.
-        """
-        run_ctx = self.get_active_run_context(session_id=session_id)
-        if run_ctx is not None and run_ctx.injection_manager is not None:
-            return run_ctx.injection_manager.has_queued()
-        return False
-
     def has_pending_injections(self, session_id: str | None = None) -> bool:
         """Check if there are pending injections.
 
@@ -929,16 +917,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         if run_ctx is not None and run_ctx.injection_manager is not None:
             return run_ctx.injection_manager.has_pending()
         return False
-
-    def clear_queued_prompts(self, session_id: str | None = None) -> None:
-        """Clear all queued prompts and pending injections.
-
-        Args:
-            session_id: Optional session ID for SessionPool fallback lookup.
-        """
-        run_ctx = self.get_active_run_context(session_id=session_id)
-        if run_ctx is not None and run_ctx.injection_manager is not None:
-            run_ctx.injection_manager.clear()
 
     @method_spawner
     async def run_stream(

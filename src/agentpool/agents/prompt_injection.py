@@ -1,19 +1,12 @@
 """Prompt injection manager for agents.
 
 Provides unified handling for immediate injection (consumed by agent
-hooks mid-run) and queued prompts (inserted at front of queue for
-processing).
+hooks mid-run).
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from agentpool.log import get_logger
-
-
-if TYPE_CHECKING:
-    from agentpool.common_types import PromptCompatible
 
 logger = get_logger(__name__)
 
@@ -29,14 +22,11 @@ class PromptInjectionManager:
     def __init__(self) -> None:
         """Initialize the injection manager."""
         self._pending_injections: list[str] = []
-        self._queued_prompts: list[tuple[PromptCompatible, ...]] = []
 
     def inject(self, message: str) -> None:
         """Queue a message for immediate injection.
 
         The message will be consumed by the next tool hook (if supported).
-        If no tool executes before the run iteration completes, the message
-        is automatically moved to the queued prompts.
 
         Args:
             message: Message to inject
@@ -72,35 +62,19 @@ class PromptInjectionManager:
             logger.debug("Consumed all injections", count=len(result))
         return result
 
-    def insert_queued(self, prompts: tuple[PromptCompatible, ...]) -> None:
-        """Insert prompts at the front of the queue.
-
-        Used to add the initial prompts from run_stream.
-
-        Args:
-            prompts: Prompts to insert at front
-        """
-        self._queued_prompts.insert(0, prompts)
-
-    def has_queued(self) -> bool:
-        """Check if there are queued prompts waiting."""
-        return bool(self._queued_prompts)
-
     def has_pending(self) -> bool:
         """Check if there are pending injections."""
         return bool(self._pending_injections)
 
     def clear(self) -> None:
-        """Clear all pending injections and queued prompts.
+        """Clear all pending injections.
 
         Called when run_stream exits (normally, cancelled, or on error).
         """
         self._pending_injections.clear()
-        self._queued_prompts.clear()
 
     def __repr__(self) -> str:
         return (
             f"PromptInjectionManager("
-            f"pending={len(self._pending_injections)}, "
-            f"queued={len(self._queued_prompts)})"
+            f"pending={len(self._pending_injections)})"
         )

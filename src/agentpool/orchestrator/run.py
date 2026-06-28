@@ -109,6 +109,7 @@ class RunHandle:
     _idle_event: asyncio.Event = field(default_factory=_create_set_event)
     _message_queue: list[str] = field(default_factory=list)
     _message_history: list[ModelMessage] = field(default_factory=list)
+    _interrupt_tasks: set[asyncio.Task[None]] = field(default_factory=set)
 
     # ------------------------------------------------------------------
     # New session-level lifecycle
@@ -392,7 +393,9 @@ class RunHandle:
         Sets the cancelled flag on the run context and wakes the idle
         event to unblock the turn loop. Delegates to the registered
         cancel function if available, otherwise cancels
-        ``run_ctx.current_task``.
+        ``run_ctx.current_task`` and schedules ``agent._interrupt()``
+        as a fire-and-forget task so that subclass-specific cleanup
+        (e.g. ACP CancelNotification) runs.
         """
         self.run_ctx.cancelled = True
         self._idle_event.set()
@@ -400,6 +403,16 @@ class RunHandle:
         if self._cancel_fn is not None:
             self._cancel_fn()
             return
+
+        # Schedule agent._interrupt() for subclass-specific cleanup
+        # (ACP sends CancelNotification, native cancels iteration_task).
+        agent = self.agent
+        if agent is not None:
+            coro = agent._interrupt(self.run_ctx)
+            if asyncio.iscoroutine(coro):
+                task = asyncio.create_task(coro)
+                self._interrupt_tasks.add(task)
+                task.add_done_callback(self._interrupt_tasks.discard)
 
         task = self.run_ctx.current_task
         if task is not None and not task.done():

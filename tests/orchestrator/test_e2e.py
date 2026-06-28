@@ -217,21 +217,12 @@ async def test_full_lifecycle_session_state_transitions(
     # Run turn
     await session_pool.process_prompt("sess-state", "hello")
 
-    # Turn timing should be recorded
-    assert len(session_pool.turns._turn_timings) == 1
-    start, end = session_pool.turns._turn_timings[0]
-    assert end >= start
-
     # Close session
     await session_pool.close_session("sess-state")
 
     # Post-close: session removed
     post_state = session_pool.sessions.get_session("sess-state")
     assert post_state is None
-
-    # Turn state cleaned up
-    assert "sess-state" not in session_pool.turns._post_turn_injections
-    assert "sess-state" not in session_pool.turns._post_turn_prompts
 
     await session_pool.shutdown()
 

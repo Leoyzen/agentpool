@@ -1581,41 +1581,6 @@ class SessionController:
             return
         run_handle.cancel()
 
-    def _create_run(
-        self,
-        session_id: str,
-        initial_prompt: Any,
-        agent: BaseAgent[Any, Any] | None = None,
-    ) -> RunHandle | None:
-        """Create a new RunHandle for a session.
-
-        Args:
-            session_id: The session to create the run for.
-            initial_prompt: The initial prompt content.
-            agent: Optional agent. When provided, uses ``agent.AGENT_TYPE``
-                instead of ``session.metadata["agent_type"]``.
-
-        Returns:
-            A new RunHandle.
-
-        Raises:
-            ValueError: If the session does not exist.
-        """
-        session = self.get_session(session_id)
-        if session is None:
-            raise ValueError("Session not found")
-        if agent is not None:
-            from agentpool.agents.base_agent import BaseAgent
-
-            agent_type = agent.AGENT_TYPE if isinstance(agent, BaseAgent) else "native"
-        else:
-            agent_type = session.metadata.get("agent_type", "unknown")
-        return RunHandle(
-            run_id=uuid.uuid4().hex,
-            session_id=session_id,
-            agent_type=agent_type,
-        )
-
     def _cleanup_run(self, run_id: str) -> None:
         """Clean up a run after it completes.
 

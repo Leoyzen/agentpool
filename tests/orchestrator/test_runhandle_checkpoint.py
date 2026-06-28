@@ -141,8 +141,7 @@ def test_resume_creates_fresh_run_handle() -> None:
     old_handle.checkpoint()
     assert old_handle.status == RunStatus.checkpointed
 
-    # Simulate resume: create a completely new handle (mimicking
-    # SessionController._create_run behavior)
+    # Simulate resume: create a completely new handle
     new_handle = RunHandle(run_id="new-run", session_id="s1", agent_type="native")
     new_handle._start_task()
     assert new_handle.status == RunStatus.running
