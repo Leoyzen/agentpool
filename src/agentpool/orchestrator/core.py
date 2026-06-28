@@ -1326,30 +1326,31 @@ class SessionController:
 
         acquired = False
         try:
-            async with asyncio.timeout(30):
-                await session.turn_lock.acquire()
-            acquired = True
-        except TimeoutError:
-            logger.warning(
-                "Timeout waiting for turn_lock during close_session (run-turn path)",
-                session_id=session_id,
-            )
-
-        if run_handle is not None and acquired:
             try:
                 async with asyncio.timeout(30):
-                    await run_handle.complete_event.wait()
+                    await session.turn_lock.acquire()
+                acquired = True
             except TimeoutError:
                 logger.warning(
-                    "Timeout waiting for run completion, cancelling",
+                    "Timeout waiting for turn_lock during close_session (run-turn path)",
                     session_id=session_id,
                 )
-                run_handle.cancel()
-        elif run_handle is not None:
-            run_handle.cancel()
 
-        if acquired:
-            session.turn_lock.release()
+            if run_handle is not None and acquired:
+                try:
+                    async with asyncio.timeout(30):
+                        await run_handle.complete_event.wait()
+                except TimeoutError:
+                    logger.warning(
+                        "Timeout waiting for run completion, cancelling",
+                        session_id=session_id,
+                    )
+                    run_handle.cancel()
+            elif run_handle is not None:
+                run_handle.cancel()
+        finally:
+            if acquired:
+                session.turn_lock.release()
 
         async with self._lock:
             children = self._children.pop(session_id, [])
@@ -1537,7 +1538,13 @@ class SessionController:
         resolved = {"steer": "asap", "followup": "when_idle"}.get(priority, priority)
         # Convert content to string safely. Empty list (from ACP handler when
         # user sends only a slash command) must become "" not "[]".
-        content_str = "" if not content else str(content)
+        # Lists with content should be joined, not str()'d (which produces "['hello']").
+        if isinstance(content, list):
+            content_str = " ".join(str(c) for c in content) if content else ""
+        elif not content:
+            content_str = ""
+        else:
+            content_str = str(content)
         async with session._request_lock:
             if session.closing or session.is_closing:
                 return None

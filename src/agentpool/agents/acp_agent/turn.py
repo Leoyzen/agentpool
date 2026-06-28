@@ -132,9 +132,10 @@ class ACPTurn(Turn):
             run_id=run_id,
         )
 
-        # Convert last user prompt to ACP ContentBlock list
-        last_prompt = self._prompts[-1] if self._prompts else ""
-        content = convert_to_acp_content([last_prompt])
+        # Convert all user prompts to ACP ContentBlock list.
+        # Join all prompts instead of taking only the last one.
+        full_prompt = "\n\n".join(self._prompts) if self._prompts else ""
+        content = convert_to_acp_content([full_prompt])
 
         # --- Phase 1: Send prompt ---
         try:

@@ -128,16 +128,13 @@ class NativeTurn(Turn):
         # run_stream() path which did the same before calling agentlet.iter().
         # Without this, skill instructions are silently discarded.
         staged_text = await self._agent.staged_content.consume_as_text()
-        effective_prompts = (
-            [*staged_text.split("\n\n"), *self._prompts]
-            if staged_text is not None
-            else self._prompts
-        )
-        # If staged_content was consumed, combine it into a single prompt
-        # with the user request (matching the old run_stream pattern).
         if staged_text is not None:
             user_request = "\n\n".join(self._prompts)
-            effective_prompts = [f"{staged_text}\n\n{user_request}"] if user_request else [staged_text]
+            effective_prompts = (
+                [f"{staged_text}\n\n{user_request}"] if user_request else [staged_text]
+            )
+        else:
+            effective_prompts = self._prompts
 
         agent_run: Any = None
         try:
@@ -183,6 +180,9 @@ class NativeTurn(Turn):
 
                         if terminal_tool_completed:
                             break
+
+                    if self._run_ctx.cancelled:
+                        break
 
                     node = await agent_run.next(node)
 

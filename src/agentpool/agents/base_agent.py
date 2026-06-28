@@ -554,7 +554,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         ) as run_handle:
             async for event in run_handle.start(prompt):
                 yield event
-                if isinstance(event, StreamCompleteEvent):
+                if isinstance(event, StreamCompleteEvent | RunErrorEvent):
                     run_handle.close()
                     break
 

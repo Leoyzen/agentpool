@@ -186,7 +186,7 @@ class RunHandle:
                         async for event in turn.execute():
                             await event_bus.publish(self.session_id, event)
                             yield event
-                            if isinstance(event, StreamCompleteEvent):
+                            if isinstance(event, StreamCompleteEvent | RunErrorEvent):
                                 break
                     except Exception as e:  # noqa: BLE001
                         turn_failed = True
@@ -202,6 +202,9 @@ class RunHandle:
                             from agentpool.mcp_server.manager import _current_input_provider
 
                             _current_input_provider.reset(_elicitation_token)
+
+                    if turn_failed:
+                        break
 
                     if not turn_failed:
                         try:
@@ -227,15 +230,22 @@ class RunHandle:
                                 pending=len(self.run_ctx.child_done_events),
                             )
 
-                        # Collect queued steer messages from completed children
-                        # as prompts for the next turn.
-                        if self.run_ctx.queued_steer_messages:
-                            self._message_queue.extend(
-                                self.run_ctx.queued_steer_messages
-                            )
-                            self.run_ctx.queued_steer_messages.clear()
+                    # Collect queued steer messages from completed children
+                    # as prompts for the next turn.
+                    if self.run_ctx.queued_steer_messages:
+                        self._message_queue.extend(
+                            self.run_ctx.queued_steer_messages
+                        )
+                        self.run_ctx.queued_steer_messages.clear()
 
-                        self.run_ctx.child_done_events.clear()
+                    # Only remove completed events; new child tasks may have
+                    # been registered between gather() and here.
+                    completed_keys = [
+                        k for k, e in self.run_ctx.child_done_events.items()
+                        if e.is_set()
+                    ]
+                    for k in completed_keys:
+                        del self.run_ctx.child_done_events[k]
 
                     current_prompts = list(self._message_queue)
                     self._message_queue.clear()
