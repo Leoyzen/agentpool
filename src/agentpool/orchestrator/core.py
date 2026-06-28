@@ -917,9 +917,14 @@ class SessionController:
             else SessionLifecyclePolicy.default()
         )
 
+        # Ensure agent_name is always a real string (guards against Mock
+        # attributes in tests where pool.main_agent_name is a MagicMock).
+        _main_agent_name = self.pool.main_agent_name
+        if not isinstance(_main_agent_name, str):
+            _main_agent_name = "default"
         state = SessionState(
             session_id=session_id,
-            agent_name=agent_name or self.pool.main_agent_name or "default",
+            agent_name=agent_name or _main_agent_name,
             parent_session_id=parent_session_id,
             lifecycle_policy=effective_policy,
             metadata=metadata,
@@ -929,18 +934,21 @@ class SessionController:
         # Clear todos for new top-level sessions only (not subagents)
         # This prevents accumulation of todos from previous sessions
         # Use dedicated lock to prevent race conditions with concurrent sessions
-        if parent_session_id is None and hasattr(self.pool, "todos") and self.pool.todos.entries:
-            async with self._todo_lock:
-                # Double-check after acquiring lock
-                if self.pool.todos.entries:
-                    cleared_count = len(self.pool.todos.entries)
-                    self.pool.todos.clear()
-                    logger.info(
-                        "Cleared todos for new top-level session",
-                        session_id=session_id,
-                        agent_name=state.agent_name,
-                        cleared_entries=cleared_count,
-                    )
+        if parent_session_id is None and hasattr(self.pool, "todos") and self.pool.todos is not None:
+            _entries = self.pool.todos.entries
+            if isinstance(_entries, (list, tuple)) and len(_entries) > 0:
+                async with self._todo_lock:
+                    # Double-check after acquiring lock
+                    _entries = self.pool.todos.entries
+                    if isinstance(_entries, (list, tuple)) and len(_entries) > 0:
+                        cleared_count = len(_entries)
+                        self.pool.todos.clear()
+                        logger.info(
+                            "Cleared todos for new top-level session",
+                            session_id=session_id,
+                            agent_name=state.agent_name,
+                            cleared_entries=cleared_count,
+                        )
 
         if parent_session_id and effective_policy in ("cascade", "bound"):
             parent_scope = self._session_scopes.get(parent_session_id)
@@ -1353,6 +1361,22 @@ class SessionController:
             if acquired:
                 session.turn_lock.release()
 
+        # Checkpoint-on-close: if pending deferred calls exist, save as
+        # checkpointed before releasing resources. If checkpoint fails,
+        # keep session in memory so it can be retried.
+        _checkpointed = False
+        if self.store is not None:
+            _data = await self.store.load(session_id)
+            if self._should_checkpoint_on_close(_data):
+                assert _data is not None
+                _checkpointed = await self._save_close_checkpoint(session_id, _data)
+                if not _checkpointed:
+                    logger.warning(
+                        "Checkpoint failed, keeping session in memory",
+                        session_id=session_id,
+                    )
+                    return
+
         async with self._lock:
             children = self._children.pop(session_id, [])
             if children:
@@ -1367,7 +1391,7 @@ class SessionController:
 
             agent = self._session_agents.pop(session_id, None)
             self._sessions.pop(session_id, None)
-            if self.store is not None:
+            if self.store is not None and not _checkpointed:
                 await self._mark_session_closed(session_id)
             if session.parent_session_id and session.parent_session_id in self._children:
                 self._children[session.parent_session_id] = [
@@ -1530,16 +1554,17 @@ class SessionController:
         session = self.get_session(session_id)
         if session is None:
             return None
-        agent = await self.get_or_create_session_agent(session_id)
-        if agent is None:
-            return None
-        # Extract input_provider from kwargs and set on session/agent.
-        # Without this, input_provider passed by protocol handlers is lost
-        # because _start_run_handle doesn't accept **kwargs.
+        # Extract input_provider from kwargs and set on session BEFORE
+        # get_or_create_session_agent() so the agent is created with the
+        # correct input_provider and the session state is consistent.
         input_provider = kwargs.pop("input_provider", None)
         if input_provider is not None:
             session.input_provider = input_provider
-            agent._input_provider = input_provider
+        agent = await self.get_or_create_session_agent(
+            session_id, input_provider=input_provider
+        )
+        if agent is None:
+            return None
         # RunHandle path (always)
         resolved = {"steer": "asap", "followup": "when_idle"}.get(priority, priority)
         # Convert content to string safely. Empty list (from ACP handler when
@@ -1837,9 +1862,12 @@ class SessionPool:
         # MCP connection pooling: share subprocess connections across sessions
         from agentpool.mcp_server.connection_pool import MCPConnectionPool
 
-        self.mcp_pool = MCPConnectionPool(
-            servers=pool.mcp.servers if hasattr(pool, "mcp") else None,
-        )
+        _mcp_servers: list[Any] = []
+        if hasattr(pool, "mcp"):
+            _raw_servers = pool.mcp.servers
+            if isinstance(_raw_servers, (list, tuple)):
+                _mcp_servers = list(_raw_servers)
+        self.mcp_pool = MCPConnectionPool(servers=_mcp_servers)
         self.sessions._mcp_pool = self.mcp_pool
 
     async def start(self) -> None:
@@ -2441,15 +2469,17 @@ class SessionPool:
         session, _ = await self.sessions.get_or_create_session(session_id)
         if session.is_closing:
             return
-        agent = await self.sessions.get_or_create_session_agent(session_id)
-        if agent is None:
-            return
-        # Extract input_provider from kwargs and set on session/agent.
-        # Without this, input_provider passed by protocol handlers is lost.
+        # Extract input_provider from kwargs and set on session BEFORE
+        # get_or_create_session_agent() so the agent is created with the
+        # correct input_provider and the session state is consistent.
         input_provider = kwargs.pop("input_provider", None)
         if input_provider is not None:
             session.input_provider = input_provider
-            agent._input_provider = input_provider
+        agent = await self.sessions.get_or_create_session_agent(
+            session_id, input_provider=input_provider
+        )
+        if agent is None:
+            return
         content = " ".join(str(p) for p in prompts) if prompts else ""
 
         run_id = session.current_run_id
@@ -2592,7 +2622,15 @@ class SessionPool:
         session, _ = await self.sessions.get_or_create_session(session_id)
         if session.is_closing:
             return
-        agent = await self.sessions.get_or_create_session_agent(session_id)
+        # Extract input_provider from kwargs and set on session BEFORE
+        # get_or_create_session_agent() so the agent is created with the
+        # correct input_provider and the session state is consistent.
+        input_provider = kwargs.pop("input_provider", None)
+        if input_provider is not None:
+            session.input_provider = input_provider
+        agent = await self.sessions.get_or_create_session_agent(
+            session_id, input_provider=input_provider
+        )
         if agent is None:
             return
         content = " ".join(str(p) for p in prompts) if prompts else ""
@@ -2623,6 +2661,8 @@ class SessionPool:
         try:
             async for event in run_handle.start(content):
                 yield event
+                if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                    break
         finally:
             session.current_run_id = None
             self.sessions._runs.pop(run_handle.run_id, None)
