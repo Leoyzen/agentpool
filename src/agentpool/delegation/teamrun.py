@@ -293,7 +293,7 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
         for i, node in enumerate(all_nodes):
             step_fn = _make_sequential_step(node, i)
             step = Step(
-                id=NodeID(node.name),
+                id=NodeID(f"{node.name}_{i}"),
                 call=step_fn,
                 label=node.description or node.name,
             )

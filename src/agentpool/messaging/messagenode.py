@@ -476,9 +476,12 @@ class MessageNode[TDeps, TResult](ABC):
     async def run(self, *prompts: Any, **kwargs: Any) -> ChatMessage[TResult]:
         """Execute node with prompts via pydantic-graph single-node graph.
 
-        Builds a single-node graph and runs it to completion. Subclasses
-        may override this method to provide custom execution logic; in
-        that case the graph-based path is bypassed.
+        Builds a single-node graph and runs it to completion, wrapping the
+        graph run with :class:`SignalEmittingGraphRun` so that
+        ``message_received`` and ``message_sent`` signals are emitted at
+        step boundaries. Subclasses may override this method to provide
+        custom execution logic; in that case the graph-based path is
+        bypassed.
 
         Args:
             *prompts: Input prompts.
@@ -487,11 +490,23 @@ class MessageNode[TDeps, TResult](ABC):
         Returns:
             The resulting ChatMessage.
         """
+        from pydantic_graph.id_types import NodeID
+
         from agentpool.messaging.graph_adapter import AgentPoolState
+        from agentpool.messaging.signal_adapter import SignalEmittingGraphRun
 
         graph = self._build_single_node_graph()
         state = AgentPoolState(node=self, prompts=prompts, kwargs=kwargs)
-        return await graph.run(state=state, deps=self._get_deps(), inputs=None)
+        node_mapping: dict[NodeID, MessageNode[Any, Any]] = {NodeID(self.name): self}
+        async with graph.iter(
+            state=state, deps=self._get_deps(), inputs=None
+        ) as graph_run:
+            signal_run = SignalEmittingGraphRun(
+                graph_run, node_mapping=node_mapping
+            )
+            async for _ in signal_run:
+                pass
+        return state.result  # type: ignore[return-value]
 
     async def run_stream(
         self,
@@ -500,11 +515,13 @@ class MessageNode[TDeps, TResult](ABC):
     ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
         """Run with streaming output via pydantic-graph Graph.iter().
 
-        Uses :meth:`Graph.iter` to drive execution step-by-step.
-        For nodes that do not override :meth:`run_stream` (e.g. most
-        agent subclasses), this yields the final result wrapped in a
-        :class:`StreamCompleteEvent`. Agent subclasses typically override
-        this with rich event streaming.
+        Uses :meth:`Graph.iter` to drive execution step-by-step, wrapping
+        the graph run with :class:`SignalEmittingGraphRun` so that
+        ``message_received`` and ``message_sent`` signals are emitted at
+        step boundaries. For nodes that do not override :meth:`run_stream`
+        (e.g. most agent subclasses), this yields the final result wrapped
+        in a :class:`StreamCompleteEvent`. Agent subclasses typically
+        override this with rich event streaming.
 
         Args:
             *prompts: Input prompts.
@@ -513,20 +530,31 @@ class MessageNode[TDeps, TResult](ABC):
         Yields:
             RichAgentStreamEvent tokens during execution.
         """
-        from agentpool.agents.events import StreamCompleteEvent
+        from pydantic_graph.id_types import NodeID
+
+        from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
         from agentpool.messaging.graph_adapter import AgentPoolState
+        from agentpool.messaging.signal_adapter import SignalEmittingGraphRun
 
         graph = self._build_single_node_graph()
         state = AgentPoolState(node=self, prompts=prompts, kwargs=kwargs)
+        node_mapping: dict[NodeID, MessageNode[Any, Any]] = {NodeID(self.name): self}
 
-        async with graph.iter(state=state, deps=self._get_deps(), inputs=None) as graph_run:
-            async for _ in graph_run:
+        async with graph.iter(
+            state=state, deps=self._get_deps(), inputs=None
+        ) as graph_run:
+            signal_run = SignalEmittingGraphRun(
+                graph_run, node_mapping=node_mapping
+            )
+            async for _ in signal_run:
                 # Generic nodes do not produce intermediate stream events;
                 # drain the event queue in case a subclass pushed events.
                 while not state.event_queue.empty():
                     try:
                         event = state.event_queue.get_nowait()
                         yield event  # type: ignore[misc]
+                        if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                            return
                     except asyncio.QueueEmpty:
                         break
 
@@ -535,6 +563,8 @@ class MessageNode[TDeps, TResult](ABC):
             try:
                 event = state.event_queue.get_nowait()
                 yield event  # type: ignore[misc]
+                if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                    return
             except asyncio.QueueEmpty:
                 break
 
