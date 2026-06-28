@@ -10,7 +10,12 @@ from typing import TYPE_CHECKING, Any, Self
 import anyio
 
 from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import RunErrorEvent, RunStartedEvent, StreamCompleteEvent
+from agentpool.agents.events import (
+    RunErrorEvent,
+    RunFailedEvent,
+    RunStartedEvent,
+    StreamCompleteEvent,
+)
 from agentpool.log import get_logger
 
 
@@ -90,6 +95,9 @@ class RunHandle:
         _idle_event: asyncio.Event that is set when idle (for wake-up).
         _message_queue: Queued prompts for the next turn.
         _message_history: Accumulated message history across turns.
+        _turn_complete_event: Per-turn completion event, set when a single
+            turn finishes (normally or via cancel). Replaces session-level
+            ``complete_event`` for ACP client blocking on a single turn.
     """
 
     run_id: str
@@ -109,6 +117,7 @@ class RunHandle:
     _idle_event: asyncio.Event = field(default_factory=_create_set_event)
     _message_queue: list[str] = field(default_factory=list)
     _message_history: list[ModelMessage] = field(default_factory=list)
+    _turn_complete_event: asyncio.Event = field(default_factory=asyncio.Event)
     _interrupt_tasks: set[asyncio.Task[None]] = field(default_factory=set)
 
     # ------------------------------------------------------------------
@@ -160,6 +169,11 @@ class RunHandle:
                             continue
 
                     self._status = RunStatus.running
+                    # Reset per-turn state: clear the completion event
+                    # and clear any stale cancelled flag from a prior turn.
+                    self._turn_complete_event.clear()
+                    if self.run_ctx.cancelled:
+                        self.run_ctx.cancelled = False
                     turn = agent.create_turn(
                         prompts=current_prompts,
                         run_ctx=self.run_ctx,
@@ -209,6 +223,26 @@ class RunHandle:
 
                             _current_input_provider.reset(_elicitation_token)
 
+                    if self.run_ctx.cancelled:
+                        # Turn was cancelled — publish RunFailedEvent, set turn
+                        # complete, clear prompts, and continue to idle for next turn.
+                        # RunFailedEvent must be published BEFORE _turn_complete_event
+                        # so the event converter can emit
+                        # TurnCompleteUpdate(stop_reason="cancelled").
+                        await event_bus.publish(
+                            self.session_id,
+                            RunFailedEvent(
+                                run_id=self.run_id,
+                                session_id=self.session_id,
+                                exception=RuntimeError("Run cancelled"),
+                            ),
+                        )
+                        self._turn_complete_event.set()
+                        self._message_queue.clear()  # Clear cancelled prompts
+                        # Do NOT reset cancelled here — handle_prompt() needs to
+                        # observe it. It will be reset at the start of the next turn.
+                        continue
+
                     if turn_failed:
                         break
 
@@ -256,9 +290,13 @@ class RunHandle:
                     current_prompts = list(self._message_queue)
                     self._message_queue.clear()
 
+                    # Signal that this turn has completed normally.
+                    self._turn_complete_event.set()
+
                 self._status = RunStatus.done
         finally:
             self._status = RunStatus.done
+            self._turn_complete_event.set()
             self.complete_event.set()
 
     def steer(self, message: str) -> bool:
@@ -368,8 +406,6 @@ class RunHandle:
         if exception is not None:
             self.run_ctx.cancelled = True
         if event_bus is not None:
-            from agentpool.agents.events import RunFailedEvent
-
             self._event_task = asyncio.create_task(
                 event_bus.publish(
                     self.session_id,
@@ -392,10 +428,13 @@ class RunHandle:
 
         Sets the cancelled flag on the run context and wakes the idle
         event to unblock the turn loop. Delegates to the registered
-        cancel function if available, otherwise cancels
-        ``run_ctx.current_task`` and schedules ``agent._interrupt()``
-        as a fire-and-forget task so that subclass-specific cleanup
-        (e.g. ACP CancelNotification) runs.
+        cancel function if available, otherwise schedules
+        ``agent._interrupt()`` as a fire-and-forget task so that
+        subclass-specific cleanup (e.g. ACP CancelNotification) runs.
+
+        The ``start()`` loop task is NOT cancelled here — it must
+        continue running to process the ``cancelled`` flag, emit
+        stream-complete events, and transition to idle/done gracefully.
         """
         self.run_ctx.cancelled = True
         self._idle_event.set()
@@ -413,10 +452,6 @@ class RunHandle:
                 task = asyncio.create_task(coro)
                 self._interrupt_tasks.add(task)
                 task.add_done_callback(self._interrupt_tasks.discard)
-
-        task = self.run_ctx.current_task
-        if task is not None and not task.done():
-            task.cancel()
 
     def _cleanup_run(self) -> None:
         """Invoke cleanup callback and signal completion.

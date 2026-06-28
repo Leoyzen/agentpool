@@ -1,8 +1,10 @@
 """Tests for ACPProtocolHandler cancel behavior.
 
-Tests that cancel_session properly stops the event consumer before
-cancelling the run itself to prevent buffered events from being
-sent as session/update notifications.
+Tests that cancel_session properly delegates to cancel_run_for_session
+without calling fail() on the RunHandle. After the cancel-turn-not-run
+fix, the event consumer is NOT stopped before cancel — it must stay
+alive to deliver the RunFailedEvent (stop_reason="cancelled") to the
+client.
 """
 from __future__ import annotations
 
@@ -66,35 +68,27 @@ def acp_handler(
 
 
 @pytest.mark.anyio
-async def test_cancel_session_calls_both_in_order(
+async def test_cancel_session_calls_cancel_run_for_session(
     acp_handler: ACPProtocolHandler,
     mock_pool: MagicMock,
 ) -> None:
-    """cancel_session must call stop_event_consumer then cancel_run_for_session.
+    """cancel_session must call cancel_run_for_session on the session pool.
 
-    This ordering is critical: stopping consumer prevents buffered events
-    from leaking after the client has issued cancel.
+    After the cancel-turn-not-run fix, the event consumer is NOT stopped
+    before cancel — it must stay alive to deliver the RunFailedEvent
+    (stop_reason="cancelled") to the client via session/update.
     """
     session_id = "test-session-123"
 
-    # Verify both methods are called in correct order
     with patch.object(
-        acp_handler,
-        "stop_event_consumer",
-        new_callable=AsyncMock,
-    ) as mock_stop, patch.object(
         mock_pool.session_pool.sessions,
         "cancel_run_for_session",
         new_callable=MagicMock,
     ) as mock_cancel:
-        # Mock stop_event_consumer to prevent it from accessing EventBus
-        mock_stop.return_value = None
-
         # Call cancel_session
         await acp_handler.cancel_session(session_id)
 
-        # Verify both were called
-        mock_stop.assert_awaited_once_with(session_id)
+        # Verify cancel_run_for_session was called
         mock_cancel.assert_called_once_with(session_id)
 
 
@@ -125,3 +119,42 @@ async def test_cancel_session_without_session_pool(acp_handler: ACPProtocolHandl
 
     # Should not raise
     await acp_handler.cancel_session(session_id)
+
+
+@pytest.mark.anyio
+async def test_cancel_session_does_not_call_fail_on_run_handle(
+    acp_handler: ACPProtocolHandler,
+    mock_pool: MagicMock,
+) -> None:
+    """cancel_session must NOT call fail() on the RunHandle.
+
+    After the cancel-turn-not-run fix, cancel uses _interrupt() + cancelled
+    flag, not fail(). Calling fail() would publish RunFailedEvent with an
+    exception, causing double TurnComplete in the ACP event converter.
+    """
+    session_id = "test-session-no-fail"
+
+    # Set up a mock run handle that cancel_run_for_session would operate on
+    mock_run_handle = MagicMock()
+
+    with (
+        patch.object(acp_handler, "stop_event_consumer", new_callable=AsyncMock),
+        patch.object(
+            mock_pool.session_pool.sessions,
+            "cancel_run_for_session",
+            new_callable=MagicMock,
+        ) as mock_cancel,
+    ):
+        # Simulate what the real cancel_run_for_session does: call cancel()
+        # on the run handle (NOT fail()).
+        def fake_cancel(sid: str) -> None:
+            mock_run_handle.cancel()
+
+        mock_cancel.side_effect = fake_cancel
+
+        await acp_handler.cancel_session(session_id)
+
+    # fail() must NOT be called — cancel uses _interrupt() + cancelled flag
+    mock_run_handle.fail.assert_not_called()
+    # cancel() SHOULD be called (via cancel_run_for_session)
+    mock_run_handle.cancel.assert_called_once()

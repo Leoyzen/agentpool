@@ -1096,18 +1096,13 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         )
 
     async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
-        """Cancel the current stream task and iteration task.
+        """Cancel the iteration task running the LLM API call.
 
         Args:
-            run_ctx: Optional per-run context for the stream to interrupt
+            run_ctx: Optional per-run context (unused in native agent,
+                kept for signature compatibility with the ACP subclass).
         """
-        task = run_ctx.current_task if run_ctx else None
-        if task and not task.done():
-            task.cancel()
-        # Also directly cancel the iteration_task running the LLM API call.
-        # Before this fix, iteration_task was a local variable and only cancelled
-        # indirectly through the consumer's finally block. If consumer cleanup
-        # timed out, the LLM call kept running in the background.
+        del run_ctx  # Unused in native agent; kept for ACP subclass signature
         iteration_task = self._iteration_task
         if iteration_task is not None and not iteration_task.done():
             iteration_task.cancel()

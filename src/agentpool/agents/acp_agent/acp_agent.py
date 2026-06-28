@@ -691,10 +691,6 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         if self._prompt_task and not self._prompt_task.done():
             self._prompt_task.cancel()
             self.log.info("Cancelled prompt task")
-        run_ctx = self.get_active_run_context()
-        stream_task = run_ctx.current_task if run_ctx else None
-        if stream_task and not stream_task.done():
-            stream_task.cancel()
 
     async def get_available_models(self) -> list[ModelInfo] | None:
         """Get available models from the ACP session state."""

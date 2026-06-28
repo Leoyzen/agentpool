@@ -178,7 +178,12 @@ class NativeTurn(Turn):
                     if self._run_ctx.cancelled:
                         break
 
-                    node = await agent_run.next(node)
+                    try:
+                        iteration_task = asyncio.create_task(agent_run.next(node))
+                        self._agent._iteration_task = iteration_task
+                        node = await iteration_task
+                    finally:
+                        self._agent._iteration_task = None
 
                 self._message_history = agent_run.all_messages()
 
@@ -202,7 +207,18 @@ class NativeTurn(Turn):
                     self._message_history = agent_run.all_messages()
 
         except asyncio.CancelledError:
-            logger.debug("NativeTurn cancelled")
+            if self._run_ctx.cancelled:
+                # Cancellation came from cancel() — exit gracefully
+                # without yielding StreamCompleteEvent. Set _final_message
+                # so turn.final_message doesn't raise for callers.
+                self._final_message = ChatMessage(
+                    content="",
+                    role="assistant",
+                    name=self._agent.name,
+                    message_id=self._message_id,
+                    session_id=self._run_ctx.session_id,
+                )
+                return
             raise
 
         except Exception as exc:
@@ -218,10 +234,11 @@ class NativeTurn(Turn):
             if self._run_ctx._run_handle is not None:
                 self._run_ctx._run_handle.active_agent_run = None
 
-        # Always yield StreamCompleteEvent so RunHandle.start() can break
-        # out of its turn loop. Even when message_history is None (e.g.
-        # RunAbortedError before agent_run was created), we yield a
-        # terminal event with an empty message.
+        # Build final message always (even when cancelled) so that
+        # turn.final_message is accessible to callers after execute()
+        # returns. When cancelled via cancel(), we skip yielding
+        # StreamCompleteEvent to avoid double turn_complete (end_turn
+        # + cancelled).
         if self._message_history is not None:
             content = extract_text_from_messages(self._message_history)
         else:
@@ -233,4 +250,11 @@ class NativeTurn(Turn):
             message_id=self._message_id,
             session_id=self._run_ctx.session_id,
         )
+
+        # Belt-and-suspenders: if cancelled during execution (e.g.
+        # CancelledError swallowed by pydantic-ai inside agent_run.next()),
+        # exit without yielding StreamCompleteEvent.
+        if self._run_ctx.cancelled:
+            return
+
         yield StreamCompleteEvent(message=self._final_message)
