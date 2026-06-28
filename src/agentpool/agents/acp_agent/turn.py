@@ -103,12 +103,14 @@ class ACPTurn(Turn):
         run_ctx: AgentRunContext,
         message_history: list[ModelMessage],
         session_id: str,
+        agent_name: str | None = None,
     ) -> None:
         super().__init__()
         self._acp_client = acp_client
         self._prompts = prompts
         self._run_ctx = run_ctx
         self._session_id = session_id
+        self._agent_name = agent_name
 
     async def execute(self) -> AsyncIterator[RichAgentStreamEvent]:
         """Execute one ACP prompt → stream → complete cycle.
@@ -140,6 +142,7 @@ class ACPTurn(Turn):
             yield RunErrorEvent(
                 message=str(exc),
                 run_id=run_id,
+                agent_name=self._agent_name,
             )
             return
 
@@ -154,6 +157,7 @@ class ACPTurn(Turn):
             yield RunErrorEvent(
                 message=str(exc),
                 run_id=run_id,
+                agent_name=self._agent_name,
             )
             return
 
@@ -166,6 +170,7 @@ class ACPTurn(Turn):
             yield RunErrorEvent(
                 message=str(exc),
                 run_id=run_id,
+                agent_name=self._agent_name,
             )
             return
 

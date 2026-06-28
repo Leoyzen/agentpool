@@ -633,3 +633,53 @@ def test_closing_property_sets_is_closing() -> None:
         "via the property setter"
     )
     assert session.closing is True
+
+
+# ---------------------------------------------------------------------------
+# _background_tasks initialization (from PR #64 round-7 review)
+# ---------------------------------------------------------------------------
+
+
+def test_background_tasks_initialized_in_init() -> None:
+    """SessionController.__init__ must initialize _background_tasks set.
+
+    Without early initialization, the first call to _start_run_handle
+    hits a hasattr check that could mask bugs.
+    """
+    from agentpool.orchestrator.core import SessionController
+
+    mock_pool = MagicMock()
+    mock_pool.main_agent = MagicMock()
+    mock_pool.main_agent.name = "main-agent"
+    mock_pool.manifest = MagicMock()
+    mock_pool.manifest.agents = {}
+
+    controller = SessionController(pool=mock_pool)
+    assert hasattr(controller, "_background_tasks"), (
+        "_background_tasks must be initialized in __init__"
+    )
+    assert isinstance(controller._background_tasks, set), (
+        "_background_tasks must be a set"
+    )
+
+
+def test_background_task_callback_is_named_function() -> None:
+    """_start_run_handle must use a named callback, not a lambda tuple hack.
+
+    Lambda tuples like `lambda _: (a(), b())` are fragile and hard to debug.
+    """
+    import re
+
+    import agentpool.orchestrator.core as core_module
+
+    source = inspect.getsource(core_module.SessionController._start_run_handle)
+    # Should NOT contain the lambda tuple pattern
+    lambda_tuple = re.findall(r"lambda.*:\s*\(.*,\s*.*\)", source)
+    assert len(lambda_tuple) == 0, (
+        f"_start_run_handle uses lambda tuple hack: {lambda_tuple}. "
+        "Use a named callback function instead."
+    )
+    # Should contain a def callback
+    assert "def _on_run_done" in source or "add_done_callback(" in source, (
+        "_start_run_handle should use a named callback function"
+    )

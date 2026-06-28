@@ -210,6 +210,7 @@ class NativeTurn(Turn):
             yield RunErrorEvent(
                 message=str(exc),
                 agent_name=self._agent.name,
+                run_id=self._run_ctx.run_id,
             )
             return
 

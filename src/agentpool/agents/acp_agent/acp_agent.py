@@ -672,6 +672,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             run_ctx=run_ctx,
             message_history=message_history,
             session_id=self._sdk_session_id or run_ctx.session_id,
+            agent_name=self.name,
         )
 
     async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:

@@ -827,6 +827,7 @@ class SessionController:
         self._pending_run_ids: dict[str, str] = {}
         self._todo_lock: asyncio.Lock = asyncio.Lock()
         self._mcp_pool: MCPConnectionPool | None = None
+        self._background_tasks: set[asyncio.Task[Any]] = set()
 
     async def get_or_create_session(
         self,
@@ -1495,15 +1496,13 @@ class SessionController:
         session.current_run_id = run_handle.run_id
         task = asyncio.create_task(self._consume_run(run_handle, content))
         # Keep a strong reference to prevent GC from destroying the task.
-        if not hasattr(self, "_background_tasks"):
-            self._background_tasks: set[asyncio.Task[Any]] = set()
         self._background_tasks.add(task)
-        task.add_done_callback(
-            lambda _t, rid=run_handle.run_id: (
-                self._background_tasks.discard(_t),
-                self._cleanup_run(rid),
-            )
-        )
+
+        def _on_run_done(t: asyncio.Task[Any], rid: str = run_handle.run_id) -> None:
+            self._background_tasks.discard(t)
+            self._cleanup_run(rid)
+
+        task.add_done_callback(_on_run_done)
         return run_handle
 
     async def receive_request(

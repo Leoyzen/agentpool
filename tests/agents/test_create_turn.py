@@ -120,3 +120,31 @@ def test_acp_turn_no_unused_initial_message_history() -> None:
         "_initial_message_history is dead code — assigned but never used. "
         "Should be removed."
     )
+
+
+# ---------------------------------------------------------------------------
+# ACPTurn agent_name propagation (from PR #64 round-7 review)
+# ---------------------------------------------------------------------------
+
+
+def test_acp_turn_accepts_agent_name() -> None:
+    """ACPTurn.__init__ must accept and store agent_name parameter."""
+    import agentpool.agents.acp_agent.turn as turn_module
+
+    source = inspect.getsource(turn_module.ACPTurn.__init__)
+    assert "agent_name" in source, (
+        "ACPTurn.__init__ must accept agent_name parameter for RunErrorEvent"
+    )
+    assert "self._agent_name" in source, (
+        "ACPTurn must store agent_name as self._agent_name"
+    )
+
+
+def test_acp_turn_run_error_event_includes_agent_name() -> None:
+    """ACPTurn.execute() must pass agent_name to RunErrorEvent yields."""
+    import agentpool.agents.acp_agent.turn as turn_module
+
+    source = inspect.getsource(turn_module.ACPTurn.execute)
+    assert "agent_name=self._agent_name" in source, (
+        "ACPTurn.execute() must include agent_name in RunErrorEvent yields"
+    )

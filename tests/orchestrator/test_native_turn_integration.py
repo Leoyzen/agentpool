@@ -284,3 +284,21 @@ def test_native_turn_no_redundant_run_started_event() -> None:
         f"NativeTurn.execute() still yields RunStartedEvent {len(yield_matches)} "
         "time(s) — RunHandle.start() already publishes it"
     )
+
+
+# ---------------------------------------------------------------------------
+# NativeTurn RunErrorEvent includes run_id (from PR #64 round-7 review)
+# ---------------------------------------------------------------------------
+
+
+def test_native_turn_run_error_event_includes_run_id() -> None:
+    """NativeTurn.execute() must pass run_id to RunErrorEvent.
+
+    Without run_id, error events can't be correlated with the active run.
+    """
+    import agentpool.agents.native_agent.turn as turn_module
+
+    source = inspect.getsource(turn_module.NativeTurn.execute)
+    assert "run_id=self._run_ctx.run_id" in source, (
+        "NativeTurn.execute() must include run_id in RunErrorEvent yields"
+    )
