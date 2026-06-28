@@ -32,6 +32,7 @@ except ImportError:
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.context import AgentContext
 from agentpool.agents.events import (
+    RunErrorEvent,
     StreamCompleteEvent,
 )
 from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
@@ -962,8 +963,15 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             message_history=kw["message_history"],
         )
         session_id = kw["session_id"]
+        turn_failed = False
+        error_msg = ""
         async for event in turn.execute():
             await event_bus.publish(session_id, event)
+            if isinstance(event, RunErrorEvent):
+                turn_failed = True
+                error_msg = event.message
+        if turn_failed:
+            raise RuntimeError(f"NativeTurn execution failed: {error_msg}")
         result = turn.final_message
 
         state.result = result
@@ -1018,8 +1026,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             run_ctx=run_ctx,
             message_history=model_messages,
         )
+        session_id_local = session_id
+        turn_failed = False
+        error_msg = ""
         async for event in turn.execute():
-            await event_bus.publish(session_id, event)
+            await event_bus.publish(session_id_local, event)
+            if isinstance(event, RunErrorEvent):
+                turn_failed = True
+                error_msg = event.message
+        if turn_failed:
+            raise RuntimeError(f"NativeTurn execution failed: {error_msg}")
         result = turn.final_message
 
         # Store result for _run_stream_once() to pick up — avoids race

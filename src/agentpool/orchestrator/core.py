@@ -1494,8 +1494,15 @@ class SessionController:
         self._runs[run_handle.run_id] = run_handle
         session.current_run_id = run_handle.run_id
         task = asyncio.create_task(self._consume_run(run_handle, content))
+        # Keep a strong reference to prevent GC from destroying the task.
+        if not hasattr(self, "_background_tasks"):
+            self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._background_tasks.add(task)
         task.add_done_callback(
-            lambda _t, rid=run_handle.run_id: self._cleanup_run(rid)
+            lambda _t, rid=run_handle.run_id: (
+                self._background_tasks.discard(_t),
+                self._cleanup_run(rid),
+            )
         )
         return run_handle
 

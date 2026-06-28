@@ -108,7 +108,6 @@ class ACPTurn(Turn):
         self._acp_client = acp_client
         self._prompts = prompts
         self._run_ctx = run_ctx
-        self._initial_message_history = message_history
         self._session_id = session_id
 
     async def execute(self) -> AsyncIterator[RichAgentStreamEvent]:
