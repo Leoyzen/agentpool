@@ -1592,6 +1592,12 @@ class SessionController:
         run_handle = self._runs.pop(run_id, None)
         if run_handle is not None:
             run_handle.complete_event.set()
+            # Clear current_run_id if it still points to this run.
+            # This is a safety net — normally start() clears it, but if
+            # the run died unexpectedly, current_run_id would be stale.
+            session = self.get_session(run_handle.session_id)
+            if session is not None and session.current_run_id == run_id:
+                session.current_run_id = None
 
     def _count_mcp_processes(self) -> int:
         """Count active MCP processes across all per-session agents.
