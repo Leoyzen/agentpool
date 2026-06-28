@@ -7,7 +7,6 @@ from contextlib import suppress
 import os
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-import anyio
 import typer as t
 
 from agentpool_cli import log
@@ -75,15 +74,15 @@ def serve_command(
 
                     async def _consume_stream_complete() -> None:
                         """Subscribe to EventBus and print completed messages."""
+                        from agentpool.orchestrator.core import drain_and_merge
+
                         stream: Any = None
                         try:
                             stream = await _event_bus.subscribe("_mcp_messages", scope="all")
                             async with stream:
-                                async for envelope in stream:
+                                async for envelope in drain_and_merge(stream):
                                     if isinstance(envelope.event, StreamCompleteEvent):
                                         on_message(envelope.event.message)
-                        except anyio.EndOfStream:
-                            pass
                         except asyncio.CancelledError:
                             pass
                         finally:

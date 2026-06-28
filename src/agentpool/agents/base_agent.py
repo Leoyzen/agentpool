@@ -1065,7 +1065,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Create local EventBus if not already set by SessionController
         _created_local_bus = run_ctx.event_bus is None
         if _created_local_bus:
-            from agentpool.orchestrator.core import EventBus
+            from agentpool.orchestrator.core import EventBus, drain_and_merge
 
             local_bus: EventBus = EventBus()
             run_ctx.event_bus = local_bus
@@ -1146,10 +1146,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
                     tg.start_soon(_non_native_publisher)
 
-                # Consumer: yield events from EventBus subscription.
+                # Consumer: yield events from EventBus subscription with drain-and-merge.
                 # RunStartedEvent is yielded by NativeTurn.execute() and
                 # flows through EventBus — no need to yield it separately.
-                async for envelope in stream:
+                async for envelope in drain_and_merge(stream):
                     event = envelope.event
                     yield event
                     if isinstance(event, (StreamCompleteEvent, RunErrorEvent)):

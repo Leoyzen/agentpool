@@ -205,6 +205,11 @@ class ProtocolEventConsumerMixin(ABC):
     async def _event_consumer_loop(self, session_id: str) -> None:
         """Read events from the subscription stream and dispatch to hooks.
 
+        Uses ``drain_and_merge()`` to consume events from the subscription
+        stream, which handles subscriber-side event coalescing by batching
+        and merging consecutive same-type events (e.g., ``PartDeltaEvent``
+        text chunks) before they reach ``_handle_event()``.
+
         The loop exits gracefully when the receive stream reaches
         EndOfStream (send stream closed), when ConsumerShutdown is raised
         from _handle_event(), or when the task is cancelled.
@@ -228,14 +233,11 @@ class ProtocolEventConsumerMixin(ABC):
             await self._before_consumer_loop(session_id)
             started = True
 
-            async for envelope in stream:
-                # Support both EventEnvelope wrappers (from EventBus) and
-                # raw events (e.g. in tests that put items directly on stream)
-                if not hasattr(envelope, "event"):
-                    from agentpool.orchestrator.core import EventEnvelope
+            # Deferred import to avoid circular dependency:
+            # agentpool.orchestrator.core -> agentpool_server.* -> mixins.py
+            from agentpool.orchestrator.core import drain_and_merge
 
-                    envelope = EventEnvelope(source_session_id=session_id, event=envelope)
-
+            async for envelope in drain_and_merge(stream):
                 if isinstance(envelope.event, SpawnSessionStart):
                     await self._on_spawn_session_start(session_id, envelope)
 

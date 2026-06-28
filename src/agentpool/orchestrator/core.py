@@ -84,7 +84,6 @@ class EventEnvelope:
 
 
 logger = get_logger(__name__)
-_coalescing_logger = get_logger("agentpool.orchestrator.eventbus.coalescing")
 
 # Constants
 DEFAULT_QUEUE_MAXSIZE: Final[int] = 1000
@@ -216,11 +215,6 @@ class SessionState:
 # ---------------------------------------------------------------------------
 # Event coalescing infrastructure (Task 1 — fields + functions only)
 # ---------------------------------------------------------------------------
-
-# Lock hierarchy:
-#   _buf_lock  — guards _buffers, _last_keys (coalescing state)
-#   _lock      — guards _subscribers, _stream_pairs, _replay_buffers (subscriber state)
-# NEVER nest: _buf_lock → _lock is correct; _lock → _buf_lock is a DEADLOCK.
 
 
 def _is_immediate(event: Any) -> bool:
@@ -388,11 +382,83 @@ def _merge_envelopes(envelopes: list[EventEnvelope]) -> list[EventEnvelope]:
     return result
 
 
+async def drain_and_merge(
+    stream: anyio.abc.ObjectReceiveStream[Any],
+) -> AsyncIterator[EventEnvelope]:
+    """Drain all queued events from a subscriber stream and merge consecutive same-type events.
+
+    Performs subscriber-side coalescing: blocks on ``await stream.receive()``
+    until at least one item is available, then drains all immediately-available
+    items via ``receive_nowait()`` until ``WouldBlock``. The resulting batch is
+    merged via ``_merge_envelopes()`` and each merged envelope is yielded.
+    Repeats until the stream signals ``EndOfStream`` or ``ClosedResourceError``.
+
+    Raw events (not wrapped in ``EventEnvelope``) are automatically wrapped with
+    an empty ``source_session_id`` for compatibility with test streams.
+
+    Usage:
+        send_stream, receive_stream = anyio.create_memory_object_stream(64)
+        async for envelope in drain_and_merge(receive_stream):
+            event = envelope.event
+            # handle event
+
+    Args:
+        stream: The ``ObjectReceiveStream`` to drain. Items may be
+            ``EventEnvelope`` instances or raw events.
+
+    Yields:
+        Merged ``EventEnvelope`` instances ready for dispatch.
+
+    !!! note "Blocking behavior"
+        This function blocks on ``stream.receive()`` between batches. Once an
+        item arrives, it non-blockingly drains ``receive_nowait()`` until
+        ``WouldBlock`` to form a batch, merges via ``_merge_envelopes()``,
+        yields each merged envelope, then blocks again for the next batch.
+    """
+    while True:
+        # Block until at least one item is available.
+        try:
+            first = await stream.receive()
+        except (anyio.EndOfStream, anyio.ClosedResourceError):
+            return
+
+        # Wrap raw events (e.g., from test streams) in EventEnvelope.
+        if not isinstance(first, EventEnvelope):
+            first = EventEnvelope(source_session_id="", event=first)
+
+        batch: list[EventEnvelope] = [first]
+
+        # Drain all immediately-available items without blocking.
+        while True:
+            try:
+                item = stream.receive_nowait()
+            except anyio.WouldBlock:
+                break
+            except (anyio.EndOfStream, anyio.ClosedResourceError):
+                # Stream closed mid-drain: process batch then terminate.
+                for env in _merge_envelopes(batch):
+                    yield env
+                return
+            if not isinstance(item, EventEnvelope):
+                item = EventEnvelope(source_session_id="", event=item)
+            batch.append(item)
+
+        # Merge and yield the batch.
+        for env in _merge_envelopes(batch):
+            yield env
+
+
 class EventBus:
     """PubSub event bus for cross-turn event streaming.
 
     Decouples event producers (agents) from consumers (protocol handlers).
-    Events are broadcast to all subscribers for a given session.
+    Events are broadcast to all subscribers for a given session via ``_send()``
+    with no publish-side buffering or coalescing.
+
+    Event coalescing/merging is the subscriber's responsibility. Subscribers
+    should drain their receive stream using ``drain_and_merge()`` to batch-merge
+    consecutive same-type events (e.g., ``PartDeltaEvent`` text chunks) for
+    efficient processing.
 
     Safety features:
     - Bounded memory streams with hybrid backpressure (drop oldest, then drop subscriber)
@@ -405,7 +471,6 @@ class EventBus:
         max_queue_size: int = DEFAULT_QUEUE_MAXSIZE,
         replay_buffer_size: int = 100,
         session_controller: SessionController | None = None,
-        max_coalesce_buffer: int = 20,
     ) -> None:
         """Initialize the event bus.
 
@@ -413,8 +478,6 @@ class EventBus:
             max_queue_size: Maximum buffer size for subscriber memory streams.
             replay_buffer_size: Maximum number of events retained per session for replay.
             session_controller: Optional session controller for hierarchy queries.
-            max_coalesce_buffer: Maximum number of batchable events to buffer per session
-                before flushing. Prevents unbounded latency on long same-type sequences.
         """
         self._subscribers: dict[
             str, list[tuple[anyio.abc.ObjectSendStream[EventEnvelope], str]]
@@ -426,12 +489,6 @@ class EventBus:
         self._replay_buffer_size = replay_buffer_size
         self._session_controller = session_controller
         self._replay_buffers: dict[str, deque[EventEnvelope]] = {}
-
-        # Coalescing state (Task 1 — infrastructure only, not yet wired into publish)
-        self._buffers: dict[str, list[EventEnvelope]] = {}
-        self._last_keys: dict[str, tuple[str, str]] = {}
-        self._buf_lock = anyio.Lock()
-        self._max_buffer = max_coalesce_buffer
 
     async def subscribe(
         self, session_id: str, scope: str = "session"
@@ -624,142 +681,31 @@ class EventBus:
             with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
                 await stream.aclose()
 
-    async def _drain_buffer(self, session_id: str) -> None:
-        """Atomically pop all buffered events and dispatch them.
-
-        Pops the buffer and last-key under ``_buf_lock``, then merges and
-        sends outside the lock. ``_send()`` acquires ``_lock`` internally.
-        Idempotent — a second caller gets an empty list.
-
-        Args:
-            session_id: The session whose buffer to drain.
-        """
-        async with self._buf_lock:
-            batch = self._buffers.pop(session_id, [])
-            self._last_keys.pop(session_id, None)
-
-        if not batch:
-            _coalescing_logger.debug("Buffer drain no-op (empty buffer)", session_id=session_id)
-            return
-
-        merged_envelopes = _merge_envelopes(batch)
-        _coalescing_logger.debug(
-            "Buffer drained",
-            session_id=session_id,
-            event_count=len(batch),
-            merged_count=len(merged_envelopes),
-        )
-        for merged in merged_envelopes:
-            await self._send(session_id, merged)
-
     async def publish(self, session_id: str, event: Any) -> None:
         """Publish an event to all subscribers for a session.
 
-        Coalescing logic:
-        - **Immediate** events (lifecycle): drain buffer, then send directly.
-        - **Batchable** events (text/thinking/tool_call deltas, progress,
-          plan updates): buffer per-session. Flush on type-change or when
-          buffer cap is reached.
-        - **Passthrough** events (SubAgentEvent, CustomEvent,
-          ToolResultMetadataEvent): drain buffer, then send individually.
-          ``PartDeltaEvent`` with ``delta=None`` is dropped entirely.
-
-        Lock hierarchy: ``_buf_lock`` is acquired briefly then released
-        before ``_send()`` acquires ``_lock``. Never nested.
+        Wraps the event in an EventEnvelope and sends it directly via _send().
+        PartDeltaEvent with delta=None is dropped (no content to deliver).
+        Coalescing is handled subscriber-side by drain_and_merge().
 
         Args:
             session_id: The session that produced the event.
             event: The event to broadcast.
         """
-        envelope = EventEnvelope(source_session_id=session_id, event=event)
-
-        # Immediate events: drain buffer then send directly
-        if _is_immediate(event):
-            buffered_count = len(self._buffers.get(session_id, []))
-            _coalescing_logger.debug(
-                "Immediate event drains buffer",
-                session_id=session_id,
-                event_type=type(event).__name__,
-                buffered_count=buffered_count,
-            )
-            await self._drain_buffer(session_id)
-            await self._send(session_id, envelope)
-            return
-
-        # Drop PartDeltaEvent with delta=None entirely
         if isinstance(event, PartDeltaEvent) and event.delta is None:
-            _coalescing_logger.debug("None-delta PartDeltaEvent dropped", session_id=session_id)
             return
-
-        key = _merge_key(event)
-
-        # Passthrough events (key is None but not a None-delta PartDeltaEvent):
-        # drain buffer then send individually
-        if key is None:
-            buffered_count = len(self._buffers.get(session_id, []))
-            _coalescing_logger.debug(
-                "Passthrough event drains buffer",
-                session_id=session_id,
-                event_type=type(event).__name__,
-                buffered_count=buffered_count,
-            )
-            await self._drain_buffer(session_id)
-            await self._send(session_id, envelope)
-            return
-
-        # Batchable events: buffer with type-change trigger + buffer cap
-        should_flush = False
-        prev_batch: list[EventEnvelope] = []
-        async with self._buf_lock:
-            buf = self._buffers.setdefault(session_id, [])
-            last_key = self._last_keys.get(session_id)
-            if last_key is not None and last_key != key:
-                _coalescing_logger.debug(
-                    "Type-change flush triggered",
-                    session_id=session_id,
-                    old_key=last_key,
-                    new_key=key,
-                )
-            if last_key is not None and len(buf) >= self._max_buffer:
-                _coalescing_logger.warning(
-                    "Coalescing buffer cap reached, flushing",
-                    session_id=session_id,
-                    cap=self._max_buffer,
-                    event_type=type(event).__name__,
-                )
-            if last_key != key or len(buf) >= self._max_buffer:
-                prev_batch = buf.copy()
-                buf.clear()
-                buf.append(envelope)
-                self._last_keys[session_id] = key
-                should_flush = True
-            else:
-                buf.append(envelope)
-
-        # _buf_lock released here. _send() acquires _lock internally.
-        if should_flush and prev_batch:
-            for merged in _merge_envelopes(prev_batch):
-                await self._send(session_id, merged)
+        envelope = EventEnvelope(source_session_id=session_id, event=event)
+        await self._send(session_id, envelope)
 
     async def close_session(self, session_id: str) -> None:
         """Close all subscriptions for a session.
 
-        Drains the coalescing buffer first, then closes all send streams
-        to signal EndOfStream to consumers, and clears the replay buffer.
+        Closes all send streams to signal EndOfStream to consumers,
+        and clears the replay buffer.
 
         Args:
             session_id: The session to close subscriptions for.
         """
-        # Drain coalescing buffer before closing subscribers
-        buffered_count = len(self._buffers.get(session_id, []))
-        if buffered_count:
-            _coalescing_logger.debug(
-                "Draining buffer before session close",
-                session_id=session_id,
-                event_count=buffered_count,
-            )
-        await self._drain_buffer(session_id)
-
         self._replay_buffers.pop(session_id, None)
 
         async with self._lock:

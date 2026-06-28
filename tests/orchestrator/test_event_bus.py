@@ -7,10 +7,16 @@ shutdown, subscriber lifecycle management, and event coalescing infrastructure.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from typing import Any
 
 import anyio
+from pydantic_ai import (
+    PartEndEvent,
+    TextPart,
+    TextPartDelta,
+    ThinkingPartDelta,
+    ToolCallPartDelta,
+)
 import pytest
 
 from agentpool.agents.events import (
@@ -46,14 +52,7 @@ from agentpool.orchestrator.core import (
     _merge_thinking_deltas,
     _merge_tool_call_deltas,
     _rebind,
-)
-from pydantic_ai import (
-    PartEndEvent,
-    TextPart,
-    TextPartDelta,
-    ThinkingPart,
-    ThinkingPartDelta,
-    ToolCallPartDelta,
+    drain_and_merge,
 )
 
 
@@ -1208,148 +1207,110 @@ def test_rebind_creates_new_envelope_instance() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Event coalescing publish (Task 2)
+# Subscriber-side coalescing via drain_and_merge (Task 7)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
 async def test_coalescing_type_change_flush() -> None:
-    """Text deltas are flushed when a thinking delta arrives (type change)."""
-    bus = EventBus(max_queue_size=100, max_coalesce_buffer=20)
+    """Text deltas and thinking deltas are merged separately by drain_and_merge."""
+    bus = EventBus(max_queue_size=100)
     stream = await bus.subscribe("sess-1")
 
-    # Publish text deltas — buffered, not yet sent
+    # Publish text deltas then thinking delta — all sent immediately via _send()
     await bus.publish("sess-1", PartDeltaEvent.text(0, "hello "))
     await bus.publish("sess-1", PartDeltaEvent.text(0, "world"))
-
-    # Nothing received yet — text deltas are buffered
-    assert len(await _drain_stream(stream)) == 0
-
-    # Publish thinking delta — type change triggers flush of text batch
     await bus.publish("sess-1", PartDeltaEvent.thinking(0, "thinking..."))
+    await bus.close_session("sess-1")
 
-    # Subscriber receives merged text delta
-    items = await _drain_stream(stream)
-    assert len(items) == 1
-    assert isinstance(items[0].event, PartDeltaEvent)
-    assert isinstance(items[0].event.delta, TextPartDelta)
-    assert items[0].event.delta.content_delta == "hello world"
-
-    # Thinking delta is still buffered — flush via immediate event
-    await bus.publish(
-        "sess-1", StreamCompleteEvent(message=ChatMessage(content="done", role="assistant"))
-    )
-
-    items = await _drain_stream(stream)
-    assert len(items) == 2
-    assert isinstance(items[0].event, PartDeltaEvent)
-    assert isinstance(items[0].event.delta, ThinkingPartDelta)
-    assert items[0].event.delta.content_delta == "thinking..."
-    assert isinstance(items[1].event, StreamCompleteEvent)
-
-
-@pytest.mark.anyio
-async def test_coalescing_buffer_cap_flush() -> None:
-    """Buffer cap (3) triggers flush when exceeded."""
-    bus = EventBus(max_queue_size=100, max_coalesce_buffer=3)
-    stream = await bus.subscribe("sess-1")
-
-    # Publish 3 text deltas — all buffered (cap not yet reached)
-    for i in range(3):
-        await bus.publish("sess-1", PartDeltaEvent.text(0, f"chunk{i}"))
-
-    assert len(await _drain_stream(stream)) == 0
-
-    # 4th text delta — cap reached, flush previous 3
-    await bus.publish("sess-1", PartDeltaEvent.text(0, "chunk3"))
-
-    items = await _drain_stream(stream)
-    assert len(items) == 1
-    assert isinstance(items[0].event, PartDeltaEvent)
-    assert isinstance(items[0].event.delta, TextPartDelta)
-    assert items[0].event.delta.content_delta == "chunk0chunk1chunk2"
+    # Consumer drains and merges — text deltas merge into 1, thinking is separate
+    results = [env async for env in drain_and_merge(stream)]
+    assert len(results) == 2
+    # First: merged text deltas
+    assert isinstance(results[0].event, PartDeltaEvent)
+    assert isinstance(results[0].event.delta, TextPartDelta)
+    assert results[0].event.delta.content_delta == "hello world"
+    # Second: thinking delta (single, no merge needed)
+    assert isinstance(results[1].event, PartDeltaEvent)
+    assert isinstance(results[1].event.delta, ThinkingPartDelta)
+    assert results[1].event.delta.content_delta == "thinking..."
 
 
 @pytest.mark.anyio
 async def test_coalescing_immediate_event_drains_buffer() -> None:
-    """StreamCompleteEvent (immediate) drains buffer before sending itself."""
-    bus = EventBus(max_queue_size=100, max_coalesce_buffer=20)
+    """Immediate event in drain batch delivered individually alongside merged batchable."""
+    bus = EventBus(max_queue_size=100)
     stream = await bus.subscribe("sess-1")
 
-    # Buffer some text deltas
+    # Batchable events then immediate event — all sent immediately
     await bus.publish("sess-1", PartDeltaEvent.text(0, "hello "))
     await bus.publish("sess-1", PartDeltaEvent.text(0, "world"))
-
-    assert len(await _drain_stream(stream)) == 0
-
-    # Publish immediate event — drains buffer first
     await bus.publish(
         "sess-1", StreamCompleteEvent(message=ChatMessage(content="done", role="assistant"))
     )
+    await bus.close_session("sess-1")
 
-    items = await _drain_stream(stream)
-    assert len(items) == 2
-    # First: drained text deltas (merged)
-    assert isinstance(items[0].event, PartDeltaEvent)
-    assert isinstance(items[0].event.delta, TextPartDelta)
-    assert items[0].event.delta.content_delta == "hello world"
-    # Second: the immediate event itself
-    assert isinstance(items[1].event, StreamCompleteEvent)
+    # Consumer drains: text deltas merged, StreamCompleteEvent passthrough
+    results = [env async for env in drain_and_merge(stream)]
+    assert len(results) == 2
+    # First: merged text deltas
+    assert isinstance(results[0].event, PartDeltaEvent)
+    assert isinstance(results[0].event.delta, TextPartDelta)
+    assert results[0].event.delta.content_delta == "hello world"
+    # Second: immediate event (passthrough, not merged with text)
+    assert isinstance(results[1].event, StreamCompleteEvent)
 
 
 @pytest.mark.anyio
 async def test_coalescing_immediate_event_empty_buffer() -> None:
-    """Immediate event with empty buffer is a no-op drain + direct send."""
-    bus = EventBus(max_queue_size=100, max_coalesce_buffer=20)
+    """Immediate event with no batchable events is delivered individually."""
+    bus = EventBus(max_queue_size=100)
     stream = await bus.subscribe("sess-1")
 
     await bus.publish(
         "sess-1", StreamCompleteEvent(message=ChatMessage(content="done", role="assistant"))
     )
+    await bus.close_session("sess-1")
 
-    items = await _drain_stream(stream)
-    assert len(items) == 1
-    assert isinstance(items[0].event, StreamCompleteEvent)
+    results = [env async for env in drain_and_merge(stream)]
+    assert len(results) == 1
+    assert isinstance(results[0].event, StreamCompleteEvent)
 
 
 @pytest.mark.anyio
 async def test_coalescing_per_session_isolation() -> None:
-    """Draining session A's buffer does not affect session B."""
-    bus = EventBus(max_queue_size=100, max_coalesce_buffer=20)
+    """Two sessions' consumers drain independently via drain_and_merge."""
+    bus = EventBus(max_queue_size=100)
     stream_a = await bus.subscribe("sess-a")
     stream_b = await bus.subscribe("sess-b")
 
-    # Buffer text deltas in both sessions
+    # Publish text deltas to both sessions — all sent immediately
     await bus.publish("sess-a", PartDeltaEvent.text(0, "hello-a"))
     await bus.publish("sess-b", PartDeltaEvent.text(0, "hello-b"))
+    await bus.close_session("sess-a")
+    await bus.close_session("sess-b")
 
-    # Nothing received yet
-    assert len(await _drain_stream(stream_a)) == 0
-    assert len(await _drain_stream(stream_b)) == 0
+    # Each consumer drains independently
+    results_a = [env async for env in drain_and_merge(stream_a)]
+    results_b = [env async for env in drain_and_merge(stream_b)]
 
-    # Publish immediate event to A — drains A's buffer only
-    await bus.publish("sess-a", RunStartedEvent(session_id="sess-a", run_id="r1"))
+    assert len(results_a) == 1
+    assert isinstance(results_a[0].event, PartDeltaEvent)
+    assert results_a[0].event.delta.content_delta == "hello-a"
 
-    # A receives merged text + immediate
-    items_a = await _drain_stream(stream_a)
-    assert len(items_a) == 2
-    assert isinstance(items_a[0].event, PartDeltaEvent)
-    assert items_a[0].event.delta.content_delta == "hello-a"
-    assert isinstance(items_a[1].event, RunStartedEvent)
-
-    # B still has buffered event, nothing received
-    assert len(await _drain_stream(stream_b)) == 0
+    assert len(results_b) == 1
+    assert isinstance(results_b[0].event, PartDeltaEvent)
+    assert results_b[0].event.delta.content_delta == "hello-b"
 
 
 @pytest.mark.anyio
 async def test_coalescing_passthrough_subagent_drains_buffer() -> None:
-    """SubAgentEvent (passthrough) drains buffer before sending itself."""
-    bus = EventBus(max_queue_size=100, max_coalesce_buffer=20)
+    """SubAgentEvent is passthrough, delivered individually by drain_and_merge."""
+    bus = EventBus(max_queue_size=100)
     stream = await bus.subscribe("sess-1")
 
     await bus.publish("sess-1", PartDeltaEvent.text(0, "hello "))
     await bus.publish("sess-1", PartDeltaEvent.text(0, "world"))
-    assert len(await _drain_stream(stream)) == 0
 
     sub_event = SubAgentEvent(
         source_name="agent",
@@ -1357,164 +1318,135 @@ async def test_coalescing_passthrough_subagent_drains_buffer() -> None:
         event=RunStartedEvent(session_id="s", run_id="r"),
     )
     await bus.publish("sess-1", sub_event)
+    await bus.close_session("sess-1")
 
-    items = await _drain_stream(stream)
-    assert len(items) == 2
-    assert isinstance(items[0].event, PartDeltaEvent)
-    assert items[0].event.delta.content_delta == "hello world"
-    assert isinstance(items[1].event, SubAgentEvent)
+    results = [env async for env in drain_and_merge(stream)]
+    assert len(results) == 2
+    # First: merged text deltas
+    assert isinstance(results[0].event, PartDeltaEvent)
+    assert results[0].event.delta.content_delta == "hello world"
+    # Second: passthrough subagent event
+    assert isinstance(results[1].event, SubAgentEvent)
 
 
 @pytest.mark.anyio
 async def test_coalescing_passthrough_custom_drains_buffer() -> None:
-    """CustomEvent (passthrough) drains buffer before sending itself."""
-    bus = EventBus(max_queue_size=100, max_coalesce_buffer=20)
+    """CustomEvent is passthrough, delivered individually by drain_and_merge."""
+    bus = EventBus(max_queue_size=100)
     stream = await bus.subscribe("sess-1")
 
     await bus.publish("sess-1", PartDeltaEvent.text(0, "data"))
-    assert len(await _drain_stream(stream)) == 0
-
     await bus.publish("sess-1", CustomEvent(event_data="test"))
+    await bus.close_session("sess-1")
 
-    items = await _drain_stream(stream)
-    assert len(items) == 2
-    assert isinstance(items[0].event, PartDeltaEvent)
-    assert items[0].event.delta.content_delta == "data"
-    assert isinstance(items[1].event, CustomEvent)
+    results = [env async for env in drain_and_merge(stream)]
+    assert len(results) == 2
+    # First: text delta
+    assert isinstance(results[0].event, PartDeltaEvent)
+    assert results[0].event.delta.content_delta == "data"
+    # Second: passthrough custom event
+    assert isinstance(results[1].event, CustomEvent)
 
 
 @pytest.mark.anyio
 async def test_coalescing_passthrough_tool_result_metadata_drains_buffer() -> None:
-    """ToolResultMetadataEvent (passthrough) drains buffer before sending itself."""
-    bus = EventBus(max_queue_size=100, max_coalesce_buffer=20)
+    """ToolResultMetadataEvent is passthrough, delivered individually."""
+    bus = EventBus(max_queue_size=100)
     stream = await bus.subscribe("sess-1")
 
     await bus.publish("sess-1", PartDeltaEvent.text(0, "data"))
-    assert len(await _drain_stream(stream)) == 0
-
     await bus.publish("sess-1", ToolResultMetadataEvent(tool_call_id="tc1", metadata={}))
+    await bus.close_session("sess-1")
 
-    items = await _drain_stream(stream)
-    assert len(items) == 2
-    assert isinstance(items[0].event, PartDeltaEvent)
-    assert items[0].event.delta.content_delta == "data"
-    assert isinstance(items[1].event, ToolResultMetadataEvent)
+    results = [env async for env in drain_and_merge(stream)]
+    assert len(results) == 2
+    # First: text delta
+    assert isinstance(results[0].event, PartDeltaEvent)
+    assert results[0].event.delta.content_delta == "data"
+    # Second: passthrough tool result metadata
+    assert isinstance(results[1].event, ToolResultMetadataEvent)
 
 
 @pytest.mark.anyio
 async def test_coalescing_non_consecutive_same_key_not_merged() -> None:
-    """text→thinking→text produces 3 separate dispatches (not merged)."""
-    bus = EventBus(max_queue_size=100, max_coalesce_buffer=20)
+    """Non-consecutive same-key events are NOT merged (separated by different-type event)."""
+    bus = EventBus(max_queue_size=100)
     stream = await bus.subscribe("sess-1")
 
+    # text→thinking→text: the two text deltas are separated by thinking
     await bus.publish("sess-1", PartDeltaEvent.text(0, "a"))
     await bus.publish("sess-1", PartDeltaEvent.thinking(0, "b"))
     await bus.publish("sess-1", PartDeltaEvent.text(0, "c"))
+    await bus.close_session("sess-1")
 
-    # text "a" flushed by thinking, thinking "b" flushed by text "c"
-    items = await _drain_stream(stream)
-    assert len(items) == 2
-    assert isinstance(items[0].event.delta, TextPartDelta)
-    assert items[0].event.delta.content_delta == "a"
-    assert isinstance(items[1].event.delta, ThinkingPartDelta)
-    assert items[1].event.delta.content_delta == "b"
-
-    # text "c" is still buffered — flush via immediate
-    await bus.publish(
-        "sess-1", StreamCompleteEvent(message=ChatMessage(content="done", role="assistant"))
-    )
-
-    items = await _drain_stream(stream)
-    assert len(items) == 2
-    assert isinstance(items[0].event.delta, TextPartDelta)
-    assert items[0].event.delta.content_delta == "c"
-    assert isinstance(items[1].event, StreamCompleteEvent)
+    # drain_and_merge groups consecutive same-key events
+    # "a" is its own group (text), "b" is its own group (thinking), "c" is its own group (text)
+    results = [env async for env in drain_and_merge(stream)]
+    assert len(results) == 3
+    assert isinstance(results[0].event.delta, TextPartDelta)
+    assert results[0].event.delta.content_delta == "a"
+    assert isinstance(results[1].event.delta, ThinkingPartDelta)
+    assert results[1].event.delta.content_delta == "b"
+    assert isinstance(results[2].event.delta, TextPartDelta)
+    assert results[2].event.delta.content_delta == "c"
 
 
 @pytest.mark.anyio
 async def test_coalescing_none_delta_dropped() -> None:
-    """PartDeltaEvent with delta=None is dropped entirely (not sent or buffered)."""
-    bus = EventBus(max_queue_size=100, max_coalesce_buffer=20)
+    """PartDeltaEvent with delta=None is dropped by publish()."""
+    bus = EventBus(max_queue_size=100)
     stream = await bus.subscribe("sess-1")
 
     none_delta: Any = PartDeltaEvent(index=0, delta=None)  # type: ignore[call-arg]
     await bus.publish("sess-1", none_delta)
+    await bus.close_session("sess-1")
 
-    assert len(await _drain_stream(stream)) == 0
+    # Stream closes immediately — no events to drain
+    results = [env async for env in drain_and_merge(stream)]
+    assert results == []
 
 
 @pytest.mark.anyio
 async def test_coalescing_plan_update_last_wins() -> None:
-    """Multiple PlanUpdateEvents merge to last-wins when flushed."""
-    bus = EventBus(max_queue_size=100, max_coalesce_buffer=20)
+    """PlanUpdateEvent uses last-wins merge in drain batch."""
+    bus = EventBus(max_queue_size=100)
     stream = await bus.subscribe("sess-1")
 
-    # Buffer multiple plan updates
+    # Publish multiple plan updates — all sent immediately
     await bus.publish("sess-1", PlanUpdateEvent(entries=[]))
     await bus.publish("sess-1", PlanUpdateEvent(entries=[]))
     await bus.publish("sess-1", PlanUpdateEvent(entries=[]))
+    await bus.close_session("sess-1")
 
-    assert len(await _drain_stream(stream)) == 0
-
-    # Flush via immediate event
-    await bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id="r1"))
-
-    items = await _drain_stream(stream)
-    # Only 1 PlanUpdateEvent (last-wins) + 1 RunStartedEvent
-    assert len(items) == 2
-    assert isinstance(items[0].event, PlanUpdateEvent)
-    assert isinstance(items[1].event, RunStartedEvent)
+    # Consumer drains: plan updates merge to last-wins
+    results = [env async for env in drain_and_merge(stream)]
+    assert len(results) == 1
+    assert isinstance(results[0].event, PlanUpdateEvent)
 
 
 @pytest.mark.anyio
 async def test_close_session_drains_buffer() -> None:
-    """close_session() drains buffered events before closing streams."""
-    bus = EventBus(max_queue_size=100, max_coalesce_buffer=20)
+    """close_session closes streams; consumer drains remaining events via drain_and_merge."""
+    bus = EventBus(max_queue_size=100)
     stream = await bus.subscribe("sess-1")
 
-    # Buffer some text deltas
+    # Publish text deltas — sent immediately
     await bus.publish("sess-1", PartDeltaEvent.text(0, "hello "))
     await bus.publish("sess-1", PartDeltaEvent.text(0, "world"))
 
-    assert len(await _drain_stream(stream)) == 0
-
-    # Close session — should drain buffer first
+    # Close session — closes send streams, consumer drains remaining events
     await bus.close_session("sess-1")
 
-    received: list[Any] = []
-    async for envelope in stream:
-        received.append(envelope)
-
-    assert len(received) == 1
-    assert isinstance(received[0].event, PartDeltaEvent)
-    assert received[0].event.delta.content_delta == "hello world"
-
-
-@pytest.mark.anyio
-async def test_drain_buffer_idempotent() -> None:
-    """Second _drain_buffer call gets empty list (idempotent)."""
-    bus = EventBus(max_queue_size=100, max_coalesce_buffer=20)
-    stream = await bus.subscribe("sess-1")
-
-    # Buffer some text deltas
-    await bus.publish("sess-1", PartDeltaEvent.text(0, "hello "))
-    await bus.publish("sess-1", PartDeltaEvent.text(0, "world"))
-
-    # First drain — sends merged batch
-    await bus._drain_buffer("sess-1")
-    items = await _drain_stream(stream)
-    assert len(items) == 1
-    assert items[0].event.delta.content_delta == "hello world"
-
-    # Second drain — empty buffer, no send
-    await bus._drain_buffer("sess-1")
-    assert len(await _drain_stream(stream)) == 0
+    results = [env async for env in drain_and_merge(stream)]
+    assert len(results) == 1
+    assert isinstance(results[0].event, PartDeltaEvent)
+    assert results[0].event.delta.content_delta == "hello world"
 
 
 @pytest.mark.anyio
 async def test_concurrent_publish_and_close_session_no_deadlock() -> None:
     """Concurrent publish() and close_session() complete without deadlock."""
-    bus = EventBus(max_queue_size=100, max_coalesce_buffer=20)
+    bus = EventBus(max_queue_size=100)
     _ = await bus.subscribe("sess-1")
 
     async def publish_loop() -> None:
@@ -1528,3 +1460,374 @@ async def test_concurrent_publish_and_close_session_no_deadlock() -> None:
         async with anyio.create_task_group() as tg:
             tg.start_soon(publish_loop)
             tg.start_soon(close_loop)
+
+
+# ---------------------------------------------------------------------------
+# Additional subscriber-side coalescing tests (Task 7)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_coalescing_100_consecutive_text_deltas() -> None:
+    """100 consecutive text deltas merge into single event with no warning."""
+    bus = EventBus(max_queue_size=200)
+    stream = await bus.subscribe("sess-1")
+
+    for i in range(100):
+        await bus.publish("sess-1", PartDeltaEvent.text(0, f"chunk{i} "))
+    await bus.close_session("sess-1")
+
+    results = [env async for env in drain_and_merge(stream)]
+    assert len(results) == 1
+    assert isinstance(results[0].event, PartDeltaEvent)
+    assert isinstance(results[0].event.delta, TextPartDelta)
+    expected = "".join(f"chunk{i} " for i in range(100))
+    assert results[0].event.delta.content_delta == expected
+
+
+@pytest.mark.anyio
+async def test_coalescing_lifecycle_alongside_batchable() -> None:
+    """Lifecycle event in drain batch delivered individually alongside merged batchable."""
+    bus = EventBus(max_queue_size=100)
+    stream = await bus.subscribe("sess-1")
+
+    await bus.publish("sess-1", PartDeltaEvent.text(0, "hello "))
+    await bus.publish("sess-1", PartDeltaEvent.text(0, "world"))
+    await bus.publish(
+        "sess-1",
+        ToolCallStartEvent(tool_name="bash", tool_call_id="tc1", title="Running bash"),
+    )
+    await bus.close_session("sess-1")
+
+    results = [env async for env in drain_and_merge(stream)]
+    assert len(results) == 2
+    # First: merged text deltas
+    assert isinstance(results[0].event, PartDeltaEvent)
+    assert isinstance(results[0].event.delta, TextPartDelta)
+    assert results[0].event.delta.content_delta == "hello world"
+    # Second: lifecycle event (passthrough)
+    assert isinstance(results[1].event, ToolCallStartEvent)
+
+
+@pytest.mark.anyio
+async def test_coalescing_passthrough_alongside_batchable() -> None:
+    """Passthrough event in drain batch delivered individually alongside merged batchable."""
+    bus = EventBus(max_queue_size=100)
+    stream = await bus.subscribe("sess-1")
+
+    await bus.publish("sess-1", PartDeltaEvent.text(0, "data1 "))
+    await bus.publish("sess-1", PartDeltaEvent.text(0, "data2"))
+    sub_event = SubAgentEvent(
+        source_name="worker",
+        source_type="agent",
+        event=RunStartedEvent(session_id="s", run_id="r"),
+    )
+    await bus.publish("sess-1", sub_event)
+    await bus.close_session("sess-1")
+
+    results = [env async for env in drain_and_merge(stream)]
+    assert len(results) == 2
+    # First: merged text deltas
+    assert isinstance(results[0].event, PartDeltaEvent)
+    assert results[0].event.delta.content_delta == "data1 data2"
+    # Second: passthrough subagent event
+    assert isinstance(results[1].event, SubAgentEvent)
+
+
+@pytest.mark.anyio
+async def test_coalescing_per_session_drain_isolation() -> None:
+    """Two sessions' consumers drain independently with mixed event types."""
+    bus = EventBus(max_queue_size=100)
+    stream_a = await bus.subscribe("sess-a")
+    stream_b = await bus.subscribe("sess-b")
+
+    # Session A: text deltas + lifecycle event
+    await bus.publish("sess-a", PartDeltaEvent.text(0, "a1 "))
+    await bus.publish("sess-a", PartDeltaEvent.text(0, "a2"))
+    await bus.publish("sess-a", RunStartedEvent(session_id="sess-a", run_id="r1"))
+
+    # Session B: thinking deltas + lifecycle event
+    await bus.publish("sess-b", PartDeltaEvent.thinking(0, "b1 "))
+    await bus.publish("sess-b", PartDeltaEvent.thinking(0, "b2"))
+    await bus.publish("sess-b", RunStartedEvent(session_id="sess-b", run_id="r2"))
+
+    await bus.close_session("sess-a")
+    await bus.close_session("sess-b")
+
+    results_a = [env async for env in drain_and_merge(stream_a)]
+    results_b = [env async for env in drain_and_merge(stream_b)]
+
+    # Session A: merged text + lifecycle
+    assert len(results_a) == 2
+    assert isinstance(results_a[0].event, PartDeltaEvent)
+    assert isinstance(results_a[0].event.delta, TextPartDelta)
+    assert results_a[0].event.delta.content_delta == "a1 a2"
+    assert isinstance(results_a[1].event, RunStartedEvent)
+
+    # Session B: merged thinking + lifecycle
+    assert len(results_b) == 2
+    assert isinstance(results_b[0].event, PartDeltaEvent)
+    assert isinstance(results_b[0].event.delta, ThinkingPartDelta)
+    assert results_b[0].event.delta.content_delta == "b1 b2"
+    assert isinstance(results_b[1].event, RunStartedEvent)
+
+
+@pytest.mark.anyio
+async def test_coalescing_plan_update_last_wins_in_drain() -> None:
+    """PlanUpdateEvent last-wins merge in drain batch alongside other events."""
+    bus = EventBus(max_queue_size=100)
+    stream = await bus.subscribe("sess-1")
+
+    # Publish plan updates interleaved with text deltas
+    await bus.publish("sess-1", PartDeltaEvent.text(0, "text1 "))
+    await bus.publish("sess-1", PlanUpdateEvent(entries=[]))
+    await bus.publish("sess-1", PlanUpdateEvent(entries=[]))
+    await bus.publish("sess-1", PartDeltaEvent.text(0, "text2"))
+    await bus.close_session("sess-1")
+
+    # drain_and_merge groups by consecutive merge_key:
+    # text1 → ("delta_text","") group, plan+plan → ("plan","") group, text2 → ("delta_text","") group
+    results = [env async for env in drain_and_merge(stream)]
+    assert len(results) == 3
+    # First: text1 (single text delta)
+    assert isinstance(results[0].event, PartDeltaEvent)
+    assert results[0].event.delta.content_delta == "text1 "
+    # Second: plan update (last-wins, 2 merged into 1)
+    assert isinstance(results[1].event, PlanUpdateEvent)
+    # Third: text2 (single text delta)
+    assert isinstance(results[2].event, PartDeltaEvent)
+    assert results[2].event.delta.content_delta == "text2"
+
+
+@pytest.mark.anyio
+async def test_merge_helpers_callable_without_instance() -> None:
+    """Merge helpers can be called directly without an EventBus instance."""
+    # _merge_text_deltas
+    text_events = [
+        PartDeltaEvent.text(0, "hello "),
+        PartDeltaEvent.text(0, "world"),
+    ]
+    merged_text = _merge_text_deltas(text_events)
+    assert isinstance(merged_text.delta, TextPartDelta)
+    assert merged_text.delta.content_delta == "hello world"
+
+    # _merge_thinking_deltas
+    thinking_events = [
+        PartDeltaEvent.thinking(0, "think "),
+        PartDeltaEvent.thinking(0, "ing"),
+    ]
+    merged_thinking = _merge_thinking_deltas(thinking_events)
+    assert isinstance(merged_thinking.delta, ThinkingPartDelta)
+    assert merged_thinking.delta.content_delta == "think ing"
+
+    # _merge_tool_call_deltas
+    tool_events = [
+        PartDeltaEvent(index=0, delta=ToolCallPartDelta(args_delta="arg1", tool_call_id="tc1")),
+        PartDeltaEvent(index=0, delta=ToolCallPartDelta(args_delta="arg2", tool_call_id="tc1")),
+    ]
+    merged_tool = _merge_tool_call_deltas(tool_events)
+    assert isinstance(merged_tool.delta, ToolCallPartDelta)
+    assert merged_tool.delta.args_delta == "arg1arg2"
+
+    # _merge_envelopes
+    envelopes = [
+        EventEnvelope(source_session_id="s1", event=PartDeltaEvent.text(0, "a")),
+        EventEnvelope(source_session_id="s1", event=PartDeltaEvent.text(0, "b")),
+    ]
+    merged_envs = _merge_envelopes(envelopes)
+    assert len(merged_envs) == 1
+    assert isinstance(merged_envs[0].event, PartDeltaEvent)
+    assert merged_envs[0].event.delta.content_delta == "ab"
+
+
+@pytest.mark.anyio
+async def test_coalescing_spawn_session_start_in_drain() -> None:
+    """SpawnSessionStart is an immediate event that does not merge with batchable."""
+    bus = EventBus(max_queue_size=100)
+    stream = await bus.subscribe("sess-1")
+
+    # Publish text deltas then SpawnSessionStart — all sent immediately
+    await bus.publish("sess-1", PartDeltaEvent.text(0, "before "))
+    await bus.publish("sess-1", PartDeltaEvent.text(0, "spawn"))
+    spawn_event = SpawnSessionStart(
+        child_session_id="sess-child",
+        parent_session_id="sess-1",
+        spawn_mechanism="spawn",
+        source_name="worker",
+        source_type="agent",
+        description="Spawning worker agent",
+    )
+    await bus.publish("sess-1", spawn_event)
+    await bus.close_session("sess-1")
+
+    # drain_and_merge: text deltas merge, SpawnSessionStart is passthrough
+    results = [env async for env in drain_and_merge(stream)]
+    assert len(results) == 2
+    # First: merged text deltas
+    assert isinstance(results[0].event, PartDeltaEvent)
+    assert isinstance(results[0].event.delta, TextPartDelta)
+    assert results[0].event.delta.content_delta == "before spawn"
+    # Second: SpawnSessionStart (passthrough/immediate, not merged)
+    assert isinstance(results[1].event, SpawnSessionStart)
+
+
+@pytest.mark.anyio
+async def test_coalescing_noop_consumer_drains_queue() -> None:
+    """When consumer skips processing, drain_and_merge still drains the queue."""
+    bus = EventBus(max_queue_size=100)
+    stream = await bus.subscribe("sess-1")
+
+    # Publish events — all sent immediately via _send()
+    await bus.publish("sess-1", PartDeltaEvent.text(0, "chunk0 "))
+    await bus.publish("sess-1", PartDeltaEvent.text(0, "chunk1 "))
+    await bus.publish("sess-1", PartDeltaEvent.text(0, "chunk2"))
+    await bus.close_session("sess-1")
+
+    # drain_and_merge consumes all items from the stream
+    results = [env async for env in drain_and_merge(stream)]
+    assert len(results) == 1
+    assert results[0].event.delta.content_delta == "chunk0 chunk1 chunk2"
+
+    # Stream is fully drained — no items remain
+    remaining = await _drain_stream(stream)
+    assert remaining == []
+
+
+# ---------------------------------------------------------------------------
+# drain_and_merge() tests
+# ---------------------------------------------------------------------------
+
+
+def _text_env(session: str, index: int, content: str) -> EventEnvelope:
+    """Create an EventEnvelope wrapping a TextPartDelta event."""
+    return EventEnvelope(
+        source_session_id=session,
+        event=PartDeltaEvent.text(index, content),
+    )
+
+
+def _thinking_env(session: str, index: int, content: str) -> EventEnvelope:
+    """Create an EventEnvelope wrapping a ThinkingPartDelta event."""
+    return EventEnvelope(
+        source_session_id=session,
+        event=PartDeltaEvent.thinking(index, content),
+    )
+
+
+async def test_drain_and_merge_consecutive_same_type_merges() -> None:
+    """Consecutive same-type TextPartDelta events merge into 1 event."""
+    send, recv = anyio.create_memory_object_stream[Any](64)
+    await send.send(_text_env("s1", 0, "hello"))
+    await send.send(_text_env("s1", 0, " "))
+    await send.send(_text_env("s1", 0, "world"))
+    await send.aclose()
+
+    results = [env async for env in drain_and_merge(recv)]
+
+    assert len(results) == 1
+    merged = results[0]
+    assert isinstance(merged.event, PartDeltaEvent)
+    assert isinstance(merged.event.delta, TextPartDelta)
+    assert merged.event.delta.content_delta == "hello world"
+    assert merged.source_session_id == "s1"
+
+
+async def test_drain_and_merge_type_change_creates_separate_groups() -> None:
+    """Type-change within a batch produces separate merged groups."""
+    send, recv = anyio.create_memory_object_stream[Any](64)
+    await send.send(_text_env("s1", 0, "foo"))
+    await send.send(_text_env("s1", 0, "bar"))
+    await send.send(_thinking_env("s1", 0, "think"))
+    await send.send(_thinking_env("s1", 0, "ing"))
+    await send.aclose()
+
+    results = [env async for env in drain_and_merge(recv)]
+
+    assert len(results) == 2
+    # First merged: text deltas
+    assert isinstance(results[0].event, PartDeltaEvent)
+    assert isinstance(results[0].event.delta, TextPartDelta)
+    assert results[0].event.delta.content_delta == "foobar"
+    # Second merged: thinking deltas
+    assert isinstance(results[1].event, PartDeltaEvent)
+    assert isinstance(results[1].event.delta, ThinkingPartDelta)
+    assert results[1].event.delta.content_delta == "thinking"
+
+
+async def test_drain_and_merge_wouldblock_ends_batch() -> None:
+    """WouldBlock ends the current batch; merged result is yielded."""
+    send, recv = anyio.create_memory_object_stream[Any](64)
+    await send.send(_text_env("s1", 0, "x"))
+    await send.send(_text_env("s1", 0, "y"))
+    await send.send(_text_env("s1", 0, "z"))
+
+    results: list[EventEnvelope] = []
+
+    async def consumer() -> None:
+        async for env in drain_and_merge(recv):
+            results.append(env)
+            await send.aclose()
+
+    with anyio.fail_after(5):
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(consumer)
+
+    assert len(results) == 1
+    assert isinstance(results[0].event, PartDeltaEvent)
+    assert isinstance(results[0].event.delta, TextPartDelta)
+    assert results[0].event.delta.content_delta == "xyz"
+
+
+async def test_drain_and_merge_endofstream_mid_drain() -> None:
+    """EndOfStream mid-drain processes batch then terminates."""
+    send, recv = anyio.create_memory_object_stream[Any](64)
+    await send.send(_text_env("s1", 0, "a"))
+    await send.send(_text_env("s1", 0, "b"))
+    await send.send(_text_env("s1", 0, "c"))
+    await send.aclose()
+
+    results = [env async for env in drain_and_merge(recv)]
+
+    assert len(results) == 1
+    assert isinstance(results[0].event, PartDeltaEvent)
+    assert isinstance(results[0].event.delta, TextPartDelta)
+    assert results[0].event.delta.content_delta == "abc"
+
+
+async def test_drain_and_merge_endofstream_on_initial_receive() -> None:
+    """EndOfStream on initial receive terminates with no events yielded."""
+    send, recv = anyio.create_memory_object_stream[Any](64)
+    await send.aclose()
+
+    results = [env async for env in drain_and_merge(recv)]
+
+    assert results == []
+
+
+async def test_drain_and_merge_closed_resource_on_initial_receive() -> None:
+    """ClosedResourceError on initial receive terminates with no events."""
+    _send, recv = anyio.create_memory_object_stream[Any](64)
+    await recv.aclose()
+
+    results = [env async for env in drain_and_merge(recv)]
+
+    assert results == []
+
+
+async def test_drain_and_merge_raw_events_wrapped_and_merged() -> None:
+    """Raw events (not EventEnvelope) are wrapped and merged correctly."""
+    send, recv = anyio.create_memory_object_stream[Any](64)
+    await send.send(PartDeltaEvent.text(0, "raw"))
+    await send.send(PartDeltaEvent.text(0, "_"))
+    await send.send(PartDeltaEvent.text(0, "event"))
+    await send.aclose()
+
+    results = [env async for env in drain_and_merge(recv)]
+
+    assert len(results) == 1
+    merged = results[0]
+    assert isinstance(merged, EventEnvelope)
+    assert merged.source_session_id == ""
+    assert isinstance(merged.event, PartDeltaEvent)
+    assert isinstance(merged.event.delta, TextPartDelta)
+    assert merged.event.delta.content_delta == "raw_event"
