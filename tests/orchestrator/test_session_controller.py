@@ -520,6 +520,27 @@ def test_cleanup_run_noop_for_missing_run(controller: SessionController) -> None
     controller._cleanup_run("ghost")  # should not raise
 
 
+def test_cleanup_run_clears_current_run_id(
+    controller: SessionController,
+) -> None:
+    """_cleanup_run clears session.current_run_id when it matches the run_id."""
+    state = SessionState(session_id="sess-cleanup", agent_name="a")
+    controller._sessions["sess-cleanup"] = state
+
+    run_handle = RunHandle(
+        run_id="run-123",
+        session_id="sess-cleanup",
+        agent_type="native",
+    )
+    controller._runs["run-123"] = run_handle
+    state.current_run_id = "run-123"
+
+    controller._cleanup_run("run-123")
+
+    assert state.current_run_id is None
+    assert "run-123" not in controller._runs
+
+
 # ---------------------------------------------------------------------------
 # SessionState.closing alias
 # ---------------------------------------------------------------------------
