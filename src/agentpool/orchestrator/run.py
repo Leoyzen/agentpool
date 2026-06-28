@@ -141,91 +141,109 @@ class RunHandle:
         # Set _run_handle on run_ctx so NativeTurn can access active_agent_run
         self.run_ctx._run_handle = self
 
-        async with session.turn_lock:
-            current_prompts: list[str] = [initial_prompt]
-            while not self._closing:
-                if not current_prompts:
-                    self._status = RunStatus.idle
-                    self._idle_event.clear()
-                    await self._idle_event.wait()
-                    if self._closing:
-                        break
-                    current_prompts = list(self._message_queue)
-                    self._message_queue.clear()
+        try:
+            async with session.turn_lock:
+                current_prompts: list[str] = [initial_prompt]
+                while not self._closing:
                     if not current_prompts:
-                        continue
-
-                self._status = RunStatus.running
-                turn = agent.create_turn(
-                    prompts=current_prompts,
-                    run_ctx=self.run_ctx,
-                    message_history=self._message_history,
-                )
-                await event_bus.publish(
-                    self.session_id,
-                    RunStartedEvent(
-                        run_id=self.run_id,
-                        session_id=self.session_id,
-                        agent_name=self.agent_type,
-                    ),
-                )
-
-                turn_failed = False
-                try:
-                    async for event in turn.execute():
-                        await event_bus.publish(self.session_id, event)
-                        yield event
-                        if isinstance(event, StreamCompleteEvent):
+                        self._status = RunStatus.idle
+                        self._idle_event.clear()
+                        await self._idle_event.wait()
+                        if self._closing:
                             break
-                except Exception as e:  # noqa: BLE001
-                    turn_failed = True
+                        current_prompts = list(self._message_queue)
+                        self._message_queue.clear()
+                        if not current_prompts:
+                            continue
+
+                    self._status = RunStatus.running
+                    turn = agent.create_turn(
+                        prompts=current_prompts,
+                        run_ctx=self.run_ctx,
+                        message_history=self._message_history,
+                    )
                     await event_bus.publish(
                         self.session_id,
-                        RunErrorEvent(
-                            message=str(e),
+                        RunStartedEvent(
                             run_id=self.run_id,
+                            session_id=self.session_id,
                             agent_name=self.agent_type,
                         ),
                     )
 
-                if not turn_failed:
-                    try:
-                        self._message_history = turn.message_history
-                    except RuntimeError:
-                        pass
+                    # Set _current_input_provider ContextVar so MCP
+                    # elicitation can access it during turn execution.
+                    _elicitation_token = None
+                    if session.input_provider is not None:
+                        from agentpool.mcp_server.manager import _current_input_provider
 
-                # Between turns: wait for background child tasks to complete,
-                # then collect their steer messages as prompts for next turn.
-                if self.run_ctx.child_done_events:
+                        _elicitation_token = _current_input_provider.set(
+                            session.input_provider
+                        )
+
+                    turn_failed = False
                     try:
-                        async with asyncio.timeout(30):
-                            await asyncio.gather(
-                                *[
-                                    e.wait()
-                                    for e in self.run_ctx.child_done_events.values()
-                                ]
-                            )
-                    except TimeoutError:
-                        logger.warning(
-                            "Timeout waiting for child_done_events",
+                        async for event in turn.execute():
+                            await event_bus.publish(self.session_id, event)
+                            yield event
+                            if isinstance(event, StreamCompleteEvent):
+                                break
+                    except Exception as e:  # noqa: BLE001
+                        turn_failed = True
+                        error_event = RunErrorEvent(
+                            message=str(e),
                             run_id=self.run_id,
-                            pending=len(self.run_ctx.child_done_events),
+                            agent_name=self.agent_type,
                         )
+                        await event_bus.publish(self.session_id, error_event)
+                        yield error_event
+                    finally:
+                        if _elicitation_token is not None:
+                            from agentpool.mcp_server.manager import _current_input_provider
 
-                    # Collect queued steer messages from completed children
-                    # as prompts for the next turn.
-                    if self.run_ctx.queued_steer_messages:
-                        self._message_queue.extend(
-                            self.run_ctx.queued_steer_messages
-                        )
-                        self.run_ctx.queued_steer_messages.clear()
+                            _current_input_provider.reset(_elicitation_token)
 
-                    self.run_ctx.child_done_events.clear()
+                    if not turn_failed:
+                        try:
+                            self._message_history = turn.message_history
+                        except RuntimeError:
+                            pass
 
-                current_prompts = list(self._message_queue)
-                self._message_queue.clear()
+                    # Between turns: wait for background child tasks to complete,
+                    # then collect their steer messages as prompts for next turn.
+                    if self.run_ctx.child_done_events:
+                        try:
+                            async with asyncio.timeout(30):
+                                await asyncio.gather(
+                                    *[
+                                        e.wait()
+                                        for e in self.run_ctx.child_done_events.values()
+                                    ]
+                                )
+                        except TimeoutError:
+                            logger.warning(
+                                "Timeout waiting for child_done_events",
+                                run_id=self.run_id,
+                                pending=len(self.run_ctx.child_done_events),
+                            )
 
+                        # Collect queued steer messages from completed children
+                        # as prompts for the next turn.
+                        if self.run_ctx.queued_steer_messages:
+                            self._message_queue.extend(
+                                self.run_ctx.queued_steer_messages
+                            )
+                            self.run_ctx.queued_steer_messages.clear()
+
+                        self.run_ctx.child_done_events.clear()
+
+                    current_prompts = list(self._message_queue)
+                    self._message_queue.clear()
+
+                self._status = RunStatus.done
+        finally:
             self._status = RunStatus.done
+            self.complete_event.set()
 
     def steer(self, message: str) -> bool:
         """Inject a steer message into the active turn or wake idle handle.

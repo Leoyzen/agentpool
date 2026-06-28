@@ -123,6 +123,22 @@ class NativeTurn(Turn):
         if self._run_ctx.deps is not None:
             agent_deps.data = self._run_ctx.deps
 
+        # Consume staged_content (e.g. skill instructions injected by
+        # skill_bridge) and prepend to prompts. This mirrors the old
+        # run_stream() path which did the same before calling agentlet.iter().
+        # Without this, skill instructions are silently discarded.
+        staged_text = await self._agent.staged_content.consume_as_text()
+        effective_prompts = (
+            [*staged_text.split("\n\n"), *self._prompts]
+            if staged_text is not None
+            else self._prompts
+        )
+        # If staged_content was consumed, combine it into a single prompt
+        # with the user request (matching the old run_stream pattern).
+        if staged_text is not None:
+            user_request = "\n\n".join(self._prompts)
+            effective_prompts = [f"{staged_text}\n\n{user_request}"] if user_request else [staged_text]
+
         agent_run: Any = None
         try:
             yield RunStartedEvent(
@@ -131,7 +147,7 @@ class NativeTurn(Turn):
                 session_id=self._run_ctx.session_id,
             )
             async with agentlet.iter(
-                self._prompts,
+                effective_prompts,
                 deps=agent_deps,
                 message_history=self._message_history_input,
                 usage_limits=self._agent._default_usage_limits,
@@ -181,7 +197,6 @@ class NativeTurn(Turn):
                     logger.debug(
                         "Could not retrieve agent_run messages after RunAbortedError",
                     )
-            return
 
         except UndrainedPendingMessagesError as exc:
             logger.warning(
@@ -191,7 +206,6 @@ class NativeTurn(Turn):
             if agent_run is not None:
                 with contextlib.suppress(Exception):
                     self._message_history = agent_run.all_messages()
-            return
 
         except asyncio.CancelledError:
             logger.debug("NativeTurn cancelled")
@@ -209,13 +223,19 @@ class NativeTurn(Turn):
             if self._run_ctx._run_handle is not None:
                 self._run_ctx._run_handle.active_agent_run = None
 
+        # Always yield StreamCompleteEvent so RunHandle.start() can break
+        # out of its turn loop. Even when message_history is None (e.g.
+        # RunAbortedError before agent_run was created), we yield a
+        # terminal event with an empty message.
         if self._message_history is not None:
             content = extract_text_from_messages(self._message_history)
-            self._final_message = ChatMessage(
-                content=content,
-                role="assistant",
-                name=self._agent.name,
-                message_id=self._message_id,
-                session_id=self._run_ctx.session_id,
-            )
-            yield StreamCompleteEvent(message=self._final_message)
+        else:
+            content = ""
+        self._final_message = ChatMessage(
+            content=content,
+            role="assistant",
+            name=self._agent.name,
+            message_id=self._message_id,
+            session_id=self._run_ctx.session_id,
+        )
+        yield StreamCompleteEvent(message=self._final_message)

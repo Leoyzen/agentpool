@@ -1523,7 +1523,7 @@ class SessionController:
         session = self.get_session(session_id)
         if session is None:
             return None
-        agent = self._session_agents.get(session_id)
+        agent = await self.get_or_create_session_agent(session_id)
         if agent is None:
             return None
         # Extract input_provider from kwargs and set on session/agent.
@@ -1535,17 +1535,20 @@ class SessionController:
             agent._input_provider = input_provider
         # RunHandle path (always)
         resolved = {"steer": "asap", "followup": "when_idle"}.get(priority, priority)
+        # Convert content to string safely. Empty list (from ACP handler when
+        # user sends only a slash command) must become "" not "[]".
+        content_str = "" if not content else str(content)
         async with session._request_lock:
             if session.closing or session.is_closing:
                 return None
             if session.current_run_id is None:
-                return self._start_run_handle(session, agent, session_id, str(content))
+                return self._start_run_handle(session, agent, session_id, content_str)
         run = self._runs.get(session.current_run_id) if session.current_run_id else None
         if run is not None:
             if resolved == "asap":
-                run.steer(str(content))
+                run.steer(content_str)
             else:
-                run.followup(str(content))
+                run.followup(content_str)
         return None
 
     def cancel_run_for_session(self, session_id: str) -> None:
@@ -2444,7 +2447,7 @@ class SessionPool:
         session, _ = await self.sessions.get_or_create_session(session_id)
         if session.is_closing:
             return
-        agent = self.sessions._session_agents.get(session_id)
+        agent = await self.sessions.get_or_create_session_agent(session_id)
         if agent is None:
             return
         # Extract input_provider from kwargs and set on session/agent.
@@ -2595,7 +2598,7 @@ class SessionPool:
         session, _ = await self.sessions.get_or_create_session(session_id)
         if session.is_closing:
             return
-        agent = self.sessions._session_agents.get(session_id)
+        agent = await self.sessions.get_or_create_session_agent(session_id)
         if agent is None:
             return
         content = " ".join(str(p) for p in prompts) if prompts else ""
@@ -2614,6 +2617,9 @@ class SessionPool:
                     except anyio.EndOfStream:
                         break
                     yield event.event
+                    raw_event = getattr(event, "event", event)
+                    if isinstance(raw_event, StreamCompleteEvent | RunErrorEvent):
+                        break
             finally:
                 await self.event_bus.unsubscribe(session_id, stream)
             return
