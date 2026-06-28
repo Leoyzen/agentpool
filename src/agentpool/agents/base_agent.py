@@ -20,7 +20,11 @@ import anyio
 from upathtools.filesystems import IsolatedMemoryFileSystem
 
 from agentpool.agents.context import AgentContext, AgentRunContext
-from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent, resolve_event_handlers
+from agentpool.agents.events import (
+    RunErrorEvent,
+    StreamCompleteEvent,
+    resolve_event_handlers,
+)
 from agentpool.agents.modes import ModeInfo
 from agentpool.common_types import IndividualEventHandler
 from agentpool.log import get_logger
@@ -1020,6 +1024,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
                     if isinstance(event, StreamCompleteEvent):
                         final_message = event.message
+                    if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                        break
                 if final_message is not None:
                     await self.message_sent.emit(final_message)
                     session = session_pool.sessions.get_session(effective_session_id)
@@ -1098,6 +1104,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                                 wait_for_connections=wait_for_connections,
                                 deps=deps,
                                 event_handlers=event_handlers,
+                                _owns_event_bus=_created_local_bus,
                             ):
                                 await local_bus.publish(effective_session_id, event)
                         finally:
@@ -1127,6 +1134,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                                 wait_for_connections=wait_for_connections,
                                 deps=deps,
                                 event_handlers=event_handlers,
+                                _owns_event_bus=_created_local_bus,
                             ):
                                 await local_bus.publish(effective_session_id, event)
                         finally:
@@ -1138,7 +1146,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
                     tg.start_soon(_non_native_publisher)
 
-                # Consumer: yield events from EventBus subscription
+                # Consumer: yield events from EventBus subscription.
+                # RunStartedEvent is yielded by NativeTurn.execute() and
+                # flows through EventBus — no need to yield it separately.
                 async for envelope in stream:
                     event = envelope.event
                     yield event
@@ -1172,6 +1182,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         wait_for_connections: bool | None = None,
         deps: TDeps | None = None,
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
+        _owns_event_bus: bool = False,
     ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
         """Process a single prompt group with streaming output.
 
@@ -1191,6 +1202,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             wait_for_connections: Whether to wait for connected agents
             deps: Optional dependencies
             event_handlers: Optional event handlers
+            _owns_event_bus: Whether the caller created a local EventBus
+                (standalone mode). When True, ``message_sent`` is emitted
+                here. When False, the caller (Path A) handles emission.
 
         Yields:
             Stream events during execution
@@ -1251,8 +1265,15 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     session_id=session_id,
                 )
                 if pre_run_result.get("decision") == "deny":
-                    reason = pre_run_result.get("reason", "Blocked by pre-run hook")
-                    raise RuntimeError(f"Run blocked: {reason}")  # noqa: TRY301
+                    run_ctx.cancelled = True
+                    cancel_msg = ChatMessage(
+                        content="",
+                        role="assistant",
+                        name=self.name,
+                        session_id=session_id,
+                    )
+                    yield StreamCompleteEvent(message=cancel_msg, cancelled=True)
+                    return
 
             context = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
             async for event in self._stream_events(
@@ -1275,6 +1296,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 # Capture final message from StreamCompleteEvent
                 if isinstance(event, StreamCompleteEvent):
                     final_message = event.message
+                if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                    break
         except Exception:
             self.log.exception("Agent stream failed")
             raise
@@ -1301,9 +1324,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     )
 
                 # Emit signal (always - for event handlers).
-                # Skip when run_ctx has an event_bus (SessionPool-managed runs);
+                # Skip when run_ctx was provided by SessionPool (Path A);
                 # the Path A wrapper in run_stream() handles emission in that case.
-                if run_ctx.event_bus is None:
+                # When we created a local bus ourselves (_owns_event_bus),
+                # we are in standalone mode and must emit here.
+                if _owns_event_bus:
                     await self.message_sent.emit(final_message)
                 # Route to connected agents (always - they decide what to do with it)
                 await self.connections.route_message(final_message, wait=wait_for_connections)

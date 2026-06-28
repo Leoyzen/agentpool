@@ -961,6 +961,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             prompts=list(prompts),
             run_ctx=run_ctx,
             message_history=kw["message_history"],
+            parent_id=kw.get("effective_parent_id"),
         )
         session_id = kw["session_id"]
         turn_failed = False
@@ -1025,6 +1026,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             prompts=list(prompts),
             run_ctx=run_ctx,
             message_history=model_messages,
+            parent_id=user_msg.message_id,
         )
         session_id_local = session_id
         turn_failed = False

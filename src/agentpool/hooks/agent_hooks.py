@@ -346,8 +346,8 @@ class AgentHooks:
             )
             result = await self._run_hooks(self.pre_run, input_data)
             if result.get("decision") == "deny":
-                msg = f"Run blocked: {result.get('reason', 'pre_run hook denied')}"
-                raise RuntimeError(msg)
+                if agent_ctx and agent_ctx.run_ctx:
+                    agent_ctx.run_ctx.cancelled = True
 
         return wrapped
 
