@@ -661,10 +661,11 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         Returns:
             An ACPTurn instance for single-cycle execution.
         """
-        # NOTE: self._api (ACPAgentAPI) does not implement ACPClientProtocol fully —
+        # TODO: ACPAgentAPI does not implement ACPClientProtocol fully —
         # it lacks stream_events() and get_messages(). At runtime this will raise
         # AttributeError when ACPTurn.execute() calls those methods. An adapter
-        # is needed for full integration.
+        # wrapping ACPAgentAPI with async futures / notification registry is needed
+        # for full integration.
         return ACPTurn(
             acp_client=self._api,
             prompts=prompts,

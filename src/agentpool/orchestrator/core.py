@@ -1550,12 +1550,12 @@ class SessionController:
                 return None
             if session.current_run_id is None:
                 return self._start_run_handle(session, agent, session_id, content_str)
-        run = self._runs.get(session.current_run_id) if session.current_run_id else None
-        if run is not None:
-            if resolved == "asap":
-                run.steer(content_str)
-            else:
-                run.followup(content_str)
+            run = self._runs.get(session.current_run_id) if session.current_run_id else None
+            if run is not None:
+                if resolved == "asap":
+                    run.steer(content_str)
+                else:
+                    run.followup(content_str)
         return None
 
     def cancel_run_for_session(self, session_id: str) -> None:

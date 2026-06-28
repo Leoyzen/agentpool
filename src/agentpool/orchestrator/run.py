@@ -186,7 +186,10 @@ class RunHandle:
                         async for event in turn.execute():
                             await event_bus.publish(self.session_id, event)
                             yield event
-                            if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                            if isinstance(event, RunErrorEvent):
+                                turn_failed = True
+                                break
+                            if isinstance(event, StreamCompleteEvent):
                                 break
                     except Exception as e:  # noqa: BLE001
                         turn_failed = True
@@ -220,7 +223,7 @@ class RunHandle:
                                 await asyncio.gather(
                                     *[
                                         e.wait()
-                                        for e in self.run_ctx.child_done_events.values()
+                                        for e in list(self.run_ctx.child_done_events.values())
                                     ]
                                 )
                         except TimeoutError:
@@ -241,7 +244,7 @@ class RunHandle:
                     # Only remove completed events; new child tasks may have
                     # been registered between gather() and here.
                     completed_keys = [
-                        k for k, e in self.run_ctx.child_done_events.items()
+                        k for k, e in list(self.run_ctx.child_done_events.items())
                         if e.is_set()
                     ]
                     for k in completed_keys:

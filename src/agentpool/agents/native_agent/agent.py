@@ -965,10 +965,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         async for event in turn.execute():
             await event_bus.publish(session_id, event)
         result = turn.final_message
-        await event_bus.publish(
-            session_id,
-            StreamCompleteEvent(message=result),
-        )
 
         state.result = result
         return result
@@ -1025,10 +1021,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         async for event in turn.execute():
             await event_bus.publish(session_id, event)
         result = turn.final_message
-        await event_bus.publish(
-            session_id,
-            StreamCompleteEvent(message=result),
-        )
 
         # Store result for _run_stream_once() to pick up — avoids race
         # condition with EventBus consumer cancelling TaskGroup.
