@@ -62,9 +62,7 @@ class SessionPoolMetrics:
         lines.append("# TYPE agentpool_event_bus_subscribers gauge")
         for session_id, count in self.event_bus_queue_depth.items():
             sid = session_id.replace('"', '\\"')
-            lines.append(
-                f'agentpool_event_bus_subscribers{{session_id="{sid}"}} {count}'
-            )
+            lines.append(f'agentpool_event_bus_subscribers{{session_id="{sid}"}} {count}')
 
         lines.append("# TYPE agentpool_session_lifetime_seconds gauge")
         lines.append(f"agentpool_session_lifetime_seconds {self.session_lifetime_seconds:.3f}")
@@ -75,9 +73,7 @@ class SessionPoolMetrics:
         lines.append("# TYPE agentpool_active_runs_by_agent_type gauge")
         for agent_type, count in self.active_runs_by_agent_type.items():
             at = agent_type.replace('"', '\\"')
-            lines.append(
-                f'agentpool_active_runs_by_agent_type{{agent_type="{at}"}} {count}'
-            )
+            lines.append(f'agentpool_active_runs_by_agent_type{{agent_type="{at}"}} {count}')
 
         return "\n".join(lines)
 
@@ -101,7 +97,7 @@ class MetricsCollector:
     def record_auto_resume(self) -> None:
         """Record an auto-resume occurrence.
 
-        Called by TurnRunner when an auto-resume iteration is triggered.
+        Called when an auto-resume iteration is triggered.
         """
         self._auto_resume_counter += 1
 
@@ -124,7 +120,8 @@ class MetricsCollector:
         else:
             avg_session_lifetime = 0.0
 
-        turn_timings = self.session_pool.turns._turn_timings
+        # Turn timing data is no longer available (old turn lifecycle removed).
+        turn_timings: list[tuple[float, float]] = []
         if turn_timings:
             latencies_ms = [(end - start) * 1000 for start, end in turn_timings]
             avg_turn_latency_ms = sum(latencies_ms) / len(latencies_ms)

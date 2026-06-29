@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import anyio
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Self
+
+import anyio
 
 from agentpool.log import get_logger
 from agentpool.utils.tasks import TaskManager
@@ -133,9 +134,7 @@ class BaseServer:
             raise RuntimeError("Server is already running in background")
 
         self._shutdown_event.clear()
-        self._server_task = asyncio.create_task(
-            self._run_with_shutdown(), name=f"{self.name}-task"
-        )
+        self._server_task = asyncio.create_task(self._run_with_shutdown(), name=f"{self.name}-task")
 
     async def _run_with_shutdown(self) -> None:
         """Internal wrapper that handles shutdown signaling."""

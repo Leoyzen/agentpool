@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 from dataclasses import dataclass, field
+import hashlib
 import re
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -29,6 +30,7 @@ from agentpool.agents.acp_agent import ACPAgent
 from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
 from agentpool.log import get_logger
 from agentpool.resource_providers.mcp_provider import MCPResourceProvider
+from agentpool.skills.uri_resolver import MAX_PROVIDER_NAME_LENGTH
 from agentpool_commands.base import NodeCommand
 from agentpool_server.acp_server.converters import (
     convert_acp_mcp_server_to_config,
@@ -40,7 +42,7 @@ from agentpool_server.opencode_server.skill_bridge import create_skill_command
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Sequence
+    from collections.abc import Callable, Sequence
 
     from pydantic_ai import UserContent
     from slashed import BaseCommand
@@ -191,10 +193,17 @@ class ACPSession:
     manager: ACPSessionManager | None = None
     """Session manager for managing sessions. Used for session management commands."""
 
-    subagent_display_mode: Literal["legacy", "zed"] = "legacy"
+    subagent_display_mode: Literal["legacy", "zed", "qwen"] = "legacy"
     """How to display subagent output:
     - 'legacy': Default display mode using tool_box semantics
     - 'zed': Zed-compatible display mode
+    """
+
+    raw_input_mode: Literal["dict", "skip", "json_str"] = "dict"
+    """How to emit tool call raw_input:
+    - 'dict': Parse args as dict (default)
+    - 'skip': Omit raw_input until tool call is complete
+    - 'json_str': Emit raw_input as a JSON string
     """
 
     def __post_init__(self) -> None:
@@ -400,6 +409,27 @@ class ACPSession:
         """Initialize async resources. Must be called after construction."""
         await self.acp_env.__aenter__()
 
+    def _make_provider_name(self, display_name: str) -> str:
+        """Build a provider name that fits within the 63-char DNS-label limit.
+
+        Truncates the session_id (via SHA-256 prefix) when the full name
+        would exceed ``MAX_PROVIDER_NAME_LENGTH``.
+
+        Args:
+            display_name: The MCP server display name to embed.
+
+        Returns:
+            A provider name guaranteed to pass ``_validate_provider_name``.
+        """
+        prefix = "session_"
+        suffix = f"_{display_name}"
+        budget = MAX_PROVIDER_NAME_LENGTH - len(prefix) - len(suffix)
+        if budget >= len(self.session_id):
+            return f"{prefix}{self.session_id}{suffix}"
+        # Truncate session_id to fit — use SHA-256 prefix for collision resistance
+        truncated = hashlib.sha256(self.session_id.encode()).hexdigest()[:budget]
+        return f"{prefix}{truncated}{suffix}"
+
     async def initialize_mcp_servers(self) -> None:
         """Initialize MCP servers if any are configured.
 
@@ -434,7 +464,7 @@ class ACPSession:
                         cfg = convert_acp_mcp_server_to_config(server)
                         provider = MCPResourceProvider(
                             server=cfg,
-                            name=f"session_{self.session_id}_{cfg.display_name}",
+                            name=self._make_provider_name(cfg.display_name),
                             source="node",
                             accessible_roots=getattr(self.agent.env, "accessible_roots", None),
                             transport=transport,
@@ -462,7 +492,7 @@ class ACPSession:
 
                     provider = MCPResourceProvider(
                         server=cfg,
-                        name=f"session_{self.session_id}_{cfg.display_name}",
+                        name=self._make_provider_name(cfg.display_name),
                         source="node",
                         accessible_roots=getattr(self.agent.env, "accessible_roots", None),
                     )
@@ -516,10 +546,14 @@ class ACPSession:
         return f"Working directory: {self.cwd}" if self.cwd else ""
 
     async def switch_active_agent(self, agent_name: str) -> None:
-        """Switch to a different agent in the pool."""
-        agents = self.agent_pool.all_agents
-        if agent_name not in agents:
-            available = list(agents.keys())
+        """Switch to a different agent in the pool.
+
+        Creates a new session-level agent for the target name via SessionPool.
+        Pool-level agents were removed — all agents are now session-scoped.
+        """
+        # Validate agent exists in config (not runtime instances)
+        available = list(self.agent_pool.agent_configs.keys())
+        if agent_name not in available:
             raise ValueError(f"Agent {agent_name!r} not found. Available: {available}")
 
         old_agent_name = self.agent.name
@@ -533,8 +567,17 @@ class ACPSession:
             if self.get_cwd_context in self.agent.sys_prompts.prompts:
                 self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
-        # Switch to the pool agent directly (per-session agents now managed by SessionPool)
-        self.agent = agents[agent_name]
+        # Create new session agent via SessionPool (pool-level agents removed)
+        pool = self.agent_pool
+        if pool.session_pool is not None:
+            # Invalidate cache so get_or_create_session_agent creates a fresh agent
+            pool.session_pool.sessions._session_agents.pop(self.session_id, None)
+            self.agent = await pool.session_pool.sessions.get_or_create_session_agent(
+                self.session_id, agent_name=agent_name, input_provider=self.input_provider
+            )
+        else:
+            msg = "SessionPool is required for agent switching"
+            raise RuntimeError(msg)
 
         # Re-apply session-specific mutations
         self.agent.env = self.acp_env
@@ -613,6 +656,7 @@ class ACPSession:
             # Create a new event converter for this prompt
             converter = ACPEventConverter(
                 subagent_display_mode=self.subagent_display_mode,
+                raw_input_mode=self.raw_input_mode,
                 client_supports_turn_complete=client_supports_turn_complete,
             )
             self._current_converter = converter  # Track for cancellation

@@ -143,7 +143,6 @@ class ServerState:
 
                 self.event_bridge = OpenCodeEventBridge(self, event_bus)
 
-
     def get_event_factory(self) -> GlobalEventFactory:
         """Get or lazily create the GlobalEventFactory for event wrapping.
 

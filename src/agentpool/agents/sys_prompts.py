@@ -190,13 +190,9 @@ class SystemPrompts:
         for prompt in self.prompts:
             if callable(prompt):
                 sig = inspect.signature(prompt)
-                param_count = len(
-                    [
-                        p
-                        for p in sig.parameters.values()
-                        if p.default is inspect.Parameter.empty
-                    ]
-                )
+                param_count = len([
+                    p for p in sig.parameters.values() if p.default is inspect.Parameter.empty
+                ])
                 if param_count == 0:
                     # No-arg callable can be rendered by to_prompt
                     renderable_prompts.append(prompt)
@@ -218,7 +214,7 @@ class SystemPrompts:
 
         # Wrap callable prompts for pydantic-ai compatibility
         for prompt in callable_prompts:
-            wrapped = wrap_instruction(prompt, fallback="", _warn=False)  # type: ignore[arg-type]
+            wrapped = wrap_instruction(prompt, fallback="", _warn=False)
             instructions.append(wrapped)
 
         return instructions

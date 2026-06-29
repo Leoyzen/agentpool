@@ -293,7 +293,7 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
         for i, node in enumerate(all_nodes):
             step_fn = _make_sequential_step(node, i)
             step = Step(
-                id=NodeID(node.name),
+                id=NodeID(f"{node.name}_{i}"),
                 call=step_fn,
                 label=node.description or node.name,
             )
@@ -314,12 +314,16 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
 
         try:
             await graph.run(state=state, deps=self._get_deps(), inputs=None)
-        except Exception:
+        except Exception as exc:
             # Yield responses collected so far, then re-raise
             for i, response in enumerate(state.responses):
                 yield response
                 if i < len(connections):
                     yield connections[i]
+            # Unwrap single-exception ExceptionGroups produced by anyio
+            # task groups inside agent run_stream().
+            if isinstance(exc, BaseExceptionGroup) and len(exc.exceptions) == 1:
+                raise exc.exceptions[0] from None
             raise
 
         # Add last_talk for the final node if all steps completed and pipeline
@@ -374,9 +378,7 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
         # Resolve the parent session id for this team execution.
         # The caller's parent_session_id takes priority, then session_id (for
         # backward compat).
-        parent_session_id: str | None = (
-            parent_session_id_kwarg or session_id_kwarg
-        )
+        parent_session_id: str | None = parent_session_id_kwarg or session_id_kwarg
 
         child_depth = depth + 1
         if child_depth > MAX_DELEGATION_DEPTH:
@@ -392,7 +394,11 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
 
                 # Create child session for this member
                 pool = self.agent_pool
-                if pool is not None and pool.session_pool is not None and parent_session_id is not None:
+                if (
+                    pool is not None
+                    and pool.session_pool is not None
+                    and parent_session_id is not None
+                ):
                     child_state = await pool.session_pool.create_session(
                         session_id=generate_session_id(),
                         parent_session_id=parent_session_id,

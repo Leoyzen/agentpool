@@ -20,7 +20,11 @@ import anyio
 from upathtools.filesystems import IsolatedMemoryFileSystem
 
 from agentpool.agents.context import AgentContext, AgentRunContext
-from agentpool.agents.events import StreamCompleteEvent, resolve_event_handlers
+from agentpool.agents.events import (
+    RunErrorEvent,
+    StreamCompleteEvent,
+    resolve_event_handlers,
+)
 from agentpool.agents.modes import ModeInfo
 from agentpool.common_types import IndividualEventHandler
 from agentpool.log import get_logger
@@ -32,7 +36,7 @@ from agentpool.utils.time_utils import get_now
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncGenerator, AsyncIterator, Sequence
     from contextvars import Token
     from datetime import datetime
 
@@ -40,6 +44,7 @@ if TYPE_CHECKING:
     from exxec import ExecutionEnvironment
     from fsspec import AbstractFileSystem
     from pydantic_ai import UserContent
+    from pydantic_ai.messages import ModelMessage
     from slashed import BaseCommand, CommandStore
     from tokonomics.model_discovery.model_info import ModelInfo
     from upathtools.filesystems import OverlayFileSystem
@@ -65,6 +70,9 @@ if TYPE_CHECKING:
     from agentpool.delegation import AgentPool, Team, TeamRun
     from agentpool.hooks import AgentHooks
     from agentpool.messaging import ChatMessage
+    from agentpool.orchestrator.core import EventBus, SessionState
+    from agentpool.orchestrator.run import RunHandle
+    from agentpool.orchestrator.turn import Turn
     from agentpool.sessions import SessionData
     from agentpool.talk.stats import MessageStats
     from agentpool.ui.base import InputProvider
@@ -257,6 +265,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # _background_run_ctx is used only for the background task's internal state.
         # It is intentionally NOT used as a fallback in get_active_run_context().
         self._background_run_ctx: AgentRunContext | None = None
+        # _run_context is set during standalone (pool-less) runs so that
+        # get_active_run_context() and is_turn_active() work cross-task.
+        self._run_context: AgentRunContext | None = None
         # Deferred initialization support - subclasses set True in __aenter__,
         # override ensure_initialized() to do actual connection
         self._connect_pending: bool = False
@@ -455,6 +466,105 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
         ...
 
+    @abstractmethod
+    def create_turn(
+        self,
+        prompts: list[str],
+        run_ctx: AgentRunContext,
+        message_history: list[ModelMessage],
+    ) -> Turn:
+        """Create a Turn for single-cycle execution.
+
+        Args:
+            prompts: Pre-converted prompt strings for this turn.
+            run_ctx: Per-run isolated context.
+            message_history: Incoming message history.
+
+        Returns:
+            A Turn instance that can be executed via execute().
+        """
+        ...
+
+    def create_run(
+        self,
+        prompt: str,
+        run_ctx: AgentRunContext,
+        message_history: list[ModelMessage],
+        event_bus: EventBus,
+        session: SessionState,
+    ) -> RunHandle:
+        """Construct a RunHandle for v2 session-level execution.
+
+        This is the v2 entry point that replaces the legacy ``run()``
+        method for session-managed runs. It only constructs the
+        RunHandle — no execution happens here. The caller is
+        responsible for calling ``run_handle.start(prompt)`` to begin
+        the idle/wake/turn loop, or for using :meth:`create_run_stream`
+        which wraps that pattern.
+
+        Args:
+            prompt: Initial user prompt for the first turn. Not used
+                during construction; pass it to ``start()`` when ready.
+            run_ctx: Per-run isolated context.
+            message_history: Incoming message history for the first turn.
+            event_bus: Event bus for publishing stream events.
+            session: Per-session state containing the turn lock.
+
+        Returns:
+            A RunHandle wired with agent, event_bus, session, and
+            run_ctx, ready to be started via ``start(prompt)``.
+        """
+        from agentpool.orchestrator.run import RunHandle
+
+        return RunHandle(
+            run_id=run_ctx.run_id,
+            session_id=run_ctx.session_id,
+            agent_type=self.AGENT_TYPE,
+            agent=self,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=run_ctx,
+            _message_history=list(message_history),
+        )
+
+    async def create_run_stream(
+        self,
+        prompt: str,
+        run_ctx: AgentRunContext,
+        message_history: list[ModelMessage],
+        event_bus: EventBus,
+        session: SessionState,
+    ) -> AsyncGenerator[RichAgentStreamEvent]:
+        """Run agent with streaming output via the v2 RunHandle lifecycle.
+
+        This is the v2 streaming wrapper around :meth:`create_run` and
+        ``RunHandle.start()``. It constructs a RunHandle, starts the
+        idle/wake/turn loop, yields all stream events, and closes the
+        handle when the stream completes.
+
+        Args:
+            prompt: Initial user prompt for the first turn.
+            run_ctx: Per-run isolated context.
+            message_history: Incoming message history for the first turn.
+            event_bus: Event bus for publishing stream events.
+            session: Per-session state containing the turn lock.
+
+        Yields:
+            Stream events from the turn execution.
+        """
+        async with self.create_run(
+            prompt=prompt,
+            run_ctx=run_ctx,
+            message_history=message_history,
+            event_bus=event_bus,
+            session=session,
+        ) as run_handle:
+            async for event in run_handle.start(prompt):
+                yield event
+                if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                    run_handle.close()
+                    break
+
     async def run_iter(
         self,
         *prompt_groups: Sequence[PromptCompatible],
@@ -638,6 +748,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                         if run_handle is not None and not run_handle.run_ctx.completed:
                             return run_handle.run_ctx
 
+        # Level 2.5: Instance-level _run_context for standalone (pool-less) runs.
+        # This enables cross-task is_turn_active() checks when no SessionPool exists.
+        if self._run_context is not None and not self._run_context.completed:
+            return self._run_context
+
         # Level 3: Background run context (lowest precedence)
         if self._background_run_ctx is not None and not self._background_run_ctx.completed:
             return self._background_run_ctx
@@ -660,7 +775,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         allows tools or external code to schedule follow-up work.
 
         !!! warning "Deprecated for pooled native agents"
-            Use ``agent_pool.session_pool.turns.followup()`` instead.
+            Use ``agent_pool.session_pool.followup()`` instead.
 
         For non-native agents and standalone native agents, the existing
         injection_manager-based path remains unchanged.
@@ -677,11 +792,15 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
         run_ctx = self.get_active_run_context(session_id=session_id)
 
-        # Pooled native agents: emit DeprecationWarning, delegate to TurnRunner.followup().
-        if self.AGENT_TYPE == "native" and self.agent_pool is not None and self.agent_pool.session_pool is not None:
+        # Pooled native agents: delegate to session_pool.followup().
+        if (
+            self.AGENT_TYPE == "native"
+            and self.agent_pool is not None
+            and self.agent_pool.session_pool is not None
+        ):
             warnings.warn(
                 "queue_prompt() is deprecated for pooled native agents. "
-                "Use agent_pool.session_pool.turns.followup() instead.",
+                "Use agent_pool.session_pool.followup() instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -692,14 +811,15 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             if effective_session_id is not None:
                 combined = "\n".join(str(p) for p in prompts)
                 self.task_manager.fire_and_forget(
-                    session_pool.turns.followup(effective_session_id, combined)
+                    session_pool.followup(effective_session_id, combined)
                 )
                 return
             # Standalone native agents: fall through to legacy path
 
         # Legacy path for non-native agents and standalone native agents
         if run_ctx is not None and run_ctx.injection_manager is not None:
-            run_ctx.injection_manager.queue(*prompts)
+            combined = "\n".join(str(p) for p in prompts)
+            run_ctx.injection_manager.inject(combined)
 
     def inject_prompt(self, message: str, session_id: str | None = None) -> None:
         """Inject a message into the conversation mid-run.
@@ -710,7 +830,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         next iteration.
 
         !!! warning "Deprecated for pooled native agents"
-            Use ``agent_pool.session_pool.turns.steer()`` instead.
+            Use ``agent_pool.session_pool.steer()`` instead.
 
         For non-native agents and standalone native agents, the existing
         injection_manager-based path remains unchanged.
@@ -728,11 +848,15 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
         run_ctx = self.get_active_run_context(session_id=session_id)
 
-        # Pooled native agents: emit DeprecationWarning, delegate to TurnRunner.steer().
-        if self.AGENT_TYPE == "native" and self.agent_pool is not None and self.agent_pool.session_pool is not None:
+        # Pooled native agents: delegate to session_pool.steer().
+        if (
+            self.AGENT_TYPE == "native"
+            and self.agent_pool is not None
+            and self.agent_pool.session_pool is not None
+        ):
             warnings.warn(
                 "inject_prompt() is deprecated for pooled native agents. "
-                "Use agent_pool.session_pool.turns.steer() instead.",
+                "Use agent_pool.session_pool.steer() instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -741,9 +865,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 run_ctx.session_id if run_ctx else self._events.session_id
             )
             if effective_session_id is not None:
-                self.task_manager.fire_and_forget(
-                    session_pool.turns.steer(effective_session_id, message)
-                )
+                self.task_manager.fire_and_forget(session_pool.steer(effective_session_id, message))
                 return
             # FALLBACK: effective_session_id is None but session_pool exists.
             # This happens when BackgroundTaskProvider calls inject_prompt
@@ -754,7 +876,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             if sessions:
                 most_recent = max(sessions, key=lambda s: s.last_active_at)
                 self.task_manager.fire_and_forget(
-                    session_pool.turns.steer(most_recent.session_id, message)
+                    session_pool.steer(most_recent.session_id, message)
                 )
                 return
             # Standalone native agents: fall through to legacy path
@@ -762,9 +884,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Legacy path for non-native agents and standalone native agents
         # CRITICAL: Check run_ctx.completed to avoid injecting into a turn that
         # has already finished (e.g., after end_turn).  If the turn is complete,
-        # the message would be stuck in injection_manager.pending forever because
-        # flush_pending_to_queue() has already been called and won't be called
-        # again.  In that case, delegate to SessionPool for auto-resume.
+        # the message would be stuck in injection_manager.pending forever.
+        # In that case, delegate to SessionPool for auto-resume.
         if run_ctx is not None and not run_ctx.completed and run_ctx.injection_manager is not None:
             run_ctx.injection_manager.inject(message)
             return
@@ -804,17 +925,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             agent_name=self.name,
         )
 
-    def has_queued_prompts(self, session_id: str | None = None) -> bool:
-        """Check if there are queued prompts waiting to be processed.
-
-        Args:
-            session_id: Optional session ID for SessionPool fallback lookup.
-        """
-        run_ctx = self.get_active_run_context(session_id=session_id)
-        if run_ctx is not None and run_ctx.injection_manager is not None:
-            return run_ctx.injection_manager.has_queued()
-        return False
-
     def has_pending_injections(self, session_id: str | None = None) -> bool:
         """Check if there are pending injections.
 
@@ -825,16 +935,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         if run_ctx is not None and run_ctx.injection_manager is not None:
             return run_ctx.injection_manager.has_pending()
         return False
-
-    def clear_queued_prompts(self, session_id: str | None = None) -> None:
-        """Clear all queued prompts and pending injections.
-
-        Args:
-            session_id: Optional session ID for SessionPool fallback lookup.
-        """
-        run_ctx = self.get_active_run_context(session_id=session_id)
-        if run_ctx is not None and run_ctx.injection_manager is not None:
-            run_ctx.injection_manager.clear()
 
     @method_spawner
     async def run_stream(
@@ -938,6 +1038,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
                     if isinstance(event, StreamCompleteEvent):
                         final_message = event.message
+                    if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                        break
                 if final_message is not None:
                     await self.message_sent.emit(final_message)
                     session = session_pool.sessions.get_session(effective_session_id)
@@ -948,8 +1050,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 return
 
         # --- Path B: Standalone / in-turn react loop ---
-        # Creates a lightweight per-run context and processes prompts without
-        # SessionPool / EventBus.  Session history is still logged.
+        # Creates a lightweight per-run context and processes prompts with
+        # EventBus-based event delivery. Session history is still logged.
         # When _run_ctx is provided (from SessionPool), the existing run
         # context is reused and session logging is skipped.
         if _run_ctx is not None:
@@ -969,53 +1071,46 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             )
 
             # Create per-run context for state isolation
-            run_ctx = AgentRunContext(deps=deps, depth=depth)
-            # Reset cancellation state and track current task
+            run_ctx = AgentRunContext(deps=deps, depth=depth, session_id=effective_session_id)
         run_ctx.cancelled = False
         self._cancelled = False
         run_ctx.current_task = asyncio.current_task()
+        # Set instance-level _run_context for cross-task visibility
+        # (standalone agents without SessionPool).
+        self._run_context = run_ctx
+
+        # Create local EventBus if not already set by SessionController
+        _created_local_bus = run_ctx.event_bus is None
+        if _created_local_bus:
+            from agentpool.orchestrator.core import EventBus, drain_and_merge
+
+            local_bus: EventBus = EventBus()
+            run_ctx.event_bus = local_bus
+        else:
+            local_bus = run_ctx.event_bus
+            assert local_bus is not None  # type narrowing for type checker
+
+        # Subscribe to EventBus to receive events
+        stream = await local_bus.subscribe(effective_session_id, scope="session")
 
         # RFC-0021: reset only via the token from set(); never set(None) (breaks nesting).
         # token is initialized so finally always has a bound name; reset only if set() succeeded.
         token: Token[AgentRunContext | None] | None = None
         try:
             token = _current_run_ctx_var.set(run_ctx)
-            # Native agents use PydanticAI's PendingMessageDrainCapability for
-            # enqueue/asap/when_idle handling.  Non-native agents still need
-            # the manual follow-up loop.
-            if self.AGENT_TYPE == "native":
-                # Process initial prompts directly, skip manual follow-up loop
-                async for event in self._run_stream_once(
-                    run_ctx,
-                    *prompts,
-                    store_history=store_history,
-                    message_id=message_id,
-                    session_id=effective_session_id,
-                    parent_session_id=parent_session_id,
-                    parent_id=parent_id,
-                    message_history=message_history,
-                    input_provider=input_provider,
-                    wait_for_connections=wait_for_connections,
-                    deps=deps,
-                    event_handlers=event_handlers,
-                ):
-                    yield event
-            else:
-                # Queue the initial prompts (skip if no injection_manager)
-                if run_ctx.injection_manager is not None:
-                    run_ctx.injection_manager.insert_queued(prompts)
-                # Process queued prompts until queue is empty
-                while (
-                    run_ctx.injection_manager is not None
-                    and run_ctx.injection_manager.has_queued()
-                    and not run_ctx.cancelled
-                ):
-                    current_prompts = run_ctx.injection_manager.pop_queued()
-                    if current_prompts is None:
-                        break
+
+            # Producer runs as a background task; consumer yields events
+            # in the main coroutine. This avoids cancel-scope boundary
+            # issues with generator cleanup (aclose/GC) while still
+            # delivering events in real-time (not batched).
+            producer_error: BaseException | None = None
+
+            async def _producer() -> None:
+                nonlocal producer_error
+                try:
                     async for event in self._run_stream_once(
                         run_ctx,
-                        *current_prompts,
+                        *prompts,
                         store_history=store_history,
                         message_id=message_id,
                         session_id=effective_session_id,
@@ -1026,12 +1121,41 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                         wait_for_connections=wait_for_connections,
                         deps=deps,
                         event_handlers=event_handlers,
+                        _owns_event_bus=_created_local_bus,
                     ):
-                        yield event
+                        await local_bus.publish(effective_session_id, event)
+                except BaseException as exc:
+                    producer_error = exc
+                finally:
+                    with anyio.CancelScope(shield=True):
+                        if _created_local_bus:
+                            await local_bus.close_session(effective_session_id)
+                        else:
+                            await local_bus.unsubscribe(effective_session_id, stream)
 
-                    # After each iteration, flush unconsumed injections to queue
-                    if run_ctx.injection_manager is not None:
-                        run_ctx.injection_manager.flush_pending_to_queue()
+            producer_task = asyncio.ensure_future(_producer())
+            try:
+                # Consumer: yield events from EventBus subscription.
+                async for envelope in drain_and_merge(stream):
+                    event = envelope.event
+                    yield event
+                    if isinstance(event, StreamCompleteEvent):
+                        break
+                    if isinstance(event, RunErrorEvent):
+                        break
+            finally:
+                if not producer_task.done():
+                    producer_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await producer_task
+                else:
+                    # Producer finished — drain its result
+                    with suppress(asyncio.CancelledError):
+                        await producer_task
+
+            # Re-raise producer error after consumer loop exits.
+            if producer_error is not None:
+                raise producer_error
         finally:
             if token is not None:
                 # Suppress ValueError when token was created in a different async
@@ -1042,6 +1166,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     _current_run_ctx_var.reset(token)
             if run_ctx.injection_manager is not None:
                 run_ctx.injection_manager.clear()
+            # Clear standalone run context so is_turn_active() returns False.
+            # Only clear if it still points to our run_ctx — concurrent runs
+            # on the same agent may have already replaced it.
+            if self._run_context is run_ctx:
+                self._run_context = None
 
     async def _run_stream_once(
         self,
@@ -1057,6 +1186,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         wait_for_connections: bool | None = None,
         deps: TDeps | None = None,
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
+        _owns_event_bus: bool = False,
     ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
         """Process a single prompt group with streaming output.
 
@@ -1076,6 +1206,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             wait_for_connections: Whether to wait for connected agents
             deps: Optional dependencies
             event_handlers: Optional event handlers
+            _owns_event_bus: Whether the caller created a local EventBus
+                (standalone mode). When True, ``message_sent`` is emitted
+                here. When False, the caller (Path A) handles emission.
 
         Yields:
             Stream events during execution
@@ -1136,8 +1269,15 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     session_id=session_id,
                 )
                 if pre_run_result.get("decision") == "deny":
-                    reason = pre_run_result.get("reason", "Blocked by pre-run hook")
-                    raise RuntimeError(f"Run blocked: {reason}")  # noqa: TRY301
+                    run_ctx.cancelled = True
+                    cancel_msg = ChatMessage(
+                        content="",
+                        role="assistant",
+                        name=self.name,
+                        session_id=session_id,
+                    )
+                    yield StreamCompleteEvent(message=cancel_msg, cancelled=True)
+                    return
 
             context = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
             async for event in self._stream_events(
@@ -1160,47 +1300,58 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 # Capture final message from StreamCompleteEvent
                 if isinstance(event, StreamCompleteEvent):
                     final_message = event.message
+                    break
+                # On RunErrorEvent, don't break — let _stream_events()
+                # raise the error on the next __anext__() call so that
+                # producer_error is set in _native_runner().
         except Exception:
             self.log.exception("Agent stream failed")
             raise
 
-        # Post-processing after stream completes
-        if final_message is not None:
-            # Execute post-run hooks
-            if self.hooks:
-                prompt_str = (
-                    user_msg.content if isinstance(user_msg.content, str) else str(user_msg.content)
-                )
-                await self.hooks.run_post_run_hooks(
-                    agent_name=self.name,
-                    prompt=prompt_str,
-                    result=final_message.content,
-                    session_id=session_id,
-                )
+        # Pick up result from side channel when _stream_events yielded nothing
+        # (native agents: events went directly to EventBus via executor.execute)
+        if final_message is None and run_ctx.terminal_tool_result is not None:
+            final_message = run_ctx.terminal_tool_result
 
-            # Emit signal (always - for event handlers).
-            # Skip when run_ctx has an event_bus (SessionPool-managed runs);
-            # the Path A wrapper in run_stream() handles emission in that case.
-            # We check event_bus rather than _in_turn_context because
-            # _in_turn_context remains True for nested route_message calls
-            # triggered by Talk, but the outer Path A wrapper won't emit for
-            # those nested agents.
-            if run_ctx.event_bus is None:
-                await self.message_sent.emit(final_message)
-            # Route to connected agents (always - they decide what to do with it)
-            await self.connections.route_message(final_message, wait=wait_for_connections)
-            # Conditional persistence based on store_history
-            # TODO: Verify store_history semantics across all use cases:
-            #   - Should subagent tool calls set store_history=False?
-            #   - Should forked/ephemeral runs always skip persistence?
-            #   - Should signals still fire when store_history=False?
-            #   Current behavior: store_history controls both DB logging AND conversation context
-            if store_history:
-                # Log to persistent storage and add to conversation context
-                # Note: user_msg was already added at the start of the run
-                # Use extend_last=True to include both user_msg and final_message in _last_messages
-                await self.log_message(final_message)
-                conversation.add_chat_messages([final_message], extend_last=True)
+        # Post-processing after stream completes — shielded to prevent
+        # TaskGroup cancellation from interrupting hooks/routing/persistence
+        if final_message is not None:
+            with anyio.CancelScope(shield=True):
+                # Execute post-run hooks
+                if self.hooks:
+                    prompt_str = (
+                        user_msg.content
+                        if isinstance(user_msg.content, str)
+                        else str(user_msg.content)
+                    )
+                    await self.hooks.run_post_run_hooks(
+                        agent_name=self.name,
+                        prompt=prompt_str,
+                        result=final_message.content,
+                        session_id=session_id,
+                    )
+
+                # Emit signal (always - for event handlers).
+                # Skip when run_ctx was provided by SessionPool (Path A);
+                # the Path A wrapper in run_stream() handles emission in that case.
+                # When we created a local bus ourselves (_owns_event_bus),
+                # we are in standalone mode and must emit here.
+                if _owns_event_bus:
+                    await self.message_sent.emit(final_message)
+                # Route to connected agents (always - they decide what to do with it)
+                await self.connections.route_message(final_message, wait=wait_for_connections)
+                # Conditional persistence based on store_history
+                # TODO: Verify store_history semantics across all use cases:
+                #   - Should subagent tool calls set store_history=False?
+                #   - Should forked/ephemeral runs always skip persistence?
+                #   - Should signals still fire when store_history=False?
+                #   Current behavior: store_history controls both DB logging AND conversation context
+                if store_history:
+                    # Log to persistent storage and add to conversation context
+                    # Note: user_msg was already added at the start of the run
+                    # Use extend_last=True to include both user_msg and final_message in _last_messages
+                    await self.log_message(final_message)
+                    conversation.add_chat_messages([final_message], extend_last=True)
 
     async def _execute_slash_command_streaming(
         self, command_text: str

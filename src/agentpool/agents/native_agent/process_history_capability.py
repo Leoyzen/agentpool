@@ -105,9 +105,7 @@ class ProcessHistoryAdapter:
             return _wrapped_async
 
         @functools.wraps(processor)
-        def _wrapped_sync(
-            ctx: RunContext[Any], messages: list[ModelMessage]
-        ) -> list[ModelMessage]:
+        def _wrapped_sync(ctx: RunContext[Any], messages: list[ModelMessage]) -> list[ModelMessage]:
             return processor(ctx, messages)
 
         return _wrapped_sync
@@ -125,10 +123,7 @@ class ProcessHistoryAdapter:
             A list of :class:`~pydantic_ai.capabilities.ProcessHistory` instances,
             one per input processor, in the same order.
         """
-        return [
-            ProcessHistory(ProcessHistoryAdapter.wrap_processor(p))
-            for p in processors
-        ]
+        return [ProcessHistory(ProcessHistoryAdapter.wrap_processor(p)) for p in processors]
 
 
 def _is_run_context_annotation(annotation: Any) -> bool:

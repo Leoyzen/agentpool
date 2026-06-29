@@ -121,16 +121,13 @@ def create_skill_command(
                 # Build complete prompt with instructions AND user request (args)
                 # This matches OpenCode's pattern: skill-instruction + user-request
                 user_request = " ".join(args)
-                if user_request:
-                    full_prompt = f"""<skill-instruction>
+                full_prompt = f"""<skill-instruction>
 {instructions}
 </skill-instruction>
 
 <user-request>
 {user_request}
 </user-request>"""
-                else:
-                    full_prompt = instructions
                 # Inject complete prompt into staged_content for agent processing
                 if (
                     hasattr(ctx, "data")

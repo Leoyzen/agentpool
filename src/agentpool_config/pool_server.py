@@ -172,13 +172,24 @@ class ACPPoolServerConfig(BasePoolServerConfig):
     )
     """Whether to raise exceptions during server start."""
 
-    subagent_display_mode: Literal["legacy", "zed"] = Field(
+    subagent_display_mode: Literal["legacy", "zed", "qwen"] = Field(
         default="legacy",
         title="Subagent display mode",
     )
     """How to display nested agent output in ACP clients:
     - "legacy": Original display mode (backward compat for "inline"/"tool_box")
     - "zed": Zed editor optimized display mode
+    - "qwen": Qwen compatible display mode
+    """
+
+    raw_input_mode: Literal["dict", "skip", "json_str"] = Field(
+        default="dict",
+        title="Raw input mode",
+    )
+    """How to emit tool call raw_input in ACP session updates:
+    - "dict": Parse args as dict (default; partial JSON returns empty dict)
+    - "skip": Omit raw_input until the tool call is complete
+    - "json_str": Emit raw_input as a JSON string instead of a dict
     """
 
     @field_validator("subagent_display_mode", mode="before")

@@ -96,19 +96,24 @@ def inject_nodes[T, **P](
             logger.error(msg)
             raise NodeInjectionError(msg)
 
-        # Get node from pool
-        if name not in pool.nodes:
-            available = ", ".join(sorted(pool.nodes))
+        # Validate node name against manifest config
+        if name not in pool.manifest.agents:
+            available = ", ".join(sorted(pool.manifest.agents))
             msg = (
-                f"No node named {name!r} found in pool.\n"
+                f"No node named {name!r} found in configuration.\n"
                 f"Available nodes: {available}\n"
                 f"Check your YAML configuration or node name."
             )
             logger.error(msg)
             raise NodeInjectionError(msg)
 
-        nodes[name] = pool.nodes[name]
-        logger.debug("Injecting node", node=nodes[name], name=name)
+        # Create the agent instance from config.
+        # Pool-level agent storage was removed; we create instances on demand
+        # from the manifest config via AnyAgentConfig.get_agent().
+        config = pool.manifest.agents[name]
+        node = config.get_agent(pool=pool)
+        nodes[name] = node
+        logger.debug("Injected node from config", name=name)
 
     logger.debug("Injection complete.", nodes=sorted(nodes))
     return nodes

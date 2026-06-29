@@ -272,6 +272,10 @@ class GraphStreamingAdapter(Generic[StateT, DepsT, OutputT]):
                     if event is None:
                         break
                     yield event
+                    if isinstance(event, RunErrorEvent):
+                        break
+                    if isinstance(event, StreamCompleteEvent):
+                        return
 
             if self._iteration_error is not None:
                 raise self._iteration_error

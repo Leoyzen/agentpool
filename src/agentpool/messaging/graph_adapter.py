@@ -31,9 +31,7 @@ class AgentPoolState:
     kwargs: dict[str, Any] = field(default_factory=dict)
     """Additional keyword arguments passed to run()."""
 
-    event_queue: asyncio.Queue[RichAgentStreamEvent[Any]] = field(
-        default_factory=asyncio.Queue
-    )
+    event_queue: asyncio.Queue[RichAgentStreamEvent[Any]] = field(default_factory=asyncio.Queue)
     """Queue for streaming events from the Step back to run_stream()."""
 
     result: ChatMessage[Any] | None = None
@@ -60,6 +58,10 @@ class MessageNodeStep:
     async def _execute(self, ctx: StepContext[AgentPoolState, Any, Any]) -> Any:
         """Step function that runs the wrapped node.
 
+        Signal emission (``message_received`` / ``message_sent``) is handled
+        by :class:`SignalEmittingGraphRun` which wraps the graph run at the
+        ``MessageNode.run()`` / ``MessageNode.run_stream()`` level.
+
         Args:
             ctx: pydantic-graph StepContext containing state, deps, and inputs.
 
@@ -69,19 +71,10 @@ class MessageNodeStep:
         state = ctx.state
         node = state.node
 
-        # Reconstruct the input message from prompts
-        user_msg = ChatMessage.user_prompt(message=state.prompts)
-
-        # Emit message_received signal for backward compatibility
-        await node.message_received.emit(user_msg)
-
         # Delegate to the node's core execution logic, injecting state
         # under a private key so _execute_node can access the event queue
         merged_kwargs = {**state.kwargs, "_state": state}
         result = await node._execute_node(*state.prompts, **merged_kwargs)
-
-        # Emit message_sent signal for backward compatibility
-        await node.message_sent.emit(result)
 
         state.result = result
         return result

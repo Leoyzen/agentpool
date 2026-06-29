@@ -282,13 +282,9 @@ class MCPServer(BaseServer):
         """Notify clients about tool list changes."""
         try:
             if self._task_group is not None:
-                self._task_group.start_soon(
-                    self.current_session.send_tool_list_changed
-                )
+                self._task_group.start_soon(self.current_session.send_tool_list_changed)
             else:
-                self.task_manager.create_task(
-                    self.current_session.send_tool_list_changed()
-                )
+                self.task_manager.create_task(self.current_session.send_tool_list_changed())
         except RuntimeError:
             self.log.debug("No active session for notification")
         except Exception:
@@ -298,13 +294,9 @@ class MCPServer(BaseServer):
         """Notify clients about prompt list changes."""
         try:
             if self._task_group is not None:
-                self._task_group.start_soon(
-                    self.current_session.send_prompt_list_changed
-                )
+                self._task_group.start_soon(self.current_session.send_prompt_list_changed)
             else:
-                self.task_manager.create_task(
-                    self.current_session.send_prompt_list_changed()
-                )
+                self.task_manager.create_task(self.current_session.send_prompt_list_changed())
         except RuntimeError:
             self.log.debug("No active session for notification")
         except Exception:

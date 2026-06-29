@@ -171,4 +171,3 @@ class PendingDeferredCall(Schema):
 
     timeout: timedelta | None = None
     """Optional timeout after which the call expires."""
-

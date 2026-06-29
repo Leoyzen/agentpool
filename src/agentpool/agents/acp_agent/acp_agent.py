@@ -44,6 +44,7 @@ from pydantic_ai import ModelRequest, ModelResponse, TextPart, UserPromptPart
 from acp import InitializeRequest
 from acp.agent import ACPAgentAPI
 from agentpool.agents.acp_agent.session_state import ACPSessionState
+from agentpool.agents.acp_agent.turn import ACPTurn
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.events import (
     RunStartedEvent,
@@ -72,6 +73,7 @@ if TYPE_CHECKING:
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
     from pydantic_ai import ThinkingPart, ToolCallPart, UserContent
+    from pydantic_ai.messages import ModelMessage
     from slashed import BaseCommand
     from tokonomics.model_discovery.model_info import ModelInfo
 
@@ -88,6 +90,7 @@ if TYPE_CHECKING:
     from agentpool.hooks import AgentHooks
     from agentpool.messaging import MessageHistory
     from agentpool.models.acp_agents import BaseACPAgentConfig
+    from agentpool.orchestrator.turn import Turn
     from agentpool.resource_providers import ResourceProvider
     from agentpool.sessions import SessionData
     from agentpool.ui.base import InputProvider
@@ -510,21 +513,10 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                                 except anyio.WouldBlock:
                                     break
                         else:
-                            event_queue = run_ctx.event_queue
-                            while not acp_done.is_set():
-                                try:
-                                    item = await asyncio.wait_for(
-                                        event_queue.get(), timeout=0.05
-                                    )
-                                    await send_stream.send(item)
-                                except TimeoutError:
-                                    continue
-                            while True:
-                                try:
-                                    item = event_queue.get_nowait()
-                                    await send_stream.send(item)
-                                except asyncio.QueueEmpty:
-                                    break
+                            logger.warning(
+                                "No EventBus stream available for ACP agent — secondary events will not be forwarded"
+                            )
+                            return
                     except (
                         anyio.EndOfStream,
                         anyio.ClosedResourceError,
@@ -534,41 +526,43 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                     finally:
                         await send_stream.aclose()
 
+                # Forwarders run inside a task group; the consumer loop
+                # (with yield) stays OUTSIDE so generator cleanup never
+                # crosses a cancel scope boundary.
                 async with anyio.create_task_group() as tg:
                     tg.start_soon(_forward_acp_events)
                     tg.start_soon(_forward_secondary_events)
-                    async for event in receive_stream:
-                        if isinstance(event, EventEnvelope):
-                            event = event.event
-                        if isinstance(event, ToolResultMetadataEvent):
-                            tool_metadata[event.tool_call_id] = event.metadata
-                            continue
-                        if run_ctx.cancelled:
-                            self.log.info("Stream cancelled by user")
-                            break
-                        if isinstance(event, ToolCallCompleteEvent):
-                            enriched_event = event
-                            if not enriched_event.agent_name:
-                                enriched_event = replace(
-                                    enriched_event, agent_name=self.name
-                                )
-                            if (
-                                enriched_event.metadata is None
-                                and enriched_event.tool_call_id in tool_metadata
-                            ):
-                                enriched_event = replace(
-                                    enriched_event,
-                                    metadata=tool_metadata[enriched_event.tool_call_id],
-                                )
-                            output_event = enriched_event
-                        else:
-                            output_event = event
-                        part = event_to_part(output_event)
-                        if isinstance(part, TextPart):
-                            text_chunks.append(part.content)
-                        if part:
-                            current_response_parts.append(part)
-                        yield output_event
+
+                async for event in receive_stream:
+                    if isinstance(event, EventEnvelope):
+                        event = event.event
+                    if isinstance(event, ToolResultMetadataEvent):
+                        tool_metadata[event.tool_call_id] = event.metadata
+                        continue
+                    if run_ctx.cancelled:
+                        self.log.info("Stream cancelled by user")
+                        break
+                    if isinstance(event, ToolCallCompleteEvent):
+                        enriched_event = event
+                        if not enriched_event.agent_name:
+                            enriched_event = replace(enriched_event, agent_name=self.name)
+                        if (
+                            enriched_event.metadata is None
+                            and enriched_event.tool_call_id in tool_metadata
+                        ):
+                            enriched_event = replace(
+                                enriched_event,
+                                metadata=tool_metadata[enriched_event.tool_call_id],
+                            )
+                        output_event = enriched_event
+                    else:
+                        output_event = event
+                    part = event_to_part(output_event)
+                    if isinstance(part, TextPart):
+                        text_chunks.append(part.content)
+                    if part:
+                        current_response_parts.append(part)
+                    yield output_event
         except asyncio.CancelledError:
             self.log.info("Stream cancelled via task cancellation")
             run_ctx.cancelled = True
@@ -655,6 +649,36 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         self.auto_approve = auto_approve
         self.log.info("Auto-approve mode changed", auto_approve=auto_approve)
 
+    def create_turn(
+        self,
+        prompts: list[str],
+        run_ctx: AgentRunContext,
+        message_history: list[ModelMessage],
+    ) -> Turn:
+        """Create an ACPTurn for single-cycle execution.
+
+        Args:
+            prompts: Pre-converted prompt strings for this turn.
+            run_ctx: Per-run isolated context.
+            message_history: Incoming message history.
+
+        Returns:
+            An ACPTurn instance for single-cycle execution.
+        """
+        # TODO: ACPAgentAPI does not implement ACPClientProtocol fully —
+        # it lacks stream_events() and get_messages(). At runtime this will raise
+        # AttributeError when ACPTurn.execute() calls those methods. An adapter
+        # wrapping ACPAgentAPI with async futures / notification registry is needed
+        # for full integration.
+        return ACPTurn(
+            acp_client=self._api,
+            prompts=prompts,
+            run_ctx=run_ctx,
+            message_history=message_history,
+            session_id=self._sdk_session_id or run_ctx.session_id,
+            agent_name=self.name,
+        )
+
     async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
         """Send CancelNotification to remote ACP server and cancel local tasks.
 
@@ -671,10 +695,6 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         if self._prompt_task and not self._prompt_task.done():
             self._prompt_task.cancel()
             self.log.info("Cancelled prompt task")
-        run_ctx = self.get_active_run_context()
-        stream_task = run_ctx.current_task if run_ctx else None
-        if stream_task and not stream_task.done():
-            stream_task.cancel()
 
     async def get_available_models(self) -> list[ModelInfo] | None:
         """Get available models from the ACP session state."""

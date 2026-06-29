@@ -41,7 +41,7 @@ def get_supported_languages() -> set[str]:
     Returns:
         Set of language identifiers that have query files
     """
-    from grep_ast.parsers import PARSERS  # type: ignore[import-untyped]
+    from grep_ast.parsers import PARSERS
 
     supported = set()
     for lang in set(PARSERS.values()):
@@ -59,7 +59,7 @@ def is_language_supported(fname: str) -> bool:
     Returns:
         True if language is supported for tag extraction
     """
-    from grep_ast import filename_to_lang  # type: ignore[import-untyped]
+    from grep_ast import filename_to_lang
 
     if (lang := filename_to_lang(fname)) and (scm := get_scm_fname(lang)):
         return scm.exists()

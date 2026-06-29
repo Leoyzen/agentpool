@@ -161,7 +161,6 @@ class Talk[TTransmittedData = Any]:
                 other = Agent.from_callback(other)  # ty: ignore[no-matching-overload]
                 if pool := self.source.agent_pool:
                     other.agent_pool = pool
-                    pool.register(other.name, other)
                 return self.__rshift__(other)
             case Sequence():
                 team_talks = [self.__rshift__(o) for o in other]  # ty: ignore[no-matching-overload]
@@ -507,7 +506,6 @@ class TeamTalk[TTransmittedData = Any](list["Talk | TeamTalk"]):
                 for talk_ in self.iter_talks():
                     if pool := talk_.source.agent_pool:
                         other.agent_pool = pool
-                        pool.register(other.name, other)
                         break
                 return self.__rshift__(other)
             case Sequence():

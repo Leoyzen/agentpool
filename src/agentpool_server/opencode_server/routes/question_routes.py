@@ -28,7 +28,10 @@ def _find_permission_provider(
         return None
     for session_id, session in state.session_controller._sessions.items():
         provider = session.input_provider
-        if isinstance(provider, OpenCodeInputProvider) and permission_id in provider._pending_permissions:
+        if (
+            isinstance(provider, OpenCodeInputProvider)
+            and permission_id in provider._pending_permissions
+        ):
             return session_id, provider
     return None
 
@@ -131,7 +134,11 @@ async def reply_to_question(requestID: str, reply: QuestionReply, state: StateDe
         return True
 
     session_id = pending.session_id
-    session = state.session_controller.get_session(session_id) if state.session_controller is not None else None
+    session = (
+        state.session_controller.get_session(session_id)
+        if state.session_controller is not None
+        else None
+    )
     provider = session.input_provider if session is not None else None
     if not isinstance(provider, OpenCodeInputProvider):
         raise HTTPException(status_code=500, detail="Invalid provider for session")

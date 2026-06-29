@@ -86,7 +86,7 @@ def _resolve_session_create_agent(state: ServerState, requested_agent: str | Non
         return default_agent
 
     pool = state.pool
-    if requested_agent not in pool.all_agents:
+    if requested_agent not in pool.manifest.agents:
         raise HTTPException(status_code=400, detail=f"Unknown agent: {requested_agent}")
     return requested_agent
 
@@ -473,9 +473,7 @@ async def _execute_skill_command(
 
             session_pool = state.pool.session_pool if state.pool else None
             if session_pool is not None:
-                iterator = session_pool.run_stream(
-                    session_id, user_prompt, scope="session"
-                )
+                iterator = session_pool.run_stream(session_id, user_prompt, scope="session")
             else:
                 # Fallback to direct agent if session_pool is not available
                 agent = state.agent
@@ -579,7 +577,9 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
             return session
 
     # Fallback: load via agent.load_session()
-    existing_messages = await get_messages_for_session(state, session_id) if is_subagent_session else []
+    existing_messages = (
+        await get_messages_for_session(state, session_id) if is_subagent_session else []
+    )
     if session_pool is not None:
         agent = await session_pool.sessions.get_or_create_session_agent(session_id)
     else:
@@ -1074,6 +1074,7 @@ async def fork_session(  # noqa: D417
         fork_agent = await session_pool.sessions.get_or_create_session_agent(new_session_id)
         fork_agent.conversation.chat_messages.clear()
         from agentpool_server.opencode_server.converters import opencode_to_chat_message
+
         for msg_with_parts in copied_messages:
             chat_msg = opencode_to_chat_message(msg_with_parts, session_id=new_session_id)
             fork_agent.conversation.chat_messages.append(chat_msg)
@@ -1161,9 +1162,7 @@ async def init_session(  # noqa: D417
             try:
                 available_models = await agent.get_available_models()
                 if available_models:
-                    valid_ids = [
-                        m.id_override if m.id_override else m.id for m in available_models
-                    ]
+                    valid_ids = [m.id_override if m.id_override else m.id for m in available_models]
                     if requested_model in valid_ids:
                         await agent.set_model(requested_model)
             except Exception:  # noqa: BLE001
@@ -1441,7 +1440,6 @@ async def summarize_session(  # noqa: PLR0915
     # not interleave with other operations on the same session.
     # Lock ordering: route-level lock first, then turn_lock.
     async with state.get_session_lock(session_id):
-
         # Determine model to use
         model_id = request.model_id if request and request.model_id else "default"
         provider_id = request.provider_id if request and request.provider_id else "agentpool"
@@ -1492,9 +1490,7 @@ async def summarize_session(  # noqa: PLR0915
                 if session_pool is None:
                     msg = "SessionPool is not available"
                     raise RuntimeError(msg)
-                stream = session_pool.run_stream(
-                    session_id, SUMMARIZE_PROMPT, scope="session"
-                )
+                stream = session_pool.run_stream(session_id, SUMMARIZE_PROMPT, scope="session")
                 async for event in stream:
                     match event:
                         # Text streaming start
@@ -1510,9 +1506,9 @@ async def summarize_session(  # noqa: PLR0915
                             await state.broadcast_event(PartUpdatedEvent.create(text_part))
 
                         # Text streaming delta
-                        case PydanticPartDeltaEvent(
-                            delta=TextPartDelta(content_delta=delta)
-                        ) if delta:
+                        case PydanticPartDeltaEvent(delta=TextPartDelta(content_delta=delta)) if (
+                            delta
+                        ):
                             response_text += delta
                             if text_part is not None:
                                 text_part = TextPart(
@@ -1560,9 +1556,7 @@ async def summarize_session(  # noqa: PLR0915
                         await state.storage.replace_conversation_messages(
                             session_id, compacted_history
                         )
-                    await set_messages_for_session(
-                        state, session_id, [assistant_msg_with_parts]
-                    )
+                    await set_messages_for_session(state, session_id, [assistant_msg_with_parts])
                 except Exception:  # noqa: BLE001
                     # Compaction failure is not fatal - we still have the summary
                     pass
@@ -1960,9 +1954,7 @@ async def execute_command(  # noqa: PLR0915
                         state._run_handles = run_handles
                         # Wait for the background run to complete before finalizing
                         try:
-                            await asyncio.wait_for(
-                                run_handle.complete_event.wait(), timeout=30.0
-                            )
+                            await asyncio.wait_for(run_handle.complete_event.wait(), timeout=30.0)
                         except TimeoutError:
                             run_handle.cancel()
                             output_text = "Error: command execution timed out"

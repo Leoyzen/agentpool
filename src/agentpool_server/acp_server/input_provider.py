@@ -447,9 +447,7 @@ class ACPInputProvider(InputProvider):
         # request_permission can only present a single question, so unwrap the first
         # elicitable property and remember the original key to wrap the result back.
         effective_schema, object_key = self._resolve_effective_schema(schema)
-        result = await self._dispatch_elicitation_by_schema(
-            effective_schema, tool_call_id, title
-        )
+        result = await self._dispatch_elicitation_by_schema(effective_schema, tool_call_id, title)
         return self._wrap_object_result(result, object_key)
 
     def _resolve_effective_schema(
@@ -481,28 +479,34 @@ class ACPInputProvider(InputProvider):
         if _is_boolean_schema(schema):
             options = _create_boolean_elicitation_options()
             perm_response = await self.session.requests.request_permission(
-                tool_call_id=tool_call_id, title=title, options=options,
+                tool_call_id=tool_call_id,
+                title=title,
+                options=options,
             )
             result = self._handle_boolean_elicitation_response(perm_response, schema)
-        elif _is_enum_schema(schema) and (
-            enum_options := _create_enum_elicitation_options(schema)
-        ):
+        elif _is_enum_schema(schema) and (enum_options := _create_enum_elicitation_options(schema)):
             perm_response = await self.session.requests.request_permission(
-                tool_call_id=tool_call_id, title=title, options=enum_options,
+                tool_call_id=tool_call_id,
+                title=title,
+                options=enum_options,
             )
             result = _handle_enum_elicitation_response(perm_response, schema)
         elif _is_oneof_schema(schema) and (
             oneof_options := _create_oneof_elicitation_options(schema)
         ):
             perm_response = await self.session.requests.request_permission(
-                tool_call_id=tool_call_id, title=title, options=oneof_options,
+                tool_call_id=tool_call_id,
+                title=title,
+                options=oneof_options,
             )
             result = _handle_oneof_elicitation_response(perm_response, schema)
         elif _is_array_enum_schema(schema) and (
             array_options := _create_array_enum_elicitation_options(schema)
         ):
             perm_response = await self.session.requests.request_permission(
-                tool_call_id=tool_call_id, title=title, options=array_options,
+                tool_call_id=tool_call_id,
+                title=title,
+                options=array_options,
             )
             result = _handle_array_enum_elicitation_response(perm_response, schema)
         else:
@@ -512,7 +516,9 @@ class ACPInputProvider(InputProvider):
                 PermissionOption(option_id="decline", name="Decline", kind="reject_once"),
             ]
             perm_response = await self.session.requests.request_permission(
-                tool_call_id=tool_call_id, title=title, options=generic_options,
+                tool_call_id=tool_call_id,
+                title=title,
+                options=generic_options,
             )
 
             match perm_response.outcome:

@@ -9,7 +9,6 @@ from datetime import timedelta
 import inspect
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Self, TypedDict, TypeVar, cast, overload
-from uuid import uuid4
 import warnings
 
 import logfire
@@ -32,12 +31,12 @@ except ImportError:
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.context import AgentContext
 from agentpool.agents.events import (
-    StreamCompleteEvent,
+    RunErrorEvent,
 )
 from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
+from agentpool.agents.native_agent.turn import NativeTurn
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory
-from agentpool.orchestrator.run_executor import RunExecutor
 from agentpool.storage import StorageManager
 from agentpool.tools import Tool, ToolManager
 from agentpool.tools.exceptions import ToolError
@@ -50,6 +49,7 @@ if TYPE_CHECKING:
 
     from exxec import ExecutionEnvironment
     from pydantic_ai import AgentBuiltinTool, UsageLimits, UserContent
+    from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models import Model
     from pydantic_ai.output import OutputSpec
     from pydantic_ai.settings import ModelSettings
@@ -75,6 +75,7 @@ if TYPE_CHECKING:
     from agentpool.hooks import AgentHooks
     from agentpool.messaging import MessageNode
     from agentpool.models.agents import NativeAgentConfig, ToolMode
+    from agentpool.orchestrator.turn import Turn
     from agentpool.prompts.prompts import PromptType
     from agentpool.resource_providers import ResourceProvider
     from agentpool.sessions import SessionData
@@ -782,7 +783,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         #    to avoid double-firing. Old base_agent.py hook mechanism handles
         #    pre_run/post_run/pre_tool_use/post_tool_use directly.
         #    EventBus events (RunStartedEvent, ToolCallStartEvent,
-        #    ToolCallCompleteEvent) are produced by RunExecutor, so the
+        #    ToolCallCompleteEvent) are produced by NativeTurn, so the
         #    removed EventBusHooksAdapter wrapping was redundant.
         if not self.hooks:
             hooks_capability = self._hook_manager.as_capability()
@@ -915,8 +916,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         Detects graph context via *_state* in kwargs (injected by
         :class:`~agentpool.messaging.graph_adapter.MessageNodeStep`) and
-        delegates execution to :class:`~agentpool.orchestrator.run_executor.RunExecutor`,
-        forwarding all events to the state's event queue for the parent graph
+        delegates execution to :class:`~agentpool.agents.native_agent.turn.NativeTurn`,
+        forwarding all events to the EventBus for the parent graph
         to drain.
 
         Args:
@@ -929,8 +930,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         Raises:
             RuntimeError: If ``_state`` or required sub-keys are missing.
-            RuntimeError: If ``RunExecutor`` completes without a
-                ``StreamCompleteEvent``.
         """
         from agentpool.messaging.graph_adapter import AgentPoolState
 
@@ -946,25 +945,33 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if run_ctx is None:
             raise RuntimeError("run_ctx required in state.kwargs for graph execution")
 
-        executor = RunExecutor(self)
-        result: ChatMessage[Any] | None = None
-        async for event in executor.execute(
+        # Get or create EventBus for graph path — events flow through EventBus
+        # instead of state.event_queue.
+        from agentpool.orchestrator.core import EventBus
+
+        event_bus = run_ctx.event_bus
+        if event_bus is None:
+            event_bus = EventBus()
+            run_ctx.event_bus = event_bus
+
+        turn = NativeTurn(
+            agent=self,
             prompts=list(prompts),
             run_ctx=run_ctx,
-            user_msg=kw["user_msg"],
             message_history=kw["message_history"],
-            message_id=kw.get("message_id") or str(uuid4()),
-            session_id=kw["session_id"],
-            _parent_id=kw.get("parent_session_id"),
-            input_provider=kw.get("input_provider"),
-            deps=kw.get("deps"),
-        ):
-            await state.event_queue.put(event)
-            if isinstance(event, StreamCompleteEvent):
-                result = event.message
-
-        if result is None:
-            raise RuntimeError("RunExecutor.execute() completed without a StreamCompleteEvent")
+            parent_id=kw.get("effective_parent_id"),
+        )
+        session_id = kw["session_id"]
+        turn_failed = False
+        error_msg = ""
+        async for event in turn.execute():
+            await event_bus.publish(session_id, event)
+            if isinstance(event, RunErrorEvent):
+                turn_failed = True
+                error_msg = event.message
+        if turn_failed:
+            raise RuntimeError(f"NativeTurn execution failed: {error_msg}")
+        result = turn.final_message
 
         state.result = result
         return result
@@ -986,47 +993,54 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         wait_for_connections: bool | None = None,
         deps: TDeps | None = None,
     ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
-        """Stream agent events in real-time using RunExecutor.
+        """Stream agent events in real-time using NativeTurn.
 
-        Delegates to :class:`~agentpool.orchestrator.run_executor.RunExecutor`
+        Delegates to :class:`~agentpool.agents.native_agent.turn.NativeTurn`
         which drives the PydanticAI agent run loop with ``agent_run.next(node)``,
         yielding fine-grained streaming events including ``RunStartedEvent``,
         ``PartStartEvent``, ``ToolCallStartEvent``, and ``StreamCompleteEvent``.
 
-        !!! note "Dual-path architecture"
-            There are two execution paths for native agents:
-
-            | Path | Entry Point | Mechanism | Streaming Granularity |
-            |---|---|---|---|
-            | **Standalone** | `BaseAgent.run_stream()` | `_stream_events()` → `RunExecutor.execute()` | Fine-grained (real-time) |
-            | **Graph** | `MessageNode.run()` / `run_stream()` | `MessageNodeStep._execute()` → `_execute_node()` | Coarse-grained (per-step) |
-
-            Both paths use :class:`RunExecutor` for event production.
-            The graph path buffers events into the state event queue; the
-            standalone path streams them directly to the caller.
+        Events are published to the EventBus via ``NativeTurn.execute()``;
+        this method yields nothing — the caller picks up the result via
+        ``run_ctx.terminal_tool_result`` side channel.
         """
-        message_id = message_id or str(uuid4())
         assert session_id is not None  # Initialized by BaseAgent.run_stream()
 
-        executor = RunExecutor(self)
+        # Get or create EventBus — events go directly to EventBus.
+        event_bus = run_ctx.event_bus
+        if event_bus is None:
+            from agentpool.orchestrator.core import EventBus
 
-        async for event in executor.execute(
+            event_bus = EventBus()
+            run_ctx.event_bus = event_bus
+
+        # Convert MessageHistory to list[ModelMessage] for pydantic-ai
+        model_messages: list[ModelMessage] = []
+        for chat_msg in message_history.get_history():
+            model_messages.extend(chat_msg.messages)
+
+        turn = NativeTurn(
+            agent=self,
             prompts=list(prompts),
             run_ctx=run_ctx,
-            user_msg=user_msg,
-            message_history=message_history,
-            message_id=message_id,
-            session_id=session_id,
-            _parent_id=parent_session_id,
-            input_provider=input_provider,
-            deps=deps,
-        ):
-            # Wire iteration_task for _interrupt() compatibility.
-            # executor._iteration_task becomes non-None after the first
-            # event (RunStartedEvent) is yielded.
-            if executor._iteration_task is not None and self._iteration_task is None:
-                self._iteration_task = executor._iteration_task
+            message_history=model_messages,
+            parent_id=user_msg.message_id,
+        )
+        session_id_local = session_id
+        turn_failed = False
+        error_msg = ""
+        async for event in turn.execute():
             yield event
+            if isinstance(event, RunErrorEvent):
+                turn_failed = True
+                error_msg = event.message
+        if turn_failed:
+            raise RuntimeError(f"NativeTurn execution failed: {error_msg}")
+        result = turn.final_message
+
+        # Store result for _run_stream_once() to pick up — avoids race
+        # condition with EventBus consumer cancelling TaskGroup.
+        run_ctx.terminal_tool_result = result
 
     def register_worker(
         self,
@@ -1053,19 +1067,37 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             # Direct Model instance assignment (no signal emission)
             self._model = model
 
-    async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
-        """Cancel the current stream task and iteration task.
+    def create_turn(
+        self,
+        prompts: list[str],
+        run_ctx: AgentRunContext,
+        message_history: list[ModelMessage],
+    ) -> Turn:
+        """Create a NativeTurn for single-cycle execution.
 
         Args:
-            run_ctx: Optional per-run context for the stream to interrupt
+            prompts: Pre-converted prompt strings for this turn.
+            run_ctx: Per-run isolated context.
+            message_history: Incoming message history.
+
+        Returns:
+            A NativeTurn instance for single-cycle execution.
         """
-        task = run_ctx.current_task if run_ctx else None
-        if task and not task.done():
-            task.cancel()
-        # Also directly cancel the iteration_task running the LLM API call.
-        # Before this fix, iteration_task was a local variable and only cancelled
-        # indirectly through the consumer's finally block. If consumer cleanup
-        # timed out, the LLM call kept running in the background.
+        return NativeTurn(
+            agent=self,
+            prompts=prompts,
+            run_ctx=run_ctx,
+            message_history=message_history,
+        )
+
+    async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
+        """Cancel the iteration task running the LLM API call.
+
+        Args:
+            run_ctx: Optional per-run context (unused in native agent,
+                kept for signature compatibility with the ACP subclass).
+        """
+        del run_ctx  # Unused in native agent; kept for ACP subclass signature
         iteration_task = self._iteration_task
         if iteration_task is not None and not iteration_task.done():
             iteration_task.cancel()

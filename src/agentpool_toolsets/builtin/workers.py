@@ -1,7 +1,7 @@
 """Provider for worker agent tools.
 
 Worker tools delegate to agents/teams in the pool. All event routing is handled
-by the SessionPool's TurnRunner — the business layer does not manually wrap or
+by the SessionPool — the business layer does not manually wrap or
 forward events. The protocol layer subscribes with ``scope="descendants"`` and
 receives child session events automatically.
 """
@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.agents.events import (
-    SpawnSessionStart,
     StreamCompleteEvent,
     SubAgentEvent,
 )
@@ -91,18 +90,35 @@ class WorkersTools(ResourceProvider):
                 msg = "SessionPool is required for worker tool execution"
                 raise ToolError(msg)
 
-            # Look for agent in both agents and teams
-            worker = None
-            agents = ctx.pool.get_agents()
-            if agent_name in agents:
-                worker = agents[agent_name]
-            elif agent_name in ctx.pool.teams:
-                worker = ctx.pool.teams[agent_name]
+            # Look for worker in manifest configs and resolve via SessionPool
+            worker: Any = None
+            if agent_name in ctx.pool.manifest.agents:
+                # Register in runtime registry so get_or_create_session_agent()
+                # can find the config even without pool-level agent storage.
+                agent_cfg = ctx.pool.manifest.agents[agent_name]
+                if session_pool.sessions is not None:
+                    session_pool.sessions.runtime_registry.register(agent_name, agent_cfg)
+                from agentpool.utils.identifiers import generate_session_id
+
+                temp_id = generate_session_id()
+                worker = await session_pool.sessions.get_or_create_session_agent(
+                    temp_id,
+                    agent_name=agent_name,
+                )
+            elif agent_name in ctx.pool.manifest.teams:
+                worker = await session_pool.create_team_from_config(
+                    agent_name,
+                    ctx.pool.manifest.teams[agent_name],
+                )
 
             if worker is None:
-                available = list(agents.keys()) + list(ctx.pool.teams.keys())
+                available = list(ctx.pool.manifest.agents.keys()) + list(
+                    ctx.pool.manifest.teams.keys()
+                )
                 msg = f"Agent {agent_name!r} not found in pool. Available: {available}"
                 raise ToolError(msg)
+
+            is_team_node = not isinstance(worker, BaseAgent)
 
             # Compute delegation depth from current run context
             current_depth: int = ctx.run_ctx.depth if ctx.run_ctx is not None else 0
@@ -136,34 +152,29 @@ class WorkersTools(ResourceProvider):
                 msg = f"Agent {agent_name} does not support streaming"
                 raise ToolError(msg)
 
+            agent_type_str = (
+                worker.agent_type if isinstance(worker, BaseAgent) else type(worker).__name__
+            )
+
             child_session_id = await ctx.create_child_session(
                 agent_name=agent_name,
-                agent_type=worker.agent_type,
+                agent_type=agent_type_str,
                 parent_session_id=parent_session_id,
-                source_name=agent_name,
-                source_type=source_type,
-                depth=child_depth,
-                tool_call_id=ctx.tool_call_id,
-            )
-
-            # Emit SpawnSessionStart so the protocol layer can detect child session
-            # creation. All other stream events flow through TurnRunner → EventBus
-            # and reach the frontend via protocol-layer ``scope="descendants"``
-            # subscription — no manual business-layer forwarding is required.
-            spawn_event = SpawnSessionStart(
-                child_session_id=child_session_id,
-                parent_session_id=parent_session_id,
-                tool_call_id=ctx.tool_call_id,
                 spawn_mechanism="task",
+                description=f"Run {agent_name} worker",
+                tool_call_id=ctx.tool_call_id,
                 source_name=agent_name,
                 source_type=source_type,
                 depth=child_depth,
-                description=f"Run {agent_name} worker",
-                metadata={"prompt": prompt[:200]} if prompt else {},
             )
-            await ctx.events.emit_event(spawn_event)
 
             try:
+                if is_team_node:
+                    # Teams run directly (SessionPool does not support team sessions)
+                    from agentpool.messaging.message_history import MessageHistory
+
+                    result = await worker.run(prompt, message_history=MessageHistory())  # type: ignore[attr-defined]
+                    return str(result.content) if result.content else ""
                 input_provider = ctx.get_input_provider() if ctx.input_provider else None
                 # Prefer node-level input_provider if session provider was resolved
                 if input_provider is None and isinstance(worker, BaseAgent):
@@ -203,17 +214,35 @@ class WorkersTools(ResourceProvider):
                 msg = "SessionPool is required for worker tool execution"
                 raise ToolError(msg)
 
-            # Look for worker in both nodes and teams
-            worker = None
-            if node_name in ctx.pool.nodes:
-                worker = ctx.pool.nodes[node_name]
-            elif node_name in ctx.pool.teams:
-                worker = ctx.pool.teams[node_name]
+            # Look for worker in manifest configs and resolve via SessionPool
+            worker: Any = None
+            if node_name in ctx.pool.manifest.agents:
+                # Register in runtime registry so get_or_create_session_agent()
+                # can find the config even without pool-level agent storage.
+                agent_cfg = ctx.pool.manifest.agents[node_name]
+                if session_pool.sessions is not None:
+                    session_pool.sessions.runtime_registry.register(node_name, agent_cfg)
+                from agentpool.utils.identifiers import generate_session_id
+
+                temp_id = generate_session_id()
+                worker = await session_pool.sessions.get_or_create_session_agent(
+                    temp_id,
+                    agent_name=node_name,
+                )
+            elif node_name in ctx.pool.manifest.teams:
+                worker = await session_pool.create_team_from_config(
+                    node_name,
+                    ctx.pool.manifest.teams[node_name],
+                )
 
             if worker is None:
-                available = list(ctx.pool.nodes.keys()) + list(ctx.pool.teams.keys())
+                available = list(ctx.pool.manifest.agents.keys()) + list(
+                    ctx.pool.manifest.teams.keys()
+                )
                 msg = f"Worker {node_name!r} not found in pool. Available: {available}"
                 raise ToolError(msg)
+
+            is_team_node = not isinstance(worker, BaseAgent)
 
             # Compute delegation depth from current run context
             current_depth: int = ctx.run_ctx.depth if ctx.run_ctx is not None else 0
@@ -222,15 +251,6 @@ class WorkersTools(ResourceProvider):
                 raise DelegationDepthError(child_depth)
 
             parent_session_id = getattr(ctx.node, "session_id", None) or ""
-            child_session_id = await ctx.create_child_session(
-                agent_name=node_name,
-                agent_type=worker.agent_type,
-                parent_session_id=parent_session_id,
-                source_name=node_name,
-                source_type="agent",  # Will be updated below
-                depth=child_depth,
-                tool_call_id=ctx.tool_call_id,
-            )
 
             # Determine source type for events
             source_type: Literal["agent", "team_parallel", "team_sequential"] = "agent"
@@ -245,22 +265,28 @@ class WorkersTools(ResourceProvider):
                 msg = f"Node {node_name} does not support streaming"
                 raise ToolError(msg)
 
-            # Emit SpawnSessionStart so the protocol layer can detect child session
-            # creation. All other stream events flow through TurnRunner → EventBus
-            # and reach the frontend via protocol-layer ``scope="descendants"``
-            # subscription — no manual business-layer forwarding is required.
-            spawn_event = SpawnSessionStart(
-                child_session_id=child_session_id,
+            agent_type_str = (
+                worker.agent_type if isinstance(worker, BaseAgent) else type(worker).__name__
+            )
+
+            child_session_id = await ctx.create_child_session(
+                agent_name=node_name,
+                agent_type=agent_type_str,
                 parent_session_id=parent_session_id,
-                tool_call_id=ctx.tool_call_id,
                 spawn_mechanism="task",
+                description=f"Run {node_name} worker",
+                tool_call_id=ctx.tool_call_id,
                 source_name=node_name,
                 source_type=source_type,
                 depth=child_depth,
-                description=f"Run {node_name} worker",
-                metadata={"prompt": prompt[:200]} if prompt else {},
             )
-            await ctx.events.emit_event(spawn_event)
+
+            if is_team_node:
+                # Teams run directly (SessionPool does not support team sessions)
+                from agentpool.messaging.message_history import MessageHistory
+
+                result = await worker.run(prompt, message_history=MessageHistory())  # type: ignore[attr-defined]
+                return str(result.content) if result.content else ""
 
             input_provider = ctx.get_input_provider() if ctx.input_provider else None
             final_content = ""

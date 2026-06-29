@@ -19,6 +19,7 @@ from agentpool.tools.base import ToolResult
 from agentpool.utils.inspection import execute, get_argument_key
 from agentpool.utils.signatures import create_modified_signature, update_signature
 
+
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:

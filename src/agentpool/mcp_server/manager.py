@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
     from mcp import types
     from mcp.shared.context import RequestContext
-    from mcp.types import ElicitRequestParams, ElicitResult, ErrorData, SamplingMessage
+    from mcp.types import ElicitRequestParams, ErrorData, SamplingMessage
     from pydantic_ai.capabilities import MCP
 
     from agentpool.ui.base import InputProvider
@@ -43,9 +43,7 @@ def set_current_input_provider(provider: InputProvider | None) -> None:
     _current_input_provider.set(provider)
 
 
-def _make_pydantic_ai_elicitation_callback() -> (
-    Any
-):
+def _make_pydantic_ai_elicitation_callback() -> Any:
     """Create an elicitation callback for PydanticAI MCP capabilities.
 
     The callback reads the current InputProvider from the ContextVar
@@ -63,7 +61,7 @@ def _make_pydantic_ai_elicitation_callback() -> (
                 "No InputProvider in context for MCP elicitation, declining",
             )
             return MCPElicitResult(action="decline")
-        return await provider.get_elicitation(params)  # type: ignore[return-value]
+        return await provider.get_elicitation(params)
 
     return _elicitation_callback
 
@@ -120,9 +118,7 @@ class MCPManager:
                 e,
             )
             await self.__aexit__(type(e), e, e.__traceback__)
-            raise RuntimeError(
-                f"Failed to initialize MCP manager (servers: {server_names})"
-            ) from e
+            raise RuntimeError(f"Failed to initialize MCP manager (servers: {server_names})") from e
 
         return self
 

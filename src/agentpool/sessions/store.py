@@ -188,9 +188,7 @@ class MemorySessionStore(SessionStore):
         }
         logger.debug("Saved checkpoint", session_id=session_id)
 
-    async def load_checkpoint(
-        self, session_id: str
-    ) -> dict[str, object] | None:
+    async def load_checkpoint(self, session_id: str) -> dict[str, object] | None:
         """Load checkpoint data for a session.
 
         Args:

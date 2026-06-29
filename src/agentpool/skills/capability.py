@@ -139,7 +139,7 @@ class SkillCapability(AbstractCapability[AgentDepsT]):
                 mcp_toolsets: list[AbstractToolset[AgentDepsT]] = []
                 for server_name in self._skill.mcp_servers:  # type: ignore[union-attr]
                     try:
-                        tools = await self._mcp_manager.get_tools(server_name, session_id)  # type: ignore[arg-type]
+                        tools = await self._mcp_manager.get_tools(server_name, session_id)
                     except Exception:
                         logger.exception(
                             "Failed to get MCP tools for skill %r, server %r",

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import warnings
 from dataclasses import dataclass, field
 import heapq
 from typing import TYPE_CHECKING, Any
+import warnings
 
 import anyio
 

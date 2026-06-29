@@ -50,8 +50,11 @@ class CallableHook(Hook):
             input_match: Optional regex patterns to match ``tool_input`` fields.
         """
         super().__init__(
-            event=event, matcher=matcher, timeout=timeout,
-            enabled=enabled, input_match=input_match,
+            event=event,
+            matcher=matcher,
+            timeout=timeout,
+            enabled=enabled,
+            input_match=input_match,
         )
         self._callable: Callable[..., HookResult | None] | None = None
         self._import_path: str | None = None

@@ -9,7 +9,11 @@ Example usage:
     from agentpool_server.opencode_server import OpenCodeServer
 
     async with AgentPool("config.yml") as pool:
-        server = OpenCodeServer(pool.main_agent, port=4096)
+        assert pool.session_pool is not None
+        agent = await pool.session_pool.sessions.get_or_create_session_agent(
+            "opencode-main", pool.main_agent_name
+        )
+        server = OpenCodeServer(agent, port=4096)
         await server.run_async()
 
 Or programmatically:

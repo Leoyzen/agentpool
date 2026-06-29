@@ -1653,9 +1653,8 @@ if __name__ == "__main__":
 
         fs = core.filesystem("file")
         tools = FSSpecTools(fs, name="local_fs")
-        async with AgentPool() as pool:
+        async with AgentPool():
             agent = Agent(name="test", model="anthropic-max:claude-haiku-4-5")
-            await pool.add_agent(agent)
             agent_ctx = agent.get_context()
             result = await tools.agentic_edit(
                 PyAiContext(deps=None, model=TestModel(), usage=RunUsage()),

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from slashed import CommandContext, CommandError
 from slashed.completers import CallbackCompleter
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.log import get_logger
+from agentpool.messaging.messagenode import MessageNode  # noqa: TC001
 from agentpool_commands.base import AgentCommand
 from agentpool_commands.completers import get_available_agents
 from agentpool_commands.markdown_utils import format_table
@@ -54,8 +57,9 @@ class AddWorkerCommand(AgentCommand):
             if ctx.context.pool is None:
                 raise CommandError("No agent pool available")  # noqa: TRY301
 
-            # Get worker agent from pool
-            worker = ctx.context.pool.get_agent(worker_name)
+            # Get agent instance from config
+            config = ctx.context.pool.agent_configs[worker_name]
+            worker: MessageNode[Any, Any] = config.get_agent(pool=ctx.context.pool)
 
             # Parse boolean flags with defaults
             reset_history_bool = reset_history.lower() != "false"

@@ -555,7 +555,7 @@ class RepoMap:
         line_ranges: dict[int, int] | None = None,
     ) -> str:
         """Render a tree representation of a file with lines of interest."""
-        from grep_ast import TreeContext  # type: ignore[import-untyped]
+        from grep_ast import TreeContext
 
         if line_ranges is None:
             line_ranges = {}

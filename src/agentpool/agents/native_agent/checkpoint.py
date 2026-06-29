@@ -170,9 +170,7 @@ class CheckpointManager:
 
         # Serialize messages via ModelMessagesTypeAdapter
         messages_json = (
-            messages_adapter.dump_json(message_history).decode()
-            if message_history
-            else None
+            messages_adapter.dump_json(message_history).decode() if message_history else None
         )
 
         # Auto-compact message history if above thresholds
@@ -192,10 +190,12 @@ class CheckpointManager:
                     TruncateToolOutputs,
                 )
 
-                pipeline = CompactionPipeline(steps=[
-                    TruncateToolOutputs(max_length=1000),
-                    KeepLastMessages(count=500),
-                ])
+                pipeline = CompactionPipeline(
+                    steps=[
+                        TruncateToolOutputs(max_length=1000),
+                        KeepLastMessages(count=500),
+                    ]
+                )
                 compacted = await pipeline.apply(message_history)
                 messages_json_for_save = messages_adapter.dump_json(compacted).decode()
                 logger.info(

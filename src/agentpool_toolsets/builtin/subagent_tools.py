@@ -1,7 +1,7 @@
 """Provider for subagent/task tools with streaming support.
 
 Business-layer event routing is intentionally minimal. All agent stream events
-flow through the SessionPool's TurnRunner, which publishes them to the EventBus.
+flow through the SessionPool, which publishes them to the EventBus.
 The protocol layer (OpenCode, ACP, etc.) subscribes to the parent session with
 ``scope="descendants"`` and receives child session events automatically — no
 manual forwarding from the business layer is required.
@@ -17,10 +17,7 @@ from typing import Any, Literal
 from pydantic_ai import ModelRetry
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
-from agentpool.agents.events import (
-    SpawnSessionStart,
-    StreamCompleteEvent,
-)
+from agentpool.agents.events import StreamCompleteEvent
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 from agentpool.log import get_logger
 from agentpool.resource_providers import StaticResourceProvider
@@ -68,11 +65,8 @@ class SubagentTools(StaticResourceProvider):
     def __init__(
         self,
         name: str = "subagent_tools",
-        *,
-        batch_stream_deltas: bool = False,
     ) -> None:
         super().__init__(name=name)
-        self._batch_stream_deltas = batch_stream_deltas
         for tool in [
             self.create_tool(
                 self.list_available_nodes, category="search", read_only=True, idempotent=True
@@ -101,25 +95,20 @@ class SubagentTools(StaticResourceProvider):
             raise ToolError(msg)
         lines: list[str] = []
         if node_type in ("all", "agent"):
-            agents = dict(ctx.pool.all_agents)
-            if only_idle:
-                agents = {n: a for n, a in agents.items() if not a.is_busy()}
-            for name, agent in agents.items():
+            for ag_name, ag_cfg in ctx.pool.manifest.agents.items():
                 lines.extend([
-                    f"name: {name}",
+                    f"name: {ag_name}",
                     "type: agent",
-                    f"description: {agent.description or 'No description'}",
+                    f"description: {ag_cfg.description or 'No description'}",
                     "---",
                 ])
 
         if node_type in ("all", "team"):  # List teams
-            teams = ctx.pool.teams
-            if only_idle:
-                teams = {name: team for name, team in teams.items() if not team.is_running}
-            for name, team in teams.items():
+            for tm_name, tm_cfg in ctx.pool.manifest.teams.items():
                 lines.extend([
-                    f"name: {name}",
-                    f"description: {team.description or 'No description'}",
+                    f"name: {tm_name}",
+                    "type: team",
+                    f"description: {tm_cfg.description or 'No description'}",
                     "---",
                 ])
 
@@ -153,8 +142,6 @@ class SubagentTools(StaticResourceProvider):
         Returns:
             Structured output containing result and metadata
         """
-        from agentpool import Team, TeamRun
-        from agentpool.agents.base_agent import BaseAgent
         from agentpool.common_types import SupportsRunStream
 
         _ = description  # Used for logging/tracking in future
@@ -168,28 +155,31 @@ class SubagentTools(StaticResourceProvider):
             msg = "SessionPool is required for subagent task execution"
             raise ToolError(msg)
 
-        if agent_or_team not in ctx.pool.nodes:
+        # Existence check against manifest configs
+        agent_cfg = ctx.pool.manifest.agents.get(agent_or_team)
+        team_cfg = ctx.pool.manifest.teams.get(agent_or_team)
+        if agent_cfg is None and team_cfg is None:
+            available = list(ctx.pool.manifest.agents.keys()) + list(ctx.pool.manifest.teams.keys())
             msg = (
                 f"No agent or team found with name: {agent_or_team}. "
-                f"Available nodes: {', '.join(ctx.pool.nodes.keys())}"
+                f"Available nodes: {', '.join(available)}"
             )
             raise ModelRetry(msg)
 
-        # Determine source type and get node
-        node = ctx.pool.nodes[agent_or_team]
-        match node:
-            case Team():
-                source_type: Literal["team_parallel", "team_sequential", "agent"] = "team_parallel"
-            case TeamRun():
-                source_type = "team_sequential"
-            case BaseAgent():
-                source_type = "agent"
-            case _:
-                source_type = "agent"
+        # Register agent config in runtime registry so that
+        # get_or_create_session_agent() (called internally by
+        # create_child_session) can find it without pool-level storage.
+        if agent_cfg is not None:
+            session_pool.sessions.runtime_registry.register(agent_or_team, agent_cfg)
 
-        if not isinstance(node, SupportsRunStream):
-            msg = f"Node {agent_or_team} does not support streaming"
-            raise ToolError(msg)
+        # Determine source_type and agent_type from config
+        if agent_cfg is not None:
+            source_type: Literal["team_parallel", "team_sequential", "agent"] = "agent"
+            agent_type_str: str = agent_cfg.type
+        else:
+            assert team_cfg is not None
+            agent_type_str = "team"
+            source_type = "team_parallel" if team_cfg.mode == "parallel" else "team_sequential"
 
         logger.info(
             "Executing task",
@@ -210,46 +200,56 @@ class SubagentTools(StaticResourceProvider):
             ctx.run_ctx.session_id if ctx.run_ctx else ""
         )
 
-        # Extract model_id from node if it's a BaseAgent
+        # Extract model_id from agent config if possible
         node_model_id: str | None = None
-        if isinstance(node, BaseAgent):
-            node_model_id = node.model_name
+        if agent_cfg is not None:
+            from agentpool.models.agents import NativeAgentConfig
 
-        # Create child session with metadata for TurnRunner event wrapping
-        child_session_id = await ctx.create_child_session(
-            agent_name=agent_or_team,
-            agent_type=node.agent_type,
-            parent_session_id=parent_session_id,
-            source_name=agent_or_team,
-            source_type=source_type,
-            depth=child_depth,
-            tool_call_id=ctx.tool_call_id,
-            model_id=node_model_id,
-        )
+            if isinstance(agent_cfg, NativeAgentConfig):
+                raw_model = agent_cfg.model
+                node_model_id = str(raw_model) if raw_model else None
 
-        # Emit exactly one SpawnSessionStart for both sync and async modes
-        # Emit SpawnSessionStart so the protocol layer can detect child session
-        # creation. All other stream events flow through TurnRunner → EventBus
-        # and reach the frontend via protocol-layer ``scope="descendants"``
-        # subscription — no manual business-layer forwarding is required.
-        spawn_event = SpawnSessionStart(
-            child_session_id=child_session_id,
-            parent_session_id=parent_session_id,
-            tool_call_id=ctx.tool_call_id,
-            spawn_mechanism="task",
-            source_name=agent_or_team,
-            source_type=source_type,
-            depth=child_depth,
-            description=f"Run {agent_or_team} task",
-            metadata={"prompt": prompt[:200]} if prompt else {},
-            model_id=node_model_id,
-        )
-        await ctx.events.emit_event(spawn_event)
-
+        # Resolve input_provider BEFORE creating child session so it can be
+        # passed to create_child_session, which eagerly registers the agent
+        # via get_or_create_session_agent with the input_provider baked in.
         try:
             input_provider = ctx.get_input_provider()
         except RuntimeError:
+            logger.warning(
+                "No input_provider available in parent context; "
+                "subagent will not support elicitation",
+                agent=agent_or_team,
+            )
             input_provider = None
+
+        # Create child session with metadata for event wrapping.
+        # SpawnSessionStart is auto-emitted by create_child_session().
+        # The agent is eagerly registered under child_session_id with
+        # input_provider — no separate get_or_create_session_agent needed.
+        child_session_id = await ctx.create_child_session(
+            agent_name=agent_or_team,
+            agent_type=agent_type_str,
+            parent_session_id=parent_session_id,
+            spawn_mechanism="task",
+            description=f"Run {agent_or_team} task",
+            tool_call_id=ctx.tool_call_id,
+            source_name=agent_or_team,
+            source_type=source_type,
+            depth=child_depth,
+            model_id=node_model_id,
+            input_provider=input_provider,
+        )
+
+        # For teams, we still need to create the team node directly
+        # (SessionPool does not manage team instances).
+        is_team_node = team_cfg is not None
+        node: SupportsRunStream[Any] | None = None
+        if is_team_node:
+            assert team_cfg is not None
+            node = await session_pool.create_team_from_config(agent_or_team, team_cfg)
+            if not isinstance(node, SupportsRunStream):
+                msg = f"Team {agent_or_team} does not support streaming"
+                raise ToolError(msg)
 
         if async_mode:
             # Generate task ID and start background task
@@ -264,15 +264,20 @@ class SubagentTools(StaticResourceProvider):
                 """Run task through SessionPool and write final result to filesystem."""
                 final_content = ""
                 try:
-                    async for event in session_pool.run_stream(
-                        child_session_id,
-                        prompt,
-                        input_provider=input_provider,
-                        message_history=MessageHistory(),
-                    ):
-                        if isinstance(event, StreamCompleteEvent):
-                            content = event.message.content
-                            final_content = _serialize_content(content)
+                    if is_team_node:
+                        # Teams run directly (SessionPool does not support team sessions)
+                        result = await node.run(prompt, message_history=MessageHistory())
+                        final_content = _serialize_content(result.content)
+                    else:
+                        async for event in session_pool.run_stream(
+                            child_session_id,
+                            prompt,
+                            input_provider=input_provider,
+                            message_history=MessageHistory(),
+                        ):
+                            if isinstance(event, StreamCompleteEvent):
+                                content = event.message.content
+                                final_content = _serialize_content(content)
                 except Exception:
                     logger.exception("Async task failed", task_id=task_id, agent=agent_or_team)
                     error_content = (
@@ -310,15 +315,20 @@ class SubagentTools(StaticResourceProvider):
         from agentpool.messaging.message_history import MessageHistory
 
         final_content = ""
-        async for event in session_pool.run_stream(
-            child_session_id,
-            prompt,
-            input_provider=input_provider,
-            message_history=MessageHistory(),
-        ):
-            if isinstance(event, StreamCompleteEvent):
-                content = event.message.content
-                final_content = _serialize_content(content)
+        if is_team_node:
+            # Teams run directly (SessionPool does not support team sessions)
+            result = await node.run(prompt, message_history=MessageHistory())
+            final_content = _serialize_content(result.content)
+        else:
+            async for event in session_pool.run_stream(
+                child_session_id,
+                prompt,
+                input_provider=input_provider,
+                message_history=MessageHistory(),
+            ):
+                if isinstance(event, StreamCompleteEvent):
+                    content = event.message.content
+                    final_content = _serialize_content(content)
 
         return {
             "output": final_content,

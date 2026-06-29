@@ -169,16 +169,18 @@ def get_agent_role_config_option(agent: BaseAgent[Any, Any]) -> SessionConfigOpt
         SessionConfigOption for agent_role, or None if pool has <= 1 agents.
     """
     pool = agent.agent_pool
-    if pool is None or len(pool.all_agents) <= 1:
+    if pool is None or len(pool.manifest.agents) <= 1:
         return None
 
     choices = [
         SessionConfigSelectOption(
-            value=a.name,
-            name=a.display_name if isinstance(a.display_name, str) and a.display_name else a.name,
-            description=f"Switch to {a.name} agent",
+            value=a.name or "",
+            name=a.display_name
+            if isinstance(a.display_name, str) and a.display_name
+            else (a.name or ""),
+            description=f"Switch to {a.name or ''} agent",
         )
-        for a in pool.all_agents.values()
+        for a in pool.manifest.agents.values()
     ]
     return SessionConfigOption(
         id="agent_role",
@@ -224,8 +226,11 @@ class AgentPoolACPAgent(ACPAgent):
     server: ACPServer | None = field(default=None)
     """Reference to the ACPServer for pool hot-switching."""
 
-    subagent_display_mode: Literal["legacy", "zed"] = "legacy"
-    """Display mode for subagent outputs ("legacy" or "zed")."""
+    subagent_display_mode: Literal["legacy", "zed", "qwen"] = "legacy"
+    """Display mode for subagent outputs ("legacy", "zed", or "qwen")."""
+
+    raw_input_mode: Literal["dict", "skip", "json_str"] = "dict"
+    """How to emit tool call raw_input ("dict", "skip", or "json_str")."""
 
     _skill_bridge: ACPSkillBridge | None = field(init=False, default=None)
     """Bridge for exposing skill commands as ACP slash commands."""
@@ -263,13 +268,13 @@ class AgentPoolACPAgent(ACPAgent):
 
         if (
             self.agent_pool
-            and self.agent_pool.main_agent
-            and self.agent_pool.main_agent.name in self.agent_pool.manifest.agents
+            and self.agent_pool.main_agent_name
+            and self.agent_pool.main_agent_name in self.agent_pool.manifest.agents
         ):
-            cfg = self.agent_pool.manifest.agents[self.agent_pool.main_agent.name]
+            cfg = self.agent_pool.manifest.agents[self.agent_pool.main_agent_name]
             if isinstance(cfg, NativeAgentConfig):
                 if cfg.name is None:
-                    cfg = cfg.model_copy(update={"name": self.agent_pool.main_agent.name})
+                    cfg = cfg.model_copy(update={"name": self.agent_pool.main_agent_name})
                 self._agent_config = cfg
 
         # Initialize SessionPool-backed protocol handler if feature flag is enabled
@@ -284,6 +289,7 @@ class AgentPoolACPAgent(ACPAgent):
                 session_manager=self.session_manager,
                 event_converter=ACPEventConverter(
                     subagent_display_mode=self.subagent_display_mode,
+                    raw_input_mode=self.raw_input_mode,
                 ),
                 client=self.client,
                 client_capabilities=self.client_capabilities,
@@ -422,6 +428,7 @@ class AgentPoolACPAgent(ACPAgent):
                 client_capabilities=self.client_capabilities,
                 client_info=self.client_info,
                 subagent_display_mode=self.subagent_display_mode,
+                raw_input_mode=self.raw_input_mode,
             )
             state: SessionModeState | None = None
             models: SessionModelState | None = None
@@ -593,6 +600,7 @@ class AgentPoolACPAgent(ACPAgent):
             client_capabilities=self.client_capabilities,
             client_info=self.client_info,
             subagent_display_mode=self.subagent_display_mode,
+            raw_input_mode=self.raw_input_mode,
         )
         return ForkSessionResponse(session_id=session_id)
 
@@ -1036,7 +1044,7 @@ class AgentPoolACPAgent(ACPAgent):
         from acp.exceptions import RequestError
 
         pool = session.agent.agent_pool
-        if pool is None or agent_name not in pool.all_agents:
+        if pool is None or agent_name not in pool.manifest.agents:
             msg = {"agent_role": agent_name, "reason": "Unknown agent"}
             raise RequestError.invalid_params(msg)
         await self._swap_session_agent(session.session_id, agent_name)
@@ -1110,13 +1118,13 @@ class AgentPoolACPAgent(ACPAgent):
                 raise RuntimeError(msg)
 
             # Re-resolve _agent_config from the new pool's manifest
-            if pool.main_agent and pool.main_agent.name in pool.manifest.agents:
-                cfg = pool.manifest.agents[pool.main_agent.name]
+            if pool.main_agent_name and pool.main_agent_name in pool.manifest.agents:
+                cfg = pool.manifest.agents[pool.main_agent_name]
                 from agentpool.models.agents import NativeAgentConfig
 
                 if isinstance(cfg, NativeAgentConfig):
                     if cfg.name is None:
-                        cfg = cfg.model_copy(update={"name": pool.main_agent.name})
+                        cfg = cfg.model_copy(update={"name": pool.main_agent_name})
                     self._agent_config = cfg
             elif pool.manifest.agents:
                 cfg = next(iter(pool.manifest.agents.values()))
@@ -1134,7 +1142,7 @@ class AgentPoolACPAgent(ACPAgent):
             # 8. Invalidate sessions cache
             self._sessions_cache = None
 
-            agent_names = list(pool.all_agents.keys())
+            agent_names = list(pool.manifest.agents.keys())
             logger.info("Pool swap complete", agent_names=agent_names)
             return agent_names
         finally:

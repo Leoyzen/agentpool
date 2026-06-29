@@ -70,22 +70,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def _use_session_pool_for_messages(state: ServerState) -> bool:
-    """Check if SessionPool should be used for messages."""
-    config = getattr(state, "config", None)
-    if config is None:
-        return True
-    return getattr(config, "use_session_pool_for_messages", True)
-
-
-def _use_session_pool_for_status(state: ServerState) -> bool:
-    """Check if SessionPool should be used for session status."""
-    config = getattr(state, "config", None)
-    if config is None:
-        return True
-    return getattr(config, "use_session_pool_for_status", True)
-
-
 async def get_messages_for_session(
     state: ServerState,
     session_id: str,
@@ -114,28 +98,27 @@ async def get_messages_for_session(
         if messages:
             return messages
 
-    if _use_session_pool_for_messages(state):
-        session_pool = getattr(state.pool, "session_pool", None)
-        if session_pool is not None:
-            try:
-                sp_messages = await session_pool.get_messages(session_id)
-            except (KeyError, TypeError):
-                sp_messages = []
-            if sp_messages:
-                agent = state.agent
-                with contextlib.suppress(Exception):
-                    agent = await session_pool.sessions.get_or_create_session_agent(session_id)
-                return [
-                    chat_message_to_opencode(
-                        chat_msg,
-                        session_id=session_id,
-                        working_dir=state.working_dir,
-                        agent_name=agent.name,
-                        model_id=getattr(chat_msg, "model_name", None) or "sonnet",
-                        provider_id=getattr(chat_msg, "provider_name", None) or "claude-code",
-                    )
-                    for chat_msg in sp_messages
-                ]
+    session_pool = getattr(state.pool, "session_pool", None)
+    if session_pool is not None:
+        try:
+            sp_messages = await session_pool.get_messages(session_id)
+        except (KeyError, TypeError):
+            sp_messages = []
+        if sp_messages:
+            agent = state.agent
+            with contextlib.suppress(Exception):
+                agent = await session_pool.sessions.get_or_create_session_agent(session_id)
+            return [
+                chat_message_to_opencode(
+                    chat_msg,
+                    session_id=session_id,
+                    working_dir=state.working_dir,
+                    agent_name=agent.name,
+                    model_id=getattr(chat_msg, "model_name", None) or "sonnet",
+                    provider_id=getattr(chat_msg, "provider_name", None) or "claude-code",
+                )
+                for chat_msg in sp_messages
+            ]
     return messages
 
 
@@ -155,20 +138,19 @@ async def append_message_to_session(
         session_id: The session ID to append to.
         msg: The OpenCode message to append.
     """
-    if _use_session_pool_for_messages(state):
-        session_pool = None
-        if hasattr(state, "pool") and state.pool is not None:
-            session_pool = getattr(state.pool, "session_pool", None)
-        if session_pool is not None:
-            chat_msg = opencode_to_chat_message(msg, session_id=session_id)
-            try:
-                await session_pool.append_message(session_id, chat_msg)
-            except (KeyError, TypeError):
-                logger.warning(
-                    "Failed to append message to SessionPool",
-                    session_id=session_id,
-                    exc_info=True,
-                )
+    session_pool = None
+    if hasattr(state, "pool") and state.pool is not None:
+        session_pool = getattr(state.pool, "session_pool", None)
+    if session_pool is not None:
+        chat_msg = opencode_to_chat_message(msg, session_id=session_id)
+        try:
+            await session_pool.append_message(session_id, chat_msg)
+        except (KeyError, TypeError):
+            logger.warning(
+                "Failed to append message to SessionPool",
+                session_id=session_id,
+                exc_info=True,
+            )
 
     # Always mirror to the in-memory dict when present for backward compatibility
     messages = getattr(state, "messages", None)
@@ -213,14 +195,7 @@ async def set_session_status(
         session_id: The session to update.
         status: The new session status.
     """
-    if _use_session_pool_for_status(state):
-        await state.broadcast_event(SessionStatusEvent.create(session_id, status))
-        return
-
-    # Fallback: write to the in-memory dict for backward compatibility
-    session_status = getattr(state, "session_status", None)
-    if session_status is not None:
-        session_status[session_id] = status
+    await state.broadcast_event(SessionStatusEvent.create(session_id, status))
 
 
 async def get_session_status(
@@ -239,12 +214,11 @@ async def get_session_status(
     Returns:
         The session status, or None if not found and the fallback is used.
     """
-    if _use_session_pool_for_status(state):
-        integration: OpenCodeSessionPoolIntegration | None = getattr(
-            state, "session_pool_integration", None
-        )
-        if integration is not None:
-            return await integration.get_session_status(session_id)
+    integration: OpenCodeSessionPoolIntegration | None = getattr(
+        state, "session_pool_integration", None
+    )
+    if integration is not None:
+        return await integration.get_session_status(session_id)
 
     return getattr(state, "session_status", {}).get(session_id)
 
@@ -997,7 +971,18 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
             if ctx is None:
                 return
 
-            await self._ensure_child_session_visible(session_id, event)
+            # Best-effort: make child session visible in protocol state.
+            # Failure here (e.g. incomplete mock, storage error) must not
+            # block ToolPart creation or assistant message registration.
+            try:
+                await self._ensure_child_session_visible(session_id, event)
+            except Exception:
+                logger.warning(
+                    "Failed to ensure child session visible",
+                    session_id=session_id,
+                    child_session_id=event.child_session_id,
+                    exc_info=True,
+                )
 
             # Ensure assistant message is registered before ToolPart creation
             if not self._message_registered.get(session_id, False):
@@ -1007,8 +992,7 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
                 )
                 self._message_registered[session_id] = True
 
-            # Distinguish parent vs child events.  With
-            # TurnRunner._maybe_wrap_event removed, child events arrive
+            # Distinguish parent vs child events.  Child events arrive
             # raw via scope="descendants".
             # Use envelope.source_session_id because many streaming events
             # (e.g.PartDeltaEvent from pydantic-ai) do not carry a

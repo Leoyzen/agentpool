@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, assert_never
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.socket_mode.websockets import SocketModeClient
 from slack_sdk.web.async_client import AsyncWebClient
-from slackify_markdown import slackify_markdown  # type: ignore[import-untyped]
+from slackify_markdown import slackify_markdown
 
 from agentpool.log import get_logger
 from agentpool.utils.time_utils import get_now
@@ -50,7 +50,7 @@ class SlackChannel(BaseChannel):
         self._running = True
         self._web_client = AsyncWebClient(token=self.config.bot_token)
         self._socket_client = SocketModeClient(self.config.app_token, web_client=self._web_client)
-        self._socket_client.socket_mode_request_listeners.append(self._on_socket_request)  # type: ignore[arg-type]
+        self._socket_client.socket_mode_request_listeners.append(self._on_socket_request)
 
         # Resolve bot user ID for mention handling
         try:
@@ -61,7 +61,7 @@ class SlackChannel(BaseChannel):
             logger.warning("Slack auth_test failed", exc_info=True)
 
         logger.info("Starting Slack Socket Mode client...")
-        await self._socket_client.connect()  # type: ignore[no-untyped-call]
+        await self._socket_client.connect()
 
         while self._running:
             await asyncio.sleep(1)
@@ -71,7 +71,7 @@ class SlackChannel(BaseChannel):
         self._running = False
         if self._socket_client:
             try:
-                await self._socket_client.close()  # type: ignore[no-untyped-call]
+                await self._socket_client.close()
             except Exception:  # noqa: BLE001
                 logger.warning("Slack socket close failed", exc_info=True)
             self._socket_client = None

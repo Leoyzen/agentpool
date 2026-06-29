@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, cast
+import uuid
 
 import typer as t
 
+from agentpool.agents.events import StreamCompleteEvent
 from agentpool_cli import log, resolve_agent_config
 
 
@@ -34,17 +36,38 @@ async def execute_job(
     from agentpool import AgentPool
 
     async with AgentPool(config) as pool:
-        # Get both agent and task
-        agent = pool.get_agent(agent_name)
+        sp = pool.session_pool
+        if sp is None:
+            msg = "SessionPool not available"
+            raise RuntimeError(msg)
+
+        # Validate agent exists
+        if agent_name not in pool.agent_configs:
+            available = list(pool.agent_configs.keys())
+            msg = f"Agent '{agent_name}' not found in config. Available: {', '.join(available)}"
+            raise ValueError(msg)
+
+        # Get task config (still available via TaskRegistry)
         task = pool.get_job(task_name)
 
         # Create final prompt from task and additional input
-        task_prompt = task.prompt
+        task_prompt = await task.get_prompt()
         if prompt:
             task_prompt = f"{task_prompt}\n\nAdditional instructions:\n{prompt}"
 
-        result = await agent.run(task_prompt)
-        return result.data
+        # Run through SessionPool
+        session_id = f"task-{agent_name}-{uuid.uuid4().hex[:8]}"
+        await sp.create_session(session_id, agent_name=agent_name)
+
+        final_message = None
+        async for event in sp.run_stream(session_id, task_prompt, scope="session"):
+            if isinstance(event, StreamCompleteEvent):
+                final_message = event.message
+
+        if final_message is None:
+            msg = "No response received from agent"
+            raise RuntimeError(msg)
+        return cast(str, final_message.data)
 
 
 def task_command(

@@ -63,6 +63,7 @@ class OpenCodeEventBridge:
         """
         # Step 0: Push to SSE subscribers (backward compatibility)
         import asyncio
+
         for subscriber in self._state.event_subscribers:
             try:
                 subscriber.put_nowait(event)

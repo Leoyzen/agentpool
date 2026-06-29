@@ -125,7 +125,7 @@ class BraintrustPromptHub(BasePromptProvider):
         env = jinjarope.Environment(enable_async=True)
         prompt = load_prompt(slug=name, version=version, project=self.config.project)
         assert prompt.prompt
-        string = prompt.prompt.messages[0].content  # type: ignore
+        string = prompt.prompt.messages[0].content
         assert isinstance(string, str)
         return await env.render_string_async(string, **(variables or {}))
 

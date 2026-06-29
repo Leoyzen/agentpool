@@ -86,9 +86,9 @@ class SignalEmittingGraphRun[StateT, DepsT, OutputT]:
     async def __anext__(self) -> EndMarker[OutputT] | Sequence[GraphTask]:
         """Advance the graph run and emit signals at step boundaries.
 
-        Emits ``message_sent`` for tasks that completed since the last
-        yield, fetches the next result, and emits ``message_received`` for
-        newly discovered tasks.
+        Drives the underlying ``GraphRun`` forward (which executes pending
+        tasks), then emits ``message_sent`` for tasks that completed during
+        that advance, and ``message_received`` for newly discovered tasks.
 
         Returns:
             The next result from the wrapped ``GraphRun``.
@@ -97,23 +97,26 @@ class SignalEmittingGraphRun[StateT, DepsT, OutputT]:
             StopAsyncIteration: When the graph run has completed.
             Exception: Re-raised from an internal ``ErrorMarker``.
         """
-        # 1. Previous tasks have now completed — emit message_sent for them.
-        if self._previous_tasks:
-            await self._emit_tasks_completed(self._previous_tasks)
-
-        # 2. Drive the underlying GraphRun forward.
+        # 1. Drive the underlying GraphRun forward.
+        #    This executes any tasks that were scheduled in the previous
+        #    yield, populating state.result before we emit message_sent.
         try:
             result = await self._graph_run.__anext__()
         except StopAsyncIteration:
+            # Previous tasks have now completed — emit message_sent.
+            if self._previous_tasks:
+                await self._emit_tasks_completed(self._previous_tasks)
             self._previous_tasks = []
             self._completed = True
             raise
 
+        # 2. Previous tasks have now completed — emit message_sent.
+        if self._previous_tasks:
+            await self._emit_tasks_completed(self._previous_tasks)
+
         # 3. Detect edge traversals: previous tasks produced this result.
         if self._previous_tasks and isinstance(result, Sequence):
-            await self._emit_edge_traversals(
-                self._previous_tasks, list(result)
-            )
+            await self._emit_edge_traversals(self._previous_tasks, list(result))
 
         # 4. Track new tasks and emit message_received for them.
         if isinstance(result, Sequence):
@@ -126,9 +129,7 @@ class SignalEmittingGraphRun[StateT, DepsT, OutputT]:
 
         return result
 
-    async def _emit_tasks_received(
-        self, tasks: Sequence[GraphTask]
-    ) -> None:
+    async def _emit_tasks_received(self, tasks: Sequence[GraphTask]) -> None:
         """Emit ``message_received`` for each task about to run."""
         for task in tasks:
             node = self._node_mapping.get(task.node_id)
@@ -138,25 +139,31 @@ class SignalEmittingGraphRun[StateT, DepsT, OutputT]:
             try:
                 await node.message_received.emit(msg)
             except Exception:
-                logger.exception(
-                    "Error emitting message_received for node %s", task.node_id
-                )
+                logger.exception("Error emitting message_received for node %s", task.node_id)
 
-    async def _emit_tasks_completed(
-        self, tasks: Sequence[GraphTask]
-    ) -> None:
-        """Emit ``message_sent`` for each task that has finished."""
+    async def _emit_tasks_completed(self, tasks: Sequence[GraphTask]) -> None:
+        """Emit ``message_sent`` for each task that has finished.
+
+        When the graph state is an :class:`AgentPoolState` with a populated
+        ``result``, that result is used as the sent message — it carries the
+        actual output of the node execution rather than the (often ``None``)
+        task inputs.
+        """
+        from agentpool.messaging.graph_adapter import AgentPoolState
+
         for task in tasks:
             node = self._node_mapping.get(task.node_id)
             if node is None:
                 continue
-            msg = self._task_to_chat_message(task, role="assistant")
+            state = self._graph_run.state
+            if isinstance(state, AgentPoolState) and state.result is not None:
+                msg = state.result
+            else:
+                msg = self._task_to_chat_message(task, role="assistant")
             try:
                 await node.message_sent.emit(msg)
             except Exception:
-                logger.exception(
-                    "Error emitting message_sent for node %s", task.node_id
-                )
+                logger.exception("Error emitting message_sent for node %s", task.node_id)
 
     async def _emit_edge_traversals(
         self,

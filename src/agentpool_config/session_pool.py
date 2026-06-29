@@ -21,9 +21,7 @@ class SessionPoolConfig(Schema):
     enable_event_bus: bool = Field(default=True, title="Enable event bus")
     """Whether to enable cross-turn event routing via the event bus."""
 
-    session_ttl_seconds: float = Field(
-        default=3600.0, gt=0, title="Session TTL seconds"
-    )
+    session_ttl_seconds: float = Field(default=3600.0, gt=0, title="Session TTL seconds")
     """Time-to-live for sessions in seconds. Expired sessions are cleaned up."""
 
     max_auto_resume: int = Field(default=10, ge=0, title="Max auto-resume")
@@ -62,9 +60,7 @@ class ACPConfig(Schema):
 class OpenCodeConfig(Schema):
     """OpenCode protocol-specific configuration."""
 
-    eventbus_replay_buffer_size: int = Field(
-        default=100, ge=1, title="EventBus replay buffer size"
-    )
+    eventbus_replay_buffer_size: int = Field(default=100, ge=1, title="EventBus replay buffer size")
     """Maximum number of events retained per session for EventBus replay."""
 
     model_config = ConfigDict(frozen=True)

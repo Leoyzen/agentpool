@@ -73,9 +73,9 @@ class A2AServer(HTTPServer):
         Returns:
             List of Route objects for each agent plus root listing endpoint
         """
-        from fasta2a import FastA2A  # type: ignore[import-untyped]
-        from fasta2a.broker import InMemoryBroker  # type: ignore[import-untyped]
-        from fasta2a.storage import InMemoryStorage  # type: ignore[import-untyped]
+        from fasta2a import FastA2A
+        from fasta2a.broker import InMemoryBroker
+        from fasta2a.storage import InMemoryStorage
         from starlette.responses import JSONResponse, Response
         from starlette.routing import Route
 
@@ -83,13 +83,20 @@ class A2AServer(HTTPServer):
 
         routes: list[Route] = []
         # Create route for each agent in the pool
-        for agent_name in self.pool.all_agents:
+        for agent_name in self.pool.manifest.agents:
 
             async def agent_handler(request: Request, agent_name: str = agent_name) -> Response:
                 """Handle A2A requests for a specific agent."""
                 try:
-                    # Get the agent from pool
-                    agent = self.pool.all_agents.get(agent_name)
+                    # Get the agent from SessionPool
+                    sp = self.pool.session_pool
+                    agent = (
+                        await sp.sessions.get_or_create_session_agent(
+                            f"a2a-{agent_name}", agent_name
+                        )
+                        if sp
+                        else None
+                    )
                     if agent is None:
                         error = {"error": f"Agent '{agent_name}' not found"}
                         return JSONResponse(error, status_code=404)
@@ -137,7 +144,7 @@ class A2AServer(HTTPServer):
                     "docs": f"/{name}/docs",
                     "model": agent.model_name,
                 }
-                for name, agent in self.pool.all_agents.items()
+                for name, agent in self.pool.manifest.agents.items()
             ]
             return JSONResponse({
                 "agents": agent_list,
@@ -147,7 +154,7 @@ class A2AServer(HTTPServer):
             })
 
         routes.append(Route("/", list_agents, methods=["GET"]))
-        self.log.info("Created A2A routes", agent_count=len(self.pool.all_agents))
+        self.log.info("Created A2A routes", agent_count=len(self.pool.manifest.agents))
         return routes
 
     def get_agent_url(self, agent_name: str) -> str:
@@ -184,5 +191,5 @@ class A2AServer(HTTPServer):
                 "agent_card": self.get_agent_card_url(name),
                 "docs": f"{self.base_url}/{name}/docs",
             }
-            for name in self.pool.all_agents
+            for name in self.pool.manifest.agents
         }

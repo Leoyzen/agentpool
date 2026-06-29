@@ -43,13 +43,17 @@ def safe_args_as_dict(
         raw = getattr(part, "args", None)
         return {"_raw_args": raw} if raw else {}
     try:
-        return part.args_as_dict()
+        result = part.args_as_dict()
     except ValueError:
-        # Model returned malformed JSON for tool args
+        result = None
+    if result is None or "INVALID_JSON" in result:
+        # Model returned malformed JSON for tool args.  PydanticAI's
+        # args_as_dict() may return {"INVALID_JSON": partial_string}
+        # instead of raising ValueError — detect both paths.
         if default is not None:
             return default
-        # Preserve raw args for debugging/inspection
         return {"_raw_args": part.args} if part.args else {}
+    return result
 
 
 def url_from_mime_type(uri: str, mime_type: str | None) -> FileUrl:
