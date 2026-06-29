@@ -18,6 +18,7 @@ from agentpool.models.manifest import AgentsManifest
 from agentpool_config.context import ConfigContextManager
 from agentpool_config.pool_server import ACPPoolServerConfig
 from agentpool_server import BaseServer
+from agentpool_server.acp_server.shared.dispatch_agent import DispatchAgent
 from agentpool_server.acp_server.shared.version_negotiator import VersionNegotiator
 from agentpool_server.acp_server.v1.acp_agent import AgentPoolACPAgent
 
@@ -260,11 +261,8 @@ class ACPServer(BaseServer):
         # Resolve agent instance from name
         default_agent = self._resolve_default_agent()
         self.log.info("Using default agent", agent=default_agent.name)
-        # Version negotiation: v1 clients get v1 agent, v2 clients get v2 agent.
-        # v2 agent is not yet implemented — v2 path will raise NotImplementedError.
-        # Once v2 agent is ready, this factory will be replaced with a version-aware dispatch.
         create_acp_agent = functools.partial(
-            AgentPoolACPAgent,
+            DispatchAgent,
             default_agent=default_agent,
             debug_commands=self.debug_commands,
             load_skills=self.load_skills,
@@ -272,7 +270,7 @@ class ACPServer(BaseServer):
             subagent_display_mode=self.subagent_display_mode,
         )
         self.log.info(
-            "ACP server version routing: v1 active, v2 pending",
+            "ACP server version routing: v1+v2 auto-negotiation via DispatchAgent",
             supported_versions=[1, 2],
         )
         debug_file = self.debug_file if self.debug_messages else None
