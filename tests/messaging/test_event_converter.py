@@ -6,10 +6,11 @@ no mocks needed, just assert on the yielded ACP session updates.
 
 from __future__ import annotations
 
-from pydantic_ai import FunctionToolCallEvent, PartDeltaEvent, PartStartEvent, TextPart, TextPartDelta, ToolCallPart
+from pydantic_ai import PartDeltaEvent, PartStartEvent, TextPart, TextPartDelta
 import pytest
 
-from acp.schema import AgentMessageChunk, ToolCallProgress
+from acp.schema import AgentMessageChunk, ToolCallProgress, TurnCompleteUpdate
+from agentpool.agents.events import RunFailedEvent, ToolCallStartEvent
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 
 
@@ -97,19 +98,17 @@ class TestACPEventConverter:
         converter = ACPEventConverter()
 
         # Start two tool calls
-        tool_event_1 = FunctionToolCallEvent(
-            part=ToolCallPart(
-                tool_call_id="tool-1",
-                tool_name="test_tool",
-                args={"arg": "value"},
-            ),
+        tool_event_1 = ToolCallStartEvent(
+            tool_call_id="tool-1",
+            tool_name="test_tool",
+            title="Executing: test_tool",
+            raw_input={"arg": "value"},
         )
-        tool_event_2 = FunctionToolCallEvent(
-            part=ToolCallPart(
-                tool_call_id="tool-2",
-                tool_name="another_tool",
-                args={},
-            ),
+        tool_event_2 = ToolCallStartEvent(
+            tool_call_id="tool-2",
+            tool_name="another_tool",
+            title="Executing: another_tool",
+            raw_input={},
         )
 
         # Process tool call starts
@@ -143,5 +142,27 @@ class TestACPEventConverter:
         # Should yield nothing
         assert len(cancellations) == 0
         assert len(converter._tool_states) == 0
+
+
+@pytest.mark.anyio
+async def test_cancelled_turn_emits_single_turn_complete():
+    """RunFailedEvent with 'cancelled' emits exactly one TurnCompleteUpdate(stop_reason='cancelled').
+
+    No preceding StreamCompleteEvent — the whole point is that cancel
+    does NOT emit StreamCompleteEvent.
+    """
+    converter = ACPEventConverter()
+    converter.client_supports_turn_complete = True
+    event = RunFailedEvent(
+        run_id="test",
+        session_id="test",
+        exception=RuntimeError("Run cancelled"),
+    )
+
+    updates = await collect_updates(converter, event)
+
+    turn_completes = [u for u in updates if isinstance(u, TurnCompleteUpdate)]
+    assert len(turn_completes) == 1
+    assert turn_completes[0].stop_reason == "cancelled"
 
 

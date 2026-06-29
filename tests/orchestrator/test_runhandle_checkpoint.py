@@ -57,7 +57,7 @@ def test_checkpoint_method_exists() -> None:
 def test_checkpoint_transitions_from_running() -> None:
     """checkpoint() transitions from running to checkpointed."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
-    handle.start()
+    handle._start_task()
     assert handle.status == RunStatus.running
     handle.checkpoint()
     assert handle.status == RunStatus.checkpointed
@@ -66,7 +66,7 @@ def test_checkpoint_transitions_from_running() -> None:
 def test_checkpoint_sets_complete_event() -> None:
     """checkpoint() must set complete_event."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
-    handle.start()
+    handle._start_task()
     assert not handle.complete_event.is_set()
     handle.checkpoint()
     assert handle.complete_event.is_set()
@@ -87,7 +87,7 @@ def test_checkpoint_invokes_cleanup_callback() -> None:
         agent_type="native",
         _cleanup_callback=cleanup,
     )
-    handle.start()
+    handle._start_task()
     handle.checkpoint()
     assert cleanup_calls == ["r1"]
     assert handle.complete_event.is_set()
@@ -100,7 +100,7 @@ def test_checkpoint_does_not_emit_run_failed_event() -> None:
     should not publish a failure event to the event bus.
     """
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
-    handle.start()
+    handle._start_task()
 
     # Mock event_bus to detect RunFailedEvent emission
     event_bus = MagicMock()
@@ -137,14 +137,13 @@ def test_resume_creates_fresh_run_handle() -> None:
     """
     # Simulate checkpointed run
     old_handle = RunHandle(run_id="old-run", session_id="s1", agent_type="native")
-    old_handle.start()
+    old_handle._start_task()
     old_handle.checkpoint()
     assert old_handle.status == RunStatus.checkpointed
 
-    # Simulate resume: create a completely new handle (mimicking
-    # SessionController._create_run behavior)
+    # Simulate resume: create a completely new handle
     new_handle = RunHandle(run_id="new-run", session_id="s1", agent_type="native")
-    new_handle.start()
+    new_handle._start_task()
     assert new_handle.status == RunStatus.running
     assert new_handle.run_id != old_handle.run_id
 
@@ -173,7 +172,7 @@ async def test_session_controller_skips_fail_on_checkpointed() -> None:
 
     controller = SessionController(pool)
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
-    handle.start()
+    handle._start_task()
     handle.checkpoint()
     assert handle.status == RunStatus.checkpointed
 
@@ -192,8 +191,8 @@ async def test_session_controller_skips_fail_on_checkpointed() -> None:
     assert not should_skip, "checkpointed status should be excluded from fail path"
 
 
-async def test_turn_runner_finally_skips_complete_on_checkpointed() -> None:
-    """TurnRunner must NOT call complete() when RunHandle is checkpointed.
+async def test_run_loop_finally_skips_complete_on_checkpointed() -> None:
+    """Run loop must NOT call complete() when RunHandle is checkpointed.
 
     This tests the guard in ``_run_turn_unlocked``'s finally block that checks
     ``run_handle.status not in (RunStatus.completed, RunStatus.failed)``
@@ -215,7 +214,7 @@ async def test_turn_runner_finally_skips_complete_on_checkpointed() -> None:
 
     # The finally block must NOT call complete() when status is checkpointed
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
-    handle.start()
+    handle._start_task()
     handle.checkpoint()
     assert handle.status == RunStatus.checkpointed
 

@@ -107,31 +107,28 @@ def test_sync_wrapper(test_agent: Agent[None]):
 
 async def test_agent_forwarding():
     """Test message forwarding between agents."""
-    async with AgentPool() as pool:
-        model = TestModel(custom_output_text="Main response")
-        main_agent = Agent("main-agent", model=model)
-        await pool.add_agent(main_agent)
-        model = TestModel(custom_output_text="Helper response")
-        helper_agent = Agent("helper-agent", model=model)
-        await pool.add_agent(helper_agent)
-        main_agent.connect_to(helper_agent)  # Set up forwarding
-        messages: list[ChatMessage[Any]] = []  # Track messages from both agents
-        main_agent.message_sent.connect(messages.append)
-        helper_agent.message_sent.connect(messages.append)
-        message = "Hello, agent!"  # Send message and wait for forwarding
-        await main_agent.run(message)
-        await main_agent.task_manager.complete_tasks()
-        await helper_agent.task_manager.complete_tasks()
+    model = TestModel(custom_output_text="Main response")
+    main_agent = Agent("main-agent", model=model)
+    model = TestModel(custom_output_text="Helper response")
+    helper_agent = Agent("helper-agent", model=model)
+    main_agent.connect_to(helper_agent)  # Set up forwarding
+    messages: list[ChatMessage[Any]] = []  # Track messages from both agents
+    main_agent.message_sent.connect(messages.append)
+    helper_agent.message_sent.connect(messages.append)
+    message = "Hello, agent!"  # Send message and wait for forwarding
+    await main_agent.run(message)
+    await main_agent.task_manager.complete_tasks()
+    await helper_agent.task_manager.complete_tasks()
 
-        # Verify both agents responded
-        assert len(messages) == 2
-        assert any(m.name == "main-agent" for m in messages)
-        assert any(m.name == "helper-agent" for m in messages)
-        assert any(m.content == "Main response" for m in messages)
-        assert any(m.content == "Helper response" for m in messages)
-        # Verify metrics are present
-        assert all(m.cost_info is not None for m in messages)
-        assert all(m.response_time is not None for m in messages)
+    # Verify both agents responded
+    assert len(messages) == 2
+    assert any(m.name == "main-agent" for m in messages)
+    assert any(m.name == "helper-agent" for m in messages)
+    assert any(m.content == "Main response" for m in messages)
+    assert any(m.content == "Helper response" for m in messages)
+    # Verify metrics are present
+    assert all(m.cost_info is not None for m in messages)
+    assert all(m.response_time is not None for m in messages)
 
 
 @pytest.mark.skip(

@@ -17,8 +17,9 @@ Fix approach:
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
-from typing import Any
+import contextlib
+from contextlib import aclosing, asynccontextmanager
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -27,6 +28,10 @@ from pydantic_ai.models.test import TestModel, TestStreamedResponse
 from agentpool import Agent
 from agentpool.agents.events import StreamCompleteEvent
 from agentpool.orchestrator.core import SessionState
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +95,7 @@ class SlowTestModel(TestModel):
 async def slow_agent() -> Agent[None]:
     """Agent with SlowTestModel for interrupt testing."""
     model = SlowTestModel(custom_output_text="Hello world slow response", pre_stream_delay=0.5)
-    agent = Agent(name="interrupt-test-agent", model=model)
+    agent = Agent(name="interrupt-test-agent", model=model, session=False)
     yield agent
 
 
@@ -98,7 +103,7 @@ async def slow_agent() -> Agent[None]:
 async def fast_agent() -> Agent[None]:
     """Agent with instant TestModel for basic tests."""
     model = TestModel(custom_output_text="Fast response")
-    agent = Agent(name="fast-test-agent", model=model)
+    agent = Agent(name="fast-test-agent", model=model, session=False)
     yield agent
 
 
@@ -118,6 +123,17 @@ def _mock_session_pool(agent: Agent, run_ctx: Any) -> None:
     agent_pool = MagicMock()
     agent_pool.session_pool = session_pool
     agent.agent_pool = agent_pool
+
+
+async def _drain_stream(agent: Agent[None], prompt: str) -> AsyncIterator[Any]:
+    """Yield events from agent.run_stream(), ensuring generator cleanup.
+
+    Wraps run_stream() in aclosing() so the anyio task group inside
+    run_stream() is properly exited in the same task that entered it.
+    """
+    async with aclosing(agent.run_stream(prompt)) as gen:
+        async for event in gen:
+            yield event
 
 
 # ---------------------------------------------------------------------------
@@ -142,14 +158,15 @@ async def test_interrupt_without_run_ctx_sets_cancelled_flag(slow_agent: Agent[N
     captured_run_ctx: list[Any] = []
 
     async def run_stream() -> None:
-        async for event in slow_agent.run_stream("Test prompt"):
-            # Capture the run_ctx while stream is active (same task)
-            run_ctx = _current_run_ctx_var.get()
-            if run_ctx is not None and not captured_run_ctx:
-                captured_run_ctx.append(run_ctx)
-            stream_started.set()
-            if isinstance(event, StreamCompleteEvent):
-                break
+        async with aclosing(slow_agent.run_stream("Test prompt")) as gen:
+            async for event in gen:
+                # Capture the run_ctx while stream is active (same task)
+                run_ctx = _current_run_ctx_var.get()
+                if run_ctx is not None and not captured_run_ctx:
+                    captured_run_ctx.append(run_ctx)
+                stream_started.set()
+                if isinstance(event, StreamCompleteEvent):
+                    break
 
     task = asyncio.create_task(run_stream())
 
@@ -185,9 +202,12 @@ async def test_interrupt_without_run_ctx_sets_cancelled_flag(slow_agent: Agent[N
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_interrupt_without_run_ctx_cancels_stream_task(slow_agent: Agent[None]) -> None:
-    """interrupt() called with no run_ctx must cancel the asyncio.Task running run_stream.
+    """interrupt() called with no run_ctx must stop the running stream.
 
-    Cross-task access requires SessionPool fallback (since _active_run_ctx was removed).
+    After the fix, interrupt() no longer cancels current_task (the session
+    loop). Instead, it sets run_ctx.cancelled=True and cancels _iteration_task.
+    The stream loop checks run_ctx.cancelled and breaks, so the task completes
+    normally (not via CancelledError).
     """
     from agentpool.agents.base_agent import _current_run_ctx_var
 
@@ -195,12 +215,13 @@ async def test_interrupt_without_run_ctx_cancels_stream_task(slow_agent: Agent[N
     captured_run_ctx: list[Any] = []
 
     async def run_stream() -> None:
-        async for event in slow_agent.run_stream("Test prompt"):
-            run_ctx = _current_run_ctx_var.get()
-            if run_ctx is not None and not captured_run_ctx:
-                captured_run_ctx.append(run_ctx)
-            stream_started.set()
-            # Don't break — let interrupt() cancel us
+        async with aclosing(slow_agent.run_stream("Test prompt")) as gen:
+            async for event in gen:
+                run_ctx = _current_run_ctx_var.get()
+                if run_ctx is not None and not captured_run_ctx:
+                    captured_run_ctx.append(run_ctx)
+                stream_started.set()
+                # Don't break — let interrupt() stop us via cancelled flag
 
     task = asyncio.create_task(run_stream())
 
@@ -216,19 +237,29 @@ async def test_interrupt_without_run_ctx_cancels_stream_task(slow_agent: Agent[N
     # Call interrupt with NO run_ctx but WITH session_id for SessionPool lookup
     await slow_agent.interrupt(session_id="test-session")
 
-    # The task should be cancelled (not still running)
+    # The task should complete (not hang) — the stream loop exits via
+    # run_ctx.cancelled flag, not via task cancellation.
     try:
         await asyncio.wait_for(task, timeout=3.0)
     except asyncio.CancelledError:
-        pass  # Expected — task was cancelled
-    except asyncio.TimeoutError:
+        pass  # Also acceptable — task was cancelled
+    except TimeoutError:
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
-        pytest.fail("Stream task was not cancelled after interrupt()")
+        pytest.fail("Stream task hung after interrupt()")
 
-    # Task should be done (either cancelled or completed with partial result)
+    # Task should be done (either completed or cancelled)
     assert task.done()
+
+    # current_task should NOT be cancelled by _interrupt() — the fix removed
+    # current_task cancellation. Only _iteration_task is cancelled.
+    current_task = run_ctx.current_task
+    if current_task is not None:
+        assert not current_task.cancelled(), (
+            "current_task should NOT be cancelled by _interrupt() — "
+            "the fix removed current_task cancellation"
+        )
 
 
 @pytest.mark.unit
@@ -245,11 +276,12 @@ async def test_interrupt_with_run_ctx_still_works(fast_agent: Agent[None]) -> No
 
     async def run_stream():
         nonlocal captured_run_ctx
-        async for event in fast_agent.run_stream("Test prompt"):
-            stream_started.set()
-            # Capture the run_ctx from the ContextVar
-            if captured_run_ctx is None:
-                captured_run_ctx = _current_run_ctx_var.get()
+        async with aclosing(fast_agent.run_stream("Test prompt")) as gen:
+            async for event in gen:
+                stream_started.set()
+                # Capture the run_ctx from the ContextVar
+                if captured_run_ctx is None:
+                    captured_run_ctx = _current_run_ctx_var.get()
 
     task = asyncio.create_task(run_stream())
     await asyncio.wait_for(stream_started.wait(), timeout=2.0)
@@ -290,13 +322,14 @@ async def test_interrupt_cancels_iteration_task(slow_agent: Agent[None]) -> None
     captured_run_ctx: list[Any] = []
 
     async def run_stream():
-        async for event in slow_agent.run_stream("Test prompt"):
-            run_ctx = _current_run_ctx_var.get()
-            if run_ctx is not None and not captured_run_ctx:
-                captured_run_ctx.append(run_ctx)
-            stream_started.set()
-            if isinstance(event, StreamCompleteEvent):
-                break
+        async with aclosing(slow_agent.run_stream("Test prompt")) as gen:
+            async for event in gen:
+                run_ctx = _current_run_ctx_var.get()
+                if run_ctx is not None and not captured_run_ctx:
+                    captured_run_ctx.append(run_ctx)
+                stream_started.set()
+                if isinstance(event, StreamCompleteEvent):
+                    break
 
     task = asyncio.create_task(run_stream())
 
@@ -331,9 +364,18 @@ async def test_interrupt_cancels_iteration_task(slow_agent: Agent[None]) -> None
 
     # The iteration_task should have been cancelled
     # Check via the agent's _iteration_task attribute (added in fix)
-    iteration_task: asyncio.Task[Any] | None = getattr(slow_agent, "_iteration_task", None)
+    iteration_task: asyncio.Task[Any] | None = slow_agent._iteration_task
     if iteration_task is not None:
         assert iteration_task.done(), "iteration_task should be done after interrupt"
+
+    # current_task should NOT be cancelled by _interrupt() — the fix removed
+    # current_task cancellation. Only _iteration_task is cancelled.
+    current_task = run_ctx.current_task
+    if current_task is not None:
+        assert not current_task.cancelled(), (
+            "current_task should NOT be cancelled by _interrupt() — "
+            "only _iteration_task should be cancelled"
+        )
 
 
 @pytest.mark.unit
@@ -347,10 +389,11 @@ async def test_iteration_task_stored_as_instance_variable(slow_agent: Agent[None
     stream_started = asyncio.Event()
 
     async def run_stream():
-        async for event in slow_agent.run_stream("Test prompt"):
-            stream_started.set()
-            if isinstance(event, StreamCompleteEvent):
-                break
+        async with aclosing(slow_agent.run_stream("Test prompt")) as gen:
+            async for event in gen:
+                stream_started.set()
+                if isinstance(event, StreamCompleteEvent):
+                    break
 
     task = asyncio.create_task(run_stream())
 
@@ -360,7 +403,7 @@ async def test_iteration_task_stored_as_instance_variable(slow_agent: Agent[None
     await asyncio.sleep(0.05)
 
     # During streaming, _iteration_task should be set
-    iteration_task = getattr(slow_agent, "_iteration_task", None)
+    iteration_task = slow_agent._iteration_task
     if iteration_task is not None:
         assert isinstance(iteration_task, asyncio.Task), "_iteration_task should be an asyncio.Task"
         assert not iteration_task.done(), "_iteration_task should be running during streaming"
@@ -395,14 +438,15 @@ async def test_opencode_abort_flow_stops_agent(slow_agent: Agent[None]) -> None:
     captured_run_ctx: list[Any] = []
 
     async def run_stream():
-        async for event in slow_agent.run_stream("Test prompt"):
-            run_ctx = _current_run_ctx_var.get()
-            if run_ctx is not None and not captured_run_ctx:
-                captured_run_ctx.append(run_ctx)
-            stream_started.set()
-            events_received.append(event)
-            if isinstance(event, StreamCompleteEvent):
-                break
+        async with aclosing(slow_agent.run_stream("Test prompt")) as gen:
+            async for event in gen:
+                run_ctx = _current_run_ctx_var.get()
+                if run_ctx is not None and not captured_run_ctx:
+                    captured_run_ctx.append(run_ctx)
+                stream_started.set()
+                events_received.append(event)
+                if isinstance(event, StreamCompleteEvent):
+                    break
 
     task = asyncio.create_task(run_stream())
 
@@ -485,9 +529,10 @@ async def test_interrupt_then_run_stream(fast_agent: Agent[None]) -> None:
 
     # Now run_stream — it should still work
     events = []
-    async for event in fast_agent.run_stream("After interrupt"):
-        events.append(event)
-        if isinstance(event, StreamCompleteEvent):
-            break
+    async with aclosing(fast_agent.run_stream("After interrupt")) as gen:
+        async for event in gen:
+            events.append(event)
+            if isinstance(event, StreamCompleteEvent):
+                break
 
     assert len(events) > 0, "run_stream should work after interrupt()"

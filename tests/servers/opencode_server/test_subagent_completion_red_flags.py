@@ -108,7 +108,7 @@ async def test_background_task_inject_prompt_wakes_lead_agent(
     CURRENT BEHAVIOR (FIXED):
       inject_prompt() now delegates to SessionPool.receive_request() or
       SessionPool.inject_prompt() when no active run context exists,
-      which triggers auto-resume via TurnRunner._trigger_auto_resume().
+      which triggers auto-resume via SessionController.
       The lead agent receives the completion notice and resumes reasoning.
 
     PREVIOUS BEHAVIOR (BROKEN):

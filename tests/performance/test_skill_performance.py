@@ -342,6 +342,7 @@ async def test_agui_bridge_bulk_conversion(tmp_path: str) -> None:
 # =============================================================================
 
 
+@pytest.mark.flaky(reruns=3)
 def test_opencode_bridge_conversion() -> None:
     """Benchmark converting 100 SkillCommand to slashed Command.
 

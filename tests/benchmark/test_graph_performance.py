@@ -30,7 +30,7 @@ from agentpool.messaging import ChatMessage
 
 # Threshold: graph-based must be within 40% of direct execution.
 # (Target: ~20% overhead + 20% measurement variance buffer for ms-scale ops.
-#  SessionPool/RunExecutor integration adds legitimate overhead from session
+#  SessionPool integration adds legitimate overhead from session
 #  management, event bus subscription, and per-run context creation —
 #  roughly 1-4ms in absolute terms which is negligible at production scale.)
 OVERHEAD_THRESHOLD = 1.40

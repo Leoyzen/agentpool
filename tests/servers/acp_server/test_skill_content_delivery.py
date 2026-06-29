@@ -30,14 +30,22 @@ def agent_pool_with_skill() -> AgentPool:
     """Create an agent pool with a skill command registered."""
     from unittest.mock import MagicMock
 
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+
+    from agentpool.models.manifest import AgentsManifest
+
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+
+    pool = AgentPool(manifest)
 
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     # Provide a mock SessionPool so process_prompt can route through it
     mock_session_pool = MagicMock()
     mock_session_pool.sessions = MagicMock()
@@ -80,7 +88,7 @@ async def test_skill_content_reaches_model_prompt(agent_pool_with_skill: AgentPo
     calling agent._stream_events() directly. We verify that session_pool.run_stream
     is called, which means the agent would receive the staged content.
     """
-    agent = agent_pool_with_skill.get_agent("test_agent")
+    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(pool=agent_pool_with_skill)
     mock_client = AsyncMock()
     mock_acp_agent = Mock()
     mock_acp_agent.tasks = Mock()
@@ -139,7 +147,7 @@ async def test_skill_content_format_matches_opencode_pattern(agent_pool_with_ski
     calling agent._stream_events() directly. We verify that run_stream is called
     with the skill instructions in the content.
     """
-    agent = agent_pool_with_skill.get_agent("test_agent")
+    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(pool=agent_pool_with_skill)
     mock_client = AsyncMock()
     mock_acp_agent = Mock()
     mock_acp_agent.tasks = Mock()
@@ -190,7 +198,7 @@ async def test_staged_content_is_consumed_once(agent_pool_with_skill: AgentPool)
     A bug where staged_content is checked for length but not properly consumed
     could lead to duplicate or missing content.
     """
-    agent = agent_pool_with_skill.get_agent("test_agent")
+    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(pool=agent_pool_with_skill)
 
     # Stage some content
     agent.staged_content.add_text("Test instructions")

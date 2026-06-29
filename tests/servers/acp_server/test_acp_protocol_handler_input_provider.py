@@ -38,6 +38,8 @@ def mock_pool() -> MagicMock:
     # Mock sessions registry
     sessions_registry = MagicMock()
     sessions_registry.get_or_create_session_agent = AsyncMock(return_value=MagicMock())
+    sessions_registry.store = MagicMock()
+    sessions_registry.store.load = AsyncMock(return_value=None)
     session_pool.sessions = sessions_registry
 
     from tests._helpers.mock_stream import EmptyReceiveStream
@@ -54,6 +56,7 @@ def mock_pool() -> MagicMock:
 def mock_event_converter() -> MagicMock:
     """Return a mocked ACPEventConverter."""
     converter = MagicMock()
+    converter.subagent_meta = {}
     converter.subagent_display_mode = "tool_box"
     return converter
 
@@ -67,7 +70,10 @@ def mock_client() -> MagicMock:
 @pytest.fixture
 def mock_session_manager() -> MagicMock:
     """Return a mocked ACPSessionManager."""
-    return MagicMock()
+    sm = MagicMock()
+    sm.session_store.load = AsyncMock()
+    sm.session_store.save = AsyncMock()
+    return sm
 
 
 @pytest.fixture
@@ -300,13 +306,11 @@ class TestHandlePromptBlockingBehavior:
         handler: ACPProtocolHandler,
         mock_pool: MagicMock,
     ) -> None:
-        """Legacy clients block until the run's complete_event is set."""
-        event = asyncio.Event()
+        """Legacy clients block until the run's turn_complete_event is set."""
         run_handle = RunHandle(
             run_id="run-1",
             session_id="sess-1",
             agent_type="native",
-            complete_event=event,
         )
         mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
 
@@ -315,9 +319,9 @@ class TestHandlePromptBlockingBehavior:
 
         # Yield so the task reaches the wait()
         await asyncio.sleep(0)
-        assert not task.done(), "Should block until complete_event is set"
+        assert not task.done(), "Should block until turn_complete_event is set"
 
-        event.set()
+        run_handle._turn_complete_event.set()
         result = await task
         assert result is not None
         assert result.stop_reason == "end_turn"
@@ -364,17 +368,15 @@ class TestHandlePromptBlockingBehavior:
         mock_pool: MagicMock,
     ) -> None:
         """If the wait is cancelled, handler returns stop_reason='cancelled'."""
-        event = asyncio.Event()
         run_handle = RunHandle(
             run_id="run-1",
             session_id="sess-1",
             agent_type="native",
-            complete_event=event,
         )
         mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
 
         prompt = [TextContentBlock(text="hello")]
-        with patch.object(event, "wait", side_effect=asyncio.CancelledError):
+        with patch.object(run_handle._turn_complete_event, "wait", side_effect=asyncio.CancelledError):
             result = await handler.handle_prompt("sess-1", prompt)
 
         assert result is not None
@@ -387,12 +389,10 @@ class TestHandlePromptBlockingBehavior:
         mock_pool: MagicMock,
     ) -> None:
         """When client_capabilities is None, handler defaults to blocking."""
-        event = asyncio.Event()
         run_handle = RunHandle(
             run_id="run-1",
             session_id="sess-1",
             agent_type="native",
-            complete_event=event,
         )
         mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
 
@@ -402,7 +402,7 @@ class TestHandlePromptBlockingBehavior:
         await asyncio.sleep(0)
         assert not task.done(), "Should block when client_capabilities is None"
 
-        event.set()
+        run_handle._turn_complete_event.set()
         result = await task
         assert result is not None
         assert result.stop_reason == "end_turn"
@@ -414,13 +414,13 @@ class TestHandlePromptBlockingBehavior:
         mock_pool: MagicMock,
     ) -> None:
         """If the run is already complete, legacy client returns promptly."""
-        event = asyncio.Event()
-        event.set()
+        turn_event = asyncio.Event()
+        turn_event.set()
         run_handle = RunHandle(
             run_id="run-1",
             session_id="sess-1",
             agent_type="native",
-            complete_event=event,
+            _turn_complete_event=turn_event,
         )
         mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
 
@@ -485,6 +485,7 @@ async def test_handle_event_uses_event_session_id_for_child(
 
     mock_converter = MagicMock()
     mock_converter.convert = mock_convert
+    mock_converter.subagent_meta = {}
     handler._converters["parent-sid"] = mock_converter
 
     from agentpool.agents.events import StreamCompleteEvent
@@ -529,6 +530,7 @@ async def test_handle_event_falls_back_to_consumer_session_id(
 
     mock_converter = MagicMock()
     mock_converter.convert = mock_convert
+    mock_converter.subagent_meta = {}
     handler._converters["parent-sid"] = mock_converter
 
     from agentpool.agents.events import StreamCompleteEvent

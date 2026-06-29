@@ -57,7 +57,7 @@ agents:
 async def agent_with_variants(manifest_with_model_variants: AgentsManifest):
     """Create an agent with model_variants in its pool."""
     async with AgentPool(manifest_with_model_variants) as pool:
-        agent = pool.get_agent("test_agent")
+        agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
         async with agent:
             # Store pool reference for tests (runtime attribute)
             agent._test_pool = pool  # type: ignore[attr-defined]
@@ -324,7 +324,7 @@ agents:
     manifest = AgentsManifest.from_yaml(config_yaml)
 
     async with AgentPool(manifest) as pool:
-        agent = pool.get_agent("assistant")
+        agent = pool.manifest.agents["assistant"].get_agent(pool=pool)
         async with agent:
             initial_model = agent.model_name
 
@@ -475,7 +475,7 @@ def _make_mock_state_with_session_agent(
     pool.manifest = Mock()
     pool.manifest.config_file_path = "/tmp/test"
     pool.manifest.model_variants = {}
-    pool.all_agents = {shared_agent.name: shared_agent}
+    pool.manifest.agents = {shared_agent.name: shared_agent}
     pool.skill_commands = None
 
     storage = Mock()

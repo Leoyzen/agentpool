@@ -87,7 +87,7 @@ async def test_logfire_provider_integration():
     manifest = AgentsManifest.from_yaml(manifest_str)
 
     async with AgentPool(manifest) as pool:
-        agent = pool.get_agent("test_agent")
+        agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
         # Run a simple prompt
         result = await agent.run("Hello!")
         # Verify no errors occurred
@@ -108,7 +108,7 @@ async def test_langsmith_provider_integration():
     manifest = AgentsManifest.from_yaml(manifest_str)
 
     async with AgentPool(manifest) as pool:
-        agent = pool.get_agent("test_agent")
+        agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
         # Run a simple prompt
         result = await agent.run("Hello!")
         # Verify no errors occurred
@@ -123,7 +123,7 @@ async def test_custom_provider_integration():
     manifest = AgentsManifest.from_yaml(manifest_str)
 
     async with AgentPool(manifest) as pool:
-        agent = pool.get_agent("test_agent")
+        agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
         # Run a simple prompt
         result = await agent.run("Hello!")
         # Verify no errors occurred
@@ -149,7 +149,7 @@ agents:
     manifest = AgentsManifest.from_yaml(manifest_str)
 
     async with AgentPool(manifest) as pool:
-        agent = pool.get_agent("test_agent")
+        agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
         # Run a simple prompt
         result = await agent.run("Hello!")
         # Verify no errors occurred

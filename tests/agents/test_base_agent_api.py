@@ -10,9 +10,12 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic_ai.models.test import TestModel
 
+from pydantic_ai.messages import ModelMessage
+
 from agentpool.agents.base_agent import BaseAgent, _current_run_ctx_var
 from agentpool.agents.context import AgentRunContext
 from agentpool.orchestrator.core import SessionState
+from agentpool.orchestrator.turn import Turn
 
 
 # ---------------------------------------------------------------------------
@@ -31,6 +34,15 @@ class _TestAgent(BaseAgent):
 
     async def set_model(self, model: str) -> None:
         pass
+
+    def create_turn(
+        self,
+        prompts: list[str],
+        run_ctx: AgentRunContext,
+        message_history: list[ModelMessage],
+    ) -> Turn:
+        """Test stub — returns no turn."""
+        raise NotImplementedError("_TestAgent does not implement create_turn")
 
     async def _stream_events(
         self,

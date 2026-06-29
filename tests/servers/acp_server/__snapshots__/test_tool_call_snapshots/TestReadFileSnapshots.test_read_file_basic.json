@@ -14,60 +14,15 @@
   },
   {
     "payload": {
-      "locations": [
-        {
-          "line": 0,
-          "path": "/test/hello.txt"
-        }
-      ],
-      "sessionUpdate": "tool_call_update",
-      "status": "in_progress",
-      "title": "Reading file: /test/hello.txt",
-      "toolCallId": "pyd_ai_tool_call_id__read"
-    },
-    "type": "tool_call_update"
-  },
-  {
-    "payload": {
-      "locations": [
-        {
-          "line": 0,
-          "path": "/test/hello.txt"
-        }
-      ],
-      "sessionUpdate": "tool_call_update",
-      "status": "completed",
-      "title": "Read: /test/hello.txt",
-      "toolCallId": "pyd_ai_tool_call_id__read"
-    },
-    "type": "tool_call_update"
-  },
-  {
-    "payload": {
       "content": [
         {
           "content": {
-            "text": "```/test/hello.txt\nHello, World!\n```",
+            "text": "Hello, World!",
             "type": "text"
           },
           "type": "content"
         }
       ],
-      "locations": [
-        {
-          "line": 0,
-          "path": "/test/hello.txt"
-        }
-      ],
-      "sessionUpdate": "tool_call_update",
-      "status": "in_progress",
-      "title": "Read: /test/hello.txt",
-      "toolCallId": "pyd_ai_tool_call_id__read"
-    },
-    "type": "tool_call_update"
-  },
-  {
-    "payload": {
       "rawOutput": "Hello, World!",
       "sessionUpdate": "tool_call_update",
       "status": "completed",

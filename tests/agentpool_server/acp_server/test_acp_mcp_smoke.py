@@ -7,30 +7,28 @@ crash with an AttributeError and initialize() to hang/timeout.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from unittest.mock import Mock
 
-from typing import Any
-
 import anyio
-import pytest
-
-from acp.schema.mcp import AcpMcpServer
-from agentpool import Agent
-from agentpool.delegation import AgentPool
-from agentpool.resource_providers.mcp_provider import MCPResourceProvider
-from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
-from agentpool_server.acp_server.acp_mcp_transport import AcpMcpTransport
-from agentpool_config.mcp_server import AcpMCPServerConfig
 from mcp.types import (
-    JSONRPCMessage,
     Implementation,
     InitializeResult,
     ListToolsResult,
     ServerCapabilities,
     Tool,
 )
+import pytest
+
+from acp.schema.mcp import AcpMcpServer
+from agentpool import Agent
+from agentpool.delegation import AgentPool
+from agentpool.models.agents import NativeAgentConfig
+from agentpool.models.manifest import AgentsManifest
+from agentpool.resource_providers.mcp_provider import MCPResourceProvider
+from agentpool_config.mcp_server import AcpMCPServerConfig
+from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+from agentpool_server.acp_server.acp_mcp_transport import AcpMcpTransport
 
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
@@ -44,17 +42,14 @@ def mock_connection():
 
 @pytest.fixture
 def default_test_agent() -> Agent:
-    """Create a simple test agent with a pool."""
+    """Create a simple test agent with a pool backed by manifest config."""
 
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
-    pool = AgentPool()
-    agent = Agent.from_callback(
-        name="test_agent", callback=simple_callback, agent_pool=pool
-    )
-    pool.register("test_agent", agent)
-    return agent
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+    pool = AgentPool(manifest)
+    return Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
 
 
 @pytest.fixture
@@ -126,7 +121,7 @@ async def test_initialize_and_get_tools_with_json_round_trip(
                 )
                 return result.model_dump(by_alias=True, mode="json", exclude_none=True)
 
-            elif req_method == "tools/list":
+            if req_method == "tools/list":
                 result = ListToolsResult(
                     tools=[
                         Tool(

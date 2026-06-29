@@ -4,8 +4,8 @@ Verifies that PartDeltaEvent (and other model events) are yielded to the consume
 while the background iteration task is still running — not batched and released
 only after the iteration completes.
 
-This is a regression test for a bug where events were buffered inside
-RunExecutor via its internal event queue and only released at the end.
+This is a regression test for a bug where events were buffered via an internal
+event queue and only released at the end.
 The fix restored direct iteration so events flow to the consumer immediately.
 """
 
@@ -100,7 +100,7 @@ async def test_run_stream_yields_events_while_iteration_running(
     """PartDeltaEvent is yielded before the background iteration task completes.
 
     If events were batched at the end, the consumer would receive no model events
-    until RunExecutor finishes and dumps everything into the queue.
+    until the background iteration finishes and dumps everything into the queue.
     With real-time streaming, each event is pushed to the queue as it arrives
     from node.stream(), so the consumer receives events while the iteration task
     is still active.

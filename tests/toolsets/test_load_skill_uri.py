@@ -498,7 +498,7 @@ class TestLoadSkillBackwardCompatibility:
         )
 
         async with AgentPool(manifest) as pool:
-            agent = pool.get_agent("test_agent")
+            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
             ctx = AgentContext(node=agent, pool=pool)
 
             result = await load_skill(ctx, "simple-skill")
@@ -526,7 +526,7 @@ class TestLoadSkillBackwardCompatibility:
         )
 
         async with AgentPool(manifest) as pool:
-            agent = pool.get_agent("test_agent")
+            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
             ctx = AgentContext(node=agent, pool=pool)
 
             result = await load_skill(ctx, "simple-skill")
@@ -557,7 +557,7 @@ class TestLoadSkillBackwardCompatibility:
         )
 
         async with AgentPool(manifest) as pool:
-            agent = pool.get_agent("test_agent")
+            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
             ctx = AgentContext(node=agent, pool=pool)
 
             result = await load_skill(ctx, "non-existent-skill")
@@ -595,7 +595,7 @@ class TestLoadSkillWithURI:
         )
 
         async with AgentPool(manifest) as pool:
-            agent = pool.get_agent("test_agent")
+            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
             ctx = AgentContext(node=agent, pool=pool)
 
             # Load with URI
@@ -626,7 +626,7 @@ class TestLoadSkillWithURI:
         )
 
         async with AgentPool(manifest) as pool:
-            agent = pool.get_agent("test_agent")
+            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
             ctx = AgentContext(node=agent, pool=pool)
 
             result = await load_skill(ctx, "skill://local/non-existent")
@@ -654,7 +654,7 @@ class TestLoadSkillWithURI:
         )
 
         async with AgentPool(manifest) as pool:
-            agent = pool.get_agent("test_agent")
+            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
             ctx = AgentContext(node=agent, pool=pool)
 
             # Invalid scheme
@@ -692,7 +692,7 @@ class TestArgumentSubstitution:
         )
 
         async with AgentPool(manifest) as pool:
-            agent = pool.get_agent("test_agent")
+            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
             ctx = AgentContext(node=agent, pool=pool)
 
             result = await load_skill(ctx, "arg-skill", "first-arg second-arg")
@@ -720,7 +720,7 @@ class TestArgumentSubstitution:
         )
 
         async with AgentPool(manifest) as pool:
-            agent = pool.get_agent("test_agent")
+            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
             ctx = AgentContext(node=agent, pool=pool)
 
             result = await load_skill(ctx, "arg-skill", "arg1 arg2 arg3")
@@ -747,7 +747,7 @@ class TestArgumentSubstitution:
         )
 
         async with AgentPool(manifest) as pool:
-            agent = pool.get_agent("test_agent")
+            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
             ctx = AgentContext(node=agent, pool=pool)
 
             result = await load_skill(ctx, "arg-skill", "foo bar")
@@ -774,7 +774,7 @@ class TestArgumentSubstitution:
         )
 
         async with AgentPool(manifest) as pool:
-            agent = pool.get_agent("test_agent")
+            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
             ctx = AgentContext(node=agent, pool=pool)
 
             result = await load_skill(ctx, "arg-skill")
@@ -1004,7 +1004,7 @@ class TestListSkillsIntegration:
         )
 
         async with AgentPool(manifest) as pool:
-            agent = pool.get_agent("test_agent")
+            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
             ctx = AgentContext(node=agent, pool=pool)
 
             result = await list_skills(ctx)
@@ -1199,7 +1199,7 @@ class TestProviderLessURIReferenceLoading:
         )
 
         async with AgentPool(manifest) as pool:
-            agent = pool.get_agent("test_agent")
+            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
             ctx = AgentContext(node=agent, pool=pool)
 
             # Provider-less URI — should load the asset via resolver fallback
@@ -1237,7 +1237,7 @@ class TestProviderLessURIReferenceLoading:
         )
 
         async with AgentPool(manifest) as pool:
-            agent = pool.get_agent("test_agent")
+            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
             ctx = AgentContext(node=agent, pool=pool)
 
             result = await load_skill(ctx, "skill://test-skill/deep/nested/file.md")

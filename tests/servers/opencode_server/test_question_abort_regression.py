@@ -246,7 +246,7 @@ def _make_pool_mock(agent: Any) -> Mock:
     pool.todos = Mock()
     pool.todos.on_change = None
     pool.skill_commands = None
-    pool.all_agents = {agent.name: agent}
+    pool.manifest.agents = {agent.name: agent}
 
     # Set up SessionPool mock for new architecture
     session_pool = Mock()

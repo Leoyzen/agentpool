@@ -8,11 +8,17 @@ info and a valid UUID tool_call_id.
 
 from __future__ import annotations
 
+from typing import Any
 import uuid
 
+import anyio
 import pytest
+from pydantic_ai.models.test import TestModel
 
+from agentpool import Agent
+from agentpool.agents.context import AgentContext, AgentRunContext, MAX_SUBAGENT_DEPTH, SubagentDepthError
 from agentpool.agents.events import SpawnSessionStart
+from agentpool.orchestrator.core import EventBus
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 
 from acp.schema import ToolCallStart
@@ -170,5 +176,137 @@ class TestZedModeMultipleSpawns:
         tcs_b: ToolCallStart = updates_b[0]  # type: ignore[assignment]
 
         assert tcs_a.tool_call_id != tcs_b.tool_call_id
+
+
+# ---------------------------------------------------------------------------
+# 9.1: create_child_session auto-emits SpawnSessionStart with tool_call_id
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_create_child_session_auto_emits_spawn_with_tool_call_id() -> None:
+    """create_child_session auto-emits SpawnSessionStart with correct tool_call_id.
+
+    Given: An AgentContext with run_ctx set and an EventBus.
+    When: create_child_session is called with tool_call_id="test-123".
+    Then: SpawnSessionStart is emitted with tool_call_id="test-123" and depth=1.
+    """
+    event_bus = EventBus()
+    run_ctx = AgentRunContext(session_id="parent-ses", event_bus=event_bus)
+    agent = Agent(name="test-agent", model=TestModel())
+
+    ctx: AgentContext[Any] = agent.get_context(run_ctx=run_ctx)
+
+    recv = await event_bus.subscribe("parent-ses", scope="session")
+
+    child_sid = await ctx.create_child_session(
+        agent_name="child-agent",
+        agent_type="native",
+        tool_call_id="test-123",
+    )
+
+    envelope = await recv.receive()
+    event = envelope.event
+
+    assert isinstance(event, SpawnSessionStart)
+    assert event.tool_call_id == "test-123"
+    assert event.depth == 1
+    assert event.child_session_id == child_sid
+    assert event.parent_session_id == "parent-ses"
+
+    await event_bus.unsubscribe("parent-ses", recv)
+
+
+# ---------------------------------------------------------------------------
+# 9.2: tool_call_id flows ctx → event → converter consistently (end-to-end)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_tool_call_id_flows_event_to_converter_consistently() -> None:
+    """tool_call_id on SpawnSessionStart appears in converter's ToolCallStart.
+
+    Given: A SpawnSessionStart with tool_call_id="flow-tc-id".
+    When: The event is converted by a zed-mode ACPEventConverter.
+    Then: The yielded ToolCallStart has the same tool_call_id.
+    """
+    converter = ACPEventConverter(subagent_display_mode="zed")
+    converter._current_message_id = "test-msg-id"
+
+    event = SpawnSessionStart(
+        child_session_id="child_flow_001",
+        parent_session_id="parent_ses",
+        tool_call_id="flow-tc-id",
+        spawn_mechanism="spawn",
+        source_name="coder",
+        source_type="agent",
+        depth=1,
+        description="Flow test",
+    )
+
+    updates: list[Any] = []
+    async for update in converter.convert(event):
+        updates.append(update)
+
+    assert len(updates) == 1
+    tcs: ToolCallStart = updates[0]  # type: ignore[assignment]
+    assert tcs.tool_call_id == "flow-tc-id"
+
+
+# ---------------------------------------------------------------------------
+# 9.11: MAX_SUBAGENT_DEPTH enforcement — SubagentDepthError at depth 6
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_max_subagent_depth_raises_at_depth_6() -> None:
+    """create_child_session raises SubagentDepthError when depth exceeds MAX_SUBAGENT_DEPTH.
+
+    Given: An AgentRunContext with depth=MAX_SUBAGENT_DEPTH (5).
+    When: create_child_session is called (child_depth = 6 > MAX_SUBAGENT_DEPTH).
+    Then: SubagentDepthError is raised.
+    """
+    run_ctx = AgentRunContext(session_id="parent-ses", depth=MAX_SUBAGENT_DEPTH)
+    agent = Agent(name="test-agent", model=TestModel())
+
+    ctx: AgentContext[Any] = agent.get_context(run_ctx=run_ctx)
+
+    with pytest.raises(SubagentDepthError):
+        await ctx.create_child_session(
+            agent_name="child-agent",
+            agent_type="native",
+        )
+
+
+# ---------------------------------------------------------------------------
+# 9.14: team.py yield pattern unaffected by auto-emit changes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_team_py_uses_yield_spawn_pattern() -> None:
+    """team.py still uses 'yield SpawnSessionStart(...)' pattern (not create_child_session).
+
+    Given: The team.py source file.
+    When: We inspect it for SpawnSessionStart usage.
+    Then: It uses 'yield SpawnSessionStart(...)' in an async generator, NOT create_child_session().
+    """
+    import inspect
+
+    from agentpool.delegation import team
+
+    source = inspect.getsource(team)
+
+    # team.py must use the yield SpawnSessionStart pattern
+    assert "yield SpawnSessionStart(" in source, (
+        "team.py must still use 'yield SpawnSessionStart(...)' pattern"
+    )
+    # team.py must NOT use create_child_session (that's for AgentContext, not teams)
+    assert "create_child_session" not in source, (
+        "team.py must NOT call create_child_session — it uses the yield pattern"
+    )
 
 

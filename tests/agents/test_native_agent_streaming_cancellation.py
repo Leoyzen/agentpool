@@ -4,6 +4,12 @@ Verifies that when a stream is cancelled mid-flight:
 - `run_ctx.cancelled` is set to `True`
 - `_iteration_task` is reset to `None`
 - No dangling asyncio tasks remain
+
+Note: RunHandle `_status` assertions (idle vs done after cancel) are
+covered in integration tests:
+- tests/orchestrator/test_cancel_e2e.py
+- tests/servers/acp_server/test_acp_cancel_then_prompt.py
+This file tests agent-level streaming, not RunHandle lifecycle.
 """
 
 from __future__ import annotations
@@ -72,7 +78,7 @@ class SlowTestModel(TestModel):
 async def slow_agent() -> AsyncGenerator[Agent[None], None]:
     """Agent with SlowTestModel for cancellation testing."""
     model = SlowTestModel(custom_output_text="Hello world slow response", pre_stream_delay=0.5)
-    agent = Agent(name="cancel-test-agent", model=model)
+    agent = Agent(name="cancel-test-agent", model=model, session=False)
     yield agent
 
 

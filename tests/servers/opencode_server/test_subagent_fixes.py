@@ -70,6 +70,7 @@ async def test_task_tool_return_format():
     # Mock node (agent) using a class to satisfy runtime_checkable Protocol
     class MockStreamingAgent:
         agent_type = "agent"
+        type = "native"
 
         def __init__(self):
             self.run_stream = MagicMock()
@@ -81,7 +82,8 @@ async def test_task_tool_return_format():
         yield StreamCompleteEvent(message=ChatMessage(role="assistant", content="Task result"))
 
     mock_agent.run_stream.side_effect = mock_stream
-    ctx.pool.nodes = {"child_agent": mock_agent}
+    ctx.pool.manifest.agents = {"child_agent": mock_agent}
+    ctx.pool.manifest.teams = {}
     ctx.node.session_id = "parent_session"
     ctx.events.emit_event = AsyncMock()
     ctx.create_child_session = AsyncMock(return_value="child_session_123")
@@ -121,12 +123,14 @@ async def test_task_tool_async_mode_return_format():
     # Mock node
     class MockStreamingAgent:
         agent_type = "agent"
+        type = "native"
 
         def __init__(self):
             self.run_stream = MagicMock()
 
     mock_agent = MockStreamingAgent()
-    ctx.pool.nodes = {"child_agent": mock_agent}
+    ctx.pool.manifest.agents = {"child_agent": mock_agent}
+    ctx.pool.manifest.teams = {}
 
     # Mock internal_fs
     ctx.internal_fs.mkdirs = MagicMock()

@@ -19,14 +19,19 @@ from agentpool_server.acp_server.session_manager import ACPSessionManager
 @pytest.fixture
 def agent_pool_with_skill() -> AgentPool:
     """Create an agent pool with a skill command registered."""
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+    pool = AgentPool(manifest)
 
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     skill = Skill(
         name="test-skill",
         description="A test skill",
@@ -57,7 +62,7 @@ def _make_mock_acp_agent():
 
 async def test_skill_commands_registered_in_session(agent_pool_with_skill: AgentPool):
     """Verify skill commands are registered in ACPSession's command_store."""
-    agent = agent_pool_with_skill.get_agent("test_agent")
+    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(pool=agent_pool_with_skill)
     mock_client = AsyncMock()
     mock_acp_agent = _make_mock_acp_agent()
 
@@ -90,7 +95,7 @@ async def test_available_commands_update_sent_after_create_session(
     This test verifies the end-to-end behavior: after create_session, the
     session's command_store contains skill commands and can send them.
     """
-    agent = agent_pool_with_skill.get_agent("test_agent")
+    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(pool=agent_pool_with_skill)
     mock_client = AsyncMock()
     mock_acp_agent = _make_mock_acp_agent()
 

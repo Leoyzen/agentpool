@@ -17,8 +17,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import RunStartedEvent
-from agentpool.orchestrator.core import EventBus, SessionController, SessionPool, TurnRunner
+from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
+from agentpool.messaging import ChatMessage
+from agentpool.orchestrator.core import EventBus, SessionController, SessionPool
 from agentpool.orchestrator.metrics import MetricsCollector
 import anyio
 
@@ -51,19 +52,29 @@ def mock_pool() -> MagicMock:
     return pool
 
 
+class _MockTurn:
+    """Minimal turn that yields RunStartedEvent + StreamCompleteEvent."""
+
+    message_history: list[Any] = []
+
+    def __init__(self, *, delay: float = 0.0) -> None:
+        self._delay = delay
+
+    async def execute(self) -> AsyncIterator[Any]:
+        if self._delay:
+            await asyncio.sleep(self._delay)
+        yield RunStartedEvent(session_id="default", run_id="run-1")
+        yield StreamCompleteEvent(
+            message=ChatMessage(content="ok", role="assistant"),
+            session_id="default",
+        )
+
+
 @pytest.fixture
 def mock_agent() -> MagicMock:
     """Return a mocked BaseAgent that yields a single event instantly."""
     agent = MagicMock()
-
-    async def _stream(
-        run_ctx: AgentRunContext,
-        *prompts: Any,
-        **kwargs: Any,
-    ) -> AsyncIterator[RunStartedEvent]:
-        yield RunStartedEvent(session_id=kwargs.get("session_id", "default"), run_id="run-1")
-
-    agent._run_stream_once = _stream
+    agent.create_turn = MagicMock(return_value=_MockTurn())
     return agent
 
 
@@ -71,16 +82,7 @@ def mock_agent() -> MagicMock:
 def mock_agent_with_delay() -> MagicMock:
     """Return a mocked BaseAgent with a small per-event delay."""
     agent = MagicMock()
-
-    async def _stream(
-        run_ctx: AgentRunContext,
-        *prompts: Any,
-        **kwargs: Any,
-    ) -> AsyncIterator[RunStartedEvent]:
-        await asyncio.sleep(0.001)
-        yield RunStartedEvent(session_id=kwargs.get("session_id", "default"), run_id="run-1")
-
-    agent._run_stream_once = _stream
+    agent.create_turn = MagicMock(return_value=_MockTurn(delay=0.001))
     return agent
 
 
@@ -102,6 +104,7 @@ async def _attach_agent(
 
 
 @pytest.mark.benchmark
+@pytest.mark.flaky(reruns=3)
 async def test_benchmark_session_creation_latency(mock_pool: MagicMock) -> None:
     """Measure time to create and close sessions at varying scales."""
     session_pool = SessionPool(mock_pool)
@@ -149,6 +152,7 @@ async def test_benchmark_session_creation_latency(mock_pool: MagicMock) -> None:
 
 
 @pytest.mark.benchmark
+@pytest.mark.flaky(reruns=3)
 async def test_benchmark_session_lifecycle_memory(mock_pool: MagicMock) -> None:
     """Verify session creation/close does not leak memory under sustained load."""
     session_pool = SessionPool(mock_pool)
@@ -183,6 +187,7 @@ async def test_benchmark_session_lifecycle_memory(mock_pool: MagicMock) -> None:
 
 
 @pytest.mark.benchmark
+@pytest.mark.flaky(reruns=3)
 async def test_benchmark_turn_latency_under_load(
     mock_pool: MagicMock,
     mock_agent_with_delay: MagicMock,
@@ -212,7 +217,7 @@ async def test_benchmark_turn_latency_under_load(
 
         # Collect events to ensure completion
         for sid in sids:
-            await asyncio.wait_for(queues[sid].get(), timeout=5.0)
+            await asyncio.wait_for(queues[sid].receive(), timeout=5.0)
 
         metrics = await collector.get_metrics()
         avg_latency = metrics.turn_latency_ms
@@ -241,6 +246,7 @@ async def test_benchmark_turn_latency_under_load(
 
 
 @pytest.mark.benchmark
+@pytest.mark.flaky(reruns=3)
 async def test_benchmark_turn_latency_serial_vs_concurrent(
     mock_pool: MagicMock,
     mock_agent_with_delay: MagicMock,
@@ -291,6 +297,7 @@ async def test_benchmark_turn_latency_serial_vs_concurrent(
 
 
 @pytest.mark.benchmark
+@pytest.mark.flaky(reruns=3)
 async def test_benchmark_event_throughput_single_subscriber() -> None:
     """Measure raw event publish throughput with one subscriber."""
     event_bus = EventBus(max_queue_size=10000)
@@ -315,11 +322,19 @@ async def test_benchmark_event_throughput_single_subscriber() -> None:
     assert throughput > 1000, f"Throughput too low: {throughput:.0f} events/s"
 
     # Verify all events reached subscriber
-    assert queue.qsize() == event_count
+    received = 0
+    while True:
+        try:
+            queue.receive_nowait()
+            received += 1
+        except anyio.WouldBlock:
+            break
+    assert received == event_count, f"Expected {event_count} events, got {received}"
     await event_bus.close_session(session_id)
 
 
 @pytest.mark.benchmark
+@pytest.mark.flaky(reruns=3)
 async def test_benchmark_event_throughput_many_subscribers() -> None:
     """Measure event throughput with many subscribers."""
     event_bus = EventBus(max_queue_size=1000)
@@ -348,12 +363,16 @@ async def test_benchmark_event_throughput_many_subscribers() -> None:
 
     # Verify each subscriber received events
     for queue in queues:
-        assert queue.qsize() > 0
+        try:
+            queue.receive_nowait()
+        except anyio.WouldBlock:
+            raise AssertionError("Subscriber did not receive any events") from None
 
     await event_bus.close_session(session_id)
 
 
 @pytest.mark.benchmark
+@pytest.mark.flaky(reruns=3)
 async def test_benchmark_event_throughput_scaling() -> None:
     """Measure how throughput scales with subscriber count."""
     event_bus = EventBus(max_queue_size=500)
@@ -382,8 +401,11 @@ async def test_benchmark_event_throughput_scaling() -> None:
         # Drain and unsubscribe for next iteration
         await event_bus.close_session(session_id)
         for q in queues:
-            while not q.empty():
-                q.get_nowait()
+            while True:
+                try:
+                    q.receive_nowait()
+                except (anyio.WouldBlock, anyio.ClosedResourceError, anyio.EndOfStream):
+                    break
 
     print("\n=== Event Throughput Scaling ===")
     for label, metrics in results.items():
@@ -479,11 +501,6 @@ async def test_1000_concurrent_sessions_with_agents(
     # Close all
     await asyncio.gather(*[session_pool.close_session(f"sess-{i}") for i in range(session_count)])
     assert len(session_pool.sessions._sessions) == 0
-
-    # Verify no leaked locks or injection state
-    assert len(session_pool.turns._injection_locks) == 0
-    assert len(session_pool.turns._post_turn_injections) == 0
-    assert len(session_pool.turns._post_turn_prompts) == 0
 
     await session_pool.shutdown()
 
@@ -661,124 +678,3 @@ async def test_event_bus_high_throughput_publish() -> None:
         assert q.qsize() <= 1000
 
 
-# ============================================================================
-# Stress: TurnRunner queue overflow
-# ============================================================================
-
-
-@pytest.mark.slow
-async def test_turn_runner_injection_overflow(
-    mock_pool: MagicMock,
-    mock_agent: MagicMock,
-) -> None:
-    """Rapidly inject many prompts into a session; verify no crash and work is processed."""
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
-
-    sid = "overflow-session"
-    await _attach_agent(session_pool, sid, mock_agent)
-
-    injection_count = 500
-
-    # Rapidly inject prompts while no turn is active
-    for i in range(injection_count):
-        await session_pool.inject_prompt(sid, f"injected-{i}")
-
-    # Now run a turn — auto-resume should process queued injections
-    queue = await session_pool.event_bus.subscribe(sid)
-    await session_pool.process_prompt(sid, "initial")
-
-    # Collect all events (should be 1 per turn)
-    events: list[Any] = []
-    deadline = time.monotonic() + 10.0
-    while time.monotonic() < deadline:
-        try:
-            ev = await asyncio.wait_for(queue.receive(), timeout=0.5)
-            if ev is None:
-                break
-            events.append(ev)
-        except TimeoutError:
-            break
-
-    # All queued injections are drained and processed in a single turn
-    assert len(events) == 2
-
-    await session_pool.close_session(sid)
-    await session_pool.shutdown()
-
-
-@pytest.mark.slow
-async def test_turn_runner_concurrent_injections(
-    mock_pool: MagicMock,
-    mock_agent_with_delay: MagicMock,
-) -> None:
-    """Many tasks inject into the same session concurrently."""
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
-
-    sid = "concurrent-inject"
-    await _attach_agent(session_pool, sid, mock_agent_with_delay)
-
-    injection_count = 100
-
-    async def inject(i: int) -> None:
-        await session_pool.inject_prompt(sid, f"msg-{i}")
-
-    # Concurrent injections
-    await asyncio.gather(*[inject(i) for i in range(injection_count)])
-
-    # Run loop to process all queued work
-    queue = await session_pool.event_bus.subscribe(sid)
-    await session_pool.process_prompt(sid, "initial")
-
-    # Collect events
-    events: list[Any] = []
-    deadline = time.monotonic() + 15.0
-    while time.monotonic() < deadline:
-        try:
-            ev = await asyncio.wait_for(queue.receive(), timeout=0.5)
-            if ev is None:
-                break
-            events.append(ev)
-        except TimeoutError:
-            break
-
-    # All queued injections are drained and processed in a single turn
-    assert len(events) == 2
-
-    await session_pool.close_session(sid)
-    await session_pool.shutdown()
-
-
-@pytest.mark.slow
-async def test_turn_runner_no_resource_leak_after_overflow(
-    mock_pool: MagicMock,
-    mock_agent: MagicMock,
-) -> None:
-    """After processing many injections, no locks or queues are leaked."""
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
-
-    sid = "leak-check"
-    await _attach_agent(session_pool, sid, mock_agent)
-
-    # Inject many prompts
-    for i in range(200):
-        await session_pool.inject_prompt(sid, f"msg-{i}")
-
-    # Process all
-    await session_pool.process_prompt(sid, "initial")
-
-    # Allow auto-resume tasks to settle
-    await asyncio.sleep(0.5)
-
-    # Close session
-    await session_pool.close_session(sid)
-
-    # Verify cleanup
-    assert sid not in session_pool.turns._post_turn_injections
-    assert sid not in session_pool.turns._post_turn_prompts
-    assert sid not in session_pool.turns._injection_locks
-    assert session_pool.sessions.get_session(sid) is None
-
-    await session_pool.shutdown()

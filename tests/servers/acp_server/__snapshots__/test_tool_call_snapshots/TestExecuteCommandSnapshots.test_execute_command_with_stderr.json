@@ -16,34 +16,13 @@
     "payload": {
       "content": [
         {
-          "terminalId": "cmd_0001",
-          "type": "terminal"
+          "content": {
+            "text": "ToolResult(content=\"ls: cannot access '/nonexistent': No such file or directory\\n\\n\\nError: Command failed\\nExit code: 2\", structured_content=None, metadata={'output': \"ls: cannot access '/nonexistent': No such file or directory\\n\", 'exit': 2, 'description': 'ls /nonexistent'})",
+            "type": "text"
+          },
+          "type": "content"
         }
       ],
-      "sessionUpdate": "tool_call_update",
-      "status": "in_progress",
-      "title": "Running: ls /nonexistent",
-      "toolCallId": "pyd_ai_tool_call_id__bash"
-    },
-    "type": "tool_call_update"
-  },
-  {
-    "payload": {
-      "content": [
-        {
-          "terminalId": "cmd_0001",
-          "type": "terminal"
-        }
-      ],
-      "sessionUpdate": "tool_call_update",
-      "status": "in_progress",
-      "title": "Output: ls: cannot access '/nonexistent': No such file or ...",
-      "toolCallId": "pyd_ai_tool_call_id__bash"
-    },
-    "type": "tool_call_update"
-  },
-  {
-    "payload": {
       "rawOutput": {
         "content": "ls: cannot access '/nonexistent': No such file or directory\n\n\nError: Command failed\nExit code: 2",
         "metadata": {

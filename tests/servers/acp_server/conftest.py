@@ -10,6 +10,8 @@ from acp import ClientCapabilities, DefaultACPClient, FileSystemCapability
 from acp.agent.implementations import TestAgent
 from agentpool import Agent
 from agentpool.delegation import AgentPool
+from agentpool.models.agents import NativeAgentConfig
+from agentpool.models.manifest import AgentsManifest
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 
 
@@ -39,9 +41,9 @@ def mock_agent_pool_with_agent() -> tuple[AgentPool, Agent]:
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
-    pool = AgentPool()
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+    pool = AgentPool(manifest)
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
     return pool, agent
 
 

@@ -14,6 +14,7 @@ Validates that the SSE event stream conforms to the OpenCode TUI protocol:
 
 from __future__ import annotations
 
+import anyio
 import asyncio
 import json
 from typing import TYPE_CHECKING, Any
@@ -75,34 +76,51 @@ class _MockEventBus:
 
     Supports scope="all" subscriptions which receive events from any session_id,
     matching the real EventBus._should_receive behavior.
+
+    Uses anyio memory object streams (matching the real EventBus) instead of
+    asyncio.Queue so subscribers receive objects with .receive()/.receive_nowait()
+    instead of .get()/.get_nowait().
     """
 
+    _STREAM_BUFFER_SIZE: int = 1024
+
     def __init__(self) -> None:
-        self._queues: dict[str, list[tuple[asyncio.Queue[Any], str]]] = {}
+        self._streams: dict[str, list[tuple[anyio.abc.ObjectSendStream[Any], str]]] = {}
+        self._stream_pairs: dict[int, anyio.abc.ObjectSendStream[Any]] = {}
 
     async def subscribe(
         self, session_id: str, scope: str = "session"
-    ) -> asyncio.Queue[Any]:
-        queue: asyncio.Queue[Any] = asyncio.Queue()
-        self._queues.setdefault(session_id, []).append((queue, scope))
-        return queue
+    ) -> anyio.abc.ObjectReceiveStream[Any]:
+        send_stream, receive_stream = anyio.create_memory_object_stream(
+            max_buffer_size=self._STREAM_BUFFER_SIZE
+        )
+        self._streams.setdefault(session_id, []).append((send_stream, scope))
+        self._stream_pairs[id(receive_stream)] = send_stream
+        return receive_stream
 
-    async def unsubscribe(self, session_id: str, queue: asyncio.Queue[Any]) -> None:
-        queues = self._queues.get(session_id, [])
-        self._queues[session_id] = [(q, s) for q, s in queues if q is not queue]
-        if not self._queues[session_id]:
-            del self._queues[session_id]
+    async def unsubscribe(
+        self, session_id: str, receive_stream: anyio.abc.ObjectReceiveStream[Any]
+    ) -> None:
+        send_to_close = self._stream_pairs.pop(id(receive_stream), None)
+        if send_to_close is not None and session_id in self._streams:
+            self._streams[session_id] = [
+                (s, sc) for s, sc in self._streams[session_id] if s is not send_to_close
+            ]
+            if not self._streams[session_id]:
+                del self._streams[session_id]
+        if send_to_close is not None:
+            await send_to_close.aclose()
 
     async def publish(self, session_id: str, event: Any) -> None:
         from agentpool.orchestrator.core import EventEnvelope
 
         envelope = EventEnvelope(source_session_id=session_id, event=event)
-        for subscriber_sid, subscribers in self._queues.items():
-            for queue, scope in subscribers:
+        for subscriber_sid, subscribers in self._streams.items():
+            for send_stream, scope in subscribers:
                 if scope == "all" or subscriber_sid == session_id:
                     try:
-                        queue.put_nowait(envelope)
-                    except asyncio.QueueFull:
+                        send_stream.send_nowait(envelope)
+                    except anyio.WouldBlock:
                         pass
 
 

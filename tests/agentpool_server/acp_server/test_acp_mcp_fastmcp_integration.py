@@ -67,14 +67,17 @@ def mock_connection():
 def default_test_agent() -> Agent:
     """Create a simple test agent with a pool."""
 
+    from agentpool.models.agents import NativeAgentConfig
+    from agentpool.models.manifest import AgentsManifest
+
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
-    pool = AgentPool()
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+    pool = AgentPool(manifest)
     agent = Agent.from_callback(
         name="test_agent", callback=simple_callback, agent_pool=pool
     )
-    pool.register("test_agent", agent)
     return agent
 
 

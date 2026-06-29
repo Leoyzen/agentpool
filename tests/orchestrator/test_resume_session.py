@@ -485,10 +485,15 @@ async def test_resume_session_emits_resume_event(
 
     # Collect events
     events: list[Any] = []
-    while not _stream_empty(queue):
-        envelope = queue.receive_nowait()
-        if envelope is not None:
-            events.append(envelope.event)
+    try:
+        while True:
+            envelope = queue.receive_nowait()
+            if envelope is not None:
+                events.append(envelope.event)
+    except anyio.WouldBlock:
+        pass
+    except anyio.EndOfStream:
+        pass
 
     # Should find SessionResumeEvent
     resume_events = [e for e in events if isinstance(e, SessionResumeEvent)]

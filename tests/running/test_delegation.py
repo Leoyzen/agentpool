@@ -54,7 +54,7 @@ async def test_duplicate_parameter(pool: AgentPool):
     async def test_func(agent1: BaseAgent[None] | None = None) -> str:
         return "unreachable"
 
-    dummy_agent = pool.get_agent("agent1")
+    dummy_agent = pool.manifest.agents["agent1"].get_agent(pool=pool)
     with pytest.raises(NodeInjectionError) as exc:
         await test_func(agent1=dummy_agent)
     assert "Parameter already provided" in str(exc.value)

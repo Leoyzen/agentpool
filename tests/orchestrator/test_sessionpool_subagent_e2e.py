@@ -43,6 +43,8 @@ class MockServerState:
         self.agent = None
         self.pool = None
         self.session_status: dict[str, Any] = {}
+        self.sessions: dict[str, Any] = {}
+        self.session_locks: dict[str, Any] = {}
 
     async def broadcast_event(self, event: Any) -> None:
         self.events.append(event)

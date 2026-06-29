@@ -31,10 +31,11 @@ class MockDeps:
 
 
 class MockRunCtx:
-    """Mock run context with session_id."""
+    """Mock run context with session_id and cancelled flag."""
 
     def __init__(self, session_id: str | None = None):
         self.session_id = session_id
+        self.cancelled: bool = False
 
 
 def make_run_context(deps: Any = ...) -> RunContext[Any]:
@@ -140,19 +141,20 @@ async def test_before_run_adapter_with_session_id():
     assert data["session_id"] == "sess-123"
 
 
-async def test_before_run_adapter_deny_raises():
-    """Test before_run adapter raises RuntimeError on deny."""
+async def test_before_run_adapter_deny_sets_cancelled():
+    """Test before_run adapter sets cancelled flag on deny instead of raising."""
     reset_hook_state()
 
     agent_hooks = AgentHooks(pre_run=[CallableHook(event="pre_run", fn=deny_hook)])
     capability = agent_hooks.as_capability()
-    ctx = make_run_context()
+    mock_deps = MockDeps(session_id="test-session")
+    ctx = make_run_context(deps=mock_deps)
 
-    with pytest.raises(RuntimeError, match="Run blocked"):
-        await capability.before_run(ctx)
+    await capability.before_run(ctx)
 
     assert len(hook_calls) == 1
     assert hook_calls[0][0] == "deny"
+    assert mock_deps.run_ctx.cancelled is True
 
 
 async def test_before_run_adapter_no_hooks():

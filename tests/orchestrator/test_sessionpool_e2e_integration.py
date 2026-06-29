@@ -103,6 +103,7 @@ async def test_e2e_reasoning_events_through_sessionpool() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.slow
 async def test_e2e_pre_existing_session_consumer_started() -> None:
     """Consumer must start even when session already exists in SessionPool."""
     agent_config = NativeAgentConfig(

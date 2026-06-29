@@ -62,6 +62,23 @@ class MockServerState:
         self.pool: Any = None
         self.session_status: dict[str, Any] = {}
         self.config = MagicMock()
+        # Required by ensure_session() and related helpers in
+        # session_pool_integration.py that access ServerState attributes
+        # directly (not via getattr).
+        self.sessions: dict[str, Any] = {}
+        self.session_locks: dict[str, asyncio.Lock] = {}
+
+    def ensure_runtime_session_state(self, session_id: str) -> None:
+        """No-op stub for ServerState.ensure_runtime_session_state."""
+        pass
+
+    def ensure_input_provider(self, session_id: str) -> Any:
+        """No-op stub for ServerState.ensure_input_provider."""
+        return None
+
+    async def mark_session_idle(self, session_id: str) -> None:
+        """No-op stub for ServerState.mark_session_idle."""
+        pass
 
     async def broadcast_event(self, event: Any) -> None:
         self.events.append(event)

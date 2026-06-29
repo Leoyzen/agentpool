@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentpool import AgentPool, AgentsManifest
+from agentpool import Agent, AgentPool, AgentsManifest
 
 
 if TYPE_CHECKING:
@@ -94,9 +94,14 @@ async def test_agent_forwarding(basic_config: Path):
     manifest = AgentsManifest.from_file(basic_config)
 
     async with AgentPool(manifest) as pool:
-        agent1 = pool.get_agent("agent1")
-        agent2 = pool.get_agent("agent2")
-        agent3 = pool.get_agent("agent3")
+        # Create agents directly from config names
+        agent1 = Agent("agent1", model="test", agent_pool=pool)
+        agent2 = Agent("agent2", model="test", agent_pool=pool)
+        agent3 = Agent("agent3", model="test", agent_pool=pool)
+
+        # Set up connections as defined in config
+        agent1.connect_to(agent2, name="agent1->agent2")
+        agent2.connect_to(agent3, name="agent2->agent3")
 
         responded_agents = set()
         received_messages = []
@@ -125,8 +130,12 @@ async def test_partial_chain(partial_config: Path):
     manifest = AgentsManifest.from_file(partial_config)
 
     async with AgentPool(manifest) as pool:
-        agent1 = pool.get_agent("agent1")
-        agent2 = pool.get_agent("agent2")
+        # Create agents directly
+        agent1 = Agent("agent1", model="test", agent_pool=pool)
+        agent2 = Agent("agent2", model="test", agent_pool=pool)
+
+        # Set up connections as defined in config
+        agent1.connect_to(agent2, name="agent1->agent2")
 
         responded_agents = set()
         agent1.message_sent.connect(lambda _: responded_agents.add("agent1"))
