@@ -29,6 +29,7 @@ from acp.schema.tool_call import (  # noqa: TC001
 )
 from acp_v2.schema._unset import UnsetType
 
+
 if TYPE_CHECKING:
     pass
 

@@ -9,13 +9,12 @@ v2 changes from v1:
 
 from __future__ import annotations
 
-
 from pydantic import Field
 
 from acp.schema.base import Request
 from acp.schema.common import Implementation
-from acp.schema.mcp import McpServer  # noqa: TC001
 from acp.schema.content_blocks import ContentBlock  # noqa: TC001
+from acp.schema.mcp import McpServer  # noqa: TC001
 from acp_v2.schema.capabilities import Capabilities
 
 

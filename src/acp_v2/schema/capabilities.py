@@ -9,7 +9,6 @@ v2 changes from v1:
 
 from __future__ import annotations
 
-
 from pydantic import BaseModel, ConfigDict
 
 

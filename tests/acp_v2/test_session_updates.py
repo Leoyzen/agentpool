@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from acp.schema.content_blocks import TextContentBlock
 from acp_v2.schema import (
     AgentMessage,

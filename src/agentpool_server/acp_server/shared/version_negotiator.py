@@ -12,6 +12,7 @@ from typing import Literal
 
 from acp.exceptions import RequestError
 
+
 ProtocolVersion = Literal[1, 2]
 
 _SUPPORTED_VERSIONS: frozenset[int] = frozenset({1, 2})

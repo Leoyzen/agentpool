@@ -17,6 +17,7 @@ from acp.schema.common import Implementation
 from acp.schema.session_state import SessionConfigOption  # noqa: TC001
 from acp_v2.schema.capabilities import Capabilities
 
+
 StopReason = Literal[
     "end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled"
 ]

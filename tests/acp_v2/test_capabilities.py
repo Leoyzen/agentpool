@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from acp_v2.schema import (
     Capabilities,
     ClientMethod,
