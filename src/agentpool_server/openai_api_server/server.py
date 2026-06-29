@@ -224,6 +224,11 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
         except Exception as e:
             self.log.exception("Error processing chat completion")
             raise HTTPException(500, f"Error: {e!s}") from e
+        finally:
+            try:
+                await session_pool.close_session(session_id)
+            except Exception:
+                self.log.exception("Error closing session during cleanup", session_id=session_id)
 
     async def create_response(self, req_body: ResponseRequest) -> ResponsesResponse:
         """Handle response creation requests."""
@@ -266,6 +271,11 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
             raise HTTPException(404, f"Model {req_body.model} not found") from None
         except Exception as e:
             raise HTTPException(500, str(e)) from e
+        finally:
+            try:
+                await session_pool.close_session(session_id)
+            except Exception:
+                self.log.exception("Error closing session during cleanup", session_id=session_id)
 
     async def _start_async(self) -> None:
         """Start the server (blocking async - runs until stopped)."""

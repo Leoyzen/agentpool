@@ -70,6 +70,8 @@ def run_command(
                             and isinstance(event.delta, TextPartDelta)
                         ):
                             print(event.delta.content_delta, end="", flush=True)
+                    if show_messages:
+                        print()
 
                     if final_message and not show_messages:
                         print(

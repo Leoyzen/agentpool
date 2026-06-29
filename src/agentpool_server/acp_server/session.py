@@ -427,7 +427,8 @@ class ACPSession:
         if budget >= len(self.session_id):
             return f"{prefix}{self.session_id}{suffix}"
         # Truncate session_id to fit — use SHA-256 prefix for collision resistance
-        truncated = hashlib.sha256(self.session_id.encode()).hexdigest()[:budget]
+        safe_budget = max(0, budget)
+        truncated = hashlib.sha256(self.session_id.encode()).hexdigest()[:safe_budget]
         return f"{prefix}{truncated}{suffix}"
 
     async def initialize_mcp_servers(self) -> None:

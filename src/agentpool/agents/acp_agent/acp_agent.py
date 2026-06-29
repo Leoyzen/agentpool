@@ -526,43 +526,58 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                     finally:
                         await send_stream.aclose()
 
-                # Forwarders run inside a task group; the consumer loop
-                # (with yield) stays OUTSIDE so generator cleanup never
-                # crosses a cancel scope boundary.
-                async with anyio.create_task_group() as tg:
-                    tg.start_soon(_forward_acp_events)
-                    tg.start_soon(_forward_secondary_events)
+                # Forwarders run as background tasks; the consumer loop
+                # (with yield) runs after they start so events flow in
+                # real-time without blocking on a task group boundary.
+                _bg_tasks: set[asyncio.Task[Any]] = set()
+                task_a = asyncio.create_task(_forward_acp_events)
+                _bg_tasks.add(task_a)
+                task_a.add_done_callback(_bg_tasks.discard)
+                task_b = asyncio.create_task(_forward_secondary_events)
+                _bg_tasks.add(task_b)
+                task_b.add_done_callback(_bg_tasks.discard)
 
-                async for event in receive_stream:
-                    if isinstance(event, EventEnvelope):
-                        event = event.event
-                    if isinstance(event, ToolResultMetadataEvent):
-                        tool_metadata[event.tool_call_id] = event.metadata
-                        continue
-                    if run_ctx.cancelled:
-                        self.log.info("Stream cancelled by user")
-                        break
-                    if isinstance(event, ToolCallCompleteEvent):
-                        enriched_event = event
-                        if not enriched_event.agent_name:
-                            enriched_event = replace(enriched_event, agent_name=self.name)
-                        if (
-                            enriched_event.metadata is None
-                            and enriched_event.tool_call_id in tool_metadata
-                        ):
-                            enriched_event = replace(
-                                enriched_event,
-                                metadata=tool_metadata[enriched_event.tool_call_id],
-                            )
-                        output_event = enriched_event
-                    else:
-                        output_event = event
-                    part = event_to_part(output_event)
-                    if isinstance(part, TextPart):
-                        text_chunks.append(part.content)
-                    if part:
-                        current_response_parts.append(part)
-                    yield output_event
+                try:
+                    async for event in receive_stream:
+                        if isinstance(event, EventEnvelope):
+                            event = event.event
+                        if isinstance(event, ToolResultMetadataEvent):
+                            tool_metadata[event.tool_call_id] = event.metadata
+                            continue
+                        if run_ctx.cancelled:
+                            self.log.info("Stream cancelled by user")
+                            break
+                        if isinstance(event, ToolCallCompleteEvent):
+                            enriched_event = event
+                            if not enriched_event.agent_name:
+                                enriched_event = replace(enriched_event, agent_name=self.name)
+                            if (
+                                enriched_event.metadata is None
+                                and enriched_event.tool_call_id in tool_metadata
+                            ):
+                                enriched_event = replace(
+                                    enriched_event,
+                                    metadata=tool_metadata[enriched_event.tool_call_id],
+                                )
+                            output_event = enriched_event
+                        else:
+                            output_event = event
+                        part = event_to_part(output_event)
+                        if isinstance(part, TextPart):
+                            text_chunks.append(part.content)
+                        if part:
+                            current_response_parts.append(part)
+                        yield output_event
+                finally:
+                    for t in _bg_tasks:
+                        t.cancel()
+                    for t in _bg_tasks:
+                        try:
+                            await t
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception:
+                            self.log.exception("Error during background task cleanup")
         except asyncio.CancelledError:
             self.log.info("Stream cancelled via task cancellation")
             run_ctx.cancelled = True
