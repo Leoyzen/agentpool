@@ -31,7 +31,9 @@ class NewSessionRequest(Request):
 
     cwd: str
     mcp_servers: list[McpServer] | None = Field(default=None, alias="mcpServers")
-    additional_directories: list[str] | None = None
+    additional_directories: list[str] | None = Field(
+        default=None, alias="additionalDirectories"
+    )
 
 
 class LoadSessionRequest(Request):
@@ -40,7 +42,9 @@ class LoadSessionRequest(Request):
     session_id: str = Field(alias="sessionId")
     cwd: str
     mcp_servers: list[McpServer] | None = Field(default=None, alias="mcpServers")
-    additional_directories: list[str] | None = None
+    additional_directories: list[str] | None = Field(
+        default=None, alias="additionalDirectories"
+    )
 
 
 class PromptRequest(Request):

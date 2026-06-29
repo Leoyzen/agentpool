@@ -12,7 +12,7 @@ Key differences from v1:
 from __future__ import annotations
 
 from collections.abc import Sequence  # noqa: TC003
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field
 
@@ -27,11 +27,8 @@ from acp.schema.tool_call import (  # noqa: TC001
     ToolCallKind,
     ToolCallLocation,
 )
-from acp_v2.schema._unset import UnsetType
+from acp_v2.schema._unset import _UNSET, UnsetType
 
-
-if TYPE_CHECKING:
-    pass
 
 ToolCallStatus = Literal["pending", "in_progress", "completed", "failed"]
 SessionState = Literal["running", "idle", "requires_action"]
@@ -44,7 +41,7 @@ class BaseChunk(AnnotatedObject):
     """Base class for v2 streamed message chunks."""
 
     content: ContentBlock
-    message_id: str
+    message_id: str = Field(alias="messageId")
 
 
 class UserMessageChunk(BaseChunk):
@@ -79,7 +76,7 @@ class WholeMessage(AnnotatedObject):
     content = None or [] = clear.
     """
 
-    message_id: str
+    message_id: str = Field(alias="messageId")
     content: Sequence[ContentBlock] | None | UnsetType = None
     """Three-state: UNSET=unchanged, None=clear, list=replace."""
 
@@ -120,15 +117,15 @@ class ToolCallUpdate(AnnotatedObject):
         default="tool_call_update", init=False
     )
 
-    tool_call_id: str
-    title: str | None | UnsetType = None
-    kind: ToolCallKind | None | UnsetType = None
-    status: ToolCallStatus | None | UnsetType = None
-    content: Sequence[ToolCallContent] | None | UnsetType = None
-    locations: Sequence[ToolCallLocation] | None | UnsetType = None
-    raw_input: Any | None | UnsetType = None
-    raw_output: Any | None | UnsetType = None
-    subagent: SubagentRunInfo | None | UnsetType = None
+    tool_call_id: str = Field(alias="toolCallId")
+    title: str | None | UnsetType = _UNSET
+    kind: ToolCallKind | None | UnsetType = _UNSET
+    status: ToolCallStatus | None | UnsetType = _UNSET
+    content: Sequence[ToolCallContent] | None | UnsetType = _UNSET
+    locations: Sequence[ToolCallLocation] | None | UnsetType = _UNSET
+    raw_input: Any | None | UnsetType = _UNSET
+    raw_output: Any | None | UnsetType = _UNSET
+    subagent: SubagentRunInfo | None | UnsetType = _UNSET
 
 
 class ToolCallContentChunk(AnnotatedObject):
@@ -138,7 +135,7 @@ class ToolCallContentChunk(AnnotatedObject):
         default="tool_call_content_chunk", init=False
     )
 
-    tool_call_id: str
+    tool_call_id: str = Field(alias="toolCallId")
     content: ToolCallContent
 
 
@@ -191,9 +188,9 @@ class ConfigOptionUpdate(AnnotatedObject):
         default="config_option_update", init=False
     )
 
-    config_id: str
-    value_id: str
-    config_options: Sequence[SessionConfigOption]
+    config_id: str = Field(alias="configId")
+    value_id: str = Field(alias="valueId")
+    config_options: Sequence[SessionConfigOption] = Field(alias="configOptions")
 
 
 class Cost(AnnotatedObject):
@@ -233,9 +230,9 @@ class SessionInfoUpdate(AnnotatedObject):
         default="session_info_update", init=False
     )
 
-    session_id: str
+    session_id: str = Field(alias="sessionId")
     title: str | None = None
-    updated_at: str | None = None
+    updated_at: str | None = Field(default=None, alias="updatedAt")
     meta: dict[str, Any] | None = None
 
 

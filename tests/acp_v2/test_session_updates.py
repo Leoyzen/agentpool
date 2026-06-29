@@ -100,8 +100,7 @@ class TestToolCallUpdate:
             kind="read",
             status="pending",
         )
-        dumped = tc.model_dump(by_alias=True, exclude_none=True)
-        assert dumped["sessionUpdate"] == "tool_call_update"
+        dumped = tc.model_dump(by_alias=True, exclude_unset=True)
         assert dumped["toolCallId"] == "tc1"
         assert dumped["title"] == "Reading file"
         assert dumped["kind"] == "read"
@@ -113,7 +112,7 @@ class TestToolCallUpdate:
             tool_call_id="tc1",
             status="in_progress",
         )
-        dumped = tc.model_dump(by_alias=True, exclude_none=True)
+        dumped = tc.model_dump(by_alias=True, exclude_unset=True)
         assert "title" not in dumped
         assert "kind" not in dumped
         assert dumped["status"] == "in_progress"

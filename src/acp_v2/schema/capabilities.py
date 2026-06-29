@@ -9,7 +9,7 @@ v2 changes from v1:
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class _Supported(BaseModel):
@@ -23,11 +23,12 @@ class PromptCapabilities(BaseModel):
 
     image: _Supported | None = None
     audio: _Supported | None = None
-    embedded_context: _Supported | None = None
+    embedded_context: _Supported | None = Field(
+        default=None, alias="embeddedContext"
+    )
 
     model_config = ConfigDict(
         populate_by_name=True,
-        alias_generator=lambda name: name.replace("_", ""),
         extra="allow",
     )
 
@@ -40,7 +41,6 @@ class McpCapabilities(BaseModel):
 
     model_config = ConfigDict(
         populate_by_name=True,
-        alias_generator=lambda s: s,
         extra="allow",
     )
 
@@ -63,7 +63,9 @@ class SessionCapabilities(BaseModel):
     mcp: McpCapabilities | None = None
     load: _Supported | None = None
     delete: _Supported | None = None
-    additional_directories: _Supported | None = None
+    additional_directories: _Supported | None = Field(
+        default=None, alias="additionalDirectories"
+    )
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -81,7 +83,7 @@ class Capabilities(BaseModel):
     session: SessionCapabilities | None = None
     auth: AuthCapabilities | None = None
     providers: _Supported | None = None
-    turn_complete: _Supported | None = None
+    turn_complete: _Supported | None = Field(default=None, alias="turnComplete")
 
     model_config = ConfigDict(
         populate_by_name=True,

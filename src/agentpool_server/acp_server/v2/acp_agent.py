@@ -47,6 +47,9 @@ from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnectionManager
 from agentpool_server.acp_server.commands.skill_commands import ACPSkillBridge
 from agentpool_server.acp_server.provider_router import ProviderRouter
 from agentpool_server.acp_server.session_manager import ACPSessionManager
+from agentpool_server.acp_server.shared.config_utils import (
+    get_session_config_options,
+)
 
 
 if TYPE_CHECKING:
@@ -148,7 +151,14 @@ class AgentPoolACPAgentV2(ACPAgentV2):
             acp_agent=self,
             mcp_servers=params.mcp_servers,
         )
-        return NewSessionResponse(session_id=session_id)
+        session = self.session_manager.get_session(session_id)
+        config_options = None
+        if session and session.agent:
+            config_options = await get_session_config_options(session.agent)
+        return NewSessionResponse(
+            session_id=session_id,
+            config_options=config_options,
+        )
 
     async def load_session(self, params: LoadSessionRequest) -> LoadSessionResponse:
         if not self._initialized:
@@ -161,7 +171,8 @@ class AgentPoolACPAgentV2(ACPAgentV2):
         )
         if not session:
             return LoadSessionResponse()
-        return LoadSessionResponse()
+        config_options = await get_session_config_options(session.agent)
+        return LoadSessionResponse(config_options=config_options)
 
     async def list_sessions(self, params: ListSessionsRequest) -> ListSessionsResponse:
         if not self._initialized:
@@ -219,7 +230,8 @@ class AgentPoolACPAgentV2(ACPAgentV2):
         )
         if not session:
             return ResumeSessionResponse()
-        return ResumeSessionResponse()
+        config_options = await get_session_config_options(session.agent)
+        return ResumeSessionResponse(config_options=config_options)
 
     async def auth_login(self, params: LoginAuthRequest) -> LoginAuthResponse:
         logger.info("v2 auth/login requested", method_id=params.method_id)
@@ -244,7 +256,6 @@ class AgentPoolACPAgentV2(ACPAgentV2):
             await session.switch_active_agent(params.value)
         else:
             await session.agent.set_mode(params.value, category_id=params.config_id)
-        from agentpool_server.acp_server.v1.acp_agent import get_session_config_options
         config_options = await get_session_config_options(session.agent)
         return SetSessionConfigOptionResponse(config_options=config_options)
 

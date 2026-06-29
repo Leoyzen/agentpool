@@ -361,7 +361,9 @@ class ACPSession:
             CurrentModelUpdate,
             CurrentModeUpdate,
         )
-        from agentpool_server.acp_server.v1.acp_agent import get_session_config_options
+        from agentpool_server.acp_server.shared.config_utils import (
+            get_session_config_options,
+        )
 
         update: CurrentModeUpdate | CurrentModelUpdate | ConfigOptionUpdate
         match state:

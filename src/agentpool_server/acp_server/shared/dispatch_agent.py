@@ -233,7 +233,11 @@ class DispatchAgent:
         await self._delegate.ext_notification(method, params)
 
     async def close(self) -> None:
-        await self._delegate.close()
+        if self._delegate is not None:
+            try:
+                await self._delegate.close()
+            except Exception:
+                logger.exception("Failed to close delegate agent")
 
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):

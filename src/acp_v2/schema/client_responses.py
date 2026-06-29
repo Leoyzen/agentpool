@@ -36,13 +36,17 @@ class NewSessionResponse(Response):
     """v2 new session response. No modes field."""
 
     session_id: str = Field(alias="sessionId")
-    config_options: list[SessionConfigOption] | None = None
+    config_options: list[SessionConfigOption] | None = Field(
+        default=None, alias="configOptions"
+    )
 
 
 class LoadSessionResponse(Response):
     """v2 load session response. No modes field."""
 
-    config_options: list[SessionConfigOption] | None = None
+    config_options: list[SessionConfigOption] | None = Field(
+        default=None, alias="configOptions"
+    )
 
 
 class PromptResponse(Response):
@@ -70,7 +74,9 @@ class CloseSessionResponse(Response):
 class ResumeSessionResponse(Response):
     """v2 resume session response. No modes field."""
 
-    config_options: list[SessionConfigOption] | None = None
+    config_options: list[SessionConfigOption] | None = Field(
+        default=None, alias="configOptions"
+    )
 
 
 class ForkSessionResponse(Response):
@@ -82,4 +88,6 @@ class ForkSessionResponse(Response):
 class SetSessionConfigOptionResponse(Response):
     """Set config option response with updated options."""
 
-    config_options: list[SessionConfigOption] | None = None
+    config_options: list[SessionConfigOption] | None = Field(
+        default=None, alias="configOptions"
+    )

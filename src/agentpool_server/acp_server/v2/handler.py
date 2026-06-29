@@ -7,7 +7,7 @@ The agent processes asynchronously and communicates state via
 
 from __future__ import annotations
 
-import asyncio
+import uuid
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -140,7 +140,7 @@ class ACPProtocolHandlerV2(ProtocolEventConsumerMixin):
             lifecycle = PromptLifecycleManager()
             self._lifecycle[session_id] = lifecycle
 
-        message_id = str(asyncio.uuid4())
+        message_id = str(uuid.uuid4())
         await self._send_user_message(session_id, prompt, message_id)
         lifecycle.transition_to_running()
         await self._send_state_update(session_id, "running")
@@ -157,14 +157,11 @@ class ACPProtocolHandlerV2(ProtocolEventConsumerMixin):
         prompt: Sequence[ContentBlock],
         message_id: str,
     ) -> None:
-        from agentpool_server.acp_server.converters import from_acp_content
-
-        content_blocks = from_acp_content(list(prompt))
         notification = SessionNotification(
             session_id=session_id,
             update=UserMessage(
                 message_id=message_id,
-                content=content_blocks,
+                content=list(prompt),
             ),
         )
         try:
@@ -209,6 +206,13 @@ class ACPProtocolHandlerV2(ProtocolEventConsumerMixin):
         await self._send_state_update(session_id, "idle", "end_turn")
 
     async def close_session(self, session_id: str) -> None:
+        try:
+            await self.cancel_session(session_id)
+        except Exception:
+            logger.exception(
+                "Failed to cancel session during close",
+                session_id=session_id,
+            )
         await self.stop_event_consumer(session_id)
         await self.session_manager.close_session(session_id)
 
@@ -227,14 +231,22 @@ async def session_pool_receive_request(
     prompt: Sequence[ContentBlock],
     message_id: str,
 ) -> None:
-    """Delegate to SessionPool.receive_request."""
+    """Delegate to SessionPool.receive_request.
+
+    Converts ACP ``ContentBlock`` objects to agentpool internal content
+    types before passing them to the session controller, matching the
+    v1 conversion boundary.
+    """
+    from agentpool_server.acp_server.converters import from_acp_content
 
     session_pool = agent_pool.session_pool
     if session_pool is None:
         return
 
+    contents = [from_acp_content(block, fs=None) for block in prompt]
+
     await session_pool.controller.receive_request(
         session_id=session_id,
-        content=list(prompt),
+        content=contents,
         priority="when_idle",
     )
