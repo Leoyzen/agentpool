@@ -12,39 +12,39 @@
 
 ## 2. v2 协议库骨架 (`src/acp_v2/`)
 
-- [ ] 2.1 创建 `src/acp_v2/__init__.py` 包骨架
-- [ ] 2.2 创建 `src/acp_v2/schema/__init__.py`
-- [ ] 2.3 定义三态补丁字段 sentinel：`src/acp_v2/schema/_unset.py`（`UnsetType` + `_UNSET`）
-- [ ] 2.4 在 `pyproject.toml` 中注册 `acp_v2` 包
+- [x] 2.1 创建 `src/acp_v2/__init__.py` 包骨架
+- [x] 2.2 创建 `src/acp_v2/schema/__init__.py`
+- [x] 2.3 定义三态补丁字段 sentinel：`src/acp_v2/schema/_unset.py`（`UnsetType` + `_UNSET`）
+- [x] 2.4 在 `pyproject.toml` 中注册 `acp_v2` 包
 
 ## 3. v2 Schema — SessionUpdate 类型
 
-- [ ] 3.1 `src/acp_v2/schema/session_updates.py`：定义 `UserMessage`、`AgentMessage`、`AgentThought`（整体消息 upsert，required `messageId`，optional `content`/`_meta`）
-- [ ] 3.2 定义 `UserMessageChunk`、`AgentMessageChunk`、`AgentThoughtChunk`（required `messageId`，单个 `content` 项）
-- [ ] 3.3 定义 `ToolCallUpdate`（统一 upsert，三态补丁字段，keyed by `toolCallId`）
-- [ ] 3.4 定义 `ToolCallContentChunk`（required `toolCallId` + 单个 `content` 项）
-- [ ] 3.5 定义 `StateUpdate`（`state`: running/idle/requires_action，optional `stopReason`）
-- [ ] 3.6 定义 `PlanUpdate`（`plan={type, id, entries}`，稳定 type="items"）
-- [ ] 3.7 定义 `UsageUpdate`、`SessionInfoUpdate`、`ConfigOptionUpdate`、`AvailableCommandsUpdate`（复用 v1 结构，适配 v2 命名）
-- [ ] 3.8 定义 `SessionUpdate` 联合类型（`Annotated[..., Field(discriminator="session_update")]`）
-- [ ] 3.9 编写 `tests/acp_v2/test_session_updates.py` 验证序列化/反序列化
+- [x] 3.1 `src/acp_v2/schema/session_updates.py`：定义 `UserMessage`、`AgentMessage`、`AgentThought`（整体消息 upsert，required `messageId`，optional `content`/`_meta`）
+- [x] 3.2 定义 `UserMessageChunk`、`AgentMessageChunk`、`AgentThoughtChunk`（required `messageId`，单个 `content` 项）
+- [x] 3.3 定义 `ToolCallUpdate`（统一 upsert，三态补丁字段，keyed by `toolCallId`）
+- [x] 3.4 定义 `ToolCallContentChunk`（required `toolCallId` + 单个 `content` 项）
+- [x] 3.5 定义 `StateUpdate`（`state`: running/idle/requires_action，optional `stopReason`）
+- [x] 3.6 定义 `PlanUpdate`（`plan={type, id, entries}`，稳定 type="items"）
+- [x] 3.7 定义 `UsageUpdate`、`SessionInfoUpdate`、`ConfigOptionUpdate`、`AvailableCommandsUpdate`（复用 v1 结构，适配 v2 命名）
+- [x] 3.8 定义 `SessionUpdate` 联合类型（`Annotated[..., Field(discriminator="session_update")]`）
+- [x] 3.9 编写 `tests/acp_v2/test_session_updates.py` 验证序列化/反序列化
 
 ## 4. v2 Schema — 初始化与能力
 
-- [ ] 4.1 `src/acp_v2/schema/capabilities.py`：统一 `Capabilities` 类型（对象标记，session 分组）
-- [ ] 4.2 `src/acp_v2/schema/client_requests.py`：`InitializeRequest`（`capabilities` + `info`，无 `clientCapabilities`/`clientInfo`）
-- [ ] 4.3 `src/acp_v2/schema/client_responses.py`：`InitializeResponse`（`capabilities` + `info`，无 `agentCapabilities`/`agentInfo`）
-- [ ] 4.4 定义 `auth/login` 和 `auth/logout` 的 request/response 类型（`LoginAuthRequest`/`LoginAuthResponse`/`LogoutAuthRequest`/`LogoutAuthResponse`）
-- [ ] 4.5 定义 v2 `SessionNotification` 和 `CancelNotification`
-- [ ] 4.6 定义 v2 `messages.py` 方法枚举（`auth/login`、`auth/logout`、`session/prompt` 等）
-- [ ] 4.7 编写 `tests/acp_v2/test_capabilities.py` 验证对象标记序列化
+- [x] 4.1 `src/acp_v2/schema/capabilities.py`：统一 `Capabilities` 类型（对象标记，session 分组）
+- [x] 4.2 `src/acp_v2/schema/client_requests.py`：`InitializeRequest`（`capabilities` + `info`，无 `clientCapabilities`/`clientInfo`）
+- [x] 4.3 `src/acp_v2/schema/client_responses.py`：`InitializeResponse`（`capabilities` + `info`，无 `agentCapabilities`/`agentInfo`）
+- [x] 4.4 定义 `auth/login` 和 `auth/logout` 的 request/response 类型（`LoginAuthRequest`/`LoginAuthResponse`/`LogoutAuthRequest`/`LogoutAuthResponse`）
+- [x] 4.5 定义 v2 `SessionNotification` 和 `CancelNotification`
+- [x] 4.6 定义 v2 `messages.py` 方法枚举（`auth/login`、`auth/logout`、`session/prompt` 等）
+- [x] 4.7 编写 `tests/acp_v2/test_capabilities.py` 验证对象标记序列化
 
 ## 5. v2 Schema — 移除项
 
-- [ ] 5.1 v2 schema 中不定义 `session/set_mode` 方法、`SessionMode`/`SessionModeState` 类型、`current_mode_update` 通知
-- [ ] 5.2 v2 schema 中不定义 `fs/*` 方法、`terminal/*` 方法、terminal ToolCallContent
-- [ ] 5.3 v2 schema 中不定义 v1 `tool_call`（创建）通知和 v1 `plan` 通知
-- [ ] 5.4 v2 MCP schema 中移除 SSE 传输，要求 `type` 判别器
+- [x] 5.1 v2 schema 中不定义 `session/set_mode` 方法、`SessionMode`/`SessionModeState` 类型、`current_mode_update` 通知
+- [x] 5.2 v2 schema 中不定义 `fs/*` 方法、`terminal/*` 方法、terminal ToolCallContent
+- [x] 5.3 v2 schema 中不定义 v1 `tool_call`（创建）通知和 v1 `plan` 通知
+- [x] 5.4 v2 MCP schema 中移除 SSE 传输，要求 `type` 判别器
 
 ## 6. 版本协商器
 
@@ -57,11 +57,11 @@
 
 ## 7. v2 Agent 协议接口
 
-- [ ] 7.1 `src/acp_v2/agent/protocol.py`：定义 v2 `Agent` typing.Protocol（方法签名用 v2 类型）
-- [ ] 7.2 `src/acp_v2/agent/connection.py`：v2 `AgentSideConnection`（JSON-RPC 分发用 v2 方法名）
-- [ ] 7.3 `src/acp_v2/client/protocol.py`：定义 v2 `Client` typing.Protocol
-- [ ] 7.4 `src/acp_v2/client/connection.py`：v2 `ClientSideConnection`
-- [ ] 7.5 复用 `src/acp/transports.py` 传输层（v2 不需要新传输）
+- [x] 7.1 `src/acp_v2/agent/protocol.py`：定义 v2 `Agent` typing.Protocol（方法签名用 v2 类型）
+- [x] 7.2 `src/acp_v2/agent/connection.py`：v2 `AgentSideConnection`（JSON-RPC 分发用 v2 方法名）
+- [x] 7.3 `src/acp_v2/client/protocol.py`：定义 v2 `Client` typing.Protocol
+- [x] 7.4 `src/acp_v2/client/connection.py`：v2 `ClientSideConnection`
+- [x] 7.5 复用 `src/acp/transports.py` 传输层（v2 不需要新传输）
 
 ## 8. v2 Prompt 生命周期
 
