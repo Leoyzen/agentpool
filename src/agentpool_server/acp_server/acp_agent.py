@@ -72,7 +72,7 @@ if TYPE_CHECKING:
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.models.agents import NativeAgentConfig
     from agentpool.storage.manager import SessionMetadataGeneratedEvent
-    from agentpool_server.acp_server.handler import ACPProtocolHandler
+    from agentpool_server.acp_server.v1.handler import ACPProtocolHandler
     from agentpool_server.acp_server.server import ACPServer
 
 logger = get_logger(__name__)
@@ -276,8 +276,8 @@ class AgentPoolACPAgent(ACPAgent):
         if self.agent_pool and (
             self.agent_pool.manifest.acp and self.agent_pool.manifest.acp.use_session_pool
         ):
-            from agentpool_server.acp_server.event_converter import ACPEventConverter
-            from agentpool_server.acp_server.handler import ACPProtocolHandler
+            from agentpool_server.acp_server.v1.event_converter import ACPEventConverter
+            from agentpool_server.acp_server.v1.handler import ACPProtocolHandler
 
             self._protocol_handler = ACPProtocolHandler(
                 agent_pool=self.agent_pool,

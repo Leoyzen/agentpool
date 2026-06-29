@@ -13,7 +13,7 @@ import pytest
 from acp.schema.session_state import SessionInfo
 from agentpool.sessions.models import PendingDeferredCall, SessionData
 from agentpool_server.acp_server.converters import to_session_info
-from agentpool_server.acp_server.event_converter import ACPEventConverter
+from agentpool_server.acp_server.v1.event_converter import ACPEventConverter
 
 
 # ============================================================================

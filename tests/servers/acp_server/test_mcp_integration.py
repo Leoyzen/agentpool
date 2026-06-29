@@ -20,7 +20,7 @@ from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 if TYPE_CHECKING:
     from acp import ClientCapabilities
-    from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+    from agentpool_server.acp_server.v1.acp_agent import AgentPoolACPAgent
 
 
 logger = get_logger(__name__)

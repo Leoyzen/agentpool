@@ -15,7 +15,7 @@ import pytest
 from acp.schema.mcp import AcpMcpServer
 from agentpool import Agent
 from agentpool.delegation import AgentPool
-from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+from agentpool_server.acp_server.v1.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnection
 from agentpool_server.acp_server.acp_mcp_transport import AcpMcpTransport
 

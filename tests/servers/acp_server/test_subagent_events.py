@@ -26,8 +26,8 @@ from agentpool.agents.events.events import (
 )
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus
-from agentpool_server.acp_server.event_converter import ACPEventConverter
-from agentpool_server.acp_server.handler import ACPProtocolHandler
+from agentpool_server.acp_server.v1.event_converter import ACPEventConverter
+from agentpool_server.acp_server.v1.handler import ACPProtocolHandler
 
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]

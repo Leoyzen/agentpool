@@ -35,7 +35,7 @@ from pydantic_ai.usage import RequestUsage
 
 from agentpool.agents.events import StreamCompleteEvent
 from agentpool.messaging.messages import ChatMessage
-from agentpool_server.acp_server.event_converter import ACPEventConverter
+from agentpool_server.acp_server.v1.event_converter import ACPEventConverter
 from tests.fixtures.subagent_events import (
     TEST_EVENT_SEQUENCES,
     zed_full_lifecycle_events,

@@ -17,7 +17,7 @@ import pytest
 from acp.schema import TextContentBlock
 from agentpool.orchestrator.core import EventEnvelope
 from agentpool.orchestrator.run import RunHandle
-from agentpool_server.acp_server.handler import ACPProtocolHandler, _ACPSessionProxy
+from agentpool_server.acp_server.v1.handler import ACPProtocolHandler, _ACPSessionProxy
 from agentpool_server.acp_server.input_provider import ACPInputProvider
 
 
@@ -271,7 +271,7 @@ class TestEventConsumerConverterFlag:
     ) -> None:
         """When client supports turn_complete, converter is created with flag=True."""
         from acp.schema.capabilities import ClientCapabilities
-        from agentpool_server.acp_server.handler import ACPEventConverter
+        from agentpool_server.acp_server.v1.handler import ACPEventConverter
 
         handler = ACPProtocolHandler(
             agent_pool=mock_pool,
@@ -437,7 +437,7 @@ class TestHandlePromptBlockingBehavior:
         mock_client: MagicMock,
     ) -> None:
         """When client_capabilities is None, converter defaults to flag=False."""
-        from agentpool_server.acp_server.handler import ACPEventConverter
+        from agentpool_server.acp_server.v1.handler import ACPEventConverter
 
         handler = ACPProtocolHandler(
             agent_pool=mock_pool,

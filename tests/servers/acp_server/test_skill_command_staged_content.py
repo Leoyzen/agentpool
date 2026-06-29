@@ -19,7 +19,7 @@ from agentpool.agents.context import AgentContext
 from agentpool.skills.command import SkillCommand
 from agentpool.skills.command_registry import SkillCommandRegistry
 from agentpool.skills.skill import Skill
-from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+from agentpool_server.acp_server.v1.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.session import ACPSession
 from agentpool_server.opencode_server.skill_bridge import create_skill_command
 

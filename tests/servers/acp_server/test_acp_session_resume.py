@@ -11,7 +11,7 @@ from agentpool.delegation import AgentPool
 from agentpool.orchestrator.core import SessionPool
 from agentpool.sessions import SessionData
 from agentpool.sessions.store import MemorySessionStore
-from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+from agentpool_server.acp_server.v1.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 from acp.schema import LoadSessionRequest, ResumeSessionRequest, ResumeSessionResponse

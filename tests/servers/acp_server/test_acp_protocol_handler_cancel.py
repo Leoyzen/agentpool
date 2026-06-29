@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentpool_server.acp_server.event_converter import ACPEventConverter
-from agentpool_server.acp_server.handler import ACPProtocolHandler
+from agentpool_server.acp_server.v1.event_converter import ACPEventConverter
+from agentpool_server.acp_server.v1.handler import ACPProtocolHandler
 from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 

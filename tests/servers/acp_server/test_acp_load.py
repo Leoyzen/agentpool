@@ -20,7 +20,7 @@ from agentpool.sessions.models import PendingDeferredCall, SessionData
 from agentpool.storage.manager import StorageManager
 from agentpool.storage.serialization import serialize_messages
 from agentpool_config.storage import MemoryStorageConfig, StorageConfig
-from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+from agentpool_server.acp_server.v1.acp_agent import AgentPoolACPAgent
 
 
 

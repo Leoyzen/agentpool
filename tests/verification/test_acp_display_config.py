@@ -213,7 +213,7 @@ def test_agent_display_mode() -> bool:
         from dataclasses import fields
         import inspect
 
-        from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+        from agentpool_server.acp_server.v1.acp_agent import AgentPoolACPAgent
 
         # Test 5.1: AgentPoolACPAgent has subagent_display_mode field
         field_names = [f.name for f in fields(AgentPoolACPAgent)]
@@ -310,7 +310,7 @@ def test_end_to_end_flow() -> bool:
 
         # Test 7.2: Verify agent has access to mode via server reference
         # (AgentPoolACPAgent gets subagent_display_mode from server at instantiation)
-        from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+        from agentpool_server.acp_server.v1.acp_agent import AgentPoolACPAgent
 
         # Check that AgentPoolACPAgent stores the mode
         sig_fields = {f.name: f for f in fields(AgentPoolACPAgent)}

@@ -23,7 +23,7 @@ from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionController, SessionPool, TurnRunner
-from agentpool_server.acp_server.event_converter import ACPEventConverter
+from agentpool_server.acp_server.v1.event_converter import ACPEventConverter
 
 
 # ============================================================================

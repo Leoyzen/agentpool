@@ -10,7 +10,7 @@ from pydantic_ai import FunctionToolCallEvent, PartDeltaEvent, PartStartEvent, T
 import pytest
 
 from acp.schema import AgentMessageChunk, ToolCallProgress
-from agentpool_server.acp_server.event_converter import ACPEventConverter
+from agentpool_server.acp_server.v1.event_converter import ACPEventConverter
 
 
 async def collect_updates(converter: ACPEventConverter, event):

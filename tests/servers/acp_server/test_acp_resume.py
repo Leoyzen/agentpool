@@ -23,7 +23,7 @@ from acp.schema import ClientCapabilities, ResumeSessionRequest
 from agentpool import Agent
 from agentpool.delegation import AgentPool
 from agentpool.sessions.models import SessionData
-from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+from agentpool_server.acp_server.v1.acp_agent import AgentPoolACPAgent
 
 
 # ---------------------------------------------------------------------------
@@ -260,8 +260,8 @@ async def test_resume_loads_agent_state(mocked_acp_agent):
 @pytest.mark.unit
 async def test_handle_prompt_checkpointed_session_resumes(mocked_acp_agent, mock_connection):
     """handle_prompt should resume a checkpointed session instead of creating a new one."""
-    from agentpool_server.acp_server.event_converter import ACPEventConverter
-    from agentpool_server.acp_server.handler import ACPProtocolHandler
+    from agentpool_server.acp_server.v1.event_converter import ACPEventConverter
+    from agentpool_server.acp_server.v1.handler import ACPProtocolHandler
 
     session_data = _make_session_data(status="checkpointed")
 
@@ -317,8 +317,8 @@ async def test_handle_prompt_checkpointed_session_resumes(mocked_acp_agent, mock
 @pytest.mark.unit
 async def test_handle_prompt_active_session_uses_create_session(mocked_acp_agent, mock_connection):
     """handle_prompt for a non-checkpointed (active/new) session should call create_session."""
-    from agentpool_server.acp_server.event_converter import ACPEventConverter
-    from agentpool_server.acp_server.handler import ACPProtocolHandler
+    from agentpool_server.acp_server.v1.event_converter import ACPEventConverter
+    from agentpool_server.acp_server.v1.handler import ACPProtocolHandler
 
     session_data = _make_session_data(status="active")
 
@@ -503,8 +503,8 @@ async def test_resume_then_handle_prompt_no_duplicate_agent_creation(
     mocked_acp_agent, mock_connection
 ):
     from acp.schema.content_blocks import TextContentBlock
-    from agentpool_server.acp_server.event_converter import ACPEventConverter
-    from agentpool_server.acp_server.handler import ACPProtocolHandler
+    from agentpool_server.acp_server.v1.event_converter import ACPEventConverter
+    from agentpool_server.acp_server.v1.handler import ACPProtocolHandler
 
     session_data = _make_session_data()
     mock_session = _make_mock_session()

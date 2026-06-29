@@ -14,7 +14,7 @@ import pytest
 
 from acp.schema import AvailableCommand
 from agentpool import Agent, AgentPool
-from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+from agentpool_server.acp_server.v1.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.session import ACPSession
 
 

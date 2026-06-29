@@ -14,7 +14,7 @@ import pytest
 
 from acp.schema import LoadSessionRequest, ResumeSessionRequest
 from agentpool.sessions.models import SessionData
-from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+from agentpool_server.acp_server.v1.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 

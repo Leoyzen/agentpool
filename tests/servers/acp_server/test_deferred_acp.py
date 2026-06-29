@@ -17,7 +17,7 @@ from acp.schema import ToolCallStart
 from acp.tool_call_state import ToolCallState
 from acp.tool_call_reporter import ToolCallReporter
 from agentpool.agents.events.events import ToolCallDeferredEvent
-from agentpool_server.acp_server.event_converter import ACPEventConverter
+from agentpool_server.acp_server.v1.event_converter import ACPEventConverter
 
 
 if TYPE_CHECKING:

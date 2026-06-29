@@ -59,7 +59,7 @@ class TestSkillsIncludeDefault:
 
         None means "use manifest's include_default setting".
         """
-        from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+        from agentpool_server.acp_server.v1.acp_agent import AgentPoolACPAgent
 
         assert AgentPoolACPAgent.load_skills is None, (
             "AgentPoolACPAgent.load_skills should default to None, "
@@ -131,7 +131,7 @@ class TestSkillsIncludeDefault:
         When AgentPoolACPAgent.load_skills is None and manifest has include_default=False,
         init_client_skills should not be called.
         """
-        from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+        from agentpool_server.acp_server.v1.acp_agent import AgentPoolACPAgent
         from agentpool_server.acp_server.session import ACPSession
 
         # Create a mock pool with include_default=False

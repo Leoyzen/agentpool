@@ -34,7 +34,7 @@ from agentpool_server.acp_server.converters import (
     convert_acp_mcp_server_to_config,
     from_acp_content,
 )
-from agentpool_server.acp_server.event_converter import ACPEventConverter
+from agentpool_server.acp_server.v1.event_converter import ACPEventConverter
 from agentpool_server.acp_server.input_provider import ACPInputProvider
 from agentpool_server.opencode_server.skill_bridge import create_skill_command
 
@@ -56,7 +56,7 @@ if TYPE_CHECKING:
     )
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.common_types import PathReference
-    from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+    from agentpool_server.acp_server.v1.acp_agent import AgentPoolACPAgent
     from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 logger = get_logger(__name__)
@@ -361,7 +361,9 @@ class ACPSession:
             CurrentModelUpdate,
             CurrentModeUpdate,
         )
-        from agentpool_server.acp_server.acp_agent import get_session_config_options
+        from agentpool_server.acp_server.shared.config_utils import (
+            get_session_config_options,
+        )
 
         update: CurrentModeUpdate | CurrentModelUpdate | ConfigOptionUpdate
         match state:

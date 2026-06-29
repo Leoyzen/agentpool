@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from acp import ClientCapabilities, InitializeRequest
-from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+from agentpool_server.acp_server.v1.acp_agent import AgentPoolACPAgent
 
 pytestmark = pytest.mark.unit
 

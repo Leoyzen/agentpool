@@ -18,7 +18,7 @@ from acp.schema.mcp import AcpMcpServer
 from agentpool import Agent
 from agentpool.delegation import AgentPool
 from agentpool.resource_providers.mcp_provider import MCPResourceProvider
-from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+from agentpool_server.acp_server.v1.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.acp_mcp_transport import AcpMcpTransport
 from agentpool_config.mcp_server import AcpMCPServerConfig
 from mcp.shared.message import SessionMessage

@@ -10,7 +10,7 @@ from pydantic_ai import RequestUsage
 
 from agentpool.agents.events import RunErrorEvent, RunFailedEvent, StreamCompleteEvent, ToolCallStartEvent
 from agentpool.messaging.messages import ChatMessage
-from agentpool_server.acp_server.event_converter import ACPEventConverter
+from agentpool_server.acp_server.v1.event_converter import ACPEventConverter
 
 
 @pytest.fixture
