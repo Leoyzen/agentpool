@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Each session SHALL have at most one EventBus subscriber that processes events
 Each session SHALL have exactly one primary EventBus consumer that handles all event types for that session. There SHALL be no parallel subscribers (such as `SessionStatusBridge`) that independently subscribe to the same session's EventBus events. The consumer SHALL perform subscriber-side drain coalescing: after receiving the first event via `await stream.receive()`, the consumer SHALL drain all immediately-available events via `stream.receive_nowait()` until `WouldBlock`, merge consecutive same-type events, and deliver merged events to `_handle_event()`.
