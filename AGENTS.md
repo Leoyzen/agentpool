@@ -940,6 +940,6 @@ async with AgentPool("config.yml") as pool:
 
 Rules:
 - ALWAYS use uv for all python related tasks.
-- DO NOT USE getattr and hasattr in very rare exceptions. Always provide full type safety.
+
 - Maximum type safety.
 - never resort to shortcuts, never leave out stuff with TODOs unless explicitely asked.

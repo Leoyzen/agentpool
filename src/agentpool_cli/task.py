@@ -59,15 +59,21 @@ async def execute_job(
         session_id = f"task-{agent_name}-{uuid.uuid4().hex[:8]}"
         await sp.create_session(session_id, agent_name=agent_name)
 
-        final_message = None
-        async for event in sp.run_stream(session_id, task_prompt, scope="session"):
-            if isinstance(event, StreamCompleteEvent):
-                final_message = event.message
+        try:
+            final_message = None
+            async for event in sp.run_stream(session_id, task_prompt, scope="session"):
+                if isinstance(event, StreamCompleteEvent):
+                    final_message = event.message
 
-        if final_message is None:
-            msg = "No response received from agent"
-            raise RuntimeError(msg)
-        return cast(str, final_message.data)
+            if final_message is None:
+                msg = "No response received from agent"
+                raise RuntimeError(msg)
+            return cast(str, final_message.data)
+        finally:
+            try:
+                await sp.close_session(session_id)
+            except Exception:
+                pass
 
 
 def task_command(

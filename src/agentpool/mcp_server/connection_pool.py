@@ -7,7 +7,6 @@ across sessions, replacing the pool-agent MCP fallback pattern.
 from __future__ import annotations
 
 import asyncio
-from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 import time
 from typing import TYPE_CHECKING
@@ -83,7 +82,6 @@ class MCPConnectionPool:
         self._max_processes = max_processes
         self._idle_timeout = idle_timeout_seconds
         self._lock = asyncio.Lock()
-        self._exit_stack = AsyncExitStack()
         self._aggregating_provider = AggregatingResourceProvider(providers=[], name="mcp_pool")
         self._cleanup_task: asyncio.Task[None] | None = None
         self._shutting_down = False
@@ -139,7 +137,7 @@ class MCPConnectionPool:
                 source="pool",
             )
             try:
-                await self._exit_stack.enter_async_context(provider)
+                await provider.__aenter__()
             except Exception:
                 logger.exception("Failed to spawn MCP subprocess for '%s'", key)
                 raise
@@ -237,16 +235,6 @@ class MCPConnectionPool:
                     "Error closing MCP provider during shutdown",
                     provider=repr(provider),
                 )
-
-        try:
-            with anyio.CancelScope(shield=True):
-                try:
-                    with anyio.fail_after(5):
-                        await self._exit_stack.aclose()
-                except TimeoutError:
-                    logger.warning("MCP connection pool shutdown timed out after 5s")
-        except Exception:
-            logger.exception("Error during MCP connection pool shutdown")
 
         logger.info("MCP connection pool shut down")
 

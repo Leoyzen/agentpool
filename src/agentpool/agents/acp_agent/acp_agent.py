@@ -569,9 +569,9 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                             current_response_parts.append(part)
                         yield output_event
                 finally:
-                    for t in _bg_tasks:
+                    for t in list(_bg_tasks):
                         t.cancel()
-                    for t in _bg_tasks:
+                    for t in list(_bg_tasks):
                         try:
                             await t
                         except asyncio.CancelledError:

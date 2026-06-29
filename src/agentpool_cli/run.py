@@ -59,28 +59,34 @@ def run_command(
                 session_id = f"run-{node_name}-{uuid.uuid4().hex[:8]}"
                 await sp.create_session(session_id, agent_name=node_name)
 
-                for prompt in prompts or []:
-                    final_message = None
-                    async for event in sp.run_stream(session_id, prompt, scope="session"):
-                        if isinstance(event, StreamCompleteEvent):
-                            final_message = event.message
-                        elif (
-                            isinstance(event, PartDeltaEvent)
-                            and show_messages
-                            and isinstance(event.delta, TextPartDelta)
-                        ):
-                            print(event.delta.content_delta, end="", flush=True)
-                    if show_messages:
-                        print()
+                try:
+                    for prompt in prompts or []:
+                        final_message = None
+                        async for event in sp.run_stream(session_id, prompt, scope="session"):
+                            if isinstance(event, StreamCompleteEvent):
+                                final_message = event.message
+                            elif (
+                                isinstance(event, PartDeltaEvent)
+                                and show_messages
+                                and isinstance(event.delta, TextPartDelta)
+                            ):
+                                print(event.delta.content_delta, end="", flush=True)
+                        if show_messages:
+                            print()
 
-                    if final_message and not show_messages:
-                        print(
-                            final_message.format(
-                                style=detail_level,
-                                show_metadata=show_metadata,
-                                show_costs=show_costs,
+                        if final_message and not show_messages:
+                            print(
+                                final_message.format(
+                                    style=detail_level,
+                                    show_metadata=show_metadata,
+                                    show_costs=show_costs,
+                                )
                             )
-                        )
+                finally:
+                    try:
+                        await sp.close_session(session_id)
+                    except Exception:
+                        pass
 
         # Run the async code in the sync command
         asyncio.run(run())

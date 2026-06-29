@@ -181,6 +181,7 @@ class RunHandle:
                     # Reset per-turn state: clear the completion event
                     # and clear any stale cancelled flag from a prior turn.
                     self._turn_complete_event.clear()
+                    self._turn_was_cancelled = False
                     if self.run_ctx.cancelled:
                         self.run_ctx.cancelled = False
                     turn = agent.create_turn(

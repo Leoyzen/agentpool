@@ -160,10 +160,8 @@ class NativeTurn(Turn):
 
                     if isinstance(node, ModelRequestNode | CallToolsNode):
                         terminal_tool_completed = False
-                        # Set _iteration_task during streaming so _interrupt()
-                        # can cancel the LLM API call and tests can verify
-                        # real-time streaming (events arrive while task is active).
-                        self._agent._iteration_task = asyncio.current_task()
+                        # Cooperative cancellation is handled via run_ctx.cancelled
+                        # checked on every streaming chunk below.
                         try:
                             async with node.stream(agent_run.ctx) as stream:
                                 async for event in stream:
