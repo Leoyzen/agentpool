@@ -105,6 +105,7 @@ class MCPConnectionPool:
         """
         key = server_config.client_id
 
+        _pending_close: MCPResourceProvider | None = None
         async with self._lock:
             if key in self._connections:
                 conn = self._connections[key]
@@ -120,7 +121,7 @@ class MCPConnectionPool:
             # Enforce max_processes: if at capacity, recycle the
             # least-recently-used idle connection.
             if len(self._connections) >= self._max_processes:
-                recycled = await self._recycle_lru_idle()
+                recycled, _pending_close = await self._recycle_lru_idle()
                 if recycled is None:
                     logger.warning(
                         "MCP connection pool at capacity (%d) with no idle "
@@ -153,6 +154,13 @@ class MCPConnectionPool:
                 total_connections=len(self._connections),
             )
             return provider
+
+        # Close recycled provider outside the lock to avoid blocking other requests
+        if _pending_close is not None:
+            try:
+                await _pending_close.__aexit__(None, None, None)
+            except Exception:
+                logger.exception("Error closing recycled MCP provider")
 
     def release_connection(self, server_config: MCPServerConfig) -> None:
         """Release a previously acquired connection.
@@ -242,11 +250,12 @@ class MCPConnectionPool:
     # Internal
     # ------------------------------------------------------------------
 
-    async def _recycle_lru_idle(self) -> str | None:
+    async def _recycle_lru_idle(self) -> tuple[str | None, MCPResourceProvider | None]:
         """Find and close the least-recently-used idle connection.
 
-        Returns the ``client_id`` of the recycled connection, or
-        ``None`` if no idle connection exists.
+        Returns a tuple of (client_id, provider_to_close). The caller is
+        responsible for calling ``__aexit__`` on the returned provider
+        **outside** the lock to avoid blocking other requests.
 
         Must be called while holding ``self._lock``.
         """
@@ -254,7 +263,7 @@ class MCPConnectionPool:
             (key, conn) for key, conn in self._connections.items() if conn.active_sessions == 0
         ]
         if not idle_connections:
-            return None
+            return None, None
 
         # Sort by last_used ascending (oldest first)
         idle_connections.sort(key=lambda item: item[1].last_used)
@@ -270,16 +279,8 @@ class MCPConnectionPool:
         del self._connections[lru_key]
         self._aggregating_provider.remove_provider(lru_conn.provider)
 
-        # Close the provider (best-effort, don't block)
-        try:
-            await lru_conn.provider.__aexit__(None, None, None)
-        except Exception:
-            logger.exception(
-                "Error closing recycled MCP provider",
-                client_id=lru_key,
-            )
-
-        return lru_key
+        # Return provider to caller for closing outside the lock
+        return lru_key, lru_conn.provider
 
     async def _cleanup_loop(self) -> None:
         """Background task that periodically terminates idle connections."""
