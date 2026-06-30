@@ -4,6 +4,9 @@ import pytest
 
 from agentpool import Agent
 
+# All tests in this file create real Agent instances that need OPENAI_API_KEY.
+pytestmark = pytest.mark.requires_openai_key
+
 
 async def test_pick_from_options(default_model: str):
     """Test picking from a list of options."""

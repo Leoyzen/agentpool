@@ -142,6 +142,7 @@ class TestWrapInstructionWithPydanticAISignature:
         assert result == "Be helpful"
 
 
+@pytest.mark.requires_openai_key
 class TestSystemPromptsPydanticAIConversion:
     """Test SystemPrompts.to_pydantic_ai_instructions()."""
 
@@ -256,6 +257,7 @@ class PydanticAIInstructionProvider(ResourceProvider):
         return None
 
 
+@pytest.mark.requires_openai_key
 class TestNativeAgentPydanticAIInstructions:
     """Test NativeAgent integration with pydantic-ai compatible instructions."""
 
@@ -343,6 +345,7 @@ class TestNativeAgentPydanticAIInstructions:
             assert len(agentlet._instructions) >= 4  # type: ignore[arg-type]
 
 
+@pytest.mark.requires_openai_key
 class TestSkillsInstructionProviderSignature:
     """Test SkillsInstructionProvider uses pydantic-ai compatible signature."""
 

@@ -189,3 +189,21 @@ def remap_hardcoded_test_models():
         patch.object(llmling_models, "infer_model", _patched_infer),
     ):
         yield
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Auto-skip tests marked ``requires_openai_key`` when no API key is set.
+
+    Tests that create real ``Agent`` instances (via ``Agent.from_config()`` or
+    ``Agent(model="openai:...")``) need ``OPENAI_API_KEY`` to satisfy
+    ``infer_provider``.  In CI without credentials these fail with
+    ``openai.OpenAIError: Missing credentials`` — skip them instead.
+    """
+    if os.environ.get("OPENAI_API_KEY"):
+        return
+    skip_marker = pytest.mark.skip(
+        reason="OPENAI_API_KEY not set — skipping credential-dependent test",
+    )
+    for item in items:
+        if "requires_openai_key" in item.keywords:
+            item.add_marker(skip_marker)
