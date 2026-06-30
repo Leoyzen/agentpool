@@ -16,6 +16,10 @@ from acp.agent.notifications import ACPNotifications
 from agentpool.mime_utils import guess_type, is_text_mime
 
 
+if TYPE_CHECKING:
+    from acp.schema.capabilities import ClientCapabilities
+
+
 class AcpInfo(FileInfo, total=False):
     """Info dict for ACP filesystem paths."""
 
@@ -83,6 +87,7 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
         session_id: str,
         *,
         use_cli_find: bool = True,
+        client_capabilities: ClientCapabilities | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize ACP filesystem.
@@ -94,6 +99,9 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
                 When True (default), uses a single `find` command for recursive
                 file discovery, which is much more efficient over the protocol
                 barrier than walking the tree with multiple ls calls.
+            client_capabilities: Client capabilities from the ACP initialize
+                handshake. Used to check if terminal operations are supported
+                before attempting them.
             **kwargs: Additional filesystem options
         """
         super().__init__(**kwargs)
@@ -103,6 +111,7 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
         self.notifications = ACPNotifications(client, session_id)
         self.command_provider = get_os_command_provider()
         self.use_cli_find = use_cli_find
+        self._terminal_available = bool(client_capabilities and client_capabilities.terminal)
 
     async def _cat_file(
         self, path: str, start: int | None = None, end: int | None = None, **kwargs: Any
@@ -136,6 +145,10 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
                 raise FileNotFoundError(f"Could not read file {path}: {e}") from e
 
         # Binary file - use base64 encoding via terminal command
+        if not self._terminal_available:
+            raise FileNotFoundError(
+                f"Cannot read binary file {path}: terminal not available for base64 encoding"
+            )
         try:
             b64_cmd = self.command_provider.get_command("base64_encode")
             cmd_str = b64_cmd.create_command(path)
@@ -205,6 +218,7 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
         """List directory contents via terminal command.
 
         Uses 'ls -la' command through ACP terminal to get directory listings.
+        When terminal is unavailable, returns an empty list.
 
         Args:
             path: Directory path to list
@@ -214,6 +228,9 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
         Returns:
             List of file information dictionaries or file names
         """
+        if not self._terminal_available:
+            return []
+
         # Use OS-specific command to list directory contents
         list_cmd = self.command_provider.get_command("list_directory")
         ls_cmd = list_cmd.create_command(path)
@@ -247,6 +264,9 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
     async def _info(self, path: str, **kwargs: Any) -> AcpInfo:
         """Get file information via stat command.
 
+        When terminal is unavailable, raises ``FileNotFoundError`` since
+        detailed file metadata cannot be obtained without terminal access.
+
         Args:
             path: File path to get info for
             **kwargs: Additional options
@@ -254,6 +274,9 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
         Returns:
             File information dictionary
         """
+        if not self._terminal_available:
+            raise FileNotFoundError(f"Cannot get file info for {path}: terminal not available")
+
         info_cmd = self.command_provider.get_command("file_info")
         stat_cmd = info_cmd.create_command(path)
 
@@ -298,6 +321,9 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
     async def _exists(self, path: str, **kwargs: Any) -> bool:
         """Check if file exists via test command.
 
+        When terminal is unavailable, falls back to attempting a
+        ``read_text_file`` and checking if it succeeds.
+
         Args:
             path: File path to check
             **kwargs: Additional options
@@ -305,6 +331,15 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
         Returns:
             True if file exists, False otherwise
         """
+        if not self._terminal_available:
+            # Fallback: try reading the file via fs/read_text_file
+            try:
+                await self.requests.read_text_file(path)
+            except Exception:  # noqa: BLE001
+                return False
+            else:
+                return True
+
         exists_cmd = self.command_provider.get_command("exists")
         test_cmd = exists_cmd.create_command(path)
 
@@ -320,6 +355,9 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
     async def _isdir(self, path: str, **kwargs: Any) -> bool:
         """Check if path is a directory via test command.
 
+        When terminal is unavailable, returns ``False`` since directory
+        detection is not possible without terminal access.
+
         Args:
             path: Path to check
             **kwargs: Additional options
@@ -327,6 +365,9 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
         Returns:
             True if path is a directory, False otherwise
         """
+        if not self._terminal_available:
+            return False
+
         isdir_cmd = self.command_provider.get_command("is_directory")
         test_cmd = isdir_cmd.create_command(path)
 
@@ -342,6 +383,9 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
     async def _isfile(self, path: str, **kwargs: Any) -> bool:
         """Check if path is a file via test command.
 
+        When terminal is unavailable, falls back to attempting a
+        ``read_text_file`` and checking if it succeeds.
+
         Args:
             path: Path to check
             **kwargs: Additional options
@@ -349,6 +393,15 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
         Returns:
             True if path is a file, False otherwise
         """
+        if not self._terminal_available:
+            # Fallback: try reading the file via fs/read_text_file
+            try:
+                await self.requests.read_text_file(path)
+            except Exception:  # noqa: BLE001
+                return False
+            else:
+                return True
+
         isfile_cmd = self.command_provider.get_command("is_file")
         test_cmd = isfile_cmd.create_command(path)
 
@@ -364,11 +417,17 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
     async def _makedirs(self, path: str, exist_ok: bool = False, **kwargs: Any) -> None:
         """Create directories via mkdir command.
 
+        When terminal is unavailable, raises ``OSError`` since directory
+        creation requires terminal access.
+
         Args:
             path: Directory path to create
             exist_ok: Don't raise error if directory already exists
             **kwargs: Additional options
         """
+        if not self._terminal_available:
+            raise OSError(f"Cannot create directory {path}: terminal not available")
+
         create_cmd = self.command_provider.get_command("create_directory")
         mkdir_cmd = create_cmd.create_command(path, parents=exist_ok)
 
@@ -393,6 +452,9 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
             path2: Destination file path
             **kwargs: Additional options
         """
+        if not self._terminal_available:
+            raise OSError(f"Cannot copy {path1} to {path2}: terminal not available")
+
         copy_cmd = self.command_provider.get_command("copy_path")
         cmd_str = copy_cmd.create_command(path1, path2, recursive=False)
 
@@ -421,6 +483,9 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
             batch_size: Batch size when removing directories (recursively)
             **kwargs: Additional options
         """
+        if not self._terminal_available:
+            raise OSError(f"Cannot remove {path}: terminal not available")
+
         remove_cmd = self.command_provider.get_command("remove_path")
         rm_cmd = remove_cmd.create_command(path, recursive=recursive)
 
@@ -479,6 +544,10 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
             List of paths, or dict mapping paths to info if detail=True
         """
         if not self.use_cli_find:
+            # Fall back to default fsspec implementation (walks tree with _ls)
+            return await super()._find(path, maxdepth=maxdepth, withdirs=withdirs, **kwargs)  # type: ignore[no-any-return]
+
+        if not self._terminal_available:
             # Fall back to default fsspec implementation (walks tree with _ls)
             return await super()._find(path, maxdepth=maxdepth, withdirs=withdirs, **kwargs)  # type: ignore[no-any-return]
 

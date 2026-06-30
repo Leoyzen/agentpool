@@ -7,6 +7,7 @@ import sys
 import pytest
 
 from acp.filesystem import ACPFileSystem
+from acp.schema.capabilities import ClientCapabilities
 
 
 if sys.platform == "win32":
@@ -101,7 +102,10 @@ def mock_session():
 @pytest.fixture
 def acp_fs(mock_session):
     """Create ACP filesystem instance."""
-    return ACPFileSystem(mock_session.client, mock_session.session_id)
+    caps = ClientCapabilities(terminal=True)
+    return ACPFileSystem(
+        mock_session.client, mock_session.session_id, client_capabilities=caps
+    )
 
 
 async def test_cat_file(acp_fs: ACPFileSystem):
@@ -190,6 +194,43 @@ def test_open(acp_fs: ACPFileSystem):
     file_obj = acp_fs.open("test.txt", "r")
     assert file_obj.path == "test.txt"
     assert file_obj.mode == "rb"  # Mode gets converted to binary
+
+
+@pytest.fixture
+def acp_fs_no_terminal(mock_session):
+    """Create ACP filesystem with terminal capability disabled."""
+    caps = ClientCapabilities(terminal=False)
+    return ACPFileSystem(
+        mock_session.client, mock_session.session_id, client_capabilities=caps
+    )
+
+
+async def test_exists_no_terminal_uses_read_fallback(acp_fs_no_terminal: ACPFileSystem):
+    """Test that _exists falls back to read_text_file when terminal is unavailable."""
+    assert await acp_fs_no_terminal._exists("test.txt") is True
+    assert await acp_fs_no_terminal._exists("nonexistent.txt") is False
+
+
+async def test_isfile_no_terminal_uses_read_fallback(acp_fs_no_terminal: ACPFileSystem):
+    """Test that _isfile falls back to read_text_file when terminal is unavailable."""
+    assert await acp_fs_no_terminal._isfile("test.txt") is True
+    assert await acp_fs_no_terminal._isfile("nonexistent.txt") is False
+
+
+async def test_isdir_no_terminal_returns_false(acp_fs_no_terminal: ACPFileSystem):
+    """Test that _isdir returns False when terminal is unavailable."""
+    assert await acp_fs_no_terminal._isdir("subdir") is False
+
+
+async def test_ls_no_terminal_returns_empty(acp_fs_no_terminal: ACPFileSystem):
+    """Test that _ls returns empty list when terminal is unavailable."""
+    assert await acp_fs_no_terminal._ls(".", detail=True) == []
+
+
+async def test_info_no_terminal_raises(acp_fs_no_terminal: ACPFileSystem):
+    """Test that _info raises FileNotFoundError when terminal is unavailable."""
+    with pytest.raises(FileNotFoundError, match="terminal not available"):
+        await acp_fs_no_terminal._info("test.txt")
 
 
 if __name__ == "__main__":

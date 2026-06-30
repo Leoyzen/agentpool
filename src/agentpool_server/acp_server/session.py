@@ -214,7 +214,11 @@ class ACPSession:
         self._cancelled = False
         self._current_converter: ACPEventConverter | None = None
         self.last_usage: Usage | None = None
-        self.fs = ACPFileSystem(self.client, session_id=self.session_id)
+        self.fs = ACPFileSystem(
+            self.client,
+            session_id=self.session_id,
+            client_capabilities=self.client_capabilities,
+        )
         self.command_store = CommandStore(commands=get_all_commands())
         self.command_store._initialize_sync()
         self._update_callbacks: list[Callable[[], None]] = []
@@ -407,6 +411,14 @@ class ACPSession:
 
     async def initialize(self) -> None:
         """Initialize async resources. Must be called after construction."""
+        # Prevent _detect_os_type() from sending terminal/create requests
+        # when the client does not support terminal capability.
+        # _detect_os_type() runs uname -s / ver via terminal, which fails
+        # for clients declaring terminal=false in their capabilities.
+        if not self.client_capabilities.terminal:
+            import platform
+
+            self.acp_env._os_type = platform.system()  # type: ignore[attr-defined]
         await self.acp_env.__aenter__()
 
     def _make_provider_name(self, display_name: str) -> str:
