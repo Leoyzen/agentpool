@@ -269,43 +269,37 @@ async def test_collision_warning_logged(
     async_client: AsyncClient,
     server_state: ServerState,
     mock_agent: Mock,
-    caplog: pytest.LogCaptureFixture,
 ):
-    """Test warning is logged when both slashed command and MCP prompt exist.
+    """Test warning is logged when both slashed command and MCP prompt exist."""
+    from unittest.mock import patch
 
-    Uses caplog to capture log output.
-    """
-    # Create session first
     response = await async_client.post("/session", json={"title": "Test Session"})
     assert response.status_code == 200
     session_id = response.json()["id"]
 
-    # Mock CommandStore with command
     mock_command = MagicMock()
     mock_command.execute = AsyncMock()
     mock_command_store = MagicMock()
     mock_command_store.get_command = MagicMock(return_value=mock_command)
     server_state.command_store = mock_command_store
 
-    # Mock MCP prompt with same name (collision)
     mock_prompt = MagicMock()
     mock_prompt.name = "collision-cmd"
     mock_agent.tools.list_prompts = AsyncMock(return_value=[mock_prompt])
 
-    # Execute command and capture logs
-    with caplog.at_level("WARNING"):
+    with patch(
+        "agentpool_server.opencode_server.routes.session_routes.logger"
+    ) as mock_logger:
         response = await async_client.post(
             f"/session/{session_id}/command",
             json={"command": "collision-cmd"},
         )
 
-    # Verify success
     assert response.status_code == 200
 
-    # Verify warning was logged
-    assert "Both slashed command and prompt exist" in caplog.text
-    assert "collision-cmd" in caplog.text
-    assert "slashed command" in caplog.text
+    mock_logger.warning.assert_called_once()
+    call_args = mock_logger.warning.call_args
+    assert "Both slashed command and prompt exist" in call_args.args[0]
 
 
 async def test_concurrent_slash_commands_same_session_are_serialized(

@@ -127,7 +127,7 @@ class TestSessionCloseCheckpointAware:
         )
 
     @pytest.mark.flaky(reruns=3, reruns_delay=0.5)
-    def test_close_session_preserves_checkpointed_with_pending_calls(
+    async def test_close_session_preserves_checkpointed_with_pending_calls(
         self,
         checkpointed_session_data: SessionData,
     ) -> None:
@@ -141,18 +141,15 @@ class TestSessionCloseCheckpointAware:
 
         store = MemorySessionStore()
 
-        # Create the session data in store (simulating a checkpointed session)
-        import asyncio
-        asyncio.get_event_loop().run_until_complete(store.save(checkpointed_session_data))
+        await store.save(checkpointed_session_data)
 
-        # Verify session exists before close
-        loaded = asyncio.get_event_loop().run_until_complete(store.load("checkpointed-sess-1"))
+        loaded = await store.load("checkpointed-sess-1")
         assert loaded is not None, "Session should exist before close"
         assert loaded.status == "checkpointed"
         assert len(loaded.pending_deferred_calls) == 1
 
     @pytest.mark.flaky(reruns=3, reruns_delay=0.5)
-    def test_close_session_deletes_when_no_pending_calls(
+    async def test_close_session_deletes_when_no_pending_calls(
         self,
         active_session_data: SessionData,
     ) -> None:
@@ -163,12 +160,10 @@ class TestSessionCloseCheckpointAware:
         from agentpool.sessions.store import MemorySessionStore
 
         store = MemorySessionStore()
-        import asyncio
 
-        asyncio.get_event_loop().run_until_complete(store.save(active_session_data))
+        await store.save(active_session_data)
 
-        # Verify session exists before close
-        loaded = asyncio.get_event_loop().run_until_complete(store.load("active-sess-1"))
+        loaded = await store.load("active-sess-1")
         assert loaded is not None, "Session should exist before close"
         assert len(loaded.pending_deferred_calls) == 0
 
