@@ -35,6 +35,7 @@ def mock_client():
     """Create a mock ACP client that captures sent notifications."""
     client = AsyncMock()
     client.session_update = AsyncMock()
+    client.ext_notification = AsyncMock()
     return client
 
 
@@ -42,6 +43,14 @@ def mock_client():
 def notifications(mock_client):
     """Create an ACPNotifications instance with a mock client."""
     return ACPNotifications(client=mock_client, session_id="test-session")
+
+
+@pytest.fixture
+def batch_notifications(mock_client):
+    """Create an ACPNotifications with batch support enabled."""
+    n = ACPNotifications(client=mock_client, session_id="test-session")
+    n.set_batch_support(True)
+    return n
 
 
 @pytest.mark.unit
@@ -349,3 +358,122 @@ async def test_replay_multiple_request_parts(notifications, mock_client):
     assert isinstance(updates[1], UserMessageChunk)
     assert isinstance(updates[1].content, TextContentBlock)
     assert updates[1].content.text == "Second message"
+
+
+@pytest.mark.unit
+async def test_replay_batch_mode_sends_ext_notification(batch_notifications, mock_client):
+    """Batch-capable client receives _batch_session_updates, not session/update."""
+    messages = [ModelRequest(parts=[UserPromptPart(content="Hello")])]
+
+    await batch_notifications.replay(messages)
+
+    mock_client.session_update.assert_not_awaited()
+    mock_client.ext_notification.assert_awaited_once()
+    method, params = mock_client.ext_notification.call_args[0]
+    assert method == "_batch_session_updates"
+    assert params["session_id"] == "test-session"
+    assert len(params["updates"]) == 1
+
+
+@pytest.mark.unit
+async def test_replay_fallback_mode_sends_session_update(notifications, mock_client):
+    """Non-capable client falls back to sequential session/update."""
+    messages = [ModelRequest(parts=[UserPromptPart(content="Hello")])]
+
+    await notifications.replay(messages)
+
+    mock_client.ext_notification.assert_not_awaited()
+    assert mock_client.session_update.call_count == 1
+
+
+@pytest.mark.unit
+async def test_replay_batch_preserves_tool_call_ordering(batch_notifications, mock_client):
+    """ToolCallStart must appear before ToolCallProgress in the batch."""
+    messages = [
+        ModelResponse(
+            parts=[
+                TextPart(content="Let me help"),
+                ToolCallPart(
+                    tool_call_id="tc-1",
+                    tool_name="read_file",
+                    args={"path": "/tmp/test.txt"},
+                ),
+            ]
+        ),
+        ModelRequest(
+            parts=[
+                ToolReturnPart(
+                    tool_call_id="tc-1",
+                    tool_name="read_file",
+                    content="file contents",
+                )
+            ]
+        ),
+    ]
+
+    await batch_notifications.replay(messages)
+
+    mock_client.ext_notification.assert_awaited_once()
+    _, params = mock_client.ext_notification.call_args[0]
+    updates = params["updates"]
+    assert len(updates) == 3
+    assert updates[0]["sessionUpdate"] == "agent_message_chunk"
+    assert updates[1]["sessionUpdate"] == "tool_call"
+    assert updates[1]["toolCallId"] == "tc-1"
+    assert updates[2]["sessionUpdate"] == "tool_call_update"
+    assert updates[2]["toolCallId"] == "tc-1"
+
+
+@pytest.mark.unit
+async def test_replay_batch_custom_size(mock_client):
+    """Custom notification_batch_size produces correct chunk count."""
+    n = ACPNotifications(client=mock_client, session_id="test", notification_batch_size=5)
+    n.set_batch_support(True)
+    messages = [ModelRequest(parts=[UserPromptPart(content=f"msg {i}")]) for i in range(12)]
+
+    await n.replay(messages)
+
+    assert mock_client.ext_notification.call_count == 3
+    batch_sizes = [
+        len(call[0][1]["updates"]) for call in mock_client.ext_notification.call_args_list
+    ]
+    assert batch_sizes == [5, 5, 2]
+
+
+@pytest.mark.unit
+async def test_collect_request_updates_is_pure(notifications, mock_client):
+    """_collect_request_updates returns list without calling client methods."""
+    request = ModelRequest(parts=[UserPromptPart(content="Hello")])
+
+    updates = notifications._collect_request_updates(request)
+
+    assert len(updates) == 1
+    assert isinstance(updates[0], UserMessageChunk)
+    mock_client.session_update.assert_not_awaited()
+    mock_client.ext_notification.assert_not_awaited()
+
+
+@pytest.mark.unit
+async def test_replay_empty_messages_batch_mode(batch_notifications, mock_client):
+    """Empty messages list produces zero notifications in batch mode."""
+    await batch_notifications.replay([])
+
+    mock_client.ext_notification.assert_not_awaited()
+    mock_client.session_update.assert_not_awaited()
+
+
+@pytest.mark.unit
+async def test_init_rejects_non_positive_batch_size(mock_client):
+    """notification_batch_size must be greater than 0."""
+    with pytest.raises(ValueError, match="notification_batch_size must be greater than 0"):
+        ACPNotifications(mock_client, "session-1", notification_batch_size=0)
+
+    with pytest.raises(ValueError, match="notification_batch_size must be greater than 0"):
+        ACPNotifications(mock_client, "session-1", notification_batch_size=-1)
+
+
+@pytest.mark.unit
+async def test_init_rejects_negative_flush_interval(mock_client):
+    """notification_flush_interval must be non-negative."""
+    with pytest.raises(ValueError, match="notification_flush_interval must be non-negative"):
+        ACPNotifications(mock_client, "session-1", notification_flush_interval=-0.1)
