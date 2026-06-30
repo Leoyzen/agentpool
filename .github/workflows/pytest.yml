@@ -63,6 +63,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --no-group lint
       - name: Run unit tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
         run: uv run pytest -m unit -n auto --tb=short --no-cov --timeout=60 -q
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -89,6 +92,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --no-group lint
       - name: Run integration tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
         run: uv run pytest -m integration -n auto --tb=short --no-cov --timeout=120 -q
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -116,6 +122,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --no-group lint
       - name: Run core tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
         run: uv run pytest -m "not unit and not integration" --tb=short --no-cov --timeout=180 -q
       - uses: actions/upload-artifact@v4
         if: failure()

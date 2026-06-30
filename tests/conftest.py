@@ -156,12 +156,16 @@ async def pool(manifest):
         yield pool
 
 
-# Model override mapping for custom endpoints without gpt-4o access.
+# Model override mapping for custom endpoints without gpt-4o / openrouter access.
 # Tests that hardcode "openai:gpt-4o" or "openai:gpt-4o-mini" are
 # transparently remapped to a model available on the custom endpoint.
+# OpenRouter models are remapped to the same endpoint to avoid needing
+# a separate OPENROUTER_API_KEY.
+_DEFAULT_REMAP = os.getenv("TEST_MODEL_OVERRIDE", "openai:gpt-5-nano")
 _MODEL_REMAP = {
-    "openai:gpt-4o": os.getenv("TEST_MODEL_OVERRIDE", "openai:gpt-5-nano"),
-    "openai:gpt-4o-mini": os.getenv("TEST_MODEL_OVERRIDE", "openai:gpt-5-nano"),
+    "openai:gpt-4o": _DEFAULT_REMAP,
+    "openai:gpt-4o-mini": _DEFAULT_REMAP,
+    "openrouter:anthropic/claude-haiku-4.5": _DEFAULT_REMAP,
 }
 
 
