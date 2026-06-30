@@ -1008,12 +1008,21 @@ class SessionController:
                     await agent.__aenter__()
 
                     # Add pool-level providers
+                    # When the subagent shares the parent's MCPManager
+                    # (agent._mcp_shared is True), pool-level MCP servers
+                    # are already accessible via the shared manager. Adding
+                    # the pool MCP provider again would register the same
+                    # tools twice (once as MCP capabilities via
+                    # self.mcp.as_capability(), once as direct tools via
+                    # the aggregating provider), causing pydantic-ai
+                    # UserError: "Tool name conflicts with existing tool".
                     if self.pool is not None:
-                        agent.tools.add_provider(
-                            self._mcp_pool.get_aggregating_provider()
-                            if self._mcp_pool is not None
-                            else self.pool.mcp.get_aggregating_provider()
-                        )
+                        if not agent._mcp_shared:
+                            agent.tools.add_provider(
+                                self._mcp_pool.get_aggregating_provider()
+                                if self._mcp_pool is not None
+                                else self.pool.mcp.get_aggregating_provider()
+                            )
                         if self.pool.skills_instruction_provider:
                             agent.tools.add_provider(self.pool.skills_instruction_provider)
                         agent.tools.add_provider(self.pool.skills_tools_provider)
