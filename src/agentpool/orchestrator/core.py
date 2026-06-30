@@ -2669,16 +2669,30 @@ class SessionPool:
                 await self.event_bus.unsubscribe(session_id, stream)
             return
 
-        # No active run — create RunHandle and yield from start()
+        # No active run — create RunHandle and yield from start().
+        # Also subscribe to EventBus so that events published by tools
+        # during turn execution (e.g. SpawnSessionStart from task() →
+        # create_child_session()) are delivered to the consumer, not
+        # just events yielded directly by start().
         run_handle = self._create_run_handle(session, agent, session_id)
+        self.event_bus.clear_replay_buffer(session_id)
+        bus_stream = await self.event_bus.subscribe(session_id, scope=scope)
         gen = run_handle.start(content)
         try:
             async for event in gen:
+                # Drain any tool-published events from EventBus before
+                # yielding the start() event. This ensures SpawnSessionStart
+                # and similar events appear before the StreamCompleteEvent.
+                with contextlib.suppress(anyio.WouldBlock):
+                    while True:
+                        envelope = bus_stream.receive_nowait()
+                        yield envelope.event
                 yield event
                 if isinstance(event, StreamCompleteEvent | RunErrorEvent):
                     break
         finally:
             await gen.aclose()
+            await self.event_bus.unsubscribe(session_id, bus_stream)
             session.current_run_id = None
             self.sessions._runs.pop(run_handle.run_id, None)
 

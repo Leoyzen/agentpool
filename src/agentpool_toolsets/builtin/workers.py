@@ -166,6 +166,7 @@ class WorkersTools(ResourceProvider):
                 source_name=agent_name,
                 source_type=source_type,
                 depth=child_depth,
+                skip_agent_registration=is_team_node,
             )
 
             try:

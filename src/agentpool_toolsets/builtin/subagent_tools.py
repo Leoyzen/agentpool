@@ -226,6 +226,9 @@ class SubagentTools(StaticResourceProvider):
         # SpawnSessionStart is auto-emitted by create_child_session().
         # The agent is eagerly registered under child_session_id with
         # input_provider — no separate get_or_create_session_agent needed.
+        # For teams, skip agent registration — team nodes are created
+        # separately via create_team_from_config() below.
+        is_team_node = team_cfg is not None
         child_session_id = await ctx.create_child_session(
             agent_name=agent_or_team,
             agent_type=agent_type_str,
@@ -238,11 +241,11 @@ class SubagentTools(StaticResourceProvider):
             depth=child_depth,
             model_id=node_model_id,
             input_provider=input_provider,
+            skip_agent_registration=is_team_node,
         )
 
         # For teams, we still need to create the team node directly
         # (SessionPool does not manage team instances).
-        is_team_node = team_cfg is not None
         node: SupportsRunStream[Any] | None = None
         if is_team_node:
             assert team_cfg is not None

@@ -281,6 +281,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         description: str = "",
         tool_call_id: str | None = None,
         input_provider: Any = None,
+        skip_agent_registration: bool = False,
         **metadata: Any,
     ) -> str:
         """Create a child session for a subagent delegation.
@@ -315,6 +316,10 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             input_provider: Optional input provider for the child agent.
                 Passed to ``get_or_create_session_agent`` so it is available
                 on the cached agent instance.
+            skip_agent_registration: When *True*, skip the eager
+                ``get_or_create_session_agent()`` call.  Needed for teams
+                whose node is created separately via
+                ``create_team_from_config()``.
             **metadata: Additional metadata to attach to the child session.
 
         Returns:
@@ -340,14 +345,18 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                 # Eagerly register agent under child session_id so that
                 # receive_request / run_stream can find it without a
                 # separate get_or_create_session_agent call.
-                agent_kwargs: dict[str, Any] = {}
-                if input_provider is not None:
-                    agent_kwargs["input_provider"] = input_provider
-                await pool.session_pool.sessions.get_or_create_session_agent(
-                    child_sid,
-                    agent_name,
-                    **agent_kwargs,
-                )
+                # Skipped for teams — team nodes are created separately
+                # via create_team_from_config() and don't need agent
+                # registration.
+                if not skip_agent_registration:
+                    agent_kwargs: dict[str, Any] = {}
+                    if input_provider is not None:
+                        agent_kwargs["input_provider"] = input_provider
+                    await pool.session_pool.sessions.get_or_create_session_agent(
+                        child_sid,
+                        agent_name,
+                        **agent_kwargs,
+                    )
             else:
                 from agentpool.utils.identifiers import generate_session_id
 
