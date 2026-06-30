@@ -42,7 +42,7 @@ from agentpool.agents.native_agent.checkpoint import CheckpointData
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
 from agentpool.models.pending_interaction import PendingPermission
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.orchestrator.run import RunHandle, RunStatus, inject_cancelled_tool_results
 from agentpool.orchestrator.runtime_registry import RuntimeAgentRegistry
 from agentpool.sessions.models import PendingDeferredCall, SessionData
 from agentpool_server.opencode_server.models.session_info import SessionInfo

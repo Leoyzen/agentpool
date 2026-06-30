@@ -40,6 +40,70 @@ def _create_set_event() -> asyncio.Event:
     return event
 
 
+def inject_cancelled_tool_results(messages: list[ModelMessage]) -> list[ModelMessage]:
+    """Inject RetryPromptPart for unprocessed tool calls in message history.
+
+    When a turn is cancelled mid-tool-call, the message history ends with a
+    ``ModelResponse`` containing ``ToolCallPart``\\s but no corresponding
+    ``ModelRequest`` with tool results. PydanticAI rejects new user prompts
+    in this state with:
+    "Cannot provide a new user prompt when the message history contains
+    unprocessed tool calls."
+
+    This function scans the message history for trailing unprocessed tool
+    calls and appends a ``ModelRequest`` with a ``RetryPromptPart`` for each,
+    telling the model the tool was cancelled. This preserves the model's
+    decision context (it knows it called the tool) while satisfying
+    PydanticAI's message history validation.
+
+    Args:
+        messages: The message history to sanitize.
+
+    Returns:
+        A new list with cancelled tool results injected if needed.
+    """
+    from pydantic_ai.messages import ModelRequest, ModelResponse, RetryPromptPart, ToolCallPart
+
+    if not messages:
+        return list(messages)
+
+    # Find the last ModelResponse with unprocessed tool calls.
+    # A tool call is "unprocessed" if there is no subsequent ModelRequest
+    # containing a ToolReturnPart or RetryPromptPart with the same tool_call_id.
+    result = list(messages)
+
+    # Check if the last message is a ModelResponse with tool calls.
+    last_msg = result[-1]
+    if not isinstance(last_msg, ModelResponse):
+        return result
+
+    # Collect tool calls that need results.
+    pending_tool_calls: list[ToolCallPart] = []
+    for part in last_msg.parts:
+        match part:
+            case ToolCallPart(tool_name=tool_name, tool_call_id=call_id) if tool_name and call_id:
+                pending_tool_calls.append(part)
+
+    if not pending_tool_calls:
+        return result
+
+    # Build a ModelRequest with RetryPromptPart for each pending tool call.
+    retry_parts: list[ModelRequest] = []
+    for tc in pending_tool_calls:
+        retry_parts.append(
+            ModelRequest(parts=[
+                RetryPromptPart(
+                    content=f"Tool '{tc.tool_name}' was cancelled. The user interrupted the run before the tool could complete.",
+                    tool_name=tc.tool_name,
+                    tool_call_id=tc.tool_call_id,
+                ),
+            ]),
+        )
+
+    result.extend(retry_parts)
+    return result
+
+
 class RunStatus(Enum):
     """Lifecycle states for an agent run.
 
