@@ -90,6 +90,23 @@ class MCPConnectionPool:
     # Public API
     # ------------------------------------------------------------------
 
+    async def initialize(self) -> None:
+        """Create connections for all pre-registered servers.
+
+        Called during :meth:`SessionPool.start` to ensure pool-level MCP
+        servers are connected upfront.  Without this, the aggregating
+        provider remains empty because ``get_connection`` is only triggered
+        lazily and no code path currently calls it for pool-level servers.
+        """
+        for server in self._servers:
+            try:
+                await self.get_connection(server)
+            except Exception:
+                logger.exception(
+                    "Failed to initialize MCP connection",
+                    client_id=server.client_id,
+                )
+
     async def get_connection(self, server_config: MCPServerConfig) -> MCPResourceProvider:
         """Get or create a cached MCP connection for *server_config*.
 
