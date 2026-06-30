@@ -162,11 +162,6 @@ async def test_team_spawn_precedes_subagent_for_each_member() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="SubagentTools 'task' tool not registered in pydantic-ai tool lookup — "
-    "as_capability() path doesn't include SubagentTools provider. Needs investigation.",
-    strict=True,
-)
 async def test_subagent_single_spawn_per_delegation() -> None:
     """TG-4: SubagentTools emits exactly one SpawnSessionStart per delegation.
 
@@ -242,11 +237,6 @@ async def test_team_member_child_session_id_in_subagent_event() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="SubagentTools 'task' tool not registered in pydantic-ai tool lookup — "
-    "as_capability() path doesn't include SubagentTools provider. Needs investigation.",
-    strict=True,
-)
 async def test_subagent_run_started_matches_spawn_child_id() -> None:
     """TG-8: RunStartedEvent from child agent carries same session_id
     as SpawnSessionStart.child_session_id (subagent path)."""
@@ -300,11 +290,6 @@ agents:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="SubagentTools 'task' tool not registered in pydantic-ai tool lookup — "
-    "as_capability() path doesn't include SubagentTools provider. Needs investigation.",
-    strict=True,
-)
 async def test_depth_increments_per_delegation_level() -> None:
     """TG-9: Subagent at depth 0 → child at depth 1; explicit depth=2 → child at depth 3."""
     manifest = AgentsManifest.from_yaml("""
@@ -813,11 +798,6 @@ async def test_pool_backed_team_and_teamrun_create_child_sessions() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="SubagentTools 'task' tool not registered in pydantic-ai tool lookup — "
-    "as_capability() path doesn't include SubagentTools provider. Needs investigation.",
-    strict=True,
-)
 async def test_child_session_ids_unique_across_providers() -> None:
     """When SubagentTools delegates to a Team, the SubagentTools child session
     and the Team member child sessions must all be unique."""
