@@ -1459,6 +1459,11 @@ class SessionController:
         the generator is closed so that ``start()`` exits its idle/wake
         loop and ``complete_event`` is set.
 
+        If ``start()`` raises an exception before yielding a terminal
+        event, a ``RunErrorEvent`` and ``RunFailedEvent`` are published to
+        the EventBus so that subscribers (e.g. background_output in
+        BackgroundTaskCapability) are unblocked instead of waiting forever.
+
         Args:
             run_handle: The run handle whose ``start()`` to consume.
             initial_prompt: The first user prompt.
@@ -1470,6 +1475,27 @@ class SessionController:
             async for event in gen:
                 if isinstance(event, StreamCompleteEvent | RunErrorEvent):
                     break
+        except Exception as exc:
+            logger.exception(
+                "RunHandle.start() raised for run_id=%s session_id=%s",
+                run_handle.run_id,
+                run_handle.session_id,
+            )
+            error_event = RunErrorEvent(
+                message=f"{type(exc).__name__}: {exc}",
+                run_id=run_handle.run_id,
+                agent_name=run_handle.agent_type,
+            )
+            if self._event_bus is not None:
+                await self._event_bus.publish(run_handle.session_id, error_event)
+                await self._event_bus.publish(
+                    run_handle.session_id,
+                    RunFailedEvent(
+                        run_id=run_handle.run_id,
+                        session_id=run_handle.session_id,
+                        exception=exc,
+                    ),
+                )
         finally:
             await gen.aclose()
 
@@ -1479,6 +1505,8 @@ class SessionController:
         agent: BaseAgent[Any, Any],
         session_id: str,
         content: str,
+        *,
+        deps: Any = None,
     ) -> RunHandle:
         """Create, register, and launch a RunHandle via the new path.
 
@@ -1487,12 +1515,14 @@ class SessionController:
             agent: The agent instance (native or ACP).
             session_id: The session identifier.
             content: The initial prompt text.
+            deps: Optional dependencies to pass to the agent run context
+                (e.g. delegation_depth from BackgroundTaskCapability).
 
         Returns:
             The newly created RunHandle.
         """
         event_bus = self._event_bus
-        run_ctx = AgentRunContext(session_id=session_id, event_bus=event_bus)
+        run_ctx = AgentRunContext(session_id=session_id, event_bus=event_bus, deps=deps)
         # Bridge agent.conversation (ChatMessage list) → list[ModelMessage]
         # so the new RunHandle has the full conversation history from prior
         # turns. Without this, each new RunHandle starts with empty
@@ -1504,6 +1534,10 @@ class SessionController:
         if conversation is not None:
             for chat_msg in conversation.get_history():
                 model_messages.extend(chat_msg.messages)
+        # Inject RetryPromptPart for any trailing unprocessed tool calls
+        # (e.g. from a cancelled turn). Without this, PydanticAI rejects
+        # the next user prompt with "unprocessed tool calls" error.
+        model_messages = inject_cancelled_tool_results(model_messages)
         run_handle = RunHandle(
             run_id=uuid.uuid4().hex,
             session_id=session_id,
@@ -1522,6 +1556,12 @@ class SessionController:
 
         def _on_run_done(t: asyncio.Task[Any], rid: str = run_handle.run_id) -> None:
             self._background_tasks.discard(t)
+            if not t.cancelled() and t.exception() is not None:
+                logger.error(
+                    "Background run task failed for run_id=%s: %s",
+                    rid,
+                    t.exception(),
+                )
             self._cleanup_run(rid)
 
         task.add_done_callback(_on_run_done)
@@ -1558,6 +1598,10 @@ class SessionController:
         input_provider = kwargs.pop("input_provider", None)
         if input_provider is not None:
             session.input_provider = input_provider
+        # Extract deps from kwargs so they are passed to AgentRunContext
+        # for the child agent run (e.g. delegation_depth from
+        # BackgroundTaskCapability._task_async).
+        deps = kwargs.pop("deps", None)
         agent = await self.get_or_create_session_agent(session_id, input_provider=input_provider)
         if agent is None:
             return None
@@ -1586,7 +1630,7 @@ class SessionController:
                 ):
                     session.current_run_id = None
             if session.current_run_id is None:
-                return self._start_run_handle(session, agent, session_id, content_str)
+                return self._start_run_handle(session, agent, session_id, content_str, deps=deps)
             run = self._runs.get(session.current_run_id) if session.current_run_id else None
             if run is not None:
                 if resolved == "asap":
