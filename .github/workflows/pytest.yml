@@ -1,0 +1,162 @@
+name: Pytest
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/pytest.yml'
+  push:
+    branches: [main, develop/**]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+  workflow_dispatch:
+
+env:
+  FORCE_COLOR: 1
+  COLUMNS: 120
+
+jobs:
+
+  smoke:
+    name: Smoke (import + collect)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+          cache-suffix: py3.13
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: uv sync --all-extras --no-group lint
+      - name: Import smoke test
+        run: |
+          uv run python -c "
+            modules = [
+              'agentpool', 'agentpool_config', 'agentpool_cli',
+              'agentpool_commands', 'agentpool_storage',
+              'agentpool_prompts', 'agentpool_server',
+              'agentpool_toolsets', 'acp',
+            ]
+            for m in modules:
+              __import__(m)
+              print(f'  OK {m}')
+            print(f'All {len(modules)} modules imported successfully')
+          "
+      - name: Test collection check
+        run: uv run pytest --co -q 2>&1 | tail -3
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: smoke
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+          cache-suffix: py3.13
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: uv sync --all-extras --no-group lint
+      - name: Run unit tests
+        run: uv run pytest -m unit -n auto --tb=short --no-cov --timeout=60 -q
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: unit-test-results
+          path: /tmp/pytest-*.txt
+          retention-days: 3
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: smoke
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+          cache-suffix: py3.13
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: uv sync --all-extras --no-group lint
+      - name: Run integration tests
+        run: uv run pytest -m integration -n auto --tb=short --no-cov --timeout=120 -q
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: integration-test-results
+          path: /tmp/pytest-*.txt
+          retention-days: 3
+
+  core:
+    name: Core tests (non-unit, non-integration)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [unit, integration]
+    if: always()
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+          cache-suffix: py3.13
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: uv sync --all-extras --no-group lint
+      - name: Run core tests
+        run: uv run pytest -m "not unit and not integration" --tb=short --no-cov --timeout=180 -q
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: core-test-results
+          path: /tmp/pytest-*.txt
+          retention-days: 3
+
+  report:
+    name: Test Report
+    runs-on: ubuntu-latest
+    needs: [smoke, unit, integration, core]
+    if: always()
+    steps:
+      - name: Build summary table
+        run: |
+          echo '## Pytest Results' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo '| Stage | Status |' >> $GITHUB_STEP_SUMMARY
+          echo '|-------|--------|' >> $GITHUB_STEP_SUMMARY
+          echo '| Smoke (import + collect) | ${{ needs.smoke.result }} |' >> $GITHUB_STEP_SUMMARY
+          echo '| Unit tests | ${{ needs.unit.result }} |' >> $GITHUB_STEP_SUMMARY
+          echo '| Integration tests | ${{ needs.integration.result }} |' >> $GITHUB_STEP_SUMMARY
+          echo '| Core tests | ${{ needs.core.result }} |' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          if [ '${{ needs.unit.result }}' = 'failure' ] || \
+             [ '${{ needs.integration.result }}' = 'failure' ] || \
+             [ '${{ needs.core.result }}' = 'failure' ]; then
+            echo '### Some tests failed' >> $GITHUB_STEP_SUMMARY
+            echo 'Download the artifact for details.' >> $GITHUB_STEP_SUMMARY
+          else
+            echo '### All tests passed' >> $GITHUB_STEP_SUMMARY
+          fi
