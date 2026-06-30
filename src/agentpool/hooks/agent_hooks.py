@@ -342,12 +342,17 @@ class AgentHooks:
             input_data = HookInput(
                 event="pre_run",
                 agent_name=agent_ctx.node_name if agent_ctx else "",
-                session_id=agent_ctx.run_ctx.session_id if agent_ctx and agent_ctx.run_ctx else None,
+                session_id=agent_ctx.run_ctx.session_id
+                if agent_ctx and agent_ctx.run_ctx
+                else None,
             )
             result = await self._run_hooks(self.pre_run, input_data)
             if result.get("decision") == "deny":
-                msg = f"Run blocked: {result.get('reason', 'pre_run hook denied')}"
-                raise RuntimeError(msg)
+                if agent_ctx and agent_ctx.run_ctx:
+                    agent_ctx.run_ctx.cancelled = True
+                else:
+                    msg = f"Run blocked: {result.get('reason', 'pre_run hook denied')}"
+                    raise RuntimeError(msg)
 
         return wrapped
 
@@ -362,7 +367,9 @@ class AgentHooks:
                 event="post_run",
                 agent_name=agent_ctx.node_name if agent_ctx else "",
                 result=result,
-                session_id=agent_ctx.run_ctx.session_id if agent_ctx and agent_ctx.run_ctx else None,
+                session_id=agent_ctx.run_ctx.session_id
+                if agent_ctx and agent_ctx.run_ctx
+                else None,
             )
             await self._run_hooks(self.post_run, input_data)
             return result
@@ -385,7 +392,9 @@ class AgentHooks:
                 agent_name=agent_ctx.node_name if agent_ctx else "",
                 tool_name=call.tool_name,
                 tool_input=dict(args),
-                session_id=agent_ctx.run_ctx.session_id if agent_ctx and agent_ctx.run_ctx else None,
+                session_id=agent_ctx.run_ctx.session_id
+                if agent_ctx and agent_ctx.run_ctx
+                else None,
             )
             result = await self._run_hooks(self.pre_tool_use, input_data)
             if result.get("decision") == "deny":
@@ -416,7 +425,9 @@ class AgentHooks:
                 tool_input=dict(args),
                 tool_output=result,
                 duration_ms=0.0,
-                session_id=agent_ctx.run_ctx.session_id if agent_ctx and agent_ctx.run_ctx else None,
+                session_id=agent_ctx.run_ctx.session_id
+                if agent_ctx and agent_ctx.run_ctx
+                else None,
             )
             await self._run_hooks(self.post_tool_use, input_data)
             return result

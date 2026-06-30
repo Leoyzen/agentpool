@@ -34,23 +34,12 @@ class ListNodesCommand(NodeCommand):
         assert node.pool
 
         rows = []
-        for name, node_ in node.pool.nodes.items():
-            # Status check
-            status = "🔄 busy" if node_.task_manager.is_busy() else "⏳ idle"
-
-            # Add connections if requested
-            connections = []
-            if show_connections and node_.connections.get_targets():
-                connections = [a.name for a in node_.connections.get_targets()]
-                conn_str = f"→ {', '.join(connections)}"
-            else:
-                conn_str = ""
-
+        for name, config in node.pool.manifest.agents.items():
             rows.append({
                 "Node": name,
-                "Status": status,
-                "Connections": conn_str,
-                "Description": node_.description or "",
+                "Status": "N/A",
+                "Connections": "",
+                "Description": config.description or "",
             })
 
         headers = ["Node", "Status", "Connections", "Description"]

@@ -54,6 +54,7 @@ class MockGraphRun:
         self._items = items
         self._index = 0
         self._delay = delay
+        self.state = None
 
     def __aiter__(self) -> AsyncIterator[Sequence[GraphTask] | EndMarker[Any] | ErrorMarker]:
         return self

@@ -93,13 +93,11 @@ class AcpMcpConnection:
             raise RuntimeError("Connection not opened")
         try:
             if isinstance(message, SessionMessage):
-                await self._to_session_send.send(message)  # type: ignore[arg-type]
+                await self._to_session_send.send(message)
             elif isinstance(message, dict):
                 if "jsonrpc" in message:
                     # Raw JSON-RPC message (backward compatibility)
-                    session_msg = SessionMessage(
-                        message=JSONRPCMessage.model_validate(message)
-                    )
+                    session_msg = SessionMessage(message=JSONRPCMessage.model_validate(message))
                     await self._to_session_send.send(session_msg)  # type: ignore[arg-type]
                 else:
                     # Flattened ACP format: reconstruct JSON-RPC message
@@ -135,9 +133,7 @@ class AcpMcpConnection:
             Response from client (for requests) or None (for notifications).
         """
         if isinstance(message, SessionMessage):
-            message = message.message.model_dump(
-                by_alias=True, mode="json", exclude_none=True
-            )
+            message = message.message.model_dump(by_alias=True, mode="json", exclude_none=True)
 
         if not isinstance(message, dict):
             logger.warning(
@@ -180,9 +176,7 @@ class AcpMcpConnection:
                 }
                 try:
                     await self._to_session_send.send(
-                        SessionMessage(
-                            message=JSONRPCMessage.model_validate(error_response)
-                        )  # type: ignore[arg-type]
+                        SessionMessage(message=JSONRPCMessage.model_validate(error_response))  # type: ignore[arg-type]
                     )
                 except anyio.BrokenResourceError:
                     pass
@@ -211,9 +205,7 @@ class AcpMcpConnection:
                 }
             try:
                 await self._to_session_send.send(
-                    SessionMessage(
-                        message=JSONRPCMessage.model_validate(response)
-                    )  # type: ignore[arg-type]
+                    SessionMessage(message=JSONRPCMessage.model_validate(response))  # type: ignore[arg-type]
                 )
             except ValidationError:
                 logger.exception(
@@ -236,9 +228,7 @@ class AcpMcpConnection:
                     }
                     try:
                         await self._to_session_send.send(
-                            SessionMessage(
-                                message=JSONRPCMessage.model_validate(fallback)
-                            )  # type: ignore[arg-type]
+                            SessionMessage(message=JSONRPCMessage.model_validate(fallback))  # type: ignore[arg-type]
                         )
                     except anyio.BrokenResourceError:
                         pass

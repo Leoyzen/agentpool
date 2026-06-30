@@ -73,9 +73,8 @@ def vercel_command(  # noqa: PLR0915
         manifest = AgentsManifest.from_file(config_path)
     pool = AgentPool(manifest, main_agent_name=agent_name)
 
-    if show_messages:
-        for agent in pool.all_agents.values():
-            agent.message_sent.connect(on_message)
+    # show_messages is disabled: agent instances are no longer created at pool level.
+    # Session-level event monitoring is available via EventBus instead.
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -136,7 +135,7 @@ def vercel_command(  # noqa: PLR0915
 
         # Determine which agent to use and create a per-request session
         # Vercel protocol is stateless — new session per HTTP request
-        effective_agent_name = agent_name or pool.main_agent.name
+        effective_agent_name = agent_name or pool.main_agent_name
         session_id = uuid.uuid4().hex
         session_pool = pool.session_pool
         assert session_pool is not None, "SessionPool must be initialized"
@@ -206,8 +205,8 @@ def vercel_command(  # noqa: PLR0915
         """List available agents."""
         return {
             "agents": [
-                {"name": name, "description": agent.description}
-                for name, agent in pool.all_agents.items()
+                {"name": name, "description": config.description}
+                for name, config in pool.manifest.agents.items()
             ]
         }
 
@@ -221,7 +220,7 @@ def vercel_command(  # noqa: PLR0915
 
     print(f"Starting Vercel AI server on http://{host}:{port}")
     print(f"Chat endpoint: POST http://{host}:{port}/chat")
-    print(f"Available agents: {list(pool.all_agents.keys())}")
+    print(f"Available agents: {list(pool.manifest.agents.keys())}")
 
     uvicorn.run(app, host=host, port=port, log_level=log_level.lower())
 

@@ -138,9 +138,7 @@ class ClientCapabilities(AnnotatedObject):
         Returns:
             A new instance of ClientCapabilities.
         """
-        fs = FileSystemCapability(
-            read_text_file=read_text_file, write_text_file=write_text_file
-        )
+        fs = FileSystemCapability(read_text_file=read_text_file, write_text_file=write_text_file)
         return cls(
             fs=fs,
             terminal=terminal,

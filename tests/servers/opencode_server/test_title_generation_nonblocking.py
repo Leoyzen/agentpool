@@ -62,7 +62,7 @@ def _make_state(tmp_path: Any) -> ServerState:
     pool = Mock()
     pool.storage = storage_mgr
     pool.manifest = Mock(model_variants={})
-    pool.all_agents = {}
+    pool.manifest.agents = {}
 
     agent.agent_pool = pool
     agent.storage = storage_mgr

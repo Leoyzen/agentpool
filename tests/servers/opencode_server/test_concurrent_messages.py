@@ -179,7 +179,7 @@ def slow_mock_agent():
     pool.session_pool.receive_request = AsyncMock(side_effect=_mock_receive_request)
 
     # CRITICAL: all_agents must return a real dict to avoid Mock issues
-    pool.all_agents = {agent.name: agent}
+    pool.manifest.agents = {agent.name: agent}
 
     agent.agent_pool = pool
 

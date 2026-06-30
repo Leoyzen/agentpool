@@ -128,9 +128,7 @@ class MCPResourceProvider(ResourceProvider):
                 e,
             )
             await self.__aexit__(type(e), e, e.__traceback__)
-            raise RuntimeError(
-                f"Failed to connect MCP server '{self.server.display_name}'"
-            ) from e
+            raise RuntimeError(f"Failed to connect MCP server '{self.server.display_name}'") from e
 
         self._client_connected = True
         return self

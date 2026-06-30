@@ -22,7 +22,7 @@ class TestCrossProtocolAlignment:
         agent.agent_pool = MagicMock()
         agent_b = MagicMock()
         agent_b.name = "agent_b"
-        agent.agent_pool.all_agents = {"agent_a": agent, "agent_b": agent_b}
+        agent.agent_pool.manifest.agents = {"agent_a": agent, "agent_b": agent_b}
         agent.get_modes = AsyncMock(
             return_value=[
                 ModeCategory(
@@ -54,7 +54,7 @@ class TestCrossProtocolAlignment:
         agent = MagicMock()
         agent.name = "solo"
         agent.agent_pool = MagicMock()
-        agent.agent_pool.all_agents = {"solo": agent}
+        agent.agent_pool.manifest.agents = {"solo": agent}
         agent.get_modes = AsyncMock(
             return_value=[
                 ModeCategory(

@@ -25,14 +25,19 @@ from agentpool_server.acp_server.session import ACPSession
 @pytest.fixture
 def agent_pool_with_skill() -> AgentPool:
     """Create an agent pool with a skill command registered."""
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+    pool = AgentPool(manifest)
 
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     # Create and register a skill command
     skill = Skill(
         name="test-skill",
@@ -57,7 +62,7 @@ def agent_pool_with_skill() -> AgentPool:
 def mock_acp_agent_with_skills(agent_pool_with_skill: AgentPool) -> AgentPoolACPAgent:
     """Create an ACP agent with skills configured."""
     mock_connection = Mock()
-    agent = agent_pool_with_skill.get_agent("test_agent")
+    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(pool=agent_pool_with_skill)
     return AgentPoolACPAgent(client=mock_connection, default_agent=agent)
 
 
@@ -81,14 +86,19 @@ async def test_initialize_does_not_expose_skill_commands(
 
 async def test_initialize_without_skills_no_commands():
     """Test that initialize response has no slash_commands field."""
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+    pool = AgentPool(manifest)
 
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     mock_connection = Mock()
     acp_agent = AgentPoolACPAgent(client=mock_connection, default_agent=agent)
 
@@ -109,7 +119,7 @@ async def test_session_update_exposes_skill_commands(
     Per RFC-0032, skill commands must be sent via available_commands_update
     session notification, not in the initialize response.
     """
-    agent = agent_pool_with_skill.get_agent("test_agent")
+    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(pool=agent_pool_with_skill)
     mock_client = AsyncMock()
     mock_acp_agent = Mock()
     mock_acp_agent.tasks = Mock()

@@ -39,7 +39,7 @@ class McpRunTools(ResourceProvider):
     kind: Literal["mcp_run"] = "mcp_run"
 
     def __init__(self, entity_id: str, session_id: str | None = None) -> None:
-        from mcp_run import Client, ClientConfig  # type: ignore[import-untyped]
+        from mcp_run import Client, ClientConfig
 
         super().__init__(name=entity_id)
         id_ = session_id or os.environ.get("MCP_RUN_SESSION_ID")

@@ -163,9 +163,15 @@ def test_background_run_ctx_unchanged():
 
     # Create a minimal agent instance
     class TestAgent(BaseAgent):
-        async def _run_stream_once(self, run_ctx, *prompts, **kwargs):
-            async for _ in []:
-                yield
+        def create_turn(self, prompts, run_ctx, message_history):
+            from agentpool.orchestrator.turn import Turn
+
+            class _EmptyTurn(Turn):
+                async def execute(self):
+                    return
+                    yield  # noqa: make it a generator
+
+            return _EmptyTurn()
 
     try:
         agent = TestAgent(name="test", model="test-model")

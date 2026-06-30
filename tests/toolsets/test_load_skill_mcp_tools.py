@@ -186,7 +186,7 @@ async def _make_context(
         ),
     )
     pool = await AgentPool(manifest).__aenter__()
-    agent = pool.get_agent("test_agent")
+    agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
     return AgentContext(node=agent, pool=pool), pool
 
 

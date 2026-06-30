@@ -15,6 +15,7 @@ from unittest.mock import patch
 import pytest
 
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
+from agentpool.agents.native_agent.turn import NativeTurn
 from agentpool.messaging import ChatMessage
 
 
@@ -76,10 +77,10 @@ async def test_conversation_preserved_after_run_failure(
         assert msgs_after_step1[1].role == "assistant", f"Expected assistant role, got {msgs_after_step1[1].role}"
 
         # --- Step 2: Failed second prompt ---
-        # Patch _stream_events to simulate a model failure that occurs AFTER
+        # Patch NativeTurn.execute to simulate a model failure that occurs AFTER
         # the user message is saved to the conversation (matching real scenario).
-        # run_stream → _run_stream_once → saves user msg at L1082 → _stream_events → FAILS
-        with patch.object(agent1, "_stream_events", side_effect=RuntimeError("Simulated model API error")):
+        # RunHandle.start() saves user msg, then calls turn.execute() → FAILS
+        with patch.object(NativeTurn, "execute", side_effect=RuntimeError("Simulated model API error")):
             run_handle2 = await session_pool.receive_request(
                 session_id,
                 "What is 3+3?",
@@ -167,8 +168,8 @@ async def test_agent_identity_preserved_after_failure(
         agent_id_before = id(agent_before)
         msg_count_before = len(list(agent_before.conversation.chat_messages))
 
-        # Second run — simulate failure during _stream_events (after user msg saved)
-        with patch.object(agent_before, "_stream_events", side_effect=RuntimeError("Simulated failure")):
+        # Second run — simulate failure during turn execution (after user msg saved)
+        with patch.object(NativeTurn, "execute", side_effect=RuntimeError("Simulated failure")):
             run_handle2 = await session_pool.receive_request(session_id, "Fail me")
             assert run_handle2 is not None
             await run_handle2.complete_event.wait()

@@ -59,8 +59,11 @@ class CommandHook(Hook):
             input_match: Optional regex patterns to match ``tool_input`` fields.
         """
         super().__init__(
-            event=event, matcher=matcher, timeout=timeout,
-            enabled=enabled, input_match=input_match,
+            event=event,
+            matcher=matcher,
+            timeout=timeout,
+            enabled=enabled,
+            input_match=input_match,
         )
         self.command = command
         self.env = env or {}

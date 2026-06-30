@@ -40,26 +40,3 @@ async def test_safe_auto_resume_sibling_isolation() -> None:
 
     assert "succeeding_task_completed" in results
     assert "failing_task_started" in results
-
-
-@pytest.mark.anyio
-async def test_safe_auto_resume_catches_exceptions() -> None:
-    """Test that _safe_auto_resume catches exceptions and logs them."""
-    from agentpool.orchestrator.core import TurnRunner
-
-    class MockSessionController:
-        def get_session(self, session_id: str) -> None:
-            return None
-
-    runner = TurnRunner.__new__(TurnRunner)
-    runner._enable_auto_resume = True
-    runner._max_auto_resume = 10
-    runner._session_task_groups = {}
-
-    async def failing_trigger(session_id: str, **kwargs: object) -> None:
-        raise RuntimeError("Auto-resume failed")
-
-    runner._trigger_auto_resume = failing_trigger
-
-    # Should not raise
-    await runner._safe_auto_resume("test-session")

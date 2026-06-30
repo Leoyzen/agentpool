@@ -1,7 +1,7 @@
 """Tests for SessionPool input_provider propagation.
 
 Verifies that input_provider is correctly forwarded through SessionPool
-run_stream -> process_prompt -> _run_turn -> get_or_create_session_agent
+run_stream -> _run_stream_run_turn -> get_or_create_session_agent
 so that elicitation does NOT fall back to StdlibInputProvider.
 """
 
@@ -44,6 +44,9 @@ def mock_pool() -> MagicMock:
     pool = MagicMock()
     pool.main_agent = MagicMock()
     pool.main_agent.name = "main-agent"
+    # main_agent_name must be a real string; the code guards against
+    # MagicMock values by falling back to "default".
+    pool.main_agent_name = "main-agent"
     pool.manifest = MagicMock()
     pool.manifest.agents = {}
     pool.manifest.opencode = MagicMock()
@@ -63,6 +66,7 @@ def mock_agent() -> MagicMock:
     agent = MagicMock()
     agent.get_active_run_context.return_value = None
     agent.AGENT_TYPE = "native"
+    agent._input_provider = None
 
     async def _fake_stream(
         run_ctx: AgentRunContext,
@@ -79,85 +83,30 @@ def mock_agent() -> MagicMock:
     return agent
 
 
+def _make_fake_run_handle(agent: MagicMock) -> MagicMock:
+    """Create a fake RunHandle whose start() yields events from the mock agent."""
+    fake_handle = MagicMock()
+    fake_handle.run_id = "fake-run-id"
+    fake_handle.session_id = "test-session"
+    fake_handle.agent_type = "native"
+    fake_handle.status = "pending"
+    fake_handle.agent = agent
+    fake_handle.steer = MagicMock(return_value=False)
+    fake_handle.cancel = MagicMock()
+    fake_handle.complete = MagicMock()
+
+    async def _fake_start(initial_prompt: str) -> AsyncIterator[Any]:
+        """Yield a RunStartedEvent then a StreamCompleteEvent."""
+        yield RunStartedEvent(session_id="test-session", run_id="fake-run-id")
+        msg = ChatMessage(content="test response", role="assistant")
+        yield StreamCompleteEvent(message=msg)
+
+    fake_handle.start = _fake_start
+    return fake_handle
+
+
 class TestSessionPoolRunStreamInputProvider:
     """RED FLAG: input_provider must be forwarded through SessionPool.run_stream()."""
-
-    @pytest.mark.anyio
-    async def test_run_stream_forwards_input_provider_to_agent(
-        self,
-        session_pool: SessionPool,
-        mock_pool: MagicMock,
-        mock_agent: MagicMock,
-    ) -> None:
-        """When run_stream() is called with input_provider, it must reach _run_stream_once.
-
-        This is the core regression test for the elicitation-broken-in-SessionPool bug.
-        Before the fix, input_provider was silently dropped because run_stream()
-        called process_prompt() without kwargs, and process_prompt() called
-        _run_turn() which popped input_provider from kwargs (which was empty).
-        """
-        fake_provider = FakeInputProvider()
-        session_id = "test-session"
-
-        # Wire the mock pool so get_or_create_session_agent returns our mock
-        mock_pool.get_agent.return_value = mock_agent
-
-        # Patch _run_stream_once to capture the kwargs
-        captured_kwargs: dict[str, Any] | None = None
-        original_stream = mock_agent._run_stream_once
-
-        async def _capturing_stream(
-            run_ctx: AgentRunContext,
-            *prompts: Any,
-            **kwargs: Any,
-        ) -> AsyncIterator[Any]:
-            nonlocal captured_kwargs
-            captured_kwargs = kwargs
-            async for event in original_stream(run_ctx, *prompts, **kwargs):
-                yield event
-
-        mock_agent._run_stream_once = _capturing_stream
-
-        # Also need to make get_or_create_session_agent return our mock
-        # and capture the input_provider passed to it
-        captured_agent_kwargs: dict[str, Any] | None = None
-        original_get_agent = session_pool.sessions.get_or_create_session_agent
-
-        async def _capturing_get_agent(
-            sid: str,
-            agent_name: str | None = None,
-            input_provider: Any | None = None,
-        ) -> MagicMock:
-            nonlocal captured_agent_kwargs
-            captured_agent_kwargs = {"input_provider": input_provider}
-            return mock_agent
-
-        session_pool.sessions.get_or_create_session_agent = _capturing_get_agent
-
-        async for _event in session_pool.run_stream(
-            session_id, "hello", input_provider=fake_provider
-        ):
-            pass
-
-        # Assert 1: input_provider reached get_or_create_session_agent
-        assert captured_agent_kwargs is not None, (
-            "get_or_create_session_agent was never called"
-        )
-        assert captured_agent_kwargs["input_provider"] is fake_provider, (
-            f"Expected FakeInputProvider, got {captured_agent_kwargs['input_provider']}"
-        )
-
-        # Assert 2: input_provider reached _run_stream_once
-        assert captured_kwargs is not None, (
-            "_run_stream_once was never called"
-        )
-        assert "input_provider" in captured_kwargs, (
-            f"input_provider missing from _run_stream_once kwargs: {captured_kwargs.keys()}"
-        )
-        assert captured_kwargs["input_provider"] is fake_provider, (
-            f"Expected FakeInputProvider in _run_stream_once, got {captured_kwargs['input_provider']}"
-        )
-
     @pytest.mark.anyio
     async def test_run_stream_without_input_provider_does_not_crash(
         self,
@@ -167,7 +116,20 @@ class TestSessionPoolRunStreamInputProvider:
     ) -> None:
         """run_stream() without input_provider should still work (backward compat)."""
         session_id = "test-session"
-        mock_pool.get_agent.return_value = mock_agent
+
+        # Mock get_or_create_session_agent to return mock_agent
+        async def _fake_get_agent(
+            sid: str,
+            agent_name: str | None = None,
+            input_provider: Any | None = None,
+        ) -> MagicMock:
+            return mock_agent
+
+        session_pool.sessions.get_or_create_session_agent = _fake_get_agent
+
+        # Mock _create_run_handle to avoid needing a real RunHandle
+        fake_handle = _make_fake_run_handle(mock_agent)
+        session_pool._create_run_handle = MagicMock(return_value=fake_handle)  # type: ignore[method-assign]
 
         # Count events to ensure stream completes
         event_count = 0
@@ -183,59 +145,44 @@ class TestSessionPoolRunStreamInputProvider:
         mock_pool: MagicMock,
         mock_agent: MagicMock,
     ) -> None:
-        """process_prompt() must forward **kwargs to the turn runner.
+        """process_prompt() must forward input_provider to get_or_create_session_agent.
 
-        This tests the middle layer: process_prompt -> run_turn/_run_turn.
+        This tests the middle layer: process_prompt -> _process_prompt_run_turn
+        -> get_or_create_session_agent.
         """
         fake_provider = FakeInputProvider()
         session_id = "test-session"
-        mock_pool.get_agent.return_value = mock_agent
 
         captured_kwargs: dict[str, Any] | None = None
-        original_run_loop = session_pool.turns.run_loop
 
-        async def _capturing_run_loop(
+        async def _capturing_get_agent(
             sid: str,
-            *prompts: Any,
-            **kwargs: Any,
-        ) -> None:
+            agent_name: str | None = None,
+            input_provider: Any | None = None,
+        ) -> MagicMock:
             nonlocal captured_kwargs
-            captured_kwargs = kwargs
-            await original_run_loop(sid, *prompts, **kwargs)
+            captured_kwargs = {"input_provider": input_provider}
+            return mock_agent
 
-        session_pool.turns.run_loop = _capturing_run_loop  # type: ignore[method-assign]
+        session_pool.sessions.get_or_create_session_agent = _capturing_get_agent
+
+        # Mock _create_run_handle to avoid needing a real RunHandle
+        fake_handle = _make_fake_run_handle(mock_agent)
+        session_pool._create_run_handle = MagicMock(return_value=fake_handle)  # type: ignore[method-assign]
 
         await session_pool.process_prompt(
             session_id, "hello", input_provider=fake_provider
         )
 
-        assert captured_kwargs is not None, "run_loop was never called"
-        assert "input_provider" in captured_kwargs, (
-            f"input_provider missing from run_loop kwargs: {captured_kwargs.keys()}"
-        )
+        assert captured_kwargs is not None, "get_or_create_session_agent was never called"
         assert captured_kwargs["input_provider"] is fake_provider, (
-            f"Expected FakeInputProvider in run_loop, got {captured_kwargs['input_provider']}"
-        )
-
-        assert captured_kwargs is not None, "run_loop was never called"
-        assert "input_provider" in captured_kwargs, (
-            f"input_provider missing from run_loop kwargs: {captured_kwargs.keys()}"
-        )
-        assert captured_kwargs["input_provider"] is fake_provider, (
-            f"Expected FakeInputProvider in run_loop, got {captured_kwargs['input_provider']}"
-        )
-
-        assert captured_kwargs is not None, "run_turn was never called"
-        assert "input_provider" in captured_kwargs, (
-            f"input_provider missing from run_turn kwargs: {captured_kwargs.keys()}"
-        )
-        assert captured_kwargs["input_provider"] is fake_provider, (
-            f"Expected FakeInputProvider in run_turn, got {captured_kwargs['input_provider']}"
+            f"Expected FakeInputProvider in get_or_create_session_agent, "
+            f"got {captured_kwargs['input_provider']}"
         )
 
 
 class TestRunTurnInputProvider:
-    """Tests for _run_turn forwarding input_provider to agent creation and stream."""
+    """Tests for _run_stream_run_turn forwarding input_provider to agent creation and stream."""
 
     @pytest.mark.anyio
     async def test_run_turn_passes_input_provider_to_get_or_create_session_agent(
@@ -244,13 +191,11 @@ class TestRunTurnInputProvider:
         mock_pool: MagicMock,
         mock_agent: MagicMock,
     ) -> None:
-        """_run_turn must pass input_provider to get_or_create_session_agent."""
+        """_run_stream_run_turn must pass input_provider to get_or_create_session_agent."""
         fake_provider = FakeInputProvider()
         session_id = "test-session"
-        mock_pool.get_agent.return_value = mock_agent
 
         captured_agent_kwargs: dict[str, Any] | None = None
-        original_get_agent = session_pool.sessions.get_or_create_session_agent
 
         async def _capturing_get_agent(
             sid: str,
@@ -263,18 +208,15 @@ class TestRunTurnInputProvider:
 
         session_pool.sessions.get_or_create_session_agent = _capturing_get_agent
 
-        # Directly call _run_turn (internal, but we test it)
-        from agentpool.orchestrator.core import SessionState
+        # Mock _create_run_handle to avoid needing a real RunHandle
+        fake_handle = _make_fake_run_handle(mock_agent)
+        session_pool._create_run_handle = MagicMock(return_value=fake_handle)  # type: ignore[method-assign]
 
-        # Ensure session exists
-        session_pool.sessions._sessions[session_id] = SessionState(
-            session_id=session_id,
-            agent_name="main-agent",
-        )
-
-        await session_pool.turns._run_turn_unlocked(
+        # Directly call run_stream (which calls _run_stream_run_turn internally)
+        async for _event in session_pool.run_stream(
             session_id, "hello", input_provider=fake_provider
-        )
+        ):
+            pass
 
         assert captured_agent_kwargs is not None, (
             "get_or_create_session_agent was never called"
@@ -290,45 +232,44 @@ class TestRunTurnInputProvider:
         mock_pool: MagicMock,
         mock_agent: MagicMock,
     ) -> None:
-        """_run_turn must pass input_provider to agent._run_stream_once."""
+        """_run_stream_run_turn must set input_provider on the agent.
+
+        In the new API, input_provider is set on the agent via
+        ``agent._input_provider = input_provider`` inside
+        ``get_or_create_session_agent``, and on the session via
+        ``session.input_provider = input_provider``.
+        """
         fake_provider = FakeInputProvider()
         session_id = "test-session"
-        mock_pool.get_agent.return_value = mock_agent
 
         captured_stream_kwargs: dict[str, Any] | None = None
         original_stream = mock_agent._run_stream_once
 
-        async def _capturing_stream(
-            run_ctx: AgentRunContext,
-            *prompts: Any,
-            **kwargs: Any,
-        ) -> AsyncIterator[Any]:
-            nonlocal captured_stream_kwargs
-            captured_stream_kwargs = kwargs
-            async for event in original_stream(run_ctx, *prompts, **kwargs):
-                yield event
+        async def _capturing_get_agent(
+            sid: str,
+            agent_name: str | None = None,
+            input_provider: Any | None = None,
+        ) -> MagicMock:
+            # Simulate what the real get_or_create_session_agent does:
+            # set _input_provider on the agent.
+            mock_agent._input_provider = input_provider
+            return mock_agent
 
-        mock_agent._run_stream_once = _capturing_stream
+        session_pool.sessions.get_or_create_session_agent = _capturing_get_agent
 
-        from agentpool.orchestrator.core import SessionState
+        # Mock _create_run_handle so RunHandle.start() works with mock agent
+        fake_handle = _make_fake_run_handle(mock_agent)
+        session_pool._create_run_handle = MagicMock(return_value=fake_handle)  # type: ignore[method-assign]
 
-        session_pool.sessions._sessions[session_id] = SessionState(
-            session_id=session_id,
-            agent_name="main-agent",
-        )
-
-        await session_pool.turns._run_turn_unlocked(
+        # Directly call run_stream (which calls _run_stream_run_turn internally)
+        async for _event in session_pool.run_stream(
             session_id, "hello", input_provider=fake_provider
-        )
+        ):
+            pass
 
-        assert captured_stream_kwargs is not None, (
-            "_run_stream_once was never called"
-        )
-        assert "input_provider" in captured_stream_kwargs, (
-            f"input_provider missing from _run_stream_once kwargs: {captured_stream_kwargs.keys()}"
-        )
-        assert captured_stream_kwargs["input_provider"] is fake_provider, (
-            f"Expected FakeInputProvider in _run_stream_once, got {captured_stream_kwargs['input_provider']}"
+        assert mock_agent._input_provider is fake_provider, (
+            f"Expected FakeInputProvider on agent._input_provider, "
+            f"got {mock_agent._input_provider}"
         )
 
 

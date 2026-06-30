@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from promptlayer import PromptLayer  # type: ignore[import-untyped]
+from promptlayer import PromptLayer
 
 from agentpool.prompts.base import BasePromptProvider
 

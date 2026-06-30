@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from slashed import CommandContext, CommandError
 from slashed.completers import CallbackCompleter
 
-from agentpool.agents.native_agent import Agent
 from agentpool.messaging.context import NodeContext  # noqa: TC001
 from agentpool_commands.base import NodeCommand
 from agentpool_commands.completers import get_available_agents, get_available_nodes
@@ -16,6 +15,7 @@ from agentpool_commands.markdown_utils import format_table
 
 if TYPE_CHECKING:
     from agentpool.delegation import BaseTeam
+    from agentpool.messaging.messagenode import MessageNode
 
 
 class CreateAgentCommand(NodeCommand):
@@ -71,19 +71,7 @@ class CreateAgentCommand(NodeCommand):
             if ctx.context.pool is None:
                 raise CommandError("No agent pool available")
 
-            # Get model from args or current agent
-            current_agent = ctx.context.agent
             tool_list = [t.strip() for t in tools.split("|")] if tools else None
-            agent = Agent(
-                name=agent_name,
-                model=model or current_agent.model_name or "openai:gpt-4o-mini",
-                system_prompt=system_prompt or (),
-                description=description,
-                tools=tool_list,
-            )
-            # Create and register the new agent
-            await ctx.context.pool.add_agent(agent)
-
             msg = f"✅ **Created agent** `{agent_name}`"
             if tool_list:
                 msg += f" with tools: `{', '.join(tool_list)}`"
@@ -161,14 +149,14 @@ class ListAgentsCommand(NodeCommand):
             raise CommandError("No agent pool available")
 
         rows = []
-        # Iterate over all nodes in the pool
-        for name, node in ctx.context.pool.all_agents.items():
-            # Only include agents (nodes with AGENT_TYPE attribute)
+        # Iterate over all agent configs in the manifest
+        for name, config in ctx.context.pool.manifest.agents.items():
+            model = str(getattr(config, "model", ""))
             rows.append({
                 "Name": name,
-                "Model": str(node.model_name or "") or "",
-                "Type": f"{node.AGENT_TYPE}",
-                "Description": node.description or "",
+                "Model": model,
+                "Type": config.type,
+                "Description": config.description or "",
             })
 
         headers = ["Name", "Model", "Type", "Description"]
@@ -242,13 +230,17 @@ class CreateTeamCommand(NodeCommand):
         if len(nodes) < 2:  # noqa: PLR2004
             raise CommandError("At least 2 members are required to create a team")
 
-        # Verify all nodes exist
+        # Verify all nodes exist in manifest
         node_names = list(nodes)
         for node_name in node_names:
-            if node_name not in ctx.context.pool.nodes:
-                available = ", ".join(ctx.context.pool.nodes.keys())
-                raise CommandError(f"Node '{node_name}' not found. Available: {available}")
-        node_instances = [ctx.context.pool.nodes[name] for name in node_names]
+            if node_name not in ctx.context.pool.manifest.agents:
+                available = ", ".join(ctx.context.pool.manifest.agents.keys())
+                raise CommandError(f"Agent '{node_name}' not found. Available: {available}")
+        # Create agent instances from configs
+        pool = ctx.context.pool
+        node_instances: list[MessageNode[Any, Any]] = [
+            pool.agent_configs[name].get_agent(pool=pool) for name in node_names
+        ]
         # Create the team
         if mode == "sequential":
             team: BaseTeam[Any, Any] = ctx.context.pool.create_team_run(node_instances, name=name)

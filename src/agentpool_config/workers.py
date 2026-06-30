@@ -56,6 +56,7 @@ class ACPAgentWorkerConfig(BaseWorkerConfig):
     type: Literal["acp_agent"] = Field("acp_agent", init=False)
     """ACP agent worker configuration."""
 
+
 WorkerConfig = Annotated[
     TeamWorkerConfig | AgentWorkerConfig | ACPAgentWorkerConfig,
     Field(discriminator="type"),

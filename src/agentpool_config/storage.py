@@ -178,6 +178,7 @@ class MemoryStorageConfig(BaseStorageProviderConfig):
 
         return MemoryStorageProvider(self)
 
+
 class OpenCodeStorageConfig(BaseStorageProviderConfig):
     """OpenCode SQLite storage format configuration.
 
@@ -249,6 +250,7 @@ class ACPStorageConfig(BaseStorageProviderConfig):
         from agentpool_storage.acp_provider import ACPStorageProvider
 
         return ACPStorageProvider(self)
+
 
 StorageProviderConfig = Annotated[
     SQLStorageConfig

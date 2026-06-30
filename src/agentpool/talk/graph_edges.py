@@ -213,9 +213,7 @@ class TalkEdgeTranslator:
             if target_nodes is None:
                 msg = "target_nodes required when filter_condition is set"
                 raise ValueError(msg)
-            filter_decisions = self._build_filter_decisions(
-                talk, target_steps, target_nodes
-            )
+            filter_decisions = self._build_filter_decisions(talk, target_steps, target_nodes)
             edges.append(path_builder.to(*filter_decisions))
             return edges
 
@@ -236,9 +234,7 @@ class TalkEdgeTranslator:
     # Internal builders
     # ------------------------------------------------------------------
 
-    def _build_transform_step(
-        self, talk: Talk[Any]
-    ) -> Step[Any, Any, Any, Any]:
+    def _build_transform_step(self, talk: Talk[Any]) -> Step[Any, Any, Any, Any]:
         """Create an intermediate :class:`Step` for an async transform."""
         transform_fn = talk.transform_fn
         assert transform_fn is not None
@@ -264,9 +260,7 @@ class TalkEdgeTranslator:
 
         return _transform
 
-    def _build_buffer_step(
-        self, talk: Talk[Any]
-    ) -> Step[Any, Any, Any, Any]:
+    def _build_buffer_step(self, talk: Talk[Any]) -> Step[Any, Any, Any, Any]:
         """Create a buffering :class:`Step` for queued connections.
 
         The step stores the incoming message in graph state and returns it
@@ -327,12 +321,10 @@ class TalkEdgeTranslator:
             #   source → eval_step → decision → [targets | end]
             # The current method returns the Decision; the caller should
             # create the edge: source → eval_step, then eval_step → decision.
-            pass_branch = self.builder.match(_ConditionPass).transform(
-                _unwrap_pass
-            ).to(*target_steps)
-            fail_branch = self.builder.match(_ConditionFail).to(
-                self.builder.end_node
+            pass_branch = (
+                self.builder.match(_ConditionPass).transform(_unwrap_pass).to(*target_steps)
             )
+            fail_branch = self.builder.match(_ConditionFail).to(self.builder.end_node)
             if invert:
                 # pass = continue to targets, fail = end
                 return decision.branch(pass_branch).branch(fail_branch)
@@ -347,13 +339,9 @@ class TalkEdgeTranslator:
 
         if invert:
             pass_branch = self.builder.match(Any, matches=pred).to(*target_steps)
-            fail_branch = self.builder.match(Any, matches=neg_pred).to(
-                self.builder.end_node
-            )
+            fail_branch = self.builder.match(Any, matches=neg_pred).to(self.builder.end_node)
         else:
-            pass_branch = self.builder.match(Any, matches=pred).to(
-                self.builder.end_node
-            )
+            pass_branch = self.builder.match(Any, matches=pred).to(self.builder.end_node)
             fail_branch = self.builder.match(Any, matches=neg_pred).to(*target_steps)
 
         return decision.branch(pass_branch).branch(fail_branch)
@@ -409,9 +397,7 @@ class TalkEdgeTranslator:
             if is_async_callable(condition):
                 # Async filter conditions are not yet supported in this
                 # translator. Fall back to a no-op pass-through.
-                pass_branch = self.builder.match(Any, matches=lambda _: False).to(
-                    target_step
-                )
+                pass_branch = self.builder.match(Any, matches=lambda _: False).to(target_step)
                 fail_branch = self.builder.match(Any, matches=lambda _: True).to(
                     self.builder.end_node
                 )
@@ -421,9 +407,7 @@ class TalkEdgeTranslator:
                     lambda ctx, original=pred: not original(ctx), talk, target_node
                 )
                 pass_branch = self.builder.match(Any, matches=pred).to(target_step)
-                fail_branch = self.builder.match(Any, matches=neg_pred).to(
-                    self.builder.end_node
-                )
+                fail_branch = self.builder.match(Any, matches=neg_pred).to(self.builder.end_node)
 
             decisions.append(decision.branch(pass_branch).branch(fail_branch))
 

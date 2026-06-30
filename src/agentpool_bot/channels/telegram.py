@@ -130,7 +130,7 @@ class TelegramChannel(BaseChannel):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
-        self._app: Application | None = None  # type: ignore[type-arg]
+        self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}
 

@@ -34,12 +34,12 @@ from agentpool_server.opencode_server.models import (
     ProviderAuthMethod,
     Session,
     SkillInfo,
+    WorkspaceCreateRequest,
+    WorkspaceInfo,
     WorktreeCreateRequest,
     WorktreeInfo,
     WorktreeRemoveRequest,
     WorktreeResetRequest,
-    WorkspaceCreateRequest,
-    WorkspaceInfo,
 )
 
 
@@ -126,7 +126,7 @@ async def list_agents(state: StateDep) -> list[Agent]:
     """
     pool = state.agent.agent_pool
     assert pool is not None, "AgentPool is not initialized"
-    default_name = pool.main_agent.name
+    default_name = pool.main_agent_name
     agents = [
         Agent(
             name=name,
@@ -134,7 +134,7 @@ async def list_agents(state: StateDep) -> list[Agent]:
             mode="primary",
             default=(name == default_name),
         )
-        for name, agent in pool.all_agents.items()
+        for name, agent in pool.manifest.agents.items()
     ]
     if not agents:
         return [Agent(name="default", description="Default agent", mode="primary", default=True)]

@@ -172,7 +172,7 @@ async def _make_context_for_load_skill(
         ),
     )
     pool = await AgentPool(manifest).__aenter__()
-    agent = pool.get_agent("f3_test_agent")
+    agent = pool.manifest.agents["f3_test_agent"].get_agent(pool=pool)
     return AgentContext(node=agent, pool=pool), pool
 
 

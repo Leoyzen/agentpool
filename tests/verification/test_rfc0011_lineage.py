@@ -50,13 +50,13 @@ async def test_pool(sql_provider):
     )
     async with AgentPool(manifest) as pool:
         # Register subagent tools on parent
-        parent = pool.get_agent("parent")
+        parent = pool.manifest.agents["parent"].get_agent(pool=pool)
         assert isinstance(parent, Agent)
         parent.tools.add_provider(SubagentTools())
 
         # Mock models for both
         await parent.set_model(TestModel())
-        child = pool.get_agent("child")
+        child = pool.manifest.agents["child"].get_agent(pool=pool)
         assert isinstance(child, Agent)
         await child.set_model(TestModel(custom_output_text="Child response"))
 
@@ -66,7 +66,7 @@ async def test_pool(sql_provider):
 @pytest.mark.asyncio
 async def test_subagent_independent_session(test_pool):
     """Test that subagent runs in independent session with unique ID."""
-    parent = test_pool.get_agent("parent")
+    parent = test_pool.manifest.agents["parent"].get_agent(pool=pool)
 
     parent_session_id = "parent-session-123"
     parent.session_id = parent_session_id
@@ -110,7 +110,7 @@ async def test_subagent_independent_session(test_pool):
 @pytest.mark.asyncio
 async def test_run_started_event_lineage(test_pool):
     """Test that RunStartedEvent contains parent_session_id."""
-    child = test_pool.get_agent("child")
+    child = test_pool.manifest.agents["child"].get_agent(pool=pool)
     parent_session_id = "parent-123"
 
     events = []
@@ -126,7 +126,7 @@ async def test_run_started_event_lineage(test_pool):
 async def test_subagent_event_lineage(test_pool):
     """Test that child session events are receivable via scope=descendants."""
     pool = test_pool
-    parent = pool.get_agent("parent")
+    parent = pool.manifest.agents["parent"].get_agent(pool=pool)
 
     parent_session_id = "parent-456"
     assert pool.session_pool is not None
@@ -142,7 +142,7 @@ async def test_subagent_event_lineage(test_pool):
     await tools.task(ctx, agent_or_team="child", prompt="Do something", description="test lineage")
 
     # Collect events from the queue — raw events flow through EventBus
-    # with scope=descendants (no SubAgentEvent wrapping in TurnRunner path).
+    # with scope=descendants (no SubAgentEvent wrapping in session path).
     child_events: list[Any] = []
     await asyncio.sleep(0.1)  # Give events time to propagate
 

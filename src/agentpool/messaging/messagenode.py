@@ -124,7 +124,19 @@ class MessageNode[TDeps, TResult](ABC):
             source_name=self._name,
         )
         name_ = f"node_{self._name}"
-        self.mcp = MCPManager(name_, servers=mcp_servers, owner=self.name, _warn=False)
+        # Share the pool's MCPManager when available to avoid duplicate
+        # MCP subprocess spawning. The pool owns the lifecycle; agents
+        # with a shared manager skip __aexit__ cleanup on it.
+        # However, when the agent has its own MCP servers (agent-level),
+        # create a dedicated MCPManager for them. Pool-level servers are
+        # still accessible via agent_pool.mcp and are added separately by
+        # the orchestrator via agent.tools.add_provider().
+        if agent_pool is not None and not mcp_servers:
+            self._mcp_shared = True
+            self.mcp = agent_pool.mcp
+        else:
+            self._mcp_shared = False
+            self.mcp = MCPManager(name_, servers=mcp_servers, owner=self.name, _warn=False)
         self.enable_db_logging = enable_logging
 
     async def log_session(
@@ -170,7 +182,8 @@ class MessageNode[TDeps, TResult](ABC):
         """Initialize base message node."""
         try:
             await self._events.__aenter__()
-            await self.mcp.__aenter__()
+            if not self._mcp_shared:
+                await self.mcp.__aenter__()
         except Exception as e:
             await self.__aexit__(type(e), e, e.__traceback__)
 
@@ -186,7 +199,8 @@ class MessageNode[TDeps, TResult](ABC):
     ) -> None:
         """Clean up base resources."""
         await self._events.__aexit__(exc_type, exc_val, exc_tb)
-        await self.mcp.__aexit__(exc_type, exc_val, exc_tb)
+        if not self._mcp_shared:
+            await self.mcp.__aexit__(exc_type, exc_val, exc_tb)
         await self.task_manager.cleanup_tasks()
 
     @property
@@ -389,7 +403,6 @@ class MessageNode[TDeps, TResult](ABC):
             target = Agent.from_callback(target)
             if pool := self.agent_pool:
                 target.agent_pool = pool
-                pool.register(target.name, target)
         # we are explicit here just to make disctinction clear, we only want sequences
         # of message units
         if isinstance(target, Sequence) and not isinstance(target, BaseTeam):
@@ -400,7 +413,6 @@ class MessageNode[TDeps, TResult](ABC):
                         other = Agent.from_callback(t)
                         if pool := self.agent_pool:
                             other.agent_pool = pool
-                            pool.register(other.name, other)
                         targets.append(other)
                     case MessageNode():
                         targets.append(t)
@@ -471,16 +483,18 @@ class MessageNode[TDeps, TResult](ABC):
                 is overridden.
         """
         raise NotImplementedError(
-            f"{self.__class__.__name__} must implement _execute_node() "
-            f"or override run() directly."
+            f"{self.__class__.__name__} must implement _execute_node() or override run() directly."
         )
 
     async def run(self, *prompts: Any, **kwargs: Any) -> ChatMessage[TResult]:
         """Execute node with prompts via pydantic-graph single-node graph.
 
-        Builds a single-node graph and runs it to completion. Subclasses
-        may override this method to provide custom execution logic; in
-        that case the graph-based path is bypassed.
+        Builds a single-node graph and runs it to completion, wrapping the
+        graph run with :class:`SignalEmittingGraphRun` so that
+        ``message_received`` and ``message_sent`` signals are emitted at
+        step boundaries. Subclasses may override this method to provide
+        custom execution logic; in that case the graph-based path is
+        bypassed.
 
         Args:
             *prompts: Input prompts.
@@ -489,11 +503,19 @@ class MessageNode[TDeps, TResult](ABC):
         Returns:
             The resulting ChatMessage.
         """
+        from pydantic_graph.id_types import NodeID
+
         from agentpool.messaging.graph_adapter import AgentPoolState
+        from agentpool.messaging.signal_adapter import SignalEmittingGraphRun
 
         graph = self._build_single_node_graph()
         state = AgentPoolState(node=self, prompts=prompts, kwargs=kwargs)
-        return await graph.run(state=state, deps=self._get_deps(), inputs=None)
+        node_mapping: dict[NodeID, MessageNode[Any, Any]] = {NodeID(self.name): self}
+        async with graph.iter(state=state, deps=self._get_deps(), inputs=None) as graph_run:
+            signal_run = SignalEmittingGraphRun(graph_run, node_mapping=node_mapping)
+            async for _ in signal_run:
+                pass
+        return state.result  # type: ignore[return-value]
 
     async def run_stream(
         self,
@@ -502,11 +524,13 @@ class MessageNode[TDeps, TResult](ABC):
     ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
         """Run with streaming output via pydantic-graph Graph.iter().
 
-        Uses :meth:`Graph.iter` to drive execution step-by-step.
-        For nodes that do not override :meth:`run_stream` (e.g. most
-        agent subclasses), this yields the final result wrapped in a
-        :class:`StreamCompleteEvent`. Agent subclasses typically override
-        this with rich event streaming.
+        Uses :meth:`Graph.iter` to drive execution step-by-step, wrapping
+        the graph run with :class:`SignalEmittingGraphRun` so that
+        ``message_received`` and ``message_sent`` signals are emitted at
+        step boundaries. For nodes that do not override :meth:`run_stream`
+        (e.g. most agent subclasses), this yields the final result wrapped
+        in a :class:`StreamCompleteEvent`. Agent subclasses typically
+        override this with rich event streaming.
 
         Args:
             *prompts: Input prompts.
@@ -515,20 +539,27 @@ class MessageNode[TDeps, TResult](ABC):
         Yields:
             RichAgentStreamEvent tokens during execution.
         """
-        from agentpool.agents.events import StreamCompleteEvent
+        from pydantic_graph.id_types import NodeID
+
+        from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
         from agentpool.messaging.graph_adapter import AgentPoolState
+        from agentpool.messaging.signal_adapter import SignalEmittingGraphRun
 
         graph = self._build_single_node_graph()
         state = AgentPoolState(node=self, prompts=prompts, kwargs=kwargs)
+        node_mapping: dict[NodeID, MessageNode[Any, Any]] = {NodeID(self.name): self}
 
         async with graph.iter(state=state, deps=self._get_deps(), inputs=None) as graph_run:
-            async for _ in graph_run:
+            signal_run = SignalEmittingGraphRun(graph_run, node_mapping=node_mapping)
+            async for _ in signal_run:
                 # Generic nodes do not produce intermediate stream events;
                 # drain the event queue in case a subclass pushed events.
                 while not state.event_queue.empty():
                     try:
                         event = state.event_queue.get_nowait()
-                        yield event  # type: ignore[misc]
+                        yield event
+                        if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                            return
                     except asyncio.QueueEmpty:
                         break
 
@@ -536,13 +567,15 @@ class MessageNode[TDeps, TResult](ABC):
         while not state.event_queue.empty():
             try:
                 event = state.event_queue.get_nowait()
-                yield event  # type: ignore[misc]
+                yield event
+                if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                    return
             except asyncio.QueueEmpty:
                 break
 
         # Yield the final result wrapped in StreamCompleteEvent
         if state.result is not None:
-            yield StreamCompleteEvent(message=state.result)  # type: ignore[misc]
+            yield StreamCompleteEvent(message=state.result)
 
     async def run_message(
         self,

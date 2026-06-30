@@ -182,10 +182,11 @@ def _load_yaml_data(path: JoinablePathLike) -> dict[str, Any]:
 
 
 def _resolve_tool_schema_paths(data: dict[str, Any], base_dir: str) -> None:
-    """Resolve relative ``kw_args.schemas`` paths in agent tool declarations.
+    """Resolve relative ``schemas`` paths in agent tool/capability declarations.
 
-    Mutates *data* in place.  Walks ``agents.<name>.tools[].kw_args.schemas``
-    and converts relative paths to absolute ones rooted at *base_dir*.
+    Mutates *data* in place.  Walks both ``agents.<name>.tools[].kw_args.schemas``
+    and ``agents.<name>.capabilities[].args.schemas`` and converts relative
+    paths to absolute ones rooted at *base_dir*.
     """
     agents = data.get("agents")
     if not isinstance(agents, dict):
@@ -193,22 +194,38 @@ def _resolve_tool_schema_paths(data: dict[str, Any], base_dir: str) -> None:
     for agent_cfg in agents.values():
         if not isinstance(agent_cfg, dict):
             continue
-        tools = agent_cfg.get("tools")
-        if not isinstance(tools, list):
+        _resolve_schemas_in_list(agent_cfg.get("tools"), "kw_args", base_dir)
+        _resolve_schemas_in_list(agent_cfg.get("capabilities"), "args", base_dir)
+
+
+def _resolve_schemas_in_list(
+    items: Any,
+    args_key: str,
+    base_dir: str,
+) -> None:
+    """Resolve relative ``schemas`` paths inside a list of tool/capability dicts.
+
+    Args:
+        items: A list of tool or capability config dicts.
+        args_key: The key under which ``schemas`` is nested — ``"kw_args"``
+            for tools, ``"args"`` for capabilities.
+        base_dir: The base directory to resolve relative paths against.
+    """
+    if not isinstance(items, list):
+        return
+    for item in items:
+        if not isinstance(item, dict):
             continue
-        for tool in tools:
-            if not isinstance(tool, dict):
-                continue
-            kw_args = tool.get("kw_args")
-            if not isinstance(kw_args, dict):
-                continue
-            schemas = kw_args.get("schemas")
-            if not isinstance(schemas, dict):
-                continue
-            for key, val in schemas.items():
-                val = str(val)
-                if not os.path.isabs(val):
-                    schemas[key] = os.path.join(base_dir, val)
+        args = item.get(args_key)
+        if not isinstance(args, dict):
+            continue
+        schemas = args.get("schemas")
+        if not isinstance(schemas, dict):
+            continue
+        for key, val in schemas.items():
+            val = str(val)
+            if not os.path.isabs(val):
+                schemas[key] = os.path.join(base_dir, val)
 
 
 def _load_package_yaml(ref: str) -> dict[str, Any]:
@@ -467,6 +484,13 @@ def resolve_config(  # noqa: PLR0915
 
     # Convert primary_path to absolute path if not already absolute
     absolute_primary_path = os.path.abspath(primary_path) if primary_path else None
+
+    # Resolve relative schema paths in tools/capabilities against the primary
+    # config file's directory.  Package includes already had their paths
+    # resolved by _load_package_yaml, but file-loaded configs (explicit,
+    # project, global, fallback) still have relative paths at this point.
+    if absolute_primary_path:
+        _resolve_tool_schema_paths(merged_data, os.path.dirname(absolute_primary_path))
 
     return ResolvedConfig(
         data=merged_data,

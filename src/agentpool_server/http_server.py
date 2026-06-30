@@ -155,7 +155,7 @@ class HTTPServer(BaseServer):
             manifest = AgentsManifest.from_file(config_path)
             pool = AgentPool(manifest=manifest)
         server = cls(pool, host=host, port=port, raise_exceptions=raise_exceptions)
-        agent_names = list(server.pool.all_agents.keys())
+        agent_names = list(server.pool.manifest.agents.keys())
         server.log.info("Created HTTP server from config", agent_names=agent_names)
         return server
 

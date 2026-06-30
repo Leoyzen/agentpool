@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from agentpool import Agent, AgentPool
+from agentpool import AgentPool
+from agentpool.models.agents import NativeAgentConfig
+from agentpool.models.manifest import AgentsManifest
 from agentpool_server import A2AServer, AggregatingServer, AGUIServer
 
 
@@ -15,21 +17,12 @@ SERVER_COUNT = 2
 
 @pytest.fixture
 def simple_agent_pool():
-    """Create a simple agent pool for testing."""
-
-    def callback1(message: str) -> str:
-        return f"Agent1: {message}"
-
-    def callback2(message: str) -> str:
-        return f"Agent2: {message}"
-
-    agent1 = Agent.from_callback(name="agent1", callback=callback1)
-    agent2 = Agent.from_callback(name="agent2", callback=callback2)
-
-    pool = AgentPool()
-    pool.register("agent1", agent1)
-    pool.register("agent2", agent2)
-    return pool
+    """Create a simple agent pool with manifest-based config."""
+    manifest = AgentsManifest(agents={
+        "agent1": NativeAgentConfig(model="test"),
+        "agent2": NativeAgentConfig(model="test"),
+    })
+    return AgentPool(manifest)
 
 
 @pytest.fixture

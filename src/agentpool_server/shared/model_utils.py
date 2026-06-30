@@ -288,9 +288,7 @@ async def build_model_state_for_acp(
         elif current_model:
             # Current model is not among configured variants — add it
             desc = "Currently configured model"
-            model_info = ACPModelInfo(
-                model_id=current_model, name=current_model, description=desc
-            )
+            model_info = ACPModelInfo(model_id=current_model, name=current_model, description=desc)
             configured_models.insert(0, model_info)
             current_model_id = current_model
         else:
@@ -313,9 +311,7 @@ async def build_model_state_for_acp(
     # Filter disabled providers from raw tokonomics models (more accurate than parsing model_id)
     if provider_router:
         toko_models = [
-            toko
-            for toko in toko_models
-            if not provider_router.is_provider_disabled(toko.provider)
+            toko for toko in toko_models if not provider_router.is_provider_disabled(toko.provider)
         ]
 
     if not toko_models:

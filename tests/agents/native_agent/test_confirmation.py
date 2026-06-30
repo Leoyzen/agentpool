@@ -366,6 +366,9 @@ def _create_mock_agentlet_from_caps(
             def all_messages(self) -> list[Any]:
                 return []
 
+            def new_messages(self) -> list[Any]:
+                return []
+
         return MockAgentRun()
 
     mock_agentlet = MagicMock()

@@ -292,7 +292,9 @@ log_level = "ERROR"
 markers = [
   "acp_snapshot: marks tests as ACP snapshot tests (excluded by default)",
   "asyncio: mark test as async",
+  "flaky: marks tests as flaky (auto-rerun on failure)",
   "integration: marks tests as integration tests",
+  "security: security-related tests",
   "slow: marks tests as slow",
   "unit: marks tests as unit tests",
 ]

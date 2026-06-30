@@ -76,7 +76,8 @@ class ACPSessionManager:
         session_id: str | None = None,
         client_capabilities: ClientCapabilities | None = None,
         client_info: Implementation | None = None,
-        subagent_display_mode: Literal["legacy", "zed"] = "legacy",
+        subagent_display_mode: Literal["legacy", "zed", "qwen"] = "legacy",
+        raw_input_mode: Literal["dict", "skip", "json_str"] = "dict",
         parent_session_id: str | None = None,
     ) -> str:
         """Create a new ACP session.
@@ -91,6 +92,7 @@ class ACPSessionManager:
             client_capabilities: Client capabilities for tool registration
             client_info: Client implementation info (name, version)
             subagent_display_mode: Display mode for subagent outputs
+            raw_input_mode: How to emit tool call raw_input
             parent_session_id: Optional parent session ID for child sessions.
                 When provided, creates a child session that inherits
                 project_id/cwd from the parent via SessionManager.
@@ -174,6 +176,7 @@ class ACPSessionManager:
             client_info=client_info,
             manager=self,
             subagent_display_mode=subagent_display_mode,
+            raw_input_mode=raw_input_mode,
         )
         session.register_update_callback(self._on_commands_updated)
         await session.initialize()
@@ -200,7 +203,8 @@ class ACPSessionManager:
         acp_agent: AgentPoolACPAgent,
         client_capabilities: ClientCapabilities | None = None,
         client_info: Implementation | None = None,
-        subagent_display_mode: Literal["legacy", "zed"] = "legacy",
+        subagent_display_mode: Literal["legacy", "zed", "qwen"] = "legacy",
+        raw_input_mode: Literal["dict", "skip", "json_str"] = "dict",
         mcp_servers: Sequence[McpServer] | None = None,
     ) -> ACPSession | None:
         """Resume a session from storage.
@@ -212,6 +216,7 @@ class ACPSessionManager:
             client_capabilities: Client capabilities
             client_info: Client implementation info (name, version)
             subagent_display_mode: Display mode for subagent outputs
+            raw_input_mode: How to emit tool call raw_input
             mcp_servers: MCP server configurations to (re-)initialize
 
         Returns:
@@ -227,13 +232,19 @@ class ACPSessionManager:
             return None
 
         # Validate agent still exists
-        if data.agent_name not in self._pool.all_agents:
+        if data.agent_name not in self._pool.manifest.agents:
             msg = "Session agent no longer exists"
             logger.warning(msg, session_id=session_id, agent=data.agent_name)
             return None
 
-        # Use the pool agent directly (per-session agents now managed by SessionPool)
-        session_agent = self._pool.all_agents[data.agent_name]
+        # Create session agent via SessionPool (pool-level agents removed)
+        if self._pool.session_pool is not None:
+            session_agent = await self._pool.session_pool.sessions.get_or_create_session_agent(
+                data.session_id, agent_name=data.agent_name
+            )
+        else:
+            msg = "SessionPool is required for session resume"
+            raise RuntimeError(msg)
 
         session = ACPSession(
             session_id=session_id,
@@ -246,6 +257,7 @@ class ACPSessionManager:
             client_info=client_info,
             manager=self,
             subagent_display_mode=subagent_display_mode,
+            raw_input_mode=raw_input_mode,
         )
         session.register_update_callback(self._on_commands_updated)
         await session.initialize()
@@ -380,8 +392,8 @@ class ACPSessionManager:
         """Update available commands for all active sessions."""
         sessions = list(self._acp_sessions.values())
         for session in sessions:
-                try:
-                    await session.send_available_commands_update()
-                except Exception:
-                    msg = "Failed to update commands"
-                    logger.exception(msg, session_id=session.session_id)
+            try:
+                await session.send_available_commands_update()
+            except Exception:
+                msg = "Failed to update commands"
+                logger.exception(msg, session_id=session.session_id)

@@ -53,9 +53,7 @@ class GraphJoinConfig(Schema):
     inputs: list[str] = Field(title="Input step IDs")
     """Step IDs whose outputs should be joined."""
 
-    reducer: ImportString[Callable[..., Any]] | None = Field(
-        default=None, title="Reducer function"
-    )
+    reducer: ImportString[Callable[..., Any]] | None = Field(default=None, title="Reducer function")
     """Optional import path to a reducer callable."""
 
     initial: Any = Field(default=None, title="Initial accumulator value")

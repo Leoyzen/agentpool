@@ -38,7 +38,7 @@ agents:
 """)
 
         async with AgentPool(manifest) as pool:
-            orchestrator = pool.get_agent("orchestrator")
+            orchestrator = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
 
             # Run orchestrator - it should call task with async_mode=True
             result = await orchestrator.run("Start a background task")
@@ -72,7 +72,7 @@ agents:
 """)
 
         async with AgentPool(manifest) as pool:
-            orchestrator = pool.get_agent("orchestrator")
+            orchestrator = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
 
             # Run orchestrator
             await orchestrator.run("Run async task")
@@ -118,7 +118,7 @@ agents:
 """)
 
         async with AgentPool(manifest) as pool:
-            orchestrator = pool.get_agent("orchestrator")
+            orchestrator = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
 
             result = await orchestrator.run("Run sync task")
 
@@ -145,7 +145,7 @@ agents:
 """)
 
         async with AgentPool(manifest) as pool:
-            orchestrator = pool.get_agent("orchestrator")
+            orchestrator = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
 
             # Should raise because the agent doesn't exist and ModelRetry exhausts retries
             with pytest.raises(UnexpectedModelBehavior, match="exceeded max retries"):

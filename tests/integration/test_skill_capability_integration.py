@@ -425,7 +425,7 @@ class TestSkillCapabilityAgentPoolIntegration:
         )
 
         async with AgentPool(manifest) as pool:
-            agent = pool.get_agent("test_agent")
+            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
 
             # get_agentlet creates a pydantic-ai Agent with capabilities
             agentlet: PydanticAgent[Any, str] = await agent.get_agentlet(  # type: ignore[attr-defined]

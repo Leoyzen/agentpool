@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import anyio
 import asyncio
 from dataclasses import dataclass
 import os
@@ -10,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Self
 
 from anyenv import method_spawner
 from anyenv.signals import Signal
+import anyio
 from pydantic import BaseModel, TypeAdapter
 from pydantic_ai.messages import ModelMessage
 

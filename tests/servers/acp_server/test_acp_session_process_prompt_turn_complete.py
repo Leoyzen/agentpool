@@ -27,9 +27,18 @@ def agent_pool() -> AgentPool:
     def simple_callback(message: str) -> str:
         return f"Response: {message}"
 
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+
+    from agentpool.models.manifest import AgentsManifest
+
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+
+    pool = AgentPool(manifest)
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
+    # pool.register() removed; agent created from callback/config above
     return pool
 
 
@@ -58,7 +67,7 @@ class TestProcessPromptTurnCompleteFlag:
     ) -> None:
         """When client_capabilities.turn_complete=True, ACPEventConverter must be
 created with client_supports_turn_complete=True."""
-        agent = agent_pool.get_agent("test_agent")
+        agent = agent_pool.manifest.agents["test_agent"].get_agent(pool=agent_pool)
         mock_client = AsyncMock()
 
         session = ACPSession(
@@ -102,7 +111,7 @@ created with client_supports_turn_complete=True."""
     ) -> None:
         """When client_capabilities.turn_complete=False, ACPEventConverter must be
 created with client_supports_turn_complete=False."""
-        agent = agent_pool.get_agent("test_agent")
+        agent = agent_pool.manifest.agents["test_agent"].get_agent(pool=agent_pool)
         mock_client = AsyncMock()
 
         session = ACPSession(
@@ -144,7 +153,7 @@ created with client_supports_turn_complete=False."""
     ) -> None:
         """When client_capabilities.turn_complete=None, ACPEventConverter must be
 created with client_supports_turn_complete=False (default)."""
-        agent = agent_pool.get_agent("test_agent")
+        agent = agent_pool.manifest.agents["test_agent"].get_agent(pool=agent_pool)
         mock_client = AsyncMock()
 
         session = ACPSession(

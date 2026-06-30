@@ -8,6 +8,7 @@ import uuid
 import anyenv
 from fastapi import Header
 
+from agentpool.agents.events import StreamCompleteEvent
 from agentpool.log import get_logger
 from agentpool_server import BaseServer
 from agentpool_server.mixins import ProtocolEventConsumerMixin
@@ -170,8 +171,8 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
     async def list_models(self) -> dict[str, Any]:
         """List available agents as models."""
         models = []
-        for name, agent in self.pool.all_agents.items():
-            info = OpenAIModelInfo(id=name, created=0, description=agent.description)
+        for name, agent_cfg in self.pool.manifest.agents.items():
+            info = OpenAIModelInfo(id=name, created=0, description=agent_cfg.description or "")
             models.append(info)
         return {"object": "list", "data": models}
 
@@ -180,7 +181,7 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
         from fastapi import HTTPException, Response
         from fastapi.responses import StreamingResponse
 
-        if request.model not in self.pool.all_agents:
+        if request.model not in self.pool.manifest.agents:
             raise HTTPException(404, f"Model {request.model} not found")
 
         session_pool = self.pool.session_pool
@@ -195,36 +196,86 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
                 stream_response(session_pool.run_stream(session_id, content), request),
                 media_type="text/event-stream",
             )
+        session_id = f"openai-{uuid.uuid4()}"
+        await session_pool.create_session(session_id, agent_name=request.model)
         try:
-            agent = self.pool.all_agents[request.model]
-            response = await agent.run(content)
-            message = OpenAIMessage(role="assistant", content=str(response.content))
+            final_message: Any = None
+            async for event in session_pool.run_stream(session_id, content):
+                if isinstance(event, StreamCompleteEvent):
+                    final_message = event.message
+
+            if final_message is None:
+                raise HTTPException(500, "No response received from agent")
+
+            msg = OpenAIMessage(role="assistant", content=str(final_message.content))
             completion_response = ChatCompletionResponse(
-                id=response.message_id,
-                created=int(response.timestamp.timestamp()),
+                id=final_message.message_id,
+                created=int(final_message.timestamp.timestamp()),
                 model=request.model,
-                choices=[Choice(message=message)],
+                choices=[Choice(message=msg)],
                 usage=_serialize_completion_usage(
-                    response.cost_info.token_usage if response.cost_info else None
+                    final_message.cost_info.token_usage if final_message.cost_info else None
                 ),
             )
-            json = completion_response.model_dump_json()
-            return Response(content=json, media_type="application/json")
+            json_str = completion_response.model_dump_json()
+            return Response(content=json_str, media_type="application/json")
+        except HTTPException:
+            raise
         except Exception as e:
             self.log.exception("Error processing chat completion")
             raise HTTPException(500, f"Error: {e!s}") from e
+        finally:
+            try:
+                await session_pool.close_session(session_id)
+            except Exception:
+                self.log.exception("Error closing session during cleanup", session_id=session_id)
 
     async def create_response(self, req_body: ResponseRequest) -> ResponsesResponse:
         """Handle response creation requests."""
         from fastapi import HTTPException
 
+        session_pool = self.pool.session_pool
+        if session_pool is None:
+            raise HTTPException(500, "SessionPool not available")
+
+        if req_body.model not in self.pool.manifest.agents:
+            raise HTTPException(404, f"Model {req_body.model} not found")
+
         try:
-            agent = self.pool.all_agents[req_body.model]
-            return await handle_request(req_body, agent)
+            match req_body.input:
+                case str():
+                    content = req_body.input
+                case list():
+                    last = req_body.input[-1]["content"]
+                    text_parts = [p["text"] for p in last if p["type"] == "input_text"]
+                    content = "\n".join(text_parts)
+                case _:
+                    raise HTTPException(400, "Invalid input format")
+
+            session_id = f"openai-responses-{uuid.uuid4()}"
+            await session_pool.create_session(session_id, agent_name=req_body.model)
+
+            from agentpool.agents.events import StreamCompleteEvent
+
+            message = None
+            async for event in session_pool.run_stream(session_id, content):
+                if isinstance(event, StreamCompleteEvent):
+                    message = event.message
+                    break
+
+            if message is None:
+                raise HTTPException(500, "No response received from agent")
+
+            return await handle_request(req_body, message)
         except KeyError:
             raise HTTPException(404, f"Model {req_body.model} not found") from None
         except Exception as e:
             raise HTTPException(500, str(e)) from e
+        finally:
+            try:
+                await session_pool.close_session(session_id)
+            except Exception:
+                self.log.exception("Error closing session during cleanup", session_id=session_id)
 
     async def _start_async(self) -> None:
         """Start the server (blocking async - runs until stopped)."""
@@ -245,7 +296,7 @@ if __name__ == "__main__":
     import anyio
     import httpx
 
-    from agentpool import Agent, AgentPool
+    from agentpool import AgentPool
 
     async def test_completions() -> None:
         """Test the chat completions API."""
@@ -294,9 +345,12 @@ if __name__ == "__main__":
 
     async def main() -> None:
         """Run server and test both endpoints."""
+        from agentpool.models.agents import NativeAgentConfig
+
         pool = AgentPool()
-        agent = Agent(name="gpt-5-mini", model="openai:gpt-5-mini")
-        await pool.add_agent(agent)
+        pool.manifest.agents["gpt-5-mini"] = NativeAgentConfig(
+            name="gpt-5-mini", model="openai:gpt-5-mini"
+        )
         async with (
             OpenAIAPIServer(pool, host="0.0.0.0", port=8000) as server,
             server.run_context(),

@@ -57,8 +57,7 @@ async def test_session_with_mcp_servers(
         return f"Test response for: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=agent_pool)
-    agent_pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     # Sample MCP servers (these won't actually connect in the test)
     mcp_servers = [
         StdioMcpServer(
@@ -112,7 +111,7 @@ async def test_session_manager_with_mcp(
         return f"Test response for: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=agent_pool)
-    agent_pool.register("test_agent", agent)
+    # pool.register() removed; agent created from callback/config above
     mcp_servers = [StdioMcpServer(name="tools", command="echo", args=["tools"], env=[])]
     async with agent_pool:
         try:

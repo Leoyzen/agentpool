@@ -30,7 +30,8 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-SubagentDisplayMode = Literal["legacy", "zed"]
+SubagentDisplayMode = Literal["legacy", "zed", "qwen"]
+RawInputMode = Literal["dict", "skip", "json_str"]
 
 
 def _coerce_subagent_display_mode(value: str) -> SubagentDisplayMode:
@@ -46,6 +47,9 @@ def _coerce_subagent_display_mode(value: str) -> SubagentDisplayMode:
     if value == "zed":
         logger.info("Subagent display mode set to 'zed'")
         return "zed"
+    if value == "qwen":
+        logger.info("Subagent display mode set to 'qwen'")
+        return "qwen"
     logger.warning("Unknown subagent display mode '%s', falling back to 'legacy'", value)
     return "legacy"
 
@@ -97,6 +101,7 @@ class ACPServer(BaseServer):
         config_path: str | None = None,
         transport: Transport = "stdio",
         subagent_display_mode: SubagentDisplayMode = "legacy",
+        raw_input_mode: RawInputMode = "dict",
         show_events: bool = False,
         show_events_detailed: bool = False,
     ) -> None:
@@ -114,6 +119,7 @@ class ACPServer(BaseServer):
             config_path: Path to the configuration file (for tracking/hot-switching)
             transport: Transport configuration ("stdio", "websocket", or transport object)
             subagent_display_mode: How to display nested agent output in ACP clients
+            raw_input_mode: How to emit tool call raw_input ("dict", "skip", or "json_str")
             show_events: Whether to print agent stream events to stderr
             show_events_detailed: Whether to print detailed agent stream events to stderr
         """
@@ -126,6 +132,7 @@ class ACPServer(BaseServer):
         self.config_path = config_path
         self.transport: Transport = transport
         self.subagent_display_mode: SubagentDisplayMode = subagent_display_mode
+        self.raw_input_mode: RawInputMode = raw_input_mode
         self.show_events = show_events
         self.show_events_detailed = show_events_detailed
 
@@ -141,6 +148,7 @@ class ACPServer(BaseServer):
         load_skills: bool | None = None,
         transport: Transport = "stdio",
         subagent_display_mode: SubagentDisplayMode | None = None,
+        raw_input_mode: RawInputMode | None = None,
         show_events: bool = False,
         show_events_detailed: bool = False,
     ) -> Self:
@@ -156,6 +164,7 @@ class ACPServer(BaseServer):
                 If None (default), uses the manifest's skills.include_default setting.
             transport: Transport configuration ("stdio", "websocket", or transport object)
             subagent_display_mode: Override for subagent display mode (argument > config > default)
+            raw_input_mode: Override for raw input mode (argument > config > default)
 
         Returns:
             Configured ACP server instance with agent pool
@@ -179,6 +188,15 @@ class ACPServer(BaseServer):
             resolved_display_mode = _coerce_subagent_display_mode(config_mode)
         else:
             resolved_display_mode = "legacy"
+
+        # Resolve raw_input_mode with priority: argument > config > default
+        resolved_raw_input_mode: RawInputMode
+        if raw_input_mode is not None:
+            resolved_raw_input_mode = raw_input_mode
+        elif isinstance(config, AgentsManifest):
+            resolved_raw_input_mode = getattr(config.pool_server, "raw_input_mode", "dict")
+        else:
+            resolved_raw_input_mode = "dict"
 
         # Resolve transport with priority: argument > config > default
         resolved_transport: Transport
@@ -218,10 +236,11 @@ class ACPServer(BaseServer):
             config_path=config_path,
             transport=resolved_transport,
             subagent_display_mode=resolved_display_mode,
+            raw_input_mode=resolved_raw_input_mode,
             show_events=show_events,
             show_events_detailed=show_events_detailed,
         )
-        agent_names = list(server.pool.all_agents.keys())
+        agent_names = list(server.pool.manifest.agents.keys())
 
         # Validate specified agent exists if provided
         if agent and agent not in pool.manifest.agents:
@@ -233,22 +252,26 @@ class ACPServer(BaseServer):
             server.log.info("ACP session agent", agent=agent)
         return server
 
-    def _resolve_default_agent(self) -> BaseAgent[Any, Any]:
+    async def _resolve_default_agent(self) -> BaseAgent[Any, Any]:
         """Resolve the default agent from name or get pool's default agent.
 
         Returns:
             The resolved agent instance
 
         Raises:
-            RuntimeError: If no agents are available
+            RuntimeError: If no agents are available or SessionPool not available
             ValueError: If specified agent doesn't exist
         """
-        # Use specified agent name or fall back to pool's default agent
-        if self.agent:
-            if self.agent not in self.pool.all_agents:
-                raise ValueError(f"Agent {self.agent!r} not found in pool")
-            return self.pool.all_agents[self.agent]
-        return self.pool.main_agent
+        session_pool = self.pool.session_pool
+        if session_pool is None:
+            msg = "SessionPool not available"
+            raise RuntimeError(msg)
+
+        agent_name = self.agent if self.agent else self.pool.main_agent_name
+        if self.agent and self.agent not in self.pool.manifest.agents:
+            raise ValueError(f"Agent {self.agent!r} not found in pool")
+
+        return await session_pool.sessions.get_or_create_session_agent("acp-default", agent_name)
 
     async def _start_async(self) -> None:
         """Start the ACP server (blocking async - runs until stopped)."""
@@ -257,7 +280,7 @@ class ACPServer(BaseServer):
         )
         self.log.info("Starting ACP server", transport=transport_name)
         # Resolve agent instance from name
-        default_agent = self._resolve_default_agent()
+        default_agent = await self._resolve_default_agent()
         self.log.info("Using default agent", agent=default_agent.name)
         create_acp_agent = functools.partial(
             AgentPoolACPAgent,
@@ -266,6 +289,7 @@ class ACPServer(BaseServer):
             load_skills=self.load_skills,
             server=self,
             subagent_display_mode=self.subagent_display_mode,
+            raw_input_mode=self.raw_input_mode,
         )
         debug_file = self.debug_file if self.debug_messages else None
         observers = None
@@ -327,7 +351,7 @@ class ACPServer(BaseServer):
                 manifest=new_manifest,
             )
         # 2. Validate agent exists in new pool if specified
-        agent_names = list(new_pool.all_agents.keys())
+        agent_names = list(new_pool.manifest.agents.keys())
         if not agent_names:
             msg = "New configuration contains no agents"
             raise ValueError(msg)
@@ -352,7 +376,7 @@ class ACPServer(BaseServer):
         self.agent = agent_name
         self.config_path = config_path
         # 6. Resolve and return the default agent instance
-        default_agent = self._resolve_default_agent()
+        default_agent = await self._resolve_default_agent()
         self.log.info(
             "Pool swapped successfully", agent_names=agent_names, default_agent=default_agent.name
         )

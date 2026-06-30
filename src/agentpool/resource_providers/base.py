@@ -154,9 +154,7 @@ class ResourceProvider(ABC):
             agent_ctx_param: str | None = None
             for name, param in sig.parameters.items():
                 ann = param.annotation
-                if ann is AgentContext or (
-                    isinstance(ann, type) and ann is AgentContext
-                ):
+                if ann is AgentContext or (isinstance(ann, type) and ann is AgentContext):
                     agent_ctx_param = name
                     break
                 # Handle string annotations (from __future__ import annotations)
@@ -214,9 +212,15 @@ class ResourceProvider(ABC):
             wrapper.__wrapped__ = original_fn  # type: ignore[attr-defined]
 
             # Build signature: RunContext + other params (without AgentContext/RunContext)
-            new_params = [inspect.Parameter("ctx", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=RunContext)]
+            new_params = [
+                inspect.Parameter(
+                    "ctx", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=RunContext
+                )
+            ]
             new_params.extend(other_params)
-            wrapper.__signature__ = inspect.Signature(new_params, return_annotation=sig.return_annotation)  # type: ignore[attr-defined]
+            wrapper.__signature__ = inspect.Signature(
+                new_params, return_annotation=sig.return_annotation
+            )
             wrapper.__annotations__ = {"ctx": RunContext}
             for n, p in sig.parameters.items():
                 if n == agent_ctx_param or n == run_ctx_param:
@@ -242,11 +246,7 @@ class ResourceProvider(ABC):
                 toolsets.append(FunctionToolset(pa_tools, id=self.name))
             if confirm_tools:
                 pa_tools = [_wrap_for_pydantic_ai(tool) for tool in confirm_tools]
-                toolsets.append(
-                    ApprovalRequiredToolset(
-                        FunctionToolset(pa_tools, id=self.name)
-                    )
-                )
+                toolsets.append(ApprovalRequiredToolset(FunctionToolset(pa_tools, id=self.name)))
 
             if not toolsets:
                 return None

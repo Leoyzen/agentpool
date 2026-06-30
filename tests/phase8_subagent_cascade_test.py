@@ -40,7 +40,7 @@ async def test_subagent_cancellation_cascade_within_5s(manifest: AgentsManifest)
     manifest.agents["sub-agent"] = subagent_config
 
     async with AgentPool(manifest=manifest) as pool:
-        async with pool.get_agent("parent-agent") as parent_agent:
+        async with pool.manifest.agents["parent-agent"].get_agent(pool=pool) as parent_agent:
             # Spawn a subagent in background via TaskGroup
             async with anyio.create_task_group() as tg:
                 tg.start_soon(parent_agent.run, "Spawn a subagent and then I will cancel")

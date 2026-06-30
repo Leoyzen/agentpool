@@ -49,7 +49,7 @@ async def test_start_transitions_to_running() -> None:
     """start() transitions status to running and stores the task."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     task: asyncio.Task[Any] = asyncio.create_task(asyncio.sleep(0))
-    handle.start(task)
+    handle._start_task(task)
     assert handle.status == RunStatus.running
     assert handle.run_ctx.current_task is task
     await task
@@ -58,7 +58,7 @@ async def test_start_transitions_to_running() -> None:
 def test_start_without_task() -> None:
     """start() works when no task is provided."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
-    handle.start()
+    handle._start_task()
     assert handle.status == RunStatus.running
     assert handle.run_ctx.current_task is None
 
@@ -132,7 +132,7 @@ async def test_cancel_sets_cancelled_flag() -> None:
     """cancel() sets run_ctx.cancelled without calling cleanup."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     task = asyncio.create_task(asyncio.sleep(10))
-    handle.start(task)
+    handle._start_task(task)
 
     handle.cancel()
     assert handle.run_ctx.cancelled is True
@@ -160,7 +160,7 @@ async def test_cancel_does_not_call_cleanup_callback() -> None:
         _cleanup_callback=cleanup,
     )
     task = asyncio.create_task(asyncio.sleep(10))
-    handle.start(task)
+    handle._start_task(task)
 
     handle.cancel()
     assert cleanup_calls == []
@@ -186,7 +186,7 @@ async def test_cancel_done_task_is_safe() -> None:
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     task = asyncio.create_task(asyncio.sleep(0))
     await task
-    handle.start(task)
+    handle._start_task(task)
 
     handle.cancel()
     assert handle.run_ctx.cancelled is True

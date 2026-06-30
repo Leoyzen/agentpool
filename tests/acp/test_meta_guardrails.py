@@ -138,4 +138,43 @@ async def test_spawn_session_start_legacy_child_session_tracked(
     assert "child_track_001" in converter._child_sessions
 
 
+# ---------------------------------------------------------------------------
+# 9.13: Legacy mode unchanged — no SubagentRunInfo, no _meta
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_legacy_mode_no_subagent_run_info_or_field_meta(
+    converter: ACPEventConverter,
+):
+    """Legacy mode SpawnSessionStart has no SubagentRunInfo and no field_meta.
+
+    Given: A SpawnSessionStart in legacy mode (default converter).
+    When: The event is converted.
+    Then: No update contains 'subagent' field (SubagentRunInfo) or 'field_meta'.
+    """
+    event = SpawnSessionStart(
+        child_session_id="child_legacy_001",
+        parent_session_id="parent_001",
+        tool_call_id="tc_legacy_001",
+        spawn_mechanism="spawn",
+        source_name="coder",
+        source_type="agent",
+        description="Legacy guardrail test",
+    )
+    updates = [u async for u in converter.convert(event)]
+
+    assert len(updates) >= 1
+    for update in updates:
+        d = _dump(update)
+        # Legacy mode must NOT have SubagentRunInfo
+        assert "subagent" not in d, (
+            f"Legacy mode leaked SubagentRunInfo: {d.get('subagent')}"
+        )
+        # Legacy mode must NOT have field_meta
+        assert d.get("field_meta") is None, (
+            f"Legacy mode leaked field_meta: {d.get('field_meta')}"
+        )
+
+
 

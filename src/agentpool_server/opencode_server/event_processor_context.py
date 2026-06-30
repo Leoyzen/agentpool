@@ -125,9 +125,7 @@ class EventProcessorContext:
             "output_tokens": self.output_tokens,
             "total_cost": self.total_cost,
             "stream_start_ms": self.stream_start_ms,
-            "tool_parts": {
-                tc_id: tp.model_dump() for tc_id, tp in self.tool_parts.items()
-            },
+            "tool_parts": {tc_id: tp.model_dump() for tc_id, tp in self.tool_parts.items()},
             "tool_outputs": dict(self.tool_outputs),
             "tool_inputs": dict(self.tool_inputs),
             "subagent_tool_parts": {

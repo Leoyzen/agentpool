@@ -1,6 +1,8 @@
 """Test that native agent streaming emits events in correct order.
 
-Verifies: RunStartedEvent -> (intermediate events) -> StreamCompleteEvent.
+Verifies: (intermediate events) -> StreamCompleteEvent.
+RunStartedEvent is published by RunHandle.start() to EventBus,
+not yielded in the standalone stream.
 """
 
 from __future__ import annotations
@@ -9,7 +11,7 @@ from pydantic_ai.models.test import TestModel
 import pytest
 
 from agentpool import Agent
-from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
+from agentpool.agents.events import StreamCompleteEvent
 
 
 TEST_RESPONSE = "I am a test response"
@@ -25,20 +27,20 @@ def ordering_agent() -> Agent[None]:
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_streaming_event_ordering(ordering_agent: Agent[None]) -> None:
-    """First event must be RunStartedEvent, last must be StreamCompleteEvent."""
+    """Last event must be StreamCompleteEvent with correct content.
+
+    RunStartedEvent is published by RunHandle.start() to EventBus,
+    not yielded in the standalone stream path.
+    """
     events = []
 
     async for event in ordering_agent.run_stream("Hello"):
         events.append(event)
 
-    assert len(events) >= 2, "Expected at least RunStartedEvent and StreamCompleteEvent"
+    assert len(events) >= 1, "Expected at least StreamCompleteEvent"
 
-    first_event = events[0]
     last_event = events[-1]
 
-    assert isinstance(first_event, RunStartedEvent), (
-        f"First event must be RunStartedEvent, got {type(first_event).__name__}"
-    )
     assert isinstance(last_event, StreamCompleteEvent), (
         f"Last event must be StreamCompleteEvent, got {type(last_event).__name__}"
     )

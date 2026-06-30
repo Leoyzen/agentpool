@@ -53,8 +53,7 @@ ResourceConfig = _FileSystemConfigUnion | str
 
 # Unified agent config type with top-level discriminator
 AnyAgentConfig = Annotated[
-    NativeAgentConfig
-    | ACPAgentConfigTypes,
+    NativeAgentConfig | ACPAgentConfigTypes,
     Field(discriminator="type"),
 ]
 
@@ -772,6 +771,25 @@ class AgentsManifest(Schema):
             response_def = self.responses[agent_config.output_type]
             return response_def.response_schema.get_schema()
         return agent_config.output_type.response_schema.get_schema()
+
+    @model_validator(mode="after")
+    def _populate_node_names(self) -> Self:
+        """Populate ``name`` on agent/team configs from their dict key.
+
+        When agents or teams are defined in YAML, the dict key (e.g.
+        ``worker:``) is the canonical identifier, but ``config.name``
+        stays ``None`` because ``NodeConfig`` is frozen and the field
+        defaults to ``None``.  This validator back-fills ``name`` so
+        that ``Agent.from_config()`` and graph step IDs use the correct
+        value instead of falling back to ``"native_agent"``.
+        """
+        for name, config in self.agents.items():
+            if config.name is None:
+                self.agents[name] = config.model_copy(update={"name": name})
+        for name, config in self.teams.items():
+            if config.name is None:
+                self.teams[name] = config.model_copy(update={"name": name})
+        return self
 
     @model_validator(mode="after")
     def validate_extra_fields(self) -> Self:

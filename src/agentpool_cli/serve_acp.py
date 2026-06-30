@@ -152,10 +152,17 @@ def acp_command(  # noqa: PLR0915
         ),
     ] = None,
     subagent_display_mode: Annotated[
-        Literal["legacy", "zed"] | None,
+        Literal["legacy", "zed", "qwen"] | None,
         t.Option(
             "--subagent-display-mode",
-            help="Display subagent: 'legacy' or 'zed'",
+            help="Display subagent: 'legacy', 'zed', or 'qwen'",
+        ),
+    ] = None,
+    raw_input_mode: Annotated[
+        Literal["dict", "skip", "json_str"] | None,
+        t.Option(
+            "--raw-input-mode",
+            help="Tool call raw_input mode: 'dict' (default), 'skip', or 'json_str'",
         ),
     ] = None,
 ) -> None:
@@ -275,6 +282,7 @@ def acp_command(  # noqa: PLR0915
                 load_skills=load_skills,
                 transport=transport_config,
                 subagent_display_mode=subagent_display_mode,
+                raw_input_mode=raw_input_mode,
                 show_events=show_events,
                 show_events_detailed=show_events_detailed,
             )

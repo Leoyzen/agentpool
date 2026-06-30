@@ -6,16 +6,16 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, assert_never
 import uuid
 
-from fasta2a.applications import FastA2A  # type: ignore[import-untyped]
-from fasta2a.broker import InMemoryBroker  # type: ignore[import-untyped]
-from fasta2a.schema import (  # type: ignore[import-untyped]
+from fasta2a.applications import FastA2A
+from fasta2a.broker import InMemoryBroker
+from fasta2a.schema import (
     Artifact,
     DataPart,
     Message,
     TextPart as A2ATextPart,
 )
-from fasta2a.storage import InMemoryStorage  # type: ignore[import-untyped]
-from fasta2a.worker import Worker  # type: ignore[import-untyped]
+from fasta2a.storage import InMemoryStorage
+from fasta2a.worker import Worker
 from pydantic import TypeAdapter
 from pydantic_ai import (
     AudioUrl,

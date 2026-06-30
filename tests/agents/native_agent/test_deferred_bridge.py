@@ -620,31 +620,4 @@ class TestEmitDeferredEvent:
         # Should not raise
         await _emit_deferred_event(run_ctx, event)
 
-    @pytest.mark.anyio
-    async def test_emit_falls_back_to_event_queue(
-        self,
-        run_ctx: RunContext[Any],
-        block_tool_call: ToolCallPart,
-    ) -> None:
-        """Event is pushed to event_queue when no event_bus."""
-        from agentpool.agents.native_agent.deferred_bridge import (
-            _emit_deferred_event,
-        )
 
-        run_ctx.deps.run_ctx.event_bus = None
-
-        event = ToolCallDeferredEvent(
-            tool_call_id="tc-1",
-            tool_name="bash",
-            deferred_strategy="block",
-            status="pending",
-            session_id="test-session",
-        )
-
-        await _emit_deferred_event(run_ctx, event)
-
-        # Check event_queue has the event
-        queue = run_ctx.deps.run_ctx.event_queue
-        assert not queue.empty()
-        queued = queue.get_nowait()
-        assert queued is event

@@ -39,10 +39,7 @@ async def _emit_deferred_event(
     ctx: RunContext[AgentContext[Any]],
     event: ToolCallDeferredEvent,
 ) -> None:
-    """Publish a ``ToolCallDeferredEvent`` to the event bus or queue.
-
-    Prefers the ``EventBus`` (cross-session) when available; falls back to
-    the per-run ``event_queue`` for in-process consumers.
+    """Publish a ``ToolCallDeferredEvent`` to the event bus.
 
     Args:
         ctx: pydantic-ai RunContext with ``AgentContext`` as deps.
@@ -56,7 +53,7 @@ async def _emit_deferred_event(
     if run_ctx.event_bus is not None:
         await run_ctx.event_bus.publish(run_ctx.session_id, event)
     else:
-        run_ctx.event_queue.put_nowait(event)
+        logger.warning("No event_bus available — deferred event dropped", tool_name=event.tool_name)
 
 
 async def _resolve_deferred_calls(
@@ -135,7 +132,7 @@ async def _resolve_deferred_calls(
     # Block-strategy calls are excluded → they remain unresolved.
     # Non-deferred calls are also excluded → they flow to the next capability
     # via the CombinedCapability.handle_deferred_tool_calls pipeline.
-    return requests.build_results(calls=continue_results)  # type: ignore[arg-type]
+    return requests.build_results(calls=continue_results)
 
 
 def create_deferred_bridge_capability(

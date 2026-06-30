@@ -30,7 +30,7 @@ from agentpool.messaging import ChatMessage
 
 # Threshold: graph-based must be within 40% of direct execution.
 # (Target: ~20% overhead + 20% measurement variance buffer for ms-scale ops.
-#  SessionPool/RunExecutor integration adds legitimate overhead from session
+#  SessionPool integration adds legitimate overhead from session
 #  management, event bus subscription, and per-run context creation —
 #  roughly 1-4ms in absolute terms which is negligible at production scale.)
 OVERHEAD_THRESHOLD = 1.40
@@ -118,6 +118,7 @@ async def _run_parallel_direct(
 
 
 @pytest.mark.anyio
+@pytest.mark.slow
 async def test_parallel_team_overhead() -> None:
     """Team with 3 agents: graph Fork+Join overhead vs direct asyncio.gather."""
     agent_a = _make_echo_agent("a", "A")
@@ -293,6 +294,7 @@ async def _run_sequential_direct(
 
 
 @pytest.mark.anyio
+@pytest.mark.slow
 async def test_sequential_team_overhead() -> None:
     """TeamRun with 3 agents: graph overhead vs direct sequential run.
 

@@ -524,9 +524,7 @@ class TurnCompleteUpdate(AnnotatedObject):
     See: https://github.com/agentclientprotocol/agent-client-protocol/issues/554
     """
 
-    session_update: Literal["turn_complete"] = Field(
-        default="turn_complete", init=False
-    )
+    session_update: Literal["turn_complete"] = Field(default="turn_complete", init=False)
 
     stop_reason: Literal["end_turn", "max_tokens", "refusal", "cancelled"] = "end_turn"
     """Why the turn stopped."""

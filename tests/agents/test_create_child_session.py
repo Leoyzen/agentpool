@@ -51,6 +51,8 @@ def _make_mock_session_pool(store: MemorySessionStore) -> MagicMock:
         return MagicMock(session_id=session_id)
 
     session_pool.create_session = mock_create_session
+    # get_or_create_session_agent is async; must use AsyncMock so await works
+    session_pool.sessions.get_or_create_session_agent = AsyncMock()
     return session_pool
 
 

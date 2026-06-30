@@ -12,6 +12,7 @@ session updates.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -20,7 +21,7 @@ from acp.agent.acp_requests import ACPRequests
 from acp.schema.capabilities import ClientCapabilities
 from agentpool.agents.events.events import SpawnSessionStart
 from agentpool.log import get_logger
-from agentpool_server.acp_server.event_converter import ACPEventConverter
+from agentpool_server.acp_server.event_converter import ACPEventConverter, SubagentContext
 from agentpool_server.acp_server.input_provider import ACPInputProvider
 from agentpool_server.mixins import ConsumerShutdown, ProtocolEventConsumerMixin
 
@@ -72,6 +73,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         self.client = client
         self.client_capabilities = client_capabilities
         self._converters: dict[str, ACPEventConverter] = {}
+        self._parent_of: dict[str, str] = {}
         self.acp_agent = acp_agent
 
     @property
@@ -116,12 +118,125 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         if isinstance(event, SpawnSessionStart):
             child_sid = event.child_session_id
             if child_sid and child_sid != session_id:
-                if getattr(event, "spawn_mechanism", None) == "task":
+                if event.spawn_mechanism == "task":
                     # Skip background tasks in non-zed modes only.
                     # Zed mode needs background task sessions too for card display.
-                    if self._event_converter_template.subagent_display_mode != "zed":
+                    if self._event_converter_template.subagent_display_mode not in ("zed", "qwen"):
                         return
+                # Create child converter with subagent context
+                client_supports_turn_complete = (
+                    self.client_capabilities is not None
+                    and self.client_capabilities.turn_complete is True
+                )
+                self._converters[child_sid] = ACPEventConverter(
+                    subagent_display_mode=self._event_converter_template.subagent_display_mode,
+                    raw_input_mode=self._event_converter_template.raw_input_mode,
+                    client_supports_turn_complete=client_supports_turn_complete,
+                    subagent_context=SubagentContext(
+                        parent_tool_call_id=event.tool_call_id or "",
+                        subagent_type=event.source_name or "",
+                    ),
+                )
                 await self.start_event_consumer(child_sid)
+                # Register parent-child relationship BEFORE starting closure
+                # so the closure can safely pop the entry.
+                self._parent_of[child_sid] = session_id
+                done_event = self._consumer_done_events.get(child_sid)
+                if done_event is not None:
+                    task = asyncio.ensure_future(
+                        self._await_child_and_notify(
+                            parent_sid=session_id,
+                            child_sid=child_sid,
+                            done_event=done_event,
+                        )
+                    )
+                    self._consumer_task_refs.append(task)
+                else:
+                    # Race: consumer already finished before we could grab
+                    # the done_event. Notify immediately and clean up.
+                    self._parent_of.pop(child_sid, None)
+                    await self._notify_completed(parent_sid=session_id, child_sid=child_sid)
+
+    async def _notify_completed(self, parent_sid: str, child_sid: str) -> None:
+        """Send a subagent completion notification to the parent session.
+
+        Looks up the parent session's converter and calls
+        ``build_subagent_completed()`` to emit a ``ToolCallProgress``
+        with ``status="completed"``, closing the tool call lifecycle
+        started by ``SpawnSessionStart`` in zed mode.
+
+        Args:
+            parent_sid: The parent session that spawned the child.
+            child_sid: The child session that has completed.
+        """
+        converter = self._converters.get(parent_sid)
+        if converter is None:
+            logger.debug(
+                "Parent converter gone, skipping completion notification",
+                parent_sid=parent_sid,
+                child_sid=child_sid,
+            )
+            return
+        try:
+            async for update in converter.build_subagent_completed(child_session_id=child_sid):
+                from acp.schema import SessionNotification
+
+                notification = SessionNotification(
+                    session_id=parent_sid,
+                    update=update,
+                )
+                await self.client.session_update(notification)
+        except (ConnectionResetError, BrokenPipeError):
+            logger.debug(
+                "Client disconnected during completion notification",
+                parent_sid=parent_sid,
+                child_sid=child_sid,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to send subagent completion notification",
+                parent_sid=parent_sid,
+                child_sid=child_sid,
+            )
+
+    async def _await_child_and_notify(
+        self,
+        parent_sid: str,
+        child_sid: str,
+        done_event: anyio.Event,
+    ) -> None:
+        """Wait for a child consumer to finish, then notify the parent.
+
+        Background closure that waits on the child session's
+        ``done_event`` (set by the mixin's finally block when the
+        consumer loop exits), then calls ``_notify_completed`` to
+        deliver the completion notification to the parent session.
+
+        Args:
+            parent_sid: The parent session that spawned the child.
+            child_sid: The child session to wait for.
+            done_event: The child consumer's done event from
+                ``_consumer_done_events``.
+        """
+        try:
+            await done_event.wait()
+            self._parent_of.pop(child_sid, None)
+            await self._notify_completed(parent_sid, child_sid)
+        except (ConnectionResetError, BrokenPipeError):
+            logger.debug(
+                "Client disconnected during child completion notification",
+                child_sid=child_sid,
+            )
+        except Exception:
+            logger.exception(
+                "Error in child completion notification",
+                child_sid=child_sid,
+            )
+        finally:
+            task = asyncio.current_task()
+            if task is not None:
+                with contextlib.suppress(ValueError):
+                    self._consumer_task_refs.remove(task)
 
     async def _before_consumer_loop(self, session_id: str) -> None:
         """Create per-session ACPEventConverter before loop starts.
@@ -129,11 +244,14 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         Args:
             session_id: The session whose consumer is starting.
         """
+        if session_id in self._converters:
+            return  # Already created by _on_spawn_session_start
         client_supports_turn_complete = (
             self.client_capabilities is not None and self.client_capabilities.turn_complete is True
         )
         converter = ACPEventConverter(
             subagent_display_mode=self._event_converter_template.subagent_display_mode,
+            raw_input_mode=self._event_converter_template.raw_input_mode,
             client_supports_turn_complete=client_supports_turn_complete,
         )
         self._converters[session_id] = converter
@@ -164,6 +282,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                 notification = SessionNotification(
                     session_id=effective_sid,
                     update=update,
+                    field_meta=converter.subagent_meta,
                 )
                 await self.client.session_update(notification)
         except (ConnectionResetError, BrokenPipeError) as e:
@@ -195,12 +314,13 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             )
 
     async def _after_consumer_loop(self, session_id: str) -> None:
-        """Clean up per-session converter.
+        """Clean up per-session converter and parent-child tracking.
 
         Args:
             session_id: The session whose consumer has stopped.
         """
         self._converters.pop(session_id, None)
+        self._parent_of.pop(session_id, None)
 
     async def _event_consumer_loop(self, session_id: str) -> None:
         """Backward-compatible wrapper for mixin's consumer loop.
@@ -284,6 +404,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                             client_capabilities=self.client_capabilities,
                             client_info=self.acp_agent.client_info,
                             subagent_display_mode=self.acp_agent.subagent_display_mode,
+                            raw_input_mode=self.acp_agent.raw_input_mode,
                         )
                         # Re-subscribe EventBus for resumed session
                         await self._ensure_event_consumer(session_id)
@@ -395,11 +516,13 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             if run_handle is not None and not (
                 self.client_capabilities is not None and self.client_capabilities.turn_complete
             ):
-                await run_handle.complete_event.wait()
-                # Check if run was cancelled after completing.
+                await run_handle._turn_complete_event.wait()
+                # Check if run was cancelled after the turn completed.
                 # When client sends session/cancel, cancel_session() calls
-                # run_handle.fail() which sets cancelled flag and complete_event.
-                # We need to detect this to return stopReason="cancelled".
+                # cancel_run_for_session() which sets run_ctx.cancelled.
+                # The start() loop then publishes RunFailedEvent, which sets
+                # _turn_complete_event. We detect the cancelled flag to
+                # return stopReason="cancelled".
                 if run_handle.cancelled:
                     stop_reason = "cancelled"
         except asyncio.CancelledError:
@@ -421,9 +544,11 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         According to ACP protocol spec, session/cancel is a notification
         (no response expected). The agent must respond to the ORIGINAL
         session/prompt request with stopReason: "cancelled". This is achieved
-        by calling run_handle.fail() which sets the complete_event that
-        handle_prompt() is waiting on, and marks the run as cancelled so
-        handle_prompt() can detect it and return the correct stop_reason.
+        without calling ``run_handle.fail()``: the ``start()`` loop detects
+        the cancellation, publishes ``RunFailedEvent``, and sets
+        ``_turn_complete_event`` — which ``handle_prompt()`` is waiting on.
+        The ``cancelled`` flag on ``run_ctx`` is set by ``cancel()``, so
+        ``handle_prompt()`` can detect it and return the correct stop_reason.
 
         The event consumer is NOT stopped here to allow the RunFailedEvent
         to be converted and sent as session/update before the turn completes.
@@ -439,41 +564,50 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
 
         session_pool.sessions.cancel_run_for_session(session_id)
 
-        # Explicitly complete the run to unblock handle_prompt().
-        # When client sends session/cancel, the original session/prompt request
-        # is still in progress, waiting on complete_event. We need to complete
-        # the run so handle_prompt() can unblock and return stopReason="cancelled".
-        session = session_pool.sessions.get_session(session_id)
-        if session is not None and session.current_run_id is not None:
-            # Use public API get_run() instead of accessing private _runs
-            run_handle = session_pool.get_run(session.current_run_id)
-            if run_handle is not None:
-                run_handle.fail(
-                    exception=RuntimeError("Session cancelled by client"),
-                    event_bus=session_pool.event_bus,
-                )
-                logger.debug(
-                    "Run completed as cancelled",
-                    session_id=session_id,
-                    run_id=session.current_run_id,
-                )
+        # The start() loop detects the cancelled flag, publishes
+        # RunFailedEvent (which sets _turn_complete_event), and the
+        # event consumer converts it to session/update with
+        # stop_reason="cancelled". handle_prompt() unblocks on
+        # _turn_complete_event and returns the cancelled stop_reason.
+        # No explicit fail() call is needed here.
 
         # Note: Event consumer is NOT stopped here. It will continue running
         # until the RunFailedEvent is processed, which emits the appropriate
         # session/update (turn_complete with stop_reason="cancelled").
-        # This is done via EventBus publish in run_handle.fail().
+
+    async def _cancel_subagents(self, parent_sid: str) -> None:
+        """Recursively cancel all child sessions of parent_sid.
+
+        Walks the ``_parent_of`` tree depth-first, popping each child
+        before recursing into its own children to prevent infinite loops
+        on circular entries.  After the subtree is drained, each child's
+        event consumer is stopped via ``stop_event_consumer()``, which
+        cascades cancellation through the mixin's CancelScope.
+
+        Args:
+            parent_sid: The session whose child sessions should be cancelled.
+        """
+        children = [child for child, parent in self._parent_of.items() if parent == parent_sid]
+        for child_sid in children:
+            self._parent_of.pop(child_sid, None)
+            await self._cancel_subagents(child_sid)
+            await self.stop_event_consumer(child_sid)
 
     async def close_session(self, session_id: str) -> None:
         """Close a session and tear down its event consumer.
 
-        Sends the EventBus sentinel to gracefully stop the consumer loop,
-        waits for it to finish, then delegates to
-        ``SessionPool.close_session()``.
+        Recursively cancels all child (subagent) sessions before stopping
+        the parent's own consumer.  Then sends the EventBus sentinel to
+        gracefully stop the consumer loop, waits for it to finish, and
+        delegates to ``SessionPool.close_session()``.
 
         Args:
             session_id: The session to close.
         """
         session_pool = self.agent_pool.session_pool
+
+        # Cancel all child sessions first (depth-first, pop-before-recurse)
+        await self._cancel_subagents(session_id)
 
         # Stop the event consumer (mixin's stop handles cancellation + unsubscribe)
         await self.stop_event_consumer(session_id)

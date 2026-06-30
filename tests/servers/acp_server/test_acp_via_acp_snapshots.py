@@ -163,7 +163,7 @@ class ACPViaACPHarness:
         # Use AgentPool to instantiate the client agent from config
         async with AgentPool(manifest=client_config_path) as pool:
             # ACP agents are in pool.all_agents dict
-            agent = pool.all_agents["test_client"]
+            agent = pool.manifest.agents["test_client"]
             async for event in agent.run_stream("Execute the tool"):
                 event_dict = asdict(event)
                 event_dict["type"] = type(event).__name__

@@ -17,43 +17,15 @@
   },
   {
     "payload": {
-      "kind": "edit",
-      "locations": [
-        {
-          "line": 0,
-          "path": "/test/example.py"
-        }
-      ],
-      "sessionUpdate": "tool_call_update",
-      "title": "Editing file: /test/example.py (Rename function from old to new)",
-      "toolCallId": "pyd_ai_tool_call_id__edit"
-    },
-    "type": "tool_call_update"
-  },
-  {
-    "payload": {
       "content": [
         {
-          "newText": "def new_function():\n    pass\n",
-          "oldText": "def old_function():\n    pass\n",
-          "path": "/test/example.py",
-          "type": "diff"
+          "content": {
+            "text": "Successfully edited example.py: Rename function from old to new (1 lines changed)",
+            "type": "text"
+          },
+          "type": "content"
         }
       ],
-      "locations": [
-        {
-          "path": "/test/example.py"
-        }
-      ],
-      "sessionUpdate": "tool_call_update",
-      "status": "completed",
-      "title": "Editing: /test/example.py",
-      "toolCallId": "pyd_ai_tool_call_id__edit"
-    },
-    "type": "tool_call_update"
-  },
-  {
-    "payload": {
       "rawOutput": "Successfully edited example.py: Rename function from old to new (1 lines changed)",
       "sessionUpdate": "tool_call_update",
       "status": "completed",

@@ -119,6 +119,7 @@ def opencode_command(
             log_dir.mkdir(parents=True, exist_ok=True)
             log_file = log_dir / "opencode.log"
             import click
+
             ctx = click.get_current_context(silent=True)
             log_level = (ctx.obj or {}).get("log_level", "info") if ctx else "info"
             ap_log.configure_logging(level=log_level.upper(), force=True, log_file=str(log_file))
@@ -142,11 +143,18 @@ def opencode_command(
 
     async def run_server() -> None:
         async with pool:
+            # Get main agent instance via SessionPool for OpenCode server
+            assert pool.session_pool is not None
+            agent = await pool.session_pool.sessions.get_or_create_session_agent(
+                session_id="__opencode_bootstrap__",
+                agent_name=pool.main_agent_name,
+            )
+
             # Load agent rules from global and project locations
-            await pool.main_agent.load_rules(working_dir)
+            await agent.load_rules(working_dir)
 
             server = OpenCodeServer(
-                pool.main_agent,
+                agent,
                 host=host,
                 port=port,
                 working_dir=working_dir,

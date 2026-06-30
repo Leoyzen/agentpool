@@ -23,7 +23,7 @@ from agentpool.messaging.processing import finalize_message, prepare_prompts
 
 
 logger = get_logger(__name__)
-_PROMPT_TEMPLATE_ENV = Environment(loader=BaseLoader(), autoescape=False)  # noqa: S701
+_PROMPT_TEMPLATE_ENV = Environment(loader=BaseLoader(), autoescape=False)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -60,7 +60,9 @@ async def _timeout_stream[T](
         if remaining <= 0:
             logger.warning(
                 "Team member stream timed out",
-                member=member_name, team=team_name, timeout=timeout,
+                member=member_name,
+                team=team_name,
+                timeout=timeout,
             )
             return
         try:
@@ -70,7 +72,9 @@ async def _timeout_stream[T](
         except TimeoutError:
             logger.warning(
                 "Team member stream timed out",
-                member=member_name, team=team_name, timeout=timeout,
+                member=member_name,
+                team=team_name,
+                timeout=timeout,
             )
             return
         yield item
@@ -104,8 +108,8 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         from agentpool.utils.identifiers import generate_session_id
 
         session_pool = self.agent_pool.session_pool
-        pool_agents = self.agent_pool.all_agents
-        pool_teams = getattr(self.agent_pool, "teams", {})
+        pool_agents = self.agent_pool.manifest.agents
+        pool_teams = self.agent_pool.manifest.teams
         scoped_nodes: list[MessageNode[Any, Any]] = []
         child_session_ids: dict[str, str] = {}
 
@@ -191,9 +195,7 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         if parent_session_id_kwarg:
             kwargs["parent_session_id"] = parent_session_id_kwarg
         parent_session_id = (
-            parent_session_id_kwarg
-            or session_id_kwarg
-            or self._active_parent_session_id()
+            parent_session_id_kwarg or session_id_kwarg or self._active_parent_session_id()
         )
         team_run_id = uuid4().hex
         template_vars = kwargs.pop("template_vars", {})
@@ -259,11 +261,7 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
             if not name:
                 continue
             raw_list = raw_names if isinstance(raw_names, list) else [raw_names]
-            names = [
-                str(item).strip()
-                for item in raw_list
-                if str(item).strip()
-            ]
+            names = [str(item).strip() for item in raw_list if str(item).strip()]
             if names:
                 result[name] = list(dict.fromkeys(names))
         return result
@@ -312,11 +310,7 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         if not instructions:
             return prompts
         prompt_text = "\n\n".join(str(prompt) for prompt in prompts if prompt is not None).strip()
-        combined = (
-            f"{instructions}\n\n{prompt_text}"
-            if prompt_text
-            else instructions
-        )
+        combined = f"{instructions}\n\n{prompt_text}" if prompt_text else instructions
         return [combined]
 
     def _resolve_member_prompt(

@@ -9,7 +9,6 @@ from agentpool.messaging import MessageNode
 
 
 if TYPE_CHECKING:
-
     from agentpool import AgentPool
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.prompts.manager import PromptManager
@@ -61,6 +60,15 @@ class NodeContext[TDeps = object]:
         # 3. Pool-level fallback
         if self.pool and self.pool._input_provider:
             return self.pool._input_provider
+        # 4. ContextVar fallback — set by _run_turn_unlocked for the current
+        # turn. This catches cases where session.input_provider was not set
+        # (e.g., run_stream path) or the agent was cached before the provider
+        # was available.
+        from agentpool.mcp_server.manager import _current_input_provider
+
+        contextvar_provider = _current_input_provider.get()
+        if contextvar_provider is not None:
+            return contextvar_provider
         raise RuntimeError(
             f"No InputProvider configured for node {self.node_name!r}. "
             f"When running under ACP/OpenCode protocols, an input provider must be "

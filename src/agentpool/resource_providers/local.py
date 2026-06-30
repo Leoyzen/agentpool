@@ -205,7 +205,7 @@ class LocalResourceProvider(ResourceProvider):
         # Avoid double "references/" prefix when ref_path already contains it
         # (e.g., when called from _load_reference_content via skill:// URIs)
         if ref_path.startswith("references/"):
-            ref_path = ref_path[len("references/"):]
+            ref_path = ref_path[len("references/") :]
 
         # Construct the full path and validate it's within references_dir
         try:

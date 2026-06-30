@@ -187,8 +187,7 @@ class Tool[TOutputType = Any]:
         # stream strategy is not yet implemented
         if self.deferred_strategy == "stream":
             raise NotImplementedError(
-                f"Tool '{self.name}': deferred_strategy='stream' is deferred "
-                f"to a follow-up change."
+                f"Tool '{self.name}': deferred_strategy='stream' is deferred to a follow-up change."
             )
 
     __repr__ = dataclasses_no_defaults_repr
@@ -392,7 +391,9 @@ class Tool[TOutputType = Any]:
             # Fallback to schemez if pydantic_ai.function_schema fails
             from pydantic.errors import PydanticSchemaGenerationError, PydanticUndefinedAnnotation
 
-            if isinstance(e, (PydanticSchemaGenerationError, PydanticUndefinedAnnotation, NameError)):
+            if isinstance(
+                e, (PydanticSchemaGenerationError, PydanticUndefinedAnnotation, NameError)
+            ):
                 logger.warning(
                     "pydantic_ai.function_schema failed for %s, falling back to schemez: %s",
                     self.name,
@@ -427,7 +428,7 @@ class Tool[TOutputType = Any]:
             # type: ignore[attr-defined] is needed because schemez is a third-party library
             schema_dump = getattr(schema, "model_dump")()  # noqa: B009, type: ignore[attr-defined]
             # type: ignore[no-any-return] is needed because mypy can't infer the return type
-            return apply_schema_override(schema_dump["parameters"])  # type: ignore[no-any-return]
+            return apply_schema_override(schema_dump["parameters"])
         else:
             return schema.json_schema
 

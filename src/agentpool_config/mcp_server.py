@@ -201,6 +201,7 @@ def _make_timeout_logger(
     Returns:
         A callable suitable for ``MCPServer.process_tool_call``.
     """
+
     async def _process_tool_call(
         ctx: Any,
         direct_call_tool: Any,
@@ -288,9 +289,7 @@ class StdioMCPServerConfig(BaseMCPServerConfig):
             timeout=self.timeout,
         )
 
-    def to_pydantic_ai(
-        self, elicitation_callback: Any | None = None
-    ) -> MCPServerStdio:
+    def to_pydantic_ai(self, elicitation_callback: Any | None = None) -> MCPServerStdio:
         """Convert to pydantic-ai MCPServerStdio instance."""
         from pydantic_ai.mcp import MCPServerStdio
 
@@ -362,9 +361,7 @@ class SSEMCPServerConfig(BaseMCPServerConfig):
             timeout=self.timeout,
         )
 
-    def to_pydantic_ai(
-        self, elicitation_callback: Any | None = None
-    ) -> MCPServerSSE:
+    def to_pydantic_ai(self, elicitation_callback: Any | None = None) -> MCPServerSSE:
         """Convert to pydantic-ai MCPServerSSE instance."""
         from pydantic_ai.mcp import MCPServerSSE
 
@@ -434,9 +431,7 @@ class StreamableHTTPMCPServerConfig(BaseMCPServerConfig):
             timeout=self.timeout,
         )
 
-    def to_pydantic_ai(
-        self, elicitation_callback: Any | None = None
-    ) -> MCPServerStreamableHTTP:
+    def to_pydantic_ai(self, elicitation_callback: Any | None = None) -> MCPServerStreamableHTTP:
         """Convert to pydantic-ai MCPServerStreamableHTTP instance."""
         from pydantic_ai.mcp import MCPServerStreamableHTTP
 
@@ -496,9 +491,7 @@ class AcpMCPServerConfig(BaseMCPServerConfig):
             timeout=self.timeout,
         )
 
-    def to_pydantic_ai(
-        self, elicitation_callback: Any | None = None
-    ) -> MCPServer:
+    def to_pydantic_ai(self, elicitation_callback: Any | None = None) -> MCPServer:
         """Convert to pydantic-ai MCP server instance.
 
         ACP transport is handled by the AcpMcpTransport, not pydantic-ai directly.

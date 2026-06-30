@@ -93,3 +93,40 @@ Protocol handlers SHALL subscribe to `EventBus` with `scope="descendants"`. The 
 - **WHEN** an AG-UI client subscribes to a parent session
 - **AND** a subagent creates a child session and emits events
 - **THEN** the AG-UI client receives the child session events
+
+## ADDED Requirements
+
+### Event ordering preserved through direct delegation
+
+Event ordering SHALL be preserved through direct `RunHandle.start()` delegation — events flow from `turn.execute()` through `RunHandle.start()` to the caller without intermediary queues or `drain_and_merge` coalescing.
+
+**Scenarios:**
+
+1. **WHEN** a turn executes, **THEN** `RunStartedEvent` SHALL be the first event yielded — it is yielded by `turn.execute()` first and flows through `RunHandle.start()` directly.
+
+2. **WHEN** a turn completes or errors, **THEN** `StreamCompleteEvent` or `RunErrorEvent` SHALL be the last event yielded — the terminal event breaks the consumer loop.
+
+3. **WHEN** consecutive `run_stream()` calls are made, **THEN** each call SHALL yield events in correct order — the first call's `RunHandle` is fully drained (via `gen.aclose()` in `finally`) before the second call begins.
+
+4. **WHEN** `drain_and_merge` coalescing is bypassed (direct yield from `turn.execute()`), **THEN** no test SHALL depend on coalesced events in standalone mode — events are yielded as produced by `turn.execute()`, with lower latency and no coalescing artifacts.
+
+### Requirement: EventMapper emits ToolCallProgressEvent when tool call args differ
+
+The EventMapper `_emit_tool_call_start()` SHALL return `ToolCallStartEvent` when a `tool_call_id` is not in `_pending_tool_calls`. When the `tool_call_id` is already present and the new `raw_input` differs from the stored value, the method SHALL return `ToolCallProgressEvent(in_progress, tool_input, tool_name)` instead of `None`. When the `tool_call_id` is already present and `raw_input` is identical, the method SHALL return `None` (dedup).
+
+#### Scenario: New tool call emits ToolCallStartEvent
+- **WHEN** a `FunctionToolCallEvent` arrives with a `tool_call_id` not in `_pending_tool_calls`
+- **THEN** `_emit_tool_call_start()` SHALL return a `ToolCallStartEvent` with the tool name and empty `raw_input`
+- **AND** SHALL add the `tool_call_id` to `_pending_tool_calls`
+
+#### Scenario: Changed args emit ToolCallProgressEvent
+- **WHEN** a `FunctionToolCallEvent` arrives with a `tool_call_id` already in `_pending_tool_calls`
+- **AND** the new `raw_input` differs from the stored value
+- **THEN** `_emit_tool_call_start()` SHALL return a `ToolCallProgressEvent` with `status="in_progress"`, `tool_input`, and `tool_name`
+- **AND** SHALL NOT return `None`
+
+#### Scenario: Identical args return None (dedup)
+- **WHEN** a `FunctionToolCallEvent` arrives with a `tool_call_id` already in `_pending_tool_calls`
+- **AND** the new `raw_input` is identical to the stored value
+- **THEN** `_emit_tool_call_start()` SHALL return `None`
+- **AND** SHALL NOT emit any event

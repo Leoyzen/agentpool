@@ -352,7 +352,7 @@ class StreamEventEmitter:
     # =========================================================================
 
     async def _emit(self, event: RichAgentStreamEvent[Any]) -> None:
-        """Internal method to emit events to EventBus or agent's queue."""
+        """Internal method to emit events to EventBus."""
         if self._event_bus is not None:
             session_id = getattr(self._context.agent, "session_id", None)
             if not session_id and self._context.run_ctx is not None:
@@ -362,17 +362,20 @@ class StreamEventEmitter:
                     await self._event_bus.publish(session_id, event)
                     return
                 except Exception:
-                    logger.debug(
-                        "EventBus publish failed",
+                    logger.warning(
+                        "EventBus publish failed — event dropped",
                         session_id=session_id,
                         event_type=type(event).__name__,
                     )
-
-        if self._context.run_ctx is not None:
-            await self._context.run_ctx.event_queue.put(event)
-        else:
-            logger.debug(
-                "Event dropped: no run_ctx or event_bus available",
+                    return
+            logger.warning(
+                "Event dropped: no session_id for event_bus publish",
                 agent_name=self._context.agent.name,
                 event_type=type(event).__name__,
             )
+            return
+        logger.warning(
+            "Event dropped: no event_bus available",
+            agent_name=self._context.agent.name,
+            event_type=type(event).__name__,
+        )

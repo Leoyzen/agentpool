@@ -8,7 +8,6 @@ import json
 from typing import TYPE_CHECKING, Any, cast
 
 import anyio
-
 from fastapi import APIRouter, Query
 from sse_starlette.sse import EventSourceResponse
 

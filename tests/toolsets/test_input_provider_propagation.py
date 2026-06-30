@@ -58,8 +58,8 @@ async def test_input_provider_propagated_to_subagent_via_task_tool() -> None:
     fake_provider = FakeInputProvider()
 
     async with AgentPool(manifest) as pool:
-        parent = pool.get_agent("parent")
-        child = pool.get_agent("child")
+        parent = pool.manifest.agents["parent"].get_agent(pool=pool)
+        child = pool.manifest.agents["child"].get_agent(pool=pool)
 
         # Patch session_pool.run_stream (what SubagentTools.task actually calls)
         # to capture the input_provider argument
@@ -116,8 +116,8 @@ async def test_input_provider_propagated_to_worker() -> None:
     fake_provider = FakeInputProvider()
 
     async with AgentPool(manifest) as pool:
-        main = pool.get_agent("main")
-        helper = pool.get_agent("helper")
+        main = pool.manifest.agents["main"].get_agent(pool=pool)
+        helper = pool.manifest.agents["helper"].get_agent(pool=pool)
 
         # Patch session_pool.run_stream (what worker tool actually calls)
         # to capture the input_provider argument
@@ -178,8 +178,8 @@ async def test_input_provider_propagated_to_subagent_async_mode() -> None:
     fake_provider = FakeInputProvider()
 
     async with AgentPool(manifest) as pool:
-        orchestrator = pool.get_agent("orchestrator")
-        worker = pool.get_agent("worker")
+        orchestrator = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
+        worker = pool.manifest.agents["worker"].get_agent(pool=pool)
 
         # Patch worker's run_stream to capture the input_provider argument
         captured_kwargs = {}
@@ -245,7 +245,7 @@ async def test_input_provider_propagated_when_session_bound_only() -> None:
     child_node = MagicMock(spec=MessageNode)
     child_node.agent_type = "native"
     mock_pool = MagicMock()
-    mock_pool.nodes = {"child_agent": child_node}
+    mock_pool.manifest.agents = {"child_agent": child_node}
     ctx.pool = mock_pool
 
     # Mock SessionPool

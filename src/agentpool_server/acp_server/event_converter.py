@@ -10,6 +10,7 @@ This separation enables easy testing without mocks.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 import uuid
@@ -17,11 +18,13 @@ import uuid
 from pydantic import BaseModel
 from pydantic_ai import (
     FinalResultEvent,
-    FunctionToolCallEvent,
     FunctionToolResultEvent,
     NativeToolCallPart,
     NativeToolReturnPart,
+    OutputToolCallEvent,
+    OutputToolResultEvent,
     PartDeltaEvent,
+    PartEndEvent,
     PartStartEvent,
     RetryPromptPart,
     TextPart,
@@ -49,19 +52,25 @@ from acp.schema import (
 from acp.utils import generate_tool_title, infer_tool_kind, to_acp_content_blocks
 from agentpool.agents.events import (
     CompactionEvent,
+    CustomEvent,
     DiffContentItem,
     FileContentItem,
     LocationContentItem,
     PlanUpdateEvent,
     RunErrorEvent,
     RunFailedEvent,
+    RunStartedEvent,
+    SessionResumeEvent,
     SpawnSessionStart,
     StreamCompleteEvent,
+    SubAgentEvent,
     TerminalContentItem,
     TextContentItem,
+    ToolCallCompleteEvent,
     ToolCallDeferredEvent,
     ToolCallProgressEvent,
     ToolCallStartEvent,
+    ToolResultMetadataEvent,
 )
 from agentpool.log import get_logger
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
@@ -133,6 +142,14 @@ class SubagentSessionInfo(BaseModel):
 
 
 @dataclass
+class SubagentContext:
+    """Parent context for a child session converter."""
+
+    parent_tool_call_id: str
+    subagent_type: str
+
+
+@dataclass
 class ACPEventConverter:
     """Converts agent stream events to ACP session updates.
 
@@ -149,8 +166,15 @@ class ACPEventConverter:
     """
 
     # Deprecated: kept for backward compatibility of constructor calls
-    subagent_display_mode: Literal["legacy", "zed"] = "legacy"
-    """How to display subagent output. "legacy" (default) or "zed"."""
+    subagent_display_mode: Literal["legacy", "zed", "qwen"] = "legacy"
+    """How to display subagent output. "legacy" (default), "zed", or "qwen"."""
+
+    raw_input_mode: Literal["dict", "skip", "json_str"] = "dict"
+    """How to emit tool call raw_input in ACP session updates:
+    - "dict": Parse args as dict (default; partial JSON returns empty dict)
+    - "skip": Omit raw_input in ToolCallStart; deliver via ToolCallProgress
+    - "json_str": Emit raw_input as a JSON string instead of a dict
+    """
 
     # Feature flag for TurnCompleteUpdate emission
     client_supports_turn_complete: bool = False
@@ -160,6 +184,9 @@ class ACPEventConverter:
     When False (default), no TurnCompleteUpdate is emitted for backward
     compatibility with clients that do not handle the update type.
     """
+
+    subagent_context: SubagentContext | None = None
+    """Parent context for child session converters. None for root sessions."""
 
     # Internal state
     _tool_states: dict[str, _ToolState] = field(default_factory=dict)
@@ -177,11 +204,35 @@ class ACPEventConverter:
     _child_sessions: set[str] = field(default_factory=set)
     """Track child session IDs that have been spawned."""
 
+    _subagent_tool_call_ids: dict[str, str] = field(default_factory=dict)
+    """Map child_session_id to tool_call_id for zed mode subagent tracking."""
+
     _current_message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     """Message ID for the current agent response."""
 
     last_usage: Usage | None = field(default=None, init=False)
     """Usage from the last completed stream, if available."""
+
+    def _format_raw_input(self, raw_input: dict[str, Any] | None) -> Any:
+        """Format raw_input for ACP session updates based on raw_input_mode.
+
+        Args:
+            raw_input: The parsed tool arguments dict (or None).
+
+        Returns:
+            - "dict" mode: the dict as-is (or None if empty/None)
+            - "skip" mode: None (raw_input delivered later via ToolCallProgress)
+            - "json_str" mode: JSON string representation (or None if empty/None)
+        """
+        if not raw_input:
+            return None
+        match self.raw_input_mode:
+            case "skip":
+                return None
+            case "json_str":
+                return json.dumps(raw_input, ensure_ascii=False)
+            case _:
+                return raw_input
 
     def _build_subagent_field_meta(
         self,
@@ -220,6 +271,7 @@ class ACPEventConverter:
         self.last_usage = None
         self._subagent_content.clear()
         self._child_sessions.clear()
+        self._subagent_tool_call_ids.clear()
         self.cleanup()
 
     def cleanup(self) -> None:
@@ -227,6 +279,17 @@ class ACPEventConverter:
 
         Idempotent — safe to call multiple times.
         """
+
+    @property
+    def subagent_meta(self) -> dict[str, Any] | None:
+        """Build _meta dict for subagent notifications. None for root sessions."""
+        if self.subagent_context is None:
+            return None
+        return {
+            "parentToolCallId": self.subagent_context.parent_tool_call_id,
+            "subagentType": self.subagent_context.subagent_type,
+            "provenance": "subagent",
+        }
 
     # =========================================================================
     # V2_EXTENSION: ACP V2 protocol hooks (no-op on V1)
@@ -278,6 +341,31 @@ class ACPEventConverter:
                 yield ToolCallProgress(tool_call_id=tool_call_id, status="completed")
         # Clean up all state
         self.reset()
+
+    async def build_subagent_completed(
+        self,
+        child_session_id: str,
+    ) -> AsyncIterator[ToolCallProgress]:
+        """Emit a completion notification for a subagent session in zed mode.
+
+        Yields a ToolCallProgress with status="completed" and subagent
+        field metadata, closing the tool call lifecycle started by
+        SpawnSessionStart in zed mode. In legacy mode, this is a no-op.
+
+        Args:
+            child_session_id: The child session ID that has completed.
+        """
+        if self.subagent_display_mode != "zed":
+            return
+        tool_call_id = self._subagent_tool_call_ids.pop(child_session_id, None)
+        if not tool_call_id:
+            return
+        field_meta = self._build_subagent_field_meta(child_session_id=child_session_id)
+        yield ToolCallProgress(
+            tool_call_id=tool_call_id,
+            status="completed",
+            field_meta=field_meta,
+        )
 
     def _get_or_create_tool_state(
         self,
@@ -339,7 +427,7 @@ class ACPEventConverter:
                         tool_call_id=tool_call_id,
                         title=state.title,
                         kind=state.kind,
-                        raw_input=state.raw_input,
+                        raw_input=self._format_raw_input(state.raw_input),
                         status="pending",
                     )
 
@@ -370,7 +458,7 @@ class ACPEventConverter:
                         tool_call_id=tool_call_id,
                         title=state.title,
                         kind=state.kind,
-                        raw_input=state.raw_input,
+                        raw_input=self._format_raw_input(state.raw_input),
                         status="pending",
                     )
 
@@ -379,87 +467,10 @@ class ACPEventConverter:
 
             # Tool call streaming delta
             case PartDeltaEvent(delta=ToolCallPartDelta() as delta):
-                delta_part = delta.as_part()
-
-                if delta_part:
-                    # We have a complete tool name - this is either a new tool call
-                    # or an update with tool_name present
-                    tool_call_id = delta_part.tool_call_id
-                    tool_name = delta_part.tool_name
-
-                    # Create/get state with empty args initially
-                    state = self._get_or_create_tool_state(tool_call_id, tool_name, {})
-
-                    # Emit ToolCallStart immediately with pending status
-                    # (per ACP spec: send pending as soon as we know the tool)
-                    if not state.started:
-                        state.started = True
-                        yield ToolCallStart(
-                            tool_call_id=tool_call_id,
-                            title=state.title,
-                            kind=state.kind,
-                            raw_input=state.raw_input,
-                            status="pending",
-                        )
-
-                    # Try to get complete args - if successful, update to in_progress
-                    try:
-                        tool_input = delta_part.args_as_dict()
-                    except ValueError:
-                        pass  # Args still streaming, not valid JSON yet
-                    else:
-                        self._current_tool_inputs[tool_call_id] = tool_input
-                        state.raw_input = tool_input
-                        # Update title since it may depend on args
-                        state.title = generate_tool_title(tool_name, tool_input)
-                        yield ToolCallProgress(
-                            tool_call_id=tool_call_id,
-                            title=state.title,
-                            raw_input=tool_input,
-                            status="in_progress",
-                        )
-                elif delta.tool_call_id:
-                    # No tool_name_delta but we have tool_call_id.
-                    # This could be a follow-up args update for an existing tool call.
-                    # We can't parse args from delta alone, but ensure start was emitted.
-                    tool_call_id = delta.tool_call_id
-                    if tool_call_id in self._tool_states:
-                        state = self._tool_states[tool_call_id]
-                        if not state.started:
-                            state.started = True
-                            yield ToolCallStart(
-                                tool_call_id=tool_call_id,
-                                title=state.title,
-                                kind=state.kind,
-                                raw_input=state.raw_input,
-                                status="pending",
-                            )
-
-            # Function tool call started
-            case FunctionToolCallEvent(part=part):
-                tool_call_id = part.tool_call_id
-                tool_input = safe_args_as_dict(part, default={})
-                self._current_tool_inputs[tool_call_id] = tool_input
-                state = self._get_or_create_tool_state(tool_call_id, part.tool_name, tool_input)
-                if not state.started:
-                    state.started = True
-                    yield ToolCallStart(
-                        tool_call_id=tool_call_id,
-                        title=state.title,
-                        kind=state.kind,
-                        raw_input=state.raw_input,
-                        status="pending",
-                    )
-                elif state.raw_input != tool_input:
-                    # Streaming already started, update with complete args
-                    state.raw_input = tool_input
-                    state.title = generate_tool_title(part.tool_name, tool_input)
-                    yield ToolCallProgress(
-                        tool_call_id=tool_call_id,
-                        title=state.title,
-                        raw_input=tool_input,
-                        status="in_progress",
-                    )
+                # Streaming deltas are not forwarded to ACP client.
+                # Tool call state is managed via ToolCallStartEvent and
+                # ToolCallProgressEvent from EventMapper.
+                pass
 
             # Tool completed successfully
             case FunctionToolResultEvent(result=ToolReturnPart(content=out), tool_call_id=tc_id):
@@ -503,7 +514,7 @@ class ACPEventConverter:
                         tool_call_id=tc_id,
                         title=title,
                         kind=kind,
-                        raw_input=raw_input,
+                        raw_input=self._format_raw_input(raw_input),
                         locations=acp_locations or None,
                         status="pending",
                     )
@@ -525,9 +536,19 @@ class ACPEventConverter:
                 progress=progress,
                 total=total,
                 message=message,
+                tool_input=tool_input,
+                tool_name=tool_name,
             ) if tool_call_id:
                 # Get or create state - handles race where tool emits before SDK event
-                state = self._get_or_create_tool_state(tool_call_id, "unknown", {})
+                state = self._get_or_create_tool_state(
+                    tool_call_id, tool_name or "unknown", tool_input or {}
+                )
+                # Update state with tool_input and tool_name from the event
+                if tool_input is not None:
+                    state.raw_input = tool_input
+                    state.title = generate_tool_title(tool_name or state.tool_name, tool_input)
+                if tool_name is not None and state.tool_name == "unknown":
+                    state.tool_name = tool_name
                 # Emit start if this is the first event for this tool call
                 if not state.started:
                     state.started = True
@@ -535,7 +556,7 @@ class ACPEventConverter:
                         tool_call_id=tool_call_id,
                         title=title or state.title,
                         kind=state.kind,
-                        raw_input=state.raw_input,
+                        raw_input=self._format_raw_input(state.raw_input),
                         status="pending",
                     )
                 acp_content: list[ToolCallContent] = []
@@ -584,9 +605,63 @@ class ACPEventConverter:
                     status=status or "in_progress",
                     content=acp_content or None,
                     locations=locations or None,
+                    raw_input=self._format_raw_input(state.raw_input),
                 )
                 if acp_content:
                     state.has_content = True
+
+            case ToolCallCompleteEvent(
+                tool_call_id=tc_id,
+                tool_name=tool_name,
+                tool_result=result,
+                metadata=meta,
+            ):
+                # ToolCallCompleteEvent is produced by EventMapper from
+                # FunctionToolResultEvent. When metadata contains
+                # ``is_error=True``, the original part was a
+                # RetryPromptPart (tool failure).
+                is_error = bool(meta and meta.get("is_error"))
+                completion_status: Literal["completed", "failed"] = (
+                    "failed" if is_error else "completed"
+                )
+                tool_state = self._tool_states.get(tc_id)
+                if is_error:
+                    error_text = str(result) if result else "Tool execution failed"
+                    content = ContentToolCallContent.text(f"Error: {error_text}")
+                    yield ToolCallProgress(
+                        tool_call_id=tc_id,
+                        status=completion_status,
+                        content=[content],
+                    )
+                elif tool_state and tool_state.has_content:
+                    yield ToolCallProgress(
+                        tool_call_id=tc_id,
+                        status=completion_status,
+                        raw_output=result,
+                    )
+                else:
+                    converted = to_acp_content_blocks(result)
+                    content_items = [ContentToolCallContent(content=block) for block in converted]
+                    yield ToolCallProgress(
+                        tool_call_id=tc_id,
+                        status=completion_status,
+                        raw_output=result,
+                        content=content_items,
+                    )
+                self._cleanup_tool_state(tc_id)
+
+            case ToolResultMetadataEvent(tool_call_id=tc_id, metadata=_meta):
+                # Sidechannel metadata for tool results (e.g., diffs,
+                # diagnostics stripped by Claude SDK). Enrich existing
+                # tool state if present; otherwise log and skip.
+                meta_state = self._tool_states.get(tc_id)
+                if meta_state:
+                    meta_state.has_content = True
+                else:
+                    logger.debug(
+                        "ToolResultMetadataEvent for unknown tool call",
+                        tool_call_id=tc_id,
+                    )
 
             case FinalResultEvent():
                 pass  # No notification needed
@@ -634,6 +709,13 @@ class ACPEventConverter:
                 text = get_compaction_text(trigger)
                 yield AgentMessageChunk.text(text, message_id=self._current_message_id)
 
+            case CompactionEvent(phase="completed"):
+                # Signal compaction completion to the client
+                yield AgentMessageChunk.text(
+                    "\n\n---\n\n✅ **Context compaction complete.**\n\n---\n\n",
+                    message_id=self._current_message_id,
+                )
+
             case SpawnSessionStart(
                 child_session_id=child_session_id,
                 source_name=source_name,
@@ -646,10 +728,17 @@ class ACPEventConverter:
                     yield AgentMessageChunk.text(text, message_id=self._current_message_id)
                     self._child_sessions.add(child_session_id)
                 elif self.subagent_display_mode == "zed":
-                    tool_call_id = str(uuid.uuid4())
+                    tool_call_id = event.tool_call_id or str(uuid.uuid4())
+                    self._subagent_tool_call_ids[child_session_id] = tool_call_id
                     _meta = self._build_subagent_field_meta(
                         child_session_id=child_session_id, message_start_index=0
                     )
+                    run_mode: Literal["foreground", "background"]
+                    match spawn_mechanism:
+                        case "task":
+                            run_mode = "background"
+                        case "spawn":
+                            run_mode = "foreground"
                     yield ToolCallStart(
                         tool_call_id=tool_call_id,
                         title=f"{source_name}: {description}" if description else source_name,
@@ -657,7 +746,85 @@ class ACPEventConverter:
                         status="pending",
                         field_meta=_meta,
                     )
+                elif self.subagent_display_mode == "qwen":
+                    tool_call_id = event.tool_call_id or str(uuid.uuid4())
+                    yield ToolCallStart(
+                        tool_call_id=tool_call_id,
+                        title=f"{source_name}: {description}" if description else source_name,
+                        kind="other",
+                        status="pending",
+                    )
 
+            case RunStartedEvent(run_id=run_id, agent_name=agent_name):
+                # ACP has no explicit "run started" notification.
+                # Log for debugging; clients infer start from first event.
+                logger.debug("Run started", run_id=run_id, agent_name=agent_name)
+
+            case SubAgentEvent(
+                source_name=source_name,
+                event=inner_event,
+                depth=depth,
+                child_session_id=child_session_id,
+            ):
+                # SubAgentEvent wraps events from delegated agents/teams.
+                # Child sessions have their own consumer that handles
+                # their events directly. This wrapper provides metadata
+                # for protocols that want to annotate nested activity.
+                # For ACP, we skip re-converting the inner event (it's
+                # already handled by the child consumer) and just log.
+                logger.debug(
+                    "SubAgent event",
+                    source_name=source_name,
+                    depth=depth,
+                    child_session_id=child_session_id,
+                    inner_event_type=type(inner_event).__name__,
+                )
+
+            case SessionResumeEvent(
+                session_id=_sess_id,
+                resolved_call_count=call_count,
+                source=resume_source,
+            ):
+                # Signal session resumption to the client
+                yield AgentMessageChunk.text(
+                    f"\n\n🔄 **Session resumed** ({call_count} deferred call(s) resolved"
+                    + (f" from {resume_source}" if resume_source else "")
+                    + ").\n\n",
+                    message_id=self._current_message_id,
+                )
+
+            case CustomEvent(event_type=ev_type, source=ev_source):
+                # Generic custom events — log for debugging, no ACP output
+                logger.debug(
+                    "Custom event",
+                    event_type=ev_type,
+                    source=ev_source,
+                )
+
+            case PartEndEvent(index=idx, part=ended_part):
+                # Part boundary detection — no ACP notification needed,
+                # but log for debugging.
+                logger.debug(
+                    "Part ended",
+                    index=idx,
+                    part_kind=ended_part.part_kind,
+                )
+
+            case OutputToolCallEvent(part=part):
+                # Output tool calls (structured output submission) —
+                # no ACP notification needed, handled internally by
+                # PydanticAI for result validation.
+                logger.debug(
+                    "Output tool call",
+                    tool_name=part.tool_name,
+                )
+
+            case OutputToolResultEvent(part=part):
+                # Output tool results — no ACP notification needed.
+                logger.debug(
+                    "Output tool result",
+                    tool_name=part.tool_name,
+                )
 
             case RunErrorEvent(message=message, agent_name=agent_name):
                 # Display error as agent text with formatting
@@ -668,15 +835,15 @@ class ACPEventConverter:
             case RunFailedEvent(run_id=run_id, exception=exc):
                 # Display run failure as agent text and signal turn completion.
                 # Unlike RunErrorEvent (agent-level), RunFailedEvent indicates
-                # the TurnRunner itself crashed — the session cannot continue.
-                
+                # the run itself crashed — the session cannot continue.
+
                 # Check if this is a cancellation (session/cancel notification)
                 import asyncio
-                is_cancellation = (
-                    isinstance(exc, asyncio.CancelledError)
-                    or (isinstance(exc, RuntimeError) and "cancelled" in str(exc).lower())
+
+                is_cancellation = isinstance(exc, asyncio.CancelledError) or (
+                    isinstance(exc, RuntimeError) and "cancelled" in str(exc).lower()
                 )
-                
+
                 if is_cancellation:
                     # For cancellation, emit turn_complete with cancelled stop_reason
                     # Don't show error text since cancellation is user-initiated
@@ -705,7 +872,7 @@ class ACPEventConverter:
                         tool_call_id=tc_id,
                         title=f"Deferred: {tool_name}",
                         kind=state.kind,
-                        raw_input=state.raw_input,
+                        raw_input=self._format_raw_input(state.raw_input),
                         status="pending",
                         field_meta={"deferred_handle": deferred_handle},
                     )
@@ -719,5 +886,3 @@ class ACPEventConverter:
                 # Graceful fallback for unknown event types
                 # Handles future events like ToolRequiresAuthEvent without crashing
                 logger.debug("Unhandled event", event_type=type(event).__name__)
-
-

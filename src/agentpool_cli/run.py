@@ -4,17 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import traceback
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated
+import uuid
 
+from pydantic_ai import TextPartDelta
 import typer as t
 
+from agentpool.agents.events import PartDeltaEvent, StreamCompleteEvent
 from agentpool_cli import resolve_agent_config
 from agentpool_cli.cli_types import DetailLevel  # noqa: TC001
 from agentpool_cli.common import verbose_opt
-
-
-if TYPE_CHECKING:
-    from agentpool import ChatMessage
 
 
 def run_command(
@@ -46,31 +45,48 @@ def run_command(
             from agentpool import AgentPool
 
             async with AgentPool(config_path) as pool:
+                sp = pool.session_pool
+                if sp is None:
+                    msg = "SessionPool not available"
+                    raise RuntimeError(msg)  # noqa: TRY301
 
-                def on_message(chat_message: ChatMessage[Any]) -> None:
-                    print(
-                        chat_message.format(
-                            style=detail_level,
-                            show_metadata=show_metadata,
-                            show_costs=show_costs,
-                        )
-                    )
+                # Validate agent exists
+                if node_name not in pool.agent_configs:
+                    available = list(pool.agent_configs.keys())
+                    msg = f"Agent '{node_name}' not found. Available agents: {', '.join(available)}"
+                    raise t.BadParameter(msg)  # noqa: TRY301
 
-                # Connect message handlers if showing all messages
-                if show_messages:
-                    for node in pool.nodes.values():
-                        node.message_sent.connect(on_message)
-                for prompt in prompts or []:
-                    response = await pool.nodes[node_name].run(prompt)
+                session_id = f"run-{node_name}-{uuid.uuid4().hex[:8]}"
+                await sp.create_session(session_id, agent_name=node_name)
 
-                    if not show_messages:
-                        print(
-                            response.format(
-                                style=detail_level,
-                                show_metadata=show_metadata,
-                                show_costs=show_costs,
+                try:
+                    for prompt in prompts or []:
+                        final_message = None
+                        async for event in sp.run_stream(session_id, prompt, scope="session"):
+                            if isinstance(event, StreamCompleteEvent):
+                                final_message = event.message
+                            elif (
+                                isinstance(event, PartDeltaEvent)
+                                and show_messages
+                                and isinstance(event.delta, TextPartDelta)
+                            ):
+                                print(event.delta.content_delta, end="", flush=True)
+                        if show_messages:
+                            print()
+
+                        if final_message and not show_messages:
+                            print(
+                                final_message.format(
+                                    style=detail_level,
+                                    show_metadata=show_metadata,
+                                    show_costs=show_costs,
+                                )
                             )
-                        )
+                finally:
+                    try:
+                        await sp.close_session(session_id)
+                    except Exception:
+                        pass
 
         # Run the async code in the sync command
         asyncio.run(run())

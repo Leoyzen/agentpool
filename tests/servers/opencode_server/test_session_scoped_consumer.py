@@ -115,6 +115,13 @@ async def test_get_messages_prefers_live_opencode_messages(
     assistant_msg.add_text_part("Live streamed content")
     server_state.messages[session_id] = [assistant_msg]
 
+    # Mark as a subagent session so get_messages_for_session() takes
+    # the fast path and returns live messages without consulting
+    # the SessionPool.
+    mock_cached_session = Mock()
+    mock_cached_session.parent_id = "parent-session"
+    server_state.sessions[session_id] = mock_cached_session
+
     stale_session_pool = Mock()
     stale_session_pool.get_messages = AsyncMock(
         return_value=[ChatMessage(content="", role="assistant")]

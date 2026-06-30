@@ -475,9 +475,7 @@ class NativeAgentConfig(BaseAgentConfig):
                 case PackagePromptConfig(package=pkg, resource=resource):
                     from importlib.resources import files as pkg_files
 
-                    template_content = (
-                        pkg_files(pkg) / resource
-                    ).read_text(encoding="utf-8")
+                    template_content = (pkg_files(pkg) / resource).read_text(encoding="utf-8")
                     static_prompt = StaticPrompt(
                         name="system",
                         description=f"Package prompt: {pkg}/{resource}",
@@ -524,13 +522,13 @@ class NativeAgentConfig(BaseAgentConfig):
                     content = function(**arguments)
                     rendered_prompts.append(render_prompt(content, {"agent": context}))
                 case PackagePromptConfig(
-                    package=pkg, resource=resource, variables=variables,
+                    package=pkg,
+                    resource=resource,
+                    variables=variables,
                 ):
                     from importlib.resources import files as pkg_files
 
-                    template_content = (
-                        pkg_files(pkg) / resource
-                    ).read_text(encoding="utf-8")
+                    template_content = (pkg_files(pkg) / resource).read_text(encoding="utf-8")
                     template_ctx = {"agent": context, **variables}
                     rendered_prompts.append(render_prompt(template_content, template_ctx))
 

@@ -153,9 +153,21 @@ class _FakeAgentPool:
     """Minimal AgentPool facade with team-scoped session support."""
 
     def __init__(self, agents: list[Agent[Any, str]]) -> None:
+        from types import SimpleNamespace
+
+        from agentpool.mcp_server.manager import MCPManager
+
         self.session_pool = _FakeSessionPool()
         self.all_agents = {agent.name: agent for agent in agents}
         self.storage = _FakeStorage()
+        self.mcp = MCPManager("fake-pool", _warn=False)
+        # Provide a minimal manifest with agents and teams dicts for
+        # _resolve_scoped_team_nodes which accesses pool.manifest.agents
+        # and pool.manifest.teams.
+        self.manifest = SimpleNamespace(
+            agents={agent.name: agent for agent in agents},
+            teams={},
+        )
 
 
 class FailingAgent(MessageNode[Any, Any]):

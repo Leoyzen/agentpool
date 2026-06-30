@@ -17,14 +17,19 @@ from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 def _make_pool_with_sessions() -> tuple[AgentPool, Agent, SessionPool, MemorySessionStore]:
     """Create a pool with a real SessionPool backed by MemorySessionStore."""
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+    pool = AgentPool(manifest)
 
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     store = MemorySessionStore()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
@@ -222,13 +227,19 @@ async def test_no_parent_session_id_preserves_existing_behavior():
 async def test_child_session_without_pool_sessions_falls_back_to_top_level():
     """When pool.sessions is None but parent_session_id is provided,
     should fall back to top-level behavior."""
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+    pool = AgentPool(manifest)
 
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
+    # pool.register() removed; agent created from callback/config above
     pool._session_pool = None
 
     pool.storage.generate_session_id = MagicMock(return_value="session_fallback_001")  # type: ignore[assignment]

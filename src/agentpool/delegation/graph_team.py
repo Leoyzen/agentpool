@@ -204,11 +204,13 @@ def build_team_graph(
         output_type=list[_MemberOutput],
     )
 
-    # Create a step for each team member
+    # Create a step for each team member.
+    # Use a positional suffix to ensure unique node IDs when the same
+    # agent appears in multiple steps (e.g. parallel teams with duplicates).
     member_steps = []
-    for node in nodes:
+    for index, node in enumerate(nodes):
         step_fn = _make_member_step(node)
-        step = builder.step(call=step_fn, node_id=node.name)
+        step = builder.step(call=step_fn, node_id=f"{node.name}_{index}")
         member_steps.append(step)
 
     # Join that collects all member outputs into a list
