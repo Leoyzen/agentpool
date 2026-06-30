@@ -1914,6 +1914,7 @@ class SessionPool:
         """Start the session pool and background tasks."""
         await self.sessions.start_cleanup_task()
         await self.mcp_pool.start_cleanup_task()
+        await self.mcp_pool.initialize()
         logger.info("SessionPool started")
 
     async def shutdown(self) -> None:
@@ -2130,7 +2131,11 @@ class SessionPool:
 
         # Add pool-level providers
         if self.pool is not None:
-            agent.tools.add_provider(self.mcp_pool.get_aggregating_provider())
+            agent.tools.add_provider(
+                self.mcp_pool.get_aggregating_provider()
+                if self.mcp_pool is not None
+                else self.pool.mcp.get_aggregating_provider()
+            )
             if self.pool.skills_instruction_provider:
                 agent.tools.add_provider(self.pool.skills_instruction_provider)
             agent.tools.add_provider(self.pool.skills_tools_provider)
@@ -2175,7 +2180,11 @@ class SessionPool:
 
         # Add pool-level providers
         if self.pool is not None:
-            agent.tools.add_provider(self.mcp_pool.get_aggregating_provider())
+            agent.tools.add_provider(
+                self.mcp_pool.get_aggregating_provider()
+                if self.mcp_pool is not None
+                else self.pool.mcp.get_aggregating_provider()
+            )
             if self.pool.skills_instruction_provider:
                 agent.tools.add_provider(self.pool.skills_instruction_provider)
             agent.tools.add_provider(self.pool.skills_tools_provider)
