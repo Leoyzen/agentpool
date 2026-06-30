@@ -144,10 +144,12 @@ class AgentPool[TPoolDeps = None]:
             # Previously handled by _connect_nodes which was removed along
             # with pool-level agent creation; this lightweight check preserves
             # the "Forward target .* not found" ValueError contract.
+            from agentpool_config.forward_targets import NodeConnectionConfig
+
             agent_names = set(manifest_obj.agents.keys())
             for agent_name, agent_cfg in manifest_obj.agents.items():
                 for conn in agent_cfg.connections:
-                    if hasattr(conn, "name") and conn.name not in agent_names:
+                    if isinstance(conn, NodeConnectionConfig) and conn.name not in agent_names:
                         raise ValueError(f"Forward target {conn.name} not found")
 
             registry.configure_observability(self.manifest.observability)
