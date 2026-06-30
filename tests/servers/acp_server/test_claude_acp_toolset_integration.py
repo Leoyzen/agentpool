@@ -54,12 +54,6 @@ async def test_claude_acp_with_subagent_toolset_setup(manifest_with_claude: Agen
         assert isinstance(pool.manifest.agents["claude_orchestrator"], ACPAgentConfig)
 
 
-@pytest.mark.skip(reason="pool.get_agents() was removed. ACP agents are now managed via SessionPool.")
-async def test_claude_acp_subagent_invocation(manifest_with_claude: AgentsManifest):
-    """Test invoking subagent tools through Claude ACP agent."""
-    pass
-
-
 async def test_claude_acp_tool_bridge_mcp_config(claude_config_with_subagent: ACPAgentConfig):
     """Test that tool bridge MCP config is properly passed to session."""
     async with AgentPool() as pool:  # noqa: SIM117
@@ -93,10 +87,6 @@ async def test_claude_acp_multiple_toolsets():
         assert "execute_introspection" in tool_names
 
 
-@pytest.mark.skip(reason="pool.get_agents() was removed. ACP agents are now managed via SessionPool.")
-async def test_pool_cleanup_stops_tool_bridges(manifest_with_claude: AgentsManifest):
-    """Test that pool cleanup properly stops tool bridges."""
-    pass
 
 
 if __name__ == "__main__":

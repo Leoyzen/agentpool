@@ -105,25 +105,6 @@ class TestParentIdBasic:
         assert chain[-1].role == "user"
 
 
-class TestParentIdForwarding:
-    """Tests for parent_id behavior when messages are forwarded between agents."""
-
-    @pytest.mark.skip(reason="connect_to() is deprecated and no longer triggers forwarding; use graph: syntax instead")
-    async def test_forwarded_message_preserves_original_parent_id(self):
-        """When a message is forwarded, it should preserve its original parent_id."""
-        # NOTE: Pool-level agent management was removed.
-        # This test used pool.add_agent() which is no longer available.
-        # Re-implement using direct agent creation when forwarding is re-enabled.
-        pass
-
-    @pytest.mark.skip(reason="connect_to() is deprecated and no longer triggers forwarding; use graph: syntax instead")
-    async def test_forwarded_message_tracks_forwarding_chain(self):
-        """Forwarded messages should track their forwarding path."""
-        # NOTE: Pool-level agent management was removed.
-        # This test used pool.add_agent() which is no longer available.
-        pass
-
-
 class TestParentIdWithRun:
     """Tests for parent_id with non-streaming run()."""
 

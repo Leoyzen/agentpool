@@ -364,50 +364,6 @@ agents:
 
 
 # =============================================================================
-# Summary Test
-# =============================================================================
-
-
-@pytest.mark.unit
-async def test_all_root_causes_documented():
-    """Summary test documenting all three root causes.
-
-    Run this test to see a summary of all issues.
-    """
-    issues = []
-
-    # Issue 1: Model ID format mismatch
-    issues.append(
-        "Issue 1: OpenCode TUI sends 'agent:qwen35' but _resolve_model_string expects 'qwen35'"
-    )
-
-    # Issue 2: Validation excludes variants
-    issues.append(
-        "Issue 2: get_available_models() returns tokonomics models, not model_variants from config"
-    )
-
-    # Issue 3: Config update doesn't sync
-    issues.append("Issue 3: PATCH /config updates state.config but never calls agent.set_model()")
-
-    # Issue 4: Temporary model switching
-    issues.append(
-        "Issue 4: _process_message() always restores original model "
-        "after message (by design, but prevents persistent changes)"
-    )
-
-    # Print summary
-    print("\n" + "=" * 70)
-    print("ROOT CAUSE SUMMARY")
-    print("=" * 70)
-    for i, issue in enumerate(issues, 1):
-        print(f"{i}. {issue}")
-    print("=" * 70 + "\n")
-
-    # This test always passes - it's just for documentation
-    assert True
-
-
-# =============================================================================
 # Per-Session Agent Model Switching Tests
 # =============================================================================
 

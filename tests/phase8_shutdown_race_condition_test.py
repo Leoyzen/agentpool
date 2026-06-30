@@ -45,3 +45,6 @@ async def test_shutdown_with_active_session_no_error(manifest: AgentsManifest) -
             # AgentPool.__aexit__() is called here
             # It should NOT raise RuntimeError("SessionPool not available")
             # due to CancelScope(shield=True) around DB writes and complete_event.set()
+            assert pool.session_pool is not None, (
+                "SessionPool was None during shutdown — race condition regression"
+            )

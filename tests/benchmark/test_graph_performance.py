@@ -323,38 +323,3 @@ async def test_sequential_team_overhead() -> None:
 # ============================================================================
 # 6. Baseline documentation test
 # ============================================================================
-
-
-def test_baseline_thresholds_documented() -> None:
-    """Document the baseline performance thresholds.
-
-    This test does not measure anything but documents the
-    thresholds used in the benchmark suite for reference.
-    """
-    thresholds = {
-        "single_agent_pipeline": {
-            "description": "TeamRun with 1 agent vs direct agent.run()",
-            "threshold": f"<{OVERHEAD_THRESHOLD:.0%} overhead",
-        },
-        "parallel_team": {
-            "description": "Team with 3 agents vs asyncio.gather",
-            "threshold": f"<{OVERHEAD_THRESHOLD:.0%} overhead",
-        },
-        "sequential_team": {
-            "description": "TeamRun with 3 agents vs manual sequential run",
-            "threshold": f"<{OVERHEAD_THRESHOLD:.0%} overhead",
-        },
-        "streaming_latency": {
-            "description": "Time to first event in run_stream",
-            "threshold": f"<{OVERHEAD_THRESHOLD:.0%} overhead",
-        },
-        "graph_construction": {
-            "description": "build_team_graph for 3 agents",
-            "threshold": f"<{GRAPH_CONSTRUCTION_THRESHOLD_MS}ms",
-        },
-    }
-
-    for name, spec in thresholds.items():
-        print(f"{name}: {spec['description']} -> {spec['threshold']}")
-
-    assert True

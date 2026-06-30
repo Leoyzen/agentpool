@@ -324,34 +324,6 @@ async def test_multiple_workers_same_prompt(tmp_path: Path):
                 assert any("helpful worker" in r.lower() for r in responses)
 
 
-@pytest.mark.skip(reason=(
-    "TestModel without custom_output_text does not produce tool calls for "
-    "structured output agents. The to_tool() pattern requires a real model "
-    "or a custom TestModel configuration that pydantic-ai does not support."
-))
-async def test_structured_worker_output():
-    """Test that agents with BaseModel output convert correctly when used as tools."""
-    structured_model = TestModel()
-    main_model = TestModel(call_tools=["ask_structured_agent"])
-    structured = Agent(
-        name="structured_agent",
-        model=structured_model,
-        output_type=StructuredResponse,
-    )
-    main_agent = Agent(name="main_agent", model=main_model)
-    tool = structured.to_tool()
-    assert tool.callable.__annotations__.get("return") == StructuredResponse
-    main_agent.tools.register_tool(tool, enabled=True)
-    async with structured, main_agent:
-        result = await main_agent.run("Ask structured_agent: return a message 'test' with value 42")
-        tool_calls = result.get_tool_calls()
-        assert len(tool_calls) > 0
-        structured_result = tool_calls[0].result
-        assert isinstance(structured_result, StructuredResponse)
-        assert isinstance(structured_result.message, str)
-        assert isinstance(structured_result.value, int)
-
-
 async def test_worker_emits_spawn_session_start_event(tmp_path: Path):
     """Test that worker tool emits SpawnSessionStart event."""
     config_path = write_config(BASIC_WORKERS, tmp_path)

@@ -75,28 +75,5 @@ async def test_agent_pool_conversation_flow():
         pass
 
 
-@pytest.mark.skip(reason="pool.get_agent() was removed. Use manifest.agents for config access.")
-async def test_agent_pool_validation():
-    """Test manifest-based agent config access."""
-    manifest = AgentsManifest.from_yaml(TEST_CONFIG)
-
-    async with AgentPool(manifest) as pool:
-        # Verify config-based access works
-        assert "test_agent" in pool.manifest.agents
-        assert "nonexistent" not in pool.manifest.agents
-
-
-@pytest.mark.skip(reason="pool.create_team() and pool.get_agent() were removed. Use SessionPool.")
-async def test_agent_pool_team_errors():
-    """Test error handling in team tasks."""
-    pass
-
-
-@pytest.mark.skip(reason="pool.get_agent() and pool.manifest.agents were removed. Use SessionPool.")
-async def test_agent_pool_cleanup():
-    """Test proper cleanup of agent resources."""
-    pass
-
-
 if __name__ == "__main__":
     pytest.main([__file__, "-vv"])

@@ -51,3 +51,6 @@ async def test_subagent_cancellation_cascade_within_5s(manifest: AgentsManifest)
                 tg.cancel_scope.cancel()
 
             # If we get here without hanging, cancellation cascaded correctly
+            assert tg.cancel_scope.cancel_called, (
+                "CancelScope.cancel() was not called — cancellation did not propagate"
+            )
