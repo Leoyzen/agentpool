@@ -1136,8 +1136,31 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             producer_task = asyncio.ensure_future(_producer())
             try:
                 # Consumer: yield events from EventBus subscription.
+                # Events published to the EventBus by tools (e.g.
+                # ``report_progress`` → ``ToolCallProgressEvent``) are
+                # delivered here in addition to events yielded by
+                # ``_stream_events()``.  We dispatch every event to the
+                # agent's event handlers so that progress callbacks
+                # etc. receive events regardless of whether they came
+                # through the stream or were published directly.
+                if event_handlers is not None:
+                    consumer_handler: MultiEventHandler[IndividualEventHandler] = (
+                        MultiEventHandler[IndividualEventHandler](
+                            resolve_event_handlers(event_handlers)
+                        )
+                    )
+                else:
+                    consumer_handler = self.event_handler
+                consumer_context = self.get_context(
+                    input_provider=input_provider, run_ctx=run_ctx
+                )
+
                 async for envelope in drain_and_merge(stream):
                     event = envelope.event
+                    # Dispatch to event handlers (covers events published
+                    # directly to EventBus that bypass _stream_events).
+                    with suppress(Exception):
+                        await consumer_handler(consumer_context, event)
                     yield event
                     if isinstance(event, StreamCompleteEvent):
                         break
@@ -1145,7 +1168,12 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                         break
             finally:
                 if not producer_task.done():
-                    producer_task.cancel()
+                    # The producer may still be running shielded
+                    # post-processing (hooks, route_message, persistence).
+                    # Cancelling the task would interrupt that work —
+                    # ``asyncio.Task.cancel()`` bypasses
+                    # ``anyio.CancelScope(shield=True)`` on asyncio.
+                    # Wait for it to finish instead of cancelling.
                     with suppress(asyncio.CancelledError):
                         await producer_task
                 else:
@@ -1213,9 +1241,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Yields:
             Stream events during execution
         """
-        from anyenv import MultiEventHandler
-
-        from agentpool.agents.events import resolve_event_handlers
         from agentpool.messaging import ChatMessage
 
         # Convert prompts to standard UserContent format
@@ -1235,13 +1260,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             session_id=session_id,
         )
 
-        # Resolve event handlers
-        if event_handlers is not None:
-            resolved_handler = MultiEventHandler[IndividualEventHandler](
-                resolve_event_handlers(event_handlers)
-            )
-        else:
-            resolved_handler = self.event_handler
+        # Event handler dispatch is now performed in the consumer loop
+        # of run_stream(), which sees all events including those published
+        # directly to the EventBus (e.g. ToolCallProgressEvent from
+        # report_progress).  This avoids missing events that bypass
+        # _stream_events().
 
         # Stream events from implementation
         final_message = None
@@ -1279,7 +1302,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     yield StreamCompleteEvent(message=cancel_msg, cancelled=True)
                     return
 
-            context = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
             async for event in self._stream_events(
                 run_ctx,
                 [*pending_parts, *converted_prompts],
@@ -1295,7 +1317,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 wait_for_connections=wait_for_connections,
                 deps=deps,
             ):
-                await resolved_handler(context, event)
                 yield event
                 # Capture final message from StreamCompleteEvent
                 if isinstance(event, StreamCompleteEvent):

@@ -118,6 +118,7 @@ async def _run_parallel_direct(
 
 
 @pytest.mark.anyio
+@pytest.mark.slow
 async def test_parallel_team_overhead() -> None:
     """Team with 3 agents: graph Fork+Join overhead vs direct asyncio.gather."""
     agent_a = _make_echo_agent("a", "A")
@@ -293,6 +294,7 @@ async def _run_sequential_direct(
 
 
 @pytest.mark.anyio
+@pytest.mark.slow
 async def test_sequential_team_overhead() -> None:
     """TeamRun with 3 agents: graph overhead vs direct sequential run.
 

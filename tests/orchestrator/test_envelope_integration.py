@@ -13,13 +13,14 @@ import anyio
 
 
 def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
-    """Check if a memory receive stream has no buffered items."""
+    """Check if a memory receive stream has no buffered items.
+
+    Uses ``statistics().current_buffer_used`` to avoid consuming events.
+    """
     try:
-        stream.receive_nowait()
-        return False
-    except anyio.WouldBlock:
-        return True
-    except anyio.EndOfStream:
+        stats = stream.statistics()
+        return stats.current_buffer_used == 0
+    except Exception:
         return True
 
 class TestEventEnvelopeIntegration:

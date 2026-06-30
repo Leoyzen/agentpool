@@ -300,6 +300,7 @@ class NativeTurn(Turn):
             parent_id=self._parent_id,
             cost_info=cost_info,
             response_time=time.perf_counter() - self._run_ctx.start_time,
+            messages=new_messages if agent_run is not None else [],
         )
 
         # Belt-and-suspenders: if cancelled during execution (e.g.

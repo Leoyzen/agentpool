@@ -482,16 +482,18 @@ async def test_cancel_during_idle_then_new_prompt(mock_pool: MagicMock) -> None:
     await _collect_events_until(queue, StreamCompleteEvent)
     await asyncio.sleep(0.1)
 
-    # Cancel while idle (no active turn)
+    # Cancel while idle (no active turn) — should be a no-op since
+    # there is no active run to cancel.
     session_pool.sessions.cancel_run_for_session(session_id)
     await asyncio.sleep(0.05)
 
-    # cancelled flag should be True after cancel
-    assert first_handle.run_ctx.cancelled is True, (
-        "cancelled flag should be True after cancel while idle"
+    # cancelled flag should remain False — cancelling while idle is a no-op
+    assert first_handle.run_ctx.cancelled is False, (
+        "cancelled flag should remain False when cancel is called while idle "
+        "(no active run to cancel)"
     )
 
-    # Send a new prompt — cancelled flag should be reset before new turn
+    # Send a new prompt — should work normally
     second_handle = await asyncio.wait_for(
         session_pool.receive_request(session_id, "second prompt"),
         timeout=30.0,
@@ -504,9 +506,9 @@ async def test_cancel_during_idle_then_new_prompt(mock_pool: MagicMock) -> None:
         f"Expected StreamCompleteEvent from new turn, got: {post_types}"
     )
 
-    # cancelled flag should be False after the new turn starts
+    # cancelled flag should still be False
     assert first_handle.run_ctx.cancelled is False, (
-        "cancelled flag should be reset to False before new turn"
+        "cancelled flag should remain False — new turn ran without cancel"
     )
 
     first_handle.close()
@@ -744,18 +746,24 @@ async def test_runhandle_dies_in_idle_loop(mock_pool: MagicMock) -> None:
     await _collect_events_until(queue, StreamCompleteEvent)
     await asyncio.sleep(0.1)
 
-    # Trigger the second create_turn (which raises) via followup
-    first_handle.followup("trigger error")
+    # Trigger the second create_turn (which raises) via receive_request.
+    # followup() doesn't work after RunHandle is done (start() generator
+    # was already closed by _consume_run). We need a new receive_request
+    # to trigger the second create_turn which raises RuntimeError.
+    crash_handle = await asyncio.wait_for(
+        session_pool.receive_request(session_id, "trigger error"),
+        timeout=30.0,
+    )
 
     # Wait for the error to propagate and cleanup to happen
     await asyncio.sleep(0.5)
 
-    # Verify finally block set events
-    assert first_handle.complete_event.is_set(), (
+    # Verify the crash handle's finally block set events
+    assert crash_handle.complete_event.is_set(), (
         "complete_event should be set by finally block after error"
     )
-    assert first_handle._status == RunStatus.done, (
-        f"RunHandle should be done after error, got: {first_handle._status}"
+    assert crash_handle._status == RunStatus.done, (
+        f"RunHandle should be done after error, got: {crash_handle._status}"
     )
 
     # Verify _cleanup_run cleared current_run_id

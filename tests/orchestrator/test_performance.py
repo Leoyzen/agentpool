@@ -372,6 +372,7 @@ async def test_benchmark_event_throughput_many_subscribers() -> None:
 
 
 @pytest.mark.benchmark
+@pytest.mark.slow
 @pytest.mark.flaky(reruns=3)
 async def test_benchmark_event_throughput_scaling() -> None:
     """Measure how throughput scales with subscriber count."""

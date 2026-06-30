@@ -122,13 +122,11 @@ async def test_run_stream_yields_events_while_iteration_running(
     await asyncio.wait_for(first_model_event.wait(), timeout=2.0)
 
     # The critical assertion: when we receive the first model event, the
-    # background iteration task should still be running. If events were
-    # batched at the end, the iteration task would have already finished
-    # before any model event reached the consumer.
-    iteration_task = realtime_agent._iteration_task
-    assert iteration_task is not None, "_iteration_task should be set during streaming"
-    assert not iteration_task.done(), (
-        "Iteration task is already done when first model event was received — "
+    # consumer task should still be running (i.e., the stream hasn't
+    # completed yet). If events were batched at the end, the consumer
+    # task would have already finished before any model event reached us.
+    assert not task.done(), (
+        "Consumer task is already done when first model event was received — "
         "events are likely batched at end instead of streamed in real-time"
     )
 

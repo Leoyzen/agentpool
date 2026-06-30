@@ -330,6 +330,11 @@ def _merge_progress_events(events: list[ToolCallProgressEvent]) -> ToolCallProgr
         items=all_items,
         replace_content=last.replace_content,
         tool_name=last.tool_name,
+        progress=last.progress,
+        total=last.total,
+        message=last.message,
+        tool_input=last.tool_input,
+        session_id=last.session_id,
     )
 
 
@@ -993,8 +998,11 @@ class SessionController:
                         if parent_agent.env is not None:
                             agent.env = parent_agent.env
                         agent._internal_fs = parent_agent._internal_fs
-                        # Share MCP manager to avoid duplicate subprocess spawning
+                        # Share MCP manager to avoid duplicate subprocess spawning.
+                        # Mark as shared so __aenter__/__aexit__ skip lifecycle
+                        # management (the parent agent owns the MCPManager lifecycle).
                         agent.mcp = parent_agent.mcp
+                        agent._mcp_shared = True
 
                     await agent.__aenter__()
 

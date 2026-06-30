@@ -127,7 +127,11 @@ class MessageNode[TDeps, TResult](ABC):
         # Share the pool's MCPManager when available to avoid duplicate
         # MCP subprocess spawning. The pool owns the lifecycle; agents
         # with a shared manager skip __aexit__ cleanup on it.
-        if agent_pool is not None:
+        # However, when the agent has its own MCP servers (agent-level),
+        # create a dedicated MCPManager for them. Pool-level servers are
+        # still accessible via agent_pool.mcp and are added separately by
+        # the orchestrator via agent.tools.add_provider().
+        if agent_pool is not None and not mcp_servers:
             self._mcp_shared = True
             self.mcp = agent_pool.mcp
         else:
