@@ -159,11 +159,26 @@ class AcpMcpConnection:
         try:
             result = await self._send_to_client(wrapped)
         except Exception as exc:
-            logger.exception(
-                "Error sending mcp/message to client",
-                connection_id=self.connection_id,
-                method=method,
+            # resources/* and prompts/* are optional MCP capabilities.
+            # Clients that don't support them return "Internal error".
+            # Log at debug level to avoid flooding error logs.
+            is_optional_mcp = (
+                isinstance(method, str)
+                and method.startswith(("resources/", "prompts/"))
             )
+            if is_optional_mcp:
+                logger.debug(
+                    "MCP method not supported by client",
+                    connection_id=self.connection_id,
+                    method=method,
+                    error=str(exc),
+                )
+            else:
+                logger.exception(
+                    "Error sending mcp/message to client",
+                    connection_id=self.connection_id,
+                    method=method,
+                )
             # Reconstruct JSON-RPC error response for the MCP session
             if original_id is not None and self._to_session_send is not None:
                 error_response = {

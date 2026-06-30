@@ -1088,6 +1088,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         Returns:
             A NativeTurn instance for single-cycle execution.
         """
+        from agentpool.orchestrator.run import inject_cancelled_tool_results
+
+        message_history = inject_cancelled_tool_results(message_history)
         return NativeTurn(
             agent=self,
             prompts=prompts,
