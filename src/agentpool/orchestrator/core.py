@@ -990,12 +990,12 @@ class SessionController:
                             pool=self.pool,
                         )
 
-                    # Preserve runtime model configuration from parent agent
+                    # Preserve runtime resources from parent agent.
+                    # Model is NOT inherited — each agent uses its own configured
+                    # model from the manifest. Inheriting the parent's model would
+                    # cause e.g. TestModel with call_tools=['task'] to override
+                    # the child's own model configuration.
                     if parent_agent is not None:
-                        base_model = getattr(parent_agent, "_model", None)
-                        if base_model is not None:
-                            agent._model = base_model
-                            agent.model_settings = getattr(parent_agent, "model_settings", None)
                         if parent_agent.env is not None:
                             agent.env = parent_agent.env
                         agent._internal_fs = parent_agent._internal_fs
