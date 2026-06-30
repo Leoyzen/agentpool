@@ -222,6 +222,11 @@ class NativeTurn(Turn):
                 # Cancellation came from cancel() — exit gracefully
                 # without yielding StreamCompleteEvent. Set _final_message
                 # so turn.final_message doesn't raise for callers.
+                # Capture _message_history from agent_run so the cancelled
+                # turn's partial messages are preserved for the next turn.
+                if agent_run is not None:
+                    with contextlib.suppress(Exception):
+                        self._message_history = agent_run.all_messages()
                 self._final_message = ChatMessage(
                     content="",
                     role="assistant",

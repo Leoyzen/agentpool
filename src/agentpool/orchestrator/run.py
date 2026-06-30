@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Any, Self
@@ -288,6 +289,13 @@ class RunHandle:
                             self._message_queue.extend(self.run_ctx.queued_steer_messages)
                             self.run_ctx.queued_steer_messages.clear()
                         current_prompts = []  # Prevent re-execution of cancelled prompt
+                        # Preserve the cancelled turn's message history so the
+                        # next turn sees the partial conversation context.
+                        # Without this, `continue` skips line 300 and the
+                        # next turn starts with stale _message_history.
+                        if not turn_failed:
+                            with contextlib.suppress(RuntimeError):
+                                self._message_history = turn.message_history
                         # Do NOT reset cancelled here — handle_prompt() needs to
                         # observe it. It will be reset at the start of the next turn.
                         continue

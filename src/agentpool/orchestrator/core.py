@@ -19,6 +19,7 @@ import uuid
 
 import anyio
 from pydantic_ai import TextPartDelta, ThinkingPartDelta, ToolCallPartDelta
+from pydantic_ai.messages import ModelMessage
 
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
@@ -1492,6 +1493,17 @@ class SessionController:
         """
         event_bus = self._event_bus
         run_ctx = AgentRunContext(session_id=session_id, event_bus=event_bus)
+        # Bridge agent.conversation (ChatMessage list) → list[ModelMessage]
+        # so the new RunHandle has the full conversation history from prior
+        # turns. Without this, each new RunHandle starts with empty
+        # _message_history and the model loses all context.
+        # Not all agent types have a conversation attribute (e.g. ACP agents),
+        # so use getattr with a fallback.
+        model_messages: list[ModelMessage] = []
+        conversation = getattr(agent, "conversation", None)
+        if conversation is not None:
+            for chat_msg in conversation.get_history():
+                model_messages.extend(chat_msg.messages)
         run_handle = RunHandle(
             run_id=uuid.uuid4().hex,
             session_id=session_id,
@@ -1500,6 +1512,7 @@ class SessionController:
             event_bus=event_bus,
             session=session,
             run_ctx=run_ctx,
+            _message_history=model_messages,
         )
         self._runs[run_handle.run_id] = run_handle
         session.current_run_id = run_handle.run_id
