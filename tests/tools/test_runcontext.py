@@ -95,7 +95,9 @@ async def test_plain_tool_no_context():
 @pytest.mark.integration
 @pytest.mark.flaky(reruns=2)
 @pytest.mark.xfail(
-    reason="Integration test with real model — may time out or fail depending on environment.",
+    reason="Test passes toolsets via Agent() constructor, but session_pool path "
+    "recreates agent from manifest config (without toolsets). SubagentTools "
+    "capability is lost. Fix: configure SubagentToolsetConfig in manifest.tools.",
     strict=False,
 )
 async def test_capability_tools(default_model: str):
