@@ -417,3 +417,108 @@ async def test_multi_turn_preserves_context_via_consume_run() -> None:
     )
 
     second_handle.close()
+
+
+# ---------------------------------------------------------------------------
+# Test 5: Bridged history must not contain trailing unprocessed tool calls
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_bridged_history_injects_cancelled_tool_results() -> None:
+    """Given a cancelled turn with a pending tool call, bridged history injects tool results.
+
+    When a turn is cancelled mid-tool-call, agent_run.all_messages() contains
+    a ModelResponse with a tool call but no corresponding tool result. If this
+    incomplete pair is passed to the next RunHandle, PydanticAI raises:
+    "Cannot provide a new user prompt when the message history contains
+    unprocessed tool calls."
+
+    Fix: when bridging, inject a ModelRequest with RetryPromptPart for each
+    unprocessed tool call, telling the model the tool was cancelled. This
+    preserves the model's decision context (it knows it called the tool)
+    while providing the required tool result to satisfy PydanticAI's
+    message history validation.
+
+    Given: An agent with conversation history whose last ChatMessage has a
+           ModelResponse with a tool call but no tool result.
+    When: _start_run_handle bridges conversation → _message_history.
+    Then: A ModelRequest with RetryPromptPart is appended after the
+          ModelResponse, one per unprocessed tool call.
+    """
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        RetryPromptPart,
+        ToolCallPart,
+        UserPromptPart,
+    )
+
+    # Simulate: user asked something, model responded with a tool call,
+    # but the tool result never came (turn was cancelled).
+    tool_call = ToolCallPart(tool_name="bash", args={"cmd": "ls"})
+    prior_messages: list[ModelMessage] = [
+        ModelRequest(parts=[UserPromptPart(content="run a command")]),
+        ModelResponse(parts=[tool_call]),
+    ]
+    chat_msg1 = ChatMessage(content="run a command", role="user")
+    chat_msg1.messages = [prior_messages[0]]
+    chat_msg2 = ChatMessage(content="", role="assistant")
+    chat_msg2.messages = [prior_messages[1]]
+
+    agent = MagicMock()
+    agent.AGENT_TYPE = "native"
+    agent.conversation = MagicMock()
+    agent.conversation.get_history.return_value = [chat_msg1, chat_msg2]
+
+    event_bus = EventBus()
+    session = SessionState(
+        session_id="test-cancel-tool-session",
+        agent_name="test-cancel-tool",
+    )
+
+    from agentpool.orchestrator.core import SessionController
+
+    controller = SessionController.__new__(SessionController)
+    controller._event_bus = event_bus
+    controller._runs = {}
+    controller._background_tasks = set()
+    controller._sessions = {"test-cancel-tool-session": session}
+
+    run_handle = controller._start_run_handle(
+        session=session,
+        agent=agent,
+        session_id="test-cancel-tool-session",
+        content="follow up",
+    )
+
+    # The bridged history must have:
+    # 1. ModelRequest (user prompt)
+    # 2. ModelResponse (tool call)
+    # 3. ModelRequest (with RetryPromptPart for the cancelled tool call)
+    assert len(run_handle._message_history) == 3, (
+        f"Expected 3 messages (user + tool_call + cancelled_result), "
+        f"got {len(run_handle._message_history)}: "
+        f"{[type(m).__name__ for m in run_handle._message_history]}"
+    )
+
+    last_msg = run_handle._message_history[-1]
+    assert isinstance(last_msg, ModelRequest), (
+        f"Expected last message to be ModelRequest with cancelled tool result, "
+        f"got {type(last_msg).__name__}"
+    )
+    retry_parts = [p for p in last_msg.parts if isinstance(p, RetryPromptPart)]
+    assert len(retry_parts) == 1, (
+        f"Expected 1 RetryPromptPart for the cancelled tool call, "
+        f"got {len(retry_parts)}"
+    )
+    assert retry_parts[0].tool_name == "bash", (
+        f"Expected RetryPromptPart tool_name='bash', "
+        f"got {retry_parts[0].tool_name!r}"
+    )
+    assert "cancel" in str(retry_parts[0].content).lower(), (
+        f"RetryPromptPart content should mention cancellation, "
+        f"got {retry_parts[0].content!r}"
+    )
+
+    run_handle.close()
