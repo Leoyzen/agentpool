@@ -14,6 +14,33 @@
   },
   {
     "payload": {
+      "kind": "other",
+      "sessionUpdate": "tool_call_update",
+      "title": "Executing: test_progress",
+      "toolCallId": "pyd_ai_tool_call_id__test_progress"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
+      "content": [
+        {
+          "content": {
+            "text": "Progress test completed with message: hello",
+            "type": "text"
+          },
+          "type": "content"
+        }
+      ],
+      "rawOutput": "Progress test completed with message: hello",
+      "sessionUpdate": "tool_call_update",
+      "status": "completed",
+      "toolCallId": "pyd_ai_tool_call_id__test_progress"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
       "content": [
         {
           "content": {

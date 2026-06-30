@@ -15,6 +15,65 @@
   },
   {
     "payload": {
+      "kind": "edit",
+      "sessionUpdate": "tool_call_update",
+      "title": "Executing: write",
+      "toolCallId": "pyd_ai_tool_call_id__write"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
+      "kind": "edit",
+      "locations": [
+        {
+          "line": 0,
+          "path": "/test/new_file.txt"
+        }
+      ],
+      "sessionUpdate": "tool_call_update",
+      "title": "Writing file: /test/new_file.txt",
+      "toolCallId": "pyd_ai_tool_call_id__write"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
+      "content": [
+        {
+          "newText": "New content here",
+          "oldText": "",
+          "path": "/test/new_file.txt",
+          "type": "diff"
+        }
+      ],
+      "locations": [
+        {
+          "path": "/test/new_file.txt"
+        }
+      ],
+      "rawInput": {
+        "content": "New content here",
+        "path": "/test/new_file.txt"
+      },
+      "sessionUpdate": "tool_call_update",
+      "status": "in_progress",
+      "title": "Wrote: /test/new_file.txt",
+      "toolCallId": "pyd_ai_tool_call_id__write"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
+      "rawOutput": "Wrote /test/new_file.txt (16 bytes)",
+      "sessionUpdate": "tool_call_update",
+      "status": "completed",
+      "toolCallId": "pyd_ai_tool_call_id__write"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
       "content": [
         {
           "content": {

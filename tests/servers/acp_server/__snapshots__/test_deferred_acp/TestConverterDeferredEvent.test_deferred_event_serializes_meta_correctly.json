@@ -3,7 +3,6 @@
     "deferred_handle": "dh_xyz789"
   },
   "kind": "other",
-  "rawInput": {},
   "sessionUpdate": "tool_call",
   "status": "pending",
   "title": "Deferred: complex_review",

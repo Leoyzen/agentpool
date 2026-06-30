@@ -15,6 +15,88 @@
   },
   {
     "payload": {
+      "kind": "execute",
+      "sessionUpdate": "tool_call_update",
+      "title": "Executing: execute_code",
+      "toolCallId": "pyd_ai_tool_call_id__execute_code"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
+      "content": [
+        {
+          "terminalId": "code_0001",
+          "type": "terminal"
+        }
+      ],
+      "rawInput": {
+        "code": "x = 1\ny = 2\nprint(x + y)",
+        "title": "test multiline"
+      },
+      "sessionUpdate": "tool_call_update",
+      "status": "in_progress",
+      "title": "Running: python",
+      "toolCallId": "pyd_ai_tool_call_id__execute_code"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
+      "content": [
+        {
+          "terminalId": "code_0001",
+          "type": "terminal"
+        }
+      ],
+      "rawInput": {
+        "code": "x = 1\ny = 2\nprint(x + y)",
+        "title": "test multiline"
+      },
+      "sessionUpdate": "tool_call_update",
+      "status": "in_progress",
+      "title": "3\n",
+      "toolCallId": "pyd_ai_tool_call_id__execute_code"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
+      "content": [
+        {
+          "terminalId": "code_0001",
+          "type": "terminal"
+        },
+        {
+          "content": {
+            "text": "3\n",
+            "type": "text"
+          },
+          "type": "content"
+        }
+      ],
+      "rawInput": {
+        "code": "x = 1\ny = 2\nprint(x + y)",
+        "title": "test multiline"
+      },
+      "sessionUpdate": "tool_call_update",
+      "status": "in_progress",
+      "title": "Process exited [✓ exit 0]",
+      "toolCallId": "pyd_ai_tool_call_id__execute_code"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
+      "rawOutput": "3\n",
+      "sessionUpdate": "tool_call_update",
+      "status": "completed",
+      "toolCallId": "pyd_ai_tool_call_id__execute_code"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
       "content": [
         {
           "content": {

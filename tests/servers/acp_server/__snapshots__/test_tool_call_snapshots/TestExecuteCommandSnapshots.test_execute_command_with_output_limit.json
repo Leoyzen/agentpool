@@ -15,6 +15,96 @@
   },
   {
     "payload": {
+      "kind": "execute",
+      "sessionUpdate": "tool_call_update",
+      "title": "Executing: bash",
+      "toolCallId": "pyd_ai_tool_call_id__bash"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
+      "content": [
+        {
+          "terminalId": "cmd_0001",
+          "type": "terminal"
+        }
+      ],
+      "rawInput": {
+        "command": "cat bigfile",
+        "output_limit": 50
+      },
+      "sessionUpdate": "tool_call_update",
+      "status": "in_progress",
+      "title": "Running: cat bigfile",
+      "toolCallId": "pyd_ai_tool_call_id__bash"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
+      "content": [
+        {
+          "terminalId": "cmd_0001",
+          "type": "terminal"
+        }
+      ],
+      "rawInput": {
+        "command": "cat bigfile",
+        "output_limit": 50
+      },
+      "sessionUpdate": "tool_call_update",
+      "status": "in_progress",
+      "title": "Output: line\nline\nline\nline\nline\nline\nline\nline\nline\nline\n...",
+      "toolCallId": "pyd_ai_tool_call_id__bash"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
+      "content": [
+        {
+          "terminalId": "cmd_0001",
+          "type": "terminal"
+        },
+        {
+          "content": {
+            "text": "line\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\n",
+            "type": "text"
+          },
+          "type": "content"
+        }
+      ],
+      "rawInput": {
+        "command": "cat bigfile",
+        "output_limit": 50
+      },
+      "sessionUpdate": "tool_call_update",
+      "status": "in_progress",
+      "title": "Process exited [✓ exit 0]",
+      "toolCallId": "pyd_ai_tool_call_id__bash"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
+      "rawOutput": {
+        "content": "...[truncated]\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\n\n\n[output truncated]",
+        "metadata": {
+          "description": "cat bigfile",
+          "exit": 0,
+          "output": "...[truncated]\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\n"
+        },
+        "structured_content": null
+      },
+      "sessionUpdate": "tool_call_update",
+      "status": "completed",
+      "toolCallId": "pyd_ai_tool_call_id__bash"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
       "content": [
         {
           "content": {

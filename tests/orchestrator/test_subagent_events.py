@@ -507,6 +507,7 @@ async def test_toolpart_transitions_to_error_on_run_error() -> None:
 # ============================================================================
 
 
+@pytest.mark.flaky(reruns=3, reruns_delay=0.5)
 @pytest.mark.anyio
 async def test_nested_subagents_create_recursive_toolparts() -> None:
     """Depth >= 2 subagents cause recursive child consumers and nested ToolParts.

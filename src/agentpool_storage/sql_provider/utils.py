@@ -65,6 +65,7 @@ def to_chat_message(db_message: Message) -> ChatMessage[str]:
     return ChatMessage[str](
         message_id=db_message.id,
         session_id=db_message.session_id,
+        parent_id=db_message.parent_id,
         content=db_message.content,
         role=db_message.role,  # type: ignore
         name=db_message.name,

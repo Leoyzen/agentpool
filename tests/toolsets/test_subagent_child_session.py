@@ -131,8 +131,13 @@ agents:
                 child_session_id_from_spawn = event.child_session_id
 
         # Drain remaining events from the queue
-        while not _stream_empty(queue):
-            envelope = queue.receive_nowait()
+        while True:
+            try:
+                envelope = queue.receive_nowait()
+            except anyio.WouldBlock:
+                break
+            except anyio.EndOfStream:
+                break
             if envelope is None:
                 break
             # Events are now wrapped in EventEnvelope by the EventBus

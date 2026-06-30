@@ -265,6 +265,7 @@ class RunHandle:
                         run_id=self.run_id,
                         session_id=self.session_id,
                         agent_name=self.agent_type,
+                        parent_session_id=session.parent_session_id if session is not None else None,
                     )
                     await event_bus.publish(self.session_id, run_started)
 

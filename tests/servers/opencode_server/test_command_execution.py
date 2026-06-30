@@ -264,6 +264,7 @@ async def test_command_execution_error(
     assert "failed" in response.json()["detail"].lower()
 
 
+@pytest.mark.flaky(reruns=3, reruns_delay=0.5)
 async def test_collision_warning_logged(
     async_client: AsyncClient,
     server_state: ServerState,

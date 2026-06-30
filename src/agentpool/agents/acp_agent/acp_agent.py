@@ -530,10 +530,10 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 # (with yield) runs after they start so events flow in
                 # real-time without blocking on a task group boundary.
                 _bg_tasks: set[asyncio.Task[Any]] = set()
-                task_a = asyncio.create_task(_forward_acp_events)
+                task_a = asyncio.create_task(_forward_acp_events())
                 _bg_tasks.add(task_a)
                 task_a.add_done_callback(_bg_tasks.discard)
-                task_b = asyncio.create_task(_forward_secondary_events)
+                task_b = asyncio.create_task(_forward_secondary_events())
                 _bg_tasks.add(task_b)
                 task_b.add_done_callback(_bg_tasks.discard)
 

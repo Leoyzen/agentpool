@@ -75,6 +75,7 @@ def mock_agent_pool() -> Mock:
     mock_agent.AGENT_TYPE = "native"
     mock_agent.conversation = Mock()
     mock_agent.conversation.add_chat_messages = Mock()
+    mock_agent.conversation.get_history = Mock(return_value=[])
     mock_agent.tools = Mock()
     mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
     mock_agent.__aexit__ = AsyncMock(return_value=None)

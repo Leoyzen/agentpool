@@ -12,6 +12,7 @@ import pytest
 
 from acp.client.implementations import HeadlessACPClient
 from acp.filesystem import ACPFileSystem
+from acp.schema import ClientCapabilities
 
 
 async def test_acp_filesystem_fsspec_operations():
@@ -36,7 +37,11 @@ async def test_acp_filesystem_fsspec_operations():
 
         try:
             session_id = "test_session"
-            fs = ACPFileSystem(client=client, session_id=session_id)
+            fs = ACPFileSystem(
+                client=client,
+                session_id=session_id,
+                client_capabilities=ClientCapabilities(terminal=True),
+            )
 
             # Test reading files
             content = await fs._cat_file(str(temp_path / "file1.txt"))
