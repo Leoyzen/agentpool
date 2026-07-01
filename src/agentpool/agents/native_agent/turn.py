@@ -35,10 +35,9 @@ from agentpool.tools.base import is_terminal_tool
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from pydantic_ai import Agent as PydanticAgent
-    from pydantic_ai.messages import ModelMessage, UserContent
+    from pydantic_ai.messages import ModelMessage
 
-    from agentpool.agents.context import AgentContext, AgentRunContext
+    from agentpool.agents.context import AgentRunContext
     from agentpool.agents.events.events import RichAgentStreamEvent
     from agentpool.agents.native_agent.agent import Agent
 
@@ -66,7 +65,7 @@ class NativeTurn(Turn):
     def __init__(
         self,
         agent: Agent[Any, Any],
-        prompts: list[UserContent],
+        prompts: list[str],
         run_ctx: AgentRunContext,
         message_history: list[ModelMessage],
         parent_id: str | None = None,
@@ -100,10 +99,20 @@ class NativeTurn(Turn):
         Raises:
             asyncio.CancelledError: If the turn is cancelled mid-execution.
         """
-        agentlet: PydanticAgent[AgentContext[Any], Any] = await self._agent.get_agentlet(
+        logger.info(
+            "NativeTurn.execute() START agent=%s session=%s",
+            self._agent.name,
+            self._run_ctx.session_id,
+        )
+        agentlet = await self._agent.get_agentlet(
             model=None,
             output_type=None,
             run_ctx=self._run_ctx,
+        )
+        logger.info(
+            "NativeTurn.execute() agentlet built agent=%s session=%s",
+            self._agent.name,
+            self._run_ctx.session_id,
         )
 
         mapper = EventMapper(
@@ -113,12 +122,24 @@ class NativeTurn(Turn):
 
         terminal_tool_names: set[str] = set()
         try:
-            all_tools = await self._agent.tools.get_tools()
+            # Use timeout to prevent hang when MCP providers are still
+            # connecting (e.g. ACP session/load hasn't arrived yet).
+            # MCP tools are handled via snapshot/as_capability path,
+            # so get_tools() here is only for building tool kind map.
+            all_tools = await asyncio.wait_for(
+                self._agent.tools.get_tools(),
+                timeout=5.0,
+            )
             for tool in all_tools:
                 if tool.category:
                     mapper.tool_kind_map[tool.name] = tool.category
                 if is_terminal_tool(tool):
                     terminal_tool_names.add(tool.name)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "get_tools() timed out after 5s, skipping tool kind map",
+                agent=self._agent.name,
+            )
         except Exception:  # noqa: BLE001
             logger.debug("Failed to build tool kind map", exc_info=True)
 
@@ -135,13 +156,12 @@ class NativeTurn(Turn):
         # Without this, skill instructions are silently discarded.
         staged_text = await self._agent.staged_content.consume_as_text()
         if staged_text is not None:
-            prompt_strs = [str(p) for p in self._prompts]
-            user_request = "\n\n".join(prompt_strs)
-            effective_prompts: list[UserContent] = (
+            user_request = "\n\n".join(self._prompts)
+            effective_prompts = (
                 [f"{staged_text}\n\n{user_request}"] if user_request else [staged_text]
             )
         else:
-            effective_prompts = list(self._prompts)
+            effective_prompts = self._prompts
 
         agent_run: Any = None
         try:
@@ -151,16 +171,33 @@ class NativeTurn(Turn):
                 message_history=self._message_history_input,
                 usage_limits=self._agent._default_usage_limits,
             ) as agent_run:
+                logger.info(
+                    "NativeTurn.execute() agentlet.iter() entered agent=%s session=%s",
+                    self._agent.name,
+                    self._run_ctx.session_id,
+                )
                 if self._run_ctx._run_handle is not None:
                     self._run_ctx._run_handle.active_agent_run = agent_run
 
                 node = agent_run.next_node
+                logger.info(
+                    "NativeTurn.execute() first node=%s agent=%s session=%s",
+                    type(node).__name__,
+                    self._agent.name,
+                    self._run_ctx.session_id,
+                )
 
                 while not isinstance(node, End):
                     if self._run_ctx.cancelled:
                         break
 
                     if isinstance(node, ModelRequestNode | CallToolsNode):
+                        logger.info(
+                            "NativeTurn.execute() processing node=%s agent=%s session=%s",
+                            type(node).__name__,
+                            self._agent.name,
+                            self._run_ctx.session_id,
+                        )
                         terminal_tool_completed = False
                         # Cooperative cancellation is handled via run_ctx.cancelled
                         # checked on every streaming chunk below.
@@ -185,6 +222,12 @@ class NativeTurn(Turn):
                         finally:
                             self._agent._iteration_task = None
 
+                        logger.info(
+                            "NativeTurn.execute() node.stream() done agent=%s session=%s",
+                            self._agent.name,
+                            self._run_ctx.session_id,
+                        )
+
                         if terminal_tool_completed:
                             break
 
@@ -192,9 +235,20 @@ class NativeTurn(Turn):
                         break
 
                     try:
+                        logger.info(
+                            "NativeTurn.execute() calling agent_run.next() agent=%s session=%s",
+                            self._agent.name,
+                            self._run_ctx.session_id,
+                        )
                         iteration_task = asyncio.create_task(agent_run.next(node))
                         self._agent._iteration_task = iteration_task
                         node = await iteration_task
+                        logger.info(
+                            "NativeTurn.execute() agent_run.next() returned node=%s agent=%s session=%s",
+                            type(node).__name__,
+                            self._agent.name,
+                            self._run_ctx.session_id,
+                        )
                     finally:
                         self._agent._iteration_task = None
 
@@ -252,6 +306,12 @@ class NativeTurn(Turn):
         finally:
             if self._run_ctx._run_handle is not None:
                 self._run_ctx._run_handle.active_agent_run = None
+
+        logger.info(
+            "NativeTurn.execute() loop exited, building final message agent=%s session=%s",
+            self._agent.name,
+            self._run_ctx.session_id,
+        )
 
         # Build final message always (even when cancelled) so that
         # turn.final_message is accessible to callers after execute()
@@ -314,6 +374,16 @@ class NativeTurn(Turn):
         # CancelledError swallowed by pydantic-ai inside agent_run.next()),
         # exit without yielding StreamCompleteEvent.
         if self._run_ctx.cancelled:
+            logger.info(
+                "NativeTurn.execute() cancelled, not yielding StreamComplete agent=%s session=%s",
+                self._agent.name,
+                self._run_ctx.session_id,
+            )
             return
 
+        logger.info(
+            "NativeTurn.execute() yielding StreamCompleteEvent agent=%s session=%s",
+            self._agent.name,
+            self._run_ctx.session_id,
+        )
         yield StreamCompleteEvent(message=self._final_message)

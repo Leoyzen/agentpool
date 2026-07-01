@@ -209,7 +209,6 @@ class MCPResourceProvider(ResourceProvider):
                     tool_info.enabled = self._saved_enabled_states[tool_info.name]
 
             self._tools_cache = all_tools
-            logger.debug("Refreshed MCP tools cache", num_tools=len(all_tools))
         except Exception:
             logger.exception("Failed to refresh MCP tools cache")
             self._tools_cache = []
@@ -247,7 +246,6 @@ class MCPResourceProvider(ResourceProvider):
                     continue
 
             self._prompts_cache = all_prompts
-            logger.debug("Refreshed MCP prompts cache", num_prompts=len(all_prompts))
         except Exception as e:
             logger.exception("Failed to refresh MCP prompts cache")
             if "method_not_found" in str(e):
@@ -283,7 +281,6 @@ class MCPResourceProvider(ResourceProvider):
                     continue
 
             self._resources_cache = all_resources
-            logger.debug("Refreshed MCP resources cache", num_resources=len(all_resources))
         except Exception as e:
             logger.exception("Failed to refresh MCP resources cache")
             if "method_not_found" in str(e):
@@ -421,12 +418,6 @@ class MCPResourceProvider(ResourceProvider):
                 skill_map[skill.name] = skill
 
             self._skills_cache = list(skill_map.values())
-            logger.debug(
-                "Refreshed MCP skills cache",
-                num_skills=len(self._skills_cache),
-                prompt_skills=len(prompt_skills),
-                resource_skills=len(resource_skills),
-            )
 
         return self._skills_cache
 
@@ -510,13 +501,6 @@ class MCPResourceProvider(ResourceProvider):
         skills: list[Skill] = []
         try:
             resources = await self.get_resources()
-            skill_uris = [r.uri for r in resources if r.uri.startswith("skill://")]
-            logger.debug(
-                "MCP resource skill discovery",
-                server=self.name,
-                total_resources=len(resources),
-                skill_resources=len(skill_uris),
-            )
             for resource in resources:
                 try:
                     # Check if this is a skill:// resource

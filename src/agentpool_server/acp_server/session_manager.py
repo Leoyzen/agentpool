@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from acp import Client
     from acp.schema import Implementation, McpServer
     from agentpool import AgentPool
-    from agentpool.agents.base_agent import BaseAgent
     from agentpool.orchestrator import SessionController
     from agentpool.sessions import SessionStore
     from agentpool.storage.manager import StorageManager
@@ -68,7 +67,7 @@ class ACPSessionManager:
 
     async def create_session(
         self,
-        agent: BaseAgent[Any, Any],
+        agent_name: str,
         cwd: str,
         client: Client,
         acp_agent: AgentPoolACPAgent,
@@ -83,7 +82,7 @@ class ACPSessionManager:
         """Create a new ACP session.
 
         Args:
-            agent: The agent instance to use for this session
+            agent_name: Name of the agent (from manifest) to use for this session
             cwd: Working directory for the session
             client: ACP client connection
             acp_agent: ACP agent instance
@@ -114,7 +113,7 @@ class ACPSessionManager:
             child_session_id = session_id or generate_session_id()
             await self._pool.session_pool.create_session(
                 session_id=child_session_id,
-                agent_name=agent.name,
+                agent_name=agent_name,
                 parent_session_id=parent_session_id,
                 agent_type="acp",
             )
@@ -152,7 +151,7 @@ class ACPSessionManager:
             # Create and persist session data directly
             data = SessionData(
                 session_id=session_id,
-                agent_name=agent.name,
+                agent_name=agent_name,
                 cwd=cwd,
                 project_id=project_id,
                 metadata={"protocol": "acp", "mcp_server_count": len(mcp_servers or [])},
@@ -161,8 +160,29 @@ class ACPSessionManager:
                 await self.session_store.save(data)
             effective_cwd = cwd
 
-        # Use the pool agent directly (per-session agents now managed by SessionPool)
-        session_agent = agent
+        # Use per-session agent from SessionPool so that
+        # initialize_mcp_servers() updates the same agent object
+        # that child sessions inherit MCP configs from.
+        if self._pool.session_pool is not None:
+            session_agent = (
+                await self._pool.session_pool.sessions.get_or_create_session_agent(
+                    session_id, agent_name=agent_name
+                )
+            )
+        else:
+            # Fallback: create directly from manifest (tests only)
+
+            cfg = self._pool.manifest.agents.get(agent_name)
+            if cfg is None:
+                msg = f"Agent {agent_name!r} not found in manifest"
+                raise ValueError(msg)
+            if cfg.name is None:
+                cfg = cfg.model_copy(update={"name": agent_name})
+            from agentpool_config.context import ConfigContextManager
+
+            with ConfigContextManager(self._pool._config_file_path):
+                session_agent = cfg.get_agent(pool=self._pool)
+            await session_agent.__aenter__()
 
         # Create the ACP-specific runtime session
         session = ACPSession(
@@ -224,6 +244,10 @@ class ACPSessionManager:
         """
         # Check if already active
         if session_id in self._acp_sessions:
+            logger.info(
+                "Session already active, ignoring session/load mcpServers",
+                session_id=session_id,
+            )
             return self._acp_sessions[session_id]
         # Try to load from pool's session store
         data = await self.session_store.load(session_id) if self.session_store else None

@@ -9,6 +9,7 @@ from __future__ import annotations
 from pydantic import HttpUrl
 
 from agentpool_config.mcp_server import (
+    AcpMCPServerConfig,
     SSEMCPServerConfig,
     StdioMCPServerConfig,
     StreamableHTTPMCPServerConfig,
@@ -183,3 +184,68 @@ def test_streamable_http_display_name_strips_whitespace():
     )
 
     assert config.display_name == "http_server"
+
+
+# =============================================================================
+# to_transport() tests
+# =============================================================================
+
+
+def test_to_transport_stdio():
+    """StdioMCPServerConfig.to_transport() should return StdioTransport with correct fields."""
+    from fastmcp.client.transports import StdioTransport
+
+    config = StdioMCPServerConfig(
+        command="python",
+        args=["-m", "my_server"],
+        env={"FOO": "bar"},
+    )
+    transport = config.to_transport()
+
+    assert isinstance(transport, StdioTransport)
+    assert transport.command == "python"
+    assert transport.args == ["-m", "my_server"]
+    assert transport.env is not None
+    assert transport.env["FOO"] == "bar"
+
+
+def test_to_transport_sse():
+    """SSEMCPServerConfig.to_transport() should return SSETransport with correct URL/headers."""
+    from fastmcp.client.transports import SSETransport
+
+    config = SSEMCPServerConfig(
+        url=HttpUrl("http://localhost:8080/sse"),
+        headers={"Authorization": "Bearer token"},
+    )
+    transport = config.to_transport()
+
+    assert isinstance(transport, SSETransport)
+    assert transport.url == "http://localhost:8080/sse"
+    assert transport.headers == {"Authorization": "Bearer token"}
+
+
+def test_to_transport_http():
+    """StreamableHTTPMCPServerConfig.to_transport() should return StreamableHttpTransport."""
+    from fastmcp.client.transports import StreamableHttpTransport
+
+    config = StreamableHTTPMCPServerConfig(
+        url=HttpUrl("https://api.example.com/mcp"),
+        headers={"X-Api-Key": "secret"},
+    )
+    transport = config.to_transport()
+
+    assert isinstance(transport, StreamableHttpTransport)
+    assert transport.url == "https://api.example.com/mcp"
+    assert transport.headers == {"X-Api-Key": "secret"}
+
+
+def test_to_transport_acp_raises():
+    """AcpMCPServerConfig.to_transport() should raise NotImplementedError."""
+    config = AcpMCPServerConfig(acp_id="my-acp-server")
+    try:
+        config.to_transport()
+    except NotImplementedError:
+        pass
+    else:
+        msg = "Expected NotImplementedError from AcpMCPServerConfig.to_transport()"
+        raise AssertionError(msg)

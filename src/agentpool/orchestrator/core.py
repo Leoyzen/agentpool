@@ -8,16 +8,18 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from collections.abc import AsyncIterator, Awaitable, Callable
 import contextlib
 from dataclasses import dataclass, field
 from datetime import datetime
 from itertools import groupby
 import time
-from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 import uuid
 
 import anyio
 from pydantic_ai import TextPartDelta, ThinkingPartDelta, ToolCallPartDelta
+from pydantic_ai.messages import ModelMessage
 
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
@@ -36,7 +38,10 @@ from agentpool.agents.events import (
     ToolCallProgressEvent,
     ToolCallStartEvent,
 )
+from agentpool.agents.native_agent.checkpoint import CheckpointData
 from agentpool.log import get_logger
+from agentpool.messaging import ChatMessage
+from agentpool.models.pending_interaction import PendingPermission
 from agentpool.orchestrator.run import RunHandle, RunStatus, inject_cancelled_tool_results
 from agentpool.orchestrator.runtime_registry import RuntimeAgentRegistry
 from agentpool.sessions.models import PendingDeferredCall, SessionData
@@ -44,21 +49,13 @@ from agentpool_server.opencode_server.models.session_info import SessionInfo
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable
-
-    from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
-    from pydantic_ai.messages import ModelMessage
-
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.agents.native_agent import Agent
-    from agentpool.agents.native_agent.checkpoint import CheckpointData
     from agentpool.delegation import AgentPool
     from agentpool.delegation.team import Team
     from agentpool.delegation.teamrun import TeamRun
-    from agentpool.mcp_server.connection_pool import MCPConnectionPool
-    from agentpool.messaging import ChatMessage
-    from agentpool.messaging.messagenode import MessageNode
-    from agentpool.models.pending_interaction import PendingPermission
+    from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
+    from agentpool.mcp_server.session_pool import SessionConnectionPool
     from agentpool.sessions.store import SessionStore
     from agentpool_config.teams import TeamConfig
 
@@ -110,8 +107,7 @@ class SessionBusyError(Exception):
 
     def __init__(self, session_id: str, run_id: str) -> None:
         super().__init__(
-            f"Session '{session_id}' already has an active run '{run_id}'. "
-            "Wait for it to complete or cancel it first."
+            f"Session '{session_id}' already has an active run '{run_id}'. Wait for it to complete or cancel it first."
         )
         self.session_id = session_id
         self.run_id = run_id
@@ -263,24 +259,25 @@ def _merge_key(event: Any) -> tuple[str, str] | None:
             return ("delta_text", "")
         case PartDeltaEvent(delta=ThinkingPartDelta()):
             return ("delta_thinking", "")
-        case PartDeltaEvent(delta=ToolCallPartDelta(tool_call_id=tcid)) if tcid is not None:
+        case PartDeltaEvent(delta=ToolCallPartDelta(tool_call_id=tcid)):
             return ("delta_tool_call", tcid)
+        case PartDeltaEvent():
+            # delta is None — classified as passthrough, will be dropped in _merge_envelopes
+            return None
         case ToolCallProgressEvent(tool_call_id=tcid, status=status):
             return ("progress", f"{tcid}:{status}")
         case PlanUpdateEvent():
             return ("plan", "")
         case _:
-            # PartDeltaEvent with delta=None and all other events are passthrough.
             return None
 
 
 def _merge_text_deltas(events: list[PartDeltaEvent]) -> PartDeltaEvent:
     """Concatenate TextPartDelta content_delta strings. Uses first event's index."""
-    parts = [
-        e.delta.content_delta
-        for e in events
-        if isinstance(e.delta, TextPartDelta) and e.delta.content_delta is not None
-    ]
+    parts: list[str] = []
+    for event in events:
+        if isinstance(event.delta, TextPartDelta) and event.delta.content_delta is not None:
+            parts.append(event.delta.content_delta)
     return PartDeltaEvent(
         index=events[0].index,
         delta=TextPartDelta(content_delta="".join(parts)),
@@ -289,11 +286,10 @@ def _merge_text_deltas(events: list[PartDeltaEvent]) -> PartDeltaEvent:
 
 def _merge_thinking_deltas(events: list[PartDeltaEvent]) -> PartDeltaEvent:
     """Concatenate ThinkingPartDelta content_delta strings. Uses first event's index."""
-    parts = [
-        e.delta.content_delta
-        for e in events
-        if isinstance(e.delta, ThinkingPartDelta) and e.delta.content_delta is not None
-    ]
+    parts: list[str] = []
+    for event in events:
+        if isinstance(event.delta, ThinkingPartDelta) and event.delta.content_delta is not None:
+            parts.append(event.delta.content_delta)
     return PartDeltaEvent(
         index=events[0].index,
         delta=ThinkingPartDelta(content_delta="".join(parts)),
@@ -306,7 +302,7 @@ def _merge_tool_call_deltas(events: list[PartDeltaEvent]) -> PartDeltaEvent:
     Uses first event's index and tool_call_id.
     """
     parts: list[str] = []
-    tool_call_id: str | None = ""
+    tool_call_id = ""
     for event in events:
         delta = event.delta
         if isinstance(delta, ToolCallPartDelta) and isinstance(delta.args_delta, str):
@@ -315,7 +311,7 @@ def _merge_tool_call_deltas(events: list[PartDeltaEvent]) -> PartDeltaEvent:
                 tool_call_id = delta.tool_call_id
     return PartDeltaEvent(
         index=events[0].index,
-        delta=ToolCallPartDelta(args_delta="".join(parts), tool_call_id=tool_call_id or ""),
+        delta=ToolCallPartDelta(args_delta="".join(parts), tool_call_id=tool_call_id),
     )
 
 
@@ -378,7 +374,6 @@ def _merge_envelopes(envelopes: list[EventEnvelope]) -> list[EventEnvelope]:
             result.append(group_list[-1])
         else:
             events = [env.event for env in group_list]
-            merged: PartDeltaEvent | ToolCallProgressEvent
             match key[0]:
                 case "delta_text":
                     merged = _merge_text_deltas(events)
@@ -444,7 +439,7 @@ async def drain_and_merge(
         # Drain all immediately-available items without blocking.
         while True:
             try:
-                item = cast("MemoryObjectReceiveStream[Any]", stream).receive_nowait()
+                item = stream.receive_nowait()
             except anyio.WouldBlock:
                 break
             except (anyio.EndOfStream, anyio.ClosedResourceError):
@@ -669,7 +664,7 @@ class EventBus:
                     await send_stream.send(envelope)
             except TimeoutError:
                 try:
-                    cast("MemoryObjectSendStream[EventEnvelope]", send_stream).send_nowait(envelope)
+                    send_stream.send_nowait(envelope)
                 except anyio.WouldBlock:
                     dead_streams.append(send_stream)
             except (anyio.BrokenResourceError, anyio.ClosedResourceError):
@@ -785,7 +780,6 @@ class SessionController:
         self._event_bus: EventBus | None = None
         self._pending_run_ids: dict[str, str] = {}
         self._todo_lock: asyncio.Lock = asyncio.Lock()
-        self._mcp_pool: MCPConnectionPool | None = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._runtime_registry = RuntimeAgentRegistry()
 
@@ -929,7 +923,12 @@ class SessionController:
         else:
             self._session_scopes[session_id] = anyio.CancelScope()
         if self.store is not None:
-            await self.store.save(self._state_to_data(state))
+            # Only save if no existing data — callers like
+            # ACPSessionManager.create_session() may have already
+            # persisted richer SessionData (with cwd, project_id, etc.)
+            existing = await self.store.load(session_id)
+            if existing is None:
+                await self.store.save(self._state_to_data(state))
         if parent_session_id:
             self._children.setdefault(parent_session_id, []).append(session_id)
         logger.info("Created session", session_id=session_id, agent_name=state.agent_name)
@@ -973,6 +972,7 @@ class SessionController:
             agent_name = agent_name or session.agent_name
 
             from agentpool.models.agents import NativeAgentConfig
+            from agentpool_config.context import ConfigContextManager
 
             cfg = self.pool.manifest.agents.get(agent_name)
             if cfg is None:
@@ -980,17 +980,227 @@ class SessionController:
 
             if isinstance(cfg, NativeAgentConfig):
                 if session.parent_session_id:
-                    return await self._create_child_session_agent(
-                        session_id, session, agent_name, cfg, input_provider
+                    # Child session: create lightweight agent inheriting
+                    # from parent session's agent.  Shares MCP manager
+                    # to avoid duplicate subprocess spawning.
+                    parent_state = self._sessions.get(session.parent_session_id)
+                    parent_agent = parent_state.agent if parent_state else None
+
+                    if cfg.name is None:
+                        cfg = cfg.model_copy(update={"name": agent_name})
+
+                    with ConfigContextManager(self.pool._config_file_path):
+                        agent: Agent[Any, Any] = cfg.get_agent(
+                            input_provider=input_provider,
+                            pool=self.pool,
+                        )
+
+                    # Preserve runtime resources from parent agent.
+                    # Model is NOT inherited — each agent uses its own configured
+                    # model from the manifest. Inheriting the parent's model would
+                    # cause e.g. TestModel with call_tools=['task'] to override
+                    # the child's own model configuration.
+                    if parent_agent is not None:
+                        if parent_agent.env is not None:
+                            agent.env = parent_agent.env
+                        agent._internal_fs = parent_agent._internal_fs
+
+                    await agent.__aenter__()
+
+                    # Build MCP config snapshot from parent's snapshot and
+                    # child's own agent configs. pool_configs and
+                    # session_configs are inherited from the parent so that
+                    # child agents share the same pool-level MCP servers and
+                    # any session-scoped injections. agent_configs come from
+                    # the child's own YAML. skill_configs are empty at
+                    # creation time (populated later by skill loading).
+                    from agentpool.mcp_server.config_snapshot import (
+                        McpConfigSnapshot as _McpConfigSnapshot,
                     )
-                return await self._create_native_session_agent(
-                    session_id, session, agent_name, cfg, input_provider
+                    from agentpool.mcp_server.session_pool import (
+                        SessionConnectionPool as _SessionConnectionPool,
+                    )
+
+                    parent_snapshot: McpConfigSnapshot | None = None
+                    if parent_agent is not None:
+                        from agentpool.agents.native_agent import Agent as _NativeAgent
+
+                        if isinstance(parent_agent, _NativeAgent):
+                            parent_snapshot = parent_agent._mcp_snapshot
+
+                    snapshot = _McpConfigSnapshot(
+                        pool_configs=(
+                            parent_snapshot.pool_configs
+                            if parent_snapshot is not None
+                            else ()
+                        ),
+                        agent_configs=agent._build_agent_configs(),
+                        session_configs=(
+                            parent_snapshot.session_configs
+                            if parent_snapshot is not None
+                            else ()
+                        ),
+                        skill_configs=(),
+                    )
+                    agent._mcp_snapshot = snapshot
+                    agent._session_connection_pool = _SessionConnectionPool(session_id)
+
+                    # Share pre-created ACP transports from parent.
+                    # AcpMcpTransport now supports concurrent connect_session()
+                    # calls — each creates an independent per-session stream
+                    # pair, so parent and child can share the same transport.
+                    if (
+                        parent_agent is not None
+                        and isinstance(parent_agent, _NativeAgent)
+                        and parent_agent._session_connection_pool is not None
+                    ):
+                        await agent._session_connection_pool.copy_pre_created_transports(
+                            parent_agent._session_connection_pool
+                        )
+
+                    # Add non-MCP pool-level providers (skills instruction
+                    # and skills tools). MCP no longer goes through providers —
+                    # it uses the snapshot-based capability path in
+                    # get_agentlet() instead.
+                    # ACP MCP servers still need the aggregating provider
+                    # so ACP agents can serialize MCP configs to child
+                    # sessions via mcp_config_to_acp().
+                    if self.pool is not None:
+                        if self.pool.skills_instruction_provider:
+                            agent.tools.add_provider(self.pool.skills_instruction_provider)
+                        agent.tools.add_provider(self.pool.skills_tools_provider)
+                        agent.tools.add_provider(self.pool.mcp.get_aggregating_provider())
+
+                    if input_provider is not None:
+                        session.input_provider = input_provider
+                    self._session_agents[session_id] = agent
+                    session.agent = agent
+                    # is_per_session_agent=False: close_session() skips
+                    # agent.__aexit__() since parent manages lifecycle
+                    session.is_per_session_agent = False
+                    logger.info(
+                        "Created child session agent",
+                        session_id=session_id,
+                        agent_name=agent_name,
+                        parent_session_id=session.parent_session_id,
+                    )
+                    return agent
+
+                # Main path: create fresh per-session agent from config
+                if cfg.name is None:
+                    cfg = cfg.model_copy(update={"name": agent_name})
+
+                with ConfigContextManager(self.pool._config_file_path):
+                    agent: Agent[Any, Any] = cfg.get_agent(
+                        input_provider=input_provider,
+                        pool=self.pool,
+                    )
+
+                await agent.__aenter__()
+
+                # Load conversation history into per-session agent from storage
+                try:
+                    await agent.load_session(session_id)
+                except Exception:
+                    logger.exception(
+                        "Failed to load session for per-session agent",
+                        session_id=session_id,
+                    )
+
+                # Build MCP config snapshot at agent creation time.
+                # pool_configs come from the pool's MCPManager, agent_configs
+                # from the agent's own MCPManager. session_configs and
+                # skill_configs are empty at creation time.
+                from agentpool.mcp_server.config_snapshot import (
+                    McpConfigSnapshot as _McpConfigSnapshot,
+                )
+                from agentpool.mcp_server.session_pool import (
+                    SessionConnectionPool as _SessionConnectionPool,
                 )
 
-            if cfg is not None:
-                return await self._create_non_native_session_agent(
-                    session_id, session, agent_name, cfg, input_provider
+                snapshot = _McpConfigSnapshot(
+                    pool_configs=agent._build_pool_configs(),
+                    agent_configs=agent._build_agent_configs(),
+                    session_configs=(),
+                    skill_configs=(),
                 )
+                agent._mcp_snapshot = snapshot
+                agent._session_connection_pool = _SessionConnectionPool(session_id)
+
+                # Add non-MCP pool-level providers (skills instruction
+                # and skills tools). MCP no longer goes through providers.
+                if self.pool is not None:
+                    if self.pool.skills_instruction_provider:
+                        agent.tools.add_provider(self.pool.skills_instruction_provider)
+                    agent.tools.add_provider(self.pool.skills_tools_provider)
+
+                self._session_agents[session_id] = agent
+                session.agent = agent
+                session.is_per_session_agent = True
+                self._increment_mcp_count(agent)
+                logger.info("Created session agent", session_id=session_id, agent_name=agent_name)
+                return agent
+
+            # Non-native agents (ACP, etc.): create per-session agent from config
+            if cfg is not None:
+                if cfg.name is None:
+                    cfg = cfg.model_copy(update={"name": agent_name})
+
+                with ConfigContextManager(self.pool._config_file_path):
+                    agent = cfg.get_agent(
+                        input_provider=input_provider,
+                        pool=self.pool,
+                    )
+
+                await agent.__aenter__()
+
+                # Build MCP config snapshot directly for non-native agents.
+                # Non-native agents (ACP, etc.) don't have _build_pool_configs
+                # or _build_agent_configs methods, so we construct the entries
+                # from the pool's MCPManager and the agent config's
+                # get_mcp_servers() method.
+                from agentpool.mcp_server.config_snapshot import (
+                    McpConfigEntry as _McpConfigEntry,
+                    McpConfigSnapshot as _McpConfigSnapshot,
+                )
+                from agentpool.mcp_server.session_pool import (
+                    SessionConnectionPool as _SessionConnectionPool,
+                )
+
+                pool_configs: tuple[McpConfigEntry, ...] = ()
+                if self.pool is not None:
+                    pool_configs = tuple(
+                        _McpConfigEntry(server_config=server, source="pool")
+                        for server in self.pool.mcp.servers
+                        if server.enabled
+                    )
+                agent_configs: tuple[McpConfigEntry, ...] = tuple(
+                    _McpConfigEntry(server_config=server, source="agent")
+                    for server in cfg.get_mcp_servers()
+                    if server.enabled
+                )
+                snapshot = _McpConfigSnapshot(
+                    pool_configs=pool_configs,
+                    agent_configs=agent_configs,
+                    session_configs=(),
+                    skill_configs=(),
+                )
+                agent._mcp_snapshot = snapshot
+                agent._session_connection_pool = _SessionConnectionPool(session_id)
+
+                # Add non-MCP pool-level providers (skills instruction
+                # and skills tools). MCP no longer goes through providers.
+                if self.pool is not None:
+                    if self.pool.skills_instruction_provider:
+                        agent.tools.add_provider(self.pool.skills_instruction_provider)
+                    agent.tools.add_provider(self.pool.skills_tools_provider)
+
+                self._session_agents[session_id] = agent
+                session.agent = agent
+                session.is_per_session_agent = True
+                self._increment_mcp_count(agent)
+                logger.info("Created session agent", session_id=session_id, agent_name=agent_name)
+                return agent
 
             # Config not found
             available_manifest = list(self.pool.manifest.agents.keys())
@@ -1001,176 +1211,6 @@ class SessionController:
                 f"Available in runtime registry: {available_runtime}."
             )
             raise RuntimeError(msg)
-
-    def _add_pool_level_providers(
-        self, agent: BaseAgent[Any, Any], *, skip_mcp: bool = False
-    ) -> None:
-        """Add pool-level resource providers to a per-session agent.
-
-        When ``skip_mcp`` is True, the pool MCP provider is omitted because
-        the agent already shares a parent's MCPManager.
-        """
-        if self.pool is None:
-            return
-        if not skip_mcp:
-            agent.tools.add_provider(
-                self._mcp_pool.get_aggregating_provider()
-                if self._mcp_pool is not None
-                else self.pool.mcp.get_aggregating_provider()
-            )
-        if self.pool.skills_instruction_provider:
-            agent.tools.add_provider(self.pool.skills_instruction_provider)
-        agent.tools.add_provider(self.pool.skills_tools_provider)
-
-    async def _create_child_session_agent(
-        self,
-        session_id: str,
-        session: SessionState,
-        agent_name: str,
-        cfg: Any,
-        input_provider: Any | None,
-    ) -> Agent[Any, Any]:
-        """Create a child session agent inheriting from parent's resources.
-
-        Shares MCP manager to avoid duplicate subprocess spawning.
-        """
-        from agentpool_config.context import ConfigContextManager
-
-        parent_state = (
-            self._sessions.get(session.parent_session_id)
-            if session.parent_session_id is not None
-            else None
-        )
-        parent_agent = parent_state.agent if parent_state else None
-
-        if cfg.name is None:
-            cfg = cfg.model_copy(update={"name": agent_name})
-
-        with ConfigContextManager(self.pool._config_file_path):
-            agent: Agent[Any, Any] = cfg.get_agent(
-                input_provider=input_provider,
-                pool=self.pool,
-            )
-
-        # Preserve runtime resources from parent agent.
-        # Model is NOT inherited — each agent uses its own configured
-        # model from the manifest. Inheriting the parent's model would
-        # cause e.g. TestModel with call_tools=['task'] to override
-        # the child's own model configuration.
-        if parent_agent is not None:
-            if parent_agent.env is not None:
-                agent.env = parent_agent.env
-            agent._internal_fs = parent_agent._internal_fs
-            # Share MCP manager to avoid duplicate subprocess spawning.
-            # Mark as shared so __aenter__/__aexit__ skip lifecycle
-            # management (the parent agent owns the MCPManager lifecycle).
-            agent.mcp = parent_agent.mcp
-            agent._mcp_shared = True
-
-        await agent.__aenter__()
-
-        # When the subagent shares the parent's MCPManager
-        # (agent._mcp_shared is True), pool-level MCP servers
-        # are already accessible via the shared manager. Adding
-        # the pool MCP provider again would register the same
-        # tools twice (once as MCP capabilities via
-        # self.mcp.as_capability(), once as direct tools via
-        # the aggregating provider), causing pydantic-ai
-        # UserError: "Tool name conflicts with existing tool".
-        self._add_pool_level_providers(agent, skip_mcp=agent._mcp_shared)
-
-        # Inherit parent's session-level MCP providers
-        if parent_agent is not None:
-            for provider in parent_agent.tools.external_providers:
-                is_mcp = getattr(provider, "kind", None) == "mcp"
-                if is_mcp and provider not in agent.tools.external_providers:
-                    agent.tools.add_provider(provider)
-
-        if input_provider is not None:
-            session.input_provider = input_provider
-        self._session_agents[session_id] = agent
-        session.agent = agent
-        # is_per_session_agent=False: close_session() skips
-        # agent.__aexit__() since MCP manager is shared
-        session.is_per_session_agent = False
-        logger.info(
-            "Created child session agent",
-            session_id=session_id,
-            agent_name=agent_name,
-            parent_session_id=session.parent_session_id,
-        )
-        return agent
-
-    async def _create_native_session_agent(
-        self,
-        session_id: str,
-        session: SessionState,
-        agent_name: str,
-        cfg: Any,
-        input_provider: Any | None,
-    ) -> Agent[Any, Any]:
-        """Create a fresh per-session native agent from config."""
-        from agentpool_config.context import ConfigContextManager
-
-        if cfg.name is None:
-            cfg = cfg.model_copy(update={"name": agent_name})
-
-        with ConfigContextManager(self.pool._config_file_path):
-            agent: Agent[Any, Any] = cfg.get_agent(
-                input_provider=input_provider,
-                pool=self.pool,
-            )
-
-        await agent.__aenter__()
-
-        # Load conversation history into per-session agent from storage
-        try:
-            await agent.load_session(session_id)
-        except Exception:
-            logger.exception(
-                "Failed to load session for per-session agent",
-                session_id=session_id,
-            )
-
-        self._add_pool_level_providers(agent)
-
-        self._session_agents[session_id] = agent
-        session.agent = agent
-        session.is_per_session_agent = True
-        self._increment_mcp_count(agent)
-        logger.info("Created session agent", session_id=session_id, agent_name=agent_name)
-        return agent
-
-    async def _create_non_native_session_agent(
-        self,
-        session_id: str,
-        session: SessionState,
-        agent_name: str,
-        cfg: Any,
-        input_provider: Any | None,
-    ) -> BaseAgent[Any, Any]:
-        """Create a per-session agent for non-native (ACP, etc.) configs."""
-        from agentpool_config.context import ConfigContextManager
-
-        if cfg.name is None:
-            cfg = cfg.model_copy(update={"name": agent_name})
-
-        with ConfigContextManager(self.pool._config_file_path):
-            agent: BaseAgent[Any, Any] = cfg.get_agent(
-                input_provider=input_provider,
-                pool=self.pool,
-            )
-
-        await agent.__aenter__()
-
-        self._add_pool_level_providers(agent)
-
-        self._session_agents[session_id] = agent
-        session.agent = agent
-        session.is_per_session_agent = True
-        self._increment_mcp_count(agent)
-        logger.info("Created session agent", session_id=session_id, agent_name=agent_name)
-        return agent
 
     def list_sessions(self) -> list[SessionInfo]:
         """List all active sessions.
@@ -1268,11 +1308,11 @@ class SessionController:
             elapsed. Returns an empty list if none have expired.
         """
         now = datetime.now()
-        return [
-            call
-            for call in session_data.pending_deferred_calls
-            if call.timeout is not None and (now - call.created_at) > call.timeout
-        ]
+        expired: list[PendingDeferredCall] = []
+        for call in session_data.pending_deferred_calls:
+            if call.timeout is not None and (now - call.created_at) > call.timeout:
+                expired.append(call)
+        return expired
 
     async def _save_close_checkpoint(self, session_id: str, data: SessionData) -> bool:
         """Save session data with checkpointed status before close.
@@ -1293,19 +1333,18 @@ class SessionController:
             data.touch()
             if self.store is not None:
                 await self.store.save(data)
-        except Exception:
-            logger.exception(
-                "Failed to save checkpoint before close",
-                session_id=session_id,
-            )
-            return False
-        else:
             logger.info(
                 "Session checkpointed before close",
                 session_id=session_id,
                 pending_call_count=len(data.pending_deferred_calls),
             )
             return True
+        except Exception:
+            logger.exception(
+                "Failed to save checkpoint before close",
+                session_id=session_id,
+            )
+            return False
 
     async def _mark_session_closed(self, session_id: str) -> None:
         """Mark a session as closed in the store instead of deleting it.
@@ -1523,10 +1562,27 @@ class SessionController:
         """
         from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
 
+        logger.info(
+            "_consume_run() START session_id=%s run_id=%s",
+            run_handle.session_id,
+            run_handle.run_id,
+        )
         gen = run_handle.start(initial_prompt)
         try:
             async for event in gen:
+                logger.info(
+                    "_consume_run() received event=%s session_id=%s run_id=%s",
+                    type(event).__name__,
+                    run_handle.session_id,
+                    run_handle.run_id,
+                )
                 if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                    logger.info(
+                        "_consume_run() breaking on %s session_id=%s run_id=%s",
+                        type(event).__name__,
+                        run_handle.session_id,
+                        run_handle.run_id,
+                    )
                     break
         except Exception as exc:
             logger.exception(
@@ -1683,6 +1739,10 @@ class SessionController:
                 ):
                     session.current_run_id = None
             if session.current_run_id is None:
+                logger.info(
+                    "receive_request() starting new run session_id=%s",
+                    session_id,
+                )
                 return self._start_run_handle(session, agent, session_id, content_str, deps=deps)
             run = self._runs.get(session.current_run_id) if session.current_run_id else None
             if run is not None:
@@ -1819,8 +1879,10 @@ class SessionController:
         """Stop the cleanup background task."""
         if self._cleanup_task is not None:
             self._cleanup_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            try:
                 await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
             self._cleanup_task = None
 
     async def _cleanup_loop(self) -> None:
@@ -1950,22 +2012,9 @@ class SessionPool:
         self._resume_locks_lock = asyncio.Lock()
         self._message_cache: dict[str, list[ChatMessage[Any]]] = {}
 
-        # MCP connection pooling: share subprocess connections across sessions
-        from agentpool.mcp_server.connection_pool import MCPConnectionPool
-
-        _mcp_servers: list[Any] = []
-        if hasattr(pool, "mcp"):
-            _raw_servers = pool.mcp.servers
-            if isinstance(_raw_servers, (list, tuple)):
-                _mcp_servers = list(_raw_servers)
-        self.mcp_pool = MCPConnectionPool(servers=_mcp_servers)
-        self.sessions._mcp_pool = self.mcp_pool
-
     async def start(self) -> None:
         """Start the session pool and background tasks."""
         await self.sessions.start_cleanup_task()
-        await self.mcp_pool.start_cleanup_task()
-        await self.mcp_pool.initialize()
         logger.info("SessionPool started")
 
     async def shutdown(self) -> None:
@@ -1980,7 +2029,6 @@ class SessionPool:
                     "Failed to close session during shutdown",
                     session_id=session_id,
                 )
-        await self.mcp_pool.shutdown()
         logger.info("SessionPool shut down")
 
     @property
@@ -2045,6 +2093,7 @@ class SessionPool:
             ValueError: If a member name is not found in the manifest
                 agents or teams sections.
         """
+        from agentpool.messaging.messagenode import MessageNode
         from agentpool.utils.identifiers import generate_session_id
 
         member_names = [team_config.get_member_name(m) for m in team_config.members]
@@ -2179,13 +2228,10 @@ class SessionPool:
                 pool=self.pool,
             )
 
-        # Add pool-level providers
+        # Add pool-level providers (non-MCP only).
+        # MCP tools are handled via McpConfigSnapshot → as_capability() →
+        # MCPToolset, not through agent.tools.providers.
         if self.pool is not None:
-            agent.tools.add_provider(
-                self.mcp_pool.get_aggregating_provider()
-                if self.mcp_pool is not None
-                else self.pool.mcp.get_aggregating_provider()
-            )
             if self.pool.skills_instruction_provider:
                 agent.tools.add_provider(self.pool.skills_instruction_provider)
             agent.tools.add_provider(self.pool.skills_tools_provider)
@@ -2223,17 +2269,15 @@ class SessionPool:
         input_provider = session.input_provider if session else None
 
         with ConfigContextManager(self.pool._config_file_path):
-            agent: BaseAgent[Any, Any] = cfg.get_agent(
+            agent = cfg.get_agent(
                 input_provider=input_provider,
                 pool=self.pool,
             )
-        # Add pool-level providers
+
+        # Add pool-level providers (non-MCP only).
+        # MCP tools are handled via McpConfigSnapshot → as_capability() →
+        # MCPToolset, not through agent.tools.providers.
         if self.pool is not None:
-            agent.tools.add_provider(
-                self.mcp_pool.get_aggregating_provider()
-                if self.mcp_pool is not None
-                else self.pool.mcp.get_aggregating_provider()
-            )
             if self.pool.skills_instruction_provider:
                 agent.tools.add_provider(self.pool.skills_instruction_provider)
             agent.tools.add_provider(self.pool.skills_tools_provider)
@@ -2285,7 +2329,7 @@ class SessionPool:
                         stored_hash=session_data.agent_config_hash,
                         current_hash=current_hash,
                     )
-            except (AttributeError, TypeError, ValueError, ImportError):
+            except Exception:
                 logger.debug(
                     "Could not compute agent config hash for drift check",
                     session_id=session_data.session_id,
@@ -2764,7 +2808,7 @@ class SessionPool:
                     except anyio.EndOfStream:
                         break
                     yield event.event
-                    raw_event: Any = event.event if isinstance(event, EventEnvelope) else event
+                    raw_event = getattr(event, "event", event)
                     if isinstance(raw_event, StreamCompleteEvent | RunErrorEvent):
                         break
             finally:
@@ -2781,18 +2825,16 @@ class SessionPool:
         bus_stream = await self.event_bus.subscribe(session_id, scope=scope)
         gen = run_handle.start(content)
         try:
-            async for turn_event in gen:
+            async for event in gen:
                 # Drain any tool-published events from EventBus before
                 # yielding the start() event. This ensures SpawnSessionStart
                 # and similar events appear before the StreamCompleteEvent.
                 with contextlib.suppress(anyio.WouldBlock):
                     while True:
-                        envelope = cast(
-                            "MemoryObjectReceiveStream[EventEnvelope]", bus_stream
-                        ).receive_nowait()
+                        envelope = bus_stream.receive_nowait()
                         yield envelope.event
-                yield turn_event
-                if isinstance(turn_event, StreamCompleteEvent | RunErrorEvent):
+                yield event
+                if isinstance(event, StreamCompleteEvent | RunErrorEvent):
                     break
         finally:
             await gen.aclose()

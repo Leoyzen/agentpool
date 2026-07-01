@@ -25,6 +25,8 @@ from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
 from pydantic import ValidationError
 
+from agentpool.mcp_server.session_stream_pair import SessionStreamPair
+
 
 logger = get_logger(__name__)
 
@@ -34,6 +36,11 @@ class AcpMcpConnection:
 
     Bridges MCP JSON-RPC messages between fastmcp's ClientSession
     and the ACP connection via mcp/message send_request calls.
+
+    Supports multiple concurrent ClientSession instances sharing the
+    same ACP connection. Each ``connect_session()`` call on the
+    transport registers a per-session stream pair, and responses
+    are routed back to the correct session via the forwarder task.
     """
 
     def __init__(
@@ -57,9 +64,17 @@ class AcpMcpConnection:
         self._from_session_send: MemoryObjectSendStream[dict[str, Any]] | None = None
         self._from_session_receive: MemoryObjectReceiveStream[dict[str, Any]] | None = None
         self._closed = False
+        # Per-session stream pairs for concurrent ClientSession support.
+        self._session_streams: dict[int, SessionStreamPair] = {}
+        self._next_session_key = 0
 
     async def open(self) -> None:
-        """Open the memory streams for the MCP session."""
+        """Open the legacy shared memory streams.
+
+        .. deprecated::
+            Used only by the legacy single-session path. New code
+            should use ``register_session()`` instead.
+        """
         self._to_session_send, self._to_session_receive = anyio.create_memory_object_stream[
             dict[str, Any]
         ](0)
@@ -69,10 +84,11 @@ class AcpMcpConnection:
         logger.info("MCP-over-ACP connection opened", connection_id=self.connection_id)
 
     async def close(self) -> None:
-        """Close the connection and clean up streams."""
+        """Close the connection and clean up all streams."""
         if self._closed:
             return
         self._closed = True
+        # Close legacy shared streams
         for stream in [
             self._to_session_send,
             self._to_session_receive,
@@ -81,15 +97,203 @@ class AcpMcpConnection:
         ]:
             if stream is not None:
                 await stream.aclose()
+        # Close all per-session stream pairs
+        for pair in list(self._session_streams.values()):
+            await pair.close()
+        self._session_streams.clear()
         logger.info("MCP-over-ACP connection closed", connection_id=self.connection_id)
+
+    def register_session(self) -> SessionStreamPair:
+        """Create and register a per-session stream pair.
+
+        Returns a ``SessionStreamPair`` with independent streams for
+        this session's ClientSession to read/write. The caller is
+        responsible for calling ``unregister_session()`` when done.
+        """
+        key = self._next_session_key
+        self._next_session_key += 1
+        to_send, to_recv = anyio.create_memory_object_stream[dict[str, Any]](0)
+        from_send, from_recv = anyio.create_memory_object_stream[dict[str, Any]](0)
+        pair = SessionStreamPair(
+            to_session_send=to_send,
+            to_session_receive=to_recv,
+            from_session_send=from_send,
+            from_session_receive=from_recv,
+        )
+        self._session_streams[key] = pair
+        return pair
+
+    def unregister_session(self, pair: SessionStreamPair) -> None:
+        """Remove a per-session stream pair from the connection."""
+        for key, val in list(self._session_streams.items()):
+            if val is pair:
+                del self._session_streams[key]
+                break
+
+    async def send_to_acp(self, message: Any, response_stream: MemoryObjectSendStream[dict[str, Any]]) -> Any:
+        """Send an MCP message to the ACP client and route the response.
+
+        Like ``send_to_client()`` but writes the response to the
+        caller's ``response_stream`` instead of the shared
+        ``_to_session_send``. This enables per-session routing.
+
+        Args:
+            message: MCP JSON-RPC message dict or SessionMessage.
+            response_stream: The caller session's ``to_session_send``.
+
+        Returns:
+            Response from client (for requests) or None (for notifications).
+        """
+        if isinstance(message, SessionMessage):
+            message = message.message.model_dump(by_alias=True, mode="json", exclude_none=True)
+
+        if not isinstance(message, dict):
+            logger.warning(
+                "Unexpected message type in send_to_acp",
+                type=type(message).__name__,
+                connection_id=self.connection_id,
+            )
+            return None
+
+        original_id = message.get("id")
+        method = message.get("method")
+        params = message.get("params")
+
+        wrapped: dict[str, Any] = {
+            "connectionId": self.connection_id,
+            "method": method,
+        }
+        if params is not None:
+            wrapped["params"] = params
+
+        try:
+            result = await self._send_to_client(wrapped)
+        except Exception as exc:
+            is_optional_mcp = (
+                isinstance(method, str)
+                and method.startswith(("resources/", "prompts/"))
+            )
+            if is_optional_mcp:
+                logger.debug(
+                    "MCP method not supported by client",
+                    connection_id=self.connection_id,
+                    method=method,
+                    error=str(exc),
+                )
+            else:
+                logger.exception(
+                    "Error sending mcp/message to client",
+                    connection_id=self.connection_id,
+                    method=method,
+                )
+            if original_id is not None:
+                error_response = {
+                    "jsonrpc": "2.0",
+                    "id": original_id,
+                    "error": {
+                        "code": -32603,
+                        "message": f"Internal error: {exc}",
+                    },
+                }
+                try:
+                    await response_stream.send(
+                        SessionMessage(message=JSONRPCMessage.model_validate(error_response))  # type: ignore[arg-type]
+                    )
+                except (anyio.BrokenResourceError, anyio.ClosedResourceError):
+                    pass
+            return None
+
+        if original_id is not None and isinstance(result, dict):
+            if "error" in result:
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": original_id,
+                    "error": result["error"],
+                }
+            else:
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": original_id,
+                    "result": result,
+                }
+            try:
+                await response_stream.send(
+                    SessionMessage(message=JSONRPCMessage.model_validate(response))  # type: ignore[arg-type]
+                )
+            except ValidationError:
+                logger.exception(
+                    "Invalid JSON-RPC response from mcp/message",
+                    response=response,
+                    connection_id=self.connection_id,
+                )
+                if original_id is not None:
+                    fallback = {
+                        "jsonrpc": "2.0",
+                        "id": original_id,
+                        "error": {
+                            "code": -32603,
+                            "message": f"Invalid upstream response: {result.get('error', result)}",
+                        },
+                    }
+                    try:
+                        await response_stream.send(
+                            SessionMessage(message=JSONRPCMessage.model_validate(fallback))  # type: ignore[arg-type]
+                        )
+                    except (anyio.BrokenResourceError, anyio.ClosedResourceError):
+                        pass
+            except (anyio.BrokenResourceError, anyio.ClosedResourceError):
+                logger.debug(
+                    "Cannot forward response: session stream already closed",
+                    connection_id=self.connection_id,
+                )
+
+        return result
+
+    async def broadcast_to_sessions(self, message: dict[str, Any]) -> None:
+        """Broadcast a server-initiated notification to all active sessions.
+
+        Used by ``handle_client_message()`` to deliver notifications
+        (e.g. ``notifications/tools/list_changed``) to every active
+        ClientSession.
+        """
+        session_msg: SessionMessage | None = None
+        if isinstance(message, SessionMessage):
+            session_msg = message
+        elif isinstance(message, dict) and "jsonrpc" in message:
+            session_msg = SessionMessage(message=JSONRPCMessage.model_validate(message))
+        else:
+            method = message.get("method")
+            params = message.get("params")
+            jsonrpc_message: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
+            if params is not None:
+                jsonrpc_message["params"] = params
+            session_msg = SessionMessage(message=JSONRPCMessage.model_validate(jsonrpc_message))
+
+        for pair in list(self._session_streams.values()):
+            try:
+                await pair.to_session_send.send(session_msg)  # type: ignore[arg-type]
+            except (anyio.BrokenResourceError, anyio.ClosedResourceError):
+                pass
+
+        # Also send to legacy shared stream if present
+        if self._to_session_send is not None:
+            try:
+                await self._to_session_send.send(session_msg)  # type: ignore[arg-type]
+            except (anyio.BrokenResourceError, anyio.ClosedResourceError):
+                pass
 
     async def handle_client_message(self, message: dict[str, Any]) -> None:
         """Handle an incoming mcp/message from the client.
 
-        Accepts either the flattened ACP format (per MCP-over-ACP RFD) or a
-        raw JSON-RPC message dict, reconstructs a standard JSON-RPC message,
-        and routes it to the MCP session's receive stream.
+        Broadcasts the message to all active session stream pairs.
+        If no per-session streams are registered, falls back to the
+        legacy shared stream.
         """
+        # If per-session streams exist, broadcast to all of them
+        if self._session_streams:
+            await self.broadcast_to_sessions(message)
+            return
+        # Legacy path: use shared stream
         if self._to_session_send is None:
             raise RuntimeError("Connection not opened")
         try:
@@ -97,11 +301,9 @@ class AcpMcpConnection:
                 await self._to_session_send.send(message)
             elif isinstance(message, dict):
                 if "jsonrpc" in message:
-                    # Raw JSON-RPC message (backward compatibility)
                     session_msg = SessionMessage(message=JSONRPCMessage.model_validate(message))
                     await self._to_session_send.send(session_msg)  # type: ignore[arg-type]
                 else:
-                    # Flattened ACP format: reconstruct JSON-RPC message
                     method = message.get("method")
                     params = message.get("params")
                     jsonrpc_message: dict[str, Any] = {

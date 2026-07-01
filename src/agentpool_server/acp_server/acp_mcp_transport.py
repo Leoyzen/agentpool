@@ -58,8 +58,9 @@ class AcpMcpTransport(ClientTransport):
     ) -> AsyncIterator[ClientSession]:
         """Create a fastmcp ClientSession over ACP.
 
-        Uses the memory streams from the AcpMcpConnection to bridge
-        MCP JSON-RPC messages to/from the ACP client.
+        Each call creates an independent per-session stream pair via
+        ``register_session()``, so multiple ``ClientSession`` instances
+        can share the same ``AcpMcpConnection`` without stream contention.
 
         Args:
             **session_kwargs: Additional arguments passed to ClientSession.
@@ -67,49 +68,34 @@ class AcpMcpTransport(ClientTransport):
         Yields:
             A connected fastmcp ClientSession.
         """
+        pair = self._connection.register_session()
 
-        # Create a task that reads from from_session stream and sends to client
-        # This bridges MCP session -> ACP client
         async def _forward_to_client() -> None:
+            """Forward MCP requests from ClientSession to ACP client."""
             try:
-                async for message in self._connection.from_session_receive:
-                    await self._connection.send_to_client(message)
+                async for message in pair.from_session_receive:
+                    await self._connection.send_to_acp(message, pair.to_session_send)
             except anyio.EndOfStream:
                 pass
             except Exception:
                 logger.exception("Error in MCP-over-ACP forwarder task")
-                await self._connection.close()
                 raise
 
-        # Remove read_timeout_seconds from session_kwargs to avoid duplicate keyword
-        # argument since we set it explicitly from our transport timeout.
         session_kwargs.pop("read_timeout_seconds", None)
         session = ClientSession(
-            self._connection.to_session,  # type: ignore[arg-type]
-            self._connection.from_session,  # type: ignore[arg-type]
+            pair.to_session_receive,  # type: ignore[arg-type]
+            pair.from_session_send,  # type: ignore[arg-type]
             read_timeout_seconds=timedelta(seconds=self._timeout),
             **session_kwargs,
         )
 
         forwarder = asyncio.create_task(_forward_to_client())
         try:
-            # Enter ClientSession context to start _receive_loop()
             async with session:
-                # Note: session.initialize() is NOT called here.
-                # When this transport is used via fastmcp.Client (MCPClient),
-                # the Client will call initialize() as part of its own connection
-                # lifecycle. Calling it here would cause a double-initialize.
                 yield session
         finally:
             forwarder.cancel()
-            try:
-                with suppress(asyncio.CancelledError):
-                    await forwarder
-            except Exception:
-                logger.exception("Error in MCP-over-ACP forwarder task")
-            # Re-open connection streams if _receive_loop closed them
-            if self._connection._to_session_receive is None or getattr(
-                self._connection._to_session_receive, "_closed", False
-            ):
-                await self._connection.open()
-            self._forwarder_task = None
+            with suppress(asyncio.CancelledError):
+                await forwarder
+            self._connection.unregister_session(pair)
+            await pair.close()

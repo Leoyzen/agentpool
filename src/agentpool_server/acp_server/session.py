@@ -11,7 +11,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 import hashlib
 import re
-from typing import TYPE_CHECKING, Any, Literal, NoReturn
+from typing import TYPE_CHECKING, Any, Literal
 
 import anyio
 from exxec.acp_provider import ACPExecutionEnvironment
@@ -27,10 +27,9 @@ from acp.schema import AvailableCommand, ClientCapabilities
 from acp.schema.mcp import AcpMcpServer
 from agentpool import Agent, AgentPool
 from agentpool.agents.acp_agent import ACPAgent
-from agentpool.agents.events import ToastInfo
 from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
 from agentpool.log import get_logger
-from agentpool.resource_providers.mcp_provider import MCPResourceProvider
+from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
 from agentpool.skills.uri_resolver import MAX_PROVIDER_NAME_LENGTH
 from agentpool_commands.base import NodeCommand
 from agentpool_server.acp_server.converters import (
@@ -182,9 +181,6 @@ class ACPSession:
     mcp_servers: Sequence[McpServer] | None = None
     """Optional MCP server configurations"""
 
-    session_mcp_providers: list[MCPResourceProvider] = field(default_factory=list)
-    """Session-level MCP resource providers (isolated per session)"""
-
     client_capabilities: ClientCapabilities = field(default_factory=ClientCapabilities)
     """Client capabilities for tool registration"""
 
@@ -247,7 +243,8 @@ class ACPSession:
                 params: RequestPermissionRequest,
             ) -> RequestPermissionResponse:
                 forwarded = params.model_copy(update={"session_id": self.session_id})
-                return await self.requests.client.request_permission(forwarded)
+                response = await self.requests.client.request_permission(forwarded)
+                return response
 
             self.agent.acp_permission_callback = permission_callback
 
@@ -365,8 +362,7 @@ class ACPSession:
             self.log.info("Registered manifest commands", count=cmd_count)
 
     async def _on_state_updated(
-        self,
-        state: ModeInfo | ModelInfo | AvailableCommandsUpdate | ConfigOptionChanged | ToastInfo,
+        self, state: ModeInfo | ModelInfo | AvailableCommandsUpdate | ConfigOptionChanged
     ) -> None:
         """Handle state update signal from agent - forward to ACP client."""
         from acp.schema import (
@@ -408,15 +404,6 @@ class ACPSession:
                 if config_id == "permissions":
                     await self.notifications.update_session_mode(value_id)
                     self.log.debug("Also sent legacy mode update", mode_id=value_id)
-            case ToastInfo():
-                # Forward toast notifications to client
-                await self._send_toast(
-                    message=state.message,
-                    level=state.level,
-                    duration=state.duration,
-                    action=state.action,
-                )
-                return
         await self.notifications.send_update(update)
 
     async def initialize(self) -> None:
@@ -428,10 +415,7 @@ class ACPSession:
         if not self.client_capabilities.terminal:
             import platform
 
-            os_name = platform.system()
-            match os_name:
-                case "Windows" | "Darwin" | "Linux":
-                    self.acp_env._os_type = os_name
+            self.acp_env._os_type = platform.system()  # type: ignore[attr-defined]
         await self.acp_env.__aenter__()
 
     def _make_provider_name(self, display_name: str) -> str:
@@ -456,55 +440,28 @@ class ACPSession:
         truncated = hashlib.sha256(self.session_id.encode()).hexdigest()[:safe_budget]
         return f"{prefix}{truncated}{suffix}"
 
-    @staticmethod
-    def _raise_missing_connection(connection_id: str) -> NoReturn:
-        """Raise RuntimeError for a missing ACP MCP connection."""
-        raise RuntimeError(f"AcpMcpConnection not found for {connection_id}")
-
-    @staticmethod
-    def _raise_no_session_pool(session_id: str) -> NoReturn:
-        """Raise RuntimeError when SessionPool is unavailable."""
-        raise RuntimeError(f"SessionPool is required for prompt processing in session {session_id}")
-
-    def _create_event_converter(self) -> ACPEventConverter:
-        """Create a new event converter for this prompt turn."""
-        client_supports_turn_complete = (
-            bool(self.client_capabilities.turn_complete)
-            if self.client_capabilities is not None
-            else False
-        )
-        return ACPEventConverter(
-            subagent_display_mode=self.subagent_display_mode,
-            raw_input_mode=self.raw_input_mode,
-            client_supports_turn_complete=client_supports_turn_complete,
-        )
-
-    async def _ensure_session_mcp_providers_on_agent(self, session_pool: Any) -> None:
-        """Ensure session MCP providers are registered on the session agent."""
-        if not self.session_mcp_providers:
-            return
-        session_agent = await session_pool.sessions.get_or_create_session_agent(
-            self.session_id, input_provider=self.input_provider
-        )
-        for provider in self.session_mcp_providers:
-            if provider not in session_agent.tools.external_providers:
-                session_agent.tools.add_provider(provider)
-
     async def initialize_mcp_servers(self) -> None:
         """Initialize MCP servers if any are configured.
 
-        Session-level MCP servers are created and managed independently
-        from the pool-level agent's MCP manager to ensure isolation.
+        Session-level MCP servers are converted to :class:`McpConfigEntry`
+        objects and merged into the agent's ``_mcp_snapshot``.  For
+        ACP-transport servers, the transport is created and stored in the
+        agent's ``_session_connection_pool`` so that snapshot-aware
+        capability building can reuse it.
         """
         if not self.mcp_servers:
             return
         self.log.info("Initializing MCP servers", server_count=len(self.mcp_servers))
 
-        async def _init_server(server: Any) -> None:
+        entries: list[McpConfigEntry] = []
+
+        async def _init_server(server: McpServer) -> None:
             try:
                 with anyio.fail_after(30):
-                    # ACP-transport MCP servers are connected by the agent initiating
-                    # mcp/connect to the client (Agent -> Client per ACP spec)
+                    cfg = convert_acp_mcp_server_to_config(server)
+
+                    # ACP-transport MCP servers need a live connection to the
+                    # client before the transport can be created.
                     if isinstance(server, AcpMcpServer):
                         self.log.info(
                             "Connecting ACP MCP server via mcp/connect",
@@ -513,58 +470,37 @@ class ACPSession:
                         connection_id = await self.acp_agent.connect_acp_mcp_server(server)
                         conn = self.acp_agent._mcp_manager.get_connection(connection_id)
                         if conn is None:
-                            self._raise_missing_connection(connection_id)
+                            raise RuntimeError(
+                                f"AcpMcpConnection not found for {connection_id}"
+                            )
                         from agentpool_server.acp_server.acp_mcp_transport import (
                             AcpMcpTransport,
                         )
 
-                        transport = AcpMcpTransport(
-                            conn, timeout=getattr(server, "timeout", None) or 600.0
-                        )
-                        cfg = convert_acp_mcp_server_to_config(server)
-                        provider = MCPResourceProvider(
-                            server=cfg,
-                            name=self._make_provider_name(cfg.display_name),
-                            source="node",
-                            accessible_roots=getattr(self.agent.env, "accessible_roots", None),
-                            transport=transport,
-                        )
-                        provider = await provider.__aenter__()
-                        self.session_mcp_providers.append(provider)
-                        # Register with pool's skill aggregator so MCP-over-ACP skills
-                        # appear in <available-skills> XML and load_skill resolution
-                        self.agent_pool.register_skill_provider(provider)
+                        transport = AcpMcpTransport(conn, timeout=600.0)
+                        # Store the pre-created transport on the agent's
+                        # session connection pool so that snapshot-aware
+                        # capability building can find it by client_id.
+                        if (
+                            isinstance(self.agent, Agent)
+                            and self.agent._session_connection_pool is not None
+                        ):
+                            await self.agent._session_connection_pool.add_transport(
+                                cfg.client_id, transport
+                            )
                         self.log.info(
                             "Added session ACP MCP server",
                             server_name=cfg.name,
                             session_id=self.session_id,
                         )
-                        return
-
-                    cfg = convert_acp_mcp_server_to_config(server)
-                    # Skip if already registered for this session
-                    if any(p.server.client_id == cfg.client_id for p in self.session_mcp_providers):
-                        self.log.debug(
-                            "MCP server already registered for session, skipping",
+                    else:
+                        self.log.info(
+                            "Added session MCP server",
                             server_name=cfg.name,
+                            session_id=self.session_id,
                         )
-                        return
 
-                    provider = MCPResourceProvider(
-                        server=cfg,
-                        name=self._make_provider_name(cfg.display_name),
-                        source="node",
-                        accessible_roots=getattr(self.agent.env, "accessible_roots", None),
-                    )
-                    provider = await provider.__aenter__()
-                    self.session_mcp_providers.append(provider)
-                    # Register with pool's skill aggregator
-                    self.agent_pool.register_skill_provider(provider)
-                    self.log.info(
-                        "Added session MCP server",
-                        server_name=cfg.name,
-                        session_id=self.session_id,
-                    )
+                    entries.append(McpConfigEntry(server_config=cfg, source="session"))
             except TimeoutError:
                 self.log.warning(
                     "MCP server initialization timed out",
@@ -577,6 +513,28 @@ class ACPSession:
                 )
 
         await asyncio.gather(*[_init_server(s) for s in self.mcp_servers])
+
+        # Merge new session configs into the agent's MCP snapshot, deduplicating
+        # by client_id so that re-initialisation does not duplicate entries.
+        if entries and isinstance(self.agent, Agent):
+            existing = self.agent._mcp_snapshot
+            existing_session = existing.session_configs if existing is not None else ()
+            seen_ids: set[str] = {e.server_config.client_id for e in existing_session}
+            merged: list[McpConfigEntry] = list(existing_session)
+            for entry in entries:
+                if entry.server_config.client_id not in seen_ids:
+                    merged.append(entry)
+                    seen_ids.add(entry.server_config.client_id)
+            new_snapshot = (existing or McpConfigSnapshot()).with_session_configs(
+                tuple(merged)
+            )
+            self.agent._mcp_snapshot = new_snapshot
+            self.log.info(
+                "Updated agent MCP snapshot with session configs",
+                session_config_count=len(merged),
+                session_id=self.session_id,
+            )
+
         # Register MCP prompts as commands after all servers are added
         try:
             await self._register_mcp_prompts_as_commands()
@@ -623,8 +581,9 @@ class ACPSession:
             self.agent.state_updated.disconnect(self._on_state_updated)
 
         # Remove session-specific mutations from old agent before switching
-        if isinstance(self.agent, Agent) and self.get_cwd_context in self.agent.sys_prompts.prompts:
-            self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        if isinstance(self.agent, Agent):
+            if self.get_cwd_context in self.agent.sys_prompts.prompts:
+                self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
         # Create new session agent via SessionPool (pool-level agents removed)
         pool = self.agent_pool
@@ -706,19 +665,27 @@ class ACPSession:
 
             self.log.debug("Processing prompt", content_items=len(non_command_content))
             event_count = 0
+            # Derive turn-complete support from client capabilities
+            client_supports_turn_complete = (
+                bool(self.client_capabilities.turn_complete)
+                if self.client_capabilities is not None
+                else False
+            )
             # Create a new event converter for this prompt
-            converter = self._create_event_converter()
+            converter = ACPEventConverter(
+                subagent_display_mode=self.subagent_display_mode,
+                raw_input_mode=self.raw_input_mode,
+                client_supports_turn_complete=client_supports_turn_complete,
+            )
             self._current_converter = converter  # Track for cancellation
 
             # Route through SessionPool for unified session management.
-            # MCP providers are added once to the session agent and persist
-            # for the session lifetime (cleaned up in close()).
+            # MCP tools are handled via McpConfigSnapshot → as_capability() →
+            # MCPToolset, not through agent.tools.providers.
             agent_pool_ref = getattr(self.agent, "agent_pool", None)
             session_pool = agent_pool_ref.session_pool if agent_pool_ref is not None else None
             try:
                 if session_pool is not None:
-                    await self._ensure_session_mcp_providers_on_agent(session_pool)
-
                     stream = session_pool.run_stream(
                         self.session_id,
                         *non_command_content,
@@ -726,7 +693,9 @@ class ACPSession:
                         deps=self,
                     )
                 else:
-                    self._raise_no_session_pool(self.session_id)
+                    raise RuntimeError(
+                        f"SessionPool is required for prompt processing in session {self.session_id}"
+                    )
 
                 async for event in stream:
                     if self._cancelled:
@@ -821,52 +790,15 @@ class ACPSession:
         """Close the session and cleanup resources."""
         try:
             await self.acp_env.__aexit__(None, None, None)
-            # Clean up session-level MCP providers
-            for provider in self.session_mcp_providers:
-                try:
-                    # Unregister from pool's skill aggregator before closing
-                    try:
-                        self.agent_pool.unregister_skill_provider(provider)
-                    except Exception:
-                        self.log.exception(
-                            "Error unregistering skill provider",
-                            provider=provider.name,
-                        )
-                    # For ACP-transport providers, notify client before closing
-                    if provider.transport_type == "acp":
-                        try:
-                            transport = provider.client._external_transport
-                            if transport is not None:
-                                from agentpool_server.acp_server.acp_mcp_transport import (
-                                    AcpMcpTransport,
-                                )
 
-                                if isinstance(transport, AcpMcpTransport):
-                                    await self.acp_agent.disconnect_acp_mcp_server(
-                                        transport.connection_id
-                                    )
-                        except Exception:
-                            self.log.exception(
-                                "Error disconnecting ACP MCP server",
-                                provider=provider.name,
-                            )
-                    await provider.__aexit__(None, None, None)
-                except Exception:
-                    self.log.exception(
-                        "Error cleaning up session MCP provider", provider=provider.name
-                    )
-            self.session_mcp_providers.clear()
-
-            # NEW: Disconnect state_updated signal to prevent stale callbacks
+            # Disconnect state_updated signal to prevent stale callbacks
             with suppress(Exception):
                 self.agent.state_updated.disconnect(self._on_state_updated)
 
             # Clean up sys_prompts from THIS session's agent only
-            if (
-                isinstance(self.agent, Agent)
-                and self.get_cwd_context in self.agent.sys_prompts.prompts
-            ):
-                self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            if isinstance(self.agent, Agent):
+                if self.get_cwd_context in self.agent.sys_prompts.prompts:
+                    self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
             # Unregister skill command callback to prevent memory leak
             if hasattr(self, "_skill_command_callback"):
@@ -874,8 +806,10 @@ class ACPSession:
                 if skill_registry is not None and hasattr(
                     skill_registry, "_command_change_handlers"
                 ):
-                    with suppress(ValueError):
+                    try:
                         skill_registry._command_change_handlers.remove(self._skill_command_callback)
+                    except ValueError:
+                        pass  # Already removed
 
             # Note: Individual agents are managed by the pool's lifecycle
             # The pool will handle agent cleanup when it's closed

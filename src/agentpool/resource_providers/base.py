@@ -138,7 +138,10 @@ class ResourceProvider(ABC):  # noqa: B024
         )
 
         async def _build_toolset(ctx: Any) -> Any:
-            tools = await self.get_tools()
+            try:
+                tools = await self.get_tools()
+            except Exception:
+                return None
             if not tools:
                 return None
 
