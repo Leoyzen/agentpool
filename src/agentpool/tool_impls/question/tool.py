@@ -102,6 +102,6 @@ class QuestionTool(Tool[ToolResult]):
             case ElicitResult():
                 return ToolResult(content="User declined to answer", metadata={"answers": []})
             case ErrorData(message=message):
-                return ToolResult(content=f"Error: {message}", metadata={"answers": []})
+                raise RunAbortedError(f"Elicitation failed: {message}")
             case _ as unreachable:
                 assert_never(unreachable)
