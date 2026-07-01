@@ -203,6 +203,11 @@ class GlobalConnectionPool:
         creates a _SharedSessionTransport wrapper, signals readiness,
         waits for close signal, then exits.
 
+        On both clean shutdown and unexpected crash, the connection is
+        removed from the pool so that subsequent ``get_transport()``
+        calls will create a fresh connection instead of getting a dead
+        entry.
+
         Args:
             conn: The pooled connection state.
             client_id: Cache key for logging.
@@ -223,6 +228,12 @@ class GlobalConnectionPool:
             conn.ready_event.set()
             raise
         finally:
+            # Remove from pool to prevent stale entries on crash.
+            # Safe under lock: if shutdown_all() already removed it,
+            # pop returns None and this is a no-op.
+            with self._lock:
+                if self._connections.get(client_id) is conn:
+                    del self._connections[client_id]
             conn.done_event.set()
             logger.debug("Owner task done for %s", client_id)
 
