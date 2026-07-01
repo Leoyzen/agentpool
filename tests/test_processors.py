@@ -24,7 +24,7 @@ def context_aware_sync(ctx: Any, messages: list[Any]) -> list[Any]:
     return messages
 
 
-def context_aware_async(ctx: Any, messages: list[Any]) -> list[Any]:
+async def context_aware_async(ctx: Any, messages: list[Any]) -> list[Any]:
     """Async processor with context — returns messages unchanged."""
     return messages
 

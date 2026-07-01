@@ -42,9 +42,8 @@ async def test_shutdown_with_active_session_no_error(manifest: AgentsManifest) -
                 # This simulates external cancellation during __aexit__
                 pass
 
-            # AgentPool.__aexit__() is called here
-            # It should NOT raise RuntimeError("SessionPool not available")
-            # due to CancelScope(shield=True) around DB writes and complete_event.set()
-            assert pool.session_pool is not None, (
-                "SessionPool was None during shutdown — race condition regression"
-            )
+        # Agent exited; pool cleanup runs next. Verify session_pool survived
+        # (regression: shielded cleanup must not null it out).
+        assert pool.session_pool is not None, (
+            "SessionPool was None during shutdown — race condition regression"
+        )

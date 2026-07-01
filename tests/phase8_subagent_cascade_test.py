@@ -50,7 +50,8 @@ async def test_subagent_cancellation_cascade_within_5s(manifest: AgentsManifest)
                 await anyio.sleep(0.1)  # Give subagent time to start
                 tg.cancel_scope.cancel()
 
-            # If we get here without hanging, cancellation cascaded correctly
-            assert tg.cancel_scope.cancel_called, (
-                "CancelScope.cancel() was not called — cancellation did not propagate"
-            )
+            # If we reach here without hanging, cancellation cascaded
+            # correctly — the task group exited because all spawned tasks
+            # (including the subagent) responded to cancellation. If the
+            # subagent did not cascade-cancel, the block would hang until
+            # the test timeout.
