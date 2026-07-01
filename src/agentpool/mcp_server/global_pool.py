@@ -163,12 +163,16 @@ class GlobalConnectionPool:
                 ready_event = conn.ready_event
                 owner_task = conn.owner_task
 
-        # Wait for owner task to become ready (outside the lock)
+        # Wait for owner task to become ready (outside the lock).
+        # Use the server's configured timeout (default 30s) so that
+        # servers with longer startup times (e.g. npx wrappers) are
+        # not killed prematurely.
         if owner_task is not None:
+            ready_timeout = config.timeout
             try:
-                await asyncio.shield(asyncio.wait_for(ready_event.wait(), timeout=30.0))
+                await asyncio.shield(asyncio.wait_for(ready_event.wait(), timeout=ready_timeout))
             except TimeoutError:
-                msg = f"Owner task for {client_id} did not become ready in 30s"
+                msg = f"Owner task for {client_id} did not become ready in {ready_timeout}s"
                 logger.error(msg)  # noqa: TRY400
                 raise TimeoutError(msg) from None
 
