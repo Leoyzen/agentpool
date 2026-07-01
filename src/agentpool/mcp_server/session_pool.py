@@ -254,6 +254,14 @@ class SessionConnectionPool:
         Signals all owner-tasks to shut down, waits with timeout,
         and force-cancels remaining tasks.
 
+        NOTE: This only cleans up stdio owner-task connections. Pre-created
+        ACP transports (added via add_transport()) are NOT closed here —
+        their underlying AcpMcpConnection lifecycle is managed by
+        AcpMcpConnectionManager, not by this pool. This is intentional:
+        child sessions share parent's ACP transport via
+        copy_pre_created_transports(), and closing it here would break
+        the parent's active sessions.
+
         Safe to call multiple times.
 
         Args:
