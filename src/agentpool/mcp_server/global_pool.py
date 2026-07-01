@@ -8,12 +8,15 @@ alive. ``get_transport()`` returns a ``_SharedSessionTransport`` wrapper
 whose ``connect_session()`` yields a shared ``ClientSession`` managed
 by the owner task. This avoids multiple ``connect_session()`` calls
 on the underlying transport.
+
+Shared stdio connections live for the pool lifetime — no ref counting
+or LRU eviction. Pool-level MCP servers are typically few (<10) and
+long-lived, so the overhead of tracking references is unnecessary.
 """  # allow: SIZE_OK — single cohesive class with tightly coupled private state
 
 from __future__ import annotations
 
 import asyncio
-from collections import OrderedDict
 import contextlib
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -31,6 +34,9 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+#: Warn if the number of cached stdio connections exceeds this threshold.
+_CONNECTION_COUNT_WARNING_THRESHOLD: int = 50
 
 
 class _SharedSessionTransport(ClientTransport):
@@ -55,20 +61,17 @@ class _SharedSessionTransport(ClientTransport):
 
 @dataclass
 class _PooledConnection:
-    """Internal state for a pooled MCP connection.
+    """Internal state for a pooled stdio MCP connection.
 
-    For stdio connections, the owner_task manages the transport lifecycle
-    and a _SharedSessionTransport wrapper is returned to callers.
-    For HTTP/SSE connections, no pooling — fresh transport per call.
+    Only stdio connections are cached. HTTP/SSE transports are created
+    fresh per ``get_transport()`` call and never stored here.
     """
 
     transport: ClientTransport
     owner_task: asyncio.Task[None] | None = None
-    ref_count: int = 0
     ready_event: asyncio.Event = field(default_factory=asyncio.Event)
     close_event: asyncio.Event = field(default_factory=asyncio.Event)
     done_event: asyncio.Event = field(default_factory=asyncio.Event)
-    is_stdio: bool = False
     shared_session_transport: _SharedSessionTransport | None = None
 
 
@@ -84,16 +87,19 @@ class GlobalConnectionPool:
     - This eliminates cross-task CancelScope errors.
 
     HTTP/SSE servers use direct transports (no cancel scope issues).
+
+    Shared stdio connections live for the pool lifetime. No ref counting
+    or LRU eviction is performed — pool-level MCP servers are typically
+    few and long-lived.
     """
 
     # NOTE: threading.Lock is used (not asyncio.Lock) because all operations
     # inside the lock are synchronous dict operations with no await. If async
     # work is added inside the lock, switch to asyncio.Lock to avoid blocking
     # the event loop.
-    MAX_SESSIONS: int = 256
 
     def __init__(self) -> None:
-        self._connections: OrderedDict[str, _PooledConnection] = OrderedDict()
+        self._connections: dict[str, _PooledConnection] = {}
         self._lock = threading.Lock()
 
     async def get_transport(
@@ -103,8 +109,7 @@ class GlobalConnectionPool:
         """Get or create a shared transport for the given config.
 
         For stdio: uses owner-task pattern (dedicated asyncio.Task).
-        For HTTP/SSE: creates direct transport (no pooling overhead,
-                     but still cached by client_id for reuse).
+        For HTTP/SSE: creates direct transport (fresh per call, no caching).
         For ACP: raises NotImplementedError (handled by SessionConnectionPool).
 
         Args:
@@ -118,42 +123,48 @@ class GlobalConnectionPool:
             RuntimeError: If the owner task fails to initialize the connection.
             TimeoutError: If the owner task does not become ready in time.
         """
-        client_id = config.client_id
+        from agentpool_config.mcp_server import (
+            AcpMCPServerConfig,
+            StdioMCPServerConfig,
+        )
 
-        transport: ClientTransport
-        is_stdio: bool
-        ready_event: asyncio.Event | None
-        owner_task: asyncio.Task[None] | None
+        if isinstance(config, AcpMCPServerConfig):
+            raise NotImplementedError(
+                "ACP transport is handled by SessionConnectionPool, not GlobalConnectionPool"
+            )
+
+        # HTTP/SSE: fresh transport per call — no sharing, no caching.
+        if not isinstance(config, StdioMCPServerConfig):
+            return config.to_transport()
+
+        # stdio: shared via owner-task pattern
+        client_id = config.client_id
 
         with self._lock:
             existing = self._connections.get(client_id)
-            if existing is not None and existing.is_stdio:
-                # Reuse stdio connection (managed by owner task)
-                existing.ref_count += 1
-                self._connections.move_to_end(client_id)
-                transport = existing.transport
-                is_stdio = existing.is_stdio
+            if existing is not None:
+                # Reuse existing stdio connection (managed by owner task)
                 ready_event = existing.ready_event
                 owner_task = existing.owner_task
-            elif existing is not None and not existing.is_stdio:
-                # HTTP/SSE: don't reuse — create fresh transport per call.
-                # TODO: ref_count is not incremented for HTTP/SSE reuse, but
-                # release() decrements it. This is a semantic imbalance but
-                # currently harmless since release() is only called from
-                # disconnect_all(), not per-turn. Follow-up: HTTP/SSE should
-                # not use ref_count at all (no shared connection to track).
-                self._connections.move_to_end(client_id)
-                transport = config.to_transport()
-                is_stdio = False
-                ready_event = None
-                owner_task = None
             else:
-                self._evict_if_needed()
-                transport, is_stdio, ready_event, owner_task = self._create_connection_locked(
-                    config, client_id
+                if len(self._connections) >= _CONNECTION_COUNT_WARNING_THRESHOLD:
+                    logger.warning(
+                        "GlobalConnectionPool has %d cached stdio connections — "
+                        "consider disabling unused MCP servers in YAML config",
+                        len(self._connections),
+                    )
+                transport = config.to_transport()
+                conn = _PooledConnection(transport=transport)
+                conn.owner_task = asyncio.create_task(
+                    self._run_session(conn, client_id),
+                    name=f"mcp-owner-{client_id}",
                 )
+                self._connections[client_id] = conn
+                ready_event = conn.ready_event
+                owner_task = conn.owner_task
 
-        if is_stdio and owner_task is not None and ready_event is not None:
+        # Wait for owner task to become ready (outside the lock)
+        if owner_task is not None:
             try:
                 await asyncio.shield(asyncio.wait_for(ready_event.wait(), timeout=30.0))
             except TimeoutError:
@@ -167,92 +178,15 @@ class GlobalConnectionPool:
                 logger.error(msg)
                 raise RuntimeError(msg) from exc
 
-            # Return the shared session transport wrapper, not the raw
-            # transport. This prevents callers from calling
-            # connect_session() on the underlying transport again.
-            existing = self._connections.get(client_id)
-            if existing is not None and existing.shared_session_transport is not None:
-                return existing.shared_session_transport
+        # Return the shared session transport wrapper, not the raw
+        # transport. This prevents callers from calling
+        # connect_session() on the underlying transport again.
+        existing = self._connections.get(client_id)
+        if existing is not None and existing.shared_session_transport is not None:
+            return existing.shared_session_transport
 
-        return transport
-
-    def _create_connection_locked(
-        self,
-        config: BaseMCPServerConfig,
-        client_id: str,
-    ) -> tuple[ClientTransport, bool, asyncio.Event | None, asyncio.Task[None] | None]:
-        """Create a new pooled connection while holding the lock.
-
-        Must be called with self._lock held.
-
-        Args:
-            config: MCP server configuration.
-            client_id: Cache key for the connection.
-
-        Returns:
-            Tuple of (transport, is_stdio, ready_event, owner_task).
-            For HTTP/SSE: ready_event and owner_task are None.
-            For stdio: all four values are populated.
-
-        Raises:
-            NotImplementedError: For ACP transport servers.
-        """
-        from agentpool_config.mcp_server import AcpMCPServerConfig
-
-        if isinstance(config, AcpMCPServerConfig):
-            raise NotImplementedError(
-                "ACP transport is handled by SessionConnectionPool, not GlobalConnectionPool"
-            )
-
-        transport = config.to_transport()
-
-        from agentpool_config.mcp_server import StdioMCPServerConfig
-
-        is_stdio = isinstance(config, StdioMCPServerConfig)
-
-        if is_stdio:
-            conn = _PooledConnection(
-                transport=transport,
-                ref_count=1,
-                is_stdio=True,
-            )
-            conn.owner_task = asyncio.create_task(
-                self._run_session(conn, client_id),
-                name=f"mcp-owner-{client_id}",
-            )
-            self._connections[client_id] = conn
-            return transport, True, conn.ready_event, conn.owner_task
-
-        # HTTP/SSE: direct transport, no owner task needed
-        conn = _PooledConnection(
-            transport=transport,
-            ref_count=1,
-            is_stdio=False,
-        )
-        conn.ready_event.set()
-        self._connections[client_id] = conn
-        return transport, False, None, None
-
-    def _evict_if_needed(self) -> None:
-        """Evict least-recently-used stdio connections when at capacity.
-
-        Must be called with self._lock held.
-        Only evicts connections with ref_count == 0.
-        """
-        while len(self._connections) >= self.MAX_SESSIONS:
-            evicted = False
-            for cid, conn in list(self._connections.items()):
-                if conn.ref_count == 0:
-                    logger.info("Evicting idle MCP connection: %s", cid)
-                    self._signal_shutdown_locked(cid, conn)
-                    evicted = True
-                    break
-            if not evicted:
-                logger.warning(
-                    "MCP connection pool at capacity (%d) with no idle connections to evict",
-                    self.MAX_SESSIONS,
-                )
-                break
+        # Fallback: should not happen if owner task succeeded
+        return self._connections[client_id].transport
 
     async def _run_session(
         self,
@@ -288,51 +222,6 @@ class GlobalConnectionPool:
             conn.done_event.set()
             logger.debug("Owner task done for %s", client_id)
 
-    async def release(self, client_id: str) -> None:
-        """Decrement ref count. When 0, signal owner-task to shut down.
-
-        Args:
-            client_id: Cache key returned by get_transport.
-        """
-        with self._lock:
-            conn = self._connections.get(client_id)
-            if conn is None:
-                logger.warning("release() called for unknown client_id: %s", client_id)
-                return
-
-            conn.ref_count -= 1
-            self._connections.move_to_end(client_id)
-
-            if conn.ref_count <= 0:
-                self._signal_shutdown_locked(client_id, conn)
-
-        if conn.is_stdio and conn.ref_count <= 0:
-            try:
-                await asyncio.shield(asyncio.wait_for(conn.done_event.wait(), timeout=10.0))
-            except TimeoutError:
-                logger.warning("Owner task for %s did not shut down in 10s, cancelling", client_id)
-                if conn.owner_task is not None:
-                    conn.owner_task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await conn.owner_task
-
-    def _signal_shutdown_locked(
-        self,
-        client_id: str,
-        conn: _PooledConnection,
-    ) -> None:
-        """Signal the owner task to shut down and remove from cache.
-
-        Must be called with self._lock held.
-
-        Args:
-            client_id: Cache key for logging.
-            conn: The connection to shut down.
-        """
-        if conn.is_stdio:
-            conn.close_event.set()
-        self._connections.pop(client_id, None)
-
     async def shutdown_all(self, timeout: float = 10.0) -> None:
         """Clean shutdown of all connections. Called on pool shutdown.
 
@@ -344,17 +233,15 @@ class GlobalConnectionPool:
         """
         with self._lock:
             items = list(self._connections.items())
-            for cid, conn in items:
-                if conn.is_stdio:
-                    conn.close_event.set()
-                else:
-                    self._connections.pop(cid, None)
+            for _cid, conn in items:
+                conn.close_event.set()
 
-        stdio_tasks: list[asyncio.Task[None]] = []
-        for cid, conn in items:
-            if conn.is_stdio and conn.owner_task is not None:
-                stdio_tasks.append(conn.owner_task)
-                logger.debug("Signaled shutdown for %s", cid)
+        stdio_tasks: list[asyncio.Task[None]] = [
+            conn.owner_task for _, conn in items if conn.owner_task is not None
+        ]
+
+        for cid, _conn in items:
+            logger.debug("Signaled shutdown for %s", cid)
 
         if not stdio_tasks:
             return
