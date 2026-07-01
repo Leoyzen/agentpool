@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, assert_never
 
+from pydantic_ai import ModelRetry
+
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.tasks.exceptions import RunAbortedError
 from agentpool.tools.base import Tool, ToolResult
@@ -102,6 +104,6 @@ class QuestionTool(Tool[ToolResult]):
             case ElicitResult():
                 return ToolResult(content="User declined to answer", metadata={"answers": []})
             case ErrorData(message=message):
-                raise RunAbortedError(f"Elicitation failed: {message}")
+                raise ModelRetry(f"Elicitation failed: {message}")
             case _ as unreachable:
                 assert_never(unreachable)

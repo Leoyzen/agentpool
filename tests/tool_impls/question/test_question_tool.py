@@ -5,7 +5,7 @@ question_for_user fails with ErrorData.
 
 Root cause: ``QuestionTool._execute`` returns a ``ToolResult`` with error
 content when ``handle_elicitation`` yields ``ErrorData``, instead of raising
-``RunAbortedError``.  This causes pydantic-ai to wrap the result as a
+``ModelRetry``.  This causes pydantic-ai to wrap the result as a
 ``ToolReturnPart`` (success) rather than a ``RetryPromptPart`` (failure),
 so the ACP event converter reports ``completion_status = "completed"``.
 """
@@ -15,6 +15,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 from mcp.types import ElicitResult, ErrorData
+from pydantic_ai import ModelRetry
 import pytest
 
 from agentpool.tasks.exceptions import RunAbortedError
@@ -23,12 +24,12 @@ from agentpool.tools.base import ToolResult
 
 
 @pytest.mark.unit
-async def test_question_tool_raises_on_error_data() -> None:
-    """Raise RunAbortedError when elicitation returns ErrorData.
+async def test_question_tool_raises_model_retry_on_error_data() -> None:
+    """Raise ModelRetry when elicitation returns ErrorData.
 
     Given: handle_elicitation returns ErrorData.
     When: QuestionTool._execute is called.
-    Then: RunAbortedError is raised (not returning a ToolResult with error content).
+    Then: ModelRetry is raised so pydantic-ai produces RetryPromptPart (failure).
     """
     # Given
     tool = QuestionTool(name="question")
@@ -38,7 +39,7 @@ async def test_question_tool_raises_on_error_data() -> None:
     )
 
     # When / Then
-    with pytest.raises(RunAbortedError, match="Elicitation failed"):
+    with pytest.raises(ModelRetry, match="Elicitation failed"):
         await tool._execute(ctx=ctx, prompt="What temperature?")
 
 
@@ -60,25 +61,25 @@ async def test_question_tool_error_data_does_not_return_tool_result() -> None:
     # When
     try:
         result = await tool._execute(ctx=ctx, prompt="Pick an option")
-    except RunAbortedError:
+    except ModelRetry:
         # Expected — this is the correct behavior
         return
 
     # Then: if we reach here, the tool returned a result instead of raising
     pytest.fail(
-        f"Expected RunAbortedError but got {type(result).__name__}: {result}. "
-        "ErrorData must raise RunAbortedError, not return a ToolResult. "
+        f"Expected ModelRetry but got {type(result).__name__}: {result}. "
+        "ErrorData must raise ModelRetry, not return a ToolResult. "
         "Returning ToolResult causes ACP to report 'completed' status for failed tool calls."
     )
 
 
 @pytest.mark.unit
-async def test_question_tool_cancel_still_raises() -> None:
+async def test_question_tool_cancel_still_raises_run_aborted() -> None:
     """Raise RunAbortedError on cancel action.
 
     Given: handle_elicitation returns ElicitResult(action='cancel').
     When: QuestionTool._execute is called.
-    Then: RunAbortedError is raised (existing behavior, regression guard).
+    Then: RunAbortedError is raised (user cancellation, not tool failure).
     """
     # Given
     tool = QuestionTool(name="question")
