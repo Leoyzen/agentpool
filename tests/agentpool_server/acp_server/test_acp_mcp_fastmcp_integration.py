@@ -66,7 +66,6 @@ def mock_connection():
 @pytest.fixture
 def default_test_agent() -> Agent:
     """Create a simple test agent with a pool."""
-
     from agentpool.models.agents import NativeAgentConfig
     from agentpool.models.manifest import AgentsManifest
 
@@ -75,10 +74,7 @@ def default_test_agent() -> Agent:
 
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
     pool = AgentPool(manifest)
-    agent = Agent.from_callback(
-        name="test_agent", callback=simple_callback, agent_pool=pool
-    )
-    return agent
+    return Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
 
 
 @pytest.fixture
@@ -172,9 +168,7 @@ async def simulated_mcp_server(
         try:
             async for msg in conn.to_session:
                 if isinstance(msg, SessionMessage):
-                    msg_dict = msg.message.model_dump(
-                        by_alias=True, mode="json", exclude_none=True
-                    )
+                    msg_dict = msg.message.model_dump(by_alias=True, mode="json", exclude_none=True)
                 elif isinstance(msg, dict):
                     msg_dict = msg
                 else:
