@@ -23,44 +23,33 @@ import threading
 from typing import TYPE_CHECKING, Any
 
 
-if TYPE_CHECKING:
-    from fastmcp.client.transports import ClientTransport
+from fastmcp.client.transports import ClientTransport
 
+if TYPE_CHECKING:
     from agentpool_config.mcp_server import BaseMCPServerConfig
 
 
 logger = logging.getLogger(__name__)
 
 
-class _SharedSessionTransport:
+class _SharedSessionTransport(ClientTransport):
     """Transport wrapper that yields a shared ClientSession.
 
     Used for stdio connections where the owner task manages the
     underlying ``connect_session()`` context. Each call to this
     wrapper's ``connect_session()`` yields the same shared session
     without calling the underlying transport again.
-
-    Uses reference counting: the session stays alive until all
-    callers exit their ``connect_session()`` context.
     """
 
     def __init__(self, session: Any, ready_event: asyncio.Event) -> None:
         self._session = session
         self._ready_event = ready_event
-        self._ref_count = 0
-        self._lock = asyncio.Lock()
 
     @asynccontextmanager
     async def connect_session(self, **kwargs: Any) -> AsyncIterator[Any]:
-        """Yield the shared session, incrementing the ref count."""
+        """Yield the shared session."""
         await self._ready_event.wait()
-        async with self._lock:
-            self._ref_count += 1
-        try:
-            yield self._session
-        finally:
-            async with self._lock:
-                self._ref_count -= 1
+        yield self._session
 
 
 @dataclass

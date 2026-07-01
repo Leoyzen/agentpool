@@ -99,7 +99,7 @@ class NativeTurn(Turn):
         Raises:
             asyncio.CancelledError: If the turn is cancelled mid-execution.
         """
-        logger.info(
+        logger.debug(
             "NativeTurn.execute() START agent=%s session=%s",
             self._agent.name,
             self._run_ctx.session_id,
@@ -109,7 +109,7 @@ class NativeTurn(Turn):
             output_type=None,
             run_ctx=self._run_ctx,
         )
-        logger.info(
+        logger.debug(
             "NativeTurn.execute() agentlet built agent=%s session=%s",
             self._agent.name,
             self._run_ctx.session_id,
@@ -171,7 +171,7 @@ class NativeTurn(Turn):
                 message_history=self._message_history_input,
                 usage_limits=self._agent._default_usage_limits,
             ) as agent_run:
-                logger.info(
+                logger.debug(
                     "NativeTurn.execute() agentlet.iter() entered agent=%s session=%s",
                     self._agent.name,
                     self._run_ctx.session_id,
@@ -180,7 +180,7 @@ class NativeTurn(Turn):
                     self._run_ctx._run_handle.active_agent_run = agent_run
 
                 node = agent_run.next_node
-                logger.info(
+                logger.debug(
                     "NativeTurn.execute() first node=%s agent=%s session=%s",
                     type(node).__name__,
                     self._agent.name,
@@ -192,7 +192,7 @@ class NativeTurn(Turn):
                         break
 
                     if isinstance(node, ModelRequestNode | CallToolsNode):
-                        logger.info(
+                        logger.debug(
                             "NativeTurn.execute() processing node=%s agent=%s session=%s",
                             type(node).__name__,
                             self._agent.name,
@@ -222,7 +222,7 @@ class NativeTurn(Turn):
                         finally:
                             self._agent._iteration_task = None
 
-                        logger.info(
+                        logger.debug(
                             "NativeTurn.execute() node.stream() done agent=%s session=%s",
                             self._agent.name,
                             self._run_ctx.session_id,
@@ -235,7 +235,7 @@ class NativeTurn(Turn):
                         break
 
                     try:
-                        logger.info(
+                        logger.debug(
                             "NativeTurn.execute() calling agent_run.next() agent=%s session=%s",
                             self._agent.name,
                             self._run_ctx.session_id,
@@ -243,7 +243,7 @@ class NativeTurn(Turn):
                         iteration_task = asyncio.create_task(agent_run.next(node))
                         self._agent._iteration_task = iteration_task
                         node = await iteration_task
-                        logger.info(
+                        logger.debug(
                             "NativeTurn.execute() agent_run.next() returned node=%s agent=%s session=%s",
                             type(node).__name__,
                             self._agent.name,
@@ -307,7 +307,7 @@ class NativeTurn(Turn):
             if self._run_ctx._run_handle is not None:
                 self._run_ctx._run_handle.active_agent_run = None
 
-        logger.info(
+        logger.debug(
             "NativeTurn.execute() loop exited, building final message agent=%s session=%s",
             self._agent.name,
             self._run_ctx.session_id,
@@ -374,14 +374,14 @@ class NativeTurn(Turn):
         # CancelledError swallowed by pydantic-ai inside agent_run.next()),
         # exit without yielding StreamCompleteEvent.
         if self._run_ctx.cancelled:
-            logger.info(
+            logger.debug(
                 "NativeTurn.execute() cancelled, not yielding StreamComplete agent=%s session=%s",
                 self._agent.name,
                 self._run_ctx.session_id,
             )
             return
 
-        logger.info(
+        logger.debug(
             "NativeTurn.execute() yielding StreamCompleteEvent agent=%s session=%s",
             self._agent.name,
             self._run_ctx.session_id,
