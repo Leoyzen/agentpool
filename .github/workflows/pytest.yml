@@ -1,4 +1,4 @@
-name: Pytest
+name: CI
 
 on:
   pull_request:
@@ -15,13 +15,75 @@ on:
       - 'tests/**'
       - 'pyproject.toml'
       - 'uv.lock'
+      - '.github/workflows/pytest.yml'
   workflow_dispatch:
 
 env:
   FORCE_COLOR: 1
+  RUFF_OUTPUT_FORMAT: github
   COLUMNS: 120
 
 jobs:
+
+  lint:
+    name: Lint (ruff check)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+          cache-suffix: py3.13
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: uv sync --all-extras --no-group lint
+      - name: Run ruff check
+        run: uv run ruff check src/ tests/
+
+  format:
+    name: Format (ruff format)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+          cache-suffix: py3.13
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: uv sync --all-extras --no-group lint
+      - name: Run ruff format check
+        run: uv run ruff format --check src/ tests/
+
+  typecheck:
+    name: Type Check (mypy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+          cache-suffix: py3.13
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: uv sync --all-extras --no-group lint
+      - name: Run mypy
+        run: uv run --no-group docs mypy src/
 
   smoke:
     name: Smoke (import + collect)
@@ -125,27 +187,34 @@ jobs:
           retention-days: 3
 
   report:
-    name: Test Report
+    name: CI Report
     runs-on: ubuntu-latest
-    needs: [smoke, unit, integration, core]
+    needs: [lint, format, typecheck, smoke, unit, integration, core]
     if: always()
     steps:
       - name: Build summary table
         run: |
-          echo '## Pytest Results' >> $GITHUB_STEP_SUMMARY
+          echo '## CI Results' >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
           echo '| Stage | Status |' >> $GITHUB_STEP_SUMMARY
           echo '|-------|--------|' >> $GITHUB_STEP_SUMMARY
+          echo '| Lint (ruff check) | ${{ needs.lint.result }} |' >> $GITHUB_STEP_SUMMARY
+          echo '| Format (ruff format) | ${{ needs.format.result }} |' >> $GITHUB_STEP_SUMMARY
+          echo '| Type Check (mypy) | ${{ needs.typecheck.result }} |' >> $GITHUB_STEP_SUMMARY
           echo '| Smoke (import + collect) | ${{ needs.smoke.result }} |' >> $GITHUB_STEP_SUMMARY
           echo '| Unit tests | ${{ needs.unit.result }} |' >> $GITHUB_STEP_SUMMARY
           echo '| Integration tests | ${{ needs.integration.result }} |' >> $GITHUB_STEP_SUMMARY
           echo '| Core tests | ${{ needs.core.result }} |' >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
-          if [ '${{ needs.unit.result }}' = 'failure' ] || \
+          if [ '${{ needs.lint.result }}' = 'failure' ] || \
+             [ '${{ needs.format.result }}' = 'failure' ] || \
+             [ '${{ needs.typecheck.result }}' = 'failure' ] || \
+             [ '${{ needs.smoke.result }}' = 'failure' ] || \
+             [ '${{ needs.unit.result }}' = 'failure' ] || \
              [ '${{ needs.integration.result }}' = 'failure' ] || \
              [ '${{ needs.core.result }}' = 'failure' ]; then
-            echo '### Some tests failed' >> $GITHUB_STEP_SUMMARY
-            echo 'Download the artifact for details.' >> $GITHUB_STEP_SUMMARY
+            echo '### Some checks failed' >> $GITHUB_STEP_SUMMARY
+            echo 'Download the artifact for test details.' >> $GITHUB_STEP_SUMMARY
           else
-            echo '### All tests passed' >> $GITHUB_STEP_SUMMARY
+            echo '### All checks passed' >> $GITHUB_STEP_SUMMARY
           fi
