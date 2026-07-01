@@ -299,12 +299,6 @@ class RunHandle:
                     turn_failed = False
                     try:
                         async for event in turn.execute():
-                            logger.debug(
-                                "RunHandle.start() got event=%s session=%s run_id=%s",
-                                type(event).__name__,
-                                self.session_id,
-                                self.run_id,
-                            )
                             await event_bus.publish(self.session_id, event)
                             # Save assistant final message to conversation BEFORE
                             # yielding. The _consume_run caller closes the generator

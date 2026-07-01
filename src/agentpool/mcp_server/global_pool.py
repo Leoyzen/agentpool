@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
-from collections.abc import AsyncIterator
 import contextlib
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -22,10 +21,12 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any
 
-
 from fastmcp.client.transports import ClientTransport
 
+
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from agentpool_config.mcp_server import BaseMCPServerConfig
 
 
