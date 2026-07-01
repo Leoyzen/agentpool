@@ -12,12 +12,16 @@ receive_request() dropped input_provider from kwargs, causing
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from agentpool.orchestrator.core import EventBus, SessionController
-from agentpool.orchestrator.run import RunHandle
+
+
+if TYPE_CHECKING:
+    from agentpool.orchestrator.run import RunHandle
 
 
 pytestmark = pytest.mark.unit
@@ -107,9 +111,7 @@ async def test_input_provider_propagated_to_session(
     controller._use_run_turn = lambda _agent: True  # type: ignore[method-assign]
     controller._consume_run = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
-    await controller.receive_request(
-        "sess-ip-1", "hello", input_provider=mock_input_provider
-    )
+    await controller.receive_request("sess-ip-1", "hello", input_provider=mock_input_provider)
 
     session = controller.get_session("sess-ip-1")
     assert session is not None
@@ -212,9 +214,7 @@ async def test_input_provider_not_in_kwargs_after_processing(
 
     controller._consume_run = _track_consume  # type: ignore[method-assign]
 
-    await controller.receive_request(
-        "sess-ip-5", "hello", input_provider=mock_input_provider
-    )
+    await controller.receive_request("sess-ip-5", "hello", input_provider=mock_input_provider)
 
     # Verify input_provider was stored on session
     session = controller.get_session("sess-ip-5")

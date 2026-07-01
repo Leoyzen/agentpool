@@ -1,25 +1,24 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from typing import TYPE_CHECKING, Any, cast
 
 import anyio
-
 from pydantic import BaseModel
 from pydantic_ai.models.test import TestModel
 import pytest
 
 from agentpool import Agent, AgentPool, AgentsManifest
-from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.events import RunErrorEvent, SpawnSessionStart, StreamCompleteEvent
-from agentpool.agents.exceptions import DelegationDepthError, MAX_DELEGATION_DEPTH
+from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from pathlib import Path
 
+    from agentpool.agents.base_agent import BaseAgent
     from agentpool.orchestrator.core import SessionPool
 
 
@@ -426,12 +425,14 @@ async def test_worker_session_isolation(tmp_path: Path):
     assert parent_ids[0] == parent_ids[1], "All worker runs should share same parent session"
 
 
-@pytest.mark.skip(reason=(
-    "Team workers run directly via worker.run() instead of session_pool.run_stream(), "
-    "so StreamCompleteEvent is not published to the session pool's EventBus. "
-    "The _run_and_collect_events helper times out waiting for a terminal event. "
-    "This is an architectural difference in how teams are executed, not a regression."
-))
+@pytest.mark.skip(
+    reason=(
+        "Team workers run directly via worker.run() instead of session_pool.run_stream(), "
+        "so StreamCompleteEvent is not published to the session pool's EventBus. "
+        "The _run_and_collect_events helper times out waiting for a terminal event. "
+        "This is an architectural difference in how teams are executed, not a regression."
+    )
+)
 async def test_worker_team_emits_events(tmp_path: Path):
     """Test that team workers also emit proper events."""
     TEAM_CONFIG = """\
@@ -546,11 +547,13 @@ async def test_worker_child_session_has_correct_parent(tmp_path: Path):
     assert spawn.parent_session_id.startswith("ses_")
 
 
-@pytest.mark.skip(reason=(
-    "DelegationDepthError raised inside a tool is caught by pydantic-ai's "
-    "tool error handling and does not propagate to the run_stream consumer. "
-    "This is a pydantic-ai behavior change, not an AgentPool regression."
-))
+@pytest.mark.skip(
+    reason=(
+        "DelegationDepthError raised inside a tool is caught by pydantic-ai's "
+        "tool error handling and does not propagate to the run_stream consumer. "
+        "This is a pydantic-ai behavior change, not an AgentPool regression."
+    )
+)
 async def test_delegation_depth_error_at_max_depth(tmp_path: Path):
     """Test that DelegationDepthError is raised when max delegation depth is exceeded."""
     config_path = write_config(BASIC_WORKERS, tmp_path)
@@ -571,7 +574,9 @@ async def test_delegation_depth_error_at_max_depth(tmp_path: Path):
                 depth_exceeded = False
                 try:
                     async for event in main_agent.run_stream(
-                        "Ask worker: do something", depth=MAX_DELEGATION_DEPTH, session_id="ses_test"
+                        "Ask worker: do something",
+                        depth=MAX_DELEGATION_DEPTH,
+                        session_id="ses_test",
                     ):
                         if isinstance(event, SpawnSessionStart):
                             pass  # Should not reach here

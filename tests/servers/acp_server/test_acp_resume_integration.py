@@ -7,7 +7,7 @@ load_session calls.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -71,7 +71,7 @@ def session_manager(mock_agent: MagicMock, mock_session_store: MagicMock) -> ACP
 @pytest.fixture
 def known_session_data() -> SessionData:
     """Create a SessionData with known values for integrity checks."""
-    created = datetime(2025, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+    created = datetime(2025, 1, 15, 10, 30, 0, tzinfo=UTC)
     return SessionData(
         session_id="sess-abc-123",
         agent_name="test_agent",
@@ -91,7 +91,7 @@ def checkpointed_session_data() -> SessionData:
         agent_name="test_agent",
         cwd="/tmp/checkpointed",
         status="checkpointed",
-        created_at=datetime(2025, 3, 1, 0, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2025, 3, 1, 0, 0, 0, tzinfo=UTC),
     )
 
 

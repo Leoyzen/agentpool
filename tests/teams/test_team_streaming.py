@@ -24,9 +24,7 @@ from agentpool.delegation.teamrun import TeamRun
 from agentpool.messaging import ChatMessage
 
 
-pytestmark = pytest.mark.filterwarnings(
-    "ignore::DeprecationWarning:agentpool.agents.base_agent"
-)
+pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning:agentpool.agents.base_agent")
 
 
 # ============================================================================
@@ -153,9 +151,8 @@ async def test_spawn_session_start_precedes_subagent_for_member() -> None:
     for i, e in enumerate(events):
         if isinstance(e, SpawnSessionStart) and e.source_name == "alpha":
             spawn_idx = i
-        if isinstance(e, SubAgentEvent) and e.source_name == "alpha":
-            if sub_idx is None:
-                sub_idx = i
+        if isinstance(e, SubAgentEvent) and e.source_name == "alpha" and sub_idx is None:
+            sub_idx = i
 
     assert spawn_idx is not None
     assert sub_idx is not None
@@ -268,13 +265,12 @@ async def test_pool_backed_team_creates_child_sessions() -> None:
     # _resolve_scoped_team_nodes calls sessions.get_or_create_session_agent
     # which must return the original agent so child_session_ids keys match.
     mock_sessions.sessions = AsyncMock()
-    mock_sessions.sessions.get_or_create_session_agent = AsyncMock(
-        side_effect=[agent_a, agent_b]
-    )
+    mock_sessions.sessions.get_or_create_session_agent = AsyncMock(side_effect=[agent_a, agent_b])
     mock_pool.session_pool = mock_sessions
     # Provide manifest with agents dict so _resolve_scoped_team_nodes
     # can check pool_agents for scoped session creation.
     from types import SimpleNamespace
+
     mock_pool.manifest = SimpleNamespace(
         agents={"alpha": None, "beta": None},
         teams={},
@@ -481,19 +477,16 @@ async def test_teamrun_child_session_uses_pool_sessions() -> None:
 
     mock_pool = MagicMock()
     mock_sessions = AsyncMock()
-    mock_sessions.create_session = AsyncMock(
-        return_value=MagicMock(session_id="child-via-pool")
-    )
+    mock_sessions.create_session = AsyncMock(return_value=MagicMock(session_id="child-via-pool"))
     # _resolve_scoped_team_nodes calls sessions.get_or_create_session_agent
     # which must return the original agent so child_session_ids keys match.
     mock_sessions.sessions = AsyncMock()
-    mock_sessions.sessions.get_or_create_session_agent = AsyncMock(
-        return_value=agent1
-    )
+    mock_sessions.sessions.get_or_create_session_agent = AsyncMock(return_value=agent1)
     mock_pool.session_pool = mock_sessions
     # Provide manifest with agents dict so _resolve_scoped_team_nodes
     # can check pool_agents for scoped session creation.
     from types import SimpleNamespace
+
     mock_pool.manifest = SimpleNamespace(
         agents={"a1": None},
         teams={},

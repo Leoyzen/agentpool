@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool.orchestrator.core import SessionController, SessionPool
+from agentpool.orchestrator.core import SessionController
 from agentpool.sessions.models import PendingDeferredCall, SessionData
 
 
@@ -276,6 +276,8 @@ class TestCloseSessionWithoutStore:
 
 class TestSessionPoolCloseCheckpoint:
     """SessionPool.close_session delegates to SessionController which handles checkpoint."""
+
+
 # ===================================================================
 # _save_close_checkpoint helper
 # ===================================================================

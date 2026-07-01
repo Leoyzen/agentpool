@@ -19,7 +19,7 @@ from agentpool.orchestrator.core import (
     SessionController,
     SessionState,
 )
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.orchestrator.run import RunHandle
 
 
 pytestmark = pytest.mark.unit
@@ -143,6 +143,8 @@ async def test_list_sessions_returns_session_info(
     assert {info.agent_name for info in infos} == {"agent-a", "agent-b"}
     assert all(info.status == "idle" for info in infos)
     assert all(not info.is_per_session_agent for info in infos)
+
+
 # ---------------------------------------------------------------------------
 # get_or_create_session_agent – shared agent fallback
 # ---------------------------------------------------------------------------
@@ -448,9 +450,7 @@ async def test_cleanup_loop_catches_exceptions(
     controller._session_ttl_seconds = 0.01
     await controller.start_cleanup_task()
     # Force an exception by corrupting internal state
-    with patch.object(
-        controller, "_cleanup_expired_sessions", side_effect=RuntimeError("boom")
-    ):
+    with patch.object(controller, "_cleanup_expired_sessions", side_effect=RuntimeError("boom")):
         await asyncio.sleep(0.03)
     await controller.stop_cleanup_task()
 
@@ -486,9 +486,9 @@ def test_default_ttl_is_one_hour() -> None:
 # ---------------------------------------------------------------------------
 # receive_request
 # ---------------------------------------------------------------------------
-    # Either idle (run completed quickly) or exactly one active run
-    # Because run_loop is mocked, it returns immediately, so the run
-    # may already be cleaned up.
+# Either idle (run completed quickly) or exactly one active run
+# Because run_loop is mocked, it returns immediately, so the run
+# may already be cleaned up.
 
 
 # ---------------------------------------------------------------------------
@@ -682,9 +682,7 @@ def test_background_tasks_initialized_in_init() -> None:
     assert hasattr(controller, "_background_tasks"), (
         "_background_tasks must be initialized in __init__"
     )
-    assert isinstance(controller._background_tasks, set), (
-        "_background_tasks must be a set"
-    )
+    assert isinstance(controller._background_tasks, set), "_background_tasks must be a set"
 
 
 def test_background_task_callback_is_named_function() -> None:

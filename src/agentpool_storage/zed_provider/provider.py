@@ -21,6 +21,8 @@ from agentpool_storage.zed_provider.models import ZedThread
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from agentpool.messaging import ChatMessage
     from agentpool_config.session import SessionQuery
     from agentpool_storage.models import QueryFilters, StatsFilters
@@ -73,7 +75,7 @@ class ZedStorageProvider(StorageProvider):
             msg = f"Zed threads database not found: {self.db_path}"
             raise FileNotFoundError(msg)
 
-        def _connect_sync():
+        def _connect_sync() -> sqlite3.Connection:
             return sqlite3.connect(self.db_path)
 
         return await asyncio.to_thread(_connect_sync)
@@ -94,7 +96,7 @@ class ZedStorageProvider(StorageProvider):
             List of (id, summary, updated_at) tuples
         """
 
-        def _list_threads_sync():
+        def _list_threads_sync() -> list[tuple[str, str, str]]:
             try:
                 conn = sqlite3.connect(self.db_path)
                 query = "SELECT id, summary, updated_at FROM threads"
@@ -109,19 +111,20 @@ class ZedStorageProvider(StorageProvider):
                 cursor = conn.execute(query, params)
                 threads = cursor.fetchall()
                 conn.close()
-                return threads
             except FileNotFoundError:
                 return []
             except sqlite3.Error as e:
                 logger.warning("Failed to list Zed threads", error=str(e))
                 return []
+            else:
+                return threads
 
         return await asyncio.to_thread(_list_threads_sync)
 
     async def _load_thread(self, thread_id: str) -> ZedThread | None:
         """Load a single thread by ID."""
 
-        def _load_thread_sync():
+        def _load_thread_sync() -> ZedThread | None:
             try:
                 conn = sqlite3.connect(self.db_path)
                 query = "SELECT data_type, data FROM threads WHERE id = ? LIMIT 1"
@@ -184,6 +187,7 @@ class ZedStorageProvider(StorageProvider):
         node_name: str,
         start_time: datetime | None = None,
         model: str | None = None,
+        agent_type: str | None = None,
         parent_session_id: str | None = None,
     ) -> None:
         """Log a conversation - NOT SUPPORTED (read-only provider)."""
@@ -292,7 +296,8 @@ class ZedStorageProvider(StorageProvider):
 
     async def get_session_title(self, session_id: str) -> str | None:
         """Get the title of a conversation."""
-        return thread.title if (thread := self._load_thread(session_id)) else None
+        thread = await self._load_thread(session_id)
+        return thread.title if thread else None
 
     async def get_session_messages(
         self,
@@ -313,7 +318,7 @@ class ZedStorageProvider(StorageProvider):
         Note:
             Zed threads don't have parent_id chain, so include_ancestors has no effect.
         """
-        if thread := self._load_thread(session_id):
+        if thread := await self._load_thread(session_id):
             messages = helpers.thread_to_chat_messages(thread, session_id)
             # Sort by timestamp (though they should already be in order)
             now = get_now()
@@ -339,9 +344,14 @@ class ZedStorageProvider(StorageProvider):
         Note:
             Zed doesn't store individual message IDs, so this searches threads.
         """
-        threads = [(session_id, None, None)] if session_id else self._list_threads()
+        threads: Sequence[tuple[str, str | None, str | None]]
+        if session_id:
+            threads = [(session_id, None, None)]
+        else:
+            threads = await self._list_threads()
         for thread_id, _summary, _updated_at in threads:
-            if thread := self._load_thread(thread_id):
+            thread = await self._load_thread(thread_id)
+            if thread:
                 for msg in helpers.thread_to_chat_messages(thread, thread_id):
                     if msg.message_id == message_id:
                         return msg

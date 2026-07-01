@@ -118,11 +118,13 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         if isinstance(event, SpawnSessionStart):
             child_sid = event.child_session_id
             if child_sid and child_sid != session_id:
-                if event.spawn_mechanism == "task":
+                if (
+                    event.spawn_mechanism == "task"
                     # Skip background tasks in non-zed modes only.
                     # Zed mode needs background task sessions too for card display.
-                    if self._event_converter_template.subagent_display_mode not in ("zed", "qwen"):
-                        return
+                    and self._event_converter_template.subagent_display_mode not in ("zed", "qwen")
+                ):
+                    return
                 # Create child converter with subagent context
                 client_supports_turn_complete = (
                     self.client_capabilities is not None
@@ -350,6 +352,137 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         await self.start_event_consumer(session_id)
         logger.debug("Started event consumer", session_id=session_id)
 
+    async def _recover_session_cwd(self, session_id: str) -> str:
+        """Recover cwd from session store and resume checkpointed sessions.
+
+        Returns the recovered cwd (or "." if none found).
+        """
+        cwd = "."
+        if self.session_manager.session_store is None:
+            return cwd
+        try:
+            stored_data = await self.session_manager.session_store.load(session_id)
+            if stored_data is not None:
+                if stored_data.cwd:
+                    cwd = stored_data.cwd
+                # Resume sessions that exist in storage but are not active in memory.
+                # This handles checkpointed sessions and normal sessions that lost
+                # in-memory state due to server restart/pool swap/TTL expiry.
+                if (
+                    self.session_manager.get_session(session_id) is None
+                    and self.acp_agent is not None
+                ):
+                    logger.info(
+                        "Resuming session",
+                        session_id=session_id,
+                        status=stored_data.status,
+                    )
+                    await self.session_manager.resume_session(
+                        session_id=session_id,
+                        client=self.client,
+                        acp_agent=self.acp_agent,
+                        client_capabilities=self.client_capabilities,
+                        client_info=self.acp_agent.client_info,
+                        subagent_display_mode=self.acp_agent.subagent_display_mode,
+                        raw_input_mode=self.acp_agent.raw_input_mode,
+                    )
+                    # Re-subscribe EventBus for resumed session
+                    await self._ensure_event_consumer(session_id)
+        except Exception:
+            logger.exception(
+                "Failed to load/resume session from store",
+                session_id=session_id,
+            )
+        return cwd
+
+    async def _add_session_mcp_providers_to_pool(
+        self,
+        session_id: str,
+        session_pool: Any,
+        acp_session: Any,
+    ) -> None:
+        """Add session MCP providers to SessionPool's per-session agent.
+
+        Uses deduplication because get_or_create_session_agent returns a cached
+        per-session agent; adding the same provider repeatedly causes tool name
+        conflicts in pydantic-ai's CombinedToolset.
+        """
+        if acp_session is None or not acp_session.session_mcp_providers:
+            return
+        try:
+            session_agent = await session_pool.sessions.get_or_create_session_agent(session_id)
+            for provider in acp_session.session_mcp_providers:
+                if provider not in session_agent.tools.external_providers:
+                    session_agent.tools.add_provider(provider)
+            logger.info(
+                "Added session MCP providers to SessionPool agent",
+                session_id=session_id,
+                num_providers=len(acp_session.session_mcp_providers),
+            )
+        except Exception:
+            logger.exception(
+                "Failed to add session MCP providers to SessionPool agent",
+                session_id=session_id,
+            )
+
+    async def _process_slash_commands(
+        self,
+        session_id: str,
+        session_pool: Any,
+        acp_session: Any,
+        contents: list[Any],
+    ) -> list[Any] | None:
+        """Process slash commands from contents.
+
+        Returns the filtered non-command contents, or None if the turn should
+        end (e.g., only commands with no staged content).
+        """
+        if acp_session is None:
+            return contents
+        from agentpool_server.acp_server.session import SLASH_PATTERN, split_commands
+
+        commands, non_command_content = split_commands(contents, acp_session.command_store)
+        if not commands:
+            return contents
+        session_agent = await session_pool.sessions.get_or_create_session_agent(session_id)
+        for command_text in commands:
+            if match := SLASH_PATTERN.match(command_text.strip()):
+                command_name = match.group(1)
+                args = match.group(2) or ""
+            else:
+                continue
+            # Check NodeCommand support via duck-typing to avoid import
+            cmd = acp_session.command_store.get_command(command_name)
+            if (
+                cmd is not None
+                and callable(supports_node := getattr(cmd, "supports_node", None))
+                and not supports_node(session_agent)
+            ):
+                logger.debug(
+                    "Command not available for this node type",
+                    command=command_name,
+                )
+                continue
+            # Use per-session agent context so expanded prompts land
+            # in the correct staged_content for the SessionPool turn.
+            agent_context = session_agent.get_context(data=acp_session)
+            cmd_ctx = acp_session.command_store.create_context(
+                data=agent_context,
+                output_writer=lambda msg: logger.debug("Command output", msg=msg),
+            )
+            command_str = f"{command_name} {args}".strip()
+            try:
+                await acp_session.command_store.execute_command(command_str, cmd_ctx)
+            except Exception:
+                logger.exception(
+                    "Command execution failed",
+                    session_id=session_id,
+                    command=command_text,
+                )
+        if not non_command_content and len(session_agent.staged_content) == 0:
+            return None
+        return non_command_content
+
     async def handle_prompt(
         self,
         session_id: str,
@@ -377,72 +510,15 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
 
         # Recover cwd from session_store for clients reconnecting after pool swaps.
         # Also detect checkpointed sessions that need context restoration.
-        cwd = "."
-        stored_data = None
-        if self.session_manager.session_store is not None:
-            try:
-                stored_data = await self.session_manager.session_store.load(session_id)
-                if stored_data is not None:
-                    if stored_data.cwd:
-                        cwd = stored_data.cwd
-                    # Resume sessions that exist in storage but are not active in memory.
-                    # This handles checkpointed sessions and normal sessions that lost
-                    # in-memory state due to server restart/pool swap/TTL expiry.
-                    if (
-                        self.session_manager.get_session(session_id) is None
-                        and self.acp_agent is not None
-                    ):
-                        logger.info(
-                            "Resuming session",
-                            session_id=session_id,
-                            status=stored_data.status,
-                        )
-                        await self.session_manager.resume_session(
-                            session_id=session_id,
-                            client=self.client,
-                            acp_agent=self.acp_agent,
-                            client_capabilities=self.client_capabilities,
-                            client_info=self.acp_agent.client_info,
-                            subagent_display_mode=self.acp_agent.subagent_display_mode,
-                            raw_input_mode=self.acp_agent.raw_input_mode,
-                        )
-                        # Re-subscribe EventBus for resumed session
-                        await self._ensure_event_consumer(session_id)
-            except Exception:
-                logger.exception(
-                    "Failed to load/resume session from store",
-                    session_id=session_id,
-                )
+        cwd = await self._recover_session_cwd(session_id)
 
         # Ensure the session exists in the SessionPool (pass recovered cwd as metadata).
         # create_session is idempotent — no-op if the session already exists.
         await session_pool.create_session(session_id, cwd=cwd)
 
         # Add session MCP providers to SessionPool's per-session agent.
-        # Use deduplication because get_or_create_session_agent returns a cached
-        # per-session agent; adding the same provider repeatedly causes tool name
-        # conflicts in pydantic-ai's CombinedToolset.
         acp_session = self.session_manager.get_session(session_id)
-        if acp_session is not None and acp_session.session_mcp_providers:
-            try:
-                session_agent = await session_pool.sessions.get_or_create_session_agent(session_id)
-                for provider in acp_session.session_mcp_providers:
-                    if provider not in session_agent.tools.external_providers:
-                        session_agent.tools.add_provider(provider)
-                # Child sessions inherit parent's session-level MCP providers
-                # via agent sharing in get_or_create_session_agent() — the
-                # child reuses the parent's per-session agent which already
-                # has these providers registered.
-                logger.info(
-                    "Added session MCP providers to SessionPool agent",
-                    session_id=session_id,
-                    num_providers=len(acp_session.session_mcp_providers),
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to add session MCP providers to SessionPool agent",
-                    session_id=session_id,
-                )
+        await self._add_session_mcp_providers_to_pool(session_id, session_pool, acp_session)
 
         # Start event consumer before processing so no events are dropped
         await self._ensure_event_consumer(session_id)
@@ -453,49 +529,10 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         # Split slash commands from content and execute local commands.
         # Commands inject expanded prompts into the SessionPool per-session
         # agent's staged_content, which the agent run loop consumes automatically.
-        if acp_session is not None:
-            from agentpool_server.acp_server.session import SLASH_PATTERN, split_commands
-
-            commands, non_command_content = split_commands(contents, acp_session.command_store)
-            if commands:
-                session_agent = await session_pool.sessions.get_or_create_session_agent(session_id)
-                for command_text in commands:
-                    if match := SLASH_PATTERN.match(command_text.strip()):
-                        command_name = match.group(1)
-                        args = match.group(2) or ""
-                    else:
-                        continue
-                    # Check NodeCommand support via duck-typing to avoid import
-                    cmd = acp_session.command_store.get_command(command_name)
-                    if (
-                        cmd is not None
-                        and callable(supports_node := getattr(cmd, "supports_node", None))
-                        and not supports_node(session_agent)
-                    ):
-                        logger.debug(
-                            "Command not available for this node type",
-                            command=command_name,
-                        )
-                        continue
-                    # Use per-session agent context so expanded prompts land
-                    # in the correct staged_content for the SessionPool turn.
-                    agent_context = session_agent.get_context(data=acp_session)
-                    cmd_ctx = acp_session.command_store.create_context(
-                        data=agent_context,
-                        output_writer=lambda msg: logger.debug("Command output", msg=msg),
-                    )
-                    command_str = f"{command_name} {args}".strip()
-                    try:
-                        await acp_session.command_store.execute_command(command_str, cmd_ctx)
-                    except Exception:
-                        logger.exception(
-                            "Command execution failed",
-                            session_id=session_id,
-                            command=command_text,
-                        )
-                if not non_command_content and len(session_agent.staged_content) == 0:
-                    return self._prompt_response("end_turn")
-                contents = non_command_content
+        result = await self._process_slash_commands(session_id, session_pool, acp_session, contents)
+        if result is None:
+            return self._prompt_response("end_turn")
+        contents = result
 
         # Create ACP input provider for elicitation and tool confirmations
         # through the ACP protocol (not falling back to StdlibInputProvider)

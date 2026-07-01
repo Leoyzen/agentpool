@@ -12,16 +12,14 @@ import asyncio
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
 from pydantic_ai.models.test import TestModel
+import pytest
 
 from agentpool import Agent
 from agentpool.agents.base_agent import _current_run_ctx_var
 from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import StreamCompleteEvent
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventBus, SessionPool
-from agentpool.orchestrator.metrics import MetricsCollector, SessionPoolMetrics
+from agentpool.orchestrator.core import SessionPool
+from agentpool.orchestrator.metrics import MetricsCollector
 from agentpool.orchestrator.run import RunHandle, RunStatus
 
 
@@ -213,7 +211,9 @@ class TestMetricsCollectorActiveRuns:
     """Tests for MetricsCollector.active_turns and active_runs_by_agent_type."""
 
     @pytest.mark.anyio
-    async def test_get_metrics_returns_zero_initially(self, mock_pool_for_metrics: MagicMock) -> None:
+    async def test_get_metrics_returns_zero_initially(
+        self, mock_pool_for_metrics: MagicMock
+    ) -> None:
         """MetricsCollector should use SessionPool.active_runs for active_turns."""
         session_pool = SessionPool(mock_pool_for_metrics)
         collector = MetricsCollector(session_pool)
@@ -224,7 +224,9 @@ class TestMetricsCollectorActiveRuns:
         assert metrics.active_runs_by_agent_type == {}
 
     @pytest.mark.anyio
-    async def test_get_metrics_counts_native_vs_non_native(self, mock_pool_for_metrics: MagicMock) -> None:
+    async def test_get_metrics_counts_native_vs_non_native(
+        self, mock_pool_for_metrics: MagicMock
+    ) -> None:
         """active_runs_by_agent_type should count native and non-native runs."""
         session_pool = SessionPool(mock_pool_for_metrics)
         collector = MetricsCollector(session_pool)

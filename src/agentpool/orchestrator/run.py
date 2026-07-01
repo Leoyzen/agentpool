@@ -21,6 +21,7 @@ from agentpool.messaging import ChatMessage
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
+    from typing import Any
 
     from pydantic_ai import AgentRun
     from pydantic_ai.messages import ModelMessage
@@ -41,7 +42,7 @@ def _create_set_event() -> asyncio.Event:
 
 
 def inject_cancelled_tool_results(messages: list[ModelMessage]) -> list[ModelMessage]:
-    """Inject RetryPromptPart for unprocessed tool calls in message history.
+    r"""Inject RetryPromptPart for unprocessed tool calls in message history.
 
     When a turn is cancelled mid-tool-call, the message history ends with a
     ``ModelResponse`` containing ``ToolCallPart``\\s but no corresponding
@@ -88,17 +89,21 @@ def inject_cancelled_tool_results(messages: list[ModelMessage]) -> list[ModelMes
         return result
 
     # Build a ModelRequest with RetryPromptPart for each pending tool call.
-    retry_parts: list[ModelRequest] = []
-    for tc in pending_tool_calls:
-        retry_parts.append(
-            ModelRequest(parts=[
+    retry_parts: list[ModelRequest] = [
+        ModelRequest(
+            parts=[
                 RetryPromptPart(
-                    content=f"Tool '{tc.tool_name}' was cancelled. The user interrupted the run before the tool could complete.",
+                    content=(
+                        f"Tool '{tc.tool_name}' was cancelled. "
+                        "The user interrupted the run before the tool could complete."
+                    ),
                     tool_name=tc.tool_name,
                     tool_call_id=tc.tool_call_id,
                 ),
-            ]),
+            ],
         )
+        for tc in pending_tool_calls
+    ]
 
     result.extend(retry_parts)
     return result
@@ -189,7 +194,7 @@ class RunHandle:
     # New session-level lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self, initial_prompt: str) -> AsyncGenerator[RichAgentStreamEvent]:  # noqa: PLR0915
+    async def start(self, initial_prompt: str) -> AsyncGenerator[RichAgentStreamEvent[Any]]:  # noqa: PLR0915
         """Start the idle/wake/turn loop as an async generator.
 
         Yields :class:`RichAgentStreamEvent` tokens from each turn's
@@ -250,7 +255,7 @@ class RunHandle:
                     if self.run_ctx.cancelled:
                         self.run_ctx.cancelled = False
                     turn = agent.create_turn(
-                        prompts=current_prompts,
+                        prompts=current_prompts,  # type: ignore[arg-type]
                         run_ctx=self.run_ctx,
                         message_history=self._message_history,
                     )
@@ -265,7 +270,9 @@ class RunHandle:
                         run_id=self.run_id,
                         session_id=self.session_id,
                         agent_name=self.agent_type,
-                        parent_session_id=session.parent_session_id if session is not None else None,
+                        parent_session_id=session.parent_session_id
+                        if session is not None
+                        else None,
                     )
                     await event_bus.publish(self.session_id, run_started)
 
@@ -308,7 +315,7 @@ class RunHandle:
                                 agent.conversation.add_chat_messages(
                                     [event.message],
                                     extend_last=True,
-                                )  # type: ignore[arg-type]
+                                )
                             yield event
                             if isinstance(event, RunErrorEvent):
                                 turn_failed = True
@@ -369,10 +376,8 @@ class RunHandle:
                         break
 
                     if not turn_failed:
-                        try:
+                        with contextlib.suppress(RuntimeError):
                             self._message_history = turn.message_history
-                        except RuntimeError:
-                            pass
 
                     # Between turns: wait for background child tasks to complete,
                     # then collect their steer messages as prompts for next turn.

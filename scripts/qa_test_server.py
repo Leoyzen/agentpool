@@ -8,27 +8,21 @@ Uses uvicorn on port 19001.
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, Mock
 
-from fastapi import FastAPI
-from httpx import ASGITransport
 import uvicorn
 
 from agentpool.storage import StorageManager
 from agentpool.utils.streams import FileOpsTracker
 from agentpool.utils.todos import TodoTracker
-from agentpool_server.opencode_server.dependencies import get_state
-from agentpool_server.opencode_server.routes import (
-    agent_router,
-    file_router,
-    global_router,
-    message_router,
-    permission_router,
-    question_router,
-    session_router,
-)
 from agentpool_server.opencode_server.server import create_app
-from agentpool_server.opencode_server.state import ServerState
+
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
+
+    from agentpool.sessions.models import SessionData
 
 
 def create_test_app() -> FastAPI:
@@ -42,6 +36,7 @@ def create_test_app() -> FastAPI:
 
     # Storage
     from agentpool_config.storage import MemoryStorageConfig, StorageConfig
+
     storage_manager = StorageManager(config=StorageConfig(providers=[MemoryStorageConfig()]))
     pool.storage = storage_manager
     pool.file_ops = FileOpsTracker()
@@ -66,7 +61,9 @@ def create_test_app() -> FastAPI:
         **metadata: object,
     ) -> Mock:
         from datetime import datetime
+
         from agentpool.sessions.models import SessionData
+
         data = SessionData(
             session_id=session_id,
             agent_name=agent_name or "test-agent",
@@ -98,9 +95,12 @@ def create_test_app() -> FastAPI:
     pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(
         return_value=_mock_session_agent
     )
+
     def _mock_session_state():
         from datetime import datetime
+
         from agentpool.orchestrator.core import SessionState
+
         state = Mock(spec=SessionState)
         state.created_at = datetime.now().timestamp()
         state.last_active_at = datetime.now().timestamp()
@@ -130,6 +130,7 @@ def create_test_app() -> FastAPI:
 
     # Mock env
     from upathtools.filesystems import AsyncLocalFileSystem
+
     env = Mock()
     env.get_fs = Mock(return_value=AsyncLocalFileSystem())
     env.cwd = "/tmp"
@@ -146,7 +147,7 @@ def create_test_app() -> FastAPI:
     agent.storage = storage_manager
 
     async def _list_sessions(**kwargs: object) -> list:
-        from agentpool.sessions.models import SessionData
+
         ids = await storage_manager.list_session_ids()
         results: list[SessionData] = []
         for sid in ids:
@@ -159,8 +160,7 @@ def create_test_app() -> FastAPI:
     agent.load_session = AsyncMock(return_value=None)
 
     # Use create_app which sets up the full server
-    app = create_app(agent=agent, working_dir="/tmp")
-    return app
+    return create_app(agent=agent, working_dir="/tmp")
 
 
 if __name__ == "__main__":

@@ -143,7 +143,8 @@ async def benchmark_toolmanager_vs_capability() -> dict[str, Any]:
     return {
         "old_approach": _format_latency(old_times),
         "new_approach": _format_latency(new_times),
-        "overhead_ms": _format_latency(new_times)["mean_ms"] - _format_latency(old_times)["mean_ms"],
+        "overhead_ms": _format_latency(new_times)["mean_ms"]
+        - _format_latency(old_times)["mean_ms"],
         "overhead_pct": (
             (_format_latency(new_times)["mean_ms"] - _format_latency(old_times)["mean_ms"])
             / _format_latency(old_times)["mean_ms"]
@@ -179,7 +180,8 @@ async def benchmark_agenthooks_vs_capability() -> dict[str, Any]:
     return {
         "old_approach": _format_latency(old_times),
         "new_approach": _format_latency(new_times),
-        "overhead_ms": _format_latency(new_times)["mean_ms"] - _format_latency(old_times)["mean_ms"],
+        "overhead_ms": _format_latency(new_times)["mean_ms"]
+        - _format_latency(old_times)["mean_ms"],
         "overhead_pct": (
             (_format_latency(new_times)["mean_ms"] - _format_latency(old_times)["mean_ms"])
             / _format_latency(old_times)["mean_ms"]
@@ -214,7 +216,8 @@ async def benchmark_mcpmanager_vs_capability() -> dict[str, Any]:
     return {
         "old_approach": _format_latency(old_times),
         "new_approach": _format_latency(new_times),
-        "overhead_ms": _format_latency(new_times)["mean_ms"] - _format_latency(old_times)["mean_ms"],
+        "overhead_ms": _format_latency(new_times)["mean_ms"]
+        - _format_latency(old_times)["mean_ms"],
         "overhead_pct": (
             (_format_latency(new_times)["mean_ms"] - _format_latency(old_times)["mean_ms"])
             / _format_latency(old_times)["mean_ms"]
@@ -473,43 +476,63 @@ def _print_results(results: dict[str, Any]) -> None:
     print()
     print("--- Tool Shim: ToolManager.get_tools() vs as_capability() ---")
     tool = results["tool_shim"]
-    print(f"  Old approach (ToolManager.get_tools):")
-    print(f"    mean={tool['old_approach']['mean_ms']:.3f}ms, median={tool['old_approach']['median_ms']:.3f}ms")
-    print(f"  New approach (ResourceProvider.as_capability):")
-    print(f"    mean={tool['new_approach']['mean_ms']:.3f}ms, median={tool['new_approach']['median_ms']:.3f}ms")
+    print("  Old approach (ToolManager.get_tools):")
+    print(
+        f"    mean={tool['old_approach']['mean_ms']:.3f}ms, median={tool['old_approach']['median_ms']:.3f}ms"
+    )
+    print("  New approach (ResourceProvider.as_capability):")
+    print(
+        f"    mean={tool['new_approach']['mean_ms']:.3f}ms, median={tool['new_approach']['median_ms']:.3f}ms"
+    )
     print(f"  Overhead: {tool['overhead_ms']:+.3f}ms ({tool['overhead_pct']:+.1f}%)")
 
     # Hooks shim
     print()
     print("--- Hooks Shim: AgentHooks vs as_capability() ---")
     hooks = results["hooks_shim"]
-    print(f"  Old approach (direct access):")
-    print(f"    mean={hooks['old_approach']['mean_ms']:.3f}ms, median={hooks['old_approach']['median_ms']:.3f}ms")
-    print(f"  New approach (AgentHooks.as_capability):")
-    print(f"    mean={hooks['new_approach']['mean_ms']:.3f}ms, median={hooks['new_approach']['median_ms']:.3f}ms")
+    print("  Old approach (direct access):")
+    print(
+        f"    mean={hooks['old_approach']['mean_ms']:.3f}ms, median={hooks['old_approach']['median_ms']:.3f}ms"
+    )
+    print("  New approach (AgentHooks.as_capability):")
+    print(
+        f"    mean={hooks['new_approach']['mean_ms']:.3f}ms, median={hooks['new_approach']['median_ms']:.3f}ms"
+    )
     print(f"  Overhead: {hooks['overhead_ms']:+.3f}ms ({hooks['overhead_pct']:+.1f}%)")
 
     # MCP shim
     print()
     print("--- MCP Shim: MCPManager vs as_capability() ---")
     mcp = results["mcp_shim"]
-    print(f"  Old approach (get_mcp_providers):")
-    print(f"    mean={mcp['old_approach']['mean_ms']:.3f}ms, median={mcp['old_approach']['median_ms']:.3f}ms")
-    print(f"  New approach (MCPManager.as_capability):")
-    print(f"    mean={mcp['new_approach']['mean_ms']:.3f}ms, median={mcp['new_approach']['median_ms']:.3f}ms")
+    print("  Old approach (get_mcp_providers):")
+    print(
+        f"    mean={mcp['old_approach']['mean_ms']:.3f}ms, median={mcp['old_approach']['median_ms']:.3f}ms"
+    )
+    print("  New approach (MCPManager.as_capability):")
+    print(
+        f"    mean={mcp['new_approach']['mean_ms']:.3f}ms, median={mcp['new_approach']['median_ms']:.3f}ms"
+    )
     print(f"  Overhead: {mcp['overhead_ms']:+.3f}ms ({mcp['overhead_pct']:+.1f}%)")
 
     # Agent construction
     print()
     print("--- Agent Construction: get_agentlet() latency ---")
     agent = results["agent_construction"]
-    print(f"  Baseline (no tools/hooks/MCP):")
-    print(f"    mean={agent['baseline_no_tools']['mean_ms']:.3f}ms, median={agent['baseline_no_tools']['median_ms']:.3f}ms")
-    print(f"  With capabilities (new approach):")
-    print(f"    mean={agent['with_capabilities']['mean_ms']:.3f}ms, median={agent['with_capabilities']['median_ms']:.3f}ms")
-    print(f"  With old shims (deprecated approach):")
-    print(f"    mean={agent['with_old_shims']['mean_ms']:.3f}ms, median={agent['with_old_shims']['median_ms']:.3f}ms")
-    print(f"  Capability overhead vs baseline: {agent['capability_overhead_vs_baseline_ms']:+.3f}ms")
+    print("  Baseline (no tools/hooks/MCP):")
+    print(
+        f"    mean={agent['baseline_no_tools']['mean_ms']:.3f}ms, median={agent['baseline_no_tools']['median_ms']:.3f}ms"
+    )
+    print("  With capabilities (new approach):")
+    print(
+        f"    mean={agent['with_capabilities']['mean_ms']:.3f}ms, median={agent['with_capabilities']['median_ms']:.3f}ms"
+    )
+    print("  With old shims (deprecated approach):")
+    print(
+        f"    mean={agent['with_old_shims']['mean_ms']:.3f}ms, median={agent['with_old_shims']['median_ms']:.3f}ms"
+    )
+    print(
+        f"  Capability overhead vs baseline: {agent['capability_overhead_vs_baseline_ms']:+.3f}ms"
+    )
     print(f"  Old shim overhead vs baseline: {agent['old_shim_overhead_vs_baseline_ms']:+.3f}ms")
     print(f"  Capability vs old shim delta: {agent['capability_vs_old_shim_delta_ms']:+.3f}ms")
 
@@ -517,21 +540,27 @@ def _print_results(results: dict[str, Any]) -> None:
     print()
     print("--- Memory Overhead ---")
     mem = results["memory"]
-    print(f"  Tool shim:")
+    print("  Tool shim:")
     print(f"    Old: {mem['tool_shim']['old_formatted']}, New: {mem['tool_shim']['new_formatted']}")
     print(f"    Delta: {mem['tool_shim']['delta_formatted']}")
-    print(f"  Hooks shim:")
-    print(f"    Old: {mem['hooks_shim']['old_formatted']}, New: {mem['hooks_shim']['new_formatted']}")
+    print("  Hooks shim:")
+    print(
+        f"    Old: {mem['hooks_shim']['old_formatted']}, New: {mem['hooks_shim']['new_formatted']}"
+    )
     print(f"    Delta: {mem['hooks_shim']['delta_formatted']}")
-    print(f"  MCP shim:")
+    print("  MCP shim:")
     print(f"    Old: {mem['mcp_shim']['old_formatted']}, New: {mem['mcp_shim']['new_formatted']}")
     print(f"    Delta: {mem['mcp_shim']['delta_formatted']}")
-    print(f"  Full agent construction:")
+    print("  Full agent construction:")
     print(f"    Baseline: {mem['agent_construction']['baseline_formatted']}")
     print(f"    Capability: {mem['agent_construction']['capability_formatted']}")
     print(f"    Old shim: {mem['agent_construction']['old_formatted']}")
-    print(f"    Cap vs baseline delta: {_format_memory(mem['agent_construction']['capability_delta_vs_baseline_bytes'])}")
-    print(f"    Old vs baseline delta: {_format_memory(mem['agent_construction']['old_delta_vs_baseline_bytes'])}")
+    print(
+        f"    Cap vs baseline delta: {_format_memory(mem['agent_construction']['capability_delta_vs_baseline_bytes'])}"
+    )
+    print(
+        f"    Old vs baseline delta: {_format_memory(mem['agent_construction']['old_delta_vs_baseline_bytes'])}"
+    )
 
     print()
     print("=" * 70)

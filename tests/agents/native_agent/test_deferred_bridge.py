@@ -11,13 +11,13 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from pydantic_ai.capabilities import HandleDeferredToolCalls
 from pydantic_ai.messages import ToolCallPart, ToolReturn
 from pydantic_ai.tools import (
     DeferredToolRequests,
     RunContext,
 )
+import pytest
 
 from agentpool.agents.context import AgentContext, AgentRunContext
 from agentpool.agents.events.events import ToolCallDeferredEvent
@@ -163,7 +163,7 @@ class TestBlockStrategy:
             "agentpool.agents.native_agent.deferred_bridge._emit_deferred_event",
             new_callable=AsyncMock,
         ) as mock_emit:
-            result = await cap.handle_deferred_tool_calls(run_ctx, requests=requests)
+            await cap.handle_deferred_tool_calls(run_ctx, requests=requests)
 
             mock_emit.assert_awaited_once()
             call_args = mock_emit.call_args
@@ -363,9 +363,7 @@ class TestMixedStrategies:
             create_deferred_bridge_capability,
         )
 
-        requests = DeferredToolRequests(
-            calls=[block_tool_call, continue_tool_call]
-        )
+        requests = DeferredToolRequests(calls=[block_tool_call, continue_tool_call])
         cap = create_deferred_bridge_capability(deferred_tools=deferred_tools)
 
         with patch(
@@ -406,9 +404,7 @@ class TestMixedStrategies:
             create_deferred_bridge_capability,
         )
 
-        requests = DeferredToolRequests(
-            calls=[block_tool_call, non_deferred_tool_call]
-        )
+        requests = DeferredToolRequests(calls=[block_tool_call, non_deferred_tool_call])
         cap = create_deferred_bridge_capability(deferred_tools=deferred_tools)
 
         with patch(
@@ -619,5 +615,3 @@ class TestEmitDeferredEvent:
 
         # Should not raise
         await _emit_deferred_event(run_ctx, event)
-
-

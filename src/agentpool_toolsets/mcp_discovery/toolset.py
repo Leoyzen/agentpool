@@ -114,14 +114,14 @@ class MCPDiscoveryToolset(ResourceProvider):
 
         import lancedb  # type: ignore[import-untyped]
         import pyarrow as pa  # type: ignore[import-untyped]
-        import pyarrow.parquet as pq  # type: ignore[import-untyped]
+        import pyarrow.parquet as pq
 
         if not PARQUET_PATH.exists():
             msg = f"MCP registry index not found at {PARQUET_PATH}. Run build_mcp_registry_index.py"
             raise FileNotFoundError(msg)
 
         # Load parquet
-        arrow_table = pq.read_table(PARQUET_PATH)
+        arrow_table = pq.read_table(PARQUET_PATH)  # type: ignore[no-untyped-call]
 
         # Convert vector column to fixed-size list for LanceDB vector search
         # LanceDB requires fixed-size vectors, not variable-length lists

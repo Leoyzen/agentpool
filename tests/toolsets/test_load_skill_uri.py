@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from pydantic_ai.models.test import TestModel
+import pytest
 from upathtools import UPath
 
 from agentpool import Agent, AgentPool, AgentsManifest, NativeAgentConfig
@@ -1034,12 +1034,11 @@ class TestUPathReferenceLoading:
         The file is at <skill_dir>/assets/fta_template.md, NOT in references/.
         This must go through the UPath direct filesystem branch.
         """
+        from pathlib import Path
+        import tempfile
         from unittest.mock import MagicMock
 
         from agentpool_toolsets.builtin.skills import _load_reference_content
-
-        import tempfile
-        from pathlib import Path
 
         # Create a real temp skill directory with a file at root level
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1075,12 +1074,11 @@ class TestUPathReferenceLoading:
         The file only exists at skill root, so if incorrectly routed through
         provider, it would fail with ReferenceNotFoundError.
         """
+        from pathlib import Path
+        import tempfile
         from unittest.mock import AsyncMock, MagicMock
 
         from agentpool_toolsets.builtin.skills import _load_reference_content
-
-        import tempfile
-        from pathlib import Path
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             skill_dir = Path(tmp_dir) / "test-skill-2"
@@ -1122,18 +1120,19 @@ class TestUPathReferenceLoading:
         path ("assets/fta_template.md"), while resolved.reference_path remains the
         partial ("fta_template.md"). The priority flip ensures the corrected path wins.
         """
+        from pathlib import Path
+        import tempfile
         from unittest.mock import MagicMock
 
-        from agentpool_toolsets.builtin.skills import _load_reference_content, load_skill
-
-        import tempfile
-        from pathlib import Path
+        from agentpool_toolsets.builtin.skills import _load_reference_content
 
         # Simulate the scenario: skill has _resolved_reference_path set by resolver
         with tempfile.TemporaryDirectory() as tmp_dir:
             skill_dir = Path(tmp_dir) / "expert-knowledge"
             skill_dir.mkdir()
-            (skill_dir / "SKILL.md").write_text("---\nname: expert-knowledge\ndescription: Test\n---")
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: expert-knowledge\ndescription: Test\n---"
+            )
             assets_dir = skill_dir / "assets"
             assets_dir.mkdir()
             (assets_dir / "fta_template.md").write_text("# FTA Template\n\nCorrect content.")

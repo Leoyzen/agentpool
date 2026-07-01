@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, UTC
-from typing import Literal
+from datetime import datetime, timedelta
 
-import pytest
 from pydantic import TypeAdapter
+import pytest
 
 from agentpool.sessions.models import PendingDeferredCall, SessionData
 
@@ -14,6 +13,7 @@ from agentpool.sessions.models import PendingDeferredCall, SessionData
 # ---------------------------------------------------------------------------
 # PendingDeferredCall
 # ---------------------------------------------------------------------------
+
 
 class TestPendingDeferredCall:
     """PendingDeferredCall model tests."""
@@ -130,6 +130,7 @@ class TestPendingDeferredCall:
 # ---------------------------------------------------------------------------
 # SessionData extension fields
 # ---------------------------------------------------------------------------
+
 
 class TestSessionDataExtension:
     """SessionData new field tests."""

@@ -166,11 +166,12 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
         try:
             mcp_skills = await pool.skill_provider.get_skills()
             for skill in mcp_skills:
-                # For MCP skills, get content via provider (load_instructions returns empty for PurePosixPath)
+                # For MCP skills, get content via provider
+                # (load_instructions returns empty for PurePosixPath)
                 if isinstance(skill.skill_path, PurePosixPath):
                     try:
                         content = await pool.skill_provider.get_skill_instructions(skill.name)
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         logger.debug(
                             "Failed to get skill instructions",
                             skill=skill.name,
@@ -188,7 +189,7 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
                         content=content,
                     )
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Failed to get MCP skills", error=str(e))
 
     # 2. Get local filesystem skills from SkillsManager (takes priority)
@@ -228,7 +229,7 @@ async def list_commands(state: StateDep) -> list[Command]:
         commands.extend([
             Command(name=p.name, description=p.description, source="mcp", hints=[]) for p in prompts
         ])
-    except Exception:
+    except Exception:  # noqa: BLE001
         pass
 
     # Add skill commands from skill_bridge if available
@@ -286,7 +287,7 @@ async def list_commands(state: StateDep) -> list[Command]:
                         hints=_extract_hints(template),
                     )
                 )
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
 
     return commands

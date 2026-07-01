@@ -278,7 +278,6 @@ class TestSessionTitleGeneration:
         """Title generation should emit session.updated event."""
         # This would test the full event flow
         # Implementation depends on your event capture fixture
-        pass
 
 
 class TestSessionTitleSearch:

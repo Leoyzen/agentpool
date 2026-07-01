@@ -17,16 +17,16 @@ import pytest
 
 from agentpool.sessions.models import SessionData
 from agentpool.storage.manager import SessionMetadata, SessionMetadataGeneratedEvent, StorageManager
+from agentpool_config.storage import MemoryStorageConfig, SQLStorageConfig, StorageConfig
 from agentpool_server.opencode_server.converters import (
     opencode_to_session_data,
     session_data_to_opencode,
 )
 from agentpool_server.opencode_server.models import Session
 from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
-from agentpool_config.storage import MemoryStorageConfig, SQLStorageConfig, StorageConfig
 from agentpool_storage.memory_provider.provider import MemoryStorageProvider
-from agentpool_storage.sql_provider.sql_provider import SQLModelProvider
 from agentpool_storage.session_store import SQLSessionStore
+from agentpool_storage.sql_provider.sql_provider import SQLModelProvider
 
 
 if TYPE_CHECKING:
@@ -410,8 +410,8 @@ class TestOpenCodeProviderTitleFix:
 
     async def test_save_session_creates_new_session_file(self, tmp_path: Path) -> None:
         """Verify save_session creates new session file when it doesn't exist."""
-        from agentpool_storage.opencode_provider.provider import OpenCodeStorageProvider
         from agentpool_config.storage import OpenCodeStorageConfig
+        from agentpool_storage.opencode_provider.provider import OpenCodeStorageProvider
 
         config = OpenCodeStorageConfig(path=str(tmp_path / "opencode_storage"))
         provider = OpenCodeStorageProvider(config)
@@ -444,8 +444,8 @@ class TestOpenCodeProviderTitleFix:
 
     async def test_save_session_updates_existing_session(self, tmp_path: Path) -> None:
         """Verify save_session updates existing session file."""
-        from agentpool_storage.opencode_provider.provider import OpenCodeStorageProvider
         from agentpool_config.storage import OpenCodeStorageConfig
+        from agentpool_storage.opencode_provider.provider import OpenCodeStorageProvider
 
         config = OpenCodeStorageConfig(path=str(tmp_path / "opencode_storage"))
         provider = OpenCodeStorageProvider(config)
@@ -479,8 +479,8 @@ class TestOpenCodeProviderTitleFix:
 
     async def test_load_session_reads_title(self, tmp_path: Path) -> None:
         """Verify load_session reads title from session file."""
-        from agentpool_storage.opencode_provider.provider import OpenCodeStorageProvider
         from agentpool_config.storage import OpenCodeStorageConfig
+        from agentpool_storage.opencode_provider.provider import OpenCodeStorageProvider
 
         config = OpenCodeStorageConfig(path=str(tmp_path / "opencode_storage"))
         provider = OpenCodeStorageProvider(config)
@@ -561,7 +561,7 @@ class TestModelVariantResolution:
                 mock_agent.run = AsyncMock(return_value=mock_result)
                 mock_agent_cls.return_value = mock_agent
 
-                metadata = await manager._generate_title_core("test_session", "user: hello")
+                await manager._generate_title_core("test_session", "user: hello")
 
                 # Should have called variant.get_model(), not infer_model
                 mock_variant.get_model.assert_called_once()

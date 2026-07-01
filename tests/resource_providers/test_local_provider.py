@@ -14,7 +14,7 @@ This module provides comprehensive tests for:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -418,7 +418,7 @@ async def test_read_reference_python_file(skill_with_references):
         content, mime_type = await provider.read_reference("ref-skill", "examples.py")
 
         assert b"print" in content
-        assert mime_type == "text/x-python" or mime_type == "application/octet-stream"
+        assert mime_type in {"text/x-python", "application/octet-stream"}
 
 
 @pytest.mark.asyncio
@@ -430,7 +430,7 @@ async def test_read_reference_nested(skill_with_references):
     )
 
     async with provider:
-        content, mime_type = await provider.read_reference("ref-skill", "subdir/nested.txt")
+        content, _mime_type = await provider.read_reference("ref-skill", "subdir/nested.txt")
 
         assert b"Nested content" in content
 

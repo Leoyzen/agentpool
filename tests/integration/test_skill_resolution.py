@@ -13,8 +13,8 @@ import pytest
 from upathtools import UPath
 
 from agentpool import AgentPool
+from agentpool.skills.exceptions import SecurityError
 from agentpool.skills.uri_resolver import ResolvedSkillURI
-from agentpool.skills.exceptions import SkillNotFoundError, SecurityError
 
 
 if TYPE_CHECKING:

@@ -34,8 +34,9 @@ class GraphMessageNodeWithEvents(MessageNode[Any, str]):
     """A node that pushes events to the state event queue during execution."""
 
     async def _execute_node(self, *prompts: Any, **kwargs: Any) -> ChatMessage[str]:
-        from agentpool.agents.events import PartDeltaEvent, TextContentItem
         from pydantic_ai import TextPartDelta
+
+        from agentpool.agents.events import PartDeltaEvent
 
         state = kwargs.get("_state")
         if state is not None:
@@ -130,7 +131,7 @@ async def test_message_node_signals_emitted():
     node.message_received.connect(received_handler)
     node.message_sent.connect(sent_handler)
 
-    result = await node.run("signal_test")
+    await node.run("signal_test")
 
     received_handler.assert_awaited_once()
     sent_handler.assert_awaited_once()

@@ -13,11 +13,11 @@ user_msg was never saved.
 
 from __future__ import annotations
 
+from pydantic_ai.models.test import TestModel
 import pytest
 
 from agentpool import Agent
 from agentpool.agents.events import StreamCompleteEvent
-from pydantic_ai.models.test import TestModel
 
 
 async def test_user_message_preserved_when_no_assistant_response():
@@ -67,9 +67,7 @@ async def test_user_message_preserved_when_no_assistant_response():
         assert final_message_2 is not None
 
         # Verify conversation history now has both user messages
-        user_messages = [
-            msg for msg in agent.conversation.chat_messages if msg.role == "user"
-        ]
+        user_messages = [msg for msg in agent.conversation.chat_messages if msg.role == "user"]
         assert len(user_messages) == 2
         assert user_msg_1 in str(user_messages[0].content)
         assert user_msg_2 in str(user_messages[1].content)
@@ -87,7 +85,7 @@ async def test_conversation_history_accumulates_across_runs():
         initial_count = len(agent.conversation.chat_messages)
 
         # Run 1
-        async for event in agent.run_stream("First message"):
+        async for _event in agent.run_stream("First message"):
             pass
 
         # Should have added user + assistant messages
@@ -95,7 +93,7 @@ async def test_conversation_history_accumulates_across_runs():
         assert after_first >= initial_count + 2
 
         # Run 2
-        async for event in agent.run_stream("Second message"):
+        async for _event in agent.run_stream("Second message"):
             pass
 
         # Should have added more messages
@@ -103,7 +101,7 @@ async def test_conversation_history_accumulates_across_runs():
         assert after_second >= after_first + 2
 
         # Run 3 - with interruption simulation
-        async for event in agent.run_stream("Third message"):
+        async for _event in agent.run_stream("Third message"):
             pass
 
         after_third = len(agent.conversation.chat_messages)
@@ -111,9 +109,7 @@ async def test_conversation_history_accumulates_across_runs():
 
         # Verify all user messages are present
         user_contents = [
-            msg.content
-            for msg in agent.conversation.chat_messages
-            if msg.role == "user"
+            msg.content for msg in agent.conversation.chat_messages if msg.role == "user"
         ]
         assert any("First message" in str(c) for c in user_contents)
         assert any("Second message" in str(c) for c in user_contents)

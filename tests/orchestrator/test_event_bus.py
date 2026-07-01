@@ -137,7 +137,7 @@ async def test_unsubscribe_removes_stream(event_bus: EventBus) -> None:
 @pytest.mark.anyio
 async def test_unsubscribe_unknown_session_noop(event_bus: EventBus) -> None:
     """Unsubscribing from a non-existent session is a no-op."""
-    send, recv = anyio.create_memory_object_stream(max_buffer_size=10)
+    _send, recv = anyio.create_memory_object_stream(max_buffer_size=10)
     await event_bus.unsubscribe("missing", recv)
     counts = await event_bus.get_subscriber_counts()
     assert counts == {}
@@ -147,7 +147,7 @@ async def test_unsubscribe_unknown_session_noop(event_bus: EventBus) -> None:
 async def test_unsubscribe_wrong_stream_noop(event_bus: EventBus) -> None:
     """Unsubscribing a stream that was never subscribed is a no-op."""
     s_real = await event_bus.subscribe("sess-1")
-    send, recv_fake = anyio.create_memory_object_stream(max_buffer_size=10)
+    _send, recv_fake = anyio.create_memory_object_stream(max_buffer_size=10)
     await event_bus.unsubscribe("sess-1", recv_fake)
     counts = await event_bus.get_subscriber_counts()
     assert counts["sess-1"] == 1

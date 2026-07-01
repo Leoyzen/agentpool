@@ -117,9 +117,7 @@ async def test_to_pydantic_ai_deferred_external_prepare_sets_kind():
         result = await result  # type: ignore[assignment]
 
     assert isinstance(result, ToolDefinition)
-    assert result.kind == "external", (
-        f"Expected kind='external', got kind='{result.kind}'"
-    )
+    assert result.kind == "external", f"Expected kind='external', got kind='{result.kind}'"
 
 
 def test_to_pydantic_ai_deferred_does_not_affect_requires_confirmation_flag():

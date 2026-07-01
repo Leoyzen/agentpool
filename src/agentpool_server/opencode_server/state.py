@@ -12,7 +12,10 @@ from typing import TYPE_CHECKING, Any
 from agentpool import log
 from agentpool.diagnostics.lsp_manager import LSPManager
 from agentpool_server.opencode_server.models import SessionStatus
-from agentpool_server.opencode_server.provider_auth import create_default_auth_service
+from agentpool_server.opencode_server.provider_auth import (
+    ProviderAuthService,
+    create_default_auth_service,
+)
 from agentpool_storage.opencode_provider import helpers
 
 
@@ -24,6 +27,7 @@ if TYPE_CHECKING:
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.delegation import AgentPool
+    from agentpool.orchestrator.core import SessionController
     from agentpool.storage import StorageManager
     from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
     from agentpool_server.opencode_server.models import (
@@ -81,11 +85,11 @@ class ServerState:
     background_tasks: set[asyncio.Task[Any]] = field(default_factory=set)
     _run_handles: dict[str, Any] = field(default_factory=dict)
     event_managers: dict[str, Any] = field(default_factory=dict)
-    auth_service: Any = field(default_factory=create_default_auth_service)
+    auth_service: ProviderAuthService = field(default_factory=create_default_auth_service)
     skill_bridge: Any = field(default=None)
     command_store: CommandStore | None = field(default=None)
     session_pool_integration: Any = field(default=None)
-    session_controller: Any = field(default=None)
+    session_controller: SessionController | None = field(default=None)
     event_bridge: Any = field(default=None, repr=False)
     _shell_env: Any = field(default=None, repr=False)
     _sse_event_counter: int = field(default=0, repr=False)

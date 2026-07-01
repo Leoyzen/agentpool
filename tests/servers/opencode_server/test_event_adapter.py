@@ -20,18 +20,16 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import Mock
 
-import pytest
 from pydantic_ai import (
     PartStartEvent as PydanticPartStartEvent,
     TextPart as PydanticTextPart,
     TextPartDelta,
-    ThinkingPart,
-    ThinkingPartDelta,
 )
 from pydantic_ai.messages import (
     PartDeltaEvent as PydanticPartDeltaEvent,
     PartEndEvent,
 )
+import pytest
 
 from agentpool.agents.events import (
     PartDeltaEvent as AgentPoolPartDeltaEvent,
@@ -228,9 +226,7 @@ class TestPartDeltaEventConversion:
         adapter = OpenCodeEventAdapter(context=adapter_context)
 
         # First establish a text part
-        start_event = PydanticPartStartEvent(
-            index=0, part=PydanticTextPart(content="Base")
-        )
+        start_event = PydanticPartStartEvent(index=0, part=PydanticTextPart(content="Base"))
         await _collect_events(adapter.convert_event(start_event))
 
         delta_event = PydanticPartDeltaEvent(
@@ -622,8 +618,7 @@ class TestMessageWithPartsPreservation:
         await _collect_events(adapter.convert_event(event))
 
         step_finish_parts = [
-            p for p in adapter_context.assistant_msg.parts
-            if isinstance(p, StepFinishPart)
+            p for p in adapter_context.assistant_msg.parts if isinstance(p, StepFinishPart)
         ]
         assert len(step_finish_parts) == 1
 
@@ -636,9 +631,7 @@ class TestMessageWithPartsPreservation:
         adapter = OpenCodeEventAdapter(context=adapter_context)
 
         # Text part
-        await _collect_events(
-            adapter.convert_event(PartStartEvent.text(index=0, content="Text"))
-        )
+        await _collect_events(adapter.convert_event(PartStartEvent.text(index=0, content="Text")))
         # Tool part
         await _collect_events(
             adapter.convert_event(
@@ -668,9 +661,7 @@ class TestMessageWithPartsPreservation:
         msg.content = "Done"
         msg.usage = None
         msg.cost_info = None
-        await _collect_events(
-            adapter.convert_event(StreamCompleteEvent(message=msg))
-        )
+        await _collect_events(adapter.convert_event(StreamCompleteEvent(message=msg)))
 
         parts = adapter_context.assistant_msg.parts
         assert len(parts) == 3  # text, tool, step_finish
@@ -728,9 +719,7 @@ class TestConversionCompleteness:
         required_events = [
             PartStartEvent.text(index=0, content="test"),
             AgentPoolPartDeltaEvent.text(index=0, content="test"),
-            ToolCallStartEvent(
-                tool_call_id="t1", tool_name="test", title="Test"
-            ),
+            ToolCallStartEvent(tool_call_id="t1", tool_name="test", title="Test"),
             ToolCallCompleteEvent(
                 tool_name="test",
                 tool_call_id="t1",

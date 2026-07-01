@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import pytest
+from typing import TYPE_CHECKING
+
 from fastapi.testclient import TestClient
 from pydantic_ai.usage import RunUsage
+import pytest
 
 from agentpool import AgentPool
 from agentpool.models.agents import NativeAgentConfig
@@ -15,15 +17,18 @@ from agentpool_server.openai_api_server.server import (
 )
 
 
-from collections.abc import AsyncGenerator
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 
 @pytest.fixture
-async def client() -> AsyncGenerator[TestClient, None]:
+async def client() -> AsyncGenerator[TestClient]:
     """Create a test client backed by a minimal agent pool with a session pool."""
-    manifest = AgentsManifest(agents={
-        "libarian": NativeAgentConfig(model="test"),
-    })
+    manifest = AgentsManifest(
+        agents={
+            "libarian": NativeAgentConfig(model="test"),
+        }
+    )
     pool = AgentPool(manifest)
     async with pool:
         server = OpenAIAPIServer(pool, docs=False)
@@ -36,7 +41,6 @@ class TestChatCompletions:
 
     async def test_chat_completions_requires_authorization_header(self, client: TestClient) -> None:
         """Requests without authorization should be rejected."""
-
         response = client.post(
             "/v1/chat/completions",
             json={
@@ -49,9 +53,10 @@ class TestChatCompletions:
         assert response.status_code == 401
         assert response.json() == {"detail": "Missing API key"}
 
-    async def test_chat_completions_accepts_bearer_authorization_header(self, client: TestClient) -> None:
+    async def test_chat_completions_accepts_bearer_authorization_header(
+        self, client: TestClient
+    ) -> None:
         """Requests with a bearer token should pass auth validation."""
-
         response = client.post(
             "/v1/chat/completions",
             headers={"Authorization": "Bearer dummy"},
@@ -74,7 +79,6 @@ class TestResponses:
 
     async def test_responses_accepts_bearer_authorization_header(self, client: TestClient) -> None:
         """Responses requests with a bearer token should pass auth validation."""
-
         response = client.post(
             "/v1/responses",
             headers={"Authorization": "Bearer dummy"},
@@ -91,7 +95,6 @@ class TestResponses:
 
 def test_serialize_completion_usage_converts_runusage_to_dict() -> None:
     """RunUsage should be converted to the OpenAI usage dict shape."""
-
     usage = RunUsage(input_tokens=11, output_tokens=7, cache_read_tokens=3)
 
     assert _serialize_completion_usage(usage) == {

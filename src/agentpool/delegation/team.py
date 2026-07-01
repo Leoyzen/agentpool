@@ -129,6 +129,7 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
                 generate_title=False,
             )
             child_session_id = child_state.session_id
+            child_node: MessageNode[Any, Any]
             if isinstance(node, BaseAgent) and node.name in pool_agents:
                 child_node = await session_pool.sessions.get_or_create_session_agent(
                     child_session_id,
@@ -176,9 +177,11 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
     async def execute(self, *prompts: PromptCompatible | None, **kwargs: Any) -> TeamResponse:
         """Run all agents in parallel via pydantic-graph Fork + Join.
 
-        Keyword Args:
-            template_vars: Extra variables available as ``{{ extra.<key> }}``
-                inside per-member ``prompt_template`` Jinja2 strings.
+        Args:
+            *prompts: Prompt-compatible inputs to pass to team members.
+            **kwargs: Extra keyword arguments. Supported keys:
+                template_vars: Extra variables available as ``{{ extra.<key> }}``
+                    inside per-member ``prompt_template`` Jinja2 strings.
         """
         from agentpool.delegation.graph_team import _TeamGraphState, run_team_graph
         from agentpool.talk.talk import Talk
@@ -422,7 +425,7 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
                 "agent_names": [r.agent_name for r in result],
                 "errors": {name: str(error) for name, error in result.errors.items()},
                 "start_time": result.start_time.isoformat(),
-                "child_session_ids": result.child_session_ids,
+                "child_session_ids": dict[str, bool | int | float | str](result.child_session_ids),
             },
         )
 

@@ -11,7 +11,6 @@ from anyenv import method_spawner
 from anyenv.signals import Signal
 import anyio
 from pydantic import BaseModel, TypeAdapter
-from pydantic_ai.messages import ModelMessage
 
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
@@ -27,6 +26,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
     from types import TracebackType
+
+    from pydantic_ai.messages import ModelMessage
 
     from agentpool.common_types import JsonValue
     from agentpool.sessions.models import ProjectData, SessionData

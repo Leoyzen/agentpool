@@ -258,6 +258,48 @@ disable_error_code = [
 module = ["fsspec.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = [
+  "grep_ast",
+  "grep_ast.parsers",
+  "grep_ast.tsl",
+  "tree_sitter",
+  "tree_sitter_language_pack",
+  "rustworkx",
+  "zstandard",
+  "telegram",
+  "telegram.ext",
+  "telegram.request",
+  "telegram._files._basemedium",
+  "slack_sdk.socket_mode.response",
+  "slack_sdk.socket_mode.websockets",
+  "slack_sdk.socket_mode.request",
+  "slack_sdk.web.async_client",
+  "slackify_markdown",
+  "copykitten",
+  "promptlayer",
+  "langfuse",
+  "langfuse.api.client",
+  "braintrust",
+  "composio",
+  "ast_grep_py",
+  "fasta2a",
+  "fasta2a.applications",
+  "fasta2a.broker",
+  "fasta2a.schema",
+  "fasta2a.storage",
+  "fasta2a.worker",
+  "mcp_run",
+  "pyarrow.parquet",
+  "anyvoice",
+  "clawd_code_sdk.models",
+  "fastmcp.prompts.prompt",
+  "fastmcp.prompts.function_prompt",
+  "fastmcp.tools.tool",
+  "apprise",
+]
+ignore_missing_imports = true
+
 [tool.pyright]
 venvPath = "."
 venv = ".venv"

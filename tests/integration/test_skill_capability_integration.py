@@ -9,31 +9,28 @@ Tests cover:
 
 from __future__ import annotations
 
-import pathlib
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 from pydantic_ai import RunContext
-from pydantic_ai.models.test import TestModel
 from pydantic_ai.toolsets import (
-    CombinedToolset,
     FilteredToolset,
     FunctionToolset,
-    PrefixedToolset,
 )
 import pytest
 from upathtools import UPath
 
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
-from agentpool.skills.skill import Skill
 from agentpool.skills.capability import SkillCapability
+from agentpool.skills.skill import Skill
 from agentpool.skills.skill_mcp_manager import SkillMcpManager
 from agentpool.skills.skill_tool_manager import SkillToolManager
-from agentpool_config.skills import SkillMcpServerConfig, SkillToolConfig, SkillsConfig
+from agentpool_config.skills import SkillMcpServerConfig, SkillsConfig, SkillToolConfig
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    import pathlib
+
     from pydantic_ai import Agent as PydanticAgent
 
 
@@ -67,7 +64,7 @@ def _create_skill(
         frontmatter_lines.append("mcp-servers:")
         for srv_name, srv_cfg in mcp_servers.items():
             frontmatter_lines.append(f"  {srv_name}:")
-            frontmatter_lines.append(f'    command: {srv_cfg["command"]}')
+            frontmatter_lines.append(f"    command: {srv_cfg['command']}")
             for arg in srv_cfg.get("args", []):
                 frontmatter_lines.append(f"    args: [{arg}]")
     if tools:
@@ -168,7 +165,7 @@ class TestSkillCapabilityFullLoad:
         tool_manager = SkillToolManager()
 
         assert len(mcp_manager._configs) == 0
-        cap = SkillCapability(sample_skill, mcp_manager, tool_manager)
+        SkillCapability(sample_skill, mcp_manager, tool_manager)
 
         # After construction, each MCP server config should be registered
         assert "demo-server" in mcp_manager._configs
@@ -215,7 +212,7 @@ class TestSkillCapabilityFullLoad:
         mcp_manager = SkillMcpManager()
         tool_manager = SkillToolManager()
 
-        cap = SkillCapability(sample_skill, mcp_manager, tool_manager)
+        SkillCapability(sample_skill, mcp_manager, tool_manager)
 
         # No providers should be connected yet
         assert len(mcp_manager._providers) == 0
@@ -244,12 +241,12 @@ class TestSkillCapabilityAllowedTools:
         # No FilteredToolset wrapping when allowed_tools is empty
         assert result is dummy_toolset
 
-    def test_allowed_tools_wraps_in_filtered_toolset(self, skill_dir_with_allowed_tools: pathlib.Path) -> None:
+    def test_allowed_tools_wraps_in_filtered_toolset(
+        self, skill_dir_with_allowed_tools: pathlib.Path
+    ) -> None:
         """When allowed_tools is set, the toolset is wrapped in FilteredToolset."""
         # Load the skill from the filesystem skill we created
-        skill = Skill.from_skill_dir(
-            UPath(str(skill_dir_with_allowed_tools / "restricted-skill"))
-        )
+        skill = Skill.from_skill_dir(UPath(str(skill_dir_with_allowed_tools / "restricted-skill")))
 
         assert skill.allowed_tools is not None
         assert skill.parsed_allowed_tools() == ["bash", "read"]
@@ -264,12 +261,12 @@ class TestSkillCapabilityAllowedTools:
         # Should now be wrapped in FilteredToolset
         assert isinstance(result, FilteredToolset)
 
-    async def test_filtered_toolset_only_allows_matching_tools(self, skill_dir_with_allowed_tools: pathlib.Path) -> None:
+    async def test_filtered_toolset_only_allows_matching_tools(
+        self, skill_dir_with_allowed_tools: pathlib.Path
+    ) -> None:
         """The FilteredToolset filter_func rejects tools not in allowed_tools."""
-        skill = Skill.from_skill_dir(
-            UPath(str(skill_dir_with_allowed_tools / "restricted-skill"))
-        )
-        allowed = set(skill.parsed_allowed_tools())
+        skill = Skill.from_skill_dir(UPath(str(skill_dir_with_allowed_tools / "restricted-skill")))
+        set(skill.parsed_allowed_tools())
 
         mcp_manager = SkillMcpManager()
         tool_manager = SkillToolManager()
@@ -308,7 +305,7 @@ class TestSkillCapabilityAllowedTools:
         filter_func = result.filter_func
 
         # Run the filter function (it is actually async in SkillCapability)
-        import asyncio
+
         result_allowed = await filter_func(ctx, allowed_tool)  # type: ignore[misc]
         result_denied = await filter_func(ctx, denied_tool)  # type: ignore[misc]
         result_passthrough = await filter_func(ctx, passthrough_tool)  # type: ignore[misc]
@@ -334,15 +331,13 @@ class TestSkillCapabilityBrokenMCP:
 
     def test_broken_mcp_prepare_does_not_fail(self, skill_dir_broken_mcp: pathlib.Path) -> None:
         """SkillCapability construction succeeds with a broken MCP server config."""
-        skill = Skill.from_skill_dir(
-            UPath(str(skill_dir_broken_mcp / "broken-mcp-skill"))
-        )
+        skill = Skill.from_skill_dir(UPath(str(skill_dir_broken_mcp / "broken-mcp-skill")))
 
         mcp_manager = SkillMcpManager()
         tool_manager = SkillToolManager()
 
         # Should NOT raise — prepare() only stores the config
-        cap = SkillCapability(skill, mcp_manager, tool_manager)
+        SkillCapability(skill, mcp_manager, tool_manager)
 
         assert "nonexistent" in mcp_manager._configs
 
@@ -352,9 +347,7 @@ class TestSkillCapabilityBrokenMCP:
         The MCP connection is lazy — it only fails at connect() time,
         not at construction or toolset building time.
         """
-        skill = Skill.from_skill_dir(
-            UPath(str(skill_dir_broken_mcp / "broken-mcp-skill"))
-        )
+        skill = Skill.from_skill_dir(UPath(str(skill_dir_broken_mcp / "broken-mcp-skill")))
 
         mcp_manager = SkillMcpManager()
         tool_manager = SkillToolManager()
@@ -373,7 +366,8 @@ class TestSkillCapabilityBrokenMCP:
 @pytest.mark.integration
 class TestSkillCapabilityAgentPoolIntegration:
     """End-to-end test through AgentPool: skill discovery, capability creation,
-    agentlet building, and instruction injection with TestModel."""
+    agentlet building, and instruction injection with TestModel.
+    """
 
     async def test_skill_discovered_and_capability_built(
         self,
@@ -459,7 +453,11 @@ class TestSkillCapabilityAgentPoolIntegration:
             found = False
             for cap in pool.skill_capabilities:
                 inst = cap.get_instructions()
-                if inst is not None and isinstance(inst, str) and "This skill has both MCP and Python tools." in inst:
+                if (
+                    inst is not None
+                    and isinstance(inst, str)
+                    and "This skill has both MCP and Python tools." in inst
+                ):
                     found = True
                     break
             assert found, "No SkillCapability contained the expected instructions"

@@ -4,14 +4,11 @@ Tests that all imports use the canonical pydantic_ai.usage module location.
 """
 
 import ast
-import sys
 from pathlib import Path
-from typing import Any
 
 
 def test_runusage_imports():
     """Test that RunUsage is imported from pydantic_ai.usage, not pydantic_ai."""
-
     files_to_check = [
         "src/agentpool_storage/sql_provider/sql_provider.py",
         "src/agentpool_storage/file_provider/provider.py",
@@ -44,9 +41,11 @@ def test_runusage_imports():
                     names = [alias.name for alias in node.names]
                     if "RunUsage" in names:
                         print(f"✗ FAILED: {file_path} imports RunUsage from pydantic_ai")
-                        print(f"  Expected: from pydantic_ai.usage import RunUsage")
-                        print(f"  Actual:   from pydantic_ai import RunUsage")
-                        assert False, f"{file_path} should import RunUsage from pydantic_ai.usage"
+                        print("  Expected: from pydantic_ai.usage import RunUsage")
+                        print("  Actual:   from pydantic_ai import RunUsage")
+                        raise AssertionError(
+                            f"{file_path} should import RunUsage from pydantic_ai.usage"
+                        )
                 elif module == "pydantic_ai.usage":
                     names = [alias.name for alias in node.names]
                     if "RunUsage" in names:

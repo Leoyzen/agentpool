@@ -6,11 +6,7 @@ in OpenCode TUI are not reflected in agentpool runtime.
 
 from __future__ import annotations
 
-import asyncio
-
-import anyio
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock, patch
 
 import pytest
@@ -25,6 +21,10 @@ from agentpool_server.opencode_server.models import (
     UserMessage,
 )
 from agentpool_server.opencode_server.models.config import Config
+
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 # =============================================================================
@@ -99,7 +99,7 @@ async def test_resolve_model_string_with_variant(agent_with_variants: Agent):
     agent = agent_with_variants
 
     # Test that variant can be resolved
-    model, settings = agent._resolve_model_string("qwen35")
+    model, _settings = agent._resolve_model_string("qwen35")
 
     # The model should be resolved from the variant
     assert model is not None
@@ -334,8 +334,6 @@ agents:
     async with AgentPool(manifest) as pool:
         agent = pool.manifest.agents["assistant"].get_agent(pool=pool)
         async with agent:
-            initial_model = agent.model_name
-
             # Simulate OpenCode TUI getting available providers
             # In config_routes.py:_build_providers_from_variants(),
             # model_variants are exposed as a synthetic "agent" provider
@@ -426,9 +424,8 @@ def _make_mock_state_with_session_agent(
     from unittest.mock import AsyncMock, Mock
 
     from agentpool.orchestrator.run import RunStatus
-    from agentpool_server.opencode_server.models import SessionStatus
-    from agentpool_server.opencode_server.state import ServerState
     from agentpool.utils.time_utils import now_ms
+    from agentpool_server.opencode_server.state import ServerState
 
     shared_agent = PerSessionAgentMock(name="shared-agent")
     shared_agent.env = Mock()
@@ -465,9 +462,7 @@ def _make_mock_state_with_session_agent(
     session_pool.sessions.get_or_create_session_agent = AsyncMock(
         side_effect=_get_or_create_session_agent
     )
-    session_pool.sessions.get_or_create_session = AsyncMock(
-        return_value=(Mock(), True)
-    )
+    session_pool.sessions.get_or_create_session = AsyncMock(return_value=(Mock(), True))
 
     # RunHandle that completes immediately
     run_handle = Mock()
@@ -479,6 +474,7 @@ def _make_mock_state_with_session_agent(
     # EventBus mock
     session_pool.event_bus = Mock()
     from tests._helpers.mock_stream import EmptyReceiveStream
+
     session_pool.event_bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     session_pool.event_bus.unsubscribe = AsyncMock(return_value=None)
 
@@ -539,7 +535,7 @@ async def test_model_switch_targets_per_session_agent(tmp_project_dir: Path) -> 
             available_models=["gpt-4o"],
         ),
     }
-    state, pool = _make_mock_state_with_session_agent(tmp_project_dir, session_agents)
+    state, _pool = _make_mock_state_with_session_agent(tmp_project_dir, session_agents)
 
     shared_agent = state.agent
     assert isinstance(shared_agent, PerSessionAgentMock)
@@ -588,7 +584,7 @@ async def test_model_switch_affects_only_target_session(tmp_project_dir: Path) -
         ),
         session_b: PerSessionAgentMock(name="agent-b", model_name="model-b"),
     }
-    state, pool = _make_mock_state_with_session_agent(tmp_project_dir, session_agents)
+    state, _pool = _make_mock_state_with_session_agent(tmp_project_dir, session_agents)
 
     # Process message for session A WITH model override
     request_a = MessageRequest(
@@ -651,7 +647,7 @@ async def test_other_sessions_retain_original_model(tmp_project_dir: Path) -> No
         ),
         session_b: PerSessionAgentMock(name="agent-b", model_name="original-model-b"),
     }
-    state, pool = _make_mock_state_with_session_agent(tmp_project_dir, session_agents)
+    state, _pool = _make_mock_state_with_session_agent(tmp_project_dir, session_agents)
 
     # Process message for session A with model override
     request = MessageRequest(

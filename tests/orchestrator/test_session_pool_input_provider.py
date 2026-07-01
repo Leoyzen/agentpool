@@ -7,18 +7,21 @@ so that elicitation does NOT fall back to StdlibInputProvider.
 
 from __future__ import annotations
 
-import asyncio
-from collections.abc import AsyncIterator
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import SessionPool
 from agentpool.ui.base import InputProvider
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from agentpool.agents.context import AgentRunContext
 
 
 pytestmark = pytest.mark.unit
@@ -27,14 +30,10 @@ pytestmark = pytest.mark.unit
 class FakeInputProvider(InputProvider):
     """A fake input provider for testing propagation."""
 
-    async def get_tool_confirmation(
-        self, context: Any, tool_description: str = ""
-    ) -> Any:
+    async def get_tool_confirmation(self, context: Any, tool_description: str = "") -> Any:
         return "allow"
 
-    async def get_elicitation(
-        self, params: Any
-    ) -> Any:
+    async def get_elicitation(self, params: Any) -> Any:
         return {"action": "accept", "content": {}}
 
 
@@ -107,6 +106,7 @@ def _make_fake_run_handle(agent: MagicMock) -> MagicMock:
 
 class TestSessionPoolRunStreamInputProvider:
     """RED FLAG: input_provider must be forwarded through SessionPool.run_stream()."""
+
     @pytest.mark.anyio
     async def test_run_stream_without_input_provider_does_not_crash(
         self,
@@ -170,9 +170,7 @@ class TestSessionPoolRunStreamInputProvider:
         fake_handle = _make_fake_run_handle(mock_agent)
         session_pool._create_run_handle = MagicMock(return_value=fake_handle)  # type: ignore[method-assign]
 
-        await session_pool.process_prompt(
-            session_id, "hello", input_provider=fake_provider
-        )
+        await session_pool.process_prompt(session_id, "hello", input_provider=fake_provider)
 
         assert captured_kwargs is not None, "get_or_create_session_agent was never called"
         assert captured_kwargs["input_provider"] is fake_provider, (
@@ -218,9 +216,7 @@ class TestRunTurnInputProvider:
         ):
             pass
 
-        assert captured_agent_kwargs is not None, (
-            "get_or_create_session_agent was never called"
-        )
+        assert captured_agent_kwargs is not None, "get_or_create_session_agent was never called"
         assert captured_agent_kwargs["input_provider"] is fake_provider, (
             f"Expected FakeInputProvider, got {captured_agent_kwargs['input_provider']}"
         )
@@ -241,9 +237,6 @@ class TestRunTurnInputProvider:
         """
         fake_provider = FakeInputProvider()
         session_id = "test-session"
-
-        captured_stream_kwargs: dict[str, Any] | None = None
-        original_stream = mock_agent._run_stream_once
 
         async def _capturing_get_agent(
             sid: str,
@@ -268,8 +261,7 @@ class TestRunTurnInputProvider:
             pass
 
         assert mock_agent._input_provider is fake_provider, (
-            f"Expected FakeInputProvider on agent._input_provider, "
-            f"got {mock_agent._input_provider}"
+            f"Expected FakeInputProvider on agent._input_provider, got {mock_agent._input_provider}"
         )
 
 

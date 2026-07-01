@@ -21,8 +21,6 @@ Security Considerations from RFC-0020:
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -138,7 +136,7 @@ async def test_local_path_traversal_leading_dotdot(local_provider):
 @pytest.mark.asyncio
 @pytest.mark.security
 async def test_local_path_traversal_mixed_separators(local_provider):
-    """Test path traversal with mixed separators: ..\\..\\..\\etc\\passwd."""
+    r"""Test path traversal with mixed separators: ..\\..\\..\\etc\\passwd."""
     # On Unix, backslash is treated as literal character
     # This test verifies the path is rejected
     with pytest.raises((SecurityError, ReferenceNotFoundError)):
@@ -193,7 +191,7 @@ async def test_local_url_encoded_dot(local_provider):
 @pytest.mark.asyncio
 @pytest.mark.security
 async def test_local_null_byte_injection(local_provider):
-    """Test null byte injection: file\x00.txt."""
+    r"""Test null byte injection: file\x00.txt."""
     with pytest.raises((SecurityError, ReferenceNotFoundError)):
         await local_provider.read_reference("test-skill", "file\x00.txt")
 
@@ -201,7 +199,7 @@ async def test_local_null_byte_injection(local_provider):
 @pytest.mark.asyncio
 @pytest.mark.security
 async def test_local_null_byte_injection_with_path(local_provider):
-    """Test null byte injection with path: subdir/file\x00.txt."""
+    r"""Test null byte injection with path: subdir/file\x00.txt."""
     with pytest.raises((SecurityError, ReferenceNotFoundError)):
         await local_provider.read_reference("test-skill", "subdir/file\x00.txt")
 
@@ -209,7 +207,7 @@ async def test_local_null_byte_injection_with_path(local_provider):
 @pytest.mark.asyncio
 @pytest.mark.security
 async def test_local_null_byte_at_start(local_provider):
-    """Test null byte at start of path: \x00file.txt."""
+    r"""Test null byte at start of path: \x00file.txt."""
     with pytest.raises((SecurityError, ReferenceNotFoundError)):
         await local_provider.read_reference("test-skill", "\x00file.txt")
 
@@ -425,7 +423,7 @@ async def test_mcp_double_url_encoding(mcp_provider):
 @pytest.mark.asyncio
 @pytest.mark.security
 async def test_mcp_null_byte_injection(mcp_provider):
-    """Test MCP null byte injection: file\x00.txt."""
+    r"""Test MCP null byte injection: file\x00.txt."""
     with pytest.raises(SecurityError) as exc_info:
         await mcp_provider.read_reference("test-skill", "file\x00.txt")
 
@@ -435,7 +433,7 @@ async def test_mcp_null_byte_injection(mcp_provider):
 @pytest.mark.asyncio
 @pytest.mark.security
 async def test_mcp_null_byte_in_middle(mcp_provider):
-    """Test MCP null byte in middle: config\x00.json."""
+    r"""Test MCP null byte in middle: config\x00.json."""
     with pytest.raises(SecurityError) as exc_info:
         await mcp_provider.read_reference("test-skill", "config\x00.json")
 
@@ -445,7 +443,7 @@ async def test_mcp_null_byte_in_middle(mcp_provider):
 @pytest.mark.asyncio
 @pytest.mark.security
 async def test_mcp_null_byte_with_path(mcp_provider):
-    """Test MCP null byte with path: subdir/file\x00.txt."""
+    r"""Test MCP null byte with path: subdir/file\x00.txt."""
     with pytest.raises(SecurityError) as exc_info:
         await mcp_provider.read_reference("test-skill", "subdir/file\x00.txt")
 
@@ -455,7 +453,7 @@ async def test_mcp_null_byte_with_path(mcp_provider):
 @pytest.mark.asyncio
 @pytest.mark.security
 async def test_mcp_null_byte_at_start(mcp_provider):
-    """Test MCP null byte at start: \x00file.txt."""
+    r"""Test MCP null byte at start: \x00file.txt."""
     with pytest.raises(SecurityError) as exc_info:
         await mcp_provider.read_reference("test-skill", "\x00file.txt")
 
@@ -465,7 +463,7 @@ async def test_mcp_null_byte_at_start(mcp_provider):
 @pytest.mark.asyncio
 @pytest.mark.security
 async def test_mcp_multiple_null_bytes(mcp_provider):
-    """Test MCP multiple null bytes: file\x00\x00\x00.txt."""
+    r"""Test MCP multiple null bytes: file\x00\x00\x00.txt."""
     with pytest.raises(SecurityError) as exc_info:
         await mcp_provider.read_reference("test-skill", "file\x00\x00\x00.txt")
 
@@ -510,7 +508,7 @@ async def test_local_single_dot(local_provider):
 async def test_local_dot_slash_prefix(local_provider):
     """Test dot slash prefix: ./guide.md."""
     # This should work - single dot is not traversal
-    content, mime_type = await local_provider.read_reference("test-skill", "./guide.md")
+    content, _mime_type = await local_provider.read_reference("test-skill", "./guide.md")
     assert b"Guide content" in content
 
 

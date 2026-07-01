@@ -2,25 +2,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from pydantic import ConfigDict, TypeAdapter
-from pydantic_ai import ModelMessage, ModelResponsePart
+from pydantic_ai import ModelMessage, ModelRequestPart, ModelResponsePart
 
 from agentpool.log import get_logger
 from agentpool.sessions.models import PendingDeferredCall
 
 
 if TYPE_CHECKING:
-    from pydantic_ai import ModelRequestPart
+    from collections.abc import Sequence
 
 
 logger = get_logger(__name__)
 
-# Type adapter for serializing ModelResponsePart sequences
+# Type adapter for serializing ModelResponsePart sequences (also accepts ModelRequestPart)
 parts_adapter = TypeAdapter(
-    list[ModelResponsePart],
+    list[ModelResponsePart | ModelRequestPart],
     config=ConfigDict(ser_json_bytes="base64", val_json_bytes="base64"),
 )
 
@@ -34,7 +33,7 @@ messages_adapter = TypeAdapter(
 deferred_calls_adapter = TypeAdapter(list[PendingDeferredCall])
 
 
-def deserialize_parts(parts_json: str | None) -> Sequence[ModelResponsePart]:
+def deserialize_parts(parts_json: str | None) -> Sequence[ModelResponsePart | ModelRequestPart]:
     """Deserialize pydantic-ai message parts from JSON string.
 
     Args:

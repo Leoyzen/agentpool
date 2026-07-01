@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import anyio
 import pytest
 
-from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     RunFailedEvent,
     RunStartedEvent,
@@ -23,9 +22,13 @@ from agentpool.agents.events import (
     ToolCallStartEvent,
 )
 from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionPool
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.orchestrator.core import EventEnvelope, SessionPool
+from agentpool.orchestrator.run import RunStatus
 from agentpool.orchestrator.turn import Turn
+
+
+if TYPE_CHECKING:
+    from agentpool.agents.context import AgentRunContext
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
@@ -91,7 +94,6 @@ class _ToolBlockingTurn(Turn):
         )
         while not self._run_ctx.cancelled:
             await asyncio.sleep(0.01)
-        return
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +246,7 @@ async def test_cancel_then_new_prompt_full_flow(
                     unwrapped = _unwrap_event(event)
                     if isinstance(unwrapped, StreamCompleteEvent):
                         break
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     break
     except TimeoutError:
         pytest.fail("Timed out waiting for events after cancel-then-prompt")
@@ -380,7 +382,7 @@ async def _collect_events_until(
                     events.append(event)
                     if isinstance(_unwrap_event(event), target_type):
                         break
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     break
     except TimeoutError:
         pytest.fail(f"Timed out waiting for {target_type.__name__}")
@@ -425,7 +427,7 @@ async def test_double_cancel(mock_pool: MagicMock) -> None:
     )
 
     # Send a new prompt — should not hang
-    second_handle = await asyncio.wait_for(
+    await asyncio.wait_for(
         session_pool.receive_request(session_id, "second prompt"),
         timeout=30.0,
     )
@@ -494,7 +496,7 @@ async def test_cancel_during_idle_then_new_prompt(mock_pool: MagicMock) -> None:
     )
 
     # Send a new prompt — should work normally
-    second_handle = await asyncio.wait_for(
+    await asyncio.wait_for(
         session_pool.receive_request(session_id, "second prompt"),
         timeout=30.0,
     )
@@ -703,7 +705,7 @@ async def test_double_cancel_then_new_prompt(mock_pool: MagicMock) -> None:
     )
 
     # Send a new prompt — should not hang
-    second_handle = await asyncio.wait_for(
+    await asyncio.wait_for(
         session_pool.receive_request(session_id, "second prompt"),
         timeout=30.0,
     )

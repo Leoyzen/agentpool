@@ -11,9 +11,9 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import sys
 from pathlib import Path
-from typing import Any
+import sys
+
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -34,7 +34,7 @@ def print_result(name: str, passed: bool, detail: str = "") -> None:
 
 async def diagnose(config_path: str | None = None) -> None:
     """Run full diagnostic pipeline."""
-    from upathtools import UPath, to_upath
+    from upathtools import to_upath
 
     # ============================================================
     # Stage 1: Filesystem Discovery
@@ -305,8 +305,8 @@ async def diagnose(config_path: str | None = None) -> None:
     # ============================================================
     print_header("Stage 5: HTTP API Check")
 
-    import urllib.request
     import json
+    import urllib.request
 
     base_url = "http://127.0.0.1:4096"
     for endpoint in ["/skill", "/command"]:

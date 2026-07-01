@@ -46,9 +46,9 @@ from io import StringIO
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
 from pydantic_ai import PartDeltaEvent, TextPartDelta
 from pydantic_ai.models.test import TestModel
+import pytest
 
 from agentpool import Agent
 from agentpool.agents.events import StreamCompleteEvent, ToolCallStartEvent
@@ -158,7 +158,7 @@ async def test_break_with_exception_handling(break_test_agent: Agent[None]):
         user_exception = None
 
         try:
-            async for event in session_pool.run_stream(session_id, "Test"):
+            async for _event in session_pool.run_stream(session_id, "Test"):
                 break
         except Exception as e:  # noqa: BLE001
             user_exception = e
@@ -180,7 +180,7 @@ async def test_conversation_history_after_break(break_test_agent: Agent[None]):
     session_pool, session_id = await _setup_session_pool(break_test_agent)
     try:
         # Run and break
-        async for event in session_pool.run_stream(session_id, "Test message"):
+        async for _event in session_pool.run_stream(session_id, "Test message"):
             break  # Break immediately
 
         history = break_test_agent.conversation.get_history()
@@ -219,7 +219,9 @@ async def test_subsequent_run_after_break(break_test_agent: Agent[None]):
 
         # Document the issue
         if second_run_error:
-            print(f"[ISSUE] Second run failed: {type(second_run_error).__name__}: {second_run_error}")
+            print(
+                f"[ISSUE] Second run failed: {type(second_run_error).__name__}: {second_run_error}"
+            )
         else:
             print(f"[INFO] Second run succeeded: {second_run_succeeded}")
     finally:
@@ -301,7 +303,6 @@ async def test_tool_call_detection_without_break(tool_call_agent: Agent[None]):
     try:
         tool_detected = False
         events = []
-        final_message = None
 
         # Safe pattern - detect but do not break
         async for event in session_pool.run_stream(session_id, "Trigger the tool"):
@@ -313,7 +314,6 @@ async def test_tool_call_detection_without_break(tool_call_agent: Agent[None]):
                 # Do not break! Let it continue
 
             if isinstance(event, StreamCompleteEvent):
-                final_message = event.message
                 break
 
         print(f"[INFO] Tool detected: {tool_detected}, Total events: {len(events)}")

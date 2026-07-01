@@ -270,9 +270,7 @@ async def test_receive_request_uses_get_or_create_session_agent() -> None:
     result = await controller.receive_request(session_id, "hello")
 
     # get_or_create_session_agent should have been called
-    controller.get_or_create_session_agent.assert_called_once_with(
-        session_id, input_provider=None
-    )
+    controller.get_or_create_session_agent.assert_called_once_with(session_id, input_provider=None)
     assert result is not None, (
         "receive_request returned None because agent was not in _session_agents cache"
     )
@@ -325,8 +323,7 @@ async def test_receive_request_list_content_joins_elements() -> None:
 
     assert len(captured_content) > 0
     assert captured_content[0] == "hello world", (
-        f"Expected 'hello world', got {captured_content[0]!r} — "
-        "list was not properly joined"
+        f"Expected 'hello world', got {captured_content[0]!r} — list was not properly joined"
     )
     assert "['hello'" not in captured_content[0], (
         "List was stringified with repr() instead of joined"

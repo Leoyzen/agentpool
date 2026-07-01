@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Quick red flag test: verify skill reference loading against local MCP scratchpad.
+"""Quick red flag test: verify skill reference loading against local MCP scratchpad.
 
 Run from packages/agentpool directory:
     uv run python reproduce_skill_bug.py
@@ -10,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+
 
 sys.path.insert(0, "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/src")
 

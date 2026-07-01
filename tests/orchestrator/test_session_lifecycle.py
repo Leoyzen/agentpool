@@ -9,18 +9,13 @@ Consolidated from:
 from __future__ import annotations
 
 import asyncio
-import contextlib
-from collections.abc import AsyncIterator
 import inspect
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
-import anyio
-
 import pytest
 
-from agentpool.agents.events import RunFailedEvent, RunStartedEvent, StreamCompleteEvent
-from agentpool.messaging.messages import ChatMessage
+from agentpool.agents.events import RunStartedEvent
 from agentpool.orchestrator.core import (
     EventBus,
     SessionController,
@@ -28,9 +23,11 @@ from agentpool.orchestrator.core import (
     SessionPool,
     SessionState,
 )
-from agentpool.orchestrator.run import RunHandle
+
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from agentpool.agents.context import AgentRunContext
 
 
@@ -157,9 +154,7 @@ class TestSessionControllerParentChild:
     async def test_creates_child_session(self) -> None:
         ctrl = SessionController(pool=MagicMock())
         parent, _ = await ctrl.get_or_create_session("parent1")
-        child, _ = await ctrl.get_or_create_session(
-            "child1", parent_session_id="parent1"
-        )
+        child, _ = await ctrl.get_or_create_session("child1", parent_session_id="parent1")
         assert child.parent_session_id == "parent1"
         assert ctrl.get_children("parent1") == ["child1"]
         assert ctrl.get_parent("child1") == parent
@@ -255,6 +250,8 @@ async def test_close_session_no_active_run(
 
     await session_pool.close_session("sess-4")
     assert session_pool.sessions.get_session("sess-4") is None
+
+
 @pytest.mark.anyio
 async def test_close_session_acquires_request_lock(
     session_pool: SessionPool,
@@ -287,7 +284,7 @@ async def test_close_session_acquires_request_lock(
 # ============================================================================
 # Error propagation
 # ============================================================================
-    # Should complete without error
+# Should complete without error
 
 
 # ============================================================================

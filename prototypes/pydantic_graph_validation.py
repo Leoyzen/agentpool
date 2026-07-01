@@ -14,17 +14,18 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+import sys
+from typing import Any
 
 from pydantic_graph import GraphBuilder, StepContext, TypeExpression
-from pydantic_graph.graph_builder import EndMarker, GraphTask
+from pydantic_graph.graph_builder import EndMarker
+from pydantic_graph.id_types import NodeID
 from pydantic_graph.join import reduce_list_append
 from pydantic_graph.node_types import AnyNode
 from pydantic_graph.paths import DestinationMarker
-from pydantic_graph.id_types import NodeID
+
 
 # ---------------------------------------------------------------------------
 # State
@@ -120,7 +121,8 @@ def build_decision_graph() -> GraphBuilder[GraphState, None, int, str]:
     g.add(
         g.edge_from(g.start_node).to(emit_value),
         g.edge_from(emit_value).to(
-            g.decision(node_id="type_decision")
+            g
+            .decision(node_id="type_decision")
             .branch(g.match(TypeExpression[int]).to(handle_int))
             .branch(g.match(TypeExpression[str]).to(handle_str))
         ),
@@ -526,9 +528,7 @@ async def run_single(name: str) -> dict[str, Any]:
     result = await TESTS[name]()
     path = evidence_path(f"task-1-{name}.txt")
     path.write_text(
-        f"Test: {name}\n"
-        f"Passed: {result['passed']}\n"
-        f"Details: {result}\n",
+        f"Test: {name}\nPassed: {result['passed']}\nDetails: {result}\n",
         encoding="utf-8",
     )
     return result
@@ -551,11 +551,7 @@ async def main() -> int:
     parser.add_argument("--test-all", action="store_true", help="Run all tests")
     args = parser.parse_args()
 
-    selected = [
-        name
-        for name in TESTS
-        if getattr(args, f"test_{name}") or args.test_all
-    ]
+    selected = [name for name in TESTS if getattr(args, f"test_{name}") or args.test_all]
 
     if not selected:
         parser.print_help()
@@ -573,7 +569,7 @@ async def main() -> int:
     notepad.parent.mkdir(parents=True, exist_ok=True)
     with notepad.open("a", encoding="utf-8") as fh:
         fh.write("\n## Prototype Validation Findings\n\n")
-        fh.write(f"Date: 2026-06-03\n\n")
+        fh.write("Date: 2026-06-03\n\n")
         for r in results:
             fh.write(f"- **{r['name']}**: {'PASS' if r['passed'] else 'FAIL'}\n")
             if not r["passed"]:

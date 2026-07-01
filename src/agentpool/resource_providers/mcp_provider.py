@@ -765,7 +765,7 @@ class MCPResourceProvider(ResourceProvider):
 
         return "\n".join(lines)
 
-    async def get_references(self, skill_name: str) -> list[dict[str, Any]]:
+    async def get_references(self, skill_name: str) -> list[str | dict[str, Any]]:
         """List references for a skill.
 
         Uses two discovery strategies:
@@ -781,7 +781,7 @@ class MCPResourceProvider(ResourceProvider):
         Returns:
             List of reference file information
         """
-        references: list[dict[str, Any]] = []
+        references: list[str | dict[str, Any]] = []
 
         # Strategy 1: Look for resources under skill://skill-name/references/
         # Try both kebab-case (normalized) and underscore (original directory name) forms,

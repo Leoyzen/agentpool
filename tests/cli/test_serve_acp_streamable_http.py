@@ -63,8 +63,9 @@ def test_default_transport_is_stdio(
     minimal_config_file: str,
 ) -> None:
     """Default --transport should create StdioTransport."""
-    with patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config, patch(
-        "agentpool_cli.serve_acp.asyncio.run"
+    with (
+        patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config,
+        patch("agentpool_cli.serve_acp.asyncio.run"),
     ):
         mock_server = MagicMock()
         mock_from_config.return_value = mock_server
@@ -84,15 +85,14 @@ def test_transport_streamable_http_creates_acp_websocket_transport(
     minimal_config_file: str,
 ) -> None:
     """--transport streamable-http should create ACPWebSocketTransport."""
-    with patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config, patch(
-        "agentpool_cli.serve_acp.asyncio.run"
+    with (
+        patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config,
+        patch("agentpool_cli.serve_acp.asyncio.run"),
     ):
         mock_server = MagicMock()
         mock_from_config.return_value = mock_server
 
-        result = cli_runner.invoke(
-            app, [minimal_config_file, "--transport", "streamable-http"]
-        )
+        result = cli_runner.invoke(app, [minimal_config_file, "--transport", "streamable-http"])
 
         assert result.exit_code == 0, result.output
         mock_from_config.assert_called_once()
@@ -106,8 +106,9 @@ def test_transport_streamable_http_with_custom_host_and_port(
     minimal_config_file: str,
 ) -> None:
     """--host and --port should be passed to ACPWebSocketTransport."""
-    with patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config, patch(
-        "agentpool_cli.serve_acp.asyncio.run"
+    with (
+        patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config,
+        patch("agentpool_cli.serve_acp.asyncio.run"),
     ):
         mock_server = MagicMock()
         mock_from_config.return_value = mock_server
@@ -138,15 +139,14 @@ def test_transport_streamable_http_uses_default_host_port(
     minimal_config_file: str,
 ) -> None:
     """ACPWebSocketTransport should use default host/port when not specified."""
-    with patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config, patch(
-        "agentpool_cli.serve_acp.asyncio.run"
+    with (
+        patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config,
+        patch("agentpool_cli.serve_acp.asyncio.run"),
     ):
         mock_server = MagicMock()
         mock_from_config.return_value = mock_server
 
-        result = cli_runner.invoke(
-            app, [minimal_config_file, "--transport", "streamable-http"]
-        )
+        result = cli_runner.invoke(app, [minimal_config_file, "--transport", "streamable-http"])
 
         assert result.exit_code == 0, result.output
         transport_arg = mock_from_config.call_args.kwargs["transport"]
@@ -160,16 +160,15 @@ def test_transport_websocket_emits_deprecation_warning(
     minimal_config_file: str,
 ) -> None:
     """--transport websocket should emit DeprecationWarning."""
-    with patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config, patch(
-        "agentpool_cli.serve_acp.asyncio.run"
+    with (
+        patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config,
+        patch("agentpool_cli.serve_acp.asyncio.run"),
     ):
         mock_server = MagicMock()
         mock_from_config.return_value = mock_server
 
         with pytest.warns(DeprecationWarning, match="deprecated"):
-            result = cli_runner.invoke(
-                app, [minimal_config_file, "--transport", "websocket"]
-            )
+            result = cli_runner.invoke(app, [minimal_config_file, "--transport", "websocket"])
 
         assert result.exit_code == 0, result.output
         transport_arg = mock_from_config.call_args.kwargs.get("transport")
@@ -182,8 +181,9 @@ def test_transport_websocket_uses_ws_host_and_ws_port(
     minimal_config_file: str,
 ) -> None:
     """--ws-host and --ws-port should be passed to WebSocketTransport."""
-    with patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config, patch(
-        "agentpool_cli.serve_acp.asyncio.run"
+    with (
+        patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config,
+        patch("agentpool_cli.serve_acp.asyncio.run"),
     ):
         mock_server = MagicMock()
         mock_from_config.return_value = mock_server
@@ -220,8 +220,9 @@ def test_short_options_for_host_and_port(
     minimal_config_file: str,
 ) -> None:
     """-h and -p should work as short options for --host and --port."""
-    with patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config, patch(
-        "agentpool_cli.serve_acp.asyncio.run"
+    with (
+        patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config,
+        patch("agentpool_cli.serve_acp.asyncio.run"),
     ):
         mock_server = MagicMock()
         mock_from_config.return_value = mock_server
@@ -256,8 +257,9 @@ def test_agent_option_is_passed_through(
     minimal_config_file: str,
 ) -> None:
     """--agent option should be passed to ACPServer.from_config."""
-    with patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config, patch(
-        "agentpool_cli.serve_acp.asyncio.run"
+    with (
+        patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config,
+        patch("agentpool_cli.serve_acp.asyncio.run"),
     ):
         mock_server = MagicMock()
         mock_from_config.return_value = mock_server
@@ -276,8 +278,9 @@ def test_debug_messages_option_is_passed_through(
     minimal_config_file: str,
 ) -> None:
     """--debug-messages option should be passed to ACPServer.from_config."""
-    with patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config, patch(
-        "agentpool_cli.serve_acp.asyncio.run"
+    with (
+        patch("agentpool_server.acp_server.ACPServer.from_config") as mock_from_config,
+        patch("agentpool_cli.serve_acp.asyncio.run"),
     ):
         mock_server = MagicMock()
         mock_from_config.return_value = mock_server

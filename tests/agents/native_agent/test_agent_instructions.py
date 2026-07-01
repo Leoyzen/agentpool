@@ -13,6 +13,7 @@ from agentpool.resource_providers.base import ResourceProvider
 
 if TYPE_CHECKING:
     from pydantic_ai.capabilities import AbstractCapability
+
     from agentpool.agents.context import AgentContext
     from agentpool.prompts.instructions import InstructionFunc
 
@@ -130,6 +131,8 @@ async def agent_with_instruction_providers():
             A pydantic-ai AbstractCapability instance, or None.
         """
         return None
+
+    return None
 
 
 @pytest.mark.requires_openai_key

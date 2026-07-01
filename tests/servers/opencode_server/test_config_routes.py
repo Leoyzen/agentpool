@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from agentpool.agents.modes import ModeCategory, ModeInfo
 from agentpool_server.opencode_server.routes.config_routes import list_modes
 

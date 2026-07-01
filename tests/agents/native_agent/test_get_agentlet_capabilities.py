@@ -10,8 +10,8 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from pydantic_ai.models.test import TestModel
+import pytest
 
 from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
@@ -22,8 +22,7 @@ from agentpool.orchestrator.core import EventBus
 def mock_agent() -> Agent[Any]:
     """Create an agent with heavily mocked internals for get_agentlet testing."""
     model = TestModel(custom_output_text="test")
-    agent = Agent(name="capability-test-agent", model=model)
-    return agent
+    return Agent(name="capability-test-agent", model=model)
 
 
 @pytest.fixture
@@ -225,25 +224,23 @@ async def test_get_agentlet_wraps_history_processors(
     from pydantic_ai.capabilities import ProcessHistory
 
     # Mock _resolve_history_processors to return our processor
-    with patch.object(
-        mock_agent,
-        "_resolve_history_processors",
-        return_value=[mock_history_processor],
+    with (
+        patch.object(
+            mock_agent,
+            "_resolve_history_processors",
+            return_value=[mock_history_processor],
+        ),
+        patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent,
     ):
-        with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
-            mock_pydantic_agent.return_value = MagicMock()
-            await mock_agent.get_agentlet(None, None, None)
+        mock_pydantic_agent.return_value = MagicMock()
+        await mock_agent.get_agentlet(None, None, None)
 
-            call_kwargs = mock_pydantic_agent.call_args.kwargs
-            capabilities = call_kwargs.get("capabilities", []) or []
+        call_kwargs = mock_pydantic_agent.call_args.kwargs
+        capabilities = call_kwargs.get("capabilities", []) or []
 
-            # Find ProcessHistory capability
-            process_history_caps = [
-                cap for cap in capabilities if isinstance(cap, ProcessHistory)
-            ]
-            assert len(process_history_caps) == 1, (
-                "Expected exactly one ProcessHistory capability"
-            )
+        # Find ProcessHistory capability
+        process_history_caps = [cap for cap in capabilities if isinstance(cap, ProcessHistory)]
+        assert len(process_history_caps) == 1, "Expected exactly one ProcessHistory capability"
 
 
 # ---------------------------------------------------------------------------
@@ -272,9 +269,7 @@ async def test_get_agentlet_wraps_builtin_tools(
 
         # Find NativeTool capabilities
         native_tool_caps = [cap for cap in capabilities if isinstance(cap, NativeTool)]
-        assert len(native_tool_caps) == 2, (
-            "Expected exactly two NativeTool capabilities"
-        )
+        assert len(native_tool_caps) == 2, "Expected exactly two NativeTool capabilities"
 
 
 # ---------------------------------------------------------------------------
@@ -299,34 +294,29 @@ async def test_get_agentlet_passes_capabilities_to_pydantic_agent(
     mock_agent.mcp = mock_mcp_manager
     mock_agent._builtin_tools = [MagicMock()]
 
-    with patch.object(
-        mock_agent,
-        "_resolve_history_processors",
-        return_value=[mock_history_processor],
+    with (
+        patch.object(
+            mock_agent,
+            "_resolve_history_processors",
+            return_value=[mock_history_processor],
+        ),
+        patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent,
     ):
-        with patch(
-            "agentpool.agents.native_agent.agent.PydanticAgent"
-        ) as mock_pydantic_agent:
-            mock_pydantic_agent.return_value = MagicMock()
-            await mock_agent.get_agentlet(None, None, None)
+        mock_pydantic_agent.return_value = MagicMock()
+        await mock_agent.get_agentlet(None, None, None)
 
-            call_kwargs = mock_pydantic_agent.call_args.kwargs
-            capabilities = call_kwargs.get("capabilities", []) or []
+        call_kwargs = mock_pydantic_agent.call_args.kwargs
+        capabilities = call_kwargs.get("capabilities", []) or []
 
-            # Verify all capability types are present
-            assert (
-                mock_provider_with_capability.as_capability.return_value in capabilities
-            )
-            assert mock_hook_manager.as_capability.return_value in capabilities
-            assert any(
-                cap in capabilities
-                for cap in mock_mcp_manager.as_capability.return_value
-            )
-            assert any(isinstance(cap, ProcessHistory) for cap in capabilities)
-            assert any(isinstance(cap, NativeTool) for cap in capabilities)
+        # Verify all capability types are present
+        assert mock_provider_with_capability.as_capability.return_value in capabilities
+        assert mock_hook_manager.as_capability.return_value in capabilities
+        assert any(cap in capabilities for cap in mock_mcp_manager.as_capability.return_value)
+        assert any(isinstance(cap, ProcessHistory) for cap in capabilities)
+        assert any(isinstance(cap, NativeTool) for cap in capabilities)
 
-            # Verify capabilities list is not empty
-            assert len(capabilities) > 0
+        # Verify capabilities list is not empty
+        assert len(capabilities) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -344,25 +334,25 @@ async def test_get_agentlet_collects_instructions(
 
     # Mock sys_prompts to return known instructions
     system_instruction = "System prompt instruction"
-    with patch.object(
-        mock_agent.sys_prompts,
-        "to_pydantic_ai_instructions",
-        new=AsyncMock(return_value=[system_instruction]),
+    with (
+        patch.object(
+            mock_agent.sys_prompts,
+            "to_pydantic_ai_instructions",
+            new=AsyncMock(return_value=[system_instruction]),
+        ),
+        patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent,
     ):
-        with patch(
-            "agentpool.agents.native_agent.agent.PydanticAgent"
-        ) as mock_pydantic_agent:
-            mock_pydantic_agent.return_value = MagicMock()
-            await mock_agent.get_agentlet(None, None, None)
+        mock_pydantic_agent.return_value = MagicMock()
+        await mock_agent.get_agentlet(None, None, None)
 
-            call_kwargs = mock_pydantic_agent.call_args.kwargs
-            instructions = call_kwargs.get("instructions", [])
+        call_kwargs = mock_pydantic_agent.call_args.kwargs
+        instructions = call_kwargs.get("instructions", [])
 
-            # System instruction should be present
-            assert system_instruction in instructions
+        # System instruction should be present
+        assert system_instruction in instructions
 
-            # Provider's get_instructions should have been called
-            mock_provider_with_instructions.get_instructions.assert_called_once()
+        # Provider's get_instructions should have been called
+        mock_provider_with_instructions.get_instructions.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -427,25 +417,23 @@ async def test_get_agentlet_default_providers_contribute_capabilities(
     mock_agent.tools.session_providers = []
     mock_agent._builtin_tools = []
 
-    with patch.object(
-        mock_agent,
-        "_resolve_history_processors",
-        return_value=[],
+    with (
+        patch.object(
+            mock_agent,
+            "_resolve_history_processors",
+            return_value=[],
+        ),
+        patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent,
     ):
-        with patch(
-            "agentpool.agents.native_agent.agent.PydanticAgent"
-        ) as mock_pydantic_agent:
-            mock_pydantic_agent.return_value = MagicMock()
-            await mock_agent.get_agentlet(None, None, None)
+        mock_pydantic_agent.return_value = MagicMock()
+        await mock_agent.get_agentlet(None, None, None)
 
-            call_kwargs = mock_pydantic_agent.call_args.kwargs
-            capabilities = call_kwargs.get("capabilities", []) or []
+        call_kwargs = mock_pydantic_agent.call_args.kwargs
+        capabilities = call_kwargs.get("capabilities", []) or []
 
-            # Default providers (builtin + worker) should still contribute
-            assert capabilities is not None
-            assert len(capabilities) >= 2, (
-                "Expected at least 2 capabilities from default providers"
-            )
+        # Default providers (builtin + worker) should still contribute
+        assert capabilities is not None
+        assert len(capabilities) >= 2, "Expected at least 2 capabilities from default providers"
 
 
 # ---------------------------------------------------------------------------
@@ -461,28 +449,26 @@ async def test_get_agentlet_handles_failing_provider_instructions(
     failing_provider = MagicMock()
     failing_provider.name = "failing_provider"
     failing_provider.as_capability.return_value = None
-    failing_provider.get_instructions = AsyncMock(
-        side_effect=RuntimeError("Instruction failure")
-    )
+    failing_provider.get_instructions = AsyncMock(side_effect=RuntimeError("Instruction failure"))
 
     mock_agent.tools.external_providers = [failing_provider]
 
-    with patch.object(
-        mock_agent.sys_prompts,
-        "to_pydantic_ai_instructions",
-        new=AsyncMock(return_value=["system prompt"]),
+    with (
+        patch.object(
+            mock_agent.sys_prompts,
+            "to_pydantic_ai_instructions",
+            new=AsyncMock(return_value=["system prompt"]),
+        ),
+        patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent,
     ):
-        with patch(
-            "agentpool.agents.native_agent.agent.PydanticAgent"
-        ) as mock_pydantic_agent:
-            mock_pydantic_agent.return_value = MagicMock()
-            # Should not raise despite provider failing
-            await mock_agent.get_agentlet(None, None, None)
+        mock_pydantic_agent.return_value = MagicMock()
+        # Should not raise despite provider failing
+        await mock_agent.get_agentlet(None, None, None)
 
-            call_kwargs = mock_pydantic_agent.call_args.kwargs
-            instructions = call_kwargs.get("instructions", [])
-            # System prompt should still be present
-            assert "system prompt" in instructions
+        call_kwargs = mock_pydantic_agent.call_args.kwargs
+        instructions = call_kwargs.get("instructions", [])
+        # System prompt should still be present
+        assert "system prompt" in instructions
 
 
 # ---------------------------------------------------------------------------
@@ -499,17 +485,19 @@ async def test_get_agentlet_resolves_string_model(
     mock_model.system = "test"
     mock_model.model_name = "test-model"
 
-    with patch.object(
-        mock_agent,
-        "_resolve_model_string",
-        return_value=(mock_model, None),
+    with (
+        patch.object(
+            mock_agent,
+            "_resolve_model_string",
+            return_value=(mock_model, None),
+        ),
+        patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent,
     ):
-        with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
-            mock_pydantic_agent.return_value = MagicMock()
-            await mock_agent.get_agentlet("custom:model", None, None)
+        mock_pydantic_agent.return_value = MagicMock()
+        await mock_agent.get_agentlet("custom:model", None, None)
 
-            call_kwargs = mock_pydantic_agent.call_args.kwargs
-            assert call_kwargs.get("model") is mock_model
+        call_kwargs = mock_pydantic_agent.call_args.kwargs
+        assert call_kwargs.get("model") is mock_model
 
 
 # ---------------------------------------------------------------------------
@@ -544,7 +532,6 @@ async def test_python_api_capability_passthrough(mock_agent: Agent[Any]) -> None
 async def test_yaml_config_capability_passthrough(mock_agent: Agent[Any]) -> None:
     """YAML-loaded CapabilityConfig is built and included in capabilities."""
     from agentpool_config.capabilities import CapabilityConfig
-    from pydantic_ai.capabilities import Instrumentation
 
     cap_config = CapabilityConfig(
         type="pydantic_ai.capabilities.Instrumentation",
@@ -605,9 +592,7 @@ async def test_capability_config_build_called(mock_agent: Agent[Any]) -> None:
 
     with patch.object(CapabilityConfig, "build") as mock_build:
         mock_build.return_value = MagicMock()
-        with patch(
-            "agentpool.agents.native_agent.agent.PydanticAgent"
-        ) as mock_pydantic_agent:
+        with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
             mock_pydantic_agent.return_value = MagicMock()
             await mock_agent.get_agentlet(None, None, None)
 

@@ -30,6 +30,8 @@ from agentpool_config.workers import WorkerConfig  # noqa: TC001
 
 
 if TYPE_CHECKING:
+    import builtins
+
     from agentpool.agents.native_agent import Agent
     from agentpool.common_types import AnyEventHandlerType
     from agentpool.delegation import AgentPool
@@ -37,6 +39,7 @@ if TYPE_CHECKING:
     from agentpool.resource_providers import ResourceProvider
     from agentpool.tools.base import Tool
     from agentpool.ui.base import InputProvider
+    from agentpool_config.workers import AgentWorkerConfig
 
 ToolMode = Literal["codemode"]
 
@@ -269,8 +272,6 @@ class NativeAgentConfig(BaseAgentConfig):
         - Plain string: "worker_name" -> {"type": "agent", "name": "worker_name"}
         - Dict with type: {"type": "agent", "name": "worker_name"} (unchanged)
         """
-        from agentpool_config.workers import AgentWorkerConfig
-
         if workers := data.get("workers"):
             resolved_workers: list[dict[str, Any] | AgentWorkerConfig] = []
             for worker in workers:
@@ -287,8 +288,7 @@ class NativeAgentConfig(BaseAgentConfig):
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
         input_provider: InputProvider | None = None,
         pool: AgentPool[Any] | None = None,
-        # type: ignore[valid-type] - TDeps is a type variable, mypy doesn't recognize it as valid type
-        deps_type: type[TDeps] | None = None,  # type: ignore[valid-type]
+        deps_type: builtins.type[TDeps] | None = None,
     ) -> Agent[TDeps, Any]:
         from agentpool.agents.native_agent import Agent
 
@@ -410,18 +410,16 @@ class NativeAgentConfig(BaseAgentConfig):
                 # Validate signature
                 sig = inspect.signature(processor)
                 params = list(sig.parameters.values())
-
-                # Check parameter count
-                if len(params) not in (1, 2):
-                    msg = f"History processor must take 1 or 2 arguments, got {len(params)}"
-                    raise ValueError(msg)
-
-                # Parameter names are not restricted - users can use any valid Python names
-                # Removed restrictive check for 'messages', 'msgs', 'history' to improve flexibility
-                resolved.append(processor)
             except Exception as e:
                 msg = f"Failed to resolve history processor '{path}': {e}"
                 raise ValueError(msg) from e
+
+            # Check parameter count (outside try to avoid catching our own raise)
+            if len(params) not in (1, 2):
+                msg = f"History processor must take 1 or 2 arguments, got {len(params)}"
+                raise ValueError(msg)
+
+            resolved.append(processor)
 
         return resolved
 

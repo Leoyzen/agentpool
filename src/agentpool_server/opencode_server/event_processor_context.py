@@ -12,15 +12,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from agentpool_server.opencode_server.models.parts import (
-    ReasoningPart,
-    TextPart,
-    ToolPart,
-)
-
 
 if TYPE_CHECKING:
     from agentpool_server.opencode_server.models import MessageWithParts
+    from agentpool_server.opencode_server.models.parts import (
+        ReasoningPart,
+        TextPart,
+        ToolPart,
+    )
     from agentpool_server.opencode_server.state import ServerState
 
 
@@ -38,7 +37,7 @@ def _model_validate_or_none(model_cls: type[Any], data: Any) -> Any | None:
         return None
     try:
         return model_cls.model_validate(data)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 

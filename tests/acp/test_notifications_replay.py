@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-import pytest
 from pydantic_ai import (
     ModelRequest,
     ModelResponse,
@@ -15,6 +14,7 @@ from pydantic_ai import (
     UserPromptPart,
 )
 from pydantic_ai.messages import BinaryContent
+import pytest
 
 from acp.agent.notifications import ACPNotifications
 from acp.schema import (

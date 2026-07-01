@@ -6,20 +6,17 @@ staged_content so that the agent runs instead of returning end_turn.
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock
 
-import anyio
 import pytest
-
-from pathlib import PurePosixPath
 
 from agentpool import Agent, AgentPool
 from agentpool.agents.context import AgentContext
 from agentpool.skills.command import SkillCommand
 from agentpool.skills.command_registry import SkillCommandRegistry
 from agentpool.skills.skill import Skill
-from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.session import ACPSession
 from agentpool_server.opencode_server.skill_bridge import create_skill_command
 
@@ -27,16 +24,10 @@ from agentpool_server.opencode_server.skill_bridge import create_skill_command
 @pytest.fixture
 def agent_pool_with_skill() -> AgentPool:
     """Create an agent pool with a skill command registered."""
-    from unittest.mock import MagicMock
-
     from agentpool.models.agents import NativeAgentConfig
-
-
     from agentpool.models.manifest import AgentsManifest
 
-
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
-
 
     pool = AgentPool(manifest)
 
@@ -50,12 +41,15 @@ def agent_pool_with_skill() -> AgentPool:
     mock_session_pool.sessions = MagicMock()
     mock_session_pool.event_bus = MagicMock()
     from tests._helpers.mock_stream import EmptyReceiveStream
+
     mock_session_pool.event_bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     mock_session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=agent)
+
     # run_stream must return an async iterable
     async def _empty_stream(*args: Any, **kwargs: Any) -> Any:
         return
         yield  # pragma: no cover
+
     mock_session_pool.run_stream = _empty_stream
     pool._session_pool = mock_session_pool  # type: ignore[reportPrivateUsage]
 
@@ -86,7 +80,9 @@ async def test_skill_command_injects_into_staged_content(agent_pool_with_skill: 
     When a user sends a slash command like /test-skill, the instructions
     should be staged so the agent can process them.
     """
-    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(pool=agent_pool_with_skill)
+    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(
+        pool=agent_pool_with_skill
+    )
 
     # Create a skill command
     skill_cmd = agent_pool_with_skill._skill_commands.get("test-skill")  # type: ignore[reportPrivateUsage]
@@ -128,7 +124,9 @@ async def test_skill_command_with_staged_content_triggers_agent_run(
     injects content into staged_content, the agent should run rather than
     returning end_turn immediately.
     """
-    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(pool=agent_pool_with_skill)
+    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(
+        pool=agent_pool_with_skill
+    )
     mock_client = AsyncMock()
     mock_acp_agent = Mock()
     mock_acp_agent.tasks = Mock()
@@ -161,22 +159,23 @@ async def test_skill_command_with_staged_content_triggers_agent_run(
     def tracked_run_stream(*args: Any, **kwargs: Any) -> Any:
         nonlocal run_stream_called
         run_stream_called = True
+
         async def _empty() -> Any:
             return
             yield  # pragma: no cover
+
         return _empty()
 
     original_run_stream = session_pool.run_stream
     session_pool.run_stream = tracked_run_stream  # type: ignore[method-assign]
 
     try:
-        result = await session.process_prompt([content_block])
+        await session.process_prompt([content_block])
     finally:
         session_pool.run_stream = original_run_stream  # type: ignore[method-assign]
 
     assert run_stream_called, (
-        "agent.run_stream should be called when skill command "
-        "injects content into staged_content"
+        "agent.run_stream should be called when skill command injects content into staged_content"
     )
 
 
@@ -187,7 +186,6 @@ async def test_skill_command_no_instructions_returns_end_turn():
     staged, so end_turn is appropriate.
     """
     from agentpool.models.agents import NativeAgentConfig
-
     from agentpool.models.manifest import AgentsManifest
 
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-import anyio
 import pytest
 
 from acp.schema.mcp import AcpMcpServer

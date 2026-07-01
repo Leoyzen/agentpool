@@ -339,8 +339,7 @@ def test_child_done_events_items_wrapped_with_list() -> None:
     source = inspect.getsource(run_module.RunHandle.start)
     # Check that items() is wrapped with list()
     assert "list(self.run_ctx.child_done_events.items())" in source, (
-        "child_done_events.items() must be wrapped with list() for "
-        "concurrent safety"
+        "child_done_events.items() must be wrapped with list() for concurrent safety"
     )
 
 
@@ -354,6 +353,5 @@ def test_child_done_events_values_wrapped_with_list() -> None:
 
     source = inspect.getsource(run_module.RunHandle.start)
     assert "list(self.run_ctx.child_done_events.values())" in source, (
-        "child_done_events.values() must be wrapped with list() for "
-        "concurrent safety"
+        "child_done_events.values() must be wrapped with list() for concurrent safety"
     )

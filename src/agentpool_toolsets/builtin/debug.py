@@ -295,47 +295,46 @@ class DebugTools(StaticResourceProvider):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 return "Error: Import statements are not allowed in introspection code"
             # Disallow function calls that aren't attribute accesses on safe objects
-            if isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Name):
-                    # Basic builtins that are safe for introspection
-                    safe_builtins = {
-                        "print",
-                        "len",
-                        "str",
-                        "int",
-                        "float",
-                        "bool",
-                        "list",
-                        "dict",
-                        "tuple",
-                        "set",
-                        "range",
-                        "type",
-                        "isinstance",
-                        "repr",
-                        "dir",
-                        "vars",
-                        "hasattr",
-                        "getattr",
-                        "id",
-                        "hash",
-                        "hex",
-                        "oct",
-                        "bin",
-                        "abs",
-                        "all",
-                        "any",
-                        "max",
-                        "min",
-                        "sum",
-                        "sorted",
-                        "enumerate",
-                        "zip",
-                        "reversed",
-                        "slice",
-                    }
-                    if node.func.id not in safe_builtins:
-                        return f"Error: Function call to {node.func.id} is not allowed"
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                # Basic builtins that are safe for introspection
+                safe_builtins = {
+                    "print",
+                    "len",
+                    "str",
+                    "int",
+                    "float",
+                    "bool",
+                    "list",
+                    "dict",
+                    "tuple",
+                    "set",
+                    "range",
+                    "type",
+                    "isinstance",
+                    "repr",
+                    "dir",
+                    "vars",
+                    "hasattr",
+                    "getattr",
+                    "id",
+                    "hash",
+                    "hex",
+                    "oct",
+                    "bin",
+                    "abs",
+                    "all",
+                    "any",
+                    "max",
+                    "min",
+                    "sum",
+                    "sorted",
+                    "enumerate",
+                    "zip",
+                    "reversed",
+                    "slice",
+                }
+                if node.func.id not in safe_builtins:
+                    return f"Error: Function call to {node.func.id} is not allowed"
 
         # Emit progress with code being executed
         await ctx.events.tool_call_progress(
@@ -350,7 +349,7 @@ class DebugTools(StaticResourceProvider):
             self._namespace_storage[key] = value
 
         # Create restricted namespace with safe builtins only
-        safe_builtins = {
+        safe_builtins_map = {
             "print": print,
             "len": len,
             "str": str,
@@ -385,7 +384,7 @@ class DebugTools(StaticResourceProvider):
             "me": ctx.agent,
             "save": save,
             "state": self._namespace_storage.copy(),
-            "__builtins__": safe_builtins,
+            "__builtins__": safe_builtins_map,
         }
         start_time = datetime.now(UTC)
         exit_code = 0

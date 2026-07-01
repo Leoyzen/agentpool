@@ -10,22 +10,28 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from pydantic_ai import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    ToolCallPart,
+    UserPromptPart,
+)
 import pytest
-from pydantic_ai import ModelMessage, ModelRequest, ModelResponse, TextPart, ToolCallPart, UserPromptPart
 
 from acp.schema import LoadSessionRequest, LoadSessionResponse
 from agentpool import Agent
 from agentpool.delegation import AgentPool
-from agentpool.sessions.models import PendingDeferredCall, SessionData
+from agentpool.sessions.models import PendingDeferredCall
 from agentpool.storage.manager import StorageManager
 from agentpool.storage.serialization import serialize_messages
 from agentpool_config.storage import MemoryStorageConfig, StorageConfig
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 
 
-
-
 # ── Helpers ─────────────────────────────────────────────────────────────
+
 
 def _make_messages_with_pending_tool() -> list[ModelMessage]:
     """Create message history with a pending ToolCallPart (no ToolReturnPart).
@@ -114,13 +120,9 @@ def mock_agent_pool_with_agent() -> tuple[AgentPool, Agent]:
         return f"Test response: {message}"
 
     from agentpool.models.agents import NativeAgentConfig
-
-
     from agentpool.models.manifest import AgentsManifest
 
-
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
-
 
     pool = AgentPool(manifest)
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
@@ -189,9 +191,7 @@ async def test_load_session_replays_message_history(
     mock_session.cwd = "/tmp"
 
     # Set up agent.conversation.chat_messages with the checkpointed messages
-    chat_msgs = _make_chat_messages_from_model_messages(
-        pending_messages, session_id=session_id
-    )
+    chat_msgs = _make_chat_messages_from_model_messages(pending_messages, session_id=session_id)
     mock_session.agent = MagicMock()
     mock_session.agent.load_session = AsyncMock(return_value=True)
     mock_session.agent.load_rules = AsyncMock()
@@ -206,10 +206,8 @@ async def test_load_session_replays_message_history(
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)  # type: ignore[assignment]  # type: ignore[assignment]
     mock_acp_agent._initialized = True
 
-    with patch.object(mock_acp_agent.tasks, "create_task") as mock_create_task:
-        response = await mock_acp_agent.load_session(
-            LoadSessionRequest(session_id=session_id, cwd="/tmp")
-        )
+    with patch.object(mock_acp_agent.tasks, "create_task"):
+        await mock_acp_agent.load_session(LoadSessionRequest(session_id=session_id, cwd="/tmp"))
 
     # Verify replay was called
     mock_session.notifications.replay.assert_awaited_once()
@@ -244,9 +242,7 @@ async def test_load_session_includes_pending_toolcallpart_without_toolreturnpart
     mock_session.session_id = session_id
     mock_session.cwd = "/tmp"
 
-    chat_msgs = _make_chat_messages_from_model_messages(
-        pending_messages, session_id=session_id
-    )
+    chat_msgs = _make_chat_messages_from_model_messages(pending_messages, session_id=session_id)
     mock_session.agent = MagicMock()
     mock_session.agent.load_session = AsyncMock(return_value=True)
     mock_session.agent.load_rules = AsyncMock()
@@ -262,21 +258,15 @@ async def test_load_session_includes_pending_toolcallpart_without_toolreturnpart
     mock_acp_agent._initialized = True
 
     with patch.object(mock_acp_agent.tasks, "create_task"):
-        response = await mock_acp_agent.load_session(
-            LoadSessionRequest(session_id=session_id, cwd="/tmp")
-        )
+        await mock_acp_agent.load_session(LoadSessionRequest(session_id=session_id, cwd="/tmp"))
 
     replay_args = mock_session.notifications.replay.call_args[0][0]
 
     # Verify ToolCallPart exists in the replayed messages
     response_msg = replay_args[1]
     assert isinstance(response_msg, ModelResponse)
-    tool_call_parts = [
-        p for p in response_msg.parts if isinstance(p, ToolCallPart)
-    ]
-    assert len(tool_call_parts) >= 1, (
-        "Expected at least one ToolCallPart in replayed messages"
-    )
+    tool_call_parts = [p for p in response_msg.parts if isinstance(p, ToolCallPart)]
+    assert len(tool_call_parts) >= 1, "Expected at least one ToolCallPart in replayed messages"
     assert tool_call_parts[0].tool_name == "bash"
     assert tool_call_parts[0].tool_call_id == "pending_call_1"
 
@@ -286,6 +276,7 @@ async def test_load_session_includes_pending_toolcallpart_without_toolreturnpart
         if isinstance(msg, ModelRequest):
             for part in msg.parts:
                 from pydantic_ai import ToolReturnPart
+
                 if isinstance(part, ToolReturnPart):
                     tool_return_ids.add(part.tool_call_id)
     assert "pending_call_1" not in tool_return_ids, (
@@ -318,9 +309,7 @@ async def test_load_session_message_ordering_is_correct(
     mock_session.session_id = session_id
     mock_session.cwd = "/tmp"
 
-    chat_msgs = _make_chat_messages_from_model_messages(
-        ordered_messages, session_id=session_id
-    )
+    chat_msgs = _make_chat_messages_from_model_messages(ordered_messages, session_id=session_id)
     mock_session.agent = MagicMock()
     mock_session.agent.load_session = AsyncMock(return_value=True)
     mock_session.agent.load_rules = AsyncMock()
@@ -336,9 +325,7 @@ async def test_load_session_message_ordering_is_correct(
     mock_acp_agent._initialized = True
 
     with patch.object(mock_acp_agent.tasks, "create_task"):
-        await mock_acp_agent.load_session(
-            LoadSessionRequest(session_id=session_id, cwd="/tmp")
-        )
+        await mock_acp_agent.load_session(LoadSessionRequest(session_id=session_id, cwd="/tmp"))
 
     replay_args = mock_session.notifications.replay.call_args[0][0]
 
@@ -348,11 +335,9 @@ async def test_load_session_message_ordering_is_correct(
         assert type(actual) is type(expected), (
             f"Message {i}: expected {type(expected).__name__}, got {type(actual).__name__}"
         )
-        if isinstance(actual, ModelRequest) and isinstance(expected, ModelRequest):
-            actual_part = actual.parts[0]
-            if hasattr(actual_part, "content"):
-                assert actual_part.content == expected.parts[0].content  # type: ignore[union-attr]
-        elif isinstance(actual, ModelResponse) and isinstance(expected, ModelResponse):
+        if (isinstance(actual, ModelRequest) and isinstance(expected, ModelRequest)) or (
+            isinstance(actual, ModelResponse) and isinstance(expected, ModelResponse)
+        ):
             actual_part = actual.parts[0]
             if hasattr(actual_part, "content"):
                 assert actual_part.content == expected.parts[0].content  # type: ignore[union-attr]
@@ -384,9 +369,7 @@ async def test_load_session_empty_conversation_no_replay(
     mock_acp_agent._initialized = True
 
     with patch.object(mock_acp_agent.tasks, "create_task"):
-        await mock_acp_agent.load_session(
-            LoadSessionRequest(session_id=session_id, cwd="/tmp")
-        )
+        await mock_acp_agent.load_session(LoadSessionRequest(session_id=session_id, cwd="/tmp"))
 
     mock_session.notifications.replay.assert_not_awaited()
 
@@ -443,9 +426,7 @@ async def test_load_checkpoint_messages_used_for_replay(
 
     # Save checkpoint data to storage manager
     messages_json = serialize_messages(pending_messages) or ""
-    await storage_manager.save_checkpoint(
-        session_id, messages_json, pending_deferred_calls
-    )
+    await storage_manager.save_checkpoint(session_id, messages_json, pending_deferred_calls)
 
     # Load checkpoint to verify
     result = await storage_manager.load_checkpoint(session_id)
@@ -468,6 +449,7 @@ async def test_load_checkpoint_messages_used_for_replay(
         if isinstance(msg, ModelRequest):
             for part in msg.parts:
                 from pydantic_ai import ToolReturnPart
+
                 if isinstance(part, ToolReturnPart):
                     assert part.tool_call_id != "pending_call_1"
 
@@ -488,18 +470,14 @@ async def test_load_session_with_checkpointed_data(
 
     # Save checkpoint data
     messages_json = serialize_messages(pending_messages) or ""
-    await storage_manager.save_checkpoint(
-        session_id, messages_json, pending_deferred_calls
-    )
+    await storage_manager.save_checkpoint(session_id, messages_json, pending_deferred_calls)
 
     # Create a mock session representing a checkpointed session
     mock_session = MagicMock()
     mock_session.session_id = session_id
     mock_session.cwd = "/tmp"
 
-    chat_msgs = _make_chat_messages_from_model_messages(
-        pending_messages, session_id=session_id
-    )
+    chat_msgs = _make_chat_messages_from_model_messages(pending_messages, session_id=session_id)
     mock_session.agent = MagicMock()
     mock_session.agent.load_session = AsyncMock(return_value=True)
     mock_session.agent.load_rules = AsyncMock()
@@ -515,9 +493,7 @@ async def test_load_session_with_checkpointed_data(
     mock_acp_agent._initialized = True
 
     with patch.object(mock_acp_agent.tasks, "create_task"):
-        response = await mock_acp_agent.load_session(
-            LoadSessionRequest(session_id=session_id, cwd="/tmp")
-        )
+        await mock_acp_agent.load_session(LoadSessionRequest(session_id=session_id, cwd="/tmp"))
 
     # Verify replay was called
     mock_session.notifications.replay.assert_awaited_once()
@@ -542,9 +518,7 @@ async def test_load_session_no_toolcalldeferredevent_during_replay(
     mock_session.session_id = session_id
     mock_session.cwd = "/tmp"
 
-    chat_msgs = _make_chat_messages_from_model_messages(
-        pending_messages, session_id=session_id
-    )
+    chat_msgs = _make_chat_messages_from_model_messages(pending_messages, session_id=session_id)
     mock_session.agent = MagicMock()
     mock_session.agent.load_session = AsyncMock(return_value=True)
     mock_session.agent.load_rules = AsyncMock()
@@ -560,9 +534,7 @@ async def test_load_session_no_toolcalldeferredevent_during_replay(
     mock_acp_agent._initialized = True
 
     with patch.object(mock_acp_agent.tasks, "create_task"):
-        await mock_acp_agent.load_session(
-            LoadSessionRequest(session_id=session_id, cwd="/tmp")
-        )
+        await mock_acp_agent.load_session(LoadSessionRequest(session_id=session_id, cwd="/tmp"))
 
     # replay is called, not any tool event emission
     mock_session.notifications.replay.assert_awaited_once()
@@ -599,9 +571,7 @@ async def test_load_session_replay_preserves_chatmessage_model_messages(
     mock_session.session_id = session_id
     mock_session.cwd = "/tmp"
 
-    chat_msgs = _make_chat_messages_from_model_messages(
-        model_messages, session_id=session_id
-    )
+    chat_msgs = _make_chat_messages_from_model_messages(model_messages, session_id=session_id)
     mock_session.agent = MagicMock()
     mock_session.agent.load_session = AsyncMock(return_value=True)
     mock_session.agent.load_rules = AsyncMock()
@@ -617,14 +587,12 @@ async def test_load_session_replay_preserves_chatmessage_model_messages(
     mock_acp_agent._initialized = True
 
     with patch.object(mock_acp_agent.tasks, "create_task"):
-        await mock_acp_agent.load_session(
-            LoadSessionRequest(session_id=session_id, cwd="/tmp")
-        )
+        await mock_acp_agent.load_session(LoadSessionRequest(session_id=session_id, cwd="/tmp"))
 
     replay_args = mock_session.notifications.replay.call_args[0][0]
     # Verify the model messages are passed through without mutation
     assert len(replay_args) == len(model_messages)
-    for i, (expected, actual) in enumerate(zip(model_messages, replay_args)):
+    for i, (expected, actual) in enumerate(zip(model_messages, replay_args, strict=False)):
         assert type(actual) is type(expected), (
             f"Message {i} type mismatch: {type(actual)} != {type(expected)}"
         )

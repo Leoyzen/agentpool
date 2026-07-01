@@ -33,9 +33,7 @@ async def test_messagenode_event_routing():
 
     await node.emit_agent_event(event, source_session_id="test_session")
 
-    node._events.emit_agent_event.assert_awaited_once_with(
-        event, source_session_id="test_session"
-    )
+    node._events.emit_agent_event.assert_awaited_once_with(event, source_session_id="test_session")
 
 
 @pytest.mark.asyncio

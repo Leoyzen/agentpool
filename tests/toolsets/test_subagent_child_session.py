@@ -14,7 +14,6 @@ Verifies RFC-0028 Task T9 requirements:
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import anyio
@@ -29,10 +28,8 @@ from agentpool.agents.events import (
 )
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 from agentpool.orchestrator.core import EventEnvelope
-from agentpool.sessions import SessionData
 from agentpool.sessions.store import MemorySessionStore
 from agentpool_toolsets.builtin.subagent_tools import SubagentTools
-import anyio
 
 
 def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:

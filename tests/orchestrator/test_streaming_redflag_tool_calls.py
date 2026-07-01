@@ -12,8 +12,7 @@ progress indicators.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic_ai.messages import PartDeltaEvent as PyAIPartDeltaEvent
 from pydantic_ai.models.test import TestModel
@@ -29,9 +28,14 @@ from agentpool.agents.events import (
 from agentpool.tools import Tool
 
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 async def _collect_events(stream: AsyncIterator[Any]) -> list[Any]:
     """Drain an async event stream into a list."""

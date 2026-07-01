@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
     from types import TracebackType
 
-    from pydantic_ai import ModelRequestPart, RunContext
+    from pydantic_ai import ModelRequestPart
     from pydantic_ai.tools import ToolDefinition
     from schemez import OpenAIFunctionDefinition
 
@@ -57,7 +57,7 @@ class ResourceChangeEvent:
     owner: str | None = None
 
 
-class ResourceProvider(ABC):
+class ResourceProvider(ABC):  # noqa: B024
     """Base class for resource providers.
 
     Provides tools, prompts, and other resources to agents.
@@ -104,7 +104,7 @@ class ResourceProvider(ABC):
         """Async context entry if required."""
         return self
 
-    async def __aexit__(
+    async def __aexit__(  # noqa: B027
         self,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
@@ -137,101 +137,6 @@ class ResourceProvider(ABC):
             FunctionToolset,
         )
 
-        from agentpool.agents.context import AgentContext
-
-        def _wrap_for_pydantic_ai(tool: Tool[Any]) -> Any:
-            """Wrap an AgentPool tool so pydantic-ai can schema-generate it.
-
-            AgentPool tools take AgentContext as a parameter, but pydantic-ai
-            only recognizes RunContext. This wrapper creates a function that
-            accepts RunContext (which carries AgentContext in deps) and injects
-            the AgentContext into the original tool call.
-            """
-            original_fn = tool.get_callable()
-            sig = inspect.signature(original_fn)
-
-            # Find the AgentContext parameter (handle string annotations from __future__)
-            agent_ctx_param: str | None = None
-            for name, param in sig.parameters.items():
-                ann = param.annotation
-                if ann is AgentContext or (isinstance(ann, type) and ann is AgentContext):
-                    agent_ctx_param = name
-                    break
-                # Handle string annotations (from __future__ import annotations)
-                if isinstance(ann, str) and "AgentContext" in ann:
-                    agent_ctx_param = name
-                    break
-
-            if agent_ctx_param is None:
-                # No AgentContext - pass through directly
-                return tool.to_pydantic_ai()
-
-            # Build a wrapper that accepts RunContext and injects AgentContext/RunContext
-            other_params: list[inspect.Parameter] = []
-            run_ctx_param: str | None = None
-            for n, p in sig.parameters.items():
-                if n == agent_ctx_param:
-                    continue
-                ann = p.annotation
-                # Detect RunContext parameter in original function
-                if ann is RunContext or (isinstance(ann, str) and "RunContext" in ann):
-                    run_ctx_param = n
-                    continue
-                other_params.append(p)
-
-            async def wrapper(ctx: RunContext[AgentContext], *args: Any, **kwargs: Any) -> Any:
-                from dataclasses import replace
-
-                agent_ctx = replace(
-                    ctx.deps,
-                    tool_name=ctx.tool_name,
-                    tool_call_id=ctx.tool_call_id,
-                    tool_input=kwargs.copy(),
-                )
-                try:
-                    sig_bound = sig.bind_partial(*args, **kwargs)
-                except TypeError as e:
-                    valid_params = [
-                        name
-                        for name, p in sig.parameters.items()
-                        if name not in (agent_ctx_param, run_ctx_param)
-                    ]
-                    msg = str(e)
-                    raise ModelRetry(
-                        f"Tool '{tool.name}' called with invalid arguments: {msg}. "
-                        f"Accepted parameters: {valid_params}"
-                    ) from e
-                sig_bound.arguments[agent_ctx_param] = agent_ctx
-                if run_ctx_param is not None:
-                    sig_bound.arguments[run_ctx_param] = ctx
-                return await tool.execute(*sig_bound.args, **sig_bound.kwargs)
-
-            # Copy metadata
-            wrapper.__name__ = tool.name
-            wrapper.__doc__ = tool.description
-            wrapper.__wrapped__ = original_fn  # type: ignore[attr-defined]
-
-            # Build signature: RunContext + other params (without AgentContext/RunContext)
-            new_params = [
-                inspect.Parameter(
-                    "ctx", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=RunContext
-                )
-            ]
-            new_params.extend(other_params)
-            wrapper.__signature__ = inspect.Signature(
-                new_params, return_annotation=sig.return_annotation
-            )
-            wrapper.__annotations__ = {"ctx": RunContext}
-            for n, p in sig.parameters.items():
-                if n == agent_ctx_param or n == run_ctx_param:
-                    continue
-                if p.annotation is not inspect.Parameter.empty:
-                    wrapper.__annotations__[n] = p.annotation
-            if sig.return_annotation is not inspect.Signature.empty:
-                wrapper.__annotations__["return"] = sig.return_annotation
-
-            return tool.to_pydantic_ai(function_override=wrapper)
-
         async def _build_toolset(ctx: Any) -> Any:
             tools = await self.get_tools()
             if not tools:
@@ -242,10 +147,10 @@ class ResourceProvider(ABC):
 
             toolsets: list[Any] = []
             if normal_tools:
-                pa_tools = [_wrap_for_pydantic_ai(tool) for tool in normal_tools]
+                pa_tools = [self._wrap_for_pydantic_ai(tool) for tool in normal_tools]
                 toolsets.append(FunctionToolset(pa_tools, id=self.name))
             if confirm_tools:
-                pa_tools = [_wrap_for_pydantic_ai(tool) for tool in confirm_tools]
+                pa_tools = [self._wrap_for_pydantic_ai(tool) for tool in confirm_tools]
                 toolsets.append(ApprovalRequiredToolset(FunctionToolset(pa_tools, id=self.name)))
 
             if not toolsets:
@@ -255,6 +160,102 @@ class ResourceProvider(ABC):
             return CombinedToolset(toolsets)
 
         return Toolset(_build_toolset)
+
+    @staticmethod
+    def _wrap_for_pydantic_ai(tool: Tool[Any]) -> Any:
+        """Wrap an AgentPool tool so pydantic-ai can schema-generate it.
+
+        AgentPool tools take AgentContext as a parameter, but pydantic-ai
+        only recognizes RunContext. This wrapper creates a function that
+        accepts RunContext (which carries AgentContext in deps) and injects
+        the AgentContext into the original tool call.
+        """
+        from pydantic_ai import RunContext
+
+        from agentpool.agents.context import AgentContext
+
+        original_fn = tool.get_callable()
+        sig = inspect.signature(original_fn)
+
+        # Find the AgentContext parameter (handle string annotations from __future__)
+        agent_ctx_param: str | None = None
+        for name, param in sig.parameters.items():
+            ann = param.annotation
+            if ann is AgentContext or (isinstance(ann, type) and ann is AgentContext):
+                agent_ctx_param = name
+                break
+            # Handle string annotations (from __future__ import annotations)
+            if isinstance(ann, str) and "AgentContext" in ann:
+                agent_ctx_param = name
+                break
+
+        if agent_ctx_param is None:
+            # No AgentContext - pass through directly
+            return tool.to_pydantic_ai()
+
+        # Build a wrapper that accepts RunContext and injects AgentContext/RunContext
+        other_params: list[inspect.Parameter] = []
+        run_ctx_param: str | None = None
+        for n, p in sig.parameters.items():
+            if n == agent_ctx_param:
+                continue
+            ann = p.annotation
+            # Detect RunContext parameter in original function
+            if ann is RunContext or (isinstance(ann, str) and "RunContext" in ann):
+                run_ctx_param = n
+                continue
+            other_params.append(p)
+
+        async def wrapper(ctx: RunContext[AgentContext], *args: Any, **kwargs: Any) -> Any:
+            from dataclasses import replace
+
+            agent_ctx = replace(
+                ctx.deps,
+                tool_name=ctx.tool_name,
+                tool_call_id=ctx.tool_call_id,
+                tool_input=kwargs.copy(),
+            )
+            try:
+                sig_bound = sig.bind_partial(*args, **kwargs)
+            except TypeError as e:
+                valid_params = [
+                    name
+                    for name, p in sig.parameters.items()
+                    if name not in (agent_ctx_param, run_ctx_param)
+                ]
+                msg = str(e)
+                raise ModelRetry(
+                    f"Tool '{tool.name}' called with invalid arguments: {msg}. "
+                    f"Accepted parameters: {valid_params}"
+                ) from e
+            sig_bound.arguments[agent_ctx_param] = agent_ctx
+            if run_ctx_param is not None:
+                sig_bound.arguments[run_ctx_param] = ctx
+            return await tool.execute(*sig_bound.args, **sig_bound.kwargs)
+
+        # Copy metadata
+        wrapper.__name__ = tool.name
+        wrapper.__doc__ = tool.description
+        wrapper.__wrapped__ = original_fn  # type: ignore[attr-defined]
+
+        # Build signature: RunContext + other params (without AgentContext/RunContext)
+        new_params = [
+            inspect.Parameter("ctx", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=RunContext)
+        ]
+        new_params.extend(other_params)
+        wrapper.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+            new_params, return_annotation=sig.return_annotation
+        )
+        wrapper.__annotations__ = {"ctx": RunContext}
+        for n, p in sig.parameters.items():
+            if n in (agent_ctx_param, run_ctx_param):
+                continue
+            if p.annotation is not inspect.Parameter.empty:
+                wrapper.__annotations__[n] = p.annotation
+        if sig.return_annotation is not inspect.Signature.empty:
+            wrapper.__annotations__["return"] = sig.return_annotation
+
+        return tool.to_pydantic_ai(function_override=wrapper)
 
     async def get_tools(self) -> Sequence[Tool]:
         """Get available tools. Override to provide tools."""
@@ -275,10 +276,6 @@ class ResourceProvider(ABC):
 
     async def get_resources(self) -> list[ResourceInfo]:
         """Get available resources. Override to provide resources."""
-        return []
-
-    async def get_skills(self) -> list[Skill]:
-        """Get available skills. Override to provide skills."""
         return []
 
     async def get_instructions(self) -> list[InstructionFunc]:
@@ -386,7 +383,7 @@ class ResourceProvider(ABC):
 
     # Skill-related methods - subclasses should override these
 
-    async def get_skills(self) -> list[Any]:
+    async def get_skills(self) -> list[Skill]:
         """Get all available skills from this provider.
 
         Returns:
@@ -410,7 +407,7 @@ class ResourceProvider(ABC):
 
         raise SkillNotFoundError(name)
 
-    async def get_references(self, skill_name: str) -> list[str]:
+    async def get_references(self, skill_name: str) -> list[str | dict[str, Any]]:
         """Get list of available reference files for a skill.
 
         Args:

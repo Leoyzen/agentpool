@@ -57,7 +57,8 @@ def _decompress(data: bytes, data_type: Literal["zstd", "plain"]) -> bytes:
     """
     if data_type == "zstd":
         reader = _ZSTD_DECOMPRESSOR.stream_reader(io.BytesIO(data))
-        return reader.read()
+        result: bytes = reader.read()
+        return result
     return data
 
 

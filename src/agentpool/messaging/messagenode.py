@@ -512,7 +512,9 @@ class MessageNode[TDeps, TResult](ABC):
         state = AgentPoolState(node=self, prompts=prompts, kwargs=kwargs)
         node_mapping: dict[NodeID, MessageNode[Any, Any]] = {NodeID(self.name): self}
         async with graph.iter(state=state, deps=self._get_deps(), inputs=None) as graph_run:
-            signal_run = SignalEmittingGraphRun(graph_run, node_mapping=node_mapping)
+            signal_run: SignalEmittingGraphRun[Any, Any, Any] = SignalEmittingGraphRun(
+                graph_run, node_mapping=node_mapping
+            )
             async for _ in signal_run:
                 pass
         return state.result  # type: ignore[return-value]
@@ -550,7 +552,9 @@ class MessageNode[TDeps, TResult](ABC):
         node_mapping: dict[NodeID, MessageNode[Any, Any]] = {NodeID(self.name): self}
 
         async with graph.iter(state=state, deps=self._get_deps(), inputs=None) as graph_run:
-            signal_run = SignalEmittingGraphRun(graph_run, node_mapping=node_mapping)
+            signal_run: SignalEmittingGraphRun[Any, Any, Any] = SignalEmittingGraphRun(
+                graph_run, node_mapping=node_mapping
+            )
             async for _ in signal_run:
                 # Generic nodes do not produce intermediate stream events;
                 # drain the event queue in case a subclass pushed events.

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Inspect MCP server resources at http://127.0.0.1:8890/mcp"""
+"""Inspect MCP server resources at http://127.0.0.1:8890/mcp."""
 
 import asyncio
 import sys
+
 
 sys.path.insert(0, "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/src")
 

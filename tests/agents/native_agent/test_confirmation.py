@@ -10,20 +10,17 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import (
     DeferredToolRequests,
-    DeferredToolResults,
     RunContext,
-    ToolApproved,
-    ToolDenied,
 )
 from pydantic_graph import End
+import pytest
 
 from agentpool import Agent
-from agentpool.agents.context import AgentContext, AgentRunContext
+from agentpool.agents.context import AgentContext
 from agentpool.tools.base import Tool
 
 
@@ -36,8 +33,7 @@ from agentpool.tools.base import Tool
 def mock_agent() -> Agent[Any]:
     """Create an agent with mocked internals for confirmation testing."""
     model = TestModel(custom_output_text="test")
-    agent = Agent(name="confirmation-test-agent", model=model)
-    return agent
+    return Agent(name="confirmation-test-agent", model=model)
 
 
 @pytest.fixture
@@ -360,7 +356,7 @@ def _create_mock_agentlet_from_caps(
             async def __aenter__(self) -> Any:
                 return self
 
-            async def __aexit__(self, *args: Any) -> None:
+            async def __aexit__(self, *args: object) -> None:
                 pass
 
             def all_messages(self) -> list[Any]:
@@ -391,14 +387,13 @@ async def test_multiple_confirmation_tools_same_run(
     mock_agent.tools.register_tool(confirmation_tool_2)
 
     with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
+
         def side_effect(**kwargs: Any) -> MagicMock:
             capabilities = kwargs.get("capabilities", []) or []
-            return _create_mock_agentlet_from_caps(
-                capabilities, sample_deferred_requests
-            )
+            return _create_mock_agentlet_from_caps(capabilities, sample_deferred_requests)
 
         mock_pydantic_agent.side_effect = side_effect
-        result = await mock_agent.run("Test prompt")
+        await mock_agent.run("Test prompt")
 
     assert mock_provider.get_tool_confirmation.call_count == 2
     call_args_list = mock_provider.get_tool_confirmation.call_args_list
@@ -421,18 +416,19 @@ async def test_mixed_approval_denial_same_run(
     mock_agent.tools.register_tool(confirmation_tool_2)
 
     with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
+
         def side_effect(**kwargs: Any) -> MagicMock:
             capabilities = kwargs.get("capabilities", []) or []
-            return _create_mock_agentlet_from_caps(
-                capabilities, sample_deferred_requests
-            )
+            return _create_mock_agentlet_from_caps(capabilities, sample_deferred_requests)
 
         mock_pydantic_agent.side_effect = side_effect
-        result = await mock_agent.run("Test prompt")
+        await mock_agent.run("Test prompt")
 
     assert mock_provider.get_tool_confirmation.call_count == 2
     assert mock_provider.get_tool_confirmation.call_args_list[0][0][0].tool_name == "dangerous_read"
-    assert mock_provider.get_tool_confirmation.call_args_list[1][0][0].tool_name == "dangerous_write"
+    assert (
+        mock_provider.get_tool_confirmation.call_args_list[1][0][0].tool_name == "dangerous_write"
+    )
 
 
 @pytest.mark.unit
@@ -451,14 +447,13 @@ async def test_never_mode_auto_approves_all_tools(
     mock_agent.tools.register_tool(confirmation_tool_2)
 
     with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
+
         def side_effect(**kwargs: Any) -> MagicMock:
             capabilities = kwargs.get("capabilities", []) or []
-            return _create_mock_agentlet_from_caps(
-                capabilities, sample_deferred_requests
-            )
+            return _create_mock_agentlet_from_caps(capabilities, sample_deferred_requests)
 
         mock_pydantic_agent.side_effect = side_effect
-        result = await mock_agent.run("Test prompt")
+        await mock_agent.run("Test prompt")
 
     mock_provider.get_tool_confirmation.assert_not_called()
 
@@ -478,14 +473,13 @@ async def test_abort_run_stops_subsequent_confirmations(
     mock_agent.tools.register_tool(confirmation_tool_2)
 
     with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
+
         def side_effect(**kwargs: Any) -> MagicMock:
             capabilities = kwargs.get("capabilities", []) or []
-            return _create_mock_agentlet_from_caps(
-                capabilities, sample_deferred_requests
-            )
+            return _create_mock_agentlet_from_caps(capabilities, sample_deferred_requests)
 
         mock_pydantic_agent.side_effect = side_effect
-        result = await mock_agent.run("Test prompt")
+        await mock_agent.run("Test prompt")
 
     assert mock_provider.get_tool_confirmation.call_count >= 1
     assert mock_provider.get_tool_confirmation.call_args_list[0][0][0].tool_name == "dangerous_read"

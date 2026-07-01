@@ -16,19 +16,16 @@ These tests should FAIL before the fix and PASS afterwards.
 from __future__ import annotations
 
 import asyncio
-
-import anyio
 import os
 import time
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
-import pytest
-
+from agentpool.storage.manager import SessionMetadata, SessionMetadataGeneratedEvent, StorageManager
+from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.models import (
     MessageWithParts,
     Session,
-    SessionStatus,
     TextPartInput,
     TimeCreatedUpdated,
     UserMessage,
@@ -40,8 +37,6 @@ from agentpool_server.opencode_server.routes.message_routes import (
 )
 from agentpool_server.opencode_server.session_pool_integration import get_messages_for_session
 from agentpool_server.opencode_server.state import ServerState
-from agentpool.storage.manager import SessionMetadata, SessionMetadataGeneratedEvent, StorageManager
-from agentpool.utils.time_utils import now_ms
 
 
 # ---------------------------------------------------------------------------
@@ -77,18 +72,15 @@ def _make_state(tmp_path: Any) -> ServerState:
     # Set up session pool mocks for _process_message_locked
     pool.session_pool = Mock()
     pool.session_pool.sessions = Mock()
-    pool.session_pool.sessions.get_or_create_session = AsyncMock(
-        return_value=(Mock(), True)
-    )
-    pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(
-        return_value=Mock()
-    )
+    pool.session_pool.sessions.get_or_create_session = AsyncMock(return_value=(Mock(), True))
+    pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=Mock())
     _run_handle = Mock()
     _run_handle.complete_event = Mock()
     _run_handle.complete_event.wait = AsyncMock()
     pool.session_pool.receive_request = AsyncMock(return_value=_run_handle)
     pool.session_pool.event_bus = Mock()
     from tests._helpers.mock_stream import EmptyReceiveStream
+
     pool.session_pool.event_bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     pool.session_pool.event_bus.unsubscribe = AsyncMock()
 
@@ -346,7 +338,9 @@ class TestTitleStillGeneratedAsynchronously:
         session_id = "ses_title_signal"
         _seed_session(state, session_id)
 
-        mock_metadata = SessionMetadata(title="Signal Title", emoji="\ud83d\udce1", icon="mdi:antenna")
+        mock_metadata = SessionMetadata(
+            title="Signal Title", emoji="\ud83d\udce1", icon="mdi:antenna"
+        )
         signal_titles: list[str] = []
 
         def on_signal(event):

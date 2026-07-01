@@ -21,7 +21,6 @@ from agentpool_server.acp_server.session import ACPSession
 def _make_pool_and_agent() -> tuple[AgentPool, Agent]:
     """Create a simple pool with one agent."""
     from agentpool.models.agents import NativeAgentConfig
-
     from agentpool.models.manifest import AgentsManifest
 
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})

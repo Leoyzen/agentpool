@@ -8,22 +8,17 @@ Consolidated from:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 import contextlib
 from typing import Any
 from unittest.mock import MagicMock
 
 import anyio
-
 import pytest
 
-from acp.schema import TurnCompleteUpdate
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
-from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
+from agentpool.agents.events import StreamCompleteEvent
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionController, SessionPool
-from agentpool_server.acp_server.event_converter import ACPEventConverter
 
 
 # ============================================================================
@@ -43,6 +38,8 @@ async def _setup_session(
     controller._session_agents[session_id] = agent
     mock_pool.get_agent.return_value = agent
     return state
+
+
 @pytest.mark.integration
 async def test_per_session_agent_session_id_set() -> None:
     """Per-session agent created by SessionPool MUST have session_id set."""
@@ -72,6 +69,8 @@ async def test_per_session_agent_session_id_set() -> None:
         # Run another turn via run_stream to verify no AssertionError
         async for _ in session_pool.run_stream(session_id, "hello"):
             pass
+
+
 # ============================================================================
 # Session tree / descendants scope red flags
 # ============================================================================
@@ -175,9 +174,7 @@ class TestSessionControllerChildrenVsEventBus:
 
         # Simulate SessionPool behavior: create sessions via controller
         await controller.get_or_create_session("parent-sid")
-        await controller.get_or_create_session(
-            "child-sid", parent_session_id="parent-sid"
-        )
+        await controller.get_or_create_session("child-sid", parent_session_id="parent-sid")
 
         # EventBus knows nothing
         assert event_bus._session_tree == {}, (
@@ -199,9 +196,7 @@ class TestSessionControllerChildrenVsEventBus:
 
         # Controller knows about the relationship
         await controller.get_or_create_session("parent-sid")
-        await controller.get_or_create_session(
-            "child-sid", parent_session_id="parent-sid"
-        )
+        await controller.get_or_create_session("child-sid", parent_session_id="parent-sid")
 
         # Should now work because controller is wired
         result = bus._is_descendant("child-sid", "parent-sid")
@@ -223,9 +218,7 @@ class TestSessionControllerChildrenVsEventBus:
         assert bus._session_tree == {}
 
         await controller.get_or_create_session("parent-sid")
-        await controller.get_or_create_session(
-            "child-sid", parent_session_id="parent-sid"
-        )
+        await controller.get_or_create_session("child-sid", parent_session_id="parent-sid")
 
         result = bus._should_receive(
             published_sid="child-sid",
@@ -275,9 +268,6 @@ class TestSessionControllerChildrenVsEventBus:
 
     async def test_acp_handler_child_events_have_session_id(self) -> None:
         """Child session events are wrapped in EventEnvelope with source_session_id."""
-        from agentpool.agents.events import StreamCompleteEvent
-        from agentpool.messaging import ChatMessage
-
         mock_pool = MagicMock()
         mock_pool.main_agent.name = "test-agent"
         mock_pool.manifest.agents = {}
@@ -403,13 +393,13 @@ async def test_diagnostic_print_session_tree_state() -> None:
     await pool.create_session("parent-sid")
     await pool.create_session("child-sid", parent_session_id="parent-sid")
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("DIAGNOSTIC: Session Tree State")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"SessionController._children: {pool.sessions._children}")
     print(f"EventBus._session_tree: {pool.event_bus._session_tree}")
     print(f"EventBus._subscribers: {await pool.event_bus.get_subscriber_counts()}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     # This assertion documents the bug:
     assert pool.sessions._children != {}, "SessionController knows about children"

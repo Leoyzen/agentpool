@@ -228,13 +228,13 @@ class FileProvider(StorageProvider):
         node_name: str,
         start_time: datetime | None = None,
         model: str | None = None,
+        agent_type: str | None = None,
         parent_session_id: str | None = None,
     ) -> None:
         """Log a new conversation."""
         conversation = ConversationData(
             id=session_id,
             agent_name=node_name,
-            parent_id=parent_session_id,
             title=None,
             start_time=(start_time or get_now()).isoformat(),
         )

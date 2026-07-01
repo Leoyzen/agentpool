@@ -220,7 +220,9 @@ async def test_compatibility_no_processors(mock_model):
         assert result.data == "Response"
 
 
-@pytest.mark.skip(reason="Run/Turn separation duplicates user prompt in message history; needs investigation of _message_history propagation in RunHandle")
+@pytest.mark.skip(
+    reason="Run/Turn separation duplicates user prompt in message history; needs investigation of _message_history propagation in RunHandle"
+)
 async def test_compaction_and_processors_interaction(mock_model):
     """Test interaction between CompactionPipeline and history processors.
 

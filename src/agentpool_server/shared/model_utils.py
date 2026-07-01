@@ -53,7 +53,7 @@ def _extract_provider_from_identifier(identifier: str) -> str:
     return "unknown"
 
 
-def _extract_provider(config: AnyModelConfig) -> str:
+def _extract_provider(config: AnyModelConfig) -> str:  # noqa: PLR0911
     """Extract provider name from AnyModelConfig.
 
     Handles:
@@ -84,19 +84,14 @@ def _extract_provider(config: AnyModelConfig) -> str:
 
         case FallbackModelConfig(models=models) if models:
             first = models[0]
-            match first:
-                case StringModelConfig(identifier=identifier):
-                    return _extract_provider_from_identifier(str(identifier))
-                case AnthropicModelConfig():
-                    return "anthropic"
-                case OpenAIModelConfig():
-                    return "openai"
-                case GeminiModelConfig():
-                    return "google"
-                case FallbackModelConfig():
-                    return _extract_provider(first)
-                case _:
-                    return "unknown"
+            if isinstance(first, str):
+                return _extract_provider_from_identifier(first)
+            if isinstance(
+                first,
+                StringModelConfig | AnthropicModelConfig | OpenAIModelConfig | GeminiModelConfig,
+            ):
+                return _extract_provider(first)
+            return "unknown"
 
         case _:
             return "unknown"
@@ -123,9 +118,10 @@ def _resolve_variant_identifier(config: AnyModelConfig, variant_name: str) -> st
     if isinstance(config, StringModelConfig):
         try:
             model = config.get_model()
-            return f"{model.system}:{model.model_name}"
-        except Exception:
+        except Exception:  # noqa: BLE001
             return config.identifier
+        else:
+            return f"{model.system}:{model.model_name}"
     return variant_name
 
 
@@ -331,10 +327,7 @@ async def build_model_state_for_acp(
 
     all_ids = [m.model_id for m in acp_models_from_tokonomics]
     current_model = agent.model_name
-    if current_model and current_model in all_ids:
-        current_model_id = current_model
-    else:
-        current_model_id = all_ids[0]
+    current_model_id = current_model if current_model and current_model in all_ids else all_ids[0]
 
     return SessionModelState(
         available_models=acp_models_from_tokonomics,

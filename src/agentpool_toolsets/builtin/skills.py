@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -109,10 +110,11 @@ async def _load_reference_content(
                 content_bytes, _ = await pool.skill_provider.read_reference(
                     skill.name, reference_path
                 )
-                content = content_bytes.decode("utf-8")
-                return f"\n\n## Reference: {reference_path}\n\n{content}"
             except Exception as e:
                 raise ReferenceNotFoundError(f"Reference not found: {reference_path}") from e
+            else:
+                content = content_bytes.decode("utf-8")
+                return f"\n\n## Reference: {reference_path}\n\n{content}"
         raise ReferenceNotFoundError(
             f"Cannot load reference {reference_path}: no skill provider available"
         )
@@ -187,6 +189,8 @@ async def _load_visible_bare_skill(
     skill_name: str,
     node_name: str | None,
 ) -> tuple[Skill, str] | None:
+    if ctx.pool is None:
+        return None
     local_skills = _visible_model_skills(ctx, ctx.pool.skills.list_skills(), node_name)
     local_skill = next((skill for skill in local_skills if skill.name == skill_name), None)
     if local_skill is not None:
@@ -385,6 +389,8 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
 
 
 async def _available_skill_names(ctx: AgentContext, node_name: str | None) -> str:
+    if ctx.pool is None:
+        return ""
     skills = ctx.pool.skills.list_skills()
     visible_skills = _visible_model_skills(ctx, skills, node_name)
 
@@ -392,7 +398,7 @@ async def _available_skill_names(ctx: AgentContext, node_name: str | None) -> st
     if ctx.pool.skill_provider is not None:
         try:
             provider_skills = await ctx.pool.skill_provider.get_skills()
-        except Exception:
+        except Exception:  # noqa: BLE001
             provider_skills = []
 
     all_skills = {
@@ -422,10 +428,8 @@ async def list_skills(ctx: AgentContext) -> str:
     # Also get skills from skill_provider (MCP-based skills)
     provider_skills: list[Skill] = []
     if ctx.pool.skill_provider is not None:
-        try:
+        with contextlib.suppress(Exception):
             provider_skills = await ctx.pool.skill_provider.get_skills()
-        except Exception:
-            pass
 
     visible_provider_skills = _visible_model_skills(ctx, provider_skills, requested_node_name)
     seen: set[str] = {s.name for s in visible_skills}

@@ -37,8 +37,12 @@ from agentpool.messaging import ChatMessage  # noqa: TC001
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentpool.resource_providers.plan_provider import PlanEntry
     from agentpool.tools.base import ToolKind
+    from agentpool.utils.todos import PlanEntry
+
+
+ToolCallStatus = Literal["pending", "in_progress", "completed", "failed"]
+"""Status of a tool call."""
 
 
 # Lifecycle events (aligned with AG-UI protocol)
@@ -533,7 +537,7 @@ class ToolCallProgressEvent:
         path: str,
         old_text: str,
         new_text: str,
-        status: Literal["in_progress", "completed", "failed"],
+        status: ToolCallStatus = "in_progress",
         tool_name: str | None = None,
     ) -> ToolCallProgressEvent:
         """Create event for file edit with diff.

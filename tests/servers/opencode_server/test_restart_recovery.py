@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import json
 from typing import TYPE_CHECKING
-from unittest.mock import Mock
 
 import pytest
 
@@ -18,6 +17,7 @@ from agentpool_storage.opencode_provider import helpers
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from unittest.mock import Mock
 
 
 class TestRestartRecovery:

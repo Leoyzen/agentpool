@@ -4,21 +4,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import pytest
-
 from pydantic_ai.capabilities import Hooks
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.run import AgentRunResult
 from pydantic_ai.tools import RunContext, ToolDefinition
 from pydantic_ai.usage import RunUsage
+import pytest
 
 from agentpool.hooks import AgentHooks, CallableHook
-from agentpool.hooks.base import HookResult
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from agentpool.hooks.base import HookResult
 
 
 # Simple mock deps with node_name and run_ctx
@@ -208,18 +206,14 @@ async def test_before_tool_execute_adapter_calls_pre_tool_hooks():
     """Test before_tool_execute adapter invokes pre_tool_use hooks."""
     reset_hook_state()
 
-    agent_hooks = AgentHooks(
-        pre_tool_use=[CallableHook(event="pre_tool_use", fn=record_hook)]
-    )
+    agent_hooks = AgentHooks(pre_tool_use=[CallableHook(event="pre_tool_use", fn=record_hook)])
     capability = agent_hooks.as_capability()
     ctx = make_run_context()
     call = ToolCallPart(tool_name="test_tool", args={"x": 1})
     tool_def = ToolDefinition(name="test_tool")
     args = {"x": 1}
 
-    returned = await capability.before_tool_execute(
-        ctx, call=call, tool_def=tool_def, args=args
-    )
+    returned = await capability.before_tool_execute(ctx, call=call, tool_def=tool_def, args=args)
 
     assert returned == args
     assert len(hook_calls) == 1
@@ -234,9 +228,7 @@ async def test_before_tool_execute_adapter_deny_raises():
     """Test before_tool_execute adapter raises RuntimeError on deny."""
     reset_hook_state()
 
-    agent_hooks = AgentHooks(
-        pre_tool_use=[CallableHook(event="pre_tool_use", fn=deny_hook)]
-    )
+    agent_hooks = AgentHooks(pre_tool_use=[CallableHook(event="pre_tool_use", fn=deny_hook)])
     capability = agent_hooks.as_capability()
     ctx = make_run_context()
     call = ToolCallPart(tool_name="test_tool", args={"x": 1})
@@ -244,9 +236,7 @@ async def test_before_tool_execute_adapter_deny_raises():
     args = {"x": 1}
 
     with pytest.raises(RuntimeError, match="Tool execution blocked"):
-        await capability.before_tool_execute(
-            ctx, call=call, tool_def=tool_def, args=args
-        )
+        await capability.before_tool_execute(ctx, call=call, tool_def=tool_def, args=args)
 
 
 async def test_before_tool_execute_adapter_modified_input():
@@ -262,9 +252,7 @@ async def test_before_tool_execute_adapter_modified_input():
     tool_def = ToolDefinition(name="test_tool")
     args = {"x": 1}
 
-    returned = await capability.before_tool_execute(
-        ctx, call=call, tool_def=tool_def, args=args
-    )
+    returned = await capability.before_tool_execute(ctx, call=call, tool_def=tool_def, args=args)
 
     assert returned == {"x": 1, "modified": True}
 
@@ -283,9 +271,7 @@ async def test_after_tool_execute_adapter_calls_post_tool_hooks():
     """Test after_tool_execute adapter invokes post_tool_use hooks."""
     reset_hook_state()
 
-    agent_hooks = AgentHooks(
-        post_tool_use=[CallableHook(event="post_tool_use", fn=record_hook)]
-    )
+    agent_hooks = AgentHooks(post_tool_use=[CallableHook(event="post_tool_use", fn=record_hook)])
     capability = agent_hooks.as_capability()
     ctx = make_run_context()
     call = ToolCallPart(tool_name="test_tool", args={"x": 1})
@@ -311,18 +297,14 @@ async def test_after_tool_execute_adapter_passes_session_id():
     """Test after_tool_execute adapter passes session_id from deps."""
     reset_hook_state()
 
-    agent_hooks = AgentHooks(
-        post_tool_use=[CallableHook(event="post_tool_use", fn=record_hook)]
-    )
+    agent_hooks = AgentHooks(post_tool_use=[CallableHook(event="post_tool_use", fn=record_hook)])
     capability = agent_hooks.as_capability()
     ctx = make_run_context(deps=MockDeps(session_id="sess-456"))
     call = ToolCallPart(tool_name="test_tool", args={"x": 1})
     tool_def = ToolDefinition(name="test_tool")
     args = {"x": 1}
 
-    await capability.after_tool_execute(
-        ctx, call=call, tool_def=tool_def, args=args, result="out"
-    )
+    await capability.after_tool_execute(ctx, call=call, tool_def=tool_def, args=args, result="out")
 
     _event_type, data = hook_calls[0]
     assert data["session_id"] == "sess-456"
@@ -357,9 +339,7 @@ async def test_all_hook_types_combined():
     call = ToolCallPart(tool_name="t", args={})
     tool_def = ToolDefinition(name="t")
     await capability.before_tool_execute(ctx, call=call, tool_def=tool_def, args={})
-    await capability.after_tool_execute(
-        ctx, call=call, tool_def=tool_def, args={}, result="r"
-    )
+    await capability.after_tool_execute(ctx, call=call, tool_def=tool_def, args={}, result="r")
 
     assert len(hook_calls) == 4
 

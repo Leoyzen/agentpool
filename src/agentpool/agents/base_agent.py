@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 import os
 from pathlib import Path
 import re
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, assert_never, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, assert_never, cast, overload
 import warnings
 
 from anyenv import MultiEventHandler, method_spawner
@@ -70,7 +70,7 @@ if TYPE_CHECKING:
     from agentpool.delegation import AgentPool, Team, TeamRun
     from agentpool.hooks import AgentHooks
     from agentpool.messaging import ChatMessage
-    from agentpool.orchestrator.core import EventBus, SessionState
+    from agentpool.orchestrator.core import EventBus, SessionPool, SessionState
     from agentpool.orchestrator.run import RunHandle
     from agentpool.orchestrator.turn import Turn
     from agentpool.sessions import SessionData
@@ -133,7 +133,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
     - conversation: MessageHistory for conversation state
     - event_handler: MultiEventHandler for event distribution
     - _event_queue: Queue for streaming events
-    - _input_provider: Provider for user input/confirmations (deprecated: use SessionState.input_provider)
+    - _input_provider: Provider for user input/confirmations
+      (deprecated: use SessionState.input_provider)
     - env: ExecutionEnvironment for running code/commands
     - context property: Returns NodeContext for the agent
 
@@ -469,7 +470,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
     @abstractmethod
     def create_turn(
         self,
-        prompts: list[str],
+        prompts: list[UserContent],
         run_ctx: AgentRunContext,
         message_history: list[ModelMessage],
     ) -> Turn:
@@ -534,7 +535,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         message_history: list[ModelMessage],
         event_bus: EventBus,
         session: SessionState,
-    ) -> AsyncGenerator[RichAgentStreamEvent]:
+    ) -> AsyncGenerator[RichAgentStreamEvent[TResult]]:
         """Run agent with streaming output via the v2 RunHandle lifecycle.
 
         This is the v2 streaming wrapper around :meth:`create_run` and
@@ -936,6 +937,162 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             return run_ctx.injection_manager.has_pending()
         return False
 
+    def _maybe_pool_stream(
+        self,
+        *,
+        prompts: tuple[PromptCompatible, ...],
+        session_id: str | None,
+        parent_session_id: str | None,
+        input_provider: InputProvider | None,
+        depth: int,
+        wait_for_connections: bool | None,
+        _skip_pool: bool,
+    ) -> AsyncIterator[RichAgentStreamEvent[TResult]] | None:
+        """Return async iterator for pool-based streaming, or None if not applicable."""
+        from agentpool.utils.identifiers import generate_session_id
+
+        if (
+            not _skip_pool
+            and self.agent_pool is not None
+            and self.agent_pool.session_pool is not None
+            and not _in_turn_context.get()
+        ):
+            session_pool = self.agent_pool.session_pool
+            effective_session_id = session_id or generate_session_id()
+            existing_session = session_pool.sessions.get_session(effective_session_id)
+            if existing_session is None or existing_session.agent_name == self.name:
+                return self._pool_stream_iter(
+                    session_pool=session_pool,
+                    effective_session_id=effective_session_id,
+                    existing_session=existing_session,
+                    prompts=prompts,
+                    parent_session_id=parent_session_id,
+                    input_provider=input_provider,
+                    depth=depth,
+                    wait_for_connections=wait_for_connections,
+                )
+        return None
+
+    @method_spawner
+    async def _pool_stream_iter(
+        self,
+        *,
+        session_pool: SessionPool,
+        effective_session_id: str,
+        existing_session: SessionState | None,
+        prompts: tuple[PromptCompatible, ...],
+        parent_session_id: str | None,
+        input_provider: InputProvider | None,
+        depth: int,
+        wait_for_connections: bool | None,
+    ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
+        """Path A: Stream events via SessionPool."""
+        if existing_session is None:
+            user_prompts = [str(p) for p in prompts if isinstance(p, str)]
+            initial_prompt = user_prompts[-1] if user_prompts else None
+            title_initial_prompt = self._session_initial_prompt_for_title(
+                effective_session_id,
+                initial_prompt,
+            )
+            await self.log_session(
+                session_id=effective_session_id,
+                initial_prompt=title_initial_prompt,
+                model=self.model_name,
+                parent_session_id=parent_session_id,
+            )
+            await session_pool.create_session(
+                effective_session_id,
+                agent_name=self.name,
+                parent_session_id=parent_session_id,
+            )
+
+        final_message: ChatMessage[TResult] | None = None
+        async for event in session_pool.run_stream(
+            effective_session_id,
+            *prompts,  # type: ignore[arg-type]
+            input_provider=input_provider,
+            parent_session_id=parent_session_id,
+            depth=depth,
+        ):
+            yield event
+
+            if isinstance(event, StreamCompleteEvent):
+                final_message = event.message
+            if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                break
+        if final_message is not None:
+            await self.message_sent.emit(final_message)
+            session = session_pool.sessions.get_session(effective_session_id)
+            if session is not None and getattr(session, "is_per_session_agent", False):
+                await self.connections.route_message(final_message, wait=wait_for_connections)
+
+    async def _prepare_standalone_context(
+        self,
+        *,
+        prompts: tuple[PromptCompatible, ...],
+        session_id: str | None,
+        parent_session_id: str | None,
+        deps: TDeps | None,
+        depth: int,
+        _run_ctx: AgentRunContext | None,
+    ) -> tuple[AgentRunContext, str, EventBus, Any, bool]:
+        """Prepare run context for standalone streaming execution.
+
+        Returns:
+            (run_ctx, effective_session_id, local_bus, stream, created_local_bus)
+        """
+        from agentpool.orchestrator.core import EventBus
+        from agentpool.utils.identifiers import generate_session_id
+
+        if _run_ctx is not None:
+            run_ctx = _run_ctx
+            effective_session_id = session_id or run_ctx.session_id
+        else:
+            effective_session_id = session_id or generate_session_id()
+
+            user_prompts = [str(p) for p in prompts if isinstance(p, str)]
+            initial_prompt = user_prompts[-1] if user_prompts else None
+
+            await self.log_session(
+                session_id=effective_session_id,
+                initial_prompt=initial_prompt,
+                model=self.model_name,
+                parent_session_id=parent_session_id,
+            )
+
+            run_ctx = AgentRunContext(deps=deps, depth=depth, session_id=effective_session_id)
+
+        _created_local_bus = run_ctx.event_bus is None
+        if _created_local_bus:
+            local_bus: EventBus = EventBus()
+            run_ctx.event_bus = local_bus
+        else:
+            assert run_ctx.event_bus is not None
+            local_bus = run_ctx.event_bus
+
+        stream = await local_bus.subscribe(effective_session_id, scope="session")
+        return run_ctx, effective_session_id, local_bus, stream, _created_local_bus
+
+    def _get_consumer_handler(
+        self, event_handlers: Sequence[AnyEventHandlerType] | None
+    ) -> MultiEventHandler[IndividualEventHandler]:
+        """Return the appropriate event handler for streaming consumption."""
+        if event_handlers is not None:
+            return MultiEventHandler[IndividualEventHandler](resolve_event_handlers(event_handlers))
+        return self.event_handler
+
+    def _cleanup_after_stream(
+        self, run_ctx: AgentRunContext, token: Token[AgentRunContext | None] | None
+    ) -> None:
+        """Clean up after streaming: reset ContextVar, clear injections, clear run context."""
+        if token is not None:
+            with suppress(ValueError):
+                _current_run_ctx_var.reset(token)
+        if run_ctx.injection_manager is not None:
+            run_ctx.injection_manager.clear()
+        if self._run_context is run_ctx:
+            self._run_context = None
+
     @method_spawner
     async def run_stream(
         self,
@@ -987,122 +1144,47 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Yields:
             Stream events during execution
         """
-        from agentpool.utils.identifiers import generate_session_id
+        from agentpool.orchestrator.core import drain_and_merge
 
         # --- Path A: SessionPool available & outside a turn context ---
-        # Delegate to SessionPool so events (including subagent SpawnSessionStart)
-        # are delivered via EventBus.  Inside a turn context we MUST execute
-        # directly to avoid deadlock on turn_lock (the parent turn already
-        # holds it).
-        if (
-            not _skip_pool
-            and self.agent_pool is not None
-            and self.agent_pool.session_pool is not None
-            and not _in_turn_context.get()
-        ):
-            session_pool = self.agent_pool.session_pool
-            effective_session_id = session_id or generate_session_id()
-
-            # If the session already exists but belongs to a different agent,
-            # fall through to direct execution so THIS agent runs.
-            existing_session = session_pool.sessions.get_session(effective_session_id)
-            if existing_session is None or existing_session.agent_name == self.name:
-                if existing_session is None:
-                    user_prompts = [str(p) for p in prompts if isinstance(p, str)]
-                    initial_prompt = user_prompts[-1] if user_prompts else None
-                    title_initial_prompt = self._session_initial_prompt_for_title(
-                        effective_session_id,
-                        initial_prompt,
-                    )
-                    await self.log_session(
-                        session_id=effective_session_id,
-                        initial_prompt=title_initial_prompt,
-                        model=self.model_name,
-                        parent_session_id=parent_session_id,
-                    )
-                    await session_pool.create_session(
-                        effective_session_id,
-                        agent_name=self.name,
-                        parent_session_id=parent_session_id,
-                    )
-
-                final_message: ChatMessage[TResult] | None = None
-                async for event in session_pool.run_stream(
-                    effective_session_id,
-                    *prompts,  # type: ignore[arg-type]
-                    input_provider=input_provider,
-                    parent_session_id=parent_session_id,
-                    depth=depth,
-                ):
-                    yield event
-
-                    if isinstance(event, StreamCompleteEvent):
-                        final_message = event.message
-                    if isinstance(event, StreamCompleteEvent | RunErrorEvent):
-                        break
-                if final_message is not None:
-                    await self.message_sent.emit(final_message)
-                    session = session_pool.sessions.get_session(effective_session_id)
-                    if session is not None and getattr(session, "is_per_session_agent", False):
-                        await self.connections.route_message(
-                            final_message, wait=wait_for_connections
-                        )
-                return
+        pool_stream = self._maybe_pool_stream(
+            prompts=prompts,
+            session_id=session_id,
+            parent_session_id=parent_session_id,
+            input_provider=input_provider,
+            depth=depth,
+            wait_for_connections=wait_for_connections,
+            _skip_pool=_skip_pool,
+        )
+        if pool_stream is not None:
+            async for event in pool_stream:
+                yield event
+            return
 
         # --- Path B: Standalone / in-turn react loop ---
-        # Creates a lightweight per-run context and processes prompts with
-        # EventBus-based event delivery. Session history is still logged.
-        # When _run_ctx is provided (from SessionPool), the existing run
-        # context is reused and session logging is skipped.
-        if _run_ctx is not None:
-            run_ctx = _run_ctx
-            effective_session_id = session_id or run_ctx.session_id
-        else:
-            effective_session_id = session_id or generate_session_id()
-
-            user_prompts = [str(p) for p in prompts if isinstance(p, str)]
-            initial_prompt = user_prompts[-1] if user_prompts else None
-
-            await self.log_session(
-                session_id=effective_session_id,
-                initial_prompt=initial_prompt,
-                model=self.model_name,
-                parent_session_id=parent_session_id,
-            )
-
-            # Create per-run context for state isolation
-            run_ctx = AgentRunContext(deps=deps, depth=depth, session_id=effective_session_id)
+        (
+            run_ctx,
+            effective_session_id,
+            local_bus,
+            stream,
+            _created_local_bus,
+        ) = await self._prepare_standalone_context(
+            prompts=prompts,
+            session_id=session_id,
+            parent_session_id=parent_session_id,
+            deps=deps,
+            depth=depth,
+            _run_ctx=_run_ctx,
+        )
         run_ctx.cancelled = False
         self._cancelled = False
         run_ctx.current_task = asyncio.current_task()
-        # Set instance-level _run_context for cross-task visibility
-        # (standalone agents without SessionPool).
         self._run_context = run_ctx
 
-        # Create local EventBus if not already set by SessionController
-        _created_local_bus = run_ctx.event_bus is None
-        if _created_local_bus:
-            from agentpool.orchestrator.core import EventBus, drain_and_merge
-
-            local_bus: EventBus = EventBus()
-            run_ctx.event_bus = local_bus
-        else:
-            local_bus = run_ctx.event_bus
-            assert local_bus is not None  # type narrowing for type checker
-
-        # Subscribe to EventBus to receive events
-        stream = await local_bus.subscribe(effective_session_id, scope="session")
-
-        # RFC-0021: reset only via the token from set(); never set(None) (breaks nesting).
-        # token is initialized so finally always has a bound name; reset only if set() succeeded.
         token: Token[AgentRunContext | None] | None = None
         try:
             token = _current_run_ctx_var.set(run_ctx)
 
-            # Producer runs as a background task; consumer yields events
-            # in the main coroutine. This avoids cancel-scope boundary
-            # issues with generator cleanup (aclose/GC) while still
-            # delivering events in real-time (not batched).
             producer_error: BaseException | None = None
 
             async def _producer() -> None:
@@ -1124,7 +1206,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                         _owns_event_bus=_created_local_bus,
                     ):
                         await local_bus.publish(effective_session_id, event)
-                except BaseException as exc:
+                except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
                     producer_error = exc
                 finally:
                     with anyio.CancelScope(shield=True):
@@ -1135,31 +1217,12 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
             producer_task = asyncio.ensure_future(_producer())
             try:
-                # Consumer: yield events from EventBus subscription.
-                # Events published to the EventBus by tools (e.g.
-                # ``report_progress`` → ``ToolCallProgressEvent``) are
-                # delivered here in addition to events yielded by
-                # ``_stream_events()``.  We dispatch every event to the
-                # agent's event handlers so that progress callbacks
-                # etc. receive events regardless of whether they came
-                # through the stream or were published directly.
-                if event_handlers is not None:
-                    consumer_handler: MultiEventHandler[IndividualEventHandler] = (
-                        MultiEventHandler[IndividualEventHandler](
-                            resolve_event_handlers(event_handlers)
-                        )
-                    )
-                else:
-                    consumer_handler = self.event_handler
-                consumer_context = self.get_context(
-                    input_provider=input_provider, run_ctx=run_ctx
-                )
+                consumer_handler = self._get_consumer_handler(event_handlers)
+                consumer_context = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
 
                 async for envelope in drain_and_merge(stream):
                     event = envelope.event
-                    # Dispatch to event handlers (covers events published
-                    # directly to EventBus that bypass _stream_events).
-                    with suppress(Exception):
+                    with suppress(ValueError, TypeError, RuntimeError, KeyError, AttributeError):
                         await consumer_handler(consumer_context, event)
                     yield event
                     if isinstance(event, StreamCompleteEvent):
@@ -1167,38 +1230,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     if isinstance(event, RunErrorEvent):
                         break
             finally:
-                if not producer_task.done():
-                    # The producer may still be running shielded
-                    # post-processing (hooks, route_message, persistence).
-                    # Cancelling the task would interrupt that work —
-                    # ``asyncio.Task.cancel()`` bypasses
-                    # ``anyio.CancelScope(shield=True)`` on asyncio.
-                    # Wait for it to finish instead of cancelling.
-                    with suppress(asyncio.CancelledError):
-                        await producer_task
-                else:
-                    # Producer finished — drain its result
-                    with suppress(asyncio.CancelledError):
-                        await producer_task
+                with suppress(asyncio.CancelledError):
+                    await producer_task
 
-            # Re-raise producer error after consumer loop exits.
             if producer_error is not None:
                 raise producer_error
         finally:
-            if token is not None:
-                # Suppress ValueError when token was created in a different async
-                # context (happens during GeneratorExit / generator cleanup).
-                # The ContextVar reverts to its default (None) in the original
-                # context when the task exits, so ignoring the reset is safe.
-                with suppress(ValueError):
-                    _current_run_ctx_var.reset(token)
-            if run_ctx.injection_manager is not None:
-                run_ctx.injection_manager.clear()
-            # Clear standalone run context so is_turn_active() returns False.
-            # Only clear if it still points to our run_ctx — concurrent runs
-            # on the same agent may have already replaced it.
-            if self._run_context is run_ctx:
-                self._run_context = None
+            self._cleanup_after_stream(run_ctx, token)
 
     async def _run_stream_once(
         self,
@@ -1299,7 +1337,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                         name=self.name,
                         session_id=session_id,
                     )
-                    yield StreamCompleteEvent(message=cancel_msg, cancelled=True)
+                    yield StreamCompleteEvent(
+                        message=cast("ChatMessage[TResult]", cancel_msg), cancelled=True
+                    )
                     return
 
             async for event in self._stream_events(
@@ -1366,11 +1406,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 #   - Should subagent tool calls set store_history=False?
                 #   - Should forked/ephemeral runs always skip persistence?
                 #   - Should signals still fire when store_history=False?
-                #   Current behavior: store_history controls both DB logging AND conversation context
+                #   Current behavior: store_history controls both DB logging
+                #   AND conversation context
                 if store_history:
                     # Log to persistent storage and add to conversation context
                     # Note: user_msg was already added at the start of the run
-                    # Use extend_last=True to include both user_msg and final_message in _last_messages
+                    # Use extend_last=True to include both user_msg and
+                    # final_message in _last_messages
                     await self.log_message(final_message)
                     conversation.add_chat_messages([final_message], extend_last=True)
 
@@ -1912,7 +1954,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 except (OSError, UnicodeDecodeError) as exc:
                     logger.debug("No project rules found", path=rules_path, error=str(exc))
                     break
-                except Exception as exc:
+                except (ConnectionError, RuntimeError, ValueError) as exc:
                     # Handles MCP/RequestError from remote filesystems (ACP mode)
                     logger.debug("No project rules found", path=rules_path, error=str(exc))
 

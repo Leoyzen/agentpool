@@ -22,8 +22,8 @@ from contextlib import aclosing, asynccontextmanager
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
-import pytest
 from pydantic_ai.models.test import TestModel, TestStreamedResponse
+import pytest
 
 from agentpool import Agent
 from agentpool.agents.events import StreamCompleteEvent
@@ -95,16 +95,14 @@ class SlowTestModel(TestModel):
 async def slow_agent() -> Agent[None]:
     """Agent with SlowTestModel for interrupt testing."""
     model = SlowTestModel(custom_output_text="Hello world slow response", pre_stream_delay=0.5)
-    agent = Agent(name="interrupt-test-agent", model=model, session=False)
-    yield agent
+    return Agent(name="interrupt-test-agent", model=model, session=False)
 
 
 @pytest.fixture
 async def fast_agent() -> Agent[None]:
     """Agent with instant TestModel for basic tests."""
     model = TestModel(custom_output_text="Fast response")
-    agent = Agent(name="fast-test-agent", model=model, session=False)
-    yield agent
+    return Agent(name="fast-test-agent", model=model, session=False)
 
 
 def _mock_session_pool(agent: Agent, run_ctx: Any) -> None:
@@ -191,10 +189,8 @@ async def test_interrupt_without_run_ctx_sets_cancelled_flag(slow_agent: Agent[N
     )
 
     # Clean up
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=3.0)
-    except asyncio.CancelledError:
-        pass
 
     assert slow_agent._cancelled is True
 
@@ -216,7 +212,7 @@ async def test_interrupt_without_run_ctx_cancels_stream_task(slow_agent: Agent[N
 
     async def run_stream() -> None:
         async with aclosing(slow_agent.run_stream("Test prompt")) as gen:
-            async for event in gen:
+            async for _event in gen:
                 run_ctx = _current_run_ctx_var.get()
                 if run_ctx is not None and not captured_run_ctx:
                     captured_run_ctx.append(run_ctx)
@@ -277,7 +273,7 @@ async def test_interrupt_with_run_ctx_still_works(fast_agent: Agent[None]) -> No
     async def run_stream():
         nonlocal captured_run_ctx
         async with aclosing(fast_agent.run_stream("Test prompt")) as gen:
-            async for event in gen:
+            async for _event in gen:
                 stream_started.set()
                 # Capture the run_ctx from the ContextVar
                 if captured_run_ctx is None:
@@ -287,10 +283,8 @@ async def test_interrupt_with_run_ctx_still_works(fast_agent: Agent[None]) -> No
     await asyncio.wait_for(stream_started.wait(), timeout=2.0)
 
     # Wait for stream to complete (fast model completes quickly)
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=2.0)
-    except asyncio.CancelledError:
-        pass
 
     # interrupt() with explicit run_ctx should still work
     if captured_run_ctx is not None:
@@ -354,12 +348,10 @@ async def test_interrupt_cancels_iteration_task(slow_agent: Agent[None]) -> None
         await asyncio.wait_for(task, timeout=3.0)
     except asyncio.CancelledError:
         pass  # Fine — task was cancelled
-    except asyncio.TimeoutError:
+    except TimeoutError:
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
         pytest.fail("Stream task hung after interrupt — iteration_task may not be cancelled")
 
     # The iteration_task should have been cancelled
@@ -410,10 +402,8 @@ async def test_iteration_task_stored_as_instance_variable(slow_agent: Agent[None
 
     # Clean up
     await slow_agent.interrupt()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=3.0)
-    except asyncio.CancelledError:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -469,12 +459,10 @@ async def test_opencode_abort_flow_stops_agent(slow_agent: Agent[None]) -> None:
         await asyncio.wait_for(task, timeout=3.0)
     except asyncio.CancelledError:
         pass  # Fine
-    except asyncio.TimeoutError:
+    except TimeoutError:
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
         pytest.fail("Agent kept running after abort — the OpenCode abort flow is broken")
 
     # We should have received some events (partial stream)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic_graph import GraphBuilder
 from pydantic_graph.decision import Decision
@@ -21,6 +21,10 @@ from agentpool.messaging import ChatMessage, MessageNode
 from agentpool.talk import Talk
 from agentpool.talk.graph_edges import TalkEdgeTranslator
 from agentpool.utils.time_utils import get_now
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +55,6 @@ class FakeMessageNode(MessageNode[Any, Any]):
         return MessageStats()
 
     def run_iter(self, *prompts: Any, **kwargs: Any) -> Any:
-        from collections.abc import AsyncIterator
 
         async def _gen() -> AsyncIterator[ChatMessage[Any]]:
             for p in prompts:
@@ -110,12 +113,8 @@ def test_simple_talk() -> None:
     source_node = FakeMessageNode("source")
     target_node = FakeMessageNode("target")
 
-    source_step = builder.step(
-        lambda ctx: ctx.inputs, node_id="source_step"
-    )
-    target_step = builder.step(
-        lambda ctx: ctx.inputs, node_id="target_step"
-    )
+    source_step = builder.step(lambda ctx: ctx.inputs, node_id="source_step")
+    target_step = builder.step(lambda ctx: ctx.inputs, node_id="target_step")
 
     talk = Talk(
         source=source_node,
@@ -143,12 +142,8 @@ def test_talk_with_transform() -> None:
     source_node = FakeMessageNode("source")
     target_node = FakeMessageNode("target")
 
-    source_step = builder.step(
-        lambda ctx: ctx.inputs, node_id="source_step"
-    )
-    target_step = builder.step(
-        lambda ctx: ctx.inputs, node_id="target_step"
-    )
+    source_step = builder.step(lambda ctx: ctx.inputs, node_id="source_step")
+    target_step = builder.step(lambda ctx: ctx.inputs, node_id="target_step")
 
     def sync_transform(msg: ChatMessage[Any]) -> ChatMessage[Any]:
         return msg
@@ -173,12 +168,8 @@ def test_talk_with_filter() -> None:
     source_node = FakeMessageNode("source")
     target_node = FakeMessageNode("target")
 
-    source_step = builder.step(
-        lambda ctx: ctx.inputs, node_id="source_step"
-    )
-    target_step = builder.step(
-        lambda ctx: ctx.inputs, node_id="target_step"
-    )
+    source_step = builder.step(lambda ctx: ctx.inputs, node_id="source_step")
+    target_step = builder.step(lambda ctx: ctx.inputs, node_id="target_step")
 
     def sync_filter(ctx: Any) -> bool:
         return True
@@ -190,9 +181,7 @@ def test_talk_with_filter() -> None:
     )
 
     translator = TalkEdgeTranslator(builder)
-    edges = translator.translate(
-        talk, source_step, [target_step], target_nodes=[target_node]
-    )
+    edges = translator.translate(talk, source_step, [target_step], target_nodes=[target_node])
     builder.add(*edges)
     graph = builder.build(validate_graph_structure=False)
 
@@ -205,12 +194,8 @@ def test_talk_with_stop() -> None:
     source_node = FakeMessageNode("source")
     target_node = FakeMessageNode("target")
 
-    source_step = builder.step(
-        lambda ctx: ctx.inputs, node_id="source_step"
-    )
-    target_step = builder.step(
-        lambda ctx: ctx.inputs, node_id="target_step"
-    )
+    source_step = builder.step(lambda ctx: ctx.inputs, node_id="source_step")
+    target_step = builder.step(lambda ctx: ctx.inputs, node_id="target_step")
 
     def sync_stop(ctx: Any) -> bool:
         return False
@@ -222,9 +207,7 @@ def test_talk_with_stop() -> None:
     )
 
     translator = TalkEdgeTranslator(builder)
-    edges = translator.translate(
-        talk, source_step, [target_step], target_nodes=[target_node]
-    )
+    edges = translator.translate(talk, source_step, [target_step], target_nodes=[target_node])
     builder.add(*edges)
     graph = builder.build(validate_graph_structure=False)
 
@@ -245,15 +228,9 @@ def test_multi_target_talk() -> None:
     target1 = FakeMessageNode("target1")
     target2 = FakeMessageNode("target2")
 
-    source_step = builder.step(
-        lambda ctx: ctx.inputs, node_id="source_step"
-    )
-    target_step1 = builder.step(
-        lambda ctx: ctx.inputs, node_id="target_step1"
-    )
-    target_step2 = builder.step(
-        lambda ctx: ctx.inputs, node_id="target_step2"
-    )
+    source_step = builder.step(lambda ctx: ctx.inputs, node_id="source_step")
+    target_step1 = builder.step(lambda ctx: ctx.inputs, node_id="target_step1")
+    target_step2 = builder.step(lambda ctx: ctx.inputs, node_id="target_step2")
 
     talk = Talk(
         source=source_node,
@@ -277,12 +254,8 @@ def test_queued_talk() -> None:
     source_node = FakeMessageNode("source")
     target_node = FakeMessageNode("target")
 
-    source_step = builder.step(
-        lambda ctx: ctx.inputs, node_id="source_step"
-    )
-    target_step = builder.step(
-        lambda ctx: ctx.inputs, node_id="target_step"
-    )
+    source_step = builder.step(lambda ctx: ctx.inputs, node_id="source_step")
+    target_step = builder.step(lambda ctx: ctx.inputs, node_id="target_step")
 
     talk = Talk(
         source=source_node,
@@ -296,8 +269,7 @@ def test_queued_talk() -> None:
     graph = builder.build(validate_graph_structure=False)
 
     buffer_nodes = [
-        n for n in graph.nodes.values()
-        if isinstance(n, Step) and "buffer" in str(n.id)
+        n for n in graph.nodes.values() if isinstance(n, Step) and "buffer" in str(n.id)
     ]
     assert len(buffer_nodes) >= 1
 
@@ -310,12 +282,8 @@ def test_connection_type_labels() -> None:
     source_node = FakeMessageNode("source")
     target_node = FakeMessageNode("target")
 
-    source_step = builder.step(
-        lambda ctx: ctx.inputs, node_id="source_step"
-    )
-    target_step = builder.step(
-        lambda ctx: ctx.inputs, node_id="target_step"
-    )
+    source_step = builder.step(lambda ctx: ctx.inputs, node_id="source_step")
+    target_step = builder.step(lambda ctx: ctx.inputs, node_id="target_step")
 
     for conn_type in ("run", "context", "forward"):
         talk = Talk(

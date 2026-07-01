@@ -2,19 +2,17 @@ import asyncio
 import logging
 from typing import Any
 
+import anyio
 from pydantic_ai.models.test import TestModel
 import pytest
 from sqlalchemy import select
 
 from agentpool import Agent, AgentPool, AgentsManifest, NativeAgentConfig
-from agentpool.agents.events import RunStartedEvent, SpawnSessionStart, SubAgentEvent
+from agentpool.agents.events import RunStartedEvent, SpawnSessionStart
 from agentpool_config.storage import SQLStorageConfig, StorageConfig
 from agentpool_storage.sql_provider import SQLModelProvider
 from agentpool_storage.sql_provider.models import Conversation
 from agentpool_toolsets.builtin.subagent_tools import SubagentTools
-import anyio
-
-
 
 
 def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
@@ -26,6 +24,7 @@ def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
         return True
     except anyio.EndOfStream:
         return True
+
 
 @pytest.fixture
 async def sql_provider(tmp_path):
@@ -63,7 +62,9 @@ async def test_pool(sql_provider):
         yield pool
 
 
-@pytest.mark.skip(reason="SubagentTools.task() now requires a run_ctx from SessionPool. Use test_subagent_event_lineage for SpawnSessionStart verification.")
+@pytest.mark.skip(
+    reason="SubagentTools.task() now requires a run_ctx from SessionPool. Use test_subagent_event_lineage for SpawnSessionStart verification."
+)
 @pytest.mark.asyncio
 async def test_subagent_independent_session(test_pool):
     """Test that subagent runs in independent session with unique ID."""
@@ -80,6 +81,7 @@ async def test_subagent_independent_session(test_pool):
 
     # Patch StreamEventEmitter.emit_event to capture events
     from agentpool.agents.events import StreamEventEmitter
+
     original_emit = StreamEventEmitter.emit_event
 
     async def mock_emit(self, event):
@@ -90,9 +92,7 @@ async def test_subagent_independent_session(test_pool):
     StreamEventEmitter.emit_event = mock_emit
 
     try:
-        await tools.task(
-            ctx, agent_or_team="child", prompt="Do something", description="test task"
-        )
+        await tools.task(ctx, agent_or_team="child", prompt="Do something", description="test task")
     finally:
         StreamEventEmitter.emit_event = original_emit
 

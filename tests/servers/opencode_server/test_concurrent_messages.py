@@ -137,12 +137,8 @@ def slow_mock_agent():
     pool.session_pool.get_messages = AsyncMock(return_value=[])
 
     # Mock SessionPool methods that are awaited in _process_message_locked
-    pool.session_pool.sessions.get_or_create_session = AsyncMock(
-        return_value=(Mock(), True)
-    )
-    pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(
-        return_value=agent
-    )
+    pool.session_pool.sessions.get_or_create_session = AsyncMock(return_value=(Mock(), True))
+    pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=agent)
     pool.session_pool.sessions.get_session = Mock(return_value=None)
 
     # Set up a real EventBus so adapter can subscribe/unsubscribe

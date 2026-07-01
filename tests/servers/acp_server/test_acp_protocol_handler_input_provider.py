@@ -8,10 +8,8 @@ SessionPool path.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import anyio
 import pytest
 
 from acp.schema import TextContentBlock
@@ -125,7 +123,8 @@ class TestHandlePromptInputProvider:
     ) -> None:
         """When handle_prompt() is called, an ACPInputProvider is created
         and passed to SessionPool.receive_request() so elicitation goes
-        through the ACP protocol."""
+        through the ACP protocol.
+        """
         prompt = [TextContentBlock(text="hello")]
 
         await handler.handle_prompt("sess-1", prompt)
@@ -143,7 +142,8 @@ class TestHandlePromptInputProvider:
         mock_pool: MagicMock,
     ) -> None:
         """The ACPInputProvider must have a requests object wired to
-        the ACP client so request_permission / elicitation_create work."""
+        the ACP client so request_permission / elicitation_create work.
+        """
         prompt = [TextContentBlock(text="hello")]
 
         await handler.handle_prompt("sess-1", prompt)
@@ -161,7 +161,8 @@ class TestHandlePromptInputProvider:
     ) -> None:
         """The ACPInputProvider must have client_capabilities so
         capability-gated elicitation paths work correctly.
-        When no capabilities are passed, elicitation is not advertised."""
+        When no capabilities are passed, elicitation is not advertised.
+        """
         prompt = [TextContentBlock(text="hello")]
 
         await handler.handle_prompt("sess-1", prompt)
@@ -180,7 +181,8 @@ class TestHandlePromptInputProvider:
     ) -> None:
         """When the handler is created with elicitation capabilities,
         the ACPInputProvider must advertise them so elicitation/create
-        is used instead of falling back to request_permission."""
+        is used instead of falling back to request_permission.
+        """
         prompt = [TextContentBlock(text="hello")]
 
         await handler_with_elicitation.handle_prompt("sess-1", prompt)
@@ -249,7 +251,8 @@ class TestACPSessionProxy:
 
     def test_proxy_defaults_capabilities(self) -> None:
         """When no capabilities are given, _ACPSessionProxy defaults to
-        an empty ClientCapabilities instance with no elicitation support."""
+        an empty ClientCapabilities instance with no elicitation support.
+        """
         from acp.schema.capabilities import ClientCapabilities
 
         proxy = _ACPSessionProxy(requests=MagicMock())
@@ -287,9 +290,7 @@ class TestEventConsumerConverterFlag:
             client_capabilities=ClientCapabilities(turn_complete=True),
         )
 
-        with patch.object(
-            ACPEventConverter, "__init__", return_value=None
-        ) as mock_init:
+        with patch.object(ACPEventConverter, "__init__", return_value=None) as mock_init:
             await handler._event_consumer_loop("sess-1")
 
         mock_init.assert_called_once()
@@ -376,7 +377,9 @@ class TestHandlePromptBlockingBehavior:
         mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
 
         prompt = [TextContentBlock(text="hello")]
-        with patch.object(run_handle._turn_complete_event, "wait", side_effect=asyncio.CancelledError):
+        with patch.object(
+            run_handle._turn_complete_event, "wait", side_effect=asyncio.CancelledError
+        ):
             result = await handler.handle_prompt("sess-1", prompt)
 
         assert result is not None
@@ -447,9 +450,7 @@ class TestHandlePromptBlockingBehavior:
             client_capabilities=None,
         )
 
-        with patch.object(
-            ACPEventConverter, "__init__", return_value=None
-        ) as mock_init:
+        with patch.object(ACPEventConverter, "__init__", return_value=None) as mock_init:
             await handler._event_consumer_loop("sess-1")
 
         mock_init.assert_called_once()

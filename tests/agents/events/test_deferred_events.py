@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict
+import json
 
 import pytest
 
 from agentpool.agents.events.events import (
+    RichAgentStreamEvent,
     SessionResumeEvent,
     ToolCallDeferredEvent,
-    RichAgentStreamEvent,
 )
 
 

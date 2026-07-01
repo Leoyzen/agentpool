@@ -5,12 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from agentpool.messaging import MessageNode
-
 
 if TYPE_CHECKING:
     from agentpool import AgentPool
     from agentpool.agents.base_agent import BaseAgent
+    from agentpool.messaging import MessageNode
     from agentpool.prompts.manager import PromptManager
     from agentpool.ui.base import InputProvider
 

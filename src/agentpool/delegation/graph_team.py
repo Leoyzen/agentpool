@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NoReturn, cast
 
 from pydantic_graph import GraphBuilder, StepContext, reduce_list_append
 
@@ -24,6 +24,12 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+
+
+def _raise_no_message(node_name: str) -> NoReturn:
+    """Raise RuntimeError for a member that returned no message."""
+    msg = f"Member {node_name!r} returned no message"
+    raise RuntimeError(msg)
 
 
 @dataclass
@@ -98,9 +104,9 @@ def _make_member_step(
     """
 
     async def _step(
-        ctx: StepContext[_TeamGraphState, None, Any],
+        ctx: StepContext,
     ) -> _MemberOutput:
-        state = ctx.state
+        state = cast(_TeamGraphState, ctx.state)
         final_prompt = state.member_prompts.get(node.name)
         if final_prompt is None:
             final_prompt = list(state.prompts)
@@ -140,8 +146,7 @@ def _make_member_step(
                     if state.member_retry_delay > 0:
                         await asyncio.sleep(state.member_retry_delay)
             if message is None:
-                msg = f"Member {node.name!r} returned no message"
-                raise RuntimeError(msg)
+                _raise_no_message(node.name)
             timing = perf_counter() - start
             response = AgentResponse(agent_name=node.name, message=message, timing=timing)
 
@@ -178,8 +183,8 @@ def _make_member_step(
 
 def build_team_graph(
     nodes: list[MessageNode[Any, Any]],
-) -> GraphBuilder[_TeamGraphState, None, Any, list[_MemberOutput]]:
-    """Build a pydantic-graph that forks to all members and joins results.
+) -> GraphBuilder:
+    r"""Build a pydantic-graph that forks to all members and joins results.
 
     Graph topology::
 
@@ -216,7 +221,7 @@ def build_team_graph(
     # Join that collects all member outputs into a list
     collect = builder.join(
         reduce_list_append,
-        initial_factory=lambda: list[_MemberOutput](),
+        initial_factory=list[_MemberOutput],
         node_id="team_join",
     )
 

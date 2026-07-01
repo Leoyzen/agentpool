@@ -209,17 +209,20 @@ async def test_connection_send_to_client_formats_request(
 ) -> None:
     """send_to_client extracts method/params and sends flattened ACP format."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-    message = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}}
+    message = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {"protocolVersion": "2024-11-05"},
+    }
 
     await conn.send_to_client(message)
 
-    send_to_client.assert_awaited_once_with(
-        {
-            "connectionId": "conn-1",
-            "method": "initialize",
-            "params": {"protocolVersion": "2024-11-05"},
-        }
-    )
+    send_to_client.assert_awaited_once_with({
+        "connectionId": "conn-1",
+        "method": "initialize",
+        "params": {"protocolVersion": "2024-11-05"},
+    })
 
 
 async def test_connection_send_to_client_formats_notification(
@@ -232,12 +235,10 @@ async def test_connection_send_to_client_formats_notification(
 
     await conn.send_to_client(message)
 
-    send_to_client.assert_awaited_once_with(
-        {
-            "connectionId": "conn-1",
-            "method": "notifications/initialized",
-        }
-    )
+    send_to_client.assert_awaited_once_with({
+        "connectionId": "conn-1",
+        "method": "notifications/initialized",
+    })
 
 
 async def test_connection_to_session_property(
@@ -316,10 +317,17 @@ async def test_connection_send_to_client_reconstructs_success_response(
     server_config: AcpMcpServer,
 ) -> None:
     """send_to_client reconstructs JSON-RPC response from inner result payload."""
-    send_mock = AsyncMock(return_value={"protocolVersion": "2024-11-05", "serverInfo": {"name": "test"}})
+    send_mock = AsyncMock(
+        return_value={"protocolVersion": "2024-11-05", "serverInfo": {"name": "test"}}
+    )
     conn = AcpMcpConnection("conn-1", server_config, send_mock)
     await conn.open()
-    message = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}}
+    message = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {"protocolVersion": "2024-11-05"},
+    }
 
     async with anyio.create_task_group() as tg:
         tg.start_soon(conn.send_to_client, message)
@@ -328,7 +336,10 @@ async def test_connection_send_to_client_reconstructs_success_response(
     from mcp.shared.message import SessionMessage
 
     assert isinstance(received, SessionMessage)
-    assert received.message.root.result == {"protocolVersion": "2024-11-05", "serverInfo": {"name": "test"}}  # type: ignore[union-attr]
+    assert received.message.root.result == {
+        "protocolVersion": "2024-11-05",
+        "serverInfo": {"name": "test"},
+    }  # type: ignore[union-attr]
 
 
 async def test_connection_send_to_client_reconstructs_error_response(

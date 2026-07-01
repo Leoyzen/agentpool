@@ -3,19 +3,18 @@
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
-import pytest
 from upathtools import UPath
 
 from agentpool.skills.skill import Skill
 
 
 if TYPE_CHECKING:
-    pass
+    from pathlib import Path
+
+    import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +237,7 @@ def test_mcp_json_missing_file(tmp_path: Path) -> None:
 def test_mcp_json_invalid_json_ignored(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Invalid mcp.json is silently ignored (warning logged)."""
     import logging
+
     caplog.set_level(logging.WARNING)
 
     skill_dir = tmp_path / "my-skill"
@@ -268,7 +268,7 @@ def test_mcp_json_invalid_json_ignored(tmp_path: Path, caplog: pytest.LogCapture
 
 
 def test_tools_parsed_from_frontmatter(tmp_path: Path) -> None:
-    """tools list in frontmatter is parsed into SkillToolConfig objects."""
+    """Tools list in frontmatter is parsed into SkillToolConfig objects."""
     skill_dir = tmp_path / "my-skill"
     skill_dir.mkdir()
 

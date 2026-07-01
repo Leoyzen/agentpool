@@ -6,7 +6,6 @@ drop subscriber) works correctly with anyio memory object streams.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import anyio
@@ -68,7 +67,7 @@ async def test_backpressure_drops_subscriber_when_buffer_full(
     make_event: Any,
 ) -> None:
     """A subscriber whose buffer is full and can't be drained gets dropped."""
-    stream = await event_bus.subscribe("sess-bp")
+    await event_bus.subscribe("sess-bp")
 
     for i in range(5):
         await event_bus.publish(

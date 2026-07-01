@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 
 def _make_manager_with_controller() -> tuple[object, MagicMock]:
     """Create an ACPSessionManager with _session_controller set but no session registered.
@@ -101,7 +99,8 @@ class TestGetSessionRedFlag:
 
     def test_returns_session_without_controller(self):
         """get_session() should work when _session_controller is None
-        (no SessionPool active)."""
+        (no SessionPool active).
+        """
         manager = _make_manager_without_controller()
         session_id = "sess-no-controller-001"
 

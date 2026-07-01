@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from pydantic_ai import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    ToolCallPart,
+    UserPromptPart,
+)
 import pytest
-from pydantic_ai import ModelMessage, ModelRequest, ModelResponse, TextPart, ToolCallPart, UserPromptPart
 
 from agentpool.sessions.models import PendingDeferredCall
 from agentpool.storage.manager import StorageManager
@@ -15,6 +22,7 @@ from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
+
 
 def make_messages() -> list[ModelMessage]:
     """Create a small set of ModelMessages for testing."""

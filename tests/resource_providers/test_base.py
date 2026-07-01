@@ -1,7 +1,12 @@
 """Test ResourceProvider base class."""
 
 from __future__ import annotations
-from pydantic_ai.capabilities import AbstractCapability
+
+from typing import TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
 
 
 class TestResourceProviderGetInstructions:

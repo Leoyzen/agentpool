@@ -135,7 +135,7 @@ class SQLSessionStore:
 
         async with AsyncSession(engine) as session:
             # Delete existing if present (upsert via delete+insert)
-            stmt = delete(Session).where(Session.id == data.session_id)  # id is the primary key
+            stmt = delete(Session).where(Session.id == data.session_id)  # type: ignore[arg-type]
             await session.execute(stmt)
 
             # Insert new/updated
@@ -159,7 +159,7 @@ class SQLSessionStore:
         engine = self._get_engine()
 
         async with AsyncSession(engine) as session:
-            stmt = select(Session).where(Session.id == session_id)  # id is the primary key
+            stmt = select(Session).where(Session.id == session_id)  # type: ignore[arg-type]
             result = await session.execute(stmt)
             row = result.scalars().first()
 
@@ -183,7 +183,7 @@ class SQLSessionStore:
         engine = self._get_engine()
 
         async with AsyncSession(engine) as session:
-            stmt = delete(Session).where(Session.id == session_id)  # id is the primary key
+            stmt = delete(Session).where(Session.id == session_id)  # type: ignore[arg-type]
             result = await session.execute(stmt)
             await session.commit()
 

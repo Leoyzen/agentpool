@@ -9,14 +9,12 @@ This test reproduces the user-reported bug:
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 from unittest.mock import patch
 
 import pytest
 
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
 from agentpool.agents.native_agent.turn import NativeTurn
-from agentpool.messaging import ChatMessage
 
 
 pytestmark = pytest.mark.integration
@@ -73,14 +71,20 @@ async def test_conversation_preserved_after_run_failure(
             f"got {len(msgs_after_step1)}"
         )
         # First message should be user, second should be assistant
-        assert msgs_after_step1[0].role == "user", f"Expected user role, got {msgs_after_step1[0].role}"
-        assert msgs_after_step1[1].role == "assistant", f"Expected assistant role, got {msgs_after_step1[1].role}"
+        assert msgs_after_step1[0].role == "user", (
+            f"Expected user role, got {msgs_after_step1[0].role}"
+        )
+        assert msgs_after_step1[1].role == "assistant", (
+            f"Expected assistant role, got {msgs_after_step1[1].role}"
+        )
 
         # --- Step 2: Failed second prompt ---
         # Patch NativeTurn.execute to simulate a model failure that occurs AFTER
         # the user message is saved to the conversation (matching real scenario).
         # RunHandle.start() saves user msg, then calls turn.execute() → FAILS
-        with patch.object(NativeTurn, "execute", side_effect=RuntimeError("Simulated model API error")):
+        with patch.object(
+            NativeTurn, "execute", side_effect=RuntimeError("Simulated model API error")
+        ):
             run_handle2 = await session_pool.receive_request(
                 session_id,
                 "What is 3+3?",

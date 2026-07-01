@@ -14,9 +14,9 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from pydantic_ai.exceptions import UndrainedPendingMessagesError
 from pydantic_ai.models.test import TestModel
+import pytest
 
 from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
@@ -86,6 +86,7 @@ async def test_normal_cycle_yields_events_and_sets_properties() -> None:
 @pytest.mark.asyncio
 async def test_terminal_tool_stops_execution() -> None:
     """Terminal tool detection stops the iter/next loop early."""
+
     def terminal_tool() -> str:
         """A terminal tool."""
         return "terminal result"
@@ -120,7 +121,8 @@ async def test_terminal_tool_stops_execution() -> None:
 
         # A ToolCallCompleteEvent for the terminal tool should have been yielded
         complete_events = [
-            e for e in events
+            e
+            for e in events
             if isinstance(e, ToolCallCompleteEvent) and e.tool_name == "terminal_tool"
         ]
         assert len(complete_events) == 1, (
@@ -328,9 +330,7 @@ async def test_execute_yields_stream_complete_as_last_event() -> None:
             events.append(event)
 
         # Must have at least one event (StreamCompleteEvent)
-        assert len(events) >= 1, (
-            f"Expected at least 1 event, got {len(events)}"
-        )
+        assert len(events) >= 1, f"Expected at least 1 event, got {len(events)}"
 
         # Last event must be StreamCompleteEvent
         assert isinstance(events[-1], StreamCompleteEvent), (
@@ -338,17 +338,13 @@ async def test_execute_yields_stream_complete_as_last_event() -> None:
         )
 
         # StreamCompleteEvent must have a non-None message
-        assert events[-1].message is not None, (
-            "StreamCompleteEvent.message must not be None"
-        )
+        assert events[-1].message is not None, "StreamCompleteEvent.message must not be None"
         assert "final response" in events[-1].message.content, (
             f"Expected 'final response' in message, got {events[-1].message.content!r}"
         )
 
         # Must have exactly one StreamCompleteEvent
-        stream_complete_count = sum(
-            1 for e in events if isinstance(e, StreamCompleteEvent)
-        )
+        stream_complete_count = sum(1 for e in events if isinstance(e, StreamCompleteEvent))
         assert stream_complete_count == 1, (
             f"Expected exactly one StreamCompleteEvent, got {stream_complete_count}"
         )

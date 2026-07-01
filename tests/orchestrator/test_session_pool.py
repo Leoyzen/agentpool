@@ -295,7 +295,9 @@ async def test_cache_append_message_invalidates_cache(
     await session_pool.sessions.get_or_create_session("sess-1", agent_name="agent-a")
     original = ChatMessage(content="original", role="user", session_id="sess-1")
     updated = ChatMessage(content="updated", role="assistant", session_id="sess-1")
-    mock_pool.storage.get_session_messages = AsyncMock(side_effect=[[original], [original, updated]])
+    mock_pool.storage.get_session_messages = AsyncMock(
+        side_effect=[[original], [original, updated]]
+    )
 
     first = await session_pool.get_messages("sess-1")
     assert first == [original]
@@ -338,7 +340,9 @@ async def test_cache_copy_messages_invalidates_target_cache(
     await session_pool.sessions.get_or_create_session("sess-2", agent_name="agent-a")
     target_before = ChatMessage(content="before", role="user", session_id="sess-2")
     target_after = ChatMessage(content="after", role="user", session_id="sess-2")
-    mock_pool.storage.get_session_messages = AsyncMock(side_effect=[[target_before], [target_after]])
+    mock_pool.storage.get_session_messages = AsyncMock(
+        side_effect=[[target_before], [target_after]]
+    )
 
     first = await session_pool.get_messages("sess-2")
     assert first == [target_before]
@@ -455,6 +459,8 @@ async def test_process_prompt_flag_on_delegates_to_run_handle(
     await session_pool.process_prompt("sess-pp-1", "test prompt")
 
     mock_run.start.assert_called_once_with("test prompt")
+
+
 # === run_stream ===
 
 
@@ -485,6 +491,8 @@ async def test_run_stream_flag_on_delegates_to_run_handle(
 
     assert events == ["event1", "event2"]
     mock_run.start.assert_called_once_with("prompt")
+
+
 # === inject_prompt ===
 
 
@@ -520,6 +528,8 @@ async def test_inject_prompt_flag_on_no_run_returns_false(
     result = await session_pool.inject_prompt("sess-ip-2", "message")
 
     assert result is False
+
+
 # === queue_prompt ===
 
 
@@ -555,6 +565,8 @@ async def test_queue_prompt_flag_on_no_run_returns_false(
     result = await session_pool.queue_prompt("sess-qp-2", "message")
 
     assert result is False
+
+
 # === steer ===
 
 
@@ -590,6 +602,8 @@ async def test_steer_flag_on_no_run_returns_false(
     result = await session_pool.steer("sess-st-2", "message")
 
     assert result is False
+
+
 # === followup ===
 
 
@@ -625,6 +639,8 @@ async def test_followup_flag_on_no_run_returns_false(
     result = await session_pool.followup("sess-fu-2", "message")
 
     assert result is False
+
+
 # === Helpers ===
 
 

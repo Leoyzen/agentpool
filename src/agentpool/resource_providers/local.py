@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import mimetypes
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Self
 
 from cachetools import TTLCache
 from upathtools import UPath
@@ -15,14 +15,16 @@ from agentpool.skills.exceptions import (
     SkillNotFoundError,
 )
 from agentpool.skills.registry import SkillsRegistry
-from agentpool.skills.skill import Skill
 
 
 if TYPE_CHECKING:
+    import asyncio
     from types import TracebackType
 
     from pydantic_ai.capabilities import AbstractCapability
     from upathtools import JoinablePathLike
+
+    from agentpool.skills.skill import Skill
 
 
 class LocalResourceProvider(ResourceProvider):
@@ -61,8 +63,9 @@ class LocalResourceProvider(ResourceProvider):
         self._registry = SkillsRegistry(skills_dirs=self.skills_dirs)
         self._cache: TTLCache[str, Skill] = TTLCache(maxsize=1000, ttl=cache_ttl)
         self._cache_valid = False
+        self._pending_emit_tasks: set[asyncio.Task[None]] = set()
 
-    async def __aenter__(self) -> LocalResourceProvider:
+    async def __aenter__(self) -> Self:
         """Async context entry - discover skills and connect callbacks.
 
         Returns:
@@ -125,10 +128,11 @@ class LocalResourceProvider(ResourceProvider):
         try:
             skill = self._registry.get(name)
             self._cache[name] = skill
-            return skill
         except Exception as e:
             available = list(self._registry.keys())
             raise SkillNotFoundError(name, available) from e
+        else:
+            return skill
 
     async def get_skill_instructions(
         self, skill_name: str, arguments: dict[str, str] | None = None
@@ -148,7 +152,7 @@ class LocalResourceProvider(ResourceProvider):
         skill = await self.get_skill(skill_name)
         return skill.load_instructions()
 
-    async def get_references(self, skill_name: str) -> list[str]:
+    async def get_references(self, skill_name: str) -> list[str | dict[str, Any]]:
         """List reference files available for a skill.
 
         Args:
@@ -163,6 +167,9 @@ class LocalResourceProvider(ResourceProvider):
         skill = await self.get_skill(skill_name)
         references_dir = skill.skill_path / "references"
 
+        if not isinstance(references_dir, UPath):
+            return []
+
         if not references_dir.exists():
             return []
 
@@ -174,7 +181,7 @@ class LocalResourceProvider(ResourceProvider):
                 rel_path = item.relative_to(references_dir)
                 refs.append(str(rel_path))
 
-        return sorted(refs)
+        return sorted(refs)  # type: ignore[return-value]
 
     async def read_reference(self, skill_name: str, ref_path: str) -> tuple[bytes, str]:
         """Read a reference file for a skill.
@@ -194,7 +201,7 @@ class LocalResourceProvider(ResourceProvider):
         skill = await self.get_skill(skill_name)
         references_dir = skill.skill_path / "references"
 
-        if not references_dir.exists():
+        if not isinstance(references_dir, UPath) or not references_dir.exists():
             raise ReferenceNotFoundError(ref_path)
 
         # Validate ref_path to prevent directory traversal
@@ -261,7 +268,9 @@ class LocalResourceProvider(ResourceProvider):
             event = self.create_change_event("skills")
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(self.skills_changed.emit(event))
+                task = loop.create_task(self.skills_changed.emit(event))
+                self._pending_emit_tasks.add(task)
+                task.add_done_callback(self._pending_emit_tasks.discard)
             except RuntimeError:
                 # No running loop - can't emit signal
                 pass
@@ -274,7 +283,9 @@ class LocalResourceProvider(ResourceProvider):
             event = self.create_change_event("skills")
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(self.skills_changed.emit(event))
+                task = loop.create_task(self.skills_changed.emit(event))
+                self._pending_emit_tasks.add(task)
+                task.add_done_callback(self._pending_emit_tasks.discard)
             except RuntimeError:
                 # No running loop - can't emit signal
                 pass

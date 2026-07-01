@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from anyenv.process_manager.models import ProcessOutput
 from exxec import MockExecutionEnvironment
 from exxec.models import ExecutionResult
@@ -12,10 +10,6 @@ import pytest
 from agentpool import Agent, AgentContext
 from agentpool.agents.context import AgentRunContext
 from agentpool_toolsets.builtin.execution_environment import ProcessManagementTools
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 @pytest.fixture
@@ -95,7 +89,6 @@ async def test_start_process(
     assert "echo" in result
 
 
-
 async def test_get_process_output(
     execution_tools: ProcessManagementTools,
     mock_env: MockExecutionEnvironment,
@@ -117,7 +110,6 @@ async def test_get_process_output(
     # Tools now return formatted strings
     assert isinstance(result, str)
     assert "hello world" in result
-
 
 
 async def test_kill_process(
@@ -144,7 +136,6 @@ async def test_kill_process(
     assert "terminated" in result.lower()
 
 
-
 async def test_wait_for_process(
     execution_tools: ProcessManagementTools,
     mock_env: MockExecutionEnvironment,
@@ -166,7 +157,6 @@ async def test_wait_for_process(
     # Tools now return formatted strings
     assert isinstance(result, str)
     assert "hello world" in result  # The mock returns "hello world\n"
-
 
 
 async def test_release_process(
@@ -195,7 +185,6 @@ async def test_release_process(
     # Verify process is no longer tracked
     processes = await mock_env.process_manager.list_processes()
     assert process_id not in processes
-
 
 
 async def test_list_processes(
@@ -238,7 +227,6 @@ async def test_execute_command(
     # Tools now return formatted strings
     assert isinstance(result, str)
     assert "hello world" in result
-
 
 
 async def test_process_not_found(

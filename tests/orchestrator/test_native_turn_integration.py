@@ -31,7 +31,6 @@ import pytest
 from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events.events import (
-    RunErrorEvent,
     StreamCompleteEvent,
 )
 from agentpool.agents.native_agent.turn import NativeTurn
@@ -117,11 +116,7 @@ async def test_native_turn_events_reach_event_bus_consumer() -> None:
                     except anyio.EndOfStream:
                         break
 
-                    event = (
-                        envelope.event
-                        if hasattr(envelope, "event")
-                        else envelope
-                    )
+                    event = envelope.event if hasattr(envelope, "event") else envelope
                     received_events.append(event)
 
                     if isinstance(event, StreamCompleteEvent):
@@ -209,9 +204,7 @@ async def test_undrained_pending_yields_stream_complete() -> None:
     async with agent:
         mock_agentlet = MagicMock()
         mock_run = AsyncMock()
-        mock_run.__aenter__ = AsyncMock(
-            side_effect=UndrainedPendingMessagesError("undrained")
-        )
+        mock_run.__aenter__ = AsyncMock(side_effect=UndrainedPendingMessagesError("undrained"))
         mock_run.__aexit__ = AsyncMock(return_value=None)
         mock_agentlet.iter = MagicMock(return_value=mock_run)
 

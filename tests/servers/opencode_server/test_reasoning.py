@@ -1,6 +1,5 @@
 """Tests for reasoning/thinking part behavior in OpenCode stream adapter."""
 
-from typing import cast
 from unittest.mock import MagicMock
 
 from pydantic_ai.messages import (
@@ -302,7 +301,8 @@ async def test_reasoning_part_gets_end_time_when_text_starts():
 
     # The reasoning part should have been updated with an end time
     reasoning_final_events = [
-        e for e in events
+        e
+        for e in events
         if isinstance(e, PartUpdatedEvent)
         and isinstance(e.properties, PartUpdatedEventProperties)
         and isinstance(e.properties.part, ReasoningPart)
@@ -350,12 +350,14 @@ async def test_reasoning_part_gets_end_time_on_stream_complete():
     # Stream completes without any text starting
     # Simulate what happens when _process_stream_complete is called
     from agentpool.messaging import ChatMessage
+
     chat_msg = ChatMessage(content="", role="assistant")
     events.extend(list(adapter.processor._process_stream_complete(adapter.main_context, chat_msg)))
 
     # The reasoning part should have been finalized with an end time
     reasoning_final_events = [
-        e for e in events
+        e
+        for e in events
         if isinstance(e, PartUpdatedEvent)
         and isinstance(e.properties, PartUpdatedEventProperties)
         and isinstance(e.properties.part, ReasoningPart)

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
 from pydantic import ValidationError
+import pytest
 
-from agentpool_config.skill_commands import SkillSlashConfig, SkillCommandConfig
+from agentpool_config.skill_commands import SkillCommandConfig, SkillSlashConfig
 
 
 class TestSkillSlashConfig:

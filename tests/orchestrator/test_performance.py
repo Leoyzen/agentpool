@@ -10,25 +10,25 @@ from __future__ import annotations
 import asyncio
 import gc
 import time
-from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
+import anyio
 import pytest
 
-from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
 from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventBus, SessionController, SessionPool
+from agentpool.orchestrator.core import EventBus, SessionPool
 from agentpool.orchestrator.metrics import MetricsCollector
-import anyio
 
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 # ============================================================================
 # Fixtures
 # ============================================================================
-
 
 
 def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
@@ -40,6 +40,7 @@ def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
         return True
     except anyio.EndOfStream:
         return True
+
 
 @pytest.fixture
 def mock_pool() -> MagicMock:
@@ -210,9 +211,7 @@ async def test_benchmark_turn_latency_under_load(
 
         # Run turns concurrently
         start = time.perf_counter()
-        await asyncio.gather(
-            *[session_pool.process_prompt(sid, "hello") for sid in sids]
-        )
+        await asyncio.gather(*[session_pool.process_prompt(sid, "hello") for sid in sids])
         total_time = time.perf_counter() - start
 
         # Collect events to ensure completion
@@ -275,9 +274,7 @@ async def test_benchmark_turn_latency_serial_vs_concurrent(
 
     # Concurrent execution
     concurrent_start = time.monotonic()
-    await asyncio.gather(
-        *[session_pool.process_prompt(sid, "hello") for sid in sids]
-    )
+    await asyncio.gather(*[session_pool.process_prompt(sid, "hello") for sid in sids])
     concurrent_time = time.monotonic() - concurrent_start
 
     speedup = serial_time / concurrent_time
@@ -417,9 +414,7 @@ async def test_benchmark_event_throughput_scaling() -> None:
 
     # With many subscribers, total deliveries should remain healthy
     fifty_total = results["50_subscribers"]["total_deliveries_per_second"]
-    assert fifty_total > 100000, (
-        f"Total throughput with 50 subscribers too low: {fifty_total:.0f}"
-    )
+    assert fifty_total > 100000, f"Total throughput with 50 subscribers too low: {fifty_total:.0f}"
 
 
 # ============================================================================
@@ -677,5 +672,3 @@ async def test_event_bus_high_throughput_publish() -> None:
     await event_bus.close_session(session_id)
     for q in queues:
         assert q.qsize() <= 1000
-
-

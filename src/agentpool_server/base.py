@@ -59,7 +59,7 @@ class BaseServer:
         self.task_manager = TaskManager()
         self._server_task: asyncio.Task[None] | None = None
         self._shutdown_event = asyncio.Event()
-        self._task_group: anyio.TaskGroup | None = None
+        self._task_group: anyio.abc.TaskGroup | None = None
         self.log = logger.bind(server_name=self.name)
 
     async def __aenter__(self) -> Self:
@@ -108,7 +108,6 @@ class BaseServer:
                 self.log.exception("Server error", exc_info=e)
             finally:
                 await self.shutdown()
-                self._task_group = None
 
     async def shutdown(self) -> None:
         """Shutdown server resources.

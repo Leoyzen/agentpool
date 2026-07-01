@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -66,7 +66,7 @@ def test_get_source_type_teamrun() -> None:
 def test_get_source_type_unknown_subclass_defaults_to_agent() -> None:
     """Unknown MessageNode subclasses should default to 'agent' with a warning."""
     stub = StubMessageNode(name="stub")
-    with patch("agentpool.messaging.messagenode.logger") as mock_logger:
+    with patch("agentpool.messaging.messagenode.logger"):
         result = get_source_type(stub)
     assert result == "agent"
     # No warning for valid MessageNode subclass — it's just not Team/BaseTeam

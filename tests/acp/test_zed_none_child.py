@@ -9,9 +9,9 @@ Ref: ``src/agentpool_server/acp_server/event_converter.py:690-693``
 
 from __future__ import annotations
 
-import pytest
 from pydantic_ai import PartStartEvent, TextPart, TextPartDelta, ThinkingPart
 from pydantic_ai.usage import RequestUsage
+import pytest
 
 from agentpool.agents.events import (
     PartDeltaEvent,
@@ -20,8 +20,8 @@ from agentpool.agents.events import (
     StreamCompleteEvent,
     SubAgentEvent,
 )
-from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool.messaging.messages import ChatMessage
+from agentpool_server.acp_server.event_converter import ACPEventConverter
 
 
 # ---------------------------------------------------------------------------

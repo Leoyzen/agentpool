@@ -7,10 +7,10 @@ has skill commands configured.
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from upathtools import UPath
 
 from agentpool.skills.command import SkillCommand
 from agentpool.skills.command_registry import SkillCommandRegistry
@@ -20,8 +20,6 @@ from agentpool_server.acp_server.commands.skill_commands import ACPSkillBridge
 from agentpool_server.agui_server.server import AGUIServer
 from agentpool_server.agui_server.skill_tools import AGUISkillBridge
 from agentpool_server.opencode_server.server import create_app
-from agentpool_server.opencode_server.skill_bridge import OpenCodeSkillBridge
-from upathtools import UPath
 
 
 @pytest.fixture
@@ -221,7 +219,7 @@ class TestOpenCodeBridgeAutoEnable:
             mock_state_cls.return_value = mock_state
 
             with patch("agentpool_server.opencode_server.state.LSPManager"):
-                app = create_app(agent=mock_agent_with_pool)
+                create_app(agent=mock_agent_with_pool)
 
         # Verify bridge was set up
         mock_logger.debug.assert_called_once()
@@ -257,7 +255,7 @@ class TestOpenCodeBridgeAutoEnable:
             mock_state_cls.return_value = mock_state
 
             with patch("agentpool_server.opencode_server.state.LSPManager"):
-                app = create_app(agent=mock_agent_no_skills)
+                create_app(agent=mock_agent_no_skills)
 
         # Verify no bridge setup log was made
         for call in mock_logger.debug.call_args_list:

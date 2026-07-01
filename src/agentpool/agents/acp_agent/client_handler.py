@@ -34,6 +34,9 @@ if TYPE_CHECKING:
     from acp.schema import (
         AvailableCommand,
         CreateTerminalRequest,
+        ElicitationCompleteNotification,
+        ElicitationCreateRequest,
+        ElicitationCreateResponse,
         KillTerminalCommandRequest,
         ReadTextFileRequest,
         ReleaseTerminalRequest,
@@ -420,6 +423,20 @@ class ACPClientHandler(Client):
                 )
             case _:
                 logger.debug("Unhandled extension notification", method=method)
+
+    async def elicitation_create(
+        self, params: ElicitationCreateRequest
+    ) -> ElicitationCreateResponse:
+        """Handle elicitation creation requests."""
+        raise NotImplementedError("elicitation_create not implemented")
+
+    async def elicitation_complete(self, params: ElicitationCompleteNotification) -> None:
+        """Handle elicitation completion notifications."""
+        raise NotImplementedError("elicitation_complete not implemented")
+
+    async def send_request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Send a raw request via extension method."""
+        return await self.ext_method(method, params)
 
     def _populate_command_store(self, commands: Sequence[AvailableCommand]) -> None:
         """Populate the agent's command store with remote ACP commands.

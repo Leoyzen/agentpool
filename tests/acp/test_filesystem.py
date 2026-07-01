@@ -103,9 +103,7 @@ def mock_session():
 def acp_fs(mock_session):
     """Create ACP filesystem instance."""
     caps = ClientCapabilities(terminal=True)
-    return ACPFileSystem(
-        mock_session.client, mock_session.session_id, client_capabilities=caps
-    )
+    return ACPFileSystem(mock_session.client, mock_session.session_id, client_capabilities=caps)
 
 
 async def test_cat_file(acp_fs: ACPFileSystem):
@@ -200,9 +198,7 @@ def test_open(acp_fs: ACPFileSystem):
 def acp_fs_no_terminal(mock_session):
     """Create ACP filesystem with terminal capability disabled."""
     caps = ClientCapabilities(terminal=False)
-    return ACPFileSystem(
-        mock_session.client, mock_session.session_id, client_capabilities=caps
-    )
+    return ACPFileSystem(mock_session.client, mock_session.session_id, client_capabilities=caps)
 
 
 async def test_exists_no_terminal_uses_read_fallback(acp_fs_no_terminal: ACPFileSystem):

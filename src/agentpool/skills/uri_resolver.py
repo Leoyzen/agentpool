@@ -49,7 +49,8 @@ class ResolvedSkillURI:
         ResolvedSkillURI(provider='local', skill_name='python-expert', reference_path=None)
 
         >>> ResolvedSkillURI.parse("skill://local/python-expert/references/guide.md")
-        ResolvedSkillURI(provider='local', skill_name='python-expert', reference_path='references/guide.md')
+        ResolvedSkillURI(provider='local', skill_name='python-expert',
+        reference_path='references/guide.md')
 
         >>> ResolvedSkillURI.parse("python-expert")
         ResolvedSkillURI(provider=None, skill_name='python-expert', reference_path=None)
@@ -143,10 +144,11 @@ class ResolvedSkillURI:
 
         # Validate reference path components if present
         # Reject absolute paths (starting with /) for defense-in-depth
-        if reference_path is not None:
-            if ".." in reference_path.split("/") or reference_path.startswith("/"):
-                msg = f"Path traversal detected in reference path: {uri!r}"
-                raise SecurityError(msg)
+        if reference_path is not None and (
+            ".." in reference_path.split("/") or reference_path.startswith("/")
+        ):
+            msg = f"Path traversal detected in reference path: {uri!r}"
+            raise SecurityError(msg)
 
         return cls(provider=provider, skill_name=skill_name, reference_path=reference_path)
 
@@ -323,6 +325,45 @@ class SkillURIResolver:
         validated_name = _validate_provider_name(name)
         self._providers.pop(validated_name, None)
 
+    async def _find_skill_in_providers(
+        self, skill_name: str, ref_path: str | None = None
+    ) -> Skill | None:
+        """Search all providers for a skill by name.
+
+        Args:
+            skill_name: The skill name to search for.
+            ref_path: Optional reference path to store on the skill if found.
+
+        Returns:
+            The matching Skill or None if not found.
+        """
+        for provider in self._providers.values():
+            skills = await provider.get_skills()
+            for skill in skills:
+                if skill.name == skill_name:
+                    if ref_path is not None:
+                        skill._resolved_reference_path = ref_path  # type: ignore[attr-defined]
+                    return skill
+        return None
+
+    async def _find_skill_with_alternatives(self, skill_name: str) -> Skill | None:
+        """Search all providers for a skill, trying name alternatives.
+
+        Args:
+            skill_name: The skill name to search for.
+
+        Returns:
+            The matching Skill or None if not found.
+        """
+        skill = await self._find_skill_in_providers(skill_name)
+        if skill is not None:
+            return skill
+        for alt_name in _name_alternatives(skill_name):
+            skill = await self._find_skill_in_providers(alt_name)
+            if skill is not None:
+                return skill
+        return None
+
     async def resolve(self, uri: str) -> Skill:
         """Resolve a skill URI to a Skill instance.
 
@@ -344,20 +385,11 @@ class SkillURIResolver:
         """
         resolved = ResolvedSkillURI.parse(uri)
 
-        # If no provider specified, we need to search all providers
+        # If no provider specified, search all providers
         if resolved.provider is None:
-            for provider in self._providers.values():
-                skills = await provider.get_skills()
-                for skill in skills:
-                    if skill.name == resolved.skill_name:
-                        return skill
-            # Fuzzy match: try swapping - and _ in the skill name
-            for alt_name in _name_alternatives(resolved.skill_name):
-                for provider in self._providers.values():
-                    skills = await provider.get_skills()
-                    for skill in skills:
-                        if skill.name == alt_name:
-                            return skill
+            skill = await self._find_skill_with_alternatives(resolved.skill_name)
+            if skill is not None:
+                return skill
             msg = f"Skill {resolved.skill_name!r} not found in any provider"
             raise SkillNotFoundError(msg)
 
@@ -374,37 +406,25 @@ class SkillURIResolver:
             )
 
             # Search all providers for this skill
-            for provider in self._providers.values():
-                skills = await provider.get_skills()
-                for skill in skills:
-                    if skill.name == potential_skill_name:
-                        # Found the skill - return it with adjusted reference path
-                        # Store the resolved reference path in the skill's metadata
-                        # for later use by _load_reference_content
-                        skill._resolved_reference_path = potential_ref_path  # type: ignore[attr-defined]
-                        return skill
+            skill = await self._find_skill_in_providers(
+                potential_skill_name, ref_path=potential_ref_path
+            )
+            if skill is not None:
+                return skill
 
             # Fallback: maybe the skill_name is actually the skill and reference is combined
             # This handles: skill://skill-name/subdir/file.md (no "references" prefix)
-            potential_skill_name2 = resolved.provider
-            potential_ref_path2 = (
-                (
+            if resolved.skill_name:
+                potential_ref_path2 = (
                     f"{resolved.skill_name}/{resolved.reference_path}"
                     if resolved.reference_path
                     else resolved.skill_name
                 )
-                if resolved.skill_name
-                else None
-            )
-
-            if potential_ref_path2:
-                for provider in self._providers.values():
-                    skills = await provider.get_skills()
-                    for skill in skills:
-                        if skill.name == potential_skill_name2:
-                            skill._resolved_reference_path = potential_ref_path2  # type: ignore[attr-defined]
-                            return skill
-                            return skill
+                skill = await self._find_skill_in_providers(
+                    potential_skill_name, ref_path=potential_ref_path2
+                )
+                if skill is not None:
+                    return skill
 
             msg = f"Provider {resolved.provider!r} not registered"
             raise ValueError(msg)

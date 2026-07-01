@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
-import pytest
 from pydantic_ai.models.test import TestModel
-
-from pydantic_ai.messages import ModelMessage
+import pytest
 
 from agentpool.agents.base_agent import BaseAgent, _current_run_ctx_var
 from agentpool.agents.context import AgentRunContext
 from agentpool.orchestrator.core import SessionState
-from agentpool.orchestrator.turn import Turn
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from pydantic_ai.messages import ModelMessage
+
+    from agentpool.orchestrator.turn import Turn
 
 
 # ---------------------------------------------------------------------------

@@ -6,10 +6,9 @@ fix, the event consumer is NOT stopped before cancel — it must stay
 alive to deliver the RunFailedEvent (stop_reason="cancelled") to the
 client.
 """
+
 from __future__ import annotations
 
-import asyncio
-import contextlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -106,9 +105,7 @@ async def test_cancel_session_handles_no_running_consumer(
     await acp_handler.cancel_session(session_id)
 
     # Verify cancel_run_for_session was still called
-    mock_pool.session_pool.sessions.cancel_run_for_session.assert_called_once_with(
-        session_id
-    )
+    mock_pool.session_pool.sessions.cancel_run_for_session.assert_called_once_with(session_id)
 
 
 @pytest.mark.anyio

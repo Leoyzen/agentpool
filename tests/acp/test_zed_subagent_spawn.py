@@ -11,17 +11,20 @@ from __future__ import annotations
 from typing import Any
 import uuid
 
-import anyio
-import pytest
 from pydantic_ai.models.test import TestModel
+import pytest
 
+from acp.schema import ToolCallStart
 from agentpool import Agent
-from agentpool.agents.context import AgentContext, AgentRunContext, MAX_SUBAGENT_DEPTH, SubagentDepthError
+from agentpool.agents.context import (
+    MAX_SUBAGENT_DEPTH,
+    AgentContext,
+    AgentRunContext,
+    SubagentDepthError,
+)
 from agentpool.agents.events import SpawnSessionStart
 from agentpool.orchestrator.core import EventBus
 from agentpool_server.acp_server.event_converter import ACPEventConverter
-
-from acp.schema import ToolCallStart
 
 
 # ---------------------------------------------------------------------------
@@ -90,9 +93,7 @@ class TestZedModeSpawnSessionStart:
         assert str(parsed) == tcs.tool_call_id
 
     @pytest.mark.unit
-    async def test_title_is_task_and_status_pending(
-        self, zed_converter: ACPEventConverter
-    ):
+    async def test_title_is_task_and_status_pending(self, zed_converter: ACPEventConverter):
         """ToolCallStart must have title='coder: Coding subagent' and status='pending'."""
         event = _make_spawn_event()
         updates = await _collect(zed_converter, event)
@@ -102,9 +103,7 @@ class TestZedModeSpawnSessionStart:
         assert tcs.status == "pending"
 
     @pytest.mark.unit
-    async def test_field_meta_session_id_matches_child(
-        self, zed_converter: ACPEventConverter
-    ):
+    async def test_field_meta_session_id_matches_child(self, zed_converter: ACPEventConverter):
         """field_meta.subagent_session_info.session_id must match child_session_id."""
         child_id = "child_ses_001"
         event = _make_spawn_event(child_session_id=child_id)
@@ -116,9 +115,7 @@ class TestZedModeSpawnSessionStart:
         assert sub_info.get("session_id") == child_id
 
     @pytest.mark.unit
-    async def test_field_meta_message_start_index_is_zero(
-        self, zed_converter: ACPEventConverter
-    ):
+    async def test_field_meta_message_start_index_is_zero(self, zed_converter: ACPEventConverter):
         """field_meta.subagent_session_info.message_start_index must be 0."""
         event = _make_spawn_event()
         updates = await _collect(zed_converter, event)
@@ -129,9 +126,7 @@ class TestZedModeSpawnSessionStart:
         assert sub_info.get("message_start_index") == 0
 
     @pytest.mark.unit
-    async def test_field_meta_has_tool_name_task(
-        self, zed_converter: ACPEventConverter
-    ):
+    async def test_field_meta_has_tool_name_task(self, zed_converter: ACPEventConverter):
         """field_meta must include tool_name='task'."""
         event = _make_spawn_event()
         updates = await _collect(zed_converter, event)
@@ -152,6 +147,7 @@ class TestZedModeSpawnSessionStart:
 
         assert len(updates) == 1
         assert not isinstance(updates[0], ToolCallStart)
+
 
 # ---------------------------------------------------------------------------
 # Multiple spawns
@@ -308,5 +304,3 @@ def test_team_py_uses_yield_spawn_pattern() -> None:
     assert "create_child_session" not in source, (
         "team.py must NOT call create_child_session — it uses the yield pattern"
     )
-
-

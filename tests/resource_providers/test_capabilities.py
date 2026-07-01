@@ -11,7 +11,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any, cast
 from unittest.mock import MagicMock
 
-import pytest
 from pydantic_ai import RunContext
 from pydantic_ai.capabilities import Hooks, Toolset
 from pydantic_ai.toolsets import (
@@ -20,6 +19,7 @@ from pydantic_ai.toolsets import (
     CombinedToolset,
     FunctionToolset,
 )
+import pytest
 
 from agentpool.resource_providers import StaticResourceProvider
 from agentpool.resource_providers.base import ResourceProvider
@@ -72,9 +72,7 @@ class TestConfirmationToolsetMapping:
         class NormalProvider(StaticResourceProvider):
             def __init__(self) -> None:
                 super().__init__(name="normal")
-                self._tools = [
-                    self.create_tool(lambda x: x, name_override="identity")
-                ]
+                self._tools = [self.create_tool(lambda x: x, name_override="identity")]
 
         provider = NormalProvider()
         cap = cast(Toolset[Any], provider.as_capability())
@@ -172,7 +170,8 @@ class TestConfirmationToolsetMapping:
         tool = tools["delete_file"]
         assert tool.tool_def.name == "delete_file"
         desc = tool.tool_def.description
-        assert desc is not None and "Delete a file" in desc
+        assert desc is not None
+        assert "Delete a file" in desc
 
     async def test_requires_confirmation_attribute_unchanged(self) -> None:
         """Tool.requires_confirmation is not mutated during capability conversion."""

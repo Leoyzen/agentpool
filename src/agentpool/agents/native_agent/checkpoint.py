@@ -10,11 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai.messages import ModelMessage
-
 from agentpool.agents.events.events import ToolCallDeferredEvent
 from agentpool.log import get_logger
-from agentpool.sessions.models import PendingDeferredCall
 from agentpool.storage.serialization import (
     deferred_calls_adapter,
     messages_adapter,
@@ -22,6 +19,9 @@ from agentpool.storage.serialization import (
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.messages import ModelMessage
+
+    from agentpool.sessions.models import PendingDeferredCall
     from agentpool.storage.manager import StorageManager
 
 logger = get_logger(__name__)

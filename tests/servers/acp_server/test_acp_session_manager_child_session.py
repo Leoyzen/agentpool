@@ -5,8 +5,6 @@ from __future__ import annotations
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from agentpool import Agent
 from agentpool.delegation import AgentPool
 from agentpool.orchestrator.core import SessionPool
@@ -18,7 +16,6 @@ from agentpool_server.acp_server.session_manager import ACPSessionManager
 def _make_pool_with_sessions() -> tuple[AgentPool, Agent, SessionPool, MemorySessionStore]:
     """Create a pool with a real SessionPool backed by MemorySessionStore."""
     from agentpool.models.agents import NativeAgentConfig
-
     from agentpool.models.manifest import AgentsManifest
 
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
@@ -59,8 +56,9 @@ def _make_acp_session_manager(pool: AgentPool) -> ACPSessionManager:
 
 async def test_top_level_session_has_no_parent():
     """Top-level ACP session (no parent_session_id) should have parent_id=None
-    and a computed project_id."""
-    pool, agent, sessions, store = _make_pool_with_sessions()
+    and a computed project_id.
+    """
+    pool, agent, _sessions, store = _make_pool_with_sessions()
 
     manager = ACPSessionManager(pool=pool)
     mock_client = MagicMock()
@@ -93,8 +91,9 @@ async def test_top_level_session_has_no_parent():
 
 async def test_child_session_inherits_parent_project_id():
     """Child ACP session (with parent_session_id) should inherit
-    project_id and cwd from the parent session."""
-    pool, agent, sessions, store = _make_pool_with_sessions()
+    project_id and cwd from the parent session.
+    """
+    pool, agent, _sessions, store = _make_pool_with_sessions()
 
     # Create a parent session in the store first
     from agentpool_storage.opencode_provider.helpers import compute_project_id
@@ -146,8 +145,9 @@ async def test_child_session_inherits_parent_project_id():
 
 async def test_child_session_uses_effective_cwd_for_acp_session():
     """When creating a child ACP session, the ACPSession object should
-    receive the inherited cwd, not the caller-provided cwd."""
-    pool, agent, sessions, store = _make_pool_with_sessions()
+    receive the inherited cwd, not the caller-provided cwd.
+    """
+    pool, agent, _sessions, store = _make_pool_with_sessions()
 
     parent_cwd = tempfile.gettempdir()
     from agentpool_storage.opencode_provider.helpers import compute_project_id
@@ -185,13 +185,16 @@ async def test_child_session_uses_effective_cwd_for_acp_session():
 
         # Verify ACPSession was constructed with the inherited cwd
         call_kwargs = MockSession.call_args
-        assert call_kwargs.kwargs.get("cwd") == parent_cwd or call_kwargs[1].get("cwd") == parent_cwd
+        assert (
+            call_kwargs.kwargs.get("cwd") == parent_cwd or call_kwargs[1].get("cwd") == parent_cwd
+        )
 
 
 async def test_no_parent_session_id_preserves_existing_behavior():
     """When parent_session_id is None, the existing top-level behavior
-    (compute project_id from cwd, direct SessionData save) is preserved."""
-    pool, agent, sessions, store = _make_pool_with_sessions()
+    (compute project_id from cwd, direct SessionData save) is preserved.
+    """
+    pool, agent, _sessions, store = _make_pool_with_sessions()
 
     manager = ACPSessionManager(pool=pool)
     mock_client = MagicMock()
@@ -226,9 +229,9 @@ async def test_no_parent_session_id_preserves_existing_behavior():
 
 async def test_child_session_without_pool_sessions_falls_back_to_top_level():
     """When pool.sessions is None but parent_session_id is provided,
-    should fall back to top-level behavior."""
+    should fall back to top-level behavior.
+    """
     from agentpool.models.agents import NativeAgentConfig
-
     from agentpool.models.manifest import AgentsManifest
 
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
@@ -293,7 +296,7 @@ async def test_get_session_returns_session_when_not_yet_in_controller():
     it returns None, causing create_task(session.send_available_commands_update())
     to be skipped — so available_commands_update is never sent.
     """
-    pool, agent, sessions, store = _make_pool_with_sessions()
+    pool, _agent, _sessions, _store = _make_pool_with_sessions()
     manager = ACPSessionManager(pool=pool)
 
     session_id = "sess-get-session-001"
@@ -325,20 +328,20 @@ async def test_get_session_returns_session_when_not_yet_in_controller():
 
 async def test_get_session_returns_none_when_not_in_either():
     """get_session() should return None when session is in neither
-    _session_controller nor _acp_sessions."""
-    pool, agent, sessions, store = _make_pool_with_sessions()
+    _session_controller nor _acp_sessions.
+    """
+    pool, _agent, _sessions, _store = _make_pool_with_sessions()
     manager = ACPSessionManager(pool=pool)
 
     result = manager.get_session("nonexistent-session")
-    assert result is None, (
-        "get_session() should return None for a session that doesn't exist"
-    )
+    assert result is None, "get_session() should return None for a session that doesn't exist"
 
 
 async def test_get_session_returns_session_when_in_both():
     """get_session() should return the session when it exists in both
-    _session_controller and _acp_sessions."""
-    pool, agent, sessions, store = _make_pool_with_sessions()
+    _session_controller and _acp_sessions.
+    """
+    pool, agent, sessions, _store = _make_pool_with_sessions()
     manager = ACPSessionManager(pool=pool)
 
     session_id = "sess-in-both-001"

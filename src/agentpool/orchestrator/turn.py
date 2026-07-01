@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+    from typing import Any
+
     from pydantic_ai.messages import ModelMessage
 
     from agentpool.agents.events.events import RichAgentStreamEvent
@@ -28,11 +30,11 @@ class Turn(ABC):
     _message_history: list[ModelMessage] | None = None
     """Message history populated after execute() completes."""
 
-    _final_message: ChatMessage | None = None
+    _final_message: ChatMessage[Any] | None = None
     """Final message populated after execute() completes."""
 
     @abstractmethod
-    async def execute(self) -> AsyncGenerator[RichAgentStreamEvent]:
+    def execute(self) -> AsyncGenerator[RichAgentStreamEvent[Any]]:
         """Execute one reactive cycle of agent interaction.
 
         Yields stream events during execution (text deltas, tool calls,
@@ -56,7 +58,7 @@ class Turn(ABC):
         return self._message_history
 
     @property
-    def final_message(self) -> ChatMessage:
+    def final_message(self) -> ChatMessage[Any]:
         """Return the final chat message after execute() completes.
 
         Returns:

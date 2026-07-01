@@ -7,7 +7,6 @@ state, enabling stateless recursive processing.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import FunctionToolCallEvent
@@ -38,9 +37,6 @@ from agentpool.utils import identifiers as identifier
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.converters import _convert_params_for_ui
-from agentpool_server.opencode_server.event_processor_context import (
-    EventProcessorContext,
-)
 from agentpool_server.opencode_server.models import (
     PartDeltaEvent,
     PartUpdatedEvent,
@@ -64,11 +60,14 @@ from agentpool_server.opencode_server.models.parts import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import AsyncIterator, Iterator, Sequence
 
     from agentpool.agents.events import ToolCallContentItem
     from agentpool.agents.events.events import RichAgentStreamEvent
     from agentpool.messaging import ChatMessage
+    from agentpool_server.opencode_server.event_processor_context import (
+        EventProcessorContext,
+    )
     from agentpool_server.opencode_server.models.events import Event
     from agentpool_server.opencode_server.models.parts import ToolState
 

@@ -5,8 +5,9 @@ One auto-resume failure MUST NOT cancel sibling auto-resume tasks.
 
 from __future__ import annotations
 
-import anyio
 import asyncio
+
+import anyio
 import pytest
 
 

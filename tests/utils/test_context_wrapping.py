@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, Mock
 
 from pydantic_ai import RunContext
 
 from agentpool.agents.context import AgentContext
+
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable
 
 
 class TestWrapInstruction:

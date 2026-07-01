@@ -6,7 +6,7 @@ ACP session/update notifications with the proper deferred_handle in _meta.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
 import pytest
@@ -14,8 +14,8 @@ from syrupy.extensions.json import JSONSnapshotExtension
 
 from acp.agent.notifications import ACPNotifications
 from acp.schema import ToolCallStart
-from acp.tool_call_state import ToolCallState
 from acp.tool_call_reporter import ToolCallReporter
+from acp.tool_call_state import ToolCallState
 from agentpool.agents.events.events import ToolCallDeferredEvent
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 
@@ -112,9 +112,7 @@ class TestConverterDeferredEvent:
         updates = [u async for u in converter.convert(event)]
         assert len(updates) == 0
 
-    async def test_deferred_event_creates_tool_state(
-        self, converter: ACPEventConverter
-    ) -> None:
+    async def test_deferred_event_creates_tool_state(self, converter: ACPEventConverter) -> None:
         """Converter should create a tool state entry for the deferred tool call."""
         event = ToolCallDeferredEvent(
             tool_call_id="tc-deferred-004",
@@ -141,9 +139,7 @@ class TestConverterDeferredEvent:
 class TestToolCallStateDeferred:
     """Tests for deferred handle in ToolCallState."""
 
-    def test_deferred_handle_defaults_to_none(
-        self, mock_notifications: AsyncMock
-    ) -> None:
+    def test_deferred_handle_defaults_to_none(self, mock_notifications: AsyncMock) -> None:
         """Deferred handle should default to None when not provided."""
         state = ToolCallState(
             notifications=mock_notifications,
@@ -155,9 +151,7 @@ class TestToolCallStateDeferred:
         )
         assert state.deferred_handle is None
 
-    def test_deferred_handle_stored_when_provided(
-        self, mock_notifications: AsyncMock
-    ) -> None:
+    def test_deferred_handle_stored_when_provided(self, mock_notifications: AsyncMock) -> None:
         """Deferred handle should be stored when explicitly provided."""
         state = ToolCallState(
             notifications=mock_notifications,
@@ -214,9 +208,7 @@ class TestToolCallReporterDeferred:
         assert update.status == "pending"
         assert update.field_meta == {"deferred_handle": "dh_reporter_001"}
 
-    async def test_deferred_start_idempotent(
-        self, mock_notifications: AsyncMock
-    ) -> None:
+    async def test_deferred_start_idempotent(self, mock_notifications: AsyncMock) -> None:
         """Calling deferred_start twice should only send one notification."""
         reporter = ToolCallReporter(
             notifications=mock_notifications,

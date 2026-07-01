@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agentpool_server.opencode_server.models.common import FileDiff, FileDiffStatus
+from agentpool_server.opencode_server.models.common import FileDiff
 
 
 # Minimal stand-in for FileChange used by from_file_change()
@@ -125,7 +125,7 @@ def test_filediff_from_file_change_write_operation():
 
 
 def test_filediff_additions_deletions_count():
-    """additions and deletions must be counted from the unified diff."""
+    """Additions and deletions must be counted from the unified diff."""
     change = _StubFileChange(
         path="test.txt",
         old_content="line1\nline2\nline3\n",

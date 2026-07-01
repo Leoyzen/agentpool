@@ -326,10 +326,12 @@ class SkillMcpManager:
         """
         from agentpool.resource_providers.mcp_provider import MCPResourceProvider
         from agentpool_config.mcp_server import (
+            BaseMCPServerConfig,
             StdioMCPServerConfig,
             StreamableHTTPMCPServerConfig,
         )
 
+        mcp_config: BaseMCPServerConfig
         if config.command:
             mcp_config = StdioMCPServerConfig(
                 name=server_name,

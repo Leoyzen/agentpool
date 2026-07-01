@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import anyio
-from pydantic_ai import Agent as PydanticAIAgent, RunContext  # noqa: TC002
+from pydantic_ai import Agent as PydanticAIAgent, RunContext
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import Tool
 import pytest
@@ -350,9 +350,7 @@ async def test_multiple_when_idle_messages_all_drained() -> None:
                     async for _event in stream:
                         pass
 
-            pending_when_idle = sum(
-                1 for m in run.pending_messages if m.priority == "when_idle"
-            )
+            pending_when_idle = sum(1 for m in run.pending_messages if m.priority == "when_idle")
             max_pending = max(max_pending, pending_when_idle)
 
             node = await run.next(node)
@@ -454,6 +452,8 @@ async def test_non_native_agent_uses_manual_injection_manager(
         session_pool_mock.receive_request.assert_not_called()
     finally:
         _current_run_ctx_var.reset(token)
+
+
 # ---------------------------------------------------------------------------
 # 9. Native agent interrupt() cancels via SessionPool
 # ---------------------------------------------------------------------------

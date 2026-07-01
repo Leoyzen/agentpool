@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock
 
 import pytest
 
 from agentpool_server.opencode_server.routes.global_routes import (
-    GlobalEventFactory,
     VERSION,
+    GlobalEventFactory,
 )
 from agentpool_server.opencode_server.state import ServerState
 
 
 if TYPE_CHECKING:
+    import asyncio
+
     from httpx import AsyncClient
 
 
@@ -101,8 +102,6 @@ async def test_diagnostic_server_version_matches_constant(
 @pytest.mark.anyio
 async def test_diagnostic_project_is_computed(async_client: AsyncClient) -> None:
     """Project field is computed via compute_project_id."""
-    from agentpool_storage.opencode_provider.helpers import compute_project_id
-
     response = await async_client.get("/global/diagnostic")
     data = response.json()
     # project should be a non-empty string

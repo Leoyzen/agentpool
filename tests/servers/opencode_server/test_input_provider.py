@@ -234,7 +234,7 @@ async def test_single_property_object():
 
 
 @pytest.mark.parametrize(
-    "property_schema,expected_multiple,expected_option_count",
+    ("property_schema", "expected_multiple", "expected_option_count"),
     [
         # Enum property -> single-select
         pytest.param(

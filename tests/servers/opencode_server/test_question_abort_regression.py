@@ -23,21 +23,17 @@ regression guards once the fix lands.
 from __future__ import annotations
 
 import asyncio
-
-import anyio
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from agentpool.tasks.exceptions import RunAbortedError
+from agentpool.utils import identifiers as identifier
+from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.models import (
     AssistantMessage,
-    MessagePath,
     MessageRequest,
-    MessageTime,
-    MessageUpdatedEvent,
-    SessionStatus,
     TextPartInput,
     TimeCreated,
     UserMessage,
@@ -53,8 +49,6 @@ from agentpool_server.opencode_server.session_pool_integration import (
     get_session_status,
 )
 from agentpool_server.opencode_server.state import PendingQuestion, ServerState
-from agentpool.utils import identifiers as identifier
-from agentpool.utils.time_utils import now_ms
 
 
 # ---------------------------------------------------------------------------
@@ -251,9 +245,7 @@ def _make_pool_mock(agent: Any) -> Mock:
     # Set up SessionPool mock for new architecture
     session_pool = Mock()
     session_pool.sessions = Mock()
-    session_pool.sessions.get_or_create_session = AsyncMock(
-        return_value=(Mock(), True)
-    )
+    session_pool.sessions.get_or_create_session = AsyncMock(return_value=(Mock(), True))
     session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=agent)
     session_pool.sessions.store = None
     sp_session = Mock()
@@ -261,6 +253,7 @@ def _make_pool_mock(agent: Any) -> Mock:
     session_pool.sessions.get_session = Mock(return_value=sp_session)
     session_pool.event_bus = Mock()
     from tests._helpers.mock_stream import EmptyReceiveStream
+
     session_pool.event_bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     session_pool.event_bus.unsubscribe = AsyncMock()
 
@@ -348,6 +341,7 @@ def blocking_real_question_state(tmp_project_dir):
     state = ServerState(working_dir=str(tmp_project_dir), agent=placeholder_agent)
     # Set up a mock session_controller for the BlockingOnRealQuestionAgentMock
     from agentpool.orchestrator.core import SessionState as SPSessionState
+
     sp_session = SPSessionState(session_id="test-session", agent_name="test-agent")
     controller = Mock()
     controller.get_session = Mock(return_value=sp_session)
@@ -472,7 +466,9 @@ class TestRunAbortedErrorCorruptsConversation:
         )
 
         assistant_msgs = [
-            msg for msg in await get_messages_for_session(state, session_id) if isinstance(msg.info, AssistantMessage)
+            msg
+            for msg in await get_messages_for_session(state, session_id)
+            if isinstance(msg.info, AssistantMessage)
         ]
         assert len(assistant_msgs) == 1, "Should have one assistant message"
 
@@ -503,7 +499,9 @@ class TestRunAbortedErrorCorruptsConversation:
         )
 
         assistant_msgs = [
-            msg for msg in await get_messages_for_session(state, session_id) if isinstance(msg.info, AssistantMessage)
+            msg
+            for msg in await get_messages_for_session(state, session_id)
+            if isinstance(msg.info, AssistantMessage)
         ]
         assert len(assistant_msgs) == 1
 
@@ -596,6 +594,7 @@ class TestRunAbortedErrorCorruptsConversation:
 
         async def _capturing_broadcast(event: Any) -> None:
             from agentpool_server.opencode_server.models import SessionStatusEvent
+
             if isinstance(event, SessionStatusEvent):
                 _session_statuses[event.properties.session_id] = event.properties.status
             await _original_broadcast(event)
@@ -622,9 +621,7 @@ class TestRunAbortedErrorCorruptsConversation:
 
         status = await get_session_status(state, session_id)
         assert status is not None
-        assert status.type == "idle", (
-            "Session must be idle after RunAbortedError"
-        )
+        assert status.type == "idle", "Session must be idle after RunAbortedError"
 
     @pytest.mark.asyncio
     async def test_message_after_run_aborted_is_not_queued(
@@ -727,7 +724,7 @@ class TestAgentLockDeadlockOnUnresolvedQuestion:
         # In the old model, this would timeout because agent_lock was held.
         # In the new model, agent_lock should be available.
         try:
-            acquired = await asyncio.wait_for(state.agent_lock.acquire(), timeout=0.5)
+            await asyncio.wait_for(state.agent_lock.acquire(), timeout=0.5)
             state.agent_lock.release()
             # agent_lock is available — no deadlock
         except TimeoutError:
@@ -781,7 +778,7 @@ class TestAgentLockDeadlockOnUnresolvedQuestion:
         try:
             from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
 
-            result = await asyncio.wait_for(get_or_load_session(state, new_session_id), timeout=1.0)
+            await asyncio.wait_for(get_or_load_session(state, new_session_id), timeout=1.0)
             # Either gets the session or None — both are fine, no deadlock
         except TimeoutError:
             pytest.fail(
@@ -835,7 +832,7 @@ class TestAgentLockDeadlockOnUnresolvedQuestion:
 
         # Verify agent_lock is available after cancellation
         try:
-            acquired = await asyncio.wait_for(state.agent_lock.acquire(), timeout=0.5)
+            await asyncio.wait_for(state.agent_lock.acquire(), timeout=0.5)
             state.agent_lock.release()
         except TimeoutError:
             pytest.fail(
@@ -885,7 +882,9 @@ class TestSSEDisconnectReleasesAgentLock:
         await asyncio.sleep(0)
 
         # Wait for the question to be created in session controller
-        session = state.session_controller.get_session(session_id) if state.session_controller else None
+        session = (
+            state.session_controller.get_session(session_id) if state.session_controller else None
+        )
         for _ in range(40):
             if session and session.pending_questions:
                 break
@@ -915,7 +914,7 @@ class TestSSEDisconnectReleasesAgentLock:
 
         # Verify agent_lock is available
         try:
-            acquired = await asyncio.wait_for(state.agent_lock.acquire(), timeout=0.5)
+            await asyncio.wait_for(state.agent_lock.acquire(), timeout=0.5)
             state.agent_lock.release()
         except TimeoutError:
             pytest.fail(
@@ -951,7 +950,9 @@ class TestSSEDisconnectReleasesAgentLock:
         )
 
         # Wait for the question to be created
-        session = state.session_controller.get_session(session_id) if state.session_controller else None
+        session = (
+            state.session_controller.get_session(session_id) if state.session_controller else None
+        )
         for _ in range(20):
             if session and session.pending_questions:
                 break

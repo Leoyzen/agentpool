@@ -222,10 +222,10 @@ def _resolve_schemas_in_list(
         schemas = args.get("schemas")
         if not isinstance(schemas, dict):
             continue
-        for key, val in schemas.items():
-            val = str(val)
-            if not os.path.isabs(val):
-                schemas[key] = os.path.join(base_dir, val)
+        for key, schema_path in schemas.items():
+            path_str = str(schema_path)
+            if not Path(path_str).is_absolute():
+                schemas[key] = str(Path(base_dir) / path_str)
 
 
 def _load_package_yaml(ref: str) -> dict[str, Any]:
@@ -272,10 +272,10 @@ def _load_package_yaml(ref: str) -> dict[str, Any]:
         top_root = pkg_files(top_pkg)
         resolved: list[str] = []
         for p in skills["paths"]:
-            p = str(p)
-            if not os.path.isabs(p):
-                p = str(top_root / p)
-            resolved.append(p)
+            path_str = str(p)
+            if not Path(path_str).is_absolute():
+                path_str = str(top_root / path_str)
+            resolved.append(path_str)
         skills["paths"] = resolved
 
     # Resolve kw_args.schemas paths relative to the YAML file's directory
@@ -483,14 +483,14 @@ def resolve_config(  # noqa: PLR0915
             pass  # Fallback config errors are non-fatal
 
     # Convert primary_path to absolute path if not already absolute
-    absolute_primary_path = os.path.abspath(primary_path) if primary_path else None
+    absolute_primary_path = str(Path(primary_path).resolve()) if primary_path else None
 
     # Resolve relative schema paths in tools/capabilities against the primary
     # config file's directory.  Package includes already had their paths
     # resolved by _load_package_yaml, but file-loaded configs (explicit,
     # project, global, fallback) still have relative paths at this point.
     if absolute_primary_path:
-        _resolve_tool_schema_paths(merged_data, os.path.dirname(absolute_primary_path))
+        _resolve_tool_schema_paths(merged_data, str(Path(absolute_primary_path).parent))
 
     return ResolvedConfig(
         data=merged_data,

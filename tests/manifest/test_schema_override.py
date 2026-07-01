@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from agentpool.tools.base import Tool
 
+
 if TYPE_CHECKING:
     from schemez import OpenAIFunctionDefinition
 

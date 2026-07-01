@@ -18,13 +18,9 @@ Test coverage:
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
-import typer as t
-from click.testing import CliRunner
 
 from agentpool.models.manifest import AgentsManifest
 from agentpool_config.context import CONFIG_DIR, ConfigContextManager
@@ -181,7 +177,6 @@ class TestServeAcp:
     ):
         """Relative paths should resolve to config file, not CWD."""
         config_path = test_config_with_relative_path
-        config_dir = config_path.parent
 
         original_cwd = os.getcwd()
         try:
@@ -221,7 +216,6 @@ class TestServeAgui:
     ):
         """serve-agui should resolve paths relative to config file."""
         config_path = test_config_with_relative_path
-        config_dir = config_path.parent
 
         original_cwd = os.getcwd()
         try:
@@ -348,7 +342,7 @@ class TestWatch:
         test_config_with_relative_path: Path,
         cwd_outside_config: Path,
     ):
-        """watch should resolve paths relative to config file."""
+        """Watch should resolve paths relative to config file."""
         config_path = test_config_with_relative_path
 
         original_cwd = os.getcwd()
@@ -380,7 +374,7 @@ class TestTask:
         test_config_with_relative_path: Path,
         cwd_outside_config: Path,
     ):
-        """task should resolve paths relative to config file."""
+        """Task should resolve paths relative to config file."""
         config_path = test_config_with_relative_path
 
         original_cwd = os.getcwd()

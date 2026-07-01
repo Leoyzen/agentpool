@@ -165,9 +165,7 @@ async def test_injection_manager_consume_works_in_run_handle_context() -> None:
     assert "<injected-context>" in consumed, (
         f"Expected XML-wrapped injection format, got: {consumed}"
     )
-    assert "</injected-context>" in consumed, (
-        "Expected closing XML tag in injection"
-    )
+    assert "</injected-context>" in consumed, "Expected closing XML tag in injection"
 
     # After consume, pending should be empty
     assert not manager.has_pending(), "Pending should be cleared after consume"
@@ -233,9 +231,7 @@ async def test_injection_manager_consume_all_preserves_order() -> None:
 
     # Verify order and XML wrapping
     for i, result in enumerate(results):
-        assert f"Step {i + 1}" in result, (
-            f"Result {i} should contain 'Step {i + 1}', got: {result}"
-        )
+        assert f"Step {i + 1}" in result, f"Result {i} should contain 'Step {i + 1}', got: {result}"
         assert "<injected-context>" in result
         assert "</injected-context>" in result
 

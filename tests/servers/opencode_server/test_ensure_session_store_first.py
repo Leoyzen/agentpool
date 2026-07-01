@@ -6,8 +6,7 @@ Covers TG-2, TG-5, TG-11, TG-17, TG-19, TG-32 scenarios from RFC-0028.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -64,8 +63,8 @@ def _make_session_data(
         cwd=cwd,
         parent_id=parent_id,
         version="1",
-        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
-        last_active=datetime(2025, 6, 1, tzinfo=timezone.utc),
+        created_at=datetime(2025, 1, 1, tzinfo=UTC),
+        last_active=datetime(2025, 6, 1, tzinfo=UTC),
         metadata={"title": "Stored Session Title"},
     )
 
@@ -397,7 +396,7 @@ async def test_store_first_broadcasts_created_and_updated(
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()) as mock_broadcast:
-        session = await ensure_session(mock_state, session_id)
+        await ensure_session(mock_state, session_id)
 
     broadcast_events = [call.args[0] for call in mock_broadcast.await_args_list]
 

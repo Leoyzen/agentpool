@@ -55,9 +55,15 @@ class ConnectCommand(NodeCommand):
             node_name: Name of the node to connect to
             wait: Whether to wait for responses (default: True)
         """
+        pool = ctx.context.pool
+        if pool is None:
+            raise CommandError("Pool not available")
+        target_config = pool.agent_configs.get(node_name)
+        if target_config is None:
+            msg = f"Node '{node_name}' not found in pool"
+            raise CommandError(msg)
         try:
-            assert ctx.context.pool
-            target_node = ctx.context.pool[node_name]
+            target_node: MessageNode[Any, Any] = target_config.get_agent(pool=pool)
             assert isinstance(target_node, MessageNode)
             ctx.context.node.connect_to(target_node)
             ctx.context.node.connections.set_wait_state(node_name, wait)
@@ -92,9 +98,15 @@ class DisconnectCommand(NodeCommand):
             node_name: Name of the node to disconnect from
         """
         source = ctx.context.node_name
+        pool = ctx.context.pool
+        if pool is None:
+            raise CommandError("Pool not available")
+        target_config = pool.agent_configs.get(node_name)
+        if target_config is None:
+            msg = f"Node '{node_name}' not found in pool"
+            raise CommandError(msg)
         try:
-            assert ctx.context.pool
-            target_node = ctx.context.pool[node_name]
+            target_node: MessageNode[Any, Any] = target_config.get_agent(pool=pool)
             assert isinstance(target_node, MessageNode)
             ctx.context.node.connections.disconnect(target_node)
             await ctx.print(f"🔌 **Disconnected:** `{source}` ⛔ `{node_name}`")
@@ -157,8 +169,7 @@ class ListConnectionsCommand(NodeCommand):
         tree = Tree(format_node_name(ctx.context.node, current=True))
         # Use session's get_connections() for info
         for node in ctx.context.node.connections.get_targets():
-            assert ctx.context.pool
-            name = format_node_name(ctx.context.pool[node.name])
+            name = format_node_name(node)
             _branch = tree.add(name)
         console = Console()
         with console.capture() as capture:

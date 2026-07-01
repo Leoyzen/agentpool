@@ -75,7 +75,9 @@ def mock_event_bus() -> AsyncMock:
 
 
 @pytest.fixture
-def mock_event_bus_with_stream(mock_event_bus: AsyncMock) -> tuple[AsyncMock, anyio.abc.ObjectSendStream[EventEnvelope]]:
+def mock_event_bus_with_stream(
+    mock_event_bus: AsyncMock,
+) -> tuple[AsyncMock, anyio.abc.ObjectSendStream[EventEnvelope]]:
     """Return a mock EventBus with a real memory stream pair."""
     send_stream, receive_stream = anyio.create_memory_object_stream(max_buffer_size=100)
     mock_event_bus.subscribe = AsyncMock(return_value=receive_stream)

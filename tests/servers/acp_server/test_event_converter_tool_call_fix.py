@@ -15,11 +15,11 @@ import pytest
 
 from acp.schema import ToolCallProgress, ToolCallStart
 from agentpool.agents.events.events import (
-    ToolCallCompleteEvent,
     ToolCallProgressEvent,
     ToolCallStartEvent,
 )
 from agentpool_server.acp_server.event_converter import ACPEventConverter
+
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 

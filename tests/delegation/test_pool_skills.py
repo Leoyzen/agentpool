@@ -600,10 +600,6 @@ class TestRegisterUnregisterSkillProvider:
         manifest_with_skills: AgentsManifest,
     ) -> None:
         """Test that register_skill_provider() buffers when called before setup."""
-        from unittest.mock import AsyncMock, MagicMock
-
-        from agentpool.resource_providers.base import ResourceProvider
-
         async with AgentPool(manifest_with_skills) as pool:
             # _pending_skill_providers should be empty after __aenter__
             # since _setup_skills_provider() drains the buffer

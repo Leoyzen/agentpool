@@ -6,7 +6,6 @@ AgentPoolACPAgent and receives skill commands from the SkillCommandRegistry.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
@@ -16,9 +15,6 @@ from agentpool.skills import SkillCommand, SkillCommandRegistry
 from agentpool.skills.registry import SkillsRegistry
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.commands.skill_commands import ACPSkillBridge
-
-if TYPE_CHECKING:
-    pass
 
 
 @pytest.fixture

@@ -6,9 +6,8 @@ self.client_capabilities.turn_complete and passes it to ACPEventConverter.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -20,6 +19,10 @@ from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.session import ACPSession
 
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+
 @pytest.fixture
 def agent_pool() -> AgentPool:
     """Create a real agent pool with a test agent."""
@@ -28,16 +31,12 @@ def agent_pool() -> AgentPool:
         return f"Response: {message}"
 
     from agentpool.models.agents import NativeAgentConfig
-
-
     from agentpool.models.manifest import AgentsManifest
-
 
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
 
-
     pool = AgentPool(manifest)
-    agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
+    Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
     return pool
 
@@ -66,7 +65,8 @@ class TestProcessPromptTurnCompleteFlag:
         mock_acp_agent: MagicMock,
     ) -> None:
         """When client_capabilities.turn_complete=True, ACPEventConverter must be
-created with client_supports_turn_complete=True."""
+        created with client_supports_turn_complete=True.
+        """
         agent = agent_pool.manifest.agents["test_agent"].get_agent(pool=agent_pool)
         mock_client = AsyncMock()
 
@@ -110,7 +110,8 @@ created with client_supports_turn_complete=True."""
         mock_acp_agent: MagicMock,
     ) -> None:
         """When client_capabilities.turn_complete=False, ACPEventConverter must be
-created with client_supports_turn_complete=False."""
+        created with client_supports_turn_complete=False.
+        """
         agent = agent_pool.manifest.agents["test_agent"].get_agent(pool=agent_pool)
         mock_client = AsyncMock()
 
@@ -152,7 +153,8 @@ created with client_supports_turn_complete=False."""
         mock_acp_agent: MagicMock,
     ) -> None:
         """When client_capabilities.turn_complete=None, ACPEventConverter must be
-created with client_supports_turn_complete=False (default)."""
+        created with client_supports_turn_complete=False (default).
+        """
         agent = agent_pool.manifest.agents["test_agent"].get_agent(pool=agent_pool)
         mock_client = AsyncMock()
 

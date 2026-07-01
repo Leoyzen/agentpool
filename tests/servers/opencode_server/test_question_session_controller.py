@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
-from unittest.mock import AsyncMock, Mock
+import contextlib
+from unittest.mock import Mock
 
 import pytest
 
 from agentpool.orchestrator.core import SessionController, SessionState
 from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 from agentpool_server.opencode_server.models import (
-    PermissionResolvedEvent,
-    QuestionRejectedEvent,
-    QuestionRepliedEvent,
     QuestionReply,
 )
 from agentpool_server.opencode_server.routes.question_routes import (
@@ -354,10 +351,8 @@ class TestInputProviderStoresQuestionsOnSessionState:
 
         # Cancel the task since there's no question to resolve
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
 
 
 class TestSSEDisconnectViaSessionController:

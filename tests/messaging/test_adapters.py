@@ -8,12 +8,11 @@ Consolidated from:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Sequence
 from typing import TYPE_CHECKING, Any
 
-import pytest
 from pydantic_graph.graph_builder import EndMarker, ErrorMarker, GraphTask
 from pydantic_graph.id_types import ForkStack, NodeID, TaskID
+import pytest
 
 from agentpool.agents.events import (
     PartStartEvent,
@@ -28,13 +27,13 @@ from agentpool.messaging.messages import ChatMessage as Msg
 from agentpool.messaging.signal_adapter import SignalEmittingGraphRun
 from agentpool.messaging.streaming_adapter import (
     GraphStreamingAdapter,
-    StepEventCollector,
     adapt_graph_run,
 )
 from agentpool.talk import Talk
 
+
 if TYPE_CHECKING:
-    pass
+    from collections.abc import AsyncIterator, Sequence
 
 
 # ============================================================================
@@ -529,11 +528,14 @@ async def test_adapt_graph_run_convenience():
         EndMarker("result"),
     ])
 
-    events = [e async for e in adapt_graph_run(
-        run,
-        session_id="sess-2",
-        agent_name="conv-agent",
-    )]
+    events = [
+        e
+        async for e in adapt_graph_run(
+            run,
+            session_id="sess-2",
+            agent_name="conv-agent",
+        )
+    ]
 
     assert any(isinstance(e, RunStartedEvent) for e in events)
     assert any(isinstance(e, PartStartEvent) for e in events)
@@ -606,7 +608,7 @@ async def test_user_msg_parent_id():
     )
 
     events = [e async for e in adapter]
-    complete = [e for e in events if isinstance(e, StreamCompleteEvent)][0]
+    complete = next(e for e in events if isinstance(e, StreamCompleteEvent))
     assert complete.message.parent_id == "user-1"
 
 

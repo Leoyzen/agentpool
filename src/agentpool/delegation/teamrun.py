@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from itertools import pairwise
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 from uuid import uuid4
 
 import anyio
@@ -69,20 +69,21 @@ def _make_sequential_step(
     """
 
     async def _step(
-        ctx: StepContext[_TeamRunGraphState, Any, Any],
+        ctx: StepContext,
     ) -> ChatMessage[Any]:
+        state = cast(_TeamRunGraphState, ctx.state)
         start = perf_counter()
         if node_index == 0:
-            result = await node.run(*ctx.state.prompts, **ctx.state.kwargs)
+            result = await node.run(*state.prompts, **state.kwargs)
         else:
             result = await node.run_message(ctx.inputs)
         timing = perf_counter() - start
         response = AgentResponse(agent_name=node.name, message=result, timing=timing)
-        ctx.state.responses.append(response)
+        state.responses.append(response)
 
         # Update talk stats for the edge leaving this node (if any)
-        if node_index < len(ctx.state.connections):
-            talk = ctx.state.connections[node_index]
+        if node_index < len(state.connections):
+            talk = state.connections[node_index]
             if result:
                 talk._stats.messages.append(result)
 

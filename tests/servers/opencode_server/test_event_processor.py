@@ -8,13 +8,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from pydantic_ai.messages import (
     PartDeltaEvent as PydanticPartDeltaEvent,
     PartStartEvent,
     TextPart as PydanticTextPart,
     TextPartDelta,
 )
+import pytest
 
 from agentpool_server.opencode_server.event_processor import EventProcessor
 from agentpool_server.opencode_server.event_processor_context import (
@@ -28,6 +28,7 @@ from agentpool_server.opencode_server.models import (
     PartUpdatedEvent,
     TextPart,
 )
+
 
 if TYPE_CHECKING:
     from agentpool_server.opencode_server.state import ServerState

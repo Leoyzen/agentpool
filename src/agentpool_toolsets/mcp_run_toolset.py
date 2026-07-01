@@ -136,7 +136,7 @@ if __name__ == "__main__":
 
     anyio.run(main)
 
-    def as_capability(self) -> AbstractCapability | None:
+    def as_capability(self: McpRunTools) -> AbstractCapability | None:
         """Return a pydantic-ai capability for this provider.
 
         Returns:

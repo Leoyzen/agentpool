@@ -7,7 +7,6 @@ any spawned subagents also receive cancellation within 5 seconds.
 from __future__ import annotations
 
 import anyio
-
 import pytest
 
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
@@ -23,7 +22,6 @@ async def test_subagent_cancellation_cascade_within_5s(manifest: AgentsManifest)
     - This tests that CancelScope(shield=True) around complete_event.set()
       allows cleanup even during cancellation
     """
-
     agent_config = NativeAgentConfig(
         name="parent-agent",
         model="test",

@@ -9,9 +9,10 @@ Usage:
 
 import argparse
 import asyncio
+from pathlib import Path
 import sys
 import time
-from pathlib import Path
+
 
 # Add agentpool to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
@@ -128,7 +129,7 @@ def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Run RFC-0021 pre-flight tests")
     parser.add_argument("--fail-fast", action="store_true", help="Stop on first failure")
-    args = parser.parse_args()
+    parser.parse_args()
 
     try:
         success = asyncio.run(run_baseline_test())

@@ -11,9 +11,9 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import pytest
 from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.models.test import TestModel
+import pytest
 
 from agentpool import Agent
 from agentpool.skills.capability import SkillCapability
@@ -23,8 +23,7 @@ from agentpool.skills.capability import SkillCapability
 def mock_agent() -> Agent[Any]:
     """Create an agent with TestModel for get_agentlet testing."""
     model = TestModel(custom_output_text="test")
-    agent = Agent(name="skill-cap-test-agent", model=model)
-    return agent
+    return Agent(name="skill-cap-test-agent", model=model)
 
 
 @pytest.fixture
@@ -84,51 +83,49 @@ async def test_skill_capability_in_position_after_mcp_before_history(
     mock_agent.agent_pool = mock_pool
 
     # Set up history processor
-    with patch.object(
-        mock_agent,
-        "_resolve_history_processors",
-        return_value=[mock_history_processor],
+    with (
+        patch.object(
+            mock_agent,
+            "_resolve_history_processors",
+            return_value=[mock_history_processor],
+        ),
+        patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent,
     ):
-        with patch(
-            "agentpool.agents.native_agent.agent.PydanticAgent"
-        ) as mock_pydantic_agent:
-            mock_pydantic_agent.return_value = MagicMock()
-            await mock_agent.get_agentlet(None, None, None)
+        mock_pydantic_agent.return_value = MagicMock()
+        await mock_agent.get_agentlet(None, None, None)
 
-            call_kwargs = mock_pydantic_agent.call_args.kwargs
-            capabilities = call_kwargs.get("capabilities", []) or []
+        call_kwargs = mock_pydantic_agent.call_args.kwargs
+        capabilities = call_kwargs.get("capabilities", []) or []
 
-            # Find SkillCapabilities
-            skill_caps = [cap for cap in capabilities if isinstance(cap, SkillCapability)]
-            assert len(skill_caps) == 2, (
-                f"Expected 2 SkillCapability instances, got {len(skill_caps)}"
-            )
+        # Find SkillCapabilities
+        skill_caps = [cap for cap in capabilities if isinstance(cap, SkillCapability)]
+        assert len(skill_caps) == 2, f"Expected 2 SkillCapability instances, got {len(skill_caps)}"
 
-            # MCP caps are MagicMock instances — track via identity
-            mcp_caps = mock_mcp_manager.as_capability.return_value
-            mcp_indices = [capabilities.index(c) for c in mcp_caps]
+        # MCP caps are MagicMock instances — track via identity
+        mcp_caps = mock_mcp_manager.as_capability.return_value
+        mcp_indices = [capabilities.index(c) for c in mcp_caps]
 
-            # Find ProcessHistory index
-            process_history_indices = [
-                i for i, cap in enumerate(capabilities) if isinstance(cap, ProcessHistory)
-            ]
+        # Find ProcessHistory index
+        process_history_indices = [
+            i for i, cap in enumerate(capabilities) if isinstance(cap, ProcessHistory)
+        ]
 
-            # Find SkillCapability indices
-            skill_indices = [capabilities.index(cap) for cap in skill_caps]
+        # Find SkillCapability indices
+        skill_indices = [capabilities.index(cap) for cap in skill_caps]
 
-            # Verify ordering: MCP < Skills < ProcessHistory
-            last_mcp_idx = max(mcp_indices)
-            first_skill_idx = min(skill_indices)
-            first_ph_idx = min(process_history_indices)
+        # Verify ordering: MCP < Skills < ProcessHistory
+        last_mcp_idx = max(mcp_indices)
+        first_skill_idx = min(skill_indices)
+        first_ph_idx = min(process_history_indices)
 
-            assert last_mcp_idx < first_skill_idx, (
-                f"MCP caps (max idx {last_mcp_idx}) should come before "
-                f"SkillCaps (min idx {first_skill_idx})"
-            )
-            assert max(skill_indices) < first_ph_idx, (
-                f"SkillCaps (max idx {max(skill_indices)}) should come before "
-                f"ProcessHistory (first idx {first_ph_idx})"
-            )
+        assert last_mcp_idx < first_skill_idx, (
+            f"MCP caps (max idx {last_mcp_idx}) should come before "
+            f"SkillCaps (min idx {first_skill_idx})"
+        )
+        assert max(skill_indices) < first_ph_idx, (
+            f"SkillCaps (max idx {max(skill_indices)}) should come before "
+            f"ProcessHistory (first idx {first_ph_idx})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -145,9 +142,7 @@ async def test_skill_capability_not_included_without_agent_pool(
     mock_agent.mcp = mock_mcp_manager
     mock_agent.agent_pool = None
 
-    with patch(
-        "agentpool.agents.native_agent.agent.PydanticAgent"
-    ) as mock_pydantic_agent:
+    with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
         mock_pydantic_agent.return_value = MagicMock()
         await mock_agent.get_agentlet(None, None, None)
 
@@ -155,9 +150,7 @@ async def test_skill_capability_not_included_without_agent_pool(
         capabilities = call_kwargs.get("capabilities", []) or []
 
         skill_caps = [cap for cap in capabilities if isinstance(cap, SkillCapability)]
-        assert len(skill_caps) == 0, (
-            "No SkillCapability expected without agent_pool"
-        )
+        assert len(skill_caps) == 0, "No SkillCapability expected without agent_pool"
 
 
 # ---------------------------------------------------------------------------
@@ -177,9 +170,7 @@ async def test_skill_capability_not_included_without_skills_manager(
     mock_pool.skill_capabilities = []
     mock_agent.agent_pool = mock_pool
 
-    with patch(
-        "agentpool.agents.native_agent.agent.PydanticAgent"
-    ) as mock_pydantic_agent:
+    with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
         mock_pydantic_agent.return_value = MagicMock()
         await mock_agent.get_agentlet(None, None, None)
 
@@ -187,9 +178,7 @@ async def test_skill_capability_not_included_without_skills_manager(
         capabilities = call_kwargs.get("capabilities", []) or []
 
         skill_caps = [cap for cap in capabilities if isinstance(cap, SkillCapability)]
-        assert len(skill_caps) == 0, (
-            "No SkillCapability expected without skills manager"
-        )
+        assert len(skill_caps) == 0, "No SkillCapability expected without skills manager"
 
 
 # ---------------------------------------------------------------------------
@@ -209,9 +198,7 @@ async def test_skill_capability_skipped_when_disabled(
     mock_pool.skill_capabilities = []
     mock_agent.agent_pool = mock_pool
 
-    with patch(
-        "agentpool.agents.native_agent.agent.PydanticAgent"
-    ) as mock_pydantic_agent:
+    with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
         mock_pydantic_agent.return_value = MagicMock()
         await mock_agent.get_agentlet(None, None, None)
 
@@ -219,9 +206,7 @@ async def test_skill_capability_skipped_when_disabled(
         capabilities = call_kwargs.get("capabilities", []) or []
 
         skill_caps = [cap for cap in capabilities if isinstance(cap, SkillCapability)]
-        assert len(skill_caps) == 0, (
-            "No SkillCapability for disabled skill"
-        )
+        assert len(skill_caps) == 0, "No SkillCapability for disabled skill"
 
 
 # ---------------------------------------------------------------------------
@@ -248,9 +233,7 @@ async def test_skill_capability_skipped_when_not_visible(
     mock_pool.is_skill_visible_to_node = MagicMock(return_value=False)
     mock_agent.agent_pool = mock_pool
 
-    with patch(
-        "agentpool.agents.native_agent.agent.PydanticAgent"
-    ) as mock_pydantic_agent:
+    with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
         mock_pydantic_agent.return_value = MagicMock()
         await mock_agent.get_agentlet(None, None, None)
 
@@ -258,12 +241,8 @@ async def test_skill_capability_skipped_when_not_visible(
         capabilities = call_kwargs.get("capabilities", []) or []
 
         skill_caps = [cap for cap in capabilities if isinstance(cap, SkillCapability)]
-        assert len(skill_caps) == 0, (
-            "No SkillCapability for filtered skill"
-        )
-        mock_pool.is_skill_visible_to_node.assert_called_once_with(
-            invisible_skill, mock_agent.name
-        )
+        assert len(skill_caps) == 0, "No SkillCapability for filtered skill"
+        mock_pool.is_skill_visible_to_node.assert_called_once_with(invisible_skill, mock_agent.name)
 
 
 # ---------------------------------------------------------------------------
@@ -295,9 +274,7 @@ async def test_skill_capability_mixed_visibility(
     mock_pool.is_skill_visible_to_node = visibility_check
     mock_agent.agent_pool = mock_pool
 
-    with patch(
-        "agentpool.agents.native_agent.agent.PydanticAgent"
-    ) as mock_pydantic_agent:
+    with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
         mock_pydantic_agent.return_value = MagicMock()
         await mock_agent.get_agentlet(None, None, None)
 
@@ -305,6 +282,4 @@ async def test_skill_capability_mixed_visibility(
         capabilities = call_kwargs.get("capabilities", []) or []
 
         skill_caps = [cap for cap in capabilities if isinstance(cap, SkillCapability)]
-        assert len(skill_caps) == 1, (
-            f"Expected 1 SkillCapability (visible), got {len(skill_caps)}"
-        )
+        assert len(skill_caps) == 1, f"Expected 1 SkillCapability (visible), got {len(skill_caps)}"

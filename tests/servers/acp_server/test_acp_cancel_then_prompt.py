@@ -15,18 +15,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import anyio
 import pytest
 
-from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunFailedEvent, RunStartedEvent, StreamCompleteEvent
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventEnvelope, SessionPool
 from agentpool.orchestrator.run import RunStatus
 from agentpool.orchestrator.turn import Turn
+
+
+if TYPE_CHECKING:
+    from agentpool.agents.context import AgentRunContext
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]

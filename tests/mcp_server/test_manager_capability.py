@@ -123,9 +123,7 @@ class TestMCPManagerAsCapability:
     def test_disabled_server_is_skipped(self) -> None:
         """Disabled servers should not produce capabilities."""
         enabled = StdioMCPServerConfig(command="python", args=["enabled.py"])
-        disabled = StdioMCPServerConfig(
-            command="python", args=["disabled.py"], enabled=False
-        )
+        disabled = StdioMCPServerConfig(command="python", args=["disabled.py"], enabled=False)
         manager = MCPManager(servers=[enabled, disabled])
 
         with warnings.catch_warnings():

@@ -11,6 +11,7 @@ import yamling
 
 from agentpool import Agent, AgentPool, AgentsManifest, NativeAgentConfig
 
+
 # Test files that are being migrated or have known issues.
 collect_ignore: list[str] = [
     "orchestrator/test_phase2_native_queue.py",
@@ -175,7 +176,7 @@ def remap_hardcoded_test_models():
     from unittest.mock import patch
 
     import llmling_models
-    import llmling_models.models.helpers as helpers
+    from llmling_models.models import helpers
 
     original = helpers.infer_model
 
@@ -205,11 +206,15 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
     for item in items:
         if "requires_openai_key" in item.keywords and not os.environ.get("OPENAI_API_KEY"):
-            item.add_marker(pytest.mark.skip(
-                reason="OPENAI_API_KEY not set — skipping credential-dependent test",
-            ))
+            item.add_marker(
+                pytest.mark.skip(
+                    reason="OPENAI_API_KEY not set — skipping credential-dependent test",
+                )
+            )
         if "incompatible_with_thinking" in item.keywords and is_thinking_model:
-            item.add_marker(pytest.mark.skip(
-                reason=f"TEST_DEFAULT_MODEL='{model}' uses thinking mode — "
-                "structured output (tool_choice: 'required') not supported (issue #84)",
-            ))
+            item.add_marker(
+                pytest.mark.skip(
+                    reason=f"TEST_DEFAULT_MODEL='{model}' uses thinking mode — "
+                    "structured output (tool_choice: 'required') not supported (issue #84)",
+                )
+            )

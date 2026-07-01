@@ -209,15 +209,13 @@ class SkillsInstructionProvider(ResourceProvider):
         # Add tools if present (SkillCapability manages these at runtime)
         if tools := getattr(skill, "tools", None):
             lines.append("<tools>")
-            for tool in tools:
-                lines.append(f"<tool>{escape(tool.import_path)}</tool>")
+            lines.extend(f"<tool>{escape(tool.import_path)}</tool>" for tool in tools)
             lines.append("</tools>")
 
         # Add MCP servers if present (SkillCapability manages these at runtime)
         if mcp_servers := getattr(skill, "mcp_servers", None):
             lines.append("<mcp_servers>")
-            for server_name in mcp_servers:
-                lines.append(f"<server>{escape(server_name)}</server>")
+            lines.extend(f"<server>{escape(server_name)}</server>" for server_name in mcp_servers)
             lines.append("</mcp_servers>")
 
         lines.append("</skill>")

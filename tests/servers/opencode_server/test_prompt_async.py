@@ -3,16 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from agentpool_server.opencode_server.models import MessageRequest, TextPartInput
-
-
-if TYPE_CHECKING:
-    pass
 
 
 class TestPromptAsync:

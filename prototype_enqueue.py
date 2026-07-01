@@ -12,12 +12,11 @@ Run: uv run python prototype_enqueue.py
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.capabilities._pending_messages import PendingMessageDrainCapability
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import Tool
+
 
 # ---------------------------------------------------------------------------
 # Test harness
@@ -38,6 +37,7 @@ def test(name: str, condition: bool) -> None:
 # Dummy tool that enqueues messages during execution
 # ---------------------------------------------------------------------------
 
+
 async def enqueue_test_tool(ctx: RunContext) -> str:
     """Tool that enqueues messages with both priorities."""
     ctx.enqueue("when_idle_message", priority="when_idle")
@@ -48,6 +48,7 @@ async def enqueue_test_tool(ctx: RunContext) -> str:
 # ---------------------------------------------------------------------------
 # Test 1: Capability auto-injection
 # ---------------------------------------------------------------------------
+
 
 async def test_capability_auto_injected() -> None:
     print("\n=== Test 1: PendingMessageDrainCapability auto-injected ===")
@@ -72,6 +73,7 @@ async def test_capability_auto_injected() -> None:
 # Test 2: Bare async for fails on undrained when_idle
 # ---------------------------------------------------------------------------
 
+
 async def test_bare_async_for_fails() -> None:
     print("\n=== Test 2: Bare `async for` fails with undrained messages ===")
     agent = Agent(model=TestModel(), tools=[Tool(enqueue_test_tool)])
@@ -91,6 +93,7 @@ async def test_bare_async_for_fails() -> None:
 # ---------------------------------------------------------------------------
 # Test 3: next() drains asap before next ModelRequestNode
 # ---------------------------------------------------------------------------
+
 
 async def test_asap_drained_before_next_model_request() -> None:
     print("\n=== Test 3: asap drained before next ModelRequestNode ===")
@@ -133,6 +136,7 @@ async def test_asap_drained_before_next_model_request() -> None:
 # Test 4: next() drains when_idle after all tool calls resolve
 # ---------------------------------------------------------------------------
 
+
 async def test_when_idle_drained_after_tool_calls() -> None:
     print("\n=== Test 4: when_idle drained after all pending tool calls ===")
     agent = Agent(model=TestModel(), tools=[Tool(enqueue_test_tool)])
@@ -148,7 +152,7 @@ async def test_when_idle_drained_after_tool_calls() -> None:
 
             if hasattr(node, "stream"):
                 async with node.stream(run.ctx) as stream:
-                    async for event in stream:
+                    async for _event in stream:
                         pass
 
             pending = [m.priority for m in run.pending_messages]
@@ -175,6 +179,7 @@ async def test_when_idle_drained_after_tool_calls() -> None:
 # ---------------------------------------------------------------------------
 # Test 5: Event mapping reference — document what PydanticAI yields
 # ---------------------------------------------------------------------------
+
 
 async def test_event_mapping() -> None:
     print("\n=== Test 5: PydanticAI node event mapping ===")
@@ -220,6 +225,7 @@ async def test_event_mapping() -> None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 async def main() -> None:
     print("=" * 70)

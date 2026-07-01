@@ -411,9 +411,7 @@ class TestSessionControllerPersistence:
         assert child.cwd == "/path/to/project"
         assert child.parent_id == "parent_1"
 
-    async def test_create_without_store(
-        self, mock_pool: MagicMock
-    ) -> None:
+    async def test_create_without_store(self, mock_pool: MagicMock) -> None:
         """SessionController works without a store."""
         controller = SessionController(pool=mock_pool, store=None)
 

@@ -18,24 +18,21 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
+import anyio
 import pytest
 
-from agentpool.orchestrator.core import EventBus, RunHandle, SessionPool
+from agentpool.orchestrator.core import RunHandle, SessionPool
 from agentpool.orchestrator.run import RunStatus
 from agentpool.sessions.models import SessionData
 from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
-from agentpool_server.opencode_server.models import SessionStatus
 from agentpool_server.opencode_server.state import ServerState
-import anyio
-
 
 
 # =============================================================================
 # Fixtures
 # =============================================================================
-
 
 
 def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
@@ -47,6 +44,7 @@ def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
         return True
     except anyio.EndOfStream:
         return True
+
 
 @pytest.fixture
 def mock_agent_pool() -> Mock:
@@ -271,7 +269,9 @@ class TestSessionCreation:
             agent_name="test-agent",
         )
 
-        created_events = [e for e in broadcast_events if getattr(e, "type", None) == "session.created"]
+        created_events = [
+            e for e in broadcast_events if getattr(e, "type", None) == "session.created"
+        ]
         assert len(created_events) == 1
 
 
@@ -416,9 +416,7 @@ class TestMessageRouting:
             if event is not None:
                 events.append(event)
 
-        run_started_events = [
-            e for e in events if getattr(e, "event_kind", None) == "run_started"
-        ]
+        run_started_events = [e for e in events if getattr(e, "event_kind", None) == "run_started"]
         assert len(run_started_events) >= 1
 
 
@@ -490,7 +488,8 @@ class TestSessionStatusSync:
             e for e in broadcast_events if getattr(e, "type", None) == "session.status"
         ]
         busy_events = [
-            e for e in status_events
+            e
+            for e in status_events
             if getattr(getattr(e, "properties", None), "status", None)
             and e.properties.status.type == "busy"
         ]
@@ -539,7 +538,8 @@ class TestSessionStatusSync:
             e for e in broadcast_events if getattr(e, "type", None) == "session.status"
         ]
         idle_events = [
-            e for e in status_events
+            e
+            for e in status_events
             if getattr(getattr(e, "properties", None), "status", None)
             and e.properties.status.type == "idle"
         ]
@@ -589,9 +589,7 @@ class TestSessionAbort:
         blocking_turn.execute = _blocking_execute
         blocking_turn.message_history: list[Any] = []
 
-        def _create_turn_with_ctx(
-            prompts: Any, run_ctx: Any, message_history: Any
-        ) -> Any:
+        def _create_turn_with_ctx(prompts: Any, run_ctx: Any, message_history: Any) -> Any:
             captured_ctx.append(run_ctx)
             return blocking_turn
 
@@ -655,9 +653,7 @@ class TestSessionAbort:
 
         await integration.abort_session("test-session-012")
 
-        error_events = [
-            e for e in broadcast_events if getattr(e, "type", None) == "session.error"
-        ]
+        error_events = [e for e in broadcast_events if getattr(e, "type", None) == "session.error"]
         assert len(error_events) >= 1
 
     @pytest.mark.asyncio
@@ -906,8 +902,12 @@ class TestInputProviderFlow:
         # Create distinct input providers for each session
         from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 
-        provider_a = OpenCodeInputProvider(state=server_state, session_id="test-session-concurrent-a")
-        provider_b = OpenCodeInputProvider(state=server_state, session_id="test-session-concurrent-b")
+        provider_a = OpenCodeInputProvider(
+            state=server_state, session_id="test-session-concurrent-a"
+        )
+        provider_b = OpenCodeInputProvider(
+            state=server_state, session_id="test-session-concurrent-b"
+        )
 
         await integration.attach_input_provider(
             session_id="test-session-concurrent-a",

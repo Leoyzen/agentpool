@@ -18,12 +18,12 @@ from pathlib import PurePosixPath
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from upathtools import UPath
 
 from agentpool.resource_providers.mcp_provider import MCPResourceProvider
 from agentpool.skills.exceptions import SkillNotFoundError
 from agentpool.skills.skill import Skill
 from agentpool.skills.uri_resolver import SkillURIResolver, _name_alternatives
-from upathtools import UPath
 
 
 # =============================================================================

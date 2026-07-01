@@ -6,12 +6,11 @@ Tests MCP status endpoint response format and display_name field handling.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
 from agentpool.common_types import MCPServerStatus
-from agentpool_server.opencode_server.routes.agent_routes import router as agent_router
 
 
 if TYPE_CHECKING:

@@ -6,6 +6,7 @@ Manages bidirectional MCP connections tunnelled over the ACP protocol.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -162,10 +163,10 @@ class AcpMcpConnection:
             # resources/* and prompts/* are optional MCP capabilities.
             # Clients that don't support them return "Internal error".
             # Log at debug level to avoid flooding error logs.
-            is_optional_mcp = (
-                isinstance(method, str)
-                and method.startswith(("resources/", "prompts/"))
-            )
+            is_optional_mcp = isinstance(method, str) and method.startswith((
+                "resources/",
+                "prompts/",
+            ))
             if is_optional_mcp:
                 logger.debug(
                     "MCP method not supported by client",
@@ -189,12 +190,10 @@ class AcpMcpConnection:
                         "message": f"Internal error: {exc}",
                     },
                 }
-                try:
+                with contextlib.suppress(anyio.BrokenResourceError):
                     await self._to_session_send.send(
                         SessionMessage(message=JSONRPCMessage.model_validate(error_response))  # type: ignore[arg-type]
                     )
-                except anyio.BrokenResourceError:
-                    pass
             return None
 
         # Forward ACP mcp/message response back to the MCP session so
@@ -241,12 +240,10 @@ class AcpMcpConnection:
                             "message": f"Invalid upstream response: {result.get('error', result)}",
                         },
                     }
-                    try:
+                    with contextlib.suppress(anyio.BrokenResourceError):
                         await self._to_session_send.send(
                             SessionMessage(message=JSONRPCMessage.model_validate(fallback))  # type: ignore[arg-type]
                         )
-                    except anyio.BrokenResourceError:
-                        pass
             except anyio.BrokenResourceError:
                 logger.debug(
                     "Cannot forward response: session stream already closed",

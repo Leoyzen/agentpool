@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from pydantic_ai._instructions import AgentInstructions  # noqa: TC002
 from pydantic_ai.capabilities import (
     AbstractCapability,
     CapabilityOrdering,
@@ -32,6 +31,7 @@ from agentpool.skills.skill import Skill  # noqa: TC001
 if TYPE_CHECKING:
     from agentpool.skills.skill_mcp_manager import SkillMcpManager
     from agentpool.skills.skill_tool_manager import SkillToolManager
+    from agentpool.tools.base import Tool
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ class SkillCapability(AbstractCapability[AgentDepsT]):
         self._tool_manager = tool_manager
 
         # Pre-register Python tools at construction time (eager import).
-        self._python_tools: list = []
+        self._python_tools: list[Tool] = []
         if skill.tools and self._tool_manager is not None:
             self._python_tools = self._tool_manager.import_tools(skill.tools)
 
@@ -80,7 +80,7 @@ class SkillCapability(AbstractCapability[AgentDepsT]):
 
     # ---- Instructions ----
 
-    def get_instructions(self) -> AgentInstructions[AgentDepsT] | None:
+    def get_instructions(self) -> str | None:
         """Return raw skill instruction content.
 
         No XML wrapper — ``SkillsInstructionProvider`` owns the XML wrapper.

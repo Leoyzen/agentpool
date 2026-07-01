@@ -22,7 +22,12 @@ import pytest
 
 from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import RunErrorEvent, RunFailedEvent, RunStartedEvent, StreamCompleteEvent
+from agentpool.agents.events import (
+    RunErrorEvent,
+    RunFailedEvent,
+    RunStartedEvent,
+    StreamCompleteEvent,
+)
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, SessionState
 from agentpool.orchestrator.run import RunHandle, RunStatus
@@ -593,7 +598,7 @@ async def test_followup_returns_false_when_done_status() -> None:
 
 @pytest.mark.unit
 async def test_cancelled_property_reflects_turn_cancel_state() -> None:
-    """cancelled property returns _turn_was_cancelled, not live run_ctx.cancelled.
+    """Cancelled property returns _turn_was_cancelled, not live run_ctx.cancelled.
 
     The property captures the cancelled state at the moment _turn_complete_event
     is set, so handle_prompt() can observe it even after the loop resets
@@ -656,8 +661,7 @@ async def test_complete_event_set_after_start_completes() -> None:
 
         # complete_event must be set
         assert run_handle.complete_event.is_set(), (
-            "complete_event was not set after start() completed — "
-            "close_session() will hang for 30s"
+            "complete_event was not set after start() completed — close_session() will hang for 30s"
         )
 
 
@@ -826,8 +830,7 @@ async def test_input_provider_contextvar_set_during_turn() -> None:
         # The tool should have captured the input provider
         assert len(captured_provider) > 0, "Tool was never called"
         assert captured_provider[0] is mock_provider, (
-            f"ContextVar was not set — got {captured_provider[0]!r}, "
-            f"expected {mock_provider!r}"
+            f"ContextVar was not set — got {captured_provider[0]!r}, expected {mock_provider!r}"
         )
 
         # Note: We intentionally do NOT reset _current_input_provider.
@@ -888,8 +891,7 @@ async def test_turn_failure_breaks_loop_not_continue_to_idle() -> None:
                         break
         except TimeoutError:
             pytest.fail(
-                "start() hung after turn failure — loop continued to idle "
-                "instead of breaking"
+                "start() hung after turn failure — loop continued to idle instead of breaking"
             )
         finally:
             with contextlib.suppress(Exception):
@@ -982,12 +984,9 @@ def test_start_sets_current_task() -> None:
 
     source = inspect.getsource(run_module.RunHandle.start)
     assert "current_task" in source, (
-        "run_ctx.current_task must be set in start() so cancel() can "
-        "interrupt the running turn"
+        "run_ctx.current_task must be set in start() so cancel() can interrupt the running turn"
     )
-    assert "asyncio.current_task()" in source, (
-        "current_task must be set to asyncio.current_task()"
-    )
+    assert "asyncio.current_task()" in source, "current_task must be set to asyncio.current_task()"
 
 
 @pytest.mark.asyncio
@@ -1279,6 +1278,5 @@ async def test_no_value_error_when_generator_abandoned_in_different_context() ->
             loop.set_exception_handler(original_handler)
 
         assert not gc_exceptions, (
-            f"ValueError(s) raised during generator GC cleanup: "
-            f"{[str(e) for e in gc_exceptions]}"
+            f"ValueError(s) raised during generator GC cleanup: {[str(e) for e in gc_exceptions]}"
         )

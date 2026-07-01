@@ -24,12 +24,12 @@ from agentpool_server.opencode_server.models import (
     PartUpdatedEvent,
 )
 from agentpool_server.opencode_server.models.parts import (
-    TimeStart,
     TimeStartEndCompacted,
     ToolPart,
     ToolStateCompleted,
     ToolStateRunning,
 )
+
 
 if TYPE_CHECKING:
     from agentpool_server.opencode_server.state import ServerState

@@ -35,9 +35,10 @@ from agentpool.tools.base import is_terminal_tool
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from pydantic_ai.messages import ModelMessage
+    from pydantic_ai import Agent as PydanticAgent
+    from pydantic_ai.messages import ModelMessage, UserContent
 
-    from agentpool.agents.context import AgentRunContext
+    from agentpool.agents.context import AgentContext, AgentRunContext
     from agentpool.agents.events.events import RichAgentStreamEvent
     from agentpool.agents.native_agent.agent import Agent
 
@@ -65,7 +66,7 @@ class NativeTurn(Turn):
     def __init__(
         self,
         agent: Agent[Any, Any],
-        prompts: list[str],
+        prompts: list[UserContent],
         run_ctx: AgentRunContext,
         message_history: list[ModelMessage],
         parent_id: str | None = None,
@@ -99,7 +100,7 @@ class NativeTurn(Turn):
         Raises:
             asyncio.CancelledError: If the turn is cancelled mid-execution.
         """
-        agentlet = await self._agent.get_agentlet(
+        agentlet: PydanticAgent[AgentContext[Any], Any] = await self._agent.get_agentlet(
             model=None,
             output_type=None,
             run_ctx=self._run_ctx,
@@ -134,12 +135,13 @@ class NativeTurn(Turn):
         # Without this, skill instructions are silently discarded.
         staged_text = await self._agent.staged_content.consume_as_text()
         if staged_text is not None:
-            user_request = "\n\n".join(self._prompts)
-            effective_prompts = (
+            prompt_strs = [str(p) for p in self._prompts]
+            user_request = "\n\n".join(prompt_strs)
+            effective_prompts: list[UserContent] = (
                 [f"{staged_text}\n\n{user_request}"] if user_request else [staged_text]
             )
         else:
-            effective_prompts = self._prompts
+            effective_prompts = list(self._prompts)
 
         agent_run: Any = None
         try:

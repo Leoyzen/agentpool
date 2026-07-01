@@ -118,9 +118,8 @@ def parse_opencode_format(
         config_kwargs["description"] = description
 
     # Model handling
-    if model := metadata.get("model"):
-        if model != "inherit":
-            config_kwargs["model"] = model
+    if (model := metadata.get("model")) and model != "inherit":
+        config_kwargs["model"] = model
 
     # Temperature (logged, not directly supported)
     if temperature := metadata.get("temperature"):
@@ -258,9 +257,10 @@ def parse_file_agent_reference(
         # Simple path string: auto-detect format
         return parse_agent_file(reference, skills_registry=skills_registry)
 
-    # Explicit config: use type as format
+    # Explicit config: use type as format (claude maps to native)
+    fmt: AgentFileFormat = "native" if reference.type == "claude" else reference.type
     return parse_agent_file(
         reference.path,
-        file_format=reference.type,
+        file_format=fmt,
         skills_registry=skills_registry,
     )

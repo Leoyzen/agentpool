@@ -9,9 +9,9 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from pydantic_ai.capabilities import HandleDeferredToolCalls
 from pydantic_ai.models.test import TestModel
+import pytest
 
 from agentpool import Agent
 
@@ -20,8 +20,7 @@ from agentpool import Agent
 def mock_agent() -> Agent[Any]:
     """Create an agent with TestModel for capability chain testing."""
     model = TestModel(custom_output_text="test")
-    agent = Agent(name="chain-test-agent", model=model)
-    return agent
+    return Agent(name="chain-test-agent", model=model)
 
 
 # ---------------------------------------------------------------------------

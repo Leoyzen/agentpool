@@ -7,16 +7,19 @@ preserving identical code path for deferred=False tools.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from pydantic_ai.messages import ToolReturn
 from pydantic_ai.tools import RunContext
+import pytest
 
 from agentpool.agents.context import AgentContext, AgentRunContext
 from agentpool.tools import ApprovalRequired, CallDeferred, Tool
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Generator
 
 
 # ============================================================================
@@ -25,7 +28,7 @@ from agentpool.tools import ApprovalRequired, CallDeferred, Tool
 
 
 @pytest.fixture
-def agent_ctx() -> Generator[AgentContext, None, None]:
+def agent_ctx() -> Generator[AgentContext]:
     """Create a minimal AgentContext for wrap_tool usage.
 
     Patches AgentContext.handle_confirmation at class level so that
@@ -98,7 +101,9 @@ async def test_non_deferred_tool_normal_return(agent_ctx: AgentContext) -> None:
 
 
 @pytest.mark.unit
-async def test_non_deferred_tool_with_context(agent_ctx: AgentContext, run_ctx: RunContext[Any]) -> None:
+async def test_non_deferred_tool_with_context(
+    agent_ctx: AgentContext, run_ctx: RunContext[Any]
+) -> None:
     """deferred=False tool with RunContext returns normally."""
     from agentpool.agents.native_agent.tool_wrapping import wrap_tool
 
@@ -164,7 +169,8 @@ async def test_deferred_tool_catches_call_deferred_on_resume(
 
 @pytest.mark.unit
 async def test_deferred_tool_catches_call_deferred_with_context(
-    agent_ctx: AgentContext, run_ctx: RunContext[Any],
+    agent_ctx: AgentContext,
+    run_ctx: RunContext[Any],
 ) -> None:
     """Tool body with RunContext raises CallDeferred → caught properly."""
     from agentpool.agents.native_agent import tool_wrapping as tw_mod

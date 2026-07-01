@@ -150,9 +150,7 @@ async def test_tool_result_augmentation_consume_preserved() -> None:
     assert "Additional context" in consumed, (
         f"Expected injected message in consumed output, got: {consumed}"
     )
-    assert "<injected-context>" in consumed, (
-        "Expected XML-wrapped injection"
-    )
+    assert "<injected-context>" in consumed, "Expected XML-wrapped injection"
     assert not manager.has_pending(), "Pending should be cleared after consume"
 
 

@@ -19,15 +19,19 @@ before approval_bridge resolves them.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic_ai.capabilities import HandleDeferredToolCalls
 from pydantic_ai.messages import ToolReturn
-from pydantic_ai.tools import DeferredToolRequests, DeferredToolResults, RunContext
 
-from agentpool.agents.context import AgentContext
 from agentpool.agents.events.events import ToolCallDeferredEvent
 from agentpool.log import get_logger
+
+
+if TYPE_CHECKING:
+    from pydantic_ai.tools import DeferredToolRequests, DeferredToolResults, RunContext
+
+    from agentpool.agents.context import AgentContext
 
 
 logger = get_logger(__name__)

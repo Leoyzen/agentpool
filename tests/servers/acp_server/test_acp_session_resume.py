@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from acp.schema import LoadSessionRequest, ResumeSessionRequest, ResumeSessionResponse
+from acp.schema.mcp import StdioMcpServer
 from agentpool import Agent
 from agentpool.delegation import AgentPool
 from agentpool.orchestrator.core import SessionPool
@@ -13,9 +15,6 @@ from agentpool.sessions import SessionData
 from agentpool.sessions.store import MemorySessionStore
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.session_manager import ACPSessionManager
-
-from acp.schema import LoadSessionRequest, ResumeSessionRequest, ResumeSessionResponse
-from acp.schema.mcp import StdioMcpServer
 
 
 @pytest.fixture
@@ -32,13 +31,9 @@ def mock_agent_pool_with_agent():
         return f"Test response: {message}"
 
     from agentpool.models.agents import NativeAgentConfig
-
-
     from agentpool.models.manifest import AgentsManifest
 
-
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
-
 
     pool = AgentPool(manifest)
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
@@ -87,7 +82,9 @@ def resume_session_request():
 
 
 @pytest.mark.unit
-async def test_resume_session_calls_agent_load_session(mock_acp_agent, mock_session, resume_session_request):
+async def test_resume_session_calls_agent_load_session(
+    mock_acp_agent, mock_session, resume_session_request
+):
     """Test that agent.load_session() is called during resume_session."""
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)
     mock_acp_agent._initialized = True
@@ -98,7 +95,9 @@ async def test_resume_session_calls_agent_load_session(mock_acp_agent, mock_sess
 
 
 @pytest.mark.unit
-async def test_resume_session_does_not_call_replay(mock_acp_agent, mock_session, resume_session_request):
+async def test_resume_session_does_not_call_replay(
+    mock_acp_agent, mock_session, resume_session_request
+):
     """Test that notifications.replay() is NOT called during resume_session."""
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)
     mock_acp_agent._initialized = True
@@ -109,7 +108,9 @@ async def test_resume_session_does_not_call_replay(mock_acp_agent, mock_session,
 
 
 @pytest.mark.unit
-async def test_resume_session_schedules_commands_update(mock_acp_agent, mock_session, resume_session_request):
+async def test_resume_session_schedules_commands_update(
+    mock_acp_agent, mock_session, resume_session_request
+):
     """Test that send_available_commands_update() is scheduled after resume."""
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)
     mock_acp_agent._initialized = True
@@ -122,7 +123,9 @@ async def test_resume_session_schedules_commands_update(mock_acp_agent, mock_ses
 
 
 @pytest.mark.unit
-async def test_resume_session_agent_load_fails(mock_acp_agent, mock_session, resume_session_request):
+async def test_resume_session_agent_load_fails(
+    mock_acp_agent, mock_session, resume_session_request
+):
     """Test resume_session handles agent.load_session() failure gracefully."""
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)
     mock_acp_agent._initialized = True
@@ -133,7 +136,9 @@ async def test_resume_session_agent_load_fails(mock_acp_agent, mock_session, res
 
 
 @pytest.mark.unit
-async def test_resume_session_creates_session_if_not_found(mock_acp_agent, mock_session, resume_session_request):
+async def test_resume_session_creates_session_if_not_found(
+    mock_acp_agent, mock_session, resume_session_request
+):
     """Test that resume_session returns empty response for non-existent session.
 
     Previously, resume would create a new session when the session wasn't found.
@@ -163,7 +168,9 @@ async def test_resume_session_creates_session_if_not_found(mock_acp_agent, mock_
 
 
 @pytest.mark.unit
-async def test_resume_session_exception_returns_empty_response(mock_acp_agent, mock_session, resume_session_request):
+async def test_resume_session_exception_returns_empty_response(
+    mock_acp_agent, mock_session, resume_session_request
+):
     """Test that resume_session returns empty ResumeSessionResponse on exception."""
     mock_session.agent.load_session = AsyncMock(side_effect=RuntimeError("boom"))
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)
@@ -183,7 +190,6 @@ async def test_resume_session_exception_returns_empty_response(mock_acp_agent, m
 async def test_resume_session_passes_mcp_servers_to_constructor():
     """Test that resume_session passes mcp_servers to the ACPSession constructor."""
     from agentpool.models.agents import NativeAgentConfig
-
     from agentpool.models.manifest import AgentsManifest
 
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
@@ -193,17 +199,19 @@ async def test_resume_session_passes_mcp_servers_to_constructor():
     def _callback(message: str) -> str:
         return f"Test response: {message}"
 
-    agent = Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
+    Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
     store = MemorySessionStore()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
 
-    await store.save(SessionData(
-        session_id="test-session-id",
-        agent_name="test_agent",
-        cwd="/tmp",
-    ))
+    await store.save(
+        SessionData(
+            session_id="test-session-id",
+            agent_name="test_agent",
+            cwd="/tmp",
+        )
+    )
 
     manager = ACPSessionManager(pool=pool)
     mock_client = MagicMock()
@@ -239,7 +247,6 @@ async def test_resume_session_passes_mcp_servers_to_constructor():
 async def test_resume_session_initializes_mcp_servers():
     """Test that resume_session calls initialize_mcp_servers on the session."""
     from agentpool.models.agents import NativeAgentConfig
-
     from agentpool.models.manifest import AgentsManifest
 
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
@@ -249,17 +256,19 @@ async def test_resume_session_initializes_mcp_servers():
     def _callback(message: str) -> str:
         return f"Test response: {message}"
 
-    agent = Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
+    Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
     store = MemorySessionStore()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
 
-    await store.save(SessionData(
-        session_id="test-session-id",
-        agent_name="test_agent",
-        cwd="/tmp",
-    ))
+    await store.save(
+        SessionData(
+            session_id="test-session-id",
+            agent_name="test_agent",
+            cwd="/tmp",
+        )
+    )
 
     manager = ACPSessionManager(pool=pool)
     mock_client = MagicMock()
@@ -289,9 +298,9 @@ async def test_resume_session_initializes_mcp_servers():
 @pytest.mark.unit
 async def test_resume_session_with_none_mcp_servers_calls_initialize():
     """Test that resume_session still calls initialize_mcp_servers when
-    mcp_servers is None (matching create_session behaviour)."""
+    mcp_servers is None (matching create_session behaviour).
+    """
     from agentpool.models.agents import NativeAgentConfig
-
     from agentpool.models.manifest import AgentsManifest
 
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
@@ -301,17 +310,19 @@ async def test_resume_session_with_none_mcp_servers_calls_initialize():
     def _callback(message: str) -> str:
         return f"Test response: {message}"
 
-    agent = Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
+    Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
     store = MemorySessionStore()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
 
-    await store.save(SessionData(
-        session_id="test-session-id",
-        agent_name="test_agent",
-        cwd="/tmp",
-    ))
+    await store.save(
+        SessionData(
+            session_id="test-session-id",
+            agent_name="test_agent",
+            cwd="/tmp",
+        )
+    )
 
     manager = ACPSessionManager(pool=pool)
     mock_client = MagicMock()
@@ -348,7 +359,6 @@ async def test_resume_session_does_not_call_load_session():
     calls agent.load_session() directly.
     """
     from agentpool.models.agents import NativeAgentConfig
-
     from agentpool.models.manifest import AgentsManifest
 
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
@@ -358,17 +368,19 @@ async def test_resume_session_does_not_call_load_session():
     def _callback(message: str) -> str:
         return f"Test response: {message}"
 
-    agent = Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
+    Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
     store = MemorySessionStore()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
 
-    await store.save(SessionData(
-        session_id="test-session-id",
-        agent_name="test_agent",
-        cwd="/tmp",
-    ))
+    await store.save(
+        SessionData(
+            session_id="test-session-id",
+            agent_name="test_agent",
+            cwd="/tmp",
+        )
+    )
 
     manager = ACPSessionManager(pool=pool)
     mock_client = MagicMock()
@@ -399,9 +411,9 @@ async def test_resume_session_does_not_call_load_session():
 async def test_resume_session_is_idempotent():
     """Test that calling resume_session twice with the same session_id
     returns the cached session on the second call without constructing
-    a new ACPSession."""
+    a new ACPSession.
+    """
     from agentpool.models.agents import NativeAgentConfig
-
     from agentpool.models.manifest import AgentsManifest
 
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
@@ -411,17 +423,19 @@ async def test_resume_session_is_idempotent():
     def _callback(message: str) -> str:
         return f"Test response: {message}"
 
-    agent = Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
+    Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
     store = MemorySessionStore()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
 
-    await store.save(SessionData(
-        session_id="test-session-id",
-        agent_name="test_agent",
-        cwd="/tmp",
-    ))
+    await store.save(
+        SessionData(
+            session_id="test-session-id",
+            agent_name="test_agent",
+            cwd="/tmp",
+        )
+    )
 
     manager = ACPSessionManager(pool=pool)
     mock_client = MagicMock()
@@ -464,7 +478,8 @@ async def test_resume_calls_session_manager_resume_not_create(
     mock_acp_agent, mock_session, resume_session_request
 ):
     """resume_session calls session_manager.resume_session() not create_session()
-    when get_session returns None but session exists in store."""
+    when get_session returns None but session exists in store.
+    """
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=None)
     mock_acp_agent.session_manager.resume_session = AsyncMock(return_value=mock_session)
     mock_acp_agent.session_manager.create_session = AsyncMock()
@@ -478,9 +493,7 @@ async def test_resume_calls_session_manager_resume_not_create(
 
 
 @pytest.mark.unit
-async def test_resume_passes_mcp_servers_to_session_manager(
-    mock_acp_agent, mock_session
-):
+async def test_resume_passes_mcp_servers_to_session_manager(mock_acp_agent, mock_session):
     """resume_session passes mcp_servers through to session_manager.resume_session."""
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=None)
     mock_acp_agent.session_manager.resume_session = AsyncMock(return_value=mock_session)
@@ -525,11 +538,10 @@ async def test_resume_passes_through_to_session_manager_correctly(
 
 
 @pytest.mark.unit
-async def test_load_session_calls_session_manager_resume_not_create(
-    mock_acp_agent, mock_session
-):
+async def test_load_session_calls_session_manager_resume_not_create(mock_acp_agent, mock_session):
     """load_session calls session_manager.resume_session() not create_session()
-    when get_session returns None but session exists in store."""
+    when get_session returns None but session exists in store.
+    """
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=None)
     mock_acp_agent.session_manager.resume_session = AsyncMock(return_value=mock_session)
     mock_acp_agent.session_manager.create_session = AsyncMock()
@@ -545,14 +557,11 @@ async def test_load_session_calls_session_manager_resume_not_create(
 
 
 @pytest.mark.unit
-async def test_load_session_still_replays_history_after_resume(
-    mock_acp_agent, mock_session
-):
+async def test_load_session_still_replays_history_after_resume(mock_acp_agent, mock_session):
     """load_session still replays conversation history after resuming
-    from session_manager."""
-    mock_session.agent.conversation.chat_messages = [
-        MagicMock(messages=[MagicMock()])
-    ]
+    from session_manager.
+    """
+    mock_session.agent.conversation.chat_messages = [MagicMock(messages=[MagicMock()])]
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=None)
     mock_acp_agent.session_manager.resume_session = AsyncMock(return_value=mock_session)
     mock_acp_agent._initialized = True
@@ -570,7 +579,8 @@ async def test_session_data_preserved_after_resume(
     mock_acp_agent, mock_session, resume_session_request
 ):
     """session_store.save is NOT called during resume_session (data is preserved,
-    not overwritten)."""
+    not overwritten).
+    """
     mock_store = MagicMock()
     mock_store.save = AsyncMock()
 

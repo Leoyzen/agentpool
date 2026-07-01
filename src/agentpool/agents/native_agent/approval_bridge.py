@@ -19,13 +19,12 @@ from pydantic_ai.tools import (
     ToolDenied,
 )
 
-from agentpool.agents.context import AgentContext
 from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
     from agentpool import Agent
-    from agentpool.agents.context import ConfirmationResult
+    from agentpool.agents.context import AgentContext, ConfirmationResult
 
 
 logger = get_logger(__name__)
@@ -107,7 +106,7 @@ async def _resolve_deferred_approvals(
             agent_ctx,
             tool_name=tool_name,
             tool_call_id=call.tool_call_id,
-            tool_input=call.args,
+            tool_input=call.args if isinstance(call.args, dict) else {},
         )
 
         try:

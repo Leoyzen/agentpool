@@ -408,6 +408,8 @@ __all__ = [
     "UserMessage",
     "VcsBranchUpdatedEvent",
     "VcsInfo",
+    "WorkspaceCreateRequest",
+    "WorkspaceInfo",
     "WorktreeCreateRequest",
     "WorktreeInfo",
     "WorktreeRemoveRequest",

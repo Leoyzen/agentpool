@@ -18,10 +18,12 @@ SERVER_COUNT = 2
 @pytest.fixture
 def simple_agent_pool():
     """Create a simple agent pool with manifest-based config."""
-    manifest = AgentsManifest(agents={
-        "agent1": NativeAgentConfig(model="test"),
-        "agent2": NativeAgentConfig(model="test"),
-    })
+    manifest = AgentsManifest(
+        agents={
+            "agent1": NativeAgentConfig(model="test"),
+            "agent2": NativeAgentConfig(model="test"),
+        }
+    )
     return AgentPool(manifest)
 
 

@@ -8,10 +8,9 @@ Covers:
 
 from __future__ import annotations
 
+from pathlib import Path
 import subprocess
 import tempfile
-from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -21,10 +20,6 @@ from agentpool.utils.identifiers import ascending
 from agentpool_config.storage import OpenCodeStorageConfig, SQLStorageConfig
 from agentpool_storage.opencode_provider import OpenCodeStorageProvider
 from agentpool_storage.sql_provider import SQLModelProvider
-
-
-if TYPE_CHECKING:
-    pass
 
 
 class TestSQLProviderLogSession:
@@ -256,13 +251,13 @@ class TestOpenCodeStorageProviderPathHandling:
     async def test_list_session_ids(self, provider: OpenCodeStorageProvider) -> None:
         """Test that list_session_ids returns all session IDs."""
         # Use ascending() to generate unique IDs
+        import anyenv
+
         from agentpool_server.opencode_server.models import (
             Session,
             SessionSummary,
             TimeCreatedUpdated,
         )
-
-        import anyenv
 
         session_ids = []
         for i in range(3):
@@ -295,7 +290,6 @@ class TestOpenCodeStorageProviderPathHandling:
         # Verify all sessions are listed
         for session_id in session_ids:
             assert session_id in result
-
 
 
 def _init_git_repo(directory: str) -> None:
@@ -370,13 +364,13 @@ class TestOpenCodeListSessionIdsCwdParameter:
         Uses real git repos so compute_project_id() returns a valid project_id
         that matches the session storage layout, mirroring production behavior.
         """
+        import anyenv
+
         from agentpool_server.opencode_server.models import (
             Session,
             TimeCreatedUpdated,
         )
         from agentpool_storage.opencode_provider.helpers import compute_project_id
-
-        import anyenv
 
         # Create two separate git repos (simulating two different projects)
         alpha_dir = provider.base_path / "alpha_project"
@@ -437,12 +431,12 @@ class TestOpenCodeListSessionIdsCwdParameter:
         self, provider: OpenCodeStorageProvider
     ) -> None:
         """list_session_ids(cwd=None) should return all sessions (no filtering)."""
+        import anyenv
+
         from agentpool_server.opencode_server.models import (
             Session,
             TimeCreatedUpdated,
         )
-
-        import anyenv
 
         project_id = "test_project"
         project_dir = provider.sessions_path / project_id
@@ -487,12 +481,12 @@ class TestOpenCodeListSessionIdsCwdParameter:
 
         # Create a valid session
         valid_id = ascending("session")
+        import anyenv
+
         from agentpool_server.opencode_server.models import (
             Session,
             TimeCreatedUpdated,
         )
-
-        import anyenv
 
         valid_session = Session(
             id=valid_id,
@@ -509,9 +503,7 @@ class TestOpenCodeListSessionIdsCwdParameter:
 
         # Create a corrupted session (invalid JSON)
         corrupt_id = ascending("session")
-        (project_dir / f"{corrupt_id}.json").write_text(
-            "{invalid json!!!", encoding="utf-8"
-        )
+        (project_dir / f"{corrupt_id}.json").write_text("{invalid json!!!", encoding="utf-8")
         (provider.messages_path / corrupt_id).mkdir(parents=True, exist_ok=True)
 
         # Filter by cwd — corrupted session must be excluded
@@ -532,9 +524,7 @@ class TestOpenCodeListSessionIdsCwdParameter:
         from agentpool_storage.base import StorageProvider
 
         base_params = inspect.signature(StorageProvider.list_session_ids).parameters
-        override_params = inspect.signature(
-            OpenCodeStorageProvider.list_session_ids
-        ).parameters
+        override_params = inspect.signature(OpenCodeStorageProvider.list_session_ids).parameters
 
         for param_name in base_params:
             if param_name == "self":

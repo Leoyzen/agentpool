@@ -8,7 +8,6 @@ This test verifies that the cold load path broadcasts the event.
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, Mock
 
@@ -18,7 +17,10 @@ from agentpool.sessions.models import SessionData
 from agentpool_server.opencode_server.models import Session, SessionUpdatedEvent
 from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
 
+
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from agentpool_server.opencode_server.state import ServerState
 
 

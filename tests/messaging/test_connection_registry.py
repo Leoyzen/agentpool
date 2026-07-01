@@ -11,9 +11,7 @@ from agentpool.models.manifest import AgentsManifest
 @pytest.fixture
 async def pool():
     """Create agent pool with test agents."""
-    manifest = AgentsManifest(
-        agents={"agent1": NativeAgentConfig(name="agent1", model="test")}
-    )
+    manifest = AgentsManifest(agents={"agent1": NativeAgentConfig(name="agent1", model="test")})
     pool = AgentPool(manifest)
 
     async with pool:

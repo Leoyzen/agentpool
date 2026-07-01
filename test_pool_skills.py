@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Test skill resolution with actual AgentPool setup mimicking serve-acp.
+"""Test skill resolution with actual AgentPool setup mimicking serve-acp.
 
 Usage (from packages/agentpool):
     uv run python test_pool_skills.py
@@ -10,12 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from pathlib import Path
+
 
 sys.path.insert(0, "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/src")
 
 from agentpool import AgentPool
-from agentpool.skills.uri_resolver import SkillURIResolver
 
 
 async def main():
@@ -24,7 +22,9 @@ async def main():
     print("=" * 60)
     print()
 
-    config_path = "/Users/yuchen.liu/src/yilab/iroot-llm/packages/xeno-agent/config/diag-agent-ng.yaml"
+    config_path = (
+        "/Users/yuchen.liu/src/yilab/iroot-llm/packages/xeno-agent/config/diag-agent-ng.yaml"
+    )
     print(f"Config: {config_path}")
     print()
 
@@ -84,6 +84,7 @@ async def main():
     except Exception as e:
         print(f"ERROR: {e}")
         import traceback
+
         traceback.print_exc()
 
     print("Done")

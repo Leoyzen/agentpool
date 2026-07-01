@@ -45,7 +45,8 @@ def _make_part_delta(session_id: str = "s1") -> PartDeltaEvent:
 @pytest.mark.unit
 async def test_clear_replay_buffer_prevents_stale_events() -> None:
     """After clear_replay_buffer, new subscribers must NOT receive
-    events from previous turns."""
+    events from previous turns.
+    """
     bus = EventBus()
 
     # Simulate turn 1 publishing events including StreamCompleteEvent
@@ -80,7 +81,8 @@ async def test_clear_replay_buffer_prevents_stale_events() -> None:
 @pytest.mark.unit
 async def test_replay_buffer_replays_stale_without_clear() -> None:
     """Without clear_replay_buffer, new subscribers DO receive stale events.
-    This documents the bug behavior that the fix prevents."""
+    This documents the bug behavior that the fix prevents.
+    """
     bus = EventBus()
 
     # Turn 1 publishes events including StreamCompleteEvent

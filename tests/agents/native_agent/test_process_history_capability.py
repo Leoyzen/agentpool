@@ -6,10 +6,10 @@ import inspect
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
 from pydantic_ai.capabilities import ProcessHistory
-from pydantic_ai.messages import ModelMessage, ModelRequest, TextPart, UserPromptPart
+from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from pydantic_ai.tools import RunContext
+import pytest
 
 from agentpool.agents.native_agent.process_history_capability import (
     ProcessHistoryAdapter,
@@ -99,9 +99,7 @@ class TestWrapTypedContextProcessors:
     ) -> None:
         """Sync processor with typed RunContext passes through."""
 
-        def processor(
-            ctx: RunContext[Any], messages: list[ModelMessage]
-        ) -> list[ModelMessage]:
+        def processor(ctx: RunContext[Any], messages: list[ModelMessage]) -> list[ModelMessage]:
             return messages[:-1]
 
         wrapped = ProcessHistoryAdapter.wrap_processor(processor)

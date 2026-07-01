@@ -135,9 +135,7 @@ class TestEventProcessorContextSerialization:
         # assistant_msg should be serialized as a dict
         assert isinstance(data["assistant_msg"], dict)
 
-    def test_serialize_deserialize_roundtrip_basic(
-        self, server_state: ServerState
-    ) -> None:
+    def test_serialize_deserialize_roundtrip_basic(self, server_state: ServerState) -> None:
         """Roundtrip: serialize → deserialize preserves all fields."""
         session_id = "sess-roundtrip"
         msg = _make_assistant_msg(session_id, server_state.working_dir)
@@ -275,7 +273,6 @@ class TestBeforeConsumerLoopResume:
 
         # First, create a normal context and serialize it
         msg = _make_assistant_msg(session_id, server_state.working_dir)
-        from agentpool.utils.time_utils import now_ms
 
         ctx = EventProcessorContext(
             session_id=session_id,
@@ -486,7 +483,8 @@ class TestBeforeConsumerLoopResume:
             # (parts are already in the frontend from the original session)
             broadcast_calls = mock_bcast.await_args_list
             part_update_calls = [
-                c for c in broadcast_calls
+                c
+                for c in broadcast_calls
                 if hasattr(c.args[0], "type") and "part" in c.args[0].type
             ]
             assert len(part_update_calls) == 0, (
@@ -615,9 +613,7 @@ class TestResumeEdgeCases:
         assert ctx is not None
 
     @pytest.mark.asyncio
-    async def test_deserialize_preserves_is_errored_flag(
-        self, server_state: ServerState
-    ) -> None:
+    async def test_deserialize_preserves_is_errored_flag(self, server_state: ServerState) -> None:
         """is_errored flag is preserved across serialize/deserialize."""
         msg = _make_assistant_msg("sess-err", server_state.working_dir)
         ctx = EventProcessorContext(

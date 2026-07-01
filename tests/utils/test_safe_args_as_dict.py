@@ -7,8 +7,8 @@ that ``safe_args_as_dict`` detects this pattern and returns the fallback.
 
 from __future__ import annotations
 
-import pytest
 from pydantic_ai.messages import ToolCallPart
+import pytest
 
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 

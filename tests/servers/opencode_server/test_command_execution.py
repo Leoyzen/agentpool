@@ -6,22 +6,20 @@ Tests slashed command execution, MCP prompt fallback, and precedence handling.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock
-
-import pytest
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, Mock
 
+import pytest
+from upathtools import UPath
+
 from agentpool.skills.command import SkillCommand
 from agentpool.skills.skill import Skill
-from agentpool_config.session_pool import OpenCodeConfig
-from agentpool_server.opencode_server.state import ServerState
-from upathtools import UPath
 
 
 if TYPE_CHECKING:
     from httpx import AsyncClient
+
+    from agentpool_server.opencode_server.state import ServerState
 
 
 pytestmark = pytest.mark.asyncio
@@ -287,9 +285,7 @@ async def test_collision_warning_logged(
     mock_prompt.name = "collision-cmd"
     mock_agent.tools.list_prompts = AsyncMock(return_value=[mock_prompt])
 
-    with patch(
-        "agentpool_server.opencode_server.routes.session_routes.logger"
-    ) as mock_logger:
+    with patch("agentpool_server.opencode_server.routes.session_routes.logger") as mock_logger:
         response = await async_client.post(
             f"/session/{session_id}/command",
             json={"command": "collision-cmd"},
@@ -367,7 +363,7 @@ async def test_concurrent_slash_commands_same_session_are_serialized(
 
 
 async def test_skill_command_routes_through_session_pool(
-    async_client: "AsyncClient",
+    async_client: AsyncClient,
     server_state: ServerState,
     mock_agent: Mock,
 ):
@@ -436,7 +432,7 @@ async def test_skill_command_routes_through_session_pool(
 
 
 async def test_slash_command_routes_through_session_pool(
-    async_client: "AsyncClient",
+    async_client: AsyncClient,
     server_state: ServerState,
     mock_agent: Mock,
 ):
@@ -499,7 +495,7 @@ async def test_slash_command_routes_through_session_pool(
 
 
 async def test_mcp_prompt_routes_through_session_pool(
-    async_client: "AsyncClient",
+    async_client: AsyncClient,
     server_state: ServerState,
     mock_agent: Mock,
 ):

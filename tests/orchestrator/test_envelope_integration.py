@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
 
 from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionController
-import anyio
 
 
+if TYPE_CHECKING:
+    import anyio
 
 
 def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
@@ -22,6 +24,7 @@ def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
         return stats.current_buffer_used == 0
     except Exception:
         return True
+
 
 class TestEventEnvelopeIntegration:
     """Integration tests for EventEnvelope wrapping behavior."""
@@ -73,6 +76,7 @@ class TestEventEnvelopeIntegration:
 
     async def test_field_precedence(self) -> None:
         """EventEnvelope.source_session_id is not shadowed by event attribute."""
+
         # Create an event that has its own source_session_id attribute
         class EventWithSourceSessionId:
             def __init__(self) -> None:

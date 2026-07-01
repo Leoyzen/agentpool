@@ -6,10 +6,16 @@ when the client explicitly declares support for it via client_capabilities.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from acp import ClientCapabilities, InitializeRequest
-from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+
+
+if TYPE_CHECKING:
+    from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+
 
 pytestmark = pytest.mark.unit
 

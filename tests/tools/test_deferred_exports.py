@@ -10,7 +10,8 @@ These are pydantic-ai exception classes used by tool authors for:
 from __future__ import annotations
 
 import pytest
-from agentpool.tools import CallDeferred, ApprovalRequired
+
+from agentpool.tools import ApprovalRequired, CallDeferred
 
 
 def test_call_deferred_is_exception():
@@ -21,7 +22,7 @@ def test_call_deferred_is_exception():
 def test_call_deferred_can_be_raised():
     """CallDeferred should be raise-able without arguments."""
     with pytest.raises(CallDeferred):
-        raise CallDeferred()
+        raise CallDeferred
 
 
 def test_call_deferred_with_metadata():
@@ -33,6 +34,7 @@ def test_call_deferred_with_metadata():
 def test_call_deferred_is_pydantic_ai_class():
     """CallDeferred should be the actual pydantic-ai class, not a wrapper."""
     from pydantic_ai.exceptions import CallDeferred as PydanticCallDeferred
+
     assert CallDeferred is PydanticCallDeferred
 
 
@@ -44,7 +46,7 @@ def test_approval_required_is_exception():
 def test_approval_required_can_be_raised():
     """ApprovalRequired should be raise-able without arguments."""
     with pytest.raises(ApprovalRequired):
-        raise ApprovalRequired()
+        raise ApprovalRequired
 
 
 def test_approval_required_with_metadata():
@@ -56,11 +58,13 @@ def test_approval_required_with_metadata():
 def test_approval_required_is_pydantic_ai_class():
     """ApprovalRequired should be the actual pydantic-ai class, not a wrapper."""
     from pydantic_ai.exceptions import ApprovalRequired as PydanticApprovalRequired
+
     assert ApprovalRequired is PydanticApprovalRequired
 
 
 def test_both_in_agentpool_tools_all():
     """Both exceptions should be listed in agentpool.tools.__all__."""
     from agentpool import tools
+
     assert "CallDeferred" in tools.__all__
     assert "ApprovalRequired" in tools.__all__

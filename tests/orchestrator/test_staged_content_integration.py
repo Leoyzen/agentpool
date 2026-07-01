@@ -92,8 +92,7 @@ async def test_staged_content_consumed_by_native_turn() -> None:
         )
 
         assert skill_instructions in all_text or "Do the thing" in all_text, (
-            "Skill instructions not found in message history. "
-            f"History text: {all_text[:500]}"
+            f"Skill instructions not found in message history. History text: {all_text[:500]}"
         )
 
 
@@ -198,7 +197,7 @@ async def test_receive_request_empty_list_not_converted_to_string() -> None:
     The fix: when content is an empty list (or falsy), pass an empty
     string instead of str([]).
     """
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
 
     from agentpool.orchestrator.core import SessionController
 
@@ -251,9 +250,7 @@ async def test_receive_request_empty_list_not_converted_to_string() -> None:
     assert captured_content[0] == "", (
         f"Expected empty string for empty list content, got {captured_content[0]!r}"
     )
-    assert captured_content[0] != "[]", (
-        "Empty list was converted to '[]' — this is the bug"
-    )
+    assert captured_content[0] != "[]", "Empty list was converted to '[]' — this is the bug"
 
 
 # ---------------------------------------------------------------------------
@@ -327,11 +324,7 @@ async def test_staged_content_reaches_model_through_runhandle_pipeline() -> None
                     except anyio.EndOfStream:
                         break
 
-                    event = (
-                        envelope.event
-                        if hasattr(envelope, "event")
-                        else envelope
-                    )
+                    event = envelope.event if hasattr(envelope, "event") else envelope
                     received_events.append(event)
 
                     if isinstance(event, StreamCompleteEvent):
@@ -347,9 +340,7 @@ async def test_staged_content_reaches_model_through_runhandle_pipeline() -> None
             with contextlib.suppress(asyncio.CancelledError):
                 await drive_task
 
-        assert stream_complete_received, (
-            "Consumer never received StreamCompleteEvent"
-        )
+        assert stream_complete_received, "Consumer never received StreamCompleteEvent"
 
         # Step 5: Verify staged_content was consumed
         assert len(agent.staged_content) == 0, (

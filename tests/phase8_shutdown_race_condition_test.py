@@ -7,7 +7,6 @@ active session processing, it doesn't raise RuntimeError('SessionPool not availa
 from __future__ import annotations
 
 import anyio
-
 import pytest
 
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
@@ -22,7 +21,6 @@ async def test_shutdown_with_active_session_no_error(manifest: AgentsManifest) -
     - SessionPool should remain available through shutdown (no RuntimeError)
     - This tests shielded cleanup in storage and orchestrator finally blocks
     """
-
     agent_config = NativeAgentConfig(
         name="test-agent",
         model="test",

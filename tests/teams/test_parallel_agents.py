@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel
 import pytest
 
 from agentpool import AgentPool, AgentsManifest, Team, TeamRun
-
-
-if TYPE_CHECKING:
-    from agentpool import Team, TeamRun
 
 
 class _TestOutput(BaseModel):

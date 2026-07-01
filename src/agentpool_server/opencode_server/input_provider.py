@@ -129,7 +129,8 @@ class OpenCodeInputProvider(InputProvider):
             args_preview = ", ".join(f"{k}={v!r}" for k, v in list(args.items())[:max_preview_args])
             if len(args) > max_preview_args:
                 args_preview += ", ..."
-            # Extract call_id from AgentContext if available (set by non-native agents from streaming)
+            # Extract call_id from AgentContext if available
+            # (set by non-native agents from streaming)
             # Fall back to a generated ID if not available
             call_id = context.tool_call_id
             if call_id is None:
