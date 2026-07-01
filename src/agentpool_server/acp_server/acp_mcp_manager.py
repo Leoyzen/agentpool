@@ -6,6 +6,7 @@ Manages bidirectional MCP connections tunnelled over the ACP protocol.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -101,7 +102,11 @@ class AcpMcpConnection:
                 del self._session_streams[key]
                 break
 
-    async def send_to_acp(self, message: Any, response_stream: MemoryObjectSendStream[dict[str, Any]]) -> Any:
+    async def send_to_acp(
+        self,
+        message: Any,
+        response_stream: MemoryObjectSendStream[dict[str, Any]],
+    ) -> Any:
         """Send an MCP message to the ACP client and route the response.
 
         Like ``send_to_client()`` but writes the response to the
@@ -166,12 +171,10 @@ class AcpMcpConnection:
                         "message": f"Internal error: {exc}",
                     },
                 }
-                try:
+                with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
                     await response_stream.send(
                         SessionMessage(message=JSONRPCMessage.model_validate(error_response))  # type: ignore[arg-type]
                     )
-                except (anyio.BrokenResourceError, anyio.ClosedResourceError):
-                    pass
             return None
 
         if original_id is not None and isinstance(result, dict):
@@ -206,12 +209,10 @@ class AcpMcpConnection:
                             "message": f"Invalid upstream response: {result.get('error', result)}",
                         },
                     }
-                    try:
+                    with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
                         await response_stream.send(
                             SessionMessage(message=JSONRPCMessage.model_validate(fallback))  # type: ignore[arg-type]
                         )
-                    except (anyio.BrokenResourceError, anyio.ClosedResourceError):
-                        pass
             except (anyio.BrokenResourceError, anyio.ClosedResourceError):
                 logger.debug(
                     "Cannot forward response: session stream already closed",
@@ -241,10 +242,8 @@ class AcpMcpConnection:
             session_msg = SessionMessage(message=JSONRPCMessage.model_validate(jsonrpc_message))
 
         for pair in list(self._session_streams.values()):
-            try:
+            with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
                 await pair.to_session_send.send(session_msg)  # type: ignore[arg-type]
-            except (anyio.BrokenResourceError, anyio.ClosedResourceError):
-                pass
 
     async def handle_client_message(self, message: dict[str, Any]) -> None:
         """Handle an incoming mcp/message from the client by broadcasting to all sessions."""

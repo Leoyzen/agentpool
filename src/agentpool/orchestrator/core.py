@@ -1562,27 +1562,10 @@ class SessionController:
         """
         from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
 
-        logger.debug(
-            "_consume_run() START session_id=%s run_id=%s",
-            run_handle.session_id,
-            run_handle.run_id,
-        )
         gen = run_handle.start(initial_prompt)
         try:
             async for event in gen:
-                logger.debug(
-                    "_consume_run() received event=%s session_id=%s run_id=%s",
-                    type(event).__name__,
-                    run_handle.session_id,
-                    run_handle.run_id,
-                )
                 if isinstance(event, StreamCompleteEvent | RunErrorEvent):
-                    logger.debug(
-                        "_consume_run() breaking on %s session_id=%s run_id=%s",
-                        type(event).__name__,
-                        run_handle.session_id,
-                        run_handle.run_id,
-                    )
                     break
         except Exception as exc:
             logger.exception(
@@ -1739,10 +1722,6 @@ class SessionController:
                 ):
                     session.current_run_id = None
             if session.current_run_id is None:
-                logger.debug(
-                    "receive_request() starting new run session_id=%s",
-                    session_id,
-                )
                 return self._start_run_handle(session, agent, session_id, content_str, deps=deps)
             run = self._runs.get(session.current_run_id) if session.current_run_id else None
             if run is not None:
