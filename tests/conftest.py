@@ -25,13 +25,13 @@ TEST_RESPONSE = "I am a test response"
 @pytest.fixture
 def default_model() -> str:
     """Default model for testing."""
-    return os.getenv("TEST_DEFAULT_MODEL", "openai-chat:svc/glm-4.7")
+    return os.getenv("TEST_DEFAULT_MODEL") or "openai-chat:svc/glm-4.7"
 
 
 @pytest.fixture
 def vision_model() -> str:
     """Vision-capable model for testing."""
-    return os.getenv("TEST_VISION_MODEL", "openai-chat:svc/kimi-k2")
+    return os.getenv("TEST_VISION_MODEL") or "openai-chat:svc/kimi-k2"
 
 
 @pytest.fixture(scope="session", autouse=True)
