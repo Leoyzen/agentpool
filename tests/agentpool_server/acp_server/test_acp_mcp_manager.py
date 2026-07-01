@@ -129,28 +129,28 @@ async def test_close_all(
 # AcpMcpConnection tests
 
 
-async def test_connection_open_creates_streams(
+async def test_register_session_creates_streams(
     server_config: AcpMcpServer,
     send_to_client: AsyncMock,
 ) -> None:
-    """Open creates memory streams for session communication."""
+    """register_session creates a per-session stream pair."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
 
-    await conn.open()
+    pair = conn.register_session()
 
-    assert conn._to_session_send is not None
-    assert conn._to_session_receive is not None
-    assert conn._from_session_send is not None
-    assert conn._from_session_receive is not None
+    assert pair.to_session_send is not None
+    assert pair.to_session_receive is not None
+    assert pair.from_session_send is not None
+    assert pair.from_session_receive is not None
 
 
 async def test_connection_close_closes_streams(
     server_config: AcpMcpServer,
     send_to_client: AsyncMock,
 ) -> None:
-    """Close closes all streams and marks connection closed."""
+    """Close closes all stream pairs and marks connection closed."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-    await conn.open()
+    conn.register_session()
 
     await conn.close()
 
@@ -163,7 +163,7 @@ async def test_connection_close_is_idempotent(
 ) -> None:
     """Close can be called multiple times without error."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-    await conn.open()
+    conn.register_session()
     await conn.close()
 
     await conn.close()
@@ -175,16 +175,16 @@ async def test_connection_handle_client_message_routes_to_session(
     server_config: AcpMcpServer,
     send_to_client: AsyncMock,
 ) -> None:
-    """handle_client_message converts dict to SessionMessage and routes to session."""
+    """handle_client_message broadcasts to registered session pairs."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-    await conn.open()
+    pair = conn.register_session()
 
     message = {"jsonrpc": "2.0", "method": "test", "id": 1}
 
     # Stream has capacity 0 (handoff semantics), so send and receive must be concurrent
     async with anyio.create_task_group() as tg:
         tg.start_soon(conn.handle_client_message, message)
-        received = await conn.to_session.receive()
+        received = await pair.to_session_receive.receive()
 
     from mcp.shared.message import SessionMessage
 
@@ -192,23 +192,13 @@ async def test_connection_handle_client_message_routes_to_session(
     assert received.message.root.method == "test"  # type: ignore[union-attr]
 
 
-async def test_connection_handle_client_message_not_opened_raises(
+async def test_send_to_acp_formats_request(
     server_config: AcpMcpServer,
     send_to_client: AsyncMock,
 ) -> None:
-    """handle_client_message raises RuntimeError when connection is not opened."""
+    """send_to_acp extracts method/params and sends flattened ACP format."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-
-    with pytest.raises(RuntimeError, match="Connection not opened"):
-        await conn.handle_client_message({"jsonrpc": "2.0", "method": "test"})
-
-
-async def test_connection_send_to_client_formats_request(
-    server_config: AcpMcpServer,
-    send_to_client: AsyncMock,
-) -> None:
-    """send_to_client extracts method/params and sends flattened ACP format."""
-    conn = AcpMcpConnection("conn-1", server_config, send_to_client)
+    pair = conn.register_session()
     message = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -216,7 +206,7 @@ async def test_connection_send_to_client_formats_request(
         "params": {"protocolVersion": "2024-11-05"},
     }
 
-    await conn.send_to_client(message)
+    await conn.send_to_acp(message, pair.to_session_send)
 
     send_to_client.assert_awaited_once_with({
         "connectionId": "conn-1",
@@ -225,15 +215,16 @@ async def test_connection_send_to_client_formats_request(
     })
 
 
-async def test_connection_send_to_client_formats_notification(
+async def test_send_to_acp_formats_notification(
     server_config: AcpMcpServer,
     send_to_client: AsyncMock,
 ) -> None:
-    """send_to_client sends notification without id in flattened ACP format."""
+    """send_to_acp sends notification without id in flattened ACP format."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
+    pair = conn.register_session()
     message = {"jsonrpc": "2.0", "method": "notifications/initialized"}
 
-    await conn.send_to_client(message)
+    await conn.send_to_acp(message, pair.to_session_send)
 
     send_to_client.assert_awaited_once_with({
         "connectionId": "conn-1",
@@ -241,87 +232,15 @@ async def test_connection_send_to_client_formats_notification(
     })
 
 
-async def test_connection_to_session_property(
-    server_config: AcpMcpServer,
-    send_to_client: AsyncMock,
-) -> None:
-    """to_session property returns the receive stream after opening."""
-    conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-    await conn.open()
-
-    stream = conn.to_session
-
-    assert stream is conn._to_session_receive
-
-
-async def test_connection_to_session_not_opened_raises(
-    server_config: AcpMcpServer,
-    send_to_client: AsyncMock,
-) -> None:
-    """to_session property raises RuntimeError when connection is not opened."""
-    conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-
-    with pytest.raises(RuntimeError, match="Connection not opened"):
-        _ = conn.to_session
-
-
-async def test_connection_from_session_property(
-    server_config: AcpMcpServer,
-    send_to_client: AsyncMock,
-) -> None:
-    """from_session property returns the send stream after opening."""
-    conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-    await conn.open()
-
-    stream = conn.from_session
-
-    assert stream is conn._from_session_send
-
-
-async def test_connection_from_session_not_opened_raises(
-    server_config: AcpMcpServer,
-    send_to_client: AsyncMock,
-) -> None:
-    """from_session property raises RuntimeError when connection is not opened."""
-    conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-
-    with pytest.raises(RuntimeError, match="Connection not opened"):
-        _ = conn.from_session
-
-
-async def test_connection_from_session_receive_property(
-    server_config: AcpMcpServer,
-    send_to_client: AsyncMock,
-) -> None:
-    """from_session_receive property returns the receive stream after opening."""
-    conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-    await conn.open()
-
-    stream = conn.from_session_receive
-
-    assert stream is conn._from_session_receive
-
-
-async def test_connection_from_session_receive_not_opened_raises(
-    server_config: AcpMcpServer,
-    send_to_client: AsyncMock,
-) -> None:
-    """from_session_receive property raises RuntimeError when not opened."""
-    conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-
-    with pytest.raises(RuntimeError, match="Connection not opened"):
-        _ = conn.from_session_receive
-
-
-async def test_connection_send_to_client_reconstructs_success_response(
+async def test_send_to_acp_reconstructs_success_response(
     server_config: AcpMcpServer,
 ) -> None:
-    """send_to_client reconstructs JSON-RPC response from inner result payload."""
+    """send_to_acp reconstructs JSON-RPC response from inner result payload."""
     send_mock = AsyncMock(
         return_value={"protocolVersion": "2024-11-05", "serverInfo": {"name": "test"}}
     )
     conn = AcpMcpConnection("conn-1", server_config, send_mock)
-    await conn.open()
+    pair = conn.register_session()
     message = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -330,8 +249,8 @@ async def test_connection_send_to_client_reconstructs_success_response(
     }
 
     async with anyio.create_task_group() as tg:
-        tg.start_soon(conn.send_to_client, message)
-        received = await conn.to_session.receive()
+        tg.start_soon(conn.send_to_acp, message, pair.to_session_send)
+        received = await pair.to_session_receive.receive()
 
     from mcp.shared.message import SessionMessage
 
@@ -342,18 +261,18 @@ async def test_connection_send_to_client_reconstructs_success_response(
     }  # type: ignore[union-attr]
 
 
-async def test_connection_send_to_client_reconstructs_error_response(
+async def test_send_to_acp_reconstructs_error_response(
     server_config: AcpMcpServer,
 ) -> None:
-    """send_to_client reconstructs JSON-RPC error from inner error payload."""
+    """send_to_acp reconstructs JSON-RPC error from inner error payload."""
     send_mock = AsyncMock(return_value={"error": {"code": -32600, "message": "Invalid Request"}})
     conn = AcpMcpConnection("conn-1", server_config, send_mock)
-    await conn.open()
+    pair = conn.register_session()
     message = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
 
     async with anyio.create_task_group() as tg:
-        tg.start_soon(conn.send_to_client, message)
-        received = await conn.to_session.receive()
+        tg.start_soon(conn.send_to_acp, message, pair.to_session_send)
+        received = await pair.to_session_receive.receive()
 
     from mcp.shared.message import SessionMessage
 
@@ -368,12 +287,12 @@ async def test_connection_handle_client_message_flattened_format(
 ) -> None:
     """handle_client_message reconstructs JSON-RPC from flattened ACP format."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-    await conn.open()
+    pair = conn.register_session()
     flattened = {"connectionId": "conn-1", "method": "tools/list", "params": {}}
 
     async with anyio.create_task_group() as tg:
         tg.start_soon(conn.handle_client_message, flattened)
-        received = await conn.to_session.receive()
+        received = await pair.to_session_receive.receive()
 
     from mcp.shared.message import SessionMessage
 
@@ -387,12 +306,12 @@ async def test_connection_handle_client_message_backward_compat(
 ) -> None:
     """handle_client_message still accepts raw JSON-RPC messages."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-    await conn.open()
+    pair = conn.register_session()
     message = {"jsonrpc": "2.0", "method": "test", "id": 1}
 
     async with anyio.create_task_group() as tg:
         tg.start_soon(conn.handle_client_message, message)
-        received = await conn.to_session.receive()
+        received = await pair.to_session_receive.receive()
 
     from mcp.shared.message import SessionMessage
 

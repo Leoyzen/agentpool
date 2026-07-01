@@ -56,11 +56,12 @@ async def test_full_connection_lifecycle(
     assert "conn-1" in manager
     assert len(manager) == 1
 
-    # 4. Streams are already opened by create_connection(); verify they work
-    assert conn._to_session_send is not None
-    assert conn._to_session_receive is not None
-    assert conn._from_session_send is not None
-    assert conn._from_session_receive is not None
+    # 4. Register a session pair to verify per-session streams
+    pair = conn.register_session()
+    assert pair.to_session_send is not None
+    assert pair.to_session_receive is not None
+    assert pair.from_session_send is not None
+    assert pair.from_session_receive is not None
 
     # 5. Create an AcpMcpTransport with the connection
     transport = AcpMcpTransport(conn)
@@ -68,9 +69,9 @@ async def test_full_connection_lifecycle(
     # 6. Use connect_session() to establish a ClientSession
     with patch("mcp.client.session.ClientSession.initialize", new_callable=AsyncMock):
         async with transport.connect_session():
-            # 7. Send a message via connection.from_session.send()
+            # 7. Send a message via send_to_acp (mimics what the forwarder does)
             msg = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
-            await conn.from_session.send(msg)
+            await conn.send_to_acp(msg, pair.to_session_send)
 
             # 8. Verify _send_to_client was called with the flattened message format
             conn._send_to_client.assert_awaited()
@@ -99,13 +100,14 @@ async def test_multiple_messages_over_same_connection(
     send_to_client: AsyncMock,
 ) -> None:
     """Verify multiple MCP JSON-RPC messages are forwarded in order."""
-    # 1. Create connection and open streams
+    # 1. Create connection and register a session pair
     manager = AcpMcpConnectionManager()
     conn = await manager.create_connection(
         connection_id="conn-multi",
         server_config=server_config,
         send_to_client=send_to_client,
     )
+    pair = conn.register_session()
 
     # 2. Create transport and establish session
     transport = AcpMcpTransport(conn)
@@ -133,9 +135,9 @@ async def test_multiple_messages_over_same_connection(
 
     with patch("mcp.client.session.ClientSession.initialize", new_callable=AsyncMock):
         async with transport.connect_session():
-            # 3. Send multiple MCP JSON-RPC messages
+            # 3. Send multiple MCP JSON-RPC messages via send_to_acp
             for msg in messages:
-                await conn.from_session.send(msg)
+                await conn.send_to_acp(msg, pair.to_session_send)
 
             # 4. Verify each is forwarded to client in order
             assert conn._send_to_client.await_count == len(messages)
@@ -205,13 +207,13 @@ async def test_error_handling_closed_connection(
     send_to_client: AsyncMock,
 ) -> None:
     """Verify handle_client_message handles closed streams gracefully."""
-    # 1. Create connection, open it, then close it
+    # 1. Create connection, register a session, then close it
     conn = AcpMcpConnection(
         connection_id="conn-closed",
         server_config=server_config,
         send_to_client=send_to_client,
     )
-    await conn.open()
+    conn.register_session()
     await conn.close()
 
     assert conn._closed is True
