@@ -116,7 +116,7 @@ async def test_session_manager_with_mcp(
     async with agent_pool:
         try:
             session_id = await session_manager.create_session(
-                agent=agent,
+                agent_name=agent.name,
                 cwd=tempfile.gettempdir(),
                 client=test_client,
                 mcp_servers=mcp_servers,

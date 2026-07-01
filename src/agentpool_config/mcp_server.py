@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-import logging
 import os
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
+from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 from pydantic import ConfigDict, Field, HttpUrl, model_validator
 from schemez import Schema
 
 
-logger = logging.getLogger(__name__)
-
-
 if TYPE_CHECKING:
-    from pydantic_ai.mcp import MCPServer, MCPServerSSE, MCPServerStdio, MCPServerStreamableHTTP
+    from fastmcp.client import ClientTransport
 
 
 class MCPServerAuthSettings(Schema):
@@ -145,16 +141,13 @@ class BaseMCPServerConfig(Schema):
         env["PYTHONIOENCODING"] = "utf-8"
         return env
 
-    def to_pydantic_ai(
-        self,
-        elicitation_callback: Any | None = None,
-    ) -> MCPServer:
-        """Convert to pydantic-ai MCP server instance.
+    def to_transport(self, force_oauth: bool = False) -> ClientTransport:
+        """Convert to a FastMCP ClientTransport instance.
+
+        Subclasses override this to return the appropriate transport.
 
         Args:
-            elicitation_callback: Optional MCP elicitation callback
-                (``ElicitationFnT``) to handle ``elicitation/create``
-                requests from the server.
+            force_oauth: If True, force OAuth authentication flow.
         """
         raise NotImplementedError
 
@@ -184,44 +177,6 @@ class BaseMCPServerConfig(Schema):
         if text.startswith(("http://", "https://")):
             return StreamableHTTPMCPServerConfig(url=HttpUrl(text))
         return StdioMCPServerConfig.from_string(text)
-
-
-def _make_timeout_logger(
-    server_name: str | None,
-) -> Any:
-    """Build a ``process_tool_call`` callback that logs MCP tool call timeouts.
-
-    The callback wraps ``direct_call_tool`` and emits a ``WARNING``-level log
-    when the underlying MCP request times out, so operators can distinguish
-    timeouts from other tool errors.
-
-    Args:
-        server_name: Display name of the MCP server, included in the log message.
-
-    Returns:
-        A callable suitable for ``MCPServer.process_tool_call``.
-    """
-
-    async def _process_tool_call(
-        ctx: Any,
-        direct_call_tool: Any,
-        name: str,
-        tool_args: dict[str, Any],
-    ) -> Any:
-        try:
-            return await direct_call_tool(name, tool_args)
-        except Exception as e:
-            msg = str(e)
-            if "Timed out" in msg or "timeout" in msg.lower():
-                logger.warning(
-                    "MCP tool call timed out (server=%s, tool=%s): %s",
-                    server_name,
-                    name,
-                    msg,
-                )
-            raise
-
-    return _process_tool_call
 
 
 class StdioMCPServerConfig(BaseMCPServerConfig):
@@ -289,22 +244,21 @@ class StdioMCPServerConfig(BaseMCPServerConfig):
             timeout=self.timeout,
         )
 
-    def to_pydantic_ai(self, elicitation_callback: Any | None = None) -> MCPServerStdio:
-        """Convert to pydantic-ai MCPServerStdio instance."""
-        from pydantic_ai.mcp import MCPServerStdio
+    def to_transport(self, force_oauth: bool = False) -> ClientTransport:
+        """Convert to a FastMCP StdioTransport instance.
 
-        kwargs: dict[str, Any] = {
-            "command": self.command,
-            "args": self.args,
-            "id": self.name,
-            "timeout": self.timeout,
-            "read_timeout": self.timeout,
-            "elicitation_callback": elicitation_callback,
-            "process_tool_call": _make_timeout_logger(self.display_name),
-        }
-        if self.env:
-            kwargs["env"] = self.get_env_vars()
-        return MCPServerStdio(**kwargs)
+        Args:
+            force_oauth: If True, raise ValueError since OAuth is not
+                supported for stdio transport.
+
+        Raises:
+            ValueError: If force_oauth is True.
+        """
+        if force_oauth:
+            raise ValueError("OAuth is not supported for StdioMCPServerConfig")
+        from fastmcp.client.transports import StdioTransport
+
+        return StdioTransport(command=self.command, args=self.args, env=self.get_env_vars())
 
 
 class SSEMCPServerConfig(BaseMCPServerConfig):
@@ -361,20 +315,16 @@ class SSEMCPServerConfig(BaseMCPServerConfig):
             timeout=self.timeout,
         )
 
-    def to_pydantic_ai(self, elicitation_callback: Any | None = None) -> MCPServerSSE:
-        """Convert to pydantic-ai MCPServerSSE instance."""
-        from pydantic_ai.mcp import MCPServerSSE
+    def to_transport(self, force_oauth: bool = False) -> ClientTransport:
+        """Convert to a FastMCP SSETransport instance.
 
-        kwargs: dict[str, Any] = {
-            "url": str(self.url),
-            "headers": self.headers,
-            "id": self.name,
-            "timeout": self.timeout,
-            "read_timeout": self.timeout,
-            "elicitation_callback": elicitation_callback,
-            "process_tool_call": _make_timeout_logger(self.display_name),
-        }
-        return MCPServerSSE(**kwargs)
+        Args:
+            force_oauth: Accepted for API compatibility; auth is applied at
+                the MCPToolset/Client level, not at the transport level.
+        """
+        from fastmcp.client import SSETransport
+
+        return SSETransport(url=str(self.url), headers=self.headers)
 
 
 class StreamableHTTPMCPServerConfig(BaseMCPServerConfig):
@@ -431,19 +381,16 @@ class StreamableHTTPMCPServerConfig(BaseMCPServerConfig):
             timeout=self.timeout,
         )
 
-    def to_pydantic_ai(self, elicitation_callback: Any | None = None) -> MCPServerStreamableHTTP:
-        """Convert to pydantic-ai MCPServerStreamableHTTP instance."""
-        from pydantic_ai.mcp import MCPServerStreamableHTTP
+    def to_transport(self, force_oauth: bool = False) -> ClientTransport:
+        """Convert to a FastMCP StreamableHttpTransport instance.
 
-        return MCPServerStreamableHTTP(
-            url=str(self.url),
-            headers=self.headers,
-            id=self.name,
-            timeout=self.timeout,
-            read_timeout=self.timeout,
-            elicitation_callback=elicitation_callback,
-            process_tool_call=_make_timeout_logger(self.display_name),
-        )
+        Args:
+            force_oauth: Accepted for API compatibility; auth is applied at
+                the MCPToolset/Client level, not at the transport level.
+        """
+        from fastmcp.client import StreamableHttpTransport
+
+        return StreamableHttpTransport(url=str(self.url), headers=self.headers)
 
 
 class AcpMCPServerConfig(BaseMCPServerConfig):
@@ -489,16 +436,6 @@ class AcpMCPServerConfig(BaseMCPServerConfig):
             command="uvx",
             args=filter_args,
             timeout=self.timeout,
-        )
-
-    def to_pydantic_ai(self, elicitation_callback: Any | None = None) -> MCPServer:
-        """Convert to pydantic-ai MCP server instance.
-
-        ACP transport is handled by the AcpMcpTransport, not pydantic-ai directly.
-        This method should not be called for ACP-transport servers.
-        """
-        raise NotImplementedError(
-            "ACP transport must use AcpMcpTransport, not pydantic-ai directly"
         )
 
 

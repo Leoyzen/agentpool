@@ -109,7 +109,7 @@ async def test_available_commands_update_sent_after_create_session(
 
     # Create session via the real create_session path (used by new_session/load_session/resume_session)
     session_id = await manager.create_session(
-        agent=agent,
+        agent_name=agent.name,
         cwd="/tmp",
         client=mock_client,
         acp_agent=mock_acp_agent,

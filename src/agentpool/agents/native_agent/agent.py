@@ -73,6 +73,8 @@ if TYPE_CHECKING:
     )
     from agentpool.delegation import AgentPool
     from agentpool.hooks import AgentHooks
+    from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
+    from agentpool.mcp_server.session_pool import SessionConnectionPool
     from agentpool.messaging import MessageNode
     from agentpool.models.agents import NativeAgentConfig, ToolMode
     from agentpool.orchestrator.turn import Turn
@@ -311,6 +313,51 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self._providers = list(providers) if providers else None  # model discovery
         self._direct_history_processors = list(history_processors) if history_processors else None
         self._resolved_history_processors: list[Callable[..., Any]] | None = None
+        # MCP lifecycle snapshot — set externally (e.g. by SessionController) to
+        # enable snapshot-aware capability building in get_agentlet().
+        # When None, get_agentlet() falls back to the legacy as_capability() path.
+        self._mcp_snapshot: McpConfigSnapshot | None = None
+        self._session_connection_pool: SessionConnectionPool | None = None
+
+    def _build_pool_configs(self) -> tuple[McpConfigEntry, ...]:
+        """Build MCP config entries from pool-level servers.
+
+        Reads from the pool's MCPManager when the agent is part of a pool.
+        When the agent is standalone (no pool), returns an empty tuple.
+
+        Returns:
+            Tuple of pool-scoped MCP config entries.
+        """
+        from agentpool.mcp_server.config_snapshot import McpConfigEntry
+
+        if self.agent_pool is None:
+            return ()
+        pool_mcp = self.agent_pool.mcp
+        return tuple(
+            McpConfigEntry(server_config=server, source="pool")
+            for server in pool_mcp.servers
+            if server.enabled
+        )
+
+    def _build_agent_configs(self) -> tuple[McpConfigEntry, ...]:
+        """Build MCP config entries from the agent's own servers.
+
+        When the agent shares the pool's MCPManager (no own servers),
+        returns an empty tuple. Otherwise reads from the agent's
+        dedicated MCPManager.
+
+        Returns:
+            Tuple of agent-scoped MCP config entries.
+        """
+        from agentpool.mcp_server.config_snapshot import McpConfigEntry
+
+        if self._mcp_shared:
+            return ()
+        return tuple(
+            McpConfigEntry(server_config=server, source="agent")
+            for server in self.mcp.servers
+            if server.enabled
+        )
 
     def _validate_processor_signature(self, processor: Callable[..., Any]) -> None:
         """Validate that a history processor has been correct signature.
@@ -746,18 +793,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # Collect capabilities from all sources
         tool_capabilities: list[Any] = []
         direct_tools: list[Any] = []
-        # Reference to the MCP aggregating provider — its tools are handled
-        # separately via self.mcp.as_capability() to avoid duplicate
-        # registration (once as direct tools, once as MCP capabilities).
-        mcp_aggregating = self.mcp.aggregating_provider
         # 1. Tool providers — collect capabilities or fall back to direct tools
         for provider in self.tools.providers:
-            # Skip the MCP aggregating provider: its tools are registered
-            # via self.mcp.as_capability() below. Including it here would
-            # register the same tools twice (once as direct tools, once as
-            # MCP capabilities), causing pydantic-ai UserError.
-            if provider is mcp_aggregating:
-                continue
             cap = provider.as_capability()
             if cap is not None:
                 tool_capabilities.append(cap)
@@ -799,10 +836,13 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # Collect tools with deferred=True for the deferred bridge
         deferred_tools: dict[str, str] = {}
         try:
-            all_tools = await self.tools.get_tools()
+            # Timeout to prevent hang when ACP MCP providers are still connecting
+            all_tools = await asyncio.wait_for(self.tools.get_tools(), timeout=5.0)
             for tool in all_tools:
                 if tool.deferred:
                     deferred_tools[tool.name] = tool.deferred_strategy
+        except asyncio.TimeoutError:
+            logger.warning("get_tools() timed out in get_agentlet(), using empty deferred_tools")
         except Exception:
             logger.exception("Failed to collect deferred tools — using empty dict")
 
@@ -814,14 +854,28 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         tool_capabilities.append(create_approval_bridge_capability(self, input_provider))
         # 4. MCP servers
-        mcp_capabilities = self.mcp.as_capability()
+        if self._mcp_snapshot is not None:
+            mcp_capabilities = await self.mcp.as_capability(
+                snapshot=self._mcp_snapshot,
+                session_pool=self._session_connection_pool,
+            )
+        else:
+            mcp_capabilities = await self.mcp.as_capability()
         tool_capabilities.extend(mcp_capabilities)
         # 5. Skill capabilities — from pool-scoped instances created during __aenter__.
         #    Each SkillCapability provides tools and MCP servers.
         #    Instructions are handled by SkillsInstructionProvider (no double injection).
+        #    Skill MCP configs are registered in the snapshot for SessionConnectionPool.
         if self.agent_pool is not None:
             pool_capabilities = self.agent_pool.skill_capabilities
             if pool_capabilities:
+                # Ensure a snapshot exists for skill config registration.
+                if self._mcp_snapshot is None:
+                    from agentpool.mcp_server.config_snapshot import McpConfigSnapshot
+
+                    self._mcp_snapshot = McpConfigSnapshot()
+                # Collect skill config entries from visible capabilities.
+                skill_entries: list[McpConfigEntry] = []
                 visibility_checker = getattr(self.agent_pool, "is_skill_visible_to_node", None)
                 for cap in pool_capabilities:
                     if visibility_checker is not None and not visibility_checker(
@@ -829,6 +883,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     ):
                         continue
                     tool_capabilities.append(cap)
+                    skill_entries.extend(cap.build_config_entries())
+                # Register skill configs in the snapshot.
+                if skill_entries:
+                    self._mcp_snapshot = self._mcp_snapshot.with_skill_configs(
+                        tuple(skill_entries),
+                    )
 
         # Collect pydantic-ai compatible instructions from SystemPrompts and providers
         all_instructions: list[Any] = []

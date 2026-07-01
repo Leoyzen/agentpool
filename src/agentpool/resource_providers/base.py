@@ -233,7 +233,10 @@ class ResourceProvider(ABC):
             return tool.to_pydantic_ai(function_override=wrapper)
 
         async def _build_toolset(ctx: Any) -> Any:
-            tools = await self.get_tools()
+            try:
+                tools = await self.get_tools()
+            except Exception:
+                return None
             if not tools:
                 return None
 

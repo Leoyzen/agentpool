@@ -77,7 +77,7 @@ async def test_top_level_session_has_no_parent():
         MockSession.return_value = mock_session
 
         session_id = await manager.create_session(
-            agent=agent,
+            agent_name=agent.name,
             cwd=tempfile.gettempdir(),
             client=mock_client,
             acp_agent=mock_acp_agent,
@@ -124,7 +124,7 @@ async def test_child_session_inherits_parent_project_id():
         MockSession.return_value = mock_session
 
         session_id = await manager.create_session(
-            agent=agent,
+            agent_name=agent.name,
             cwd="/some/other/cwd",  # Different cwd — should be overridden by parent's
             client=mock_client,
             acp_agent=mock_acp_agent,
@@ -176,7 +176,7 @@ async def test_child_session_uses_effective_cwd_for_acp_session():
         MockSession.return_value = mock_session
 
         await manager.create_session(
-            agent=agent,
+            agent_name=agent.name,
             cwd="/different/cwd",
             client=mock_client,
             acp_agent=mock_acp_agent,
@@ -209,7 +209,7 @@ async def test_no_parent_session_id_preserves_existing_behavior():
 
         cwd = tempfile.gettempdir()
         session_id = await manager.create_session(
-            agent=agent,
+            agent_name=agent.name,
             cwd=cwd,
             client=mock_client,
             acp_agent=mock_acp_agent,
@@ -260,7 +260,7 @@ async def test_child_session_without_pool_sessions_falls_back_to_top_level():
 
         cwd = tempfile.gettempdir()
         session_id = await manager.create_session(
-            agent=agent,
+            agent_name=agent.name,
             cwd=cwd,
             client=mock_client,
             acp_agent=mock_acp_agent,

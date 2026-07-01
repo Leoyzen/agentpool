@@ -77,7 +77,7 @@ def mock_mcp_manager() -> MagicMock:
     mcp_mgr = MagicMock()
     cap1 = MagicMock()
     cap2 = MagicMock()
-    mcp_mgr.as_capability.return_value = [cap1, cap2]
+    mcp_mgr.as_capability = AsyncMock(return_value=[cap1, cap2])
     return mcp_mgr
 
 

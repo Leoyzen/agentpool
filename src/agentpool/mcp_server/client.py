@@ -13,7 +13,7 @@ from __future__ import annotations
 import contextlib
 from importlib.metadata import version
 import logging
-from typing import TYPE_CHECKING, Any, Self, assert_never
+from typing import TYPE_CHECKING, Any, Self
 
 import anyio
 from pydantic_ai import BinaryContent, RunContext, ToolReturn
@@ -206,35 +206,22 @@ class MCPClient:
     ) -> fastmcp.Client[Any]:
         """Create FastMCP client based on config."""
         import fastmcp
-        from fastmcp.client import SSETransport, StreamableHttpTransport
-        from fastmcp.client.transports import StdioTransport
         from mcp.types import Icon, Implementation
 
-        transport: ClientTransport
-        # Create transport based on config type
-        match config:
-            case StdioMCPServerConfig(command=command, args=args):
-                env = config.get_env_vars()
-                transport = StdioTransport(command=command, args=args, env=env)
-                oauth = False
-                if force_oauth:
-                    raise ValueError("OAuth is not supported for StdioMCPServerConfig")
+        # ACP configs are not handled here — they use AcpMcpConnectionManager.
+        if isinstance(config, AcpMCPServerConfig):
+            raise NotImplementedError(
+                "ACP-transport MCP servers are managed by the ACP agent directly. "
+                "Use AcpMcpConnectionManager to establish connections."
+            )
 
-            case SSEMCPServerConfig(url=url, headers=headers, auth=auth):
-                transport = SSETransport(url=url, headers=headers)
-                oauth = auth.oauth
+        # Use shared to_transport() method from config classes.
+        transport = config.to_transport(force_oauth=force_oauth)
 
-            case StreamableHTTPMCPServerConfig(url=url, headers=headers, auth=auth):
-                transport = StreamableHttpTransport(url=url, headers=headers)
-                oauth = auth.oauth
-
-            case AcpMCPServerConfig():
-                raise NotImplementedError(
-                    "ACP-transport MCP servers are managed by the ACP agent directly. "
-                    "Use AcpMcpConnectionManager to establish connections."
-                )
-            case _ as unreachable:
-                assert_never(unreachable)
+        # Determine oauth flag for Client auth parameter.
+        oauth = False
+        if isinstance(config, (SSEMCPServerConfig, StreamableHTTPMCPServerConfig)):
+            oauth = config.auth.oauth
 
         # Create message handler if needed
         msg_handler = self._message_handler or MCPMessageHandler(

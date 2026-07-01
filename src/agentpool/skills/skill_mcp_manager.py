@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 
 if TYPE_CHECKING:
+    from agentpool.mcp_server.config_snapshot import McpConfigEntry
     from agentpool.resource_providers.mcp_provider import MCPResourceProvider
     from agentpool.tools.base import Tool
     from agentpool_config.skills import SkillMcpServerConfig
@@ -74,6 +75,34 @@ class SkillMcpManager:
         """
         self._configs[server_name] = config
         logger.debug("Prepared skill MCP server config", extra={"server_name": server_name})
+
+    def build_config_entries(self, skill_name: str) -> tuple[McpConfigEntry, ...]:
+        """Build ``McpConfigEntry`` entries from all registered configs.
+
+        Converts each registered ``SkillMcpServerConfig`` to a standard
+        ``MCPServerConfig`` via ``to_mcp_server_config()``, then wraps it
+        in a ``McpConfigEntry`` tagged with ``source="skill"`` and the
+        given ``skill_name``.
+
+        Args:
+            skill_name: Name of the skill that owns these MCP servers.
+
+        Returns:
+            A tuple of ``McpConfigEntry`` instances, one per registered server.
+        """
+        from agentpool.mcp_server.config_snapshot import McpConfigEntry
+
+        entries: list[McpConfigEntry] = []
+        for server_name, config in self._configs.items():
+            mcp_config = config.to_mcp_server_config(name=server_name)
+            entries.append(
+                McpConfigEntry(
+                    server_config=mcp_config,
+                    source="skill",
+                    skill_name=skill_name,
+                )
+            )
+        return tuple(entries)
 
     # ---- Connection ----
 

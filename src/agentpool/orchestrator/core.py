@@ -54,7 +54,8 @@ if TYPE_CHECKING:
     from agentpool.delegation import AgentPool
     from agentpool.delegation.team import Team
     from agentpool.delegation.teamrun import TeamRun
-    from agentpool.mcp_server.connection_pool import MCPConnectionPool
+    from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
+    from agentpool.mcp_server.session_pool import SessionConnectionPool
     from agentpool.sessions.store import SessionStore
     from agentpool_config.teams import TeamConfig
 
@@ -779,7 +780,6 @@ class SessionController:
         self._event_bus: EventBus | None = None
         self._pending_run_ids: dict[str, str] = {}
         self._todo_lock: asyncio.Lock = asyncio.Lock()
-        self._mcp_pool: MCPConnectionPool | None = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._runtime_registry = RuntimeAgentRegistry()
 
@@ -923,7 +923,12 @@ class SessionController:
         else:
             self._session_scopes[session_id] = anyio.CancelScope()
         if self.store is not None:
-            await self.store.save(self._state_to_data(state))
+            # Only save if no existing data — callers like
+            # ACPSessionManager.create_session() may have already
+            # persisted richer SessionData (with cwd, project_id, etc.)
+            existing = await self.store.load(session_id)
+            if existing is None:
+                await self.store.save(self._state_to_data(state))
         if parent_session_id:
             self._children.setdefault(parent_session_id, []).append(session_id)
         logger.info("Created session", session_id=session_id, agent_name=state.agent_name)
@@ -999,47 +1004,79 @@ class SessionController:
                         if parent_agent.env is not None:
                             agent.env = parent_agent.env
                         agent._internal_fs = parent_agent._internal_fs
-                        # Share MCP manager to avoid duplicate subprocess spawning.
-                        # Mark as shared so __aenter__/__aexit__ skip lifecycle
-                        # management (the parent agent owns the MCPManager lifecycle).
-                        agent.mcp = parent_agent.mcp
-                        agent._mcp_shared = True
 
                     await agent.__aenter__()
 
-                    # Add pool-level providers
-                    # When the subagent shares the parent's MCPManager
-                    # (agent._mcp_shared is True), pool-level MCP servers
-                    # are already accessible via the shared manager. Adding
-                    # the pool MCP provider again would register the same
-                    # tools twice (once as MCP capabilities via
-                    # self.mcp.as_capability(), once as direct tools via
-                    # the aggregating provider), causing pydantic-ai
-                    # UserError: "Tool name conflicts with existing tool".
+                    # Build MCP config snapshot from parent's snapshot and
+                    # child's own agent configs. pool_configs and
+                    # session_configs are inherited from the parent so that
+                    # child agents share the same pool-level MCP servers and
+                    # any session-scoped injections. agent_configs come from
+                    # the child's own YAML. skill_configs are empty at
+                    # creation time (populated later by skill loading).
+                    from agentpool.mcp_server.config_snapshot import (
+                        McpConfigSnapshot as _McpConfigSnapshot,
+                    )
+                    from agentpool.mcp_server.session_pool import (
+                        SessionConnectionPool as _SessionConnectionPool,
+                    )
+
+                    parent_snapshot: McpConfigSnapshot | None = None
+                    if parent_agent is not None:
+                        from agentpool.agents.native_agent import Agent as _NativeAgent
+
+                        if isinstance(parent_agent, _NativeAgent):
+                            parent_snapshot = parent_agent._mcp_snapshot
+
+                    snapshot = _McpConfigSnapshot(
+                        pool_configs=(
+                            parent_snapshot.pool_configs
+                            if parent_snapshot is not None
+                            else ()
+                        ),
+                        agent_configs=agent._build_agent_configs(),
+                        session_configs=(
+                            parent_snapshot.session_configs
+                            if parent_snapshot is not None
+                            else ()
+                        ),
+                        skill_configs=(),
+                    )
+                    agent._mcp_snapshot = snapshot
+                    agent._session_connection_pool = _SessionConnectionPool(session_id)
+
+                    # Share pre-created ACP transports from parent.
+                    # AcpMcpTransport now supports concurrent connect_session()
+                    # calls — each creates an independent per-session stream
+                    # pair, so parent and child can share the same transport.
+                    if (
+                        parent_agent is not None
+                        and isinstance(parent_agent, _NativeAgent)
+                        and parent_agent._session_connection_pool is not None
+                    ):
+                        await agent._session_connection_pool.copy_pre_created_transports(
+                            parent_agent._session_connection_pool
+                        )
+
+                    # Add non-MCP pool-level providers (skills instruction
+                    # and skills tools). MCP no longer goes through providers —
+                    # it uses the snapshot-based capability path in
+                    # get_agentlet() instead.
+                    # ACP MCP servers still need the aggregating provider
+                    # so ACP agents can serialize MCP configs to child
+                    # sessions via mcp_config_to_acp().
                     if self.pool is not None:
-                        if not agent._mcp_shared:
-                            agent.tools.add_provider(
-                                self._mcp_pool.get_aggregating_provider()
-                                if self._mcp_pool is not None
-                                else self.pool.mcp.get_aggregating_provider()
-                            )
                         if self.pool.skills_instruction_provider:
                             agent.tools.add_provider(self.pool.skills_instruction_provider)
                         agent.tools.add_provider(self.pool.skills_tools_provider)
-
-                    # Inherit parent's session-level MCP providers
-                    if parent_agent is not None:
-                        for provider in parent_agent.tools.external_providers:
-                            if getattr(provider, "kind", None) == "mcp":
-                                if provider not in agent.tools.external_providers:
-                                    agent.tools.add_provider(provider)
+                        agent.tools.add_provider(self.pool.mcp.get_aggregating_provider())
 
                     if input_provider is not None:
                         session.input_provider = input_provider
                     self._session_agents[session_id] = agent
                     session.agent = agent
                     # is_per_session_agent=False: close_session() skips
-                    # agent.__aexit__() since MCP manager is shared
+                    # agent.__aexit__() since parent manages lifecycle
                     session.is_per_session_agent = False
                     logger.info(
                         "Created child session agent",
@@ -1070,13 +1107,29 @@ class SessionController:
                         session_id=session_id,
                     )
 
-                # Add pool-level providers to per-session agent
+                # Build MCP config snapshot at agent creation time.
+                # pool_configs come from the pool's MCPManager, agent_configs
+                # from the agent's own MCPManager. session_configs and
+                # skill_configs are empty at creation time.
+                from agentpool.mcp_server.config_snapshot import (
+                    McpConfigSnapshot as _McpConfigSnapshot,
+                )
+                from agentpool.mcp_server.session_pool import (
+                    SessionConnectionPool as _SessionConnectionPool,
+                )
+
+                snapshot = _McpConfigSnapshot(
+                    pool_configs=agent._build_pool_configs(),
+                    agent_configs=agent._build_agent_configs(),
+                    session_configs=(),
+                    skill_configs=(),
+                )
+                agent._mcp_snapshot = snapshot
+                agent._session_connection_pool = _SessionConnectionPool(session_id)
+
+                # Add non-MCP pool-level providers (skills instruction
+                # and skills tools). MCP no longer goes through providers.
                 if self.pool is not None:
-                    agent.tools.add_provider(
-                        self._mcp_pool.get_aggregating_provider()
-                        if self._mcp_pool is not None
-                        else self.pool.mcp.get_aggregating_provider()
-                    )
                     if self.pool.skills_instruction_provider:
                         agent.tools.add_provider(self.pool.skills_instruction_provider)
                     agent.tools.add_provider(self.pool.skills_tools_provider)
@@ -1101,13 +1154,43 @@ class SessionController:
 
                 await agent.__aenter__()
 
-                # Add pool-level providers
+                # Build MCP config snapshot directly for non-native agents.
+                # Non-native agents (ACP, etc.) don't have _build_pool_configs
+                # or _build_agent_configs methods, so we construct the entries
+                # from the pool's MCPManager and the agent config's
+                # get_mcp_servers() method.
+                from agentpool.mcp_server.config_snapshot import (
+                    McpConfigEntry as _McpConfigEntry,
+                    McpConfigSnapshot as _McpConfigSnapshot,
+                )
+                from agentpool.mcp_server.session_pool import (
+                    SessionConnectionPool as _SessionConnectionPool,
+                )
+
+                pool_configs: tuple[McpConfigEntry, ...] = ()
                 if self.pool is not None:
-                    agent.tools.add_provider(
-                        self._mcp_pool.get_aggregating_provider()
-                        if self._mcp_pool is not None
-                        else self.pool.mcp.get_aggregating_provider()
+                    pool_configs = tuple(
+                        _McpConfigEntry(server_config=server, source="pool")
+                        for server in self.pool.mcp.servers
+                        if server.enabled
                     )
+                agent_configs: tuple[McpConfigEntry, ...] = tuple(
+                    _McpConfigEntry(server_config=server, source="agent")
+                    for server in cfg.get_mcp_servers()
+                    if server.enabled
+                )
+                snapshot = _McpConfigSnapshot(
+                    pool_configs=pool_configs,
+                    agent_configs=agent_configs,
+                    session_configs=(),
+                    skill_configs=(),
+                )
+                agent._mcp_snapshot = snapshot
+                agent._session_connection_pool = _SessionConnectionPool(session_id)
+
+                # Add non-MCP pool-level providers (skills instruction
+                # and skills tools). MCP no longer goes through providers.
+                if self.pool is not None:
                     if self.pool.skills_instruction_provider:
                         agent.tools.add_provider(self.pool.skills_instruction_provider)
                     agent.tools.add_provider(self.pool.skills_tools_provider)
@@ -1479,10 +1562,27 @@ class SessionController:
         """
         from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
 
+        logger.info(
+            "_consume_run() START session_id=%s run_id=%s",
+            run_handle.session_id,
+            run_handle.run_id,
+        )
         gen = run_handle.start(initial_prompt)
         try:
             async for event in gen:
+                logger.info(
+                    "_consume_run() received event=%s session_id=%s run_id=%s",
+                    type(event).__name__,
+                    run_handle.session_id,
+                    run_handle.run_id,
+                )
                 if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                    logger.info(
+                        "_consume_run() breaking on %s session_id=%s run_id=%s",
+                        type(event).__name__,
+                        run_handle.session_id,
+                        run_handle.run_id,
+                    )
                     break
         except Exception as exc:
             logger.exception(
@@ -1639,6 +1739,10 @@ class SessionController:
                 ):
                     session.current_run_id = None
             if session.current_run_id is None:
+                logger.info(
+                    "receive_request() starting new run session_id=%s",
+                    session_id,
+                )
                 return self._start_run_handle(session, agent, session_id, content_str, deps=deps)
             run = self._runs.get(session.current_run_id) if session.current_run_id else None
             if run is not None:
@@ -1908,22 +2012,9 @@ class SessionPool:
         self._resume_locks_lock = asyncio.Lock()
         self._message_cache: dict[str, list[ChatMessage[Any]]] = {}
 
-        # MCP connection pooling: share subprocess connections across sessions
-        from agentpool.mcp_server.connection_pool import MCPConnectionPool
-
-        _mcp_servers: list[Any] = []
-        if hasattr(pool, "mcp"):
-            _raw_servers = pool.mcp.servers
-            if isinstance(_raw_servers, (list, tuple)):
-                _mcp_servers = list(_raw_servers)
-        self.mcp_pool = MCPConnectionPool(servers=_mcp_servers)
-        self.sessions._mcp_pool = self.mcp_pool
-
     async def start(self) -> None:
         """Start the session pool and background tasks."""
         await self.sessions.start_cleanup_task()
-        await self.mcp_pool.start_cleanup_task()
-        await self.mcp_pool.initialize()
         logger.info("SessionPool started")
 
     async def shutdown(self) -> None:
@@ -1938,7 +2029,6 @@ class SessionPool:
                     "Failed to close session during shutdown",
                     session_id=session_id,
                 )
-        await self.mcp_pool.shutdown()
         logger.info("SessionPool shut down")
 
     @property
@@ -2138,13 +2228,10 @@ class SessionPool:
                 pool=self.pool,
             )
 
-        # Add pool-level providers
+        # Add pool-level providers (non-MCP only).
+        # MCP tools are handled via McpConfigSnapshot → as_capability() →
+        # MCPToolset, not through agent.tools.providers.
         if self.pool is not None:
-            agent.tools.add_provider(
-                self.mcp_pool.get_aggregating_provider()
-                if self.mcp_pool is not None
-                else self.pool.mcp.get_aggregating_provider()
-            )
             if self.pool.skills_instruction_provider:
                 agent.tools.add_provider(self.pool.skills_instruction_provider)
             agent.tools.add_provider(self.pool.skills_tools_provider)
@@ -2187,13 +2274,10 @@ class SessionPool:
                 pool=self.pool,
             )
 
-        # Add pool-level providers
+        # Add pool-level providers (non-MCP only).
+        # MCP tools are handled via McpConfigSnapshot → as_capability() →
+        # MCPToolset, not through agent.tools.providers.
         if self.pool is not None:
-            agent.tools.add_provider(
-                self.mcp_pool.get_aggregating_provider()
-                if self.mcp_pool is not None
-                else self.pool.mcp.get_aggregating_provider()
-            )
             if self.pool.skills_instruction_provider:
                 agent.tools.add_provider(self.pool.skills_instruction_provider)
             agent.tools.add_provider(self.pool.skills_tools_provider)

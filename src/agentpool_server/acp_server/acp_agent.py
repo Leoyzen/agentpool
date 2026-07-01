@@ -420,7 +420,7 @@ class AgentPoolACPAgent(ACPAgent):
         logger.info("Creating new session", default_agent=self.default_agent.name)
         try:
             session_id = await self.session_manager.create_session(
-                agent=self.default_agent,
+                agent_name=self.default_agent.name,
                 cwd=params.cwd,
                 client=self.client,
                 acp_agent=self,
@@ -592,7 +592,7 @@ class AgentPoolACPAgent(ACPAgent):
         logger.info("Forking session", session_id=params.session_id)
         # For now, just create a new session - full fork implementation would copy state
         session_id = await self.session_manager.create_session(
-            agent=self.default_agent,
+            agent_name=self.default_agent.name,
             cwd=params.cwd,
             client=self.client,
             acp_agent=self,
@@ -640,13 +640,12 @@ class AgentPoolACPAgent(ACPAgent):
                     await session_pool.create_session(
                         params.session_id, cwd=session.cwd or params.cwd
                     )
-                    session_agent = await session_pool.sessions.get_or_create_session_agent(
+                    await session_pool.sessions.get_or_create_session_agent(
                         params.session_id
                     )
-                    if session.session_mcp_providers:
-                        for provider in session.session_mcp_providers:
-                            if provider not in session_agent.tools.external_providers:
-                                session_agent.tools.add_provider(provider)
+                    # MCP tools are handled via McpConfigSnapshot →
+                    # as_capability() → MCPToolset, not through
+                    # agent.tools.providers.
                 except Exception:
                     logger.exception(
                         "Failed to create per-session agent during resume",

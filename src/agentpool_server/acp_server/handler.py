@@ -418,31 +418,9 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         # create_session is idempotent — no-op if the session already exists.
         await session_pool.create_session(session_id, cwd=cwd)
 
-        # Add session MCP providers to SessionPool's per-session agent.
-        # Use deduplication because get_or_create_session_agent returns a cached
-        # per-session agent; adding the same provider repeatedly causes tool name
-        # conflicts in pydantic-ai's CombinedToolset.
+        # MCP tools are handled via McpConfigSnapshot → as_capability() →
+        # MCPToolset, not through agent.tools.providers.
         acp_session = self.session_manager.get_session(session_id)
-        if acp_session is not None and acp_session.session_mcp_providers:
-            try:
-                session_agent = await session_pool.sessions.get_or_create_session_agent(session_id)
-                for provider in acp_session.session_mcp_providers:
-                    if provider not in session_agent.tools.external_providers:
-                        session_agent.tools.add_provider(provider)
-                # Child sessions inherit parent's session-level MCP providers
-                # via agent sharing in get_or_create_session_agent() — the
-                # child reuses the parent's per-session agent which already
-                # has these providers registered.
-                logger.info(
-                    "Added session MCP providers to SessionPool agent",
-                    session_id=session_id,
-                    num_providers=len(acp_session.session_mcp_providers),
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to add session MCP providers to SessionPool agent",
-                    session_id=session_id,
-                )
 
         # Start event consumer before processing so no events are dropped
         await self._ensure_event_consumer(session_id)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 import warnings
 
 from pydantic import ConfigDict, Field
@@ -10,6 +10,10 @@ from schemez import Schema
 from upathtools import UPath
 
 from agentpool_config.paths import ConfigPath
+
+
+if TYPE_CHECKING:
+    from agentpool_config.mcp_server import MCPServerConfig
 
 
 DEFAULT_SKILLS_PATHS = [
@@ -219,6 +223,46 @@ class SkillMcpServerConfig(Schema):
         examples=[{"NODE_ENV": "production"}],
     )
     """Environment variables to set when launching the server process."""
+
+    def to_mcp_server_config(self, name: str) -> MCPServerConfig:
+        """Convert to a standard :class:`MCPServerConfig` subclass.
+
+        Produces a :class:`StdioMCPServerConfig` when ``command`` is set,
+        or a :class:`StreamableHTTPMCPServerConfig` when ``url`` is set.
+
+        Args:
+            name: Server name to assign in the resulting config.
+
+        Returns:
+            A ``MCPServerConfig`` instance suitable for the MCP manager.
+
+        Raises:
+            ValueError: If neither ``command`` nor ``url`` is specified.
+        """
+        from agentpool_config.mcp_server import (
+            StdioMCPServerConfig,
+            StreamableHTTPMCPServerConfig,
+        )
+
+        if self.command:
+            return StdioMCPServerConfig(
+                name=name,
+                command=self.command,
+                args=list(self.args),
+                env=dict(self.env) if self.env else None,
+            )
+        if self.url:
+            from pydantic import HttpUrl
+
+            return StreamableHTTPMCPServerConfig(
+                name=name,
+                url=HttpUrl(self.url),
+                headers=dict(self.headers) if self.headers else None,
+                env=dict(self.env) if self.env else None,
+            )
+        raise ValueError(
+            f"SkillMcpServerConfig for {name!r} must specify either 'command' or 'url'"
+        )
 
 
 class SkillToolConfig(Schema):

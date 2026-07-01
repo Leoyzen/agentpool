@@ -10,9 +10,10 @@ from typing import TYPE_CHECKING, Any, Self, cast
 import anyio
 
 from agentpool.log import get_logger
+from agentpool.mcp_server.global_pool import GlobalConnectionPool
 from agentpool.resource_providers import AggregatingResourceProvider, ResourceProvider
 from agentpool.resource_providers.mcp_provider import MCPResourceProvider
-from agentpool_config.mcp_server import BaseMCPServerConfig
+from agentpool_config.mcp_server import AcpMCPServerConfig, BaseMCPServerConfig
 
 
 if TYPE_CHECKING:
@@ -21,9 +22,11 @@ if TYPE_CHECKING:
 
     from mcp import types
     from mcp.shared.context import RequestContext
-    from mcp.types import ElicitRequestParams, ErrorData, SamplingMessage
+    from mcp.types import ElicitRequestParams, SamplingMessage
     from pydantic_ai.capabilities import MCP
 
+    from agentpool.mcp_server.config_snapshot import McpConfigSnapshot
+    from agentpool.mcp_server.session_pool import SessionConnectionPool
     from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig
 
@@ -43,27 +46,68 @@ def set_current_input_provider(provider: InputProvider | None) -> None:
     _current_input_provider.set(provider)
 
 
-def _make_pydantic_ai_elicitation_callback() -> Any:
-    """Create an elicitation callback for PydanticAI MCP capabilities.
+def _make_elicitation_handler() -> Any:
+    """Create a FastMCP elicitation handler for MCPToolset.
 
-    The callback reads the current InputProvider from the ContextVar
+    The handler reads the current InputProvider from the ContextVar
     and delegates to ``InputProvider.get_elicitation()``.
     """
-    from mcp.types import ElicitResult as MCPElicitResult
+    from fastmcp.client.elicitation import ElicitResult
 
-    async def _elicitation_callback(
-        context: RequestContext[Any, Any],
+    async def _handler[T](
+        message: str,
+        response_type: type[T] | None,
         params: ElicitRequestParams,
-    ) -> MCPElicitResult | ErrorData:
+        context: RequestContext[Any, Any],
+    ) -> T | dict[str, Any] | ElicitResult:
         provider = _current_input_provider.get()
         if provider is None:
             logger.warning(
                 "No InputProvider in context for MCP elicitation, declining",
             )
-            return MCPElicitResult(action="decline")
-        return await provider.get_elicitation(params)
+            return ElicitResult(action="decline")
+        result = await provider.get_elicitation(params)
+        return cast("T | dict[str, Any] | ElicitResult", result)
 
-    return _elicitation_callback
+    return _handler
+
+
+def _make_timeout_logger(
+    server_name: str | None,
+) -> Any:
+    """Build a ``process_tool_call`` callback that logs MCP tool call timeouts.
+
+    The callback wraps ``direct_call_tool`` and emits a ``WARNING``-level log
+    when the underlying MCP request times out, so operators can distinguish
+    timeouts from other tool errors.
+
+    Args:
+        server_name: Display name of the MCP server, included in the log message.
+
+    Returns:
+        A callable suitable for ``MCPToolset.process_tool_call``.
+    """
+
+    async def _process_tool_call(
+        ctx: Any,
+        direct_call_tool: Any,
+        name: str,
+        tool_args: dict[str, Any],
+    ) -> Any:
+        try:
+            return await direct_call_tool(name, tool_args)
+        except Exception as e:
+            msg = str(e)
+            if "Timed out" in msg or "timeout" in msg.lower():
+                logger.warning(
+                    "MCP tool call timed out (server=%s, tool=%s): %s",
+                    server_name,
+                    name,
+                    msg,
+                )
+            raise
+
+    return _process_tool_call
 
 
 class MCPManager:
@@ -97,6 +141,7 @@ class MCPManager:
         )
         self.exit_stack = AsyncExitStack()
         self._accessible_roots = accessible_roots
+        self._global_pool = GlobalConnectionPool()
 
     def add_server_config(self, cfg: MCPServerConfig | str) -> None:
         """Add a new MCP server to the manager."""
@@ -226,32 +271,59 @@ class MCPManager:
 
     async def disconnect_all(self) -> None:
         """Disconnect all MCP providers without clearing the servers list."""
+        await self._global_pool.shutdown_all()
         await self.cleanup()
-        # Re-initialize the exit stack for future connections
         self.exit_stack = AsyncExitStack()
 
     def get_aggregating_provider(self) -> AggregatingResourceProvider:
-        """Get the aggregating provider that contains all MCP providers."""
-        return self.aggregating_provider
+        """Get an aggregating provider containing only ACP providers.
 
-    def as_capability(self) -> list[MCP]:
+        Non-ACP providers are excluded because they are handled separately
+        by :meth:`as_capability()`.
+        """
+        acp_providers = [
+            p for p in self.providers if isinstance(p.server, AcpMCPServerConfig)
+        ]
+        return AggregatingResourceProvider(
+            providers=cast(list[ResourceProvider], acp_providers),
+            name=f"{self.name}_acp_aggregated",
+        )
+
+    async def as_capability(
+        self,
+        snapshot: McpConfigSnapshot | None = None,
+        session_pool: SessionConnectionPool | None = None,
+    ) -> list[MCP]:
         """Return pydantic-ai MCP capabilities for all configured servers.
 
-        Each enabled server is converted to a pydantic-ai ``MCP`` capability
-        configured with the correct transport (stdio, SSE, or Streamable HTTP).
-        Servers using ACP transport are skipped since pydantic-ai does not
-        support ACP directly. Disabled servers are also skipped.
+        Each enabled server is converted to a pydantic-ai ``MCP`` capability.
+        A new ``MCPToolset`` instance is created on every call — no caching.
+        Servers using ACP transport are skipped in global configs since
+        pydantic-ai does not support ACP directly. Disabled servers are
+        also skipped.
 
-        The returned capabilities are new instances; they do not share
-        connections with the providers managed by this manager. Existing
-        ``MCPManager`` lifecycle (``__aenter__`` / ``__aexit__``) is
-        unchanged.
+        When ``snapshot`` is provided, configs are read from the snapshot
+        and transports are obtained from the appropriate connection pool:
+
+        - Global configs (pool + agent) use ``self._global_pool``
+        - Session-scoped configs (session + skill) use ``session_pool``
+
+        When ``snapshot`` is None, the legacy path uses ``self.servers``
+        with ``self._global_pool`` for transports.
+
+        Args:
+            snapshot: Optional immutable snapshot of MCP configs partitioned
+                by lifecycle scope.
+            session_pool: Optional per-session connection pool for transport
+                lifecycle isolation. Required when snapshot contains
+                session-scoped configs.
 
         Returns:
             A list of ``pydantic_ai.capabilities.MCP`` instances, one per
             configured and enabled server with a supported transport.
         """
         from pydantic_ai.capabilities import MCP
+        from pydantic_ai.mcp import MCPToolset
 
         from agentpool_config.mcp_server import (
             AcpMCPServerConfig,
@@ -261,21 +333,29 @@ class MCPManager:
         )
 
         capabilities: list[MCP] = []
-        for server in self.servers:
-            if not server.enabled:
-                continue
 
-            # ACP transport is not supported by pydantic-ai directly
-            if isinstance(server, AcpMCPServerConfig):
-                continue
+        def _make_kwargs(server: BaseMCPServerConfig) -> dict[str, Any]:
+            """Build MCPToolset constructor kwargs (without client)."""
+            kwargs: dict[str, Any] = {
+                "id": server.name,
+                "include_instructions": True,
+                "process_tool_call": _make_timeout_logger(server.display_name),
+                "init_timeout": server.timeout,
+                "read_timeout": server.timeout,
+                "elicitation_handler": _make_elicitation_handler(),
+            }
+            if isinstance(
+                server, (SSEMCPServerConfig, StreamableHTTPMCPServerConfig)
+            ) and server.auth.oauth:
+                kwargs["auth"] = "oauth"
+            return kwargs
 
-            pydantic_server = server.to_pydantic_ai(
-                elicitation_callback=_make_pydantic_ai_elicitation_callback()
-            )
+        def _make_capability(
+            server: BaseMCPServerConfig, transport: Any
+        ) -> MCP:
+            """Create a fresh MCPToolset and wrap it in an MCP capability."""
+            toolset = MCPToolset(client=transport, **_make_kwargs(server))
 
-            # Derive a URL for the capability constructor. For HTTP-based
-            # transports we use the real endpoint; for stdio we synthesise
-            # a stable identifier URL.
             match server:
                 case SSEMCPServerConfig():
                     url = str(server.url)
@@ -286,14 +366,60 @@ class MCPManager:
                 case _:
                     url = f"mcp://{server.type}/{server.client_id}"
 
-            cap = MCP(
+            return MCP(
                 url=url,
-                local=pydantic_server,
+                local=toolset,
                 native=False,
                 id=server.name or server.client_id,
                 allowed_tools=server.enabled_tools,
             )
-            capabilities.append(cap)
+
+        if snapshot is not None:
+            # Global configs (pool + agent) — borrow from GlobalConnectionPool
+            for entry in snapshot.global_configs:
+                server = entry.server_config
+                if not server.enabled:
+                    continue
+                if isinstance(server, AcpMCPServerConfig):
+                    continue
+                transport = await self._global_pool.get_transport(server)
+                capabilities.append(_make_capability(server, transport))
+
+            # Session-scoped configs (session + skill) — borrow from
+            # SessionConnectionPool.  ACP entries have pre-stored transports
+            # via add_transport(); get_transport() returns them without
+            # trying to create new ones.  Inherited ACP configs (from parent
+            # session) that don't have a transport in this session's pool
+            # are skipped — they go through the ACP aggregating provider.
+            if session_pool is not None:
+                for entry in snapshot.session_scoped_configs:
+                    server = entry.server_config
+                    if not server.enabled:
+                        continue
+                    if isinstance(server, AcpMCPServerConfig):
+                        # ACP transports are pre-stored via add_transport().
+                        # If not found, skip — the ACP aggregating provider
+                        # handles ACP MCP tool exposure.
+                        try:
+                            transport = await session_pool.get_transport(
+                                server, entry.skill_name
+                            )
+                        except NotImplementedError:
+                            continue
+                    else:
+                        transport = await session_pool.get_transport(
+                            server, entry.skill_name
+                        )
+                    capabilities.append(_make_capability(server, transport))
+        else:
+            # Legacy path: pool servers only, no snapshot
+            for server in self.servers:
+                if not server.enabled:
+                    continue
+                if isinstance(server, AcpMCPServerConfig):
+                    continue
+                transport = await self._global_pool.get_transport(server)
+                capabilities.append(_make_capability(server, transport))
 
         return capabilities
 
