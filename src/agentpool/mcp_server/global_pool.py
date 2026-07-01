@@ -86,6 +86,10 @@ class GlobalConnectionPool:
     HTTP/SSE servers use direct transports (no cancel scope issues).
     """
 
+    # NOTE: threading.Lock is used (not asyncio.Lock) because all operations
+    # inside the lock are synchronous dict operations with no await. If async
+    # work is added inside the lock, switch to asyncio.Lock to avoid blocking
+    # the event loop.
     MAX_SESSIONS: int = 256
 
     def __init__(self) -> None:
@@ -132,7 +136,12 @@ class GlobalConnectionPool:
                 ready_event = existing.ready_event
                 owner_task = existing.owner_task
             elif existing is not None and not existing.is_stdio:
-                # HTTP/SSE: don't reuse — create fresh transport per call
+                # HTTP/SSE: don't reuse — create fresh transport per call.
+                # TODO: ref_count is not incremented for HTTP/SSE reuse, but
+                # release() decrements it. This is a semantic imbalance but
+                # currently harmless since release() is only called from
+                # disconnect_all(), not per-turn. Follow-up: HTTP/SSE should
+                # not use ref_count at all (no shared connection to track).
                 self._connections.move_to_end(client_id)
                 transport = config.to_transport()
                 is_stdio = False
