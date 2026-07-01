@@ -141,6 +141,11 @@ class ResourceProvider(ABC):  # noqa: B024
             try:
                 tools = await self.get_tools()
             except Exception:
+                logger.warning(
+                    "Failed to retrieve tools from provider",
+                    provider=self.name,
+                    exc_info=True,
+                )
                 return None
             if not tools:
                 return None
