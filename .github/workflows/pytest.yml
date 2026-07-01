@@ -22,6 +22,12 @@ env:
   FORCE_COLOR: 1
   RUFF_OUTPUT_FORMAT: github
   COLUMNS: 120
+  # API credentials for requires_openai_key tests (configured via secrets).
+  # test_pick.py auto-skipped via incompatible_with_thinking marker for
+  # thinking-mode models — see issue #84.
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+  TEST_DEFAULT_MODEL: ${{ secrets.TEST_DEFAULT_MODEL }}
 
 jobs:
 

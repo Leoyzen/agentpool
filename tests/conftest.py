@@ -192,18 +192,24 @@ def remap_hardcoded_test_models():
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Auto-skip tests marked ``requires_openai_key`` when no API key is set.
+    """Auto-skip credential-dependent and thinking-incompatible tests.
 
-    Tests that create real ``Agent`` instances (via ``Agent.from_config()`` or
-    ``Agent(model="openai:...")``) need ``OPENAI_API_KEY`` to satisfy
-    ``infer_provider``.  In CI without credentials these fail with
-    ``openai.OpenAIError: Missing credentials`` — skip them instead.
+    - ``requires_openai_key``: skipped when ``OPENAI_API_KEY`` is not set
+    - ``incompatible_with_thinking``: skipped when ``TEST_DEFAULT_MODEL``
+      points to a thinking-mode model (deepseek, kimi) — see issue #84
     """
-    if os.environ.get("OPENAI_API_KEY"):
-        return
-    skip_marker = pytest.mark.skip(
-        reason="OPENAI_API_KEY not set — skipping credential-dependent test",
-    )
+    _THINKING_MODEL_PREFIXES = ("deepseek", "kimi", "moonshot")
+
+    model = os.getenv("TEST_DEFAULT_MODEL", "")
+    is_thinking_model = any(p in model for p in _THINKING_MODEL_PREFIXES)
+
     for item in items:
-        if "requires_openai_key" in item.keywords:
-            item.add_marker(skip_marker)
+        if "requires_openai_key" in item.keywords and not os.environ.get("OPENAI_API_KEY"):
+            item.add_marker(pytest.mark.skip(
+                reason="OPENAI_API_KEY not set — skipping credential-dependent test",
+            ))
+        if "incompatible_with_thinking" in item.keywords and is_thinking_model:
+            item.add_marker(pytest.mark.skip(
+                reason=f"TEST_DEFAULT_MODEL='{model}' uses thinking mode — "
+                "structured output (tool_choice: 'required') not supported (issue #84)",
+            ))

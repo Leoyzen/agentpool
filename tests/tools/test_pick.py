@@ -5,7 +5,12 @@ import pytest
 from agentpool import Agent
 
 # All tests in this file create real Agent instances that need OPENAI_API_KEY.
-pytestmark = pytest.mark.requires_openai_key
+# These tests use structured output (tool_choice: 'required') which is
+# incompatible with thinking-mode models (DeepSeek, Kimi). See issue #84.
+pytestmark = [
+    pytest.mark.requires_openai_key,
+    pytest.mark.incompatible_with_thinking,
+]
 
 
 async def test_pick_from_options(default_model: str):
