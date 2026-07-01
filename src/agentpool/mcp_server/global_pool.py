@@ -236,7 +236,6 @@ class GlobalConnectionPool:
                 if conn.ref_count == 0:
                     logger.info("Evicting idle MCP connection: %s", cid)
                     self._signal_shutdown_locked(cid, conn)
-                    self._connections.pop(cid, None)
                     evicted = True
                     break
             if not evicted:
@@ -308,9 +307,6 @@ class GlobalConnectionPool:
                     with contextlib.suppress(asyncio.CancelledError):
                         await conn.owner_task
 
-            with self._lock:
-                self._connections.pop(client_id, None)
-
     def _signal_shutdown_locked(
         self,
         client_id: str,
@@ -326,9 +322,7 @@ class GlobalConnectionPool:
         """
         if conn.is_stdio:
             conn.close_event.set()
-        else:
-            # HTTP/SSE: no owner task, just remove
-            self._connections.pop(client_id, None)
+        self._connections.pop(client_id, None)
 
     async def shutdown_all(self, timeout: float = 10.0) -> None:
         """Clean shutdown of all connections. Called on pool shutdown.
