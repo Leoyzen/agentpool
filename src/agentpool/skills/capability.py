@@ -192,7 +192,11 @@ class SkillCapability(AbstractCapability[AgentDepsT]):
 
         if isinstance(ctx.deps, AgentContext):
             return await self._build_mcp_toolsets_from_pool(ctx.deps)
-        return await self._build_mcp_toolsets_legacy_session("default")
+
+        # Fallback: try to extract session_id from deps directly (e.g. for
+        # testing with FakeDeps), otherwise use "default".
+        session_id = getattr(ctx.deps, "session_id", "default")
+        return await self._build_mcp_toolsets_legacy_session(session_id)
 
     async def _build_mcp_toolsets_from_pool(
         self,
@@ -352,6 +356,9 @@ class SkillCapability(AbstractCapability[AgentDepsT]):
             run_ctx = ctx.deps.run_ctx
             if run_ctx is not None:
                 session_id = run_ctx.session_id
+        else:
+            # Fallback: try to extract session_id from deps directly.
+            session_id = getattr(ctx.deps, "session_id", None)
         if session_id is None:
             return
         await self._mcp_manager.cleanup(session_id)
