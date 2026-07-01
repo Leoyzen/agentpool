@@ -8,17 +8,12 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from agentpool.mcp_server.global_pool import GlobalConnectionPool
-
-if TYPE_CHECKING:
-    from fastmcp.client.transports import ClientTransport
-
-    from agentpool_config.mcp_server import StreamableHTTPMCPServerConfig
 
 
 pytestmark = pytest.mark.integration
@@ -49,12 +44,11 @@ class TestGlobalConnectionPoolSharing:
 
     async def test_http_transport_not_shared_directly(self) -> None:
         """Given an HTTP config, when get_transport() is called twice,
-        then each call returns a transport whose connect_session()
+        then each call returns a fresh transport whose connect_session()
         can be entered independently without interference.
 
-        The GlobalConnectionPool must wrap the transport so that
-        connect_session() creates independent sessions, not competing
-        readers on the same underlying connection.
+        HTTP/SSE transports are never cached — each call creates a fresh
+        transport to avoid stream contention.
         """
         pool = GlobalConnectionPool()
 
@@ -76,7 +70,7 @@ class TestGlobalConnectionPoolSharing:
         results: list[int] = []
 
         async def _use_transport(t: Any) -> None:
-            async with t.connect_session() as session:
+            async with t.connect_session():
                 results.append(len(results))
 
         await asyncio.gather(_use_transport(transport1), _use_transport(transport2))
@@ -103,7 +97,7 @@ class TestGlobalConnectionPoolSharing:
 
         fake_transport = _FakeTransport("stdio")
         with patch.object(type(config), "to_transport", return_value=fake_transport):
-            transport = await pool.get_transport(config)
+            await pool.get_transport(config)
 
         # The owner task should have called connect_session() exactly once
         assert fake_transport.connect_count == 1
@@ -142,7 +136,7 @@ class TestGlobalConnectionPoolSharing:
         results: list[int] = []
 
         async def _use(t: Any) -> None:
-            async with t.connect_session() as session:
+            async with t.connect_session():
                 results.append(len(results))
 
         await asyncio.gather(_use(t1), _use(t2))
