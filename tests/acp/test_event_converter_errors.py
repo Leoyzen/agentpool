@@ -5,10 +5,15 @@ Covers RunErrorEvent and RunFailedEvent conversion to ACP session updates.
 
 from __future__ import annotations
 
-import pytest
 from pydantic_ai import RequestUsage
+import pytest
 
-from agentpool.agents.events import RunErrorEvent, RunFailedEvent, StreamCompleteEvent, ToolCallStartEvent
+from agentpool.agents.events import (
+    RunErrorEvent,
+    RunFailedEvent,
+    StreamCompleteEvent,
+    ToolCallStartEvent,
+)
 from agentpool.messaging.messages import ChatMessage
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 
@@ -64,6 +69,70 @@ async def test_run_error_event_without_agent_name(converter: ACPEventConverter):
     assert len(updates) == 1
     d = _dump(updates[0])
     assert "Error" in str(d["content"])
+
+
+@pytest.mark.unit
+async def test_run_error_event_yields_turn_complete_when_supported(
+    converter_with_turn_complete: ACPEventConverter,
+):
+    """RunErrorEvent should yield error text + TurnCompleteUpdate when supported."""
+    event = RunErrorEvent(message="Model API returned 500", agent_name="engineer")
+    updates = [u async for u in converter_with_turn_complete.convert(event)]
+
+    assert len(updates) == 2
+
+    d_text = _dump(updates[0])
+    assert d_text["session_update"] == "agent_message_chunk"
+    assert "Error" in str(d_text["content"])
+    assert "engineer" in str(d_text["content"])
+    assert "Model API returned 500" in str(d_text["content"])
+
+    d_turn = _dump(updates[1])
+    assert d_turn["session_update"] == "turn_complete"
+    assert d_turn["stop_reason"] == "end_turn"
+
+
+@pytest.mark.unit
+async def test_run_error_event_resets_converter_state(
+    converter_with_turn_complete: ACPEventConverter,
+):
+    """RunErrorEvent should reset converter state after emitting updates."""
+    tc_event = ToolCallStartEvent(
+        tool_call_id="tc_001",
+        tool_name="bash",
+        title="Running command",
+    )
+    _ = [u async for u in converter_with_turn_complete.convert(tc_event)]
+    assert "tc_001" in converter_with_turn_complete._tool_states
+
+    event = RunErrorEvent(message="Something went wrong", agent_name="engineer")
+    _ = [u async for u in converter_with_turn_complete.convert(event)]
+
+    assert "tc_001" not in converter_with_turn_complete._tool_states
+    assert converter_with_turn_complete._current_message_id != "test-msg-id"
+
+
+@pytest.mark.unit
+async def test_run_error_event_cancels_pending_tools(
+    converter_with_turn_complete: ACPEventConverter,
+):
+    """RunErrorEvent should emit ToolCallProgress for pending tools before resetting."""
+    tc_event = ToolCallStartEvent(
+        tool_call_id="tc_001",
+        tool_name="bash",
+        title="Running command",
+    )
+    _ = [u async for u in converter_with_turn_complete.convert(tc_event)]
+
+    event = RunErrorEvent(message="Something went wrong", agent_name="engineer")
+    updates = [u async for u in converter_with_turn_complete.convert(event)]
+
+    progress_dumps = [
+        _dump(u) for u in updates if _dump(u).get("session_update") == "tool_call_update"
+    ]
+    assert len(progress_dumps) == 1
+    assert progress_dumps[0]["tool_call_id"] == "tc_001"
+    assert progress_dumps[0]["status"] == "completed"
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +206,31 @@ async def test_run_failed_event_resets_converter_state(
     assert converter_with_turn_complete._current_message_id != "test-msg-id"
 
 
+@pytest.mark.unit
+async def test_run_failed_event_cancels_pending_tools_before_turn_complete(
+    converter_with_turn_complete: ACPEventConverter,
+):
+    """RunFailedEvent should cancel tools BEFORE yielding TurnCompleteUpdate."""
+    tc_event = ToolCallStartEvent(
+        tool_call_id="tc_001",
+        tool_name="bash",
+        title="Running command",
+    )
+    _ = [u async for u in converter_with_turn_complete.convert(tc_event)]
+
+    event = RunFailedEvent(
+        run_id="run_abc123",
+        session_id="ses_xyz",
+        exception=RuntimeError("Agent crashed"),
+    )
+    updates = [u async for u in converter_with_turn_complete.convert(event)]
+
+    update_types = [_dump(u).get("session_update") for u in updates]
+    tool_idx = update_types.index("tool_call_update")
+    turn_idx = update_types.index("turn_complete")
+    assert tool_idx < turn_idx, "tool cleanup must come before turn_complete"
+
+
 # ---------------------------------------------------------------------------
 # Reset idempotency
 # ---------------------------------------------------------------------------
@@ -179,12 +273,12 @@ async def test_stream_complete_single_reset(converter_with_turn_complete: ACPEve
     event = StreamCompleteEvent(message=msg)
     updates = [u async for u in converter_with_turn_complete.convert(event)]
 
-    # Should yield UsageUpdate + TurnCompleteUpdate
-    assert len(updates) >= 2
-    d_usage = _dump(updates[0])
-    assert d_usage["session_update"] == "usage_update"
-    d_turn = _dump(updates[1])
-    assert d_turn["session_update"] == "turn_complete"
+    # ACP spec: all session/update notifications must precede the turn_complete barrier
+    update_types = [_dump(u).get("session_update") for u in updates]
+    assert "usage_update" in update_types
+    assert "turn_complete" in update_types
+    if "tool_call_update" in update_types:
+        assert update_types.index("tool_call_update") < update_types.index("turn_complete")
 
     # Verify state is reset
     assert converter_with_turn_complete._tool_states == {}

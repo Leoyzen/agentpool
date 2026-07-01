@@ -10,8 +10,8 @@ This separation enables easy testing without mocks.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
+import json
 from typing import TYPE_CHECKING, Any, Literal
 import uuid
 
@@ -694,9 +694,10 @@ class ACPEventConverter:
                 # Turn-complete signal: explicit end-of-turn barrier for clients.
                 # Based on draft RFD PR #644 (not yet merged into ACP spec).
                 # See: https://github.com/agentclientprotocol/agent-client-protocol/pull/644
+                async for progress in self.cancel_pending_tools():
+                    yield progress
                 if self.client_supports_turn_complete:
                     yield TurnCompleteUpdate(stop_reason="end_turn")
-                self.reset()
 
             case PlanUpdateEvent(entries=entries):
                 acp_entries = [
@@ -733,12 +734,6 @@ class ACPEventConverter:
                     _meta = self._build_subagent_field_meta(
                         child_session_id=child_session_id, message_start_index=0
                     )
-                    run_mode: Literal["foreground", "background"]
-                    match spawn_mechanism:
-                        case "task":
-                            run_mode = "background"
-                        case "spawn":
-                            run_mode = "foreground"
                     yield ToolCallStart(
                         tool_call_id=tool_call_id,
                         title=f"{source_name}: {description}" if description else source_name,
@@ -827,10 +822,15 @@ class ACPEventConverter:
                 )
 
             case RunErrorEvent(message=message, agent_name=agent_name):
-                # Display error as agent text with formatting
+                # TurnCompleteUpdate is required here — without it, clients
+                # with turn_complete support stay stuck in "running" state.
                 agent_prefix = f"[{agent_name}] " if agent_name else ""
                 error_text = f"\n\n❌ **Error**: {agent_prefix}{message}\n\n"
                 yield AgentMessageChunk.text(error_text, message_id=self._current_message_id)
+                async for progress in self.cancel_pending_tools():
+                    yield progress
+                if self.client_supports_turn_complete:
+                    yield TurnCompleteUpdate(stop_reason="end_turn")
 
             case RunFailedEvent(run_id=run_id, exception=exc):
                 # Display run failure as agent text and signal turn completion.
@@ -844,18 +844,16 @@ class ACPEventConverter:
                     isinstance(exc, RuntimeError) and "cancelled" in str(exc).lower()
                 )
 
-                if is_cancellation:
-                    # For cancellation, emit turn_complete with cancelled stop_reason
-                    # Don't show error text since cancellation is user-initiated
-                    if self.client_supports_turn_complete:
-                        yield TurnCompleteUpdate(stop_reason="cancelled")
-                else:
-                    # For actual failures, show error message
+                stop_reason: Literal["end_turn", "cancelled"] = (
+                    "cancelled" if is_cancellation else "end_turn"
+                )
+                if not is_cancellation:
                     error_text = f"\n\n❌ **Run Failed** [{run_id}]: {exc}\n\n"
                     yield AgentMessageChunk.text(error_text, message_id=self._current_message_id)
-                    if self.client_supports_turn_complete:
-                        yield TurnCompleteUpdate(stop_reason="end_turn")
-                self.reset()
+                async for progress in self.cancel_pending_tools():
+                    yield progress
+                if self.client_supports_turn_complete:
+                    yield TurnCompleteUpdate(stop_reason=stop_reason)
 
             case ToolCallDeferredEvent(
                 tool_call_id=tc_id,
