@@ -136,7 +136,7 @@ class MessageNode[TDeps, TResult](ABC):
             self.mcp = agent_pool.mcp
         else:
             self._mcp_shared = False
-            self.mcp = MCPManager(name_, servers=mcp_servers, owner=self.name, _warn=False)
+            self.mcp = MCPManager(name_, servers=mcp_servers, owner=self.name)
         self.enable_db_logging = enable_logging
 
     async def log_session(

@@ -125,8 +125,6 @@ class MCPManager:
         sampling_model: str = "openai:gpt-5-nano",
         servers: Sequence[MCPServerConfig | str] | None = None,
         accessible_roots: list[str] | None = None,
-        *,
-        _warn: bool = True,
     ) -> None:
         self.name = name
         self.owner = owner
@@ -326,7 +324,6 @@ class MCPManager:
         from pydantic_ai.mcp import MCPToolset
 
         from agentpool_config.mcp_server import (
-            AcpMCPServerConfig,
             SSEMCPServerConfig,
             StdioMCPServerConfig,
             StreamableHTTPMCPServerConfig,
@@ -441,30 +438,4 @@ class MCPManager:
             raise RuntimeError(msg) from e
 
 
-if __name__ == "__main__":
-    from agentpool_config.mcp_server import StdioMCPServerConfig
 
-    cfg = StdioMCPServerConfig(
-        command="uv",
-        args=["run", "/home/phil65/dev/oss/agentpool/tests/mcp_server/server.py"],
-    )
-
-    async def main() -> None:
-        manager = MCPManager(servers=[cfg])
-        async with manager:
-            providers = manager.get_mcp_providers()
-            print(f"Found {len(providers)} providers")
-            provider = providers[0]
-            prompts = await provider.get_prompts()
-            print(f"Found prompts: {prompts}")
-            # Test static prompt (no arguments)
-            static_prompt = next(p for p in prompts if p.name == "static_prompt")
-            print(f"\n--- Testing static prompt: {static_prompt} ---")
-            components = await static_prompt.get_components()
-            assert components, "No prompt components found"
-            print(f"Found {len(components)} prompt components:")
-            for i, component in enumerate(components):
-                comp_type = type(component).__name__
-                print(f"  {i + 1}. {comp_type}: {component.content}")
-
-    anyio.run(main)

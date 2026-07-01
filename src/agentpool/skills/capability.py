@@ -192,7 +192,7 @@ class SkillCapability(AbstractCapability[AgentDepsT]):
 
         if isinstance(ctx.deps, AgentContext):
             return await self._build_mcp_toolsets_from_pool(ctx.deps)
-        return await self._build_mcp_toolsets_legacy(ctx)
+        return await self._build_mcp_toolsets_legacy_session("default")
 
     async def _build_mcp_toolsets_from_pool(
         self,
@@ -261,25 +261,6 @@ class SkillCapability(AbstractCapability[AgentDepsT]):
             )
             toolsets.append(toolset)
         return toolsets
-
-    async def _build_mcp_toolsets_legacy(
-        self,
-        ctx: RunContext[AgentDepsT],
-    ) -> list[AbstractToolset[AgentDepsT]]:
-        """Build MCP toolsets using the legacy ``SkillMcpManager`` path.
-
-        Used when ``ctx.deps`` is not an ``AgentContext`` (e.g. in tests
-        with mock deps). Uses ``"default"`` as the session_id since we
-        cannot extract it from untyped deps.
-
-        Args:
-            ctx: The pydantic-ai run context.
-
-        Returns:
-            List of ``FunctionToolset`` instances built from MCP tools.
-        """
-        _ = ctx  # ctx.deps is untyped; session_id defaults to "default"
-        return await self._build_mcp_toolsets_legacy_session("default")
 
     async def _build_mcp_toolsets_legacy_session(
         self,

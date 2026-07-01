@@ -299,7 +299,7 @@ class RunHandle:
                     turn_failed = False
                     try:
                         async for event in turn.execute():
-                            logger.info(
+                            logger.debug(
                                 "RunHandle.start() got event=%s session=%s run_id=%s",
                                 type(event).__name__,
                                 self.session_id,
