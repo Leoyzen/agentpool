@@ -53,10 +53,10 @@ def test_agent_hooks_still_works() -> None:
 
 
 def test_mcp_manager_still_works() -> None:
-    """MCPManager with _warn=False initializes and accepts server configs."""
+    """MCPManager initializes and accepts server configs."""
     from agentpool.mcp_server.manager import MCPManager
 
-    mm = MCPManager(_warn=False)
+    mm = MCPManager()
     assert mm.name == "mcp"
     assert mm.servers == []
     assert mm.providers == []
