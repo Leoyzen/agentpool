@@ -109,8 +109,24 @@ class TeamConfig(NodeConfig):
         nodes: Sequence[MessageNode[Any, Any]],
         name: str,
     ) -> Team | TeamRun[Any, Any]:
-        """Create a team based on config."""
+        """Create a team based on config.
+
+        !!! warning "Deprecated"
+            Use `agentpool_config.graph_translation.translate_team_to_graph()`
+            instead. This method will be removed when Team/TeamRun classes
+            are removed in a future phase.
+        """
+        import warnings
+
         from agentpool import Team, TeamRun
+
+        warnings.warn(
+            "TeamConfig.get_team() is deprecated. "
+            "Use translate_team_to_graph() from agentpool_config.graph_translation "
+            "to convert team config to GraphConfig instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         member_configs = self.get_member_configs()
 
