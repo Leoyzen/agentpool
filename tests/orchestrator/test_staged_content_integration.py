@@ -21,7 +21,6 @@ import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Any
 
-import anyio
 from pydantic_ai.models.test import TestModel
 import pytest
 
@@ -317,8 +316,8 @@ async def test_staged_content_reaches_model_through_runhandle_pipeline() -> None
             async with asyncio.timeout(10):
                 while True:
                     try:
-                        envelope = await receive_stream.receive()
-                    except anyio.EndOfStream:
+                        envelope = await receive_stream.get()
+                    except asyncio.QueueShutDown:
                         break
 
                     event = envelope.event if hasattr(envelope, "event") else envelope

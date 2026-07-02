@@ -2,17 +2,21 @@
 
 Extracted from orchestrator/core.py as part of the thin-wrapper refactor.
 Provides pub/sub event routing with replay buffers and overflow handling.
+
+Uses ``asyncio.Queue`` with configurable overflow policies instead of
+anyio memory streams. The ``block`` policy is rejected on the publish
+path to prevent run-loop deadlocks.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 import contextlib
 from dataclasses import dataclass
 from itertools import groupby
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, Literal
 
-import anyio
 from pydantic_ai import TextPartDelta, ThinkingPartDelta, ToolCallPartDelta
 
 from agentpool.agents.events import (
@@ -44,6 +48,14 @@ logger = get_logger(__name__)
 
 DEFAULT_QUEUE_MAXSIZE: Final[int] = 1000
 
+OverflowPolicy = Literal["drop_oldest", "drop_newest", "drop_subscriber"]
+
+_VALID_OVERFLOW_POLICIES: frozenset[str] = frozenset({
+    "drop_oldest",
+    "drop_newest",
+    "drop_subscriber",
+})
+
 
 @dataclass(frozen=True)
 class EventEnvelope:
@@ -72,7 +84,7 @@ class EventEnvelope:
 
 
 # ---------------------------------------------------------------------------
-# Event coalescing infrastructure (Task 1 — fields + functions only)
+# Event coalescing infrastructure
 # ---------------------------------------------------------------------------
 
 
@@ -118,7 +130,6 @@ def _merge_key(event: Any) -> tuple[str, str | None] | None:  # noqa: PLR0911
         case PartDeltaEvent(delta=ToolCallPartDelta(tool_call_id=tcid)):
             return ("delta_tool_call", tcid)
         case PartDeltaEvent():
-            # delta is None — classified as passthrough, will be dropped in _merge_envelopes
             return None
         case ToolCallProgressEvent(tool_call_id=tcid, status=status):
             return ("progress", f"{tcid}:{status}")
@@ -214,7 +225,6 @@ def _merge_envelopes(envelopes: list[EventEnvelope]) -> list[EventEnvelope]:
     Returns:
         List of merged (or passthrough) envelopes ready for dispatch.
     """
-    # Drop PartDeltaEvent with delta=None
     filtered: list[EventEnvelope] = [
         env
         for env in envelopes
@@ -225,10 +235,8 @@ def _merge_envelopes(envelopes: list[EventEnvelope]) -> list[EventEnvelope]:
     for key, group in groupby(filtered, key=lambda env: _merge_key(env.event)):
         group_list = list(group)
         if key is None:
-            # Passthrough: extend without merging
             result.extend(group_list)
         elif key[0] == "plan":
-            # Last-wins: keep last event
             result.append(group_list[-1])
         else:
             events = [env.event for env in group_list]
@@ -250,59 +258,43 @@ def _merge_envelopes(envelopes: list[EventEnvelope]) -> list[EventEnvelope]:
 
 
 async def drain_and_merge(
-    stream: anyio.abc.ObjectReceiveStream[Any],
+    queue: asyncio.Queue[EventEnvelope],
 ) -> AsyncIterator[EventEnvelope]:
-    """Drain all queued events from a subscriber stream and merge consecutive same-type events.
+    """Drain all queued events from a subscriber queue and merge consecutive same-type events.
 
-    Performs subscriber-side coalescing: blocks on ``await stream.receive()``
+    Performs subscriber-side coalescing: blocks on ``await queue.get()``
     until at least one item is available, then drains all immediately-available
-    items via ``receive_nowait()`` until ``WouldBlock``. The resulting batch is
+    items via ``get_nowait()`` until ``QueueEmpty``. The resulting batch is
     merged via ``_merge_envelopes()`` and each merged envelope is yielded.
-    Repeats until the stream signals ``EndOfStream`` or ``ClosedResourceError``.
+    Repeats until the queue is shut down (``QueueShutDown``).
 
     Raw events (not wrapped in ``EventEnvelope``) are automatically wrapped with
-    an empty ``source_session_id`` for compatibility with test streams.
-
-    Usage:
-        send_stream, receive_stream = anyio.create_memory_object_stream(64)
-        async for envelope in drain_and_merge(receive_stream):
-            event = envelope.event
-            # handle event
+    an empty ``source_session_id`` for compatibility with test queues.
 
     Args:
-        stream: The ``ObjectReceiveStream`` to drain. Items may be
-            ``EventEnvelope`` instances or raw events.
+        queue: The ``asyncio.Queue`` to drain. Items must be
+            ``EventEnvelope`` instances.
 
     Yields:
         Merged ``EventEnvelope`` instances ready for dispatch.
-
-    !!! note "Blocking behavior"
-        This function blocks on ``stream.receive()`` between batches. Once an
-        item arrives, it non-blockingly drains ``receive_nowait()`` until
-        ``WouldBlock`` to form a batch, merges via ``_merge_envelopes()``,
-        yields each merged envelope, then blocks again for the next batch.
     """
     while True:
-        # Block until at least one item is available.
         try:
-            first = await stream.receive()
-        except (anyio.EndOfStream, anyio.ClosedResourceError):
+            first = await queue.get()
+        except asyncio.QueueShutDown:
             return
 
-        # Wrap raw events (e.g., from test streams) in EventEnvelope.
         if not isinstance(first, EventEnvelope):
             first = EventEnvelope(source_session_id="", event=first)
 
         batch: list[EventEnvelope] = [first]
 
-        # Drain all immediately-available items without blocking.
         while True:
             try:
-                item = stream.receive_nowait()  # type: ignore[attr-defined]
-            except anyio.WouldBlock:
+                item = queue.get_nowait()
+            except asyncio.QueueEmpty:
                 break
-            except (anyio.EndOfStream, anyio.ClosedResourceError):
-                # Stream closed mid-drain: process batch then terminate.
+            except asyncio.QueueShutDown:
                 for env in _merge_envelopes(batch):
                     yield env
                 return
@@ -310,7 +302,6 @@ async def drain_and_merge(
                 item = EventEnvelope(source_session_id="", event=item)
             batch.append(item)
 
-        # Merge and yield the batch.
         for env in _merge_envelopes(batch):
             yield env
 
@@ -323,14 +314,14 @@ class EventBus:
     with no publish-side buffering or coalescing.
 
     Event coalescing/merging is the subscriber's responsibility. Subscribers
-    should drain their receive stream using ``drain_and_merge()`` to batch-merge
+    should drain their queue using ``drain_and_merge()`` to batch-merge
     consecutive same-type events (e.g., ``PartDeltaEvent`` text chunks) for
     efficient processing.
 
     Safety features:
-    - Bounded memory streams with hybrid backpressure (drop oldest, then drop subscriber)
+    - Bounded ``asyncio.Queue`` with configurable overflow policies
     - Automatic cleanup of dead subscribers
-    - EndOfStream-based shutdown (no sentinel None)
+    - ``Queue.shutdown()``-based shutdown (no sentinel None)
     """
 
     def __init__(
@@ -338,28 +329,45 @@ class EventBus:
         max_queue_size: int = DEFAULT_QUEUE_MAXSIZE,
         replay_buffer_size: int = 100,
         session_controller: SessionController | None = None,
+        overflow_policy: OverflowPolicy = "drop_oldest",
     ) -> None:
         """Initialize the event bus.
 
         Args:
-            max_queue_size: Maximum buffer size for subscriber memory streams.
+            max_queue_size: Maximum buffer size for subscriber queues.
             replay_buffer_size: Maximum number of events retained per session for replay.
             session_controller: Optional session controller for hierarchy queries.
+            overflow_policy: Policy for handling full subscriber queues.
+                One of ``drop_oldest``, ``drop_newest``, ``drop_subscriber``.
+                ``block`` is NOT supported (would deadlock the run loop).
+
+        Raises:
+            ValueError: If ``overflow_policy`` is ``"block"`` or not a valid policy.
         """
-        self._subscribers: dict[
-            str, list[tuple[anyio.abc.ObjectSendStream[EventEnvelope], str]]
-        ] = {}
-        self._stream_pairs: dict[int, anyio.abc.ObjectSendStream[EventEnvelope]] = {}
+        if overflow_policy == "block":
+            raise ValueError(
+                "overflow_policy='block' is not supported on the publish path — "
+                "it would deadlock the run loop. Use 'drop_oldest', 'drop_newest', "
+                "or 'drop_subscriber' instead."
+            )
+        if overflow_policy not in _VALID_OVERFLOW_POLICIES:
+            raise ValueError(
+                f"Invalid overflow_policy={overflow_policy!r}. "
+                f"Must be one of: {sorted(_VALID_OVERFLOW_POLICIES)}"
+            )
+
+        self._subscribers: dict[str, list[tuple[asyncio.Queue[EventEnvelope], str]]] = {}
         self._session_tree: dict[str, list[str]] = {}
-        self._lock = anyio.Lock()
+        self._lock = asyncio.Lock()
         self._max_queue_size = max_queue_size
         self._replay_buffer_size = replay_buffer_size
         self._session_controller = session_controller
         self._replay_buffers: dict[str, deque[EventEnvelope]] = {}
+        self._overflow_policy: OverflowPolicy = overflow_policy
 
     async def subscribe(
         self, session_id: str, scope: str = "session"
-    ) -> anyio.abc.ObjectReceiveStream[EventEnvelope]:
+    ) -> asyncio.Queue[EventEnvelope]:
         """Subscribe to events for a session.
 
         New subscribers receive replayed historical events from the replay
@@ -381,15 +389,12 @@ class EventBus:
                     The "descendants" enum value is retained for backward compatibility.
 
         Returns:
-            A memory object receive stream to consume events from.
+            An ``asyncio.Queue`` to consume events from.
         """
-        send_stream, receive_stream = anyio.create_memory_object_stream(
-            max_buffer_size=self._max_queue_size
-        )
+        queue: asyncio.Queue[EventEnvelope] = asyncio.Queue(maxsize=self._max_queue_size)
 
         async with self._lock:
-            self._subscribers.setdefault(session_id, []).append((send_stream, scope))
-            self._stream_pairs[id(receive_stream)] = send_stream
+            self._subscribers.setdefault(session_id, []).append((queue, scope))
             if scope == "all":
                 historical_events: list[EventEnvelope] = []
                 for buffer in self._replay_buffers.values():
@@ -400,11 +405,11 @@ class EventBus:
 
         for envelope in historical_events:
             try:
-                send_stream.send_nowait(envelope)
-            except anyio.WouldBlock:
+                queue.put_nowait(envelope)
+            except asyncio.QueueFull:
                 break
 
-        return receive_stream
+        return queue
 
     def clear_replay_buffer(self, session_id: str) -> None:
         """Clear the replay buffer for a session.
@@ -423,30 +428,27 @@ class EventBus:
     async def unsubscribe(
         self,
         session_id: str,
-        receive_stream: anyio.abc.ObjectReceiveStream[EventEnvelope],
+        queue: asyncio.Queue[EventEnvelope],
     ) -> None:
         """Unsubscribe from events.
 
-        Closes the send stream counterpart so the consumer receives EndOfStream.
-        Cleans up empty subscriber lists to prevent memory leaks.
+        Shuts down the subscriber's queue so the consumer receives
+        ``QueueShutDown``. Cleans up empty subscriber lists to prevent
+        memory leaks.
 
         Args:
             session_id: The session to unsubscribe from.
-            receive_stream: The receive stream returned by subscribe().
+            queue: The queue returned by subscribe().
         """
-        send_to_close: anyio.abc.ObjectSendStream[EventEnvelope] | None = None
         async with self._lock:
-            send_to_close = self._stream_pairs.pop(id(receive_stream), None)
-            if send_to_close is not None and session_id in self._subscribers:
+            if session_id in self._subscribers:
                 self._subscribers[session_id] = [
-                    (s, sc) for s, sc in self._subscribers[session_id] if s is not send_to_close
+                    (q, sc) for q, sc in self._subscribers[session_id] if q is not queue
                 ]
                 if not self._subscribers[session_id]:
                     del self._subscribers[session_id]
 
-        if send_to_close is not None:
-            with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
-                await send_to_close.aclose()
+        queue.shutdown()
 
     def _get_parent(self, session_id: str) -> str | None:
         """Find the parent of a session in the session tree."""
@@ -493,13 +495,40 @@ class EventBus:
             return True
         return published_sid == subscriber_sid
 
+    def _enqueue(self, queue: asyncio.Queue[EventEnvelope], envelope: EventEnvelope) -> bool:
+        """Enqueue an envelope using the configured overflow policy.
+
+        Returns:
+            True if the envelope was enqueued (or dropped by policy),
+            False if the subscriber should be removed (dead queue).
+        """
+        try:
+            queue.put_nowait(envelope)
+        except asyncio.QueueShutDown:
+            return False
+        except asyncio.QueueFull:
+            match self._overflow_policy:
+                case "drop_oldest":
+                    with contextlib.suppress(asyncio.QueueEmpty):
+                        queue.get_nowait()
+                    try:
+                        queue.put_nowait(envelope)
+                    except asyncio.QueueFull:
+                        return False
+                    else:
+                        return True
+                case "drop_newest":
+                    return True
+                case "drop_subscriber":
+                    return False
+        return True
+
     async def _send(self, session_id: str, envelope: EventEnvelope) -> None:
         """Send a single envelope to all matching subscribers.
 
         Appends to the replay buffer, collects target subscribers under
-        ``_lock``, then sends to each target with hybrid backpressure
-        (0.1s timeout → ``send_nowait`` → drop subscriber). Cleans up
-        dead streams afterwards.
+        ``_lock``, then sends to each target with the configured overflow
+        policy. Cleans up dead queues afterwards.
 
         Args:
             session_id: The session that produced the event.
@@ -510,54 +539,39 @@ class EventBus:
                 self._replay_buffers[session_id] = deque(maxlen=self._replay_buffer_size)
             self._replay_buffers[session_id].append(envelope)
 
-            targets: list[tuple[anyio.abc.ObjectSendStream[EventEnvelope], str]] = []
+            targets: list[tuple[asyncio.Queue[EventEnvelope], str]] = []
             for subscriber_sid, subscribers in self._subscribers.items():
-                for send_stream, scope in subscribers:
+                for queue, scope in subscribers:
                     if self._should_receive(session_id, subscriber_sid, scope):
-                        targets.append((send_stream, scope))
+                        targets.append((queue, scope))
 
-        dead_streams: list[anyio.abc.ObjectSendStream[EventEnvelope]] = []
-        for send_stream, _scope in targets:
-            try:
-                with anyio.fail_after(0.1):
-                    await send_stream.send(envelope)
-            except TimeoutError:
-                try:
-                    send_stream.send_nowait(envelope)  # type: ignore[attr-defined]
-                except anyio.WouldBlock:
-                    dead_streams.append(send_stream)
-            except (anyio.BrokenResourceError, anyio.ClosedResourceError):
-                dead_streams.append(send_stream)
+        dead_queues: list[asyncio.Queue[EventEnvelope]] = []
+        for queue, _scope in targets:
+            if not self._enqueue(queue, envelope):
+                dead_queues.append(queue)
 
-        if dead_streams:
-            dead_set = set(dead_streams)
+        if dead_queues:
+            dead_set = {id(q) for q in dead_queues}
             async with self._lock:
                 for subscriber_sid in list(self._subscribers):
                     self._subscribers[subscriber_sid] = [
                         item
                         for item in self._subscribers[subscriber_sid]
-                        if item[0] not in dead_set
+                        if id(item[0]) not in dead_set
                     ]
                     if not self._subscribers[subscriber_sid]:
                         del self._subscribers[subscriber_sid]
-                dead_ids = {sid for sid, stream in self._stream_pairs.items() if stream in dead_set}
-                for sid in dead_ids:
-                    self._stream_pairs.pop(sid, None)
 
-        for stream in dead_streams:
-            try:
-                await stream.aclose()
-            except (anyio.BrokenResourceError, anyio.ClosedResourceError):
-                pass
-            except Exception:
-                logger.exception("Failed to close dead stream")
+        for queue in dead_queues:
+            with contextlib.suppress(Exception):
+                queue.shutdown()
 
     async def publish(self, session_id: str, event: Any) -> None:
         """Publish an event to all subscribers for a session.
 
         Wraps the event in an EventEnvelope and sends it directly via _send().
-        PartDeltaEvent with delta=None is dropped (no content to deliver).
-        Coalescing is handled subscriber-side by drain_and_merge().
+        ``PartDeltaEvent`` with ``delta=None`` is dropped (no content to deliver).
+        Coalescing is handled subscriber-side by ``drain_and_merge()``.
 
         Args:
             session_id: The session that produced the event.
@@ -571,8 +585,8 @@ class EventBus:
     async def close_session(self, session_id: str) -> None:
         """Close all subscriptions for a session.
 
-        Closes all send streams to signal EndOfStream to consumers,
-        and clears the replay buffer.
+        Shuts down all subscriber queues to signal ``QueueShutDown`` to
+        consumers, and clears the replay buffer.
 
         Args:
             session_id: The session to close subscriptions for.
@@ -581,15 +595,11 @@ class EventBus:
 
         async with self._lock:
             subscribers = self._subscribers.pop(session_id, [])
-            send_streams = [send_stream for send_stream, _scope in subscribers]
+            queues = [queue for queue, _scope in subscribers]
 
-        for send_stream in send_streams:
-            try:
-                await send_stream.aclose()
-            except (anyio.BrokenResourceError, anyio.ClosedResourceError):
-                pass
-            except Exception:
-                logger.exception("Failed to close send stream during session close")
+        for queue in queues:
+            with contextlib.suppress(Exception):
+                queue.shutdown()
 
     async def get_subscriber_counts(self) -> dict[str, int]:
         """Get subscriber counts per session.

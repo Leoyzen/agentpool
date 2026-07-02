@@ -11,20 +11,12 @@ from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionControll
 
 
 if TYPE_CHECKING:
-    import anyio
+    import asyncio
 
 
-def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
-    """Check if a memory receive stream has no buffered items.
-
-    Uses ``statistics().current_buffer_used`` to avoid consuming events.
-    """
-    try:
-        stats = stream.statistics()
-    except Exception:  # noqa: BLE001
-        return True
-    else:
-        return stats.current_buffer_used == 0
+def _queue_empty(queue: asyncio.Queue) -> bool:
+    """Check if an asyncio.Queue has no buffered items without consuming them."""
+    return queue.empty()
 
 
 class TestEventEnvelopeIntegration:
@@ -44,10 +36,10 @@ class TestEventEnvelopeIntegration:
         event = {"type": "test", "data": "hello from child"}
         await bus.publish("child-sid", event)
 
-        assert not _stream_empty(parent_queue), (
+        assert not _queue_empty(parent_queue), (
             "Parent subscriber should receive child events wrapped in EventEnvelope"
         )
-        received = await parent_queue.receive()
+        received = await parent_queue.get()
         assert isinstance(received, EventEnvelope), (
             f"Expected EventEnvelope, got {type(received).__name__}"
         )

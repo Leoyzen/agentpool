@@ -16,7 +16,6 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
-import anyio
 from pydantic_ai import Agent as PydanticAIAgent, RunContext
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import Tool
@@ -513,9 +512,9 @@ async def test_receive_request_inject_prompt_into_active_run(
     events: list[Any] = []
     try:
         while True:
-            event = await asyncio.wait_for(queue.receive(), timeout=1.0)
+            event = await asyncio.wait_for(queue.get(), timeout=1.0)
             events.append(event)
-    except (TimeoutError, anyio.EndOfStream):
+    except (TimeoutError, asyncio.QueueShutDown):
         pass
 
     # Should have at least one RunStartedEvent
@@ -579,6 +578,6 @@ async def test_receive_request_ignores_unknown_kwargs_gracefully(
     # Wait for execution
     try:
         while True:
-            await asyncio.wait_for(queue.receive(), timeout=2.0)
-    except (TimeoutError, anyio.EndOfStream):
+            await asyncio.wait_for(queue.get(), timeout=2.0)
+    except (TimeoutError, asyncio.QueueShutDown):
         pass

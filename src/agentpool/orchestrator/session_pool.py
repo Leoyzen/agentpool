@@ -12,8 +12,6 @@ import time
 from typing import TYPE_CHECKING, Any, Final
 import uuid
 
-import anyio
-
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     RunErrorEvent,
@@ -901,19 +899,19 @@ class SessionPool:
             run_handle = self.sessions._runs.get(run_id)
             if run_handle is not None:
                 run_handle.steer(content)
-            stream = await self.event_bus.subscribe(session_id, scope=scope)
+            queue = await self.event_bus.subscribe(session_id, scope=scope)
             try:
                 while True:
                     try:
-                        event = await stream.receive()
-                    except anyio.EndOfStream:
+                        event = await queue.get()
+                    except asyncio.QueueShutDown:
                         break
                     yield event.event
                     raw_event = getattr(event, "event", event)
                     if isinstance(raw_event, StreamCompleteEvent | RunErrorEvent):
                         break
             finally:
-                await self.event_bus.unsubscribe(session_id, stream)
+                await self.event_bus.unsubscribe(session_id, queue)
             return
 
         # No active run — create RunHandle and yield from start().
@@ -923,23 +921,23 @@ class SessionPool:
         # just events yielded directly by start().
         run_handle = self._create_run_handle(session, agent, session_id)
         self.event_bus.clear_replay_buffer(session_id)
-        bus_stream = await self.event_bus.subscribe(session_id, scope=scope)
+        bus_queue = await self.event_bus.subscribe(session_id, scope=scope)
         gen = run_handle.start(content)
         try:
             async for evt in gen:
                 # Drain any tool-published events from EventBus before
                 # yielding the start() event. This ensures SpawnSessionStart
                 # and similar events appear before the StreamCompleteEvent.
-                with contextlib.suppress(anyio.WouldBlock):
+                with contextlib.suppress(asyncio.QueueEmpty):
                     while True:
-                        envelope = bus_stream.receive_nowait()  # type: ignore[attr-defined]
+                        envelope = bus_queue.get_nowait()
                         yield envelope.event
                 yield evt
                 if isinstance(evt, StreamCompleteEvent | RunErrorEvent):
                     break
         finally:
             await gen.aclose()
-            await self.event_bus.unsubscribe(session_id, bus_stream)
+            await self.event_bus.unsubscribe(session_id, bus_queue)
             session.current_run_id = None
             self.sessions._runs.pop(run_handle.run_id, None)
 

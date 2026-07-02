@@ -298,7 +298,7 @@ async def test_child_events_published_to_child_event_bus() -> None:
         await session_pool.event_bus.publish(child_id, complete_event)
 
         # Child subscriber should receive the event
-        received = await asyncio.wait_for(child_queue.receive(), timeout=1.0)
+        received = await asyncio.wait_for(child_queue.get(), timeout=1.0)
         assert isinstance(received, EventEnvelope)
         assert received.source_session_id == child_id
         assert isinstance(received.event, StreamCompleteEvent)
@@ -654,7 +654,7 @@ async def test_descendants_scope_delivers_child_events_to_parent() -> None:
         await session_pool.event_bus.publish(child_id, child_event)
 
         # Parent queue should receive it wrapped in EventEnvelope
-        received = await asyncio.wait_for(parent_queue.receive(), timeout=1.0)
+        received = await asyncio.wait_for(parent_queue.get(), timeout=1.0)
         assert isinstance(received, EventEnvelope)
         assert received.source_session_id == child_id
         assert isinstance(received.event, StreamCompleteEvent)
@@ -666,7 +666,7 @@ async def test_descendants_scope_delivers_child_events_to_parent() -> None:
 
         # exact_queue should be empty (timeout)
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(exact_queue.receive(), timeout=0.2)
+            await asyncio.wait_for(exact_queue.get(), timeout=0.2)
 
         await session_pool.event_bus.unsubscribe(parent_id, parent_queue)
         await session_pool.event_bus.unsubscribe(parent_id, exact_queue)
