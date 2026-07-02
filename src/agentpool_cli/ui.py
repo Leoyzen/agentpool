@@ -349,7 +349,7 @@ def opencode_desktop_command(  # noqa: PLR0915
             if system == "Darwin":
                 subprocess.Popen(["open", "-a", "OpenCode"])
             elif system == "Windows":
-                os.startfile("opencode")
+                subprocess.Popen(["start", "", "opencode"], shell=True)
             else:  # Linux and others
                 # Try different possible command names - OpenCode (capital O) is the desktop app
                 for cmd in ["OpenCode", "opencode-desktop"]:
@@ -441,7 +441,7 @@ def opencode_desktop_command(  # noqa: PLR0915
             if system == "Darwin":
                 subprocess.Popen(["open", "-a", "OpenCode"])
             elif system == "Windows":
-                os.startfile("opencode")
+                subprocess.Popen(["start", "", "opencode"], shell=True)
             else:  # Linux
                 # OpenCode (capital O) is the desktop app
                 for cmd in ["OpenCode", "opencode-desktop"]:

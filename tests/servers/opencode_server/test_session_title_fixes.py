@@ -8,6 +8,7 @@ These tests verify the fixes for:
 
 from __future__ import annotations
 
+import contextlib
 import os
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -17,16 +18,16 @@ import pytest
 
 from agentpool.sessions.models import SessionData
 from agentpool.storage.manager import SessionMetadata, SessionMetadataGeneratedEvent, StorageManager
+from agentpool_config.storage import MemoryStorageConfig, SQLStorageConfig, StorageConfig
 from agentpool_server.opencode_server.converters import (
     opencode_to_session_data,
     session_data_to_opencode,
 )
 from agentpool_server.opencode_server.models import Session
 from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
-from agentpool_config.storage import MemoryStorageConfig, SQLStorageConfig, StorageConfig
 from agentpool_storage.memory_provider.provider import MemoryStorageProvider
-from agentpool_storage.sql_provider.sql_provider import SQLModelProvider
 from agentpool_storage.session_store import SQLSessionStore
+from agentpool_storage.sql_provider.sql_provider import SQLModelProvider
 
 
 if TYPE_CHECKING:
@@ -291,7 +292,7 @@ class TestStorageManagerTitleGenerationFix:
                 mock_core.assert_not_called()  # Should not generate
 
     async def test_generate_title_from_prompt_generates_despite_default_title(self) -> None:
-        """Verify _generate_title_from_prompt generates title even when default 'New Session' exists.
+        """Verify _generate_title_from_prompt generates title despite default 'New Session'.
 
         Regression test: 'New Session' is the default placeholder title assigned
         when a session is created.  Title generation should NOT be blocked by
@@ -360,23 +361,24 @@ class TestStorageManagerTitleGenerationFix:
                 await self_.metadata_generated.emit(event)
                 return mock_metadata
 
-            with patch.object(
-                StorageManager,
-                "_generate_title_core",
-                mock_core_with_signal,
+            with (
+                patch.object(
+                    StorageManager,
+                    "_generate_title_core",
+                    mock_core_with_signal,
+                ),
+                patch.dict(os.environ, {}, clear=False),
             ):
-                # Remove pytest env to trigger generation
-                with patch.dict(os.environ, {}, clear=False):
-                    os.environ.pop("PYTEST_CURRENT_TEST", None)
+                os.environ.pop("PYTEST_CURRENT_TEST", None)
 
-                    await manager.log_session(
-                        session_id=session_id,
-                        node_name="test_agent",
-                        initial_prompt="Generate a title for this",
-                    )
+                await manager.log_session(
+                    session_id=session_id,
+                    node_name="test_agent",
+                    initial_prompt="Generate a title for this",
+                )
 
-                    # Wait for async processing
-                    await anyio.sleep(0.1)
+                # Wait for async processing
+                await anyio.sleep(0.1)
 
             # Title should be generated and stored
             stored = await manager.get_session_title(session_id)
@@ -410,8 +412,8 @@ class TestOpenCodeProviderTitleFix:
 
     async def test_save_session_creates_new_session_file(self, tmp_path: Path) -> None:
         """Verify save_session creates new session file when it doesn't exist."""
-        from agentpool_storage.opencode_provider.provider import OpenCodeStorageProvider
         from agentpool_config.storage import OpenCodeStorageConfig
+        from agentpool_storage.opencode_provider.provider import OpenCodeStorageProvider
 
         config = OpenCodeStorageConfig(path=str(tmp_path / "opencode_storage"))
         provider = OpenCodeStorageProvider(config)
@@ -444,8 +446,8 @@ class TestOpenCodeProviderTitleFix:
 
     async def test_save_session_updates_existing_session(self, tmp_path: Path) -> None:
         """Verify save_session updates existing session file."""
-        from agentpool_storage.opencode_provider.provider import OpenCodeStorageProvider
         from agentpool_config.storage import OpenCodeStorageConfig
+        from agentpool_storage.opencode_provider.provider import OpenCodeStorageProvider
 
         config = OpenCodeStorageConfig(path=str(tmp_path / "opencode_storage"))
         provider = OpenCodeStorageProvider(config)
@@ -479,8 +481,8 @@ class TestOpenCodeProviderTitleFix:
 
     async def test_load_session_reads_title(self, tmp_path: Path) -> None:
         """Verify load_session reads title from session file."""
-        from agentpool_storage.opencode_provider.provider import OpenCodeStorageProvider
         from agentpool_config.storage import OpenCodeStorageConfig
+        from agentpool_storage.opencode_provider.provider import OpenCodeStorageProvider
 
         config = OpenCodeStorageConfig(path=str(tmp_path / "opencode_storage"))
         provider = OpenCodeStorageProvider(config)
@@ -531,7 +533,7 @@ class TestModelVariantResolution:
     """Tests for _generate_title_core resolving model_variants before infer_model."""
 
     async def test_generate_title_core_resolves_variant_name(self) -> None:
-        """Verify _generate_title_core resolves a model variant name instead of passing it to infer_model.
+        """Verify _generate_title_core resolves a model variant name before infer_model.
 
         Regression test: When title_generation_model is a variant name like 'ack-dev',
         infer_model() raises 'Unknown model: ack-dev'. The fix checks _model_variants
@@ -561,7 +563,7 @@ class TestModelVariantResolution:
                 mock_agent.run = AsyncMock(return_value=mock_result)
                 mock_agent_cls.return_value = mock_agent
 
-                metadata = await manager._generate_title_core("test_session", "user: hello")
+                await manager._generate_title_core("test_session", "user: hello")
 
                 # Should have called variant.get_model(), not infer_model
                 mock_variant.get_model.assert_called_once()
@@ -588,30 +590,8 @@ class TestModelVariantResolution:
             # No model_variants set (empty dict by default) - so model string
             # goes to infer_model(). We just verify no crash on variant lookup.
             # The actual LLM call will fail, but we catch that as expected.
-            try:
+            with contextlib.suppress(Exception):
                 await manager._generate_title_core("test_session", "user: hello")
-            except Exception:
-                pass  # Expected - LLM call fails in test, but variant lookup didn't crash
-
-    async def test_generate_title_core_falls_back_to_infer_model(self) -> None:
-        """Verify _generate_title_core falls back to infer_model for non-variant model strings.
-
-        When title_generation_model is not in _model_variants, it should be passed
-        directly to infer_model() rather than raising 'Unknown model'.
-        """
-        config = StorageConfig(
-            providers=[MemoryStorageConfig()],
-            title_generation_model="openai:gpt-4o-mini",
-        )
-
-        async with StorageManager(config) as manager:
-            # No model_variants set (empty dict by default) - so model string
-            # goes to infer_model(). We just verify no crash on variant lookup.
-            # The actual LLM call will fail, but we catch that as expected.
-            try:
-                await manager._generate_title_core("test_session", "user: hello")
-            except Exception:
-                pass  # Expected - LLM call fails in test, but variant lookup didn't crash
 
 
 class TestTitlePersistedAfterReload:

@@ -171,7 +171,8 @@ def _get_filtered_conversations_sync(
 
         usage = TokenUsage(total=total_tokens, prompt=0, completion=0) if total_tokens else None
         filtered_messages = chat_messages
-        if compact and len(chat_messages) > 2:
+        _compact_min_messages = 2
+        if compact and len(chat_messages) > _compact_min_messages:
             filtered_messages = [chat_messages[0], chat_messages[-1]]
 
         conv_data = ConvData(
@@ -552,6 +553,7 @@ class OpenCodeStorageProvider(StorageProvider):
         node_name: str,
         start_time: datetime | None = None,
         model: str | None = None,
+        agent_type: str | None = None,
         parent_session_id: str | None = None,
     ) -> None:
         """Log a conversation start.

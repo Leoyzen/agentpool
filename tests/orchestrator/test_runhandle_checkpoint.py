@@ -9,13 +9,10 @@ Verifies that:
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
-from unittest.mock import MagicMock, PropertyMock
+from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool.agents.events import RunFailedEvent
 from agentpool.orchestrator.run import RunHandle, RunStatus
 
 
@@ -103,7 +100,7 @@ def test_checkpoint_does_not_emit_run_failed_event() -> None:
     handle._start_task()
 
     # Mock event_bus to detect RunFailedEvent emission
-    event_bus = MagicMock()
+    MagicMock()
     handle.checkpoint()
 
     # RunHandle.checkpoint() does not accept event_bus parameter,
@@ -160,9 +157,9 @@ async def test_session_controller_skips_fail_on_checkpointed() -> None:
     ``run_handle.status not in (RunStatus.completed, RunStatus.failed,
     RunStatus.checkpointed)`` before calling ``run_handle.fail()``.
     """
-    from agentpool.orchestrator.core import SessionController
-    from agentpool.delegation import AgentPool
     from agentpool import AgentsManifest
+    from agentpool.delegation import AgentPool
+    from agentpool.orchestrator.core import SessionController
 
     manifest = AgentsManifest()
     pool = MagicMock(spec=AgentPool)
@@ -170,7 +167,7 @@ async def test_session_controller_skips_fail_on_checkpointed() -> None:
     pool.main_agent.name = "main"
     pool.manifest = manifest
 
-    controller = SessionController(pool)
+    SessionController(pool)
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     handle._start_task()
     handle.checkpoint()

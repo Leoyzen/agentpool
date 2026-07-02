@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import traceback
 from typing import Annotated
 import uuid
@@ -83,10 +84,8 @@ def run_command(
                                 )
                             )
                 finally:
-                    try:
+                    with contextlib.suppress(Exception):
                         await sp.close_session(session_id)
-                    except Exception:
-                        pass
 
         # Run the async code in the sync command
         asyncio.run(run())

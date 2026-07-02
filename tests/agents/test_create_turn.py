@@ -71,9 +71,7 @@ def test_acp_adapter_has_todo_comment() -> None:
     import agentpool.agents.acp_agent.acp_agent as acp_module
 
     source = inspect.getsource(acp_module.ACPAgent.create_turn)
-    assert "TODO" in source, (
-        "ACP adapter gap must be documented with TODO comment, not just NOTE"
-    )
+    assert "TODO" in source, "ACP adapter gap must be documented with TODO comment, not just NOTE"
     assert "AttributeError" in source or "adapter" in source.lower(), (
         "TODO comment must describe the gap and required infrastructure"
     )
@@ -117,8 +115,7 @@ def test_acp_turn_no_unused_initial_message_history() -> None:
 
     source = inspect.getsource(turn_module.ACPTurn.__init__)
     assert "_initial_message_history" not in source, (
-        "_initial_message_history is dead code — assigned but never used. "
-        "Should be removed."
+        "_initial_message_history is dead code — assigned but never used. Should be removed."
     )
 
 
@@ -135,9 +132,7 @@ def test_acp_turn_accepts_agent_name() -> None:
     assert "agent_name" in source, (
         "ACPTurn.__init__ must accept agent_name parameter for RunErrorEvent"
     )
-    assert "self._agent_name" in source, (
-        "ACPTurn must store agent_name as self._agent_name"
-    )
+    assert "self._agent_name" in source, "ACPTurn must store agent_name as self._agent_name"
 
 
 def test_acp_turn_run_error_event_includes_agent_name() -> None:

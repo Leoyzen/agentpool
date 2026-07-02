@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from upathtools import UPath
 
 from agentpool.skills.command import SkillCommand
@@ -300,7 +299,10 @@ class TestCommandChangeHandlerType:
 
     def test_handler_type_with_lambda(self) -> None:
         """Test that lambda can be used as CommandChangeHandler."""
-        handler: CommandChangeHandler = lambda name, cmd: None
+
+        def handler(name, cmd):
+            return None
+
         assert callable(handler)
 
 

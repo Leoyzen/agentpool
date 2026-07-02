@@ -34,8 +34,9 @@ class GraphMessageNodeWithEvents(MessageNode[Any, str]):
     """A node that pushes events to the state event queue during execution."""
 
     async def _execute_node(self, *prompts: Any, **kwargs: Any) -> ChatMessage[str]:
-        from agentpool.agents.events import PartDeltaEvent, TextContentItem
         from pydantic_ai import TextPartDelta
+
+        from agentpool.agents.events import PartDeltaEvent
 
         state = kwargs.get("_state")
         if state is not None:
@@ -92,9 +93,7 @@ async def test_message_node_run_uses_graph():
 async def test_message_node_run_stream_uses_graph_iter():
     """MessageNode.run_stream() drives execution via Graph.iter()."""
     node = GraphMessageNode(name="test_stream")
-    events = []
-    async for event in node.run_stream("stream_test"):
-        events.append(event)
+    events = [event async for event in node.run_stream("stream_test")]
 
     assert len(events) == 1
     from agentpool.agents.events import StreamCompleteEvent
@@ -107,9 +106,7 @@ async def test_message_node_run_stream_uses_graph_iter():
 async def test_message_node_run_stream_drains_event_queue():
     """run_stream drains events from AgentPoolState.event_queue."""
     node = GraphMessageNodeWithEvents(name="test_events")
-    events = []
-    async for event in node.run_stream("event_test"):
-        events.append(event)
+    events = [event async for event in node.run_stream("event_test")]
 
     from agentpool.agents.events import PartDeltaEvent, StreamCompleteEvent
 
@@ -130,7 +127,7 @@ async def test_message_node_signals_emitted():
     node.message_received.connect(received_handler)
     node.message_sent.connect(sent_handler)
 
-    result = await node.run("signal_test")
+    await node.run("signal_test")
 
     received_handler.assert_awaited_once()
     sent_handler.assert_awaited_once()

@@ -102,11 +102,13 @@ async def test_plain_tool_no_context():
 )
 async def test_capability_tools(default_model: str):
     """Test that capability tools work with AgentContext via manifest config."""
-    manifest = AgentsManifest(agents={
-        "test": NativeAgentConfig(model=default_model),
-        "test_2": NativeAgentConfig(model=default_model),
-        "helper": NativeAgentConfig(model=default_model, system_prompt="You help with tasks"),
-    })
+    manifest = AgentsManifest(
+        agents={
+            "test": NativeAgentConfig(model=default_model),
+            "test_2": NativeAgentConfig(model=default_model),
+            "helper": NativeAgentConfig(model=default_model, system_prompt="You help with tasks"),
+        }
+    )
     async with AgentPool(manifest) as pool:
         subagent = SubagentToolsetConfig()
         providers = [subagent.get_provider()]

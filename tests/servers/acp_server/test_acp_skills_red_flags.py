@@ -8,15 +8,12 @@ Run with: pytest tests/servers/acp_server/test_acp_skills_red_flags.py -v
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from upathtools import UPath
 
-from agentpool.delegation import AgentPool
 from agentpool.skills.manager import SkillsManager
-from agentpool.skills.registry import SkillsRegistry
 from agentpool_config.skills import SkillsConfig
 
 
@@ -72,11 +69,10 @@ class TestSkillsIncludeDefault:
         When load_skills is not explicitly provided (None), from_config should
         use manifest.skills.include_default as the default.
         """
-        from agentpool_server.acp_server.server import ACPServer
-
         # Create a manifest with include_default=False
         from agentpool.models.manifest import AgentsManifest
         from agentpool_config.skills import SkillsConfig
+        from agentpool_server.acp_server.server import ACPServer
 
         manifest = AgentsManifest(
             skills=SkillsConfig(
@@ -98,9 +94,9 @@ class TestSkillsIncludeDefault:
 
     def test_acp_server_from_config_explicit_load_skills_overrides_manifest(self) -> None:
         """Explicit load_skills argument must override manifest's include_default."""
-        from agentpool_server.acp_server.server import ACPServer
         from agentpool.models.manifest import AgentsManifest
         from agentpool_config.skills import SkillsConfig
+        from agentpool_server.acp_server.server import ACPServer
 
         manifest = AgentsManifest(
             skills=SkillsConfig(
@@ -132,7 +128,6 @@ class TestSkillsIncludeDefault:
         init_client_skills should not be called.
         """
         from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
-        from agentpool_server.acp_server.session import ACPSession
 
         # Create a mock pool with include_default=False
         mock_pool = MagicMock()
@@ -162,8 +157,9 @@ class TestSkillsIncludeDefault:
         None means "use manifest's skills.include_default setting".
         Users can explicitly pass --skills or --no-skills to override.
         """
-        from agentpool_cli.serve_acp import acp_command
         import inspect
+
+        from agentpool_cli.serve_acp import acp_command
 
         sig = inspect.signature(acp_command)
         load_skills_param = sig.parameters.get("load_skills")
@@ -191,6 +187,7 @@ class TestSkillsIncludeDefault:
 
         # Without explicit override, load_skills should follow manifest
         from agentpool_server.acp_server.server import ACPServer
+
         server = ACPServer.from_config(manifest)
         assert server.load_skills is False, (
             "ACP server should not load skills when manifest has include_default=False "
@@ -224,7 +221,7 @@ class TestSkillsIncludeDefault:
         so LocalResourceProvider (created from those dirs) re-discovered default paths.
         """
         import logging
-        from agentpool.skills.manager import SkillsManager
+
         from agentpool_config.skills import SkillsConfig
 
         # Enable debug logging
@@ -235,14 +232,18 @@ class TestSkillsIncludeDefault:
         custom_skills_dir.mkdir()
         skill_dir = custom_skills_dir / "custom-skill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("---\nname: custom-skill\ndescription: A custom test skill\n---\n# Custom Skill")
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: custom-skill\ndescription: A custom test skill\n---\n# Custom Skill"
+        )
 
         # Create a default skill directory with one skill
         default_skills_dir = tmp_path / ".claude" / "skills"
         default_skills_dir.mkdir(parents=True)
         default_skill_dir = default_skills_dir / "default-skill"
         default_skill_dir.mkdir()
-        (default_skill_dir / "SKILL.md").write_text("---\nname: default-skill\ndescription: A default test skill\n---\n# Default Skill")
+        (default_skill_dir / "SKILL.md").write_text(
+            "---\nname: default-skill\ndescription: A default test skill\n---\n# Default Skill"
+        )
 
         # Create SkillsManager with include_default=False
         config = SkillsConfig(
@@ -262,13 +263,20 @@ class TestSkillsIncludeDefault:
         try:
             # Debug: print paths
             from agentpool.resource_providers.local import LocalResourceProvider
-            print(f"DEBUG: skills_manager.registry.skills_dirs = {skills_manager.registry.skills_dirs}")
+
+            print(
+                f"DEBUG: skills_manager.registry.skills_dirs ="
+                f" {skills_manager.registry.skills_dirs}"
+            )
             provider = skills_manager.resource_provider
             assert isinstance(provider, LocalResourceProvider)
             print(f"DEBUG: provider.skills_dirs = {provider.skills_dirs}")
             print(f"DEBUG: provider._registry.skills_dirs = {provider._registry.skills_dirs}")
 
-            print(f"DEBUG: skills_manager.registry.list_items() = {skills_manager.registry.list_items()}")
+            print(
+                f"DEBUG: skills_manager.registry.list_items() ="
+                f" {skills_manager.registry.list_items()}"
+            )
 
             skills = await provider.get_skills()
             skill_names = {s.name for s in skills}

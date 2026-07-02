@@ -111,7 +111,7 @@ def inject_nodes[T, **P](
         # Pool-level agent storage was removed; we create instances on demand
         # from the manifest config via AnyAgentConfig.get_agent().
         config = pool.manifest.agents[name]
-        node = config.get_agent(pool=pool)
+        node: MessageNode[Any, Any] = config.get_agent(pool=pool)
         nodes[name] = node
         logger.debug("Injected node from config", name=name)
 

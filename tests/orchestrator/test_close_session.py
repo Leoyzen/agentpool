@@ -13,12 +13,17 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
 
 from agentpool.orchestrator.core import EventBus, SessionController, SessionState
 from agentpool.orchestrator.run import RunHandle
+
+
+if TYPE_CHECKING:
+    from agentpool.agents.context import AgentRunContext
 
 
 pytestmark = pytest.mark.unit
@@ -249,9 +254,7 @@ async def test_close_session_releases_lock_on_cancelled() -> None:
         async with asyncio.timeout(1):
             await lock.acquire()
     except TimeoutError:
-        pytest.fail(
-            "turn_lock was not released after CancelledError in close_session"
-        )
+        pytest.fail("turn_lock was not released after CancelledError in close_session")
     finally:
         if lock.locked():
             lock.release()
@@ -279,7 +282,6 @@ async def test_close_session_after_cancel() -> None:
     """
     from typing import Any
 
-    from agentpool.agents.context import AgentRunContext
     from agentpool.agents.events import StreamCompleteEvent
     from agentpool.messaging import ChatMessage
     from agentpool.orchestrator.core import SessionPool
@@ -377,9 +379,7 @@ async def test_close_session_after_cancel() -> None:
             timeout=30.0,
         )
     except TimeoutError:
-        pytest.fail(
-            "close_session hung after cancel — turn_lock was not released"
-        )
+        pytest.fail("close_session hung after cancel — turn_lock was not released")
 
     # --- Step 4: Verify session is closed ---
     assert session_id not in session_pool.sessions._sessions

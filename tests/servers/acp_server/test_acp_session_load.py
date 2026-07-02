@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from pydantic_ai import ModelRequest, UserPromptPart
+import pytest
 
 from acp.schema import (
     LoadSessionRequest,
     LoadSessionResponse,
-    SessionModelState,
     SessionMode,
+    SessionModelState,
     SessionModeState,
 )
 from agentpool import Agent
@@ -34,13 +34,9 @@ def mock_agent_pool_with_agent():
         return f"Test response: {message}"
 
     from agentpool.models.agents import NativeAgentConfig
-
-
     from agentpool.models.manifest import AgentsManifest
 
-
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
-
 
     pool = AgentPool(manifest)
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
@@ -91,7 +87,9 @@ def load_session_request():
 
 
 @pytest.mark.unit
-async def test_load_session_calls_agent_load_session(mock_acp_agent, mock_session, load_session_request):
+async def test_load_session_calls_agent_load_session(
+    mock_acp_agent, mock_session, load_session_request
+):
     """Test that session.agent.load_session() is called with the session ID.
 
     NOTE: load_session() no longer calls session.agent.load_session() directly.
@@ -107,7 +105,9 @@ async def test_load_session_calls_agent_load_session(mock_acp_agent, mock_sessio
 
 
 @pytest.mark.unit
-async def test_load_session_calls_replay_with_messages(mock_acp_agent, mock_session, load_session_request):
+async def test_load_session_calls_replay_with_messages(
+    mock_acp_agent, mock_session, load_session_request
+):
     """Test that session.notifications.replay() is called with correct messages."""
     chat_msg = ChatMessage[str](
         content="Hello",
@@ -127,7 +127,9 @@ async def test_load_session_calls_replay_with_messages(mock_acp_agent, mock_sess
 
 
 @pytest.mark.unit
-async def test_load_session_schedules_commands_update(mock_acp_agent, mock_session, load_session_request):
+async def test_load_session_schedules_commands_update(
+    mock_acp_agent, mock_session, load_session_request
+):
     """Test that send_available_commands_update() is scheduled after load."""
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)
     mock_acp_agent._initialized = True
@@ -169,12 +171,14 @@ async def test_load_session_agent_load_fails(mock_acp_agent, mock_session, load_
 
 
 @pytest.mark.unit
-async def test_load_session_response_contains_config_options(mock_acp_agent, mock_session, load_session_request):
+async def test_load_session_response_contains_config_options(
+    mock_acp_agent, mock_session, load_session_request
+):
     """Test that LoadSessionResponse contains correct config_options."""
 
     class _MockMode:
-        def __init__(self, id: str, name: str, description: str) -> None:
-            self.id = id
+        def __init__(self, mode_id: str, name: str, description: str) -> None:
+            self.id = mode_id
             self.name = name
             self.description = description
 
@@ -198,8 +202,10 @@ async def test_load_session_response_contains_config_options(mock_acp_agent, moc
 
 
 @pytest.mark.unit
-async def test_load_session_response_contains_config_options(mock_acp_agent, mock_session, load_session_request):
-    """Test that LoadSessionResponse contains correct config_options."""
+async def test_load_session_response_contains_config_options_empty_modes(
+    mock_acp_agent, mock_session, load_session_request
+):
+    """Test that LoadSessionResponse handles empty modes correctly."""
     mock_session.agent.get_modes = AsyncMock(return_value=[])
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)
     mock_acp_agent._initialized = True
@@ -211,7 +217,9 @@ async def test_load_session_response_contains_config_options(mock_acp_agent, moc
 
 
 @pytest.mark.unit
-async def test_load_session_creates_session_if_not_found(mock_acp_agent, mock_session, load_session_request):
+async def test_load_session_creates_session_if_not_found(
+    mock_acp_agent, mock_session, load_session_request
+):
     """Test that load_session resumes via session_manager.resume_session() if session not found."""
     mock_acp_agent.session_manager.get_session = MagicMock(side_effect=[None, mock_session])
     mock_acp_agent.session_manager.resume_session = AsyncMock(return_value=mock_session)
@@ -224,7 +232,9 @@ async def test_load_session_creates_session_if_not_found(mock_acp_agent, mock_se
 
 
 @pytest.mark.unit
-async def test_load_session_exception_returns_empty_response(mock_acp_agent, mock_session, load_session_request):
+async def test_load_session_exception_returns_empty_response(
+    mock_acp_agent, mock_session, load_session_request
+):
     """Test that load_session returns empty LoadSessionResponse on exception."""
     mock_session.agent.load_session = AsyncMock(side_effect=RuntimeError("boom"))
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)
@@ -238,7 +248,9 @@ async def test_load_session_exception_returns_empty_response(mock_acp_agent, moc
 
 
 @pytest.mark.unit
-async def test_load_session_with_nested_acp_agent(mock_acp_agent, mock_session, load_session_request):
+async def test_load_session_with_nested_acp_agent(
+    mock_acp_agent, mock_session, load_session_request
+):
     """Test load_session with nested ACP agent populates models/modes from agent state."""
     from agentpool.agents.acp_agent import ACPAgent
 
@@ -248,9 +260,7 @@ async def test_load_session_with_nested_acp_agent(mock_acp_agent, mock_session, 
         available_modes=[SessionMode(id="chat", name="Chat", description="Chat mode")],
         current_mode_id="chat",
     )
-    nested_agent._state.models = SessionModelState(
-        available_models=[], current_model_id="gpt-4"
-    )
+    nested_agent._state.models = SessionModelState(available_models=[], current_model_id="gpt-4")
     nested_agent.load_session = AsyncMock(return_value=True)
     nested_agent.conversation = MagicMock()
     nested_agent.conversation.chat_messages = []

@@ -14,10 +14,11 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+
 if TYPE_CHECKING:
     from agentpool import AgentPool
     from agentpool.agents.base_agent import BaseAgent
-    from agentpool.agents.events import RichAgentStreamEvent, StreamCompleteEvent
+    from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.orchestrator.core import SessionPool
 
 
@@ -36,7 +37,12 @@ class AgentPoolSession:
 # =============================================================================
 
 
-pytestmark = pytest.mark.skip(reason="TestModel generates 400+ events per turn, extremely CPU/memory intensive under pytest. Logic verified via standalone script.")
+pytestmark = pytest.mark.skip(
+    reason=(
+        "TestModel generates 400+ events per turn, extremely CPU/memory intensive"
+        " under pytest. Logic verified via standalone script."
+    )
+)
 
 
 @pytest.mark.asyncio
@@ -163,7 +169,7 @@ async def test_concurrent_event_isolation(native_agent: AgentPoolSession) -> Non
     assert len(set(run_ids)) == 3, "Each task should have a unique run_id"
 
     # Verify each task received events
-    for i, (run_id, events) in enumerate(results):
+    for i, (_run_id, events) in enumerate(results):
         assert len(events) > 0, f"Task {i} received no events"
         # All events in the stream should belong to this run
         # (This is implicit - if events were cross-contaminated, we'd see wrong event counts)
@@ -208,12 +214,11 @@ async def test_concurrent_cancellation_isolation(native_agent: AgentPoolSession)
 
     # Task B should complete normally
     try:
-        status_a, duration_a = await task_a
+        status_a, _duration_a = await task_a
     except asyncio.CancelledError:
         status_a = "cancelled"
-        duration_a = 0.1
 
-    status_b, duration_b = await task_b
+    status_b, _duration_b = await task_b
 
     # Task A was cancelled (expected)
     assert status_a == "cancelled"
@@ -390,7 +395,9 @@ async def test_concurrent_performance(native_agent: AgentPoolSession) -> None:
     # With sub-millisecond test model execution, timing variance dominates.
     # Accept any speedup >= 0.8 (within measurement noise for trivial tasks).
     speedup = serial_time / concurrent_time
-    assert speedup >= 0.8, f"Concurrent execution significantly slower than serial: speedup = {speedup:.2f}x"
+    assert speedup >= 0.8, (
+        f"Concurrent execution significantly slower than serial: speedup = {speedup:.2f}x"
+    )
 
 
 # =============================================================================

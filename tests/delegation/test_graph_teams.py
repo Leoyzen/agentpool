@@ -259,8 +259,7 @@ class SlowAgent(MessageNode[Any, Any]):
 async def _collect_events(source: Any, *args: Any, **kwargs: Any) -> list[Any]:
     """Collect all events from run_stream into a list."""
     events: list[Any] = []
-    async for event in source.run_stream(*args, **kwargs):
-        events.append(event)
+    events.extend([event async for event in source.run_stream(*args, **kwargs)])
     return events
 
 
@@ -594,9 +593,7 @@ async def test_parallel_team_streaming_events() -> None:
     assert len(subs) >= 2
 
     # Each member should produce at least a StreamCompleteEvent
-    complete_events = [
-        e for e in subs if isinstance(e.event, StreamCompleteEvent)
-    ]
+    complete_events = [e for e in subs if isinstance(e.event, StreamCompleteEvent)]
     assert len(complete_events) == 2
 
 
@@ -640,10 +637,10 @@ async def test_parallel_team_signals_emitted() -> None:
     received_b: list[ChatMessage[Any]] = []
     sent_b: list[ChatMessage[Any]] = []
 
-    agent_a.message_received.connect(lambda msg: received_a.append(msg))
-    agent_a.message_sent.connect(lambda msg: sent_a.append(msg))
-    agent_b.message_received.connect(lambda msg: received_b.append(msg))
-    agent_b.message_sent.connect(lambda msg: sent_b.append(msg))
+    agent_a.message_received.connect(received_a.append)
+    agent_a.message_sent.connect(sent_a.append)
+    agent_b.message_received.connect(received_b.append)
+    agent_b.message_sent.connect(sent_b.append)
 
     team = Team([agent_a, agent_b], name="signal_test")
     await team.run("prompt")
@@ -668,10 +665,10 @@ async def test_sequential_team_signals_emitted() -> None:
     received: dict[str, list[ChatMessage[Any]]] = {"s1": [], "s2": []}
     sent: dict[str, list[ChatMessage[Any]]] = {"s1": [], "s2": []}
 
-    agent_1.message_received.connect(lambda msg: received["s1"].append(msg))
-    agent_1.message_sent.connect(lambda msg: sent["s1"].append(msg))
-    agent_2.message_received.connect(lambda msg: received["s2"].append(msg))
-    agent_2.message_sent.connect(lambda msg: sent["s2"].append(msg))
+    agent_1.message_received.connect(received["s1"].append)
+    agent_1.message_sent.connect(sent["s1"].append)
+    agent_2.message_received.connect(received["s2"].append)
+    agent_2.message_sent.connect(sent["s2"].append)
 
     pipeline = TeamRun([agent_1, agent_2], name="seq_signals")
 

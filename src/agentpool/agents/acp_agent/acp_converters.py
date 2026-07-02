@@ -25,6 +25,7 @@ from pydantic_ai import (
     ImageUrl,
     ModelRequest,
     ModelResponse,
+    TextContent,
     TextPart,
     ThinkingPart,
     ToolCallPart,
@@ -193,7 +194,7 @@ def convert_acp_locations(
     locations: Sequence[ToolCallLocation] | None,
 ) -> list[LocationContentItem]:
     """Convert ACP ToolCallLocation list to native LocationContentItem list."""
-    return [LocationContentItem(path=loc.path, line=loc.line) for loc in locations or []]
+    return [LocationContentItem(path=loc.path, line=loc.line or 0) for loc in locations or []]
 
 
 def convert_acp_content(content: Sequence[ToolCallContent] | None) -> list[ToolCallContentItem]:
@@ -264,6 +265,9 @@ def convert_to_acp_content(prompts: Sequence[UserContent]) -> list[ContentBlock]
                 name = type(item).__name__.removesuffix("Url")
                 content_blocks.append(ResourceContentBlock(uri=url, name=name, mime_type=typ))
 
+            case TextContent(content=text):
+                content_blocks.append(TextContentBlock(text=text))
+
             case CachePoint() | UploadedFile():
                 pass
 
@@ -308,7 +312,7 @@ def acp_to_native_event(update: SessionUpdate) -> RichAgentStreamEvent[Any] | No
                 tool_call_id=tool_call_id,
                 tool_name=title,  # ACP uses title, not separate tool_name
                 title=title,
-                kind=kind or "other",
+                kind="other" if kind == "subagent" else (kind or "other"),
                 content=convert_acp_content(list(content) if content else None),
                 locations=convert_acp_locations(list(locations) if locations else None),
                 raw_input=raw_input or {},

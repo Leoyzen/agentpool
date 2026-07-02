@@ -24,9 +24,7 @@ from agentpool.delegation.teamrun import TeamRun
 from agentpool.messaging import ChatMessage
 
 
-pytestmark = pytest.mark.filterwarnings(
-    "ignore::DeprecationWarning:agentpool.agents.base_agent"
-)
+pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning:agentpool.agents.base_agent")
 
 
 # ============================================================================
@@ -49,10 +47,7 @@ def _make_echo_agent(name: str, response: str = "hello") -> Agent[Any, str]:
 
 async def _collect_events(team_run: TeamRun[Any, Any], *args: Any, **kwargs: Any) -> list[Any]:
     """Collect all events from run_stream into a list."""
-    events: list[Any] = []
-    async for event in team_run.run_stream(*args, **kwargs):
-        events.append(event)
-    return events
+    return [event async for event in team_run.run_stream(*args, **kwargs)]
 
 
 # ============================================================================
@@ -91,9 +86,7 @@ async def test_team_run_stream_depth_at_limit_ok() -> None:
     agent_a = Agent(name="a", model=model)
     team = Team([agent_a])
 
-    events: list[Any] = []
-    async for event in team.run_stream("hi", depth=MAX_DELEGATION_DEPTH - 1):
-        events.append(event)
+    events = [event async for event in team.run_stream("hi", depth=MAX_DELEGATION_DEPTH - 1)]
     assert len(events) > 0
 
 
@@ -114,9 +107,7 @@ async def test_team_run_stream_emits_spawn_session_start() -> None:
     agent_b = Agent(name="beta", model=model)
     team = Team([agent_a, agent_b])
 
-    events: list[Any] = []
-    async for event in team.run_stream("test"):
-        events.append(event)
+    events = [event async for event in team.run_stream("test")]
 
     spawn_events = [e for e in events if isinstance(e, SpawnSessionStart)]
     sub_events = [e for e in events if isinstance(e, SubAgentEvent)]
@@ -144,18 +135,15 @@ async def test_spawn_session_start_precedes_subagent_for_member() -> None:
     agent_a = Agent(name="alpha", model=model)
     team = Team([agent_a])
 
-    events: list[Any] = []
-    async for event in team.run_stream("test"):
-        events.append(event)
+    events = [event async for event in team.run_stream("test")]
 
     spawn_idx = None
     sub_idx = None
     for i, e in enumerate(events):
         if isinstance(e, SpawnSessionStart) and e.source_name == "alpha":
             spawn_idx = i
-        if isinstance(e, SubAgentEvent) and e.source_name == "alpha":
-            if sub_idx is None:
-                sub_idx = i
+        if isinstance(e, SubAgentEvent) and e.source_name == "alpha" and sub_idx is None:
+            sub_idx = i
 
     assert spawn_idx is not None
     assert sub_idx is not None
@@ -178,9 +166,9 @@ async def test_subagent_event_preserves_session_ids() -> None:
     agent_a = Agent(name="alpha", model=model)
     team = Team([agent_a])
 
-    events: list[Any] = []
-    async for event in team.run_stream("test", session_id="parent_ses_123", depth=2):
-        events.append(event)
+    events = [
+        event async for event in team.run_stream("test", session_id="parent_ses_123", depth=2)
+    ]
 
     sub_events = [e for e in events if isinstance(e, SubAgentEvent)]
     assert len(sub_events) >= 1
@@ -203,9 +191,7 @@ async def test_spawn_session_start_carries_session_ids() -> None:
     agent_a = Agent(name="alpha", model=model)
     team = Team([agent_a])
 
-    events: list[Any] = []
-    async for event in team.run_stream("test", session_id="ses_parent_abc"):
-        events.append(event)
+    events = [event async for event in team.run_stream("test", session_id="ses_parent_abc")]
 
     spawn_events = [e for e in events if isinstance(e, SpawnSessionStart)]
     assert len(spawn_events) == 1
@@ -226,9 +212,7 @@ async def test_out_of_pool_team_generates_session_ids() -> None:
     agent_b = Agent(name="beta", model=model)
     team = Team([agent_a, agent_b])
 
-    events: list[Any] = []
-    async for event in team.run_stream("hello"):
-        events.append(event)
+    events = [event async for event in team.run_stream("hello")]
 
     spawn_events = [e for e in events if isinstance(e, SpawnSessionStart)]
     sub_events = [e for e in events if isinstance(e, SubAgentEvent)]
@@ -268,22 +252,19 @@ async def test_pool_backed_team_creates_child_sessions() -> None:
     # _resolve_scoped_team_nodes calls sessions.get_or_create_session_agent
     # which must return the original agent so child_session_ids keys match.
     mock_sessions.sessions = AsyncMock()
-    mock_sessions.sessions.get_or_create_session_agent = AsyncMock(
-        side_effect=[agent_a, agent_b]
-    )
+    mock_sessions.sessions.get_or_create_session_agent = AsyncMock(side_effect=[agent_a, agent_b])
     mock_pool.session_pool = mock_sessions
     # Provide manifest with agents dict so _resolve_scoped_team_nodes
     # can check pool_agents for scoped session creation.
     from types import SimpleNamespace
+
     mock_pool.manifest = SimpleNamespace(
         agents={"alpha": None, "beta": None},
         teams={},
     )
     team.agent_pool = mock_pool
 
-    events: list[Any] = []
-    async for event in team.run_stream("test", session_id="ses_parent"):
-        events.append(event)
+    events = [event async for event in team.run_stream("test", session_id="ses_parent")]
 
     assert mock_sessions.create_session.call_count == 2
 
@@ -308,13 +289,14 @@ async def test_team_kwargs_session_id_depth_popped() -> None:
     agent_a = Agent(name="alpha", model=model)
     team = Team([agent_a])
 
-    events: list[Any] = []
-    async for event in team.run_stream(
-        "test",
-        session_id="ses_from_kwargs",
-        depth=5,
-    ):
-        events.append(event)
+    events = [
+        event
+        async for event in team.run_stream(
+            "test",
+            session_id="ses_from_kwargs",
+            depth=5,
+        )
+    ]
 
     spawn_events = [e for e in events if isinstance(e, SpawnSessionStart)]
     sub_events = [e for e in events if isinstance(e, SubAgentEvent)]
@@ -354,9 +336,7 @@ async def test_nested_subagent_event_session_ids_preserved() -> None:
     outer_agent = Agent(name="outer_agent", model=model)
     outer_team = Team([inner_team, outer_agent], name="outer_team")
 
-    events: list[Any] = []
-    async for event in outer_team.run_stream("test"):
-        events.append(event)
+    events = [event async for event in outer_team.run_stream("test")]
 
     nested_sub = [e for e in events if isinstance(e, SubAgentEvent) and e.depth > 1]
     for se in nested_sub:
@@ -481,19 +461,16 @@ async def test_teamrun_child_session_uses_pool_sessions() -> None:
 
     mock_pool = MagicMock()
     mock_sessions = AsyncMock()
-    mock_sessions.create_session = AsyncMock(
-        return_value=MagicMock(session_id="child-via-pool")
-    )
+    mock_sessions.create_session = AsyncMock(return_value=MagicMock(session_id="child-via-pool"))
     # _resolve_scoped_team_nodes calls sessions.get_or_create_session_agent
     # which must return the original agent so child_session_ids keys match.
     mock_sessions.sessions = AsyncMock()
-    mock_sessions.sessions.get_or_create_session_agent = AsyncMock(
-        return_value=agent1
-    )
+    mock_sessions.sessions.get_or_create_session_agent = AsyncMock(return_value=agent1)
     mock_pool.session_pool = mock_sessions
     # Provide manifest with agents dict so _resolve_scoped_team_nodes
     # can check pool_agents for scoped session creation.
     from types import SimpleNamespace
+
     mock_pool.manifest = SimpleNamespace(
         agents={"a1": None},
         teams={},
@@ -649,7 +626,7 @@ async def test_teamrun_require_all_still_propagates_errors() -> None:
 
     async def _failing_stream(*_prompts: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("Agent failed")
-        yield  # noqa: UNREACHABLE
+        yield
 
     failing_agent.run_stream = _failing_stream  # type: ignore[assignment]
 
@@ -665,7 +642,7 @@ async def test_teamrun_require_all_false_continues_on_error() -> None:
 
     async def _failing_stream(*_prompts: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("Agent failed")
-        yield  # noqa: UNREACHABLE
+        yield
 
     failing_agent.run_stream = _failing_stream  # type: ignore[assignment]
 

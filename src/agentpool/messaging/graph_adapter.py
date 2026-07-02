@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic_graph import GraphBuilder, Step, StepContext
-from pydantic_graph.graph_builder import Graph
 from pydantic_graph.id_types import NodeID
 
-from agentpool.agents.events import RichAgentStreamEvent
-from agentpool.messaging import ChatMessage
+
+if TYPE_CHECKING:
+    from pydantic_graph.graph_builder import Graph
+
+    from agentpool.agents.events import RichAgentStreamEvent
+    from agentpool.messaging import ChatMessage
 
 
 @dataclass
@@ -55,7 +58,7 @@ class MessageNodeStep:
         """
         self.node = node
 
-    async def _execute(self, ctx: StepContext[AgentPoolState, Any, Any]) -> Any:
+    async def _execute(self, ctx: StepContext) -> Any:
         """Step function that runs the wrapped node.
 
         Signal emission (``message_received`` / ``message_sent``) is handled
@@ -68,7 +71,7 @@ class MessageNodeStep:
         Returns:
             The ChatMessage result from the node.
         """
-        state = ctx.state
+        state = cast(AgentPoolState, ctx.state)
         node = state.node
 
         # Delegate to the node's core execution logic, injecting state
@@ -79,7 +82,7 @@ class MessageNodeStep:
         state.result = result
         return result
 
-    def as_step(self) -> Step[AgentPoolState, Any, Any, Any]:
+    def as_step(self) -> Step:
         """Return the pydantic-graph Step for this node.
 
         Returns:
@@ -91,7 +94,7 @@ class MessageNodeStep:
             label=self.node.description or self.node.name,
         )
 
-    def build_single_node_graph(self) -> Graph[AgentPoolState, Any, Any, Any]:
+    def build_single_node_graph(self) -> Graph:
         """Build a single-node graph containing only this node's Step.
 
         The graph has start_node -> this node's Step -> end_node.

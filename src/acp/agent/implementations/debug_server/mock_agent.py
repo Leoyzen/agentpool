@@ -16,8 +16,10 @@ from acp.schema import (
     CloseSessionResponse,
     CreateTerminalResponse,
     # CurrentModelUpdate,
+    DisableProvidersResponse,
     ForkSessionResponse,
     InitializeResponse,
+    ListProvidersResponse,
     ListSessionsResponse,
     LoadSessionResponse,
     NewSessionResponse,
@@ -25,6 +27,7 @@ from acp.schema import (
     ReadTextFileResponse,
     ResumeSessionResponse,
     SessionInfo,
+    SetProvidersResponse,
     WriteTextFileResponse,
 )
 
@@ -37,14 +40,17 @@ if TYPE_CHECKING:
         CancelNotification,
         CloseSessionRequest,
         CreateTerminalRequest,
+        DisableProvidersRequest,
         ForkSessionRequest,
         InitializeRequest,
+        ListProvidersRequest,
         ListSessionsRequest,
         LoadSessionRequest,
         NewSessionRequest,
         PromptRequest,
         ReadTextFileRequest,
         ResumeSessionRequest,
+        SetProvidersRequest,
         SetSessionConfigOptionRequest,
         WriteTextFileRequest,
     )
@@ -172,3 +178,15 @@ class MockAgent(Agent):
         if self.debug_state.active_session_id == params.session_id:
             self.debug_state.active_session_id = None
         return CloseSessionResponse()
+
+    async def list_providers(self, params: ListProvidersRequest) -> ListProvidersResponse:
+        """Mock list providers."""
+        return ListProvidersResponse()
+
+    async def set_provider(self, params: SetProvidersRequest) -> SetProvidersResponse:
+        """Mock set provider."""
+        return SetProvidersResponse()
+
+    async def disable_provider(self, params: DisableProvidersRequest) -> DisableProvidersResponse:
+        """Mock disable provider."""
+        return DisableProvidersResponse()

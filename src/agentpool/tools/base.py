@@ -5,7 +5,6 @@ from __future__ import annotations
 from abc import abstractmethod
 import ast
 from dataclasses import dataclass, field
-from datetime import timedelta
 import inspect
 from typing import TYPE_CHECKING, Any, Literal
 import warnings
@@ -26,6 +25,8 @@ from agentpool_config.tools import ToolHints
 
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from pydantic_ai import RunContext
 
     from agentpool.agents.context import AgentContext
@@ -176,13 +177,12 @@ class Tool[TOutputType = Any]:
             return
 
         # unapproved tools must block — continue/stream would bypass approval
-        if self.deferred_kind == "unapproved":
-            if self.deferred_strategy in ("continue", "stream"):
-                raise ToolError(
-                    f"Tool '{self.name}': deferred_kind='unapproved' requires "
-                    f"deferred_strategy='block', got '{self.deferred_strategy}'. "
-                    f"Deferred unapproved tools must block to await approval."
-                )
+        if self.deferred_kind == "unapproved" and self.deferred_strategy in ("continue", "stream"):
+            raise ToolError(
+                f"Tool '{self.name}': deferred_kind='unapproved' requires "
+                f"deferred_strategy='block', got '{self.deferred_strategy}'. "
+                f"Deferred unapproved tools must block to await approval."
+            )
 
         # stream strategy is not yet implemented
         if self.deferred_strategy == "stream":
@@ -255,12 +255,10 @@ class Tool[TOutputType = Any]:
             ctx: RunContext[AgentContext], tool_def: ToolDefinition
         ) -> ToolDefinition | None:
             if base_prepare is not None:
-                result = base_prepare(ctx, tool_def)
-                if inspect.isawaitable(result):
-                    result = await result
-                if result is None:
+                prepared: ToolDefinition | None = await base_prepare(ctx, tool_def)
+                if prepared is None:
                     return None
-                tool_def = result
+                tool_def = prepared
             return replace(tool_def, kind="external")
 
         return deferred_external_prepare
@@ -286,6 +284,7 @@ class Tool[TOutputType = Any]:
             from pydantic_ai.tools import ToolDefinition
 
             raw_params = schema_override.get("parameters")
+            parameters_json_schema: dict[str, Any]
             if raw_params is not None and not isinstance(raw_params, dict):
                 logger.warning(
                     "schema_override.parameters must be a dict; keeping original parameters schema",
@@ -294,7 +293,7 @@ class Tool[TOutputType = Any]:
                 )
                 parameters_json_schema = tool_def.parameters_json_schema
             elif isinstance(raw_params, dict):
-                parameters_json_schema = raw_params
+                parameters_json_schema = dict(raw_params)
             else:
                 parameters_json_schema = tool_def.parameters_json_schema
 
@@ -348,15 +347,17 @@ class Tool[TOutputType = Any]:
         if self.schema_override is None:
             return None
 
+        schema_override = self.schema_override
+
         def apply_schema_override(base_schema: dict[str, Any]) -> dict[str, Any]:
-            if "description" in self.schema_override:
-                base_schema["description"] = self.schema_override["description"]
-            if "parameters" not in self.schema_override:
+            if "description" in schema_override:
+                base_schema["description"] = schema_override["description"]
+            if "parameters" not in schema_override:
                 return base_schema
-            override_params = self.schema_override["parameters"]
-            for key, value in override_params.items():
-                if key != "properties":
-                    base_schema[key] = value
+            override_params = schema_override["parameters"]
+            base_schema.update({
+                key: value for key, value in override_params.items() if key != "properties"
+            })
             if "properties" in override_params:
                 for param_name, param_def in override_params["properties"].items():
                     if param_name in base_schema.get("properties", {}):
@@ -415,7 +416,7 @@ class Tool[TOutputType = Any]:
             )
 
             # Use schemez to generate JSON schema
-            # type: ignore is needed because schemez is not strictly typed
+            # Note: schemez is not strictly typed, so we use type: ignore here
             schema = schemez.create_schema(  # type: ignore
                 func,
                 name_override=self.name,
@@ -425,9 +426,9 @@ class Tool[TOutputType = Any]:
 
             # Return only the parameters part (the "object" schema)
             # Use model_dump - schemez.FunctionSchema has this method (pydantic-compatible)
-            # type: ignore[attr-defined] is needed because schemez is a third-party library
+            # Note: schemez is a third-party library without full type stubs
             schema_dump = getattr(schema, "model_dump")()  # noqa: B009, type: ignore[attr-defined]
-            # type: ignore[no-any-return] is needed because mypy can't infer the return type
+            # Note: mypy can't infer the return type from schemez
             return apply_schema_override(schema_dump["parameters"])
         else:
             return schema.json_schema
@@ -592,7 +593,7 @@ class Tool[TOutputType = Any]:
             # Disallow imports
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 msg = "Import statements are not allowed in code execution"
-                raise ValueError(msg)
+                raise ValueError(msg)  # noqa: TRY004
             # Disallow function calls that aren't attribute accesses on safe objects
             if isinstance(node, ast.Call):
                 # Allow simple calls like print(), str(), int(), etc.
@@ -681,7 +682,7 @@ class Tool[TOutputType = Any]:
                 # Disallow complex calls
                 else:
                     msg = "Complex function calls are not allowed"
-                    raise ValueError(msg)
+                    raise ValueError(msg)  # noqa: TRY004
             # Disallow exec, eval, compile
             if isinstance(node, ast.Name) and node.id in {"exec", "eval", "compile", "__import__"}:
                 msg = f"Use of {node.id} is not allowed"
@@ -704,11 +705,14 @@ class Tool[TOutputType = Any]:
                     msg = f"Access to attribute {node.attr} is not allowed"
                     raise ValueError(msg)
             # Disallow calls to type() or accessing type information
-            if isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Name) and node.func.id == "type":
-                    if len(node.args) > 1:
-                        msg = "Using type() to create classes is not allowed"
-                        raise ValueError(msg)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "type"
+                and len(node.args) > 1
+            ):
+                msg = "Using type() to create classes is not allowed"
+                raise ValueError(msg)
 
         # Create restricted namespace with only safe builtins
         safe_namespace: dict[str, Any] = {

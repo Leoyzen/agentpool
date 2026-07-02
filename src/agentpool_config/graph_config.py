@@ -108,7 +108,7 @@ class GraphEdgeConfig(Schema):
     """Optional delay before processing."""
 
     @model_serializer(mode="wrap")
-    def _serialize(self, serializer: Any, info: Any) -> dict[str, Any]:
+    def _serialize(self, serializer: Callable[[Any], dict[str, Any]], info: Any) -> dict[str, Any]:
         """Serialize while preserving field aliases.
 
         ``schemez.Schema`` overrides the default serializer with a custom
@@ -139,6 +139,6 @@ class GraphConfig(Schema):
     """Explicit join configurations."""
 
     @model_serializer(mode="wrap")
-    def _serialize(self, serializer: Any, info: Any) -> dict[str, Any]:
+    def _serialize(self, serializer: Callable[[Any], dict[str, Any]], info: Any) -> dict[str, Any]:
         """Serialize while preserving field aliases on nested models."""
         return serializer(self)

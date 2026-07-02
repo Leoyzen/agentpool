@@ -7,16 +7,19 @@ interaction (like confirmations) work correctly in the child agent.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from agentpool import AgentPool, AgentsManifest
-from agentpool.agents.events import SpawnSessionStart, StreamCompleteEvent
+from agentpool.agents.events import StreamCompleteEvent
 from agentpool.messaging.messages import ChatMessage
 from agentpool.ui.base import InputProvider
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 class FakeInputProvider(InputProvider):
@@ -59,15 +62,13 @@ async def test_input_provider_propagated_to_subagent_via_task_tool() -> None:
 
     async with AgentPool(manifest) as pool:
         parent = pool.manifest.agents["parent"].get_agent(pool=pool)
-        child = pool.manifest.agents["child"].get_agent(pool=pool)
+        pool.manifest.agents["child"].get_agent(pool=pool)
 
         # Patch session_pool.run_stream (what SubagentTools.task actually calls)
         # to capture the input_provider argument
         captured_kwargs = {}
         session_pool = pool.session_pool
         assert session_pool is not None
-
-        original_run_stream = session_pool.run_stream
 
         async def mock_run_stream(session_id: str, *prompts: str, **kwargs: Any) -> Any:
             captured_kwargs.update(kwargs)
@@ -117,7 +118,7 @@ async def test_input_provider_propagated_to_worker() -> None:
 
     async with AgentPool(manifest) as pool:
         main = pool.manifest.agents["main"].get_agent(pool=pool)
-        helper = pool.manifest.agents["helper"].get_agent(pool=pool)
+        pool.manifest.agents["helper"].get_agent(pool=pool)
 
         # Patch session_pool.run_stream (what worker tool actually calls)
         # to capture the input_provider argument
@@ -214,7 +215,11 @@ class FakeInputProviderSession(InputProvider):
         raise NotImplementedError
 
 
-@pytest.mark.skip(reason="Mock setup incomplete for pool-less architecture; SubagentTools.task() requires full SessionPool. Other input_provider tests cover propagation.")
+@pytest.mark.skip(
+    reason="Mock setup incomplete for pool-less architecture;"
+    " SubagentTools.task() requires full SessionPool."
+    " Other input_provider tests cover propagation."
+)
 @pytest.mark.anyio
 async def test_input_provider_propagated_when_session_bound_only() -> None:
     """Regression test: input_provider must propagate even when ctx.input_provider is None.

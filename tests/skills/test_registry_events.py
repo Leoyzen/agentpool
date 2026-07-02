@@ -146,7 +146,7 @@ class TestSkillRemovedEvents:
         """Test that removing a non-existent skill raises an error."""
         registry = SkillsRegistry()
 
-        with pytest.raises(Exception):  # noqa: B017
+        with pytest.raises(Exception, match="nonexistent"):
             del registry["nonexistent-skill"]
 
 

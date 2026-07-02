@@ -12,8 +12,7 @@ Test Classes:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from upathtools import UPath
@@ -24,9 +23,6 @@ from agentpool.skills.command_registry import CommandChangeHandler, SkillCommand
 from agentpool.skills.registry import SkillsRegistry
 from agentpool.skills.skill import Skill
 from agentpool_server.acp_server.commands.skill_commands import ACPSkillBridge
-
-if TYPE_CHECKING:
-    pass
 
 
 # =============================================================================

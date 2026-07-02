@@ -51,8 +51,8 @@ class LangfusePromptHub(BasePromptProvider):
             fetch_timeout_seconds=self.config.fetch_timeout_seconds,
         )
         if variables:
-            return prompt.compile(**variables)
-        return prompt.prompt
+            return str(prompt.compile(**variables))
+        return str(prompt.prompt)
 
     async def list_prompts(self) -> list[str]:
         """List available prompts from Langfuse."""

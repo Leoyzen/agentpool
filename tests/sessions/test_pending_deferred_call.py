@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, UTC
-from typing import Literal
+from datetime import datetime, timedelta
 
-import pytest
 from pydantic import TypeAdapter
+import pytest
 
 from agentpool.sessions.models import PendingDeferredCall, SessionData
 
@@ -14,6 +13,7 @@ from agentpool.sessions.models import PendingDeferredCall, SessionData
 # ---------------------------------------------------------------------------
 # PendingDeferredCall
 # ---------------------------------------------------------------------------
+
 
 class TestPendingDeferredCall:
     """PendingDeferredCall model tests."""
@@ -96,7 +96,7 @@ class TestPendingDeferredCall:
             "deferred_strategy": "block",
         }
         adapter = TypeAdapter(PendingDeferredCall)
-        with pytest.raises(Exception):
+        with pytest.raises(Exception, match="deferred_kind"):
             adapter.validate_python(dct)
 
     def test_deferred_strategy_rejects_invalid(self) -> None:
@@ -108,7 +108,7 @@ class TestPendingDeferredCall:
             "deferred_strategy": "bogus",
         }
         adapter = TypeAdapter(PendingDeferredCall)
-        with pytest.raises(Exception):
+        with pytest.raises(Exception, match="deferred_strategy"):
             adapter.validate_python(dct)
 
     def test_model_copy_update(self) -> None:
@@ -130,6 +130,7 @@ class TestPendingDeferredCall:
 # ---------------------------------------------------------------------------
 # SessionData extension fields
 # ---------------------------------------------------------------------------
+
 
 class TestSessionDataExtension:
     """SessionData new field tests."""

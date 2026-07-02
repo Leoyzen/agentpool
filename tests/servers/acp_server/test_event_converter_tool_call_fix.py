@@ -15,11 +15,11 @@ import pytest
 
 from acp.schema import ToolCallProgress, ToolCallStart
 from agentpool.agents.events.events import (
-    ToolCallCompleteEvent,
     ToolCallProgressEvent,
     ToolCallStartEvent,
 )
 from agentpool_server.acp_server.event_converter import ACPEventConverter
+
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
@@ -27,8 +27,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 async def _collect(converter: ACPEventConverter, event: Any) -> list[Any]:
     """Collect all notifications yielded by converter.convert(event)."""
     results: list[Any] = []
-    async for update in converter.convert(event):
-        results.append(update)
+    results.extend([update async for update in converter.convert(event)])
     return results
 
 

@@ -20,7 +20,8 @@ from agentpool.orchestrator.turn import Turn
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncGenerator, AsyncIterator, Sequence
+    from typing import Any
 
     from pydantic_ai import ModelMessage
 
@@ -112,7 +113,7 @@ class ACPTurn(Turn):
         self._session_id = session_id
         self._agent_name = agent_name
 
-    async def execute(self) -> AsyncIterator[RichAgentStreamEvent]:
+    async def execute(self) -> AsyncGenerator[RichAgentStreamEvent[Any]]:
         """Execute one ACP prompt → stream → complete cycle.
 
         Yields:

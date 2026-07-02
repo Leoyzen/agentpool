@@ -59,7 +59,9 @@ def test_config_model() -> bool:
                 assert config_old.subagent_display_mode == "legacy"
                 # Verify a DeprecationWarning was emitted
                 deprecation_warnings = [
-                    x for x in w if issubclass(x.category, DeprecationWarning)
+                    x
+                    for x in w
+                    if issubclass(x.category, DeprecationWarning)
                     and "subagent_display_mode" in str(x.message)
                 ]
                 assert len(deprecation_warnings) >= 1, (

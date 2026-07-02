@@ -23,7 +23,6 @@ Bug behavior (before fix):
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -62,9 +61,7 @@ def mock_mcp_client_with_scratchpad_skills():
     mock_resource_manifest.uri = "skill://systematic-troubleshooting/_manifest"
     mock_resource_manifest.description = "Skill manifest"
 
-    client.list_resources = AsyncMock(
-        return_value=[mock_resource_skillmd, mock_resource_manifest]
-    )
+    client.list_resources = AsyncMock(return_value=[mock_resource_skillmd, mock_resource_manifest])
 
     # Simulate reading reference files
     async def mock_read_resource(uri: str):
@@ -73,7 +70,10 @@ def mock_mcp_client_with_scratchpad_skills():
         if "SKILL.md" in uri:
             return ["# Systematic Troubleshooting\n\nFollow the procedure."]
         if "_manifest" in uri:
-            return ['{"name": "systematic-troubleshooting", "description": "Systematic troubleshooting"}']
+            return [
+                '{"name": "systematic-troubleshooting",'
+                ' "description": "Systematic troubleshooting"}'
+            ]
         return []
 
     client.read_resource = AsyncMock(side_effect=mock_read_resource)

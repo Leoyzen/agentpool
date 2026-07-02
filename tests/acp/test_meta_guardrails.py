@@ -168,13 +168,6 @@ async def test_legacy_mode_no_subagent_run_info_or_field_meta(
     for update in updates:
         d = _dump(update)
         # Legacy mode must NOT have SubagentRunInfo
-        assert "subagent" not in d, (
-            f"Legacy mode leaked SubagentRunInfo: {d.get('subagent')}"
-        )
+        assert "subagent" not in d, f"Legacy mode leaked SubagentRunInfo: {d.get('subagent')}"
         # Legacy mode must NOT have field_meta
-        assert d.get("field_meta") is None, (
-            f"Legacy mode leaked field_meta: {d.get('field_meta')}"
-        )
-
-
-
+        assert d.get("field_meta") is None, f"Legacy mode leaked field_meta: {d.get('field_meta')}"

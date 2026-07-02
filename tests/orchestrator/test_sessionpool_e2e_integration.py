@@ -8,14 +8,11 @@ reasoning/text events reach the frontend.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from typing import Any
 
 import pytest
-from pydantic_ai.models.test import TestModel
 
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
-from agentpool.orchestrator.core import SessionPool
 from agentpool_server.opencode_server.session_pool_integration import (
     OpenCodeSessionPoolIntegration,
 )

@@ -190,7 +190,9 @@ class TestConfigModelPropagation:
     """Verify model changes via PATCH /config propagate to per-session agents."""
 
     def test_patch_config_model_propagates_to_shared_agent(
-        self, _server_state: ServerState, client: TestClient
+        self,
+        _server_state: ServerState,  # noqa: PT019
+        client: TestClient,
     ) -> None:
         """PATCH /config with model should update the shared server agent."""
         # Keep a reference to the shared agent's set_model mock

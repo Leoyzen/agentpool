@@ -9,9 +9,9 @@ Ref: ``src/agentpool_server/acp_server/event_converter.py:690-693``
 
 from __future__ import annotations
 
-import pytest
 from pydantic_ai import PartStartEvent, TextPart, TextPartDelta, ThinkingPart
 from pydantic_ai.usage import RequestUsage
+import pytest
 
 from agentpool.agents.events import (
     PartDeltaEvent,
@@ -20,8 +20,8 @@ from agentpool.agents.events import (
     StreamCompleteEvent,
     SubAgentEvent,
 )
-from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool.messaging.messages import ChatMessage
+from agentpool_server.acp_server.event_converter import ACPEventConverter
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +220,10 @@ async def test_none_child_after_valid_spawn_does_not_crash(
 async def test_multiple_none_child_events_do_not_crash(
     zed_converter: ACPEventConverter,
 ) -> None:
-    """Multiple SubAgentEvents with None child_session_id and various inner events must not crash."""
+    """Multiple SubAgentEvents with None child_session_id and various inner events.
+
+    Must not crash.
+    """
     events = [
         SubAgentEvent(
             source_name="helper",
@@ -260,8 +263,7 @@ async def test_multiple_none_child_events_do_not_crash(
 
     all_updates: list[object] = []
     for event in events:
-        async for update in zed_converter.convert(event):
-            all_updates.append(update)
+        all_updates.extend([update async for update in zed_converter.convert(event)])
 
     # All None child_session_id events must silently skip — no updates
     assert len(all_updates) == 0

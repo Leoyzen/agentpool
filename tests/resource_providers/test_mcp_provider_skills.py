@@ -12,15 +12,14 @@ This module provides comprehensive tests for:
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from upathtools import UPath
 
 from agentpool.resource_providers.mcp_provider import MCPResourceProvider
 from agentpool.skills.exceptions import SecurityError, SkillNotFoundError
 from agentpool.skills.skill import Skill
-from upathtools import UPath
 
 
 # =============================================================================
@@ -440,7 +439,9 @@ async def test_get_skill_instructions_missing_args_returns_template(mcp_provider
     mcp_provider.get_skills = AsyncMock(return_value=[skill])
     mcp_provider.get_prompts = AsyncMock(return_value=[mock_prompt])
     mcp_provider._get_prompt_skill_instructions = AsyncMock(
-        return_value="# arg-prompt\n\n## Arguments\n- **required_arg** (required): A required argument"
+        return_value=(
+            "# arg-prompt\n\n## Arguments\n- **required_arg** (required): A required argument"
+        )
     )
 
     instructions = await mcp_provider.get_skill_instructions("arg-prompt")
@@ -667,7 +668,7 @@ async def test_on_skills_changed_emits_signal(mcp_provider):
     """Test that _on_skills_changed() emits the skills_changed signal."""
     # Track emitted events
     emitted_events = []
-    mcp_provider.skills_changed.connect(lambda event: emitted_events.append(event))
+    mcp_provider.skills_changed.connect(emitted_events.append)
 
     # Call change handler
     await mcp_provider._on_skills_changed()
@@ -830,7 +831,7 @@ async def test_get_skill_description_fallback(mcp_provider):
 async def test_skills_changed_signal_forwarding(mcp_provider):
     """Test that skills changes trigger the signal."""
     events = []
-    mcp_provider.skills_changed.connect(lambda e: events.append(e))
+    mcp_provider.skills_changed.connect(events.append)
 
     await mcp_provider._on_skills_changed()
 
@@ -883,7 +884,7 @@ async def test_read_reference_without_references_prefix(mcp_provider):
     """Test that read_reference constructs URI with references/ prefix when ref_path lacks it."""
     mcp_provider.read_resource = AsyncMock(return_value=["# Guide\n\nGuide content"])
 
-    content_bytes, mime_type = await mcp_provider.read_reference("test-skill", "guide.md")
+    content_bytes, _mime_type = await mcp_provider.read_reference("test-skill", "guide.md")
 
     # Verify the URI constructed includes references/ prefix
     # URI format: skill://{skill_name}/references/{path} (no provider prefix)
@@ -899,7 +900,7 @@ async def test_read_reference_with_references_prefix(mcp_provider):
     """Test that read_reference avoids double references/ prefix when ref_path already has it."""
     mcp_provider.read_resource = AsyncMock(return_value=["# Phase 3\n\nExecution content"])
 
-    content_bytes, mime_type = await mcp_provider.read_reference(
+    content_bytes, _mime_type = await mcp_provider.read_reference(
         "test-skill", "references/phase_3_execution.md"
     )
 
@@ -919,7 +920,7 @@ async def test_read_reference_url_encoded_with_references_prefix(mcp_provider):
     mcp_provider.read_resource = AsyncMock(return_value=["# Doc\n\nContent"])
 
     # URL-encoded "references/file.md"
-    content_bytes, mime_type = await mcp_provider.read_reference(
+    _content_bytes, _mime_type = await mcp_provider.read_reference(
         "test-skill", "references%2Ffile.md"
     )
 
@@ -938,7 +939,7 @@ async def test_read_reference_underscore_skill_name(mcp_provider):
     """
     mcp_provider.read_resource = AsyncMock(return_value=["# Diagnostic Phases\n\nPhase content"])
 
-    content_bytes, mime_type = await mcp_provider.read_reference(
+    content_bytes, _mime_type = await mcp_provider.read_reference(
         "systematic_troubleshooting", "references/diagnostic-phases.md"
     )
 

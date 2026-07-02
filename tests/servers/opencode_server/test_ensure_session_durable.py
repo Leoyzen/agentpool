@@ -6,11 +6,10 @@ spawn graph restoration, and route_message() deferred result replay.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import anyio
 import pytest
 
 from agentpool.agents.base_agent import BaseAgent
@@ -18,11 +17,7 @@ from agentpool.agents.native_agent.checkpoint import CheckpointData
 from agentpool.sessions.models import PendingDeferredCall, SessionData
 from agentpool_server.opencode_server.models import (
     MessageWithParts,
-    Session,
     SessionStatusEvent,
-    SessionUpdatedEvent,
-    TimeCreatedUpdated,
-    UserMessage,
 )
 from agentpool_server.opencode_server.models.parts import (
     ToolPart,
@@ -54,6 +49,7 @@ def create_mock_agent() -> MagicMock:
     agent.agent_pool.session_pool.sessions.get_session = MagicMock(return_value=None)
     agent.agent_pool.session_pool.event_bus = MagicMock()
     from tests._helpers.mock_stream import EmptyReceiveStream
+
     agent.agent_pool.session_pool.event_bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     agent.agent_pool.session_pool.event_bus.unsubscribe = AsyncMock()
     agent.env = MagicMock()
@@ -87,8 +83,8 @@ def _make_session_data(
         cwd=cwd,
         parent_id=parent_id,
         version="1",
-        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
-        last_active=datetime(2025, 6, 1, tzinfo=timezone.utc),
+        created_at=datetime(2025, 1, 1, tzinfo=UTC),
+        last_active=datetime(2025, 6, 1, tzinfo=UTC),
         metadata=meta,
         status=status,
         pending_deferred_calls=pending_calls or [],
@@ -181,7 +177,7 @@ async def test_ensure_session_detects_checkpointed_status(mock_state: ServerStat
 
 @pytest.mark.asyncio
 async def test_ensure_session_checkpointed_marks_idle(mock_state: ServerState) -> None:
-    """checkpointed session loaded from store is marked as idle."""
+    """Checkpointed session loaded from store is marked as idle."""
     session_id = "checkpointed-idle"
     sd = _make_session_data(session_id, status="checkpointed")
 
@@ -347,9 +343,7 @@ async def test_ensure_session_no_spawn_graph_for_no_children(
         await ensure_session(mock_state, session_id)
 
     spawn_graph: dict[str, list[str]] = getattr(mock_state, "checkpoint_spawn_graph", {})
-    assert session_id in spawn_graph, (
-        "Spawn graph entry should exist (empty children list)"
-    )
+    assert session_id in spawn_graph, "Spawn graph entry should exist (empty children list)"
     assert spawn_graph[session_id] == []
 
 
@@ -439,7 +433,7 @@ async def test_route_message_skips_resume_when_not_checkpointed(
 async def test_ensure_session_checkpointed_restores_input_provider(
     mock_state: ServerState,
 ) -> None:
-    """checkpointed session restores input provider correctly."""
+    """Checkpointed session restores input provider correctly."""
     session_id = "checkpointed-input-provider"
     sd = _make_session_data(session_id, status="checkpointed")
 

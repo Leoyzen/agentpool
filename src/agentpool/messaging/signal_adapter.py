@@ -11,7 +11,7 @@ for downstream consumers (ACP, OpenCode, AG-UI) that already subscribe to
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from pydantic_graph.graph_builder import EndMarker, GraphRun, GraphTask
 
@@ -54,7 +54,7 @@ class SignalEmittingGraphRun[StateT, DepsT, OutputT]:
 
     def __init__(
         self,
-        graph_run: GraphRun[StateT, DepsT, OutputT],
+        graph_run: GraphRun,
         node_mapping: dict[NodeID, MessageNode[Any, Any]],
         talk_mapping: dict[tuple[NodeID, NodeID], Talk[Any]] | None = None,
         session_id: str | None = None,
@@ -83,7 +83,7 @@ class SignalEmittingGraphRun[StateT, DepsT, OutputT]:
     def __aiter__(self) -> SignalEmittingGraphRun[StateT, DepsT, OutputT]:
         return self
 
-    async def __anext__(self) -> EndMarker[OutputT] | Sequence[GraphTask]:
+    async def __anext__(self) -> EndMarker | Sequence[GraphTask]:
         """Advance the graph run and emit signals at step boundaries.
 
         Drives the underlying ``GraphRun`` forward (which executes pending
@@ -156,8 +156,12 @@ class SignalEmittingGraphRun[StateT, DepsT, OutputT]:
             if node is None:
                 continue
             state = self._graph_run.state
-            if isinstance(state, AgentPoolState) and state.result is not None:
-                msg = state.result
+            if isinstance(state, AgentPoolState):
+                state_result = cast(AgentPoolState, state).result
+                if state_result is not None:
+                    msg = state_result
+                else:
+                    msg = self._task_to_chat_message(task, role="assistant")
             else:
                 msg = self._task_to_chat_message(task, role="assistant")
             try:
@@ -246,7 +250,7 @@ class SignalEmittingGraphRun[StateT, DepsT, OutputT]:
         )
 
     @property
-    def graph_run(self) -> GraphRun[StateT, DepsT, OutputT]:
+    def graph_run(self) -> GraphRun:
         """Access the underlying ``GraphRun`` instance."""
         return self._graph_run
 

@@ -25,6 +25,51 @@ from agentpool_cli import log
 logger = log.get_logger(__name__)
 
 
+def _apply_config_file_path(manifest: Any, primary_path: str) -> Any:
+    """Set config_file_path on manifest and each agent/team for relative path resolution."""
+
+    def update_with_path(nodes: dict[str, Any]) -> dict[str, Any]:
+        return {
+            name: cfg.model_copy(update={"config_file_path": primary_path})
+            for name, cfg in nodes.items()
+        }
+
+    return manifest.model_copy(
+        update={
+            "config_file_path": primary_path,
+            "agents": update_with_path(manifest.agents),
+            "teams": update_with_path(manifest.teams),
+        }
+    )
+
+
+def _configure_observability_and_logging(
+    manifest: Any, host: str, port: int, resolved: Any
+) -> None:
+    """Initialize observability and configure file logging."""
+    from agentpool import log as ap_log
+    from agentpool.observability import registry
+
+    registry.configure_observability(manifest.observability)
+
+    log_dir = user_log_path("agentpool", appauthor=False)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "opencode.log"
+    import click
+
+    ctx = click.get_current_context(silent=True)
+    log_level = (ctx.obj or {}).get("log_level", "info") if ctx else "info"
+    ap_log.configure_logging(level=log_level.upper(), force=True, log_file=str(log_file))
+    logger.info("Configured file logging with rollover", log_file=str(log_file))
+
+    # Log which config layers were used
+    if resolved.layers:
+        sources = [f"{layer.source}:{layer.path}" for layer in resolved.layers if layer.path]
+        logger.info("Config layers loaded", sources=sources, host=host, port=port)
+    else:
+        logger.info("Starting OpenCode server with built-in defaults only", host=host, port=port)
+
+
 def opencode_command(
     config: Annotated[str | None, t.Argument(help="Path to agent configuration (optional)")] = None,
     host: Annotated[
@@ -69,7 +114,7 @@ def opencode_command(
     the pool's default agent is used (set via 'default_agent' in config,
     or falls back to the first agent).
     """
-    from agentpool import AgentPool, log as ap_log
+    from agentpool import AgentPool
     from agentpool.config_resources import ACP_ASSISTANT
     from agentpool.models.manifest import AgentsManifest
     from agentpool_config.context import ConfigContextManager
@@ -92,49 +137,9 @@ def opencode_command(
         with ConfigContextManager(resolved.primary_path):
             manifest = AgentsManifest.model_validate(resolved.data)
             if resolved.primary_path:
-                # 为 manifest 和每个 agent/team 设置 config_file_path
-                # 这对于相对路径解析（如 file prompts）至关重要
-                def update_with_path(nodes: dict[str, Any]) -> dict[str, Any]:
-                    return {
-                        name: config.model_copy(update={"config_file_path": resolved.primary_path})
-                        for name, config in nodes.items()
-                    }
+                manifest = _apply_config_file_path(manifest, resolved.primary_path)
 
-                manifest = manifest.model_copy(
-                    update={
-                        "config_file_path": resolved.primary_path,
-                        "agents": update_with_path(manifest.agents),
-                        "teams": update_with_path(manifest.teams),
-                    }
-                )
-
-            # Initialize observability BEFORE configuring logging
-            # This ensures logfire is configured before StructlogProcessor is added
-            from agentpool.observability import registry
-
-            registry.configure_observability(manifest.observability)
-
-            # Always log to file with rollover
-            log_dir = user_log_path("agentpool", appauthor=False)
-            log_dir.mkdir(parents=True, exist_ok=True)
-            log_file = log_dir / "opencode.log"
-            import click
-
-            ctx = click.get_current_context(silent=True)
-            log_level = (ctx.obj or {}).get("log_level", "info") if ctx else "info"
-            ap_log.configure_logging(level=log_level.upper(), force=True, log_file=str(log_file))
-            logger.info("Configured file logging with rollover", log_file=str(log_file))
-
-            # Log which config layers were used
-            if resolved.layers:
-                sources = [
-                    f"{layer.source}:{layer.path}" for layer in resolved.layers if layer.path
-                ]
-                logger.info("Config layers loaded", sources=sources, host=host, port=port)
-            else:
-                logger.info(
-                    "Starting OpenCode server with built-in defaults only", host=host, port=port
-                )
+            _configure_observability_and_logging(manifest, host, port, resolved)
 
             # Load agent from merged manifest (needs config context for path resolution)
             pool = AgentPool(manifest, main_agent_name=agent)

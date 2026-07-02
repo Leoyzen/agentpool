@@ -34,12 +34,19 @@ from dataclasses import replace
 from datetime import datetime
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
 import uuid
 
 import anyio
 from pydantic import HttpUrl
-from pydantic_ai import ModelRequest, ModelResponse, TextPart, UserPromptPart
+from pydantic_ai import (
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    ToolReturnPart,
+    UserContent,
+    UserPromptPart,
+)
 
 from acp import InitializeRequest
 from acp.agent import ACPAgentAPI
@@ -70,6 +77,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from anyio.abc import Process
+    from anyio.streams.memory import MemoryObjectReceiveStream
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
     from pydantic_ai import ThinkingPart, ToolCallPart, UserContent
@@ -82,6 +90,7 @@ if TYPE_CHECKING:
     from acp.schema.capabilities import AgentCapabilities
     from acp.schema.mcp import McpServer
     from agentpool.agents.acp_agent.client_handler import ACPClientHandler
+    from agentpool.agents.acp_agent.turn import ACPClientProtocol
     from agentpool.agents.context import AgentRunContext
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
@@ -217,7 +226,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         config_handlers = config.get_event_handlers()
         merged_handlers: list[AnyEventHandlerType] = [*config_handlers, *(event_handlers or [])]
         return cls(
-            command=config.get_command(),
+            command=config.get_command() or "",
             args=config.get_args(),
             # Identity
             name=config.name,
@@ -508,13 +517,16 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                                     await send_stream.send(envelope)
                             while True:
                                 try:
-                                    envelope = bus_stream.receive_nowait()
+                                    envelope = cast(
+                                        "MemoryObjectReceiveStream[EventEnvelope]", bus_stream
+                                    ).receive_nowait()
                                     await send_stream.send(envelope)
                                 except anyio.WouldBlock:
                                     break
                         else:
                             logger.warning(
-                                "No EventBus stream available for ACP agent — secondary events will not be forwarded"
+                                "No EventBus stream available for ACP agent"
+                                " — secondary events will not be forwarded"
                             )
                             return
                     except (
@@ -538,9 +550,10 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 task_b.add_done_callback(_bg_tasks.discard)
 
                 try:
-                    async for event in receive_stream:
-                        if isinstance(event, EventEnvelope):
-                            event = event.event
+                    async for raw_event in receive_stream:
+                        event = (
+                            raw_event.event if isinstance(raw_event, EventEnvelope) else raw_event
+                        )
                         if isinstance(event, ToolResultMetadataEvent):
                             tool_metadata[event.tool_call_id] = event.metadata
                             continue
@@ -565,7 +578,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                         part = event_to_part(output_event)
                         if isinstance(part, TextPart):
                             text_chunks.append(part.content)
-                        if part:
+                        if part and not isinstance(part, ToolReturnPart):
                             current_response_parts.append(part)
                         yield output_event
                 finally:
@@ -601,7 +614,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 parent_id=user_msg.message_id,
                 model_name=self.model_name,
                 messages=model_messages,
-                metadata=None,
+                metadata={},
                 finish_reason="stop",
             )
             yield StreamCompleteEvent(message=message)
@@ -638,7 +651,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             parent_id=user_msg.message_id,
             model_name=self.model_name,
             messages=model_messages,
-            metadata=None,
+            metadata={},
             finish_reason=finish_reason,
             usage=usage,
             cost_info=cost_info,
@@ -666,7 +679,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
 
     def create_turn(
         self,
-        prompts: list[str],
+        prompts: list[UserContent],
         run_ctx: AgentRunContext,
         message_history: list[ModelMessage],
     ) -> Turn:
@@ -686,8 +699,8 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         # wrapping ACPAgentAPI with async futures / notification registry is needed
         # for full integration.
         return ACPTurn(
-            acp_client=self._api,
-            prompts=prompts,
+            acp_client=cast("ACPClientProtocol", self._api),
+            prompts=prompts,  # type: ignore[arg-type]
             run_ctx=run_ctx,
             message_history=message_history,
             session_id=self._sdk_session_id or run_ctx.session_id,

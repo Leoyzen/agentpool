@@ -4,11 +4,9 @@ Tests that _current_run_ctx uses ContextVar for thread-safe per-run context.
 """
 
 import asyncio
-import sys
 from pathlib import Path
-from typing import Any
+import sys
 
-import pytest
 
 # Add src to path for imports
 sys_path = Path(__file__).parent.parent.parent / "src"
@@ -17,11 +15,10 @@ sys.path.insert(0, str(sys_path))
 
 def test_current_run_ctx_var_exists():
     """Test that _current_run_ctx_var ContextVar exists."""
-
-    from agentpool.agents.base_agent import _current_run_ctx_var
-
     # Check it's a ContextVar
     from contextvars import ContextVar
+
+    from agentpool.agents.base_agent import _current_run_ctx_var
 
     assert isinstance(_current_run_ctx_var, ContextVar)
 
@@ -33,7 +30,6 @@ def test_current_run_ctx_var_exists():
 
 def test_contextvar_isolation():
     """Test that ContextVar provides proper isolation between contexts."""
-
     from agentpool.agents.base_agent import _current_run_ctx_var
     from agentpool.agents.context import AgentRunContext
 
@@ -66,7 +62,6 @@ def test_contextvar_isolation():
 
 def test_contextvar_with_tasks():
     """Test ContextVar behavior with sequential asyncio tasks."""
-
     from agentpool.agents.base_agent import _current_run_ctx_var
     from agentpool.agents.context import AgentRunContext
 
@@ -104,7 +99,6 @@ def test_contextvar_with_tasks():
 
 def test_contextvar_context_manager():
     """Test ContextVar usage with context manager pattern."""
-
     from agentpool.agents.base_agent import _current_run_ctx_var
     from agentpool.agents.context import AgentRunContext
 
@@ -130,7 +124,6 @@ def test_contextvar_context_manager():
 
 def test_no_instance_variable():
     """Test that _current_run_ctx is NOT an instance variable."""
-
     from agentpool.agents.base_agent import BaseAgent
 
     # Create a mock agent instance
@@ -151,14 +144,13 @@ def test_no_instance_variable():
         )
 
         print("✓ _current_run_ctx is not an instance variable")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"⚠️  Could not fully test instance variable: {e}")
         print("  (This may be due to MockAgent initialization requirements)")
 
 
 def test_background_run_ctx_unchanged():
     """Test that _background_run_ctx is still an instance variable (unchanged)."""
-
     from agentpool.agents.base_agent import BaseAgent
 
     # Create a minimal agent instance
@@ -169,7 +161,7 @@ def test_background_run_ctx_unchanged():
             class _EmptyTurn(Turn):
                 async def execute(self):
                     return
-                    yield  # noqa: make it a generator
+                    yield
 
             return _EmptyTurn()
 
@@ -182,13 +174,12 @@ def test_background_run_ctx_unchanged():
         )
 
         print("✓ _background_run_ctx remains an instance variable")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"⚠️  Could not fully test _background_run_ctx: {e}")
 
 
 def test_concurrent_runs_isolation():
     """Test that concurrent agent runs have isolated contexts (RFC-0021)."""
-
     from agentpool.agents.base_agent import _current_run_ctx_var
     from agentpool.agents.context import AgentRunContext
 

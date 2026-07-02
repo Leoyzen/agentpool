@@ -23,17 +23,16 @@ EXPECTED BEHAVIOR:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, Mock
 
-import pytest
 from pydantic_ai.messages import (
+    PartDeltaEvent as PydanticPartDeltaEvent,
     PartStartEvent,
     TextPart as PydanticTextPart,
     TextPartDelta,
-    PartDeltaEvent as PydanticPartDeltaEvent,
 )
+import pytest
 
 from agentpool.agents.events import StreamCompleteEvent
 from agentpool.messaging import ChatMessage
@@ -48,6 +47,10 @@ from agentpool_server.opencode_server.session_pool_integration import (
     get_messages_for_session,
 )
 from agentpool_server.opencode_server.state import ServerState
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 @pytest.fixture
@@ -94,7 +97,9 @@ def mock_session_store() -> Mock:
 
 
 @pytest.fixture
-async def session_pool(mock_agent_pool: Mock, mock_session_store: Mock) -> AsyncIterator[SessionPool]:
+async def session_pool(
+    mock_agent_pool: Mock, mock_session_store: Mock
+) -> AsyncIterator[SessionPool]:
     """Create a real SessionPool with mocked dependencies."""
     sp = SessionPool(
         pool=mock_agent_pool,
@@ -193,10 +198,7 @@ async def test_auto_resume_events_create_message_in_state(
 
     # ASSERTION 1: MessageUpdatedEvent must be broadcast
     # so the TUI knows the message exists
-    message_updated_events = [
-        e for e in broadcast_events
-        if isinstance(e, MessageUpdatedEvent)
-    ]
+    message_updated_events = [e for e in broadcast_events if isinstance(e, MessageUpdatedEvent)]
     assert len(message_updated_events) > 0, (
         "No MessageUpdatedEvent was broadcast by _event_consumer_loop. "
         "The TUI cannot display the auto-resume response because it "
@@ -207,8 +209,7 @@ async def test_auto_resume_events_create_message_in_state(
     # ASSERTION 2: The message must exist in state.messages
     session_messages = await get_messages_for_session(server_state, session_id)
     auto_resume_messages = [
-        msg for msg in session_messages
-        if isinstance(msg.info, AssistantMessage)
+        msg for msg in session_messages if isinstance(msg.info, AssistantMessage)
     ]
     assert len(auto_resume_messages) > 0, (
         "No AssistantMessage was added to state.messages for the auto-resume turn. "
@@ -218,10 +219,7 @@ async def test_auto_resume_events_create_message_in_state(
 
     # ASSERTION 3: PartUpdatedEvent must be broadcast
     # (for the text content to be displayed)
-    part_updated_events = [
-        e for e in broadcast_events
-        if isinstance(e, PartUpdatedEvent)
-    ]
+    part_updated_events = [e for e in broadcast_events if isinstance(e, PartUpdatedEvent)]
     assert len(part_updated_events) > 0, (
         "No PartUpdatedEvent was broadcast for the auto-resume text content. "
         "The TUI has no parts to render even if the message exists."

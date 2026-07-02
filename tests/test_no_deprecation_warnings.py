@@ -6,19 +6,20 @@ They will PASS after tasks 1.9-1.11 remove the warnings.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
 import warnings
-from collections.abc import AsyncIterator
-from typing import Any
-
-import pytest
 
 from agentpool.hooks.agent_hooks import AgentHooks
-from agentpool.messaging import ChatMessage
 from agentpool.mcp_server.manager import MCPManager
+from agentpool.messaging import ChatMessage
 from agentpool.messaging.connection_manager import ConnectionManager
 from agentpool.messaging.messagenode import MessageNode
 from agentpool.tools.manager import ToolManager
 from agentpool.utils.context_wrapping import wrap_instruction
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 def _get_deprecation_warnings(
@@ -30,15 +31,14 @@ def _get_deprecation_warnings(
 
 # ── Minimal concrete MessageNode for testing connect_to / create_connection ──
 
+
 class _FakeMessageNode(MessageNode[Any, Any]):
     """Minimal non-abstract MessageNode for testing deprecated connect methods."""
 
     async def get_stats(self) -> Any:
         return {}
 
-    async def run_iter(
-        self, *prompts: Any, **kwargs: Any
-    ) -> AsyncIterator[ChatMessage[Any]]:
+    async def run_iter(self, *prompts: Any, **kwargs: Any) -> AsyncIterator[ChatMessage[Any]]:
         if False:  # pragma: no cover — never yields in tests
             yield ChatMessage[Any]()  # type: ignore[abstract]
 

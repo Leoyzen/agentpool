@@ -12,14 +12,13 @@ Note: The OpenCode API uses camelCase field names with "ID" suffix:
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, Mock
 
 from agentpool.sessions.models import SessionData
-from agentpool_server.opencode_server.models import Session, SessionStatus
+from agentpool_server.opencode_server.models import Session
 from agentpool_server.opencode_server.models.events import (
     SessionCreatedEvent,
     SessionIdleEvent,
@@ -65,7 +64,9 @@ class TestSessionCreatedEvent:
         assert event.properties.info.project_id == "global"  # Non-git directory returns "global"
         status_events = event_capture.get_events_by_type("session.status")
         idle_events = event_capture.get_events_by_type("session.idle")
-        assert len(status_events) == 2  # set_session_status() + mark_session_idle() explicit broadcast
+        assert (
+            len(status_events) == 2
+        )  # set_session_status() + mark_session_idle() explicit broadcast
         assert len(idle_events) == 1
         assert isinstance(status_events[0], SessionStatusEvent)
         assert isinstance(idle_events[0], SessionIdleEvent)
@@ -130,7 +131,9 @@ class TestSessionCRUD:
         assert "updated" in session["time"]
         status_events = event_capture.get_events_by_type("session.status")
         idle_events = event_capture.get_events_by_type("session.idle")
-        assert len(status_events) == 2  # set_session_status() + mark_session_idle() explicit broadcast
+        assert (
+            len(status_events) == 2
+        )  # set_session_status() + mark_session_idle() explicit broadcast
         assert len(idle_events) == 1
 
     async def test_create_session_with_parent_id(self, async_client: AsyncClient):
@@ -367,7 +370,7 @@ class TestSessionStatus:
         status_events: list[SessionStatusEvent] = []
         original_broadcast = server_state.broadcast_event
 
-        async def tracking_broadcast(event: Any) -> None:
+        async def tracking_broadcast(event: object) -> None:
             if isinstance(event, SessionStatusEvent):
                 status_events.append(event)
             await original_broadcast(event)

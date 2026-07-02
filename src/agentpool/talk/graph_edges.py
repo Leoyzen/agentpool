@@ -19,19 +19,22 @@ Key mappings:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from pydantic_graph import GraphBuilder
-from pydantic_graph.decision import Decision
 from pydantic_graph.id_types import NodeID
-from pydantic_graph.paths import EdgePath
-from pydantic_graph.step import Step, StepContext
+from pydantic_graph.paths import TransformFunction
+from pydantic_graph.step import StepContext  # noqa: TC002
 
 from agentpool.utils.inspection import is_async_callable
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from pydantic_graph import GraphBuilder
+    from pydantic_graph.decision import Decision
+    from pydantic_graph.paths import EdgePath
+    from pydantic_graph.step import Step
 
     from agentpool.messaging import MessageNode
     from agentpool.talk import Talk
@@ -68,9 +71,10 @@ class _ConditionFail(_ConditionResult):
 # ---------------------------------------------------------------------------
 
 
-def _unwrap_pass(ctx: StepContext[Any, Any, _ConditionPass]) -> Any:
+def _unwrap_pass(ctx: StepContext) -> Any:
     """Extract the wrapped value from a :class:`_ConditionPass`."""
-    return ctx.inputs.value
+    inputs = cast(_ConditionPass, ctx.inputs)
+    return inputs.value
 
 
 def _make_sync_matches(
@@ -118,15 +122,15 @@ class TalkEdgeTranslator:
         builder: The :class:`GraphBuilder` receiving translated edges.
     """
 
-    builder: GraphBuilder[Any, Any, Any, Any]
+    builder: GraphBuilder
 
     def translate(
         self,
         talk: Talk[Any],
-        source_step: Step[Any, Any, Any, Any],
-        target_steps: list[Step[Any, Any, Any, Any]],
+        source_step: Step,
+        target_steps: list[Step],
         target_nodes: list[MessageNode[Any, Any]] | None = None,
-    ) -> list[EdgePath[Any, Any]]:
+    ) -> list[EdgePath]:
         """Translate a single :class:`Talk` into graph :class:`EdgePath` objects.
 
         The translation respects Talk property ordering:
@@ -149,7 +153,7 @@ class TalkEdgeTranslator:
             ValueError: If conditions are provided but ``target_nodes`` is
                 ``None``.
         """
-        edges: list[EdgePath[Any, Any]] = []
+        edges: list[EdgePath] = []
         current_source = source_step
         path_builder = self.builder.edge_from(current_source)
 
@@ -234,12 +238,12 @@ class TalkEdgeTranslator:
     # Internal builders
     # ------------------------------------------------------------------
 
-    def _build_transform_step(self, talk: Talk[Any]) -> Step[Any, Any, Any, Any]:
+    def _build_transform_step(self, talk: Talk[Any]) -> Step:
         """Create an intermediate :class:`Step` for an async transform."""
         transform_fn = talk.transform_fn
         assert transform_fn is not None
 
-        async def _transform_step(ctx: StepContext[Any, Any, Any]) -> Any:
+        async def _transform_step(ctx: StepContext) -> Any:
             from agentpool.utils.inspection import execute
 
             return await execute(transform_fn, ctx.inputs)
@@ -252,15 +256,15 @@ class TalkEdgeTranslator:
     def _wrap_sync_transform(
         self,
         transform_fn: Callable[..., Any],
-    ) -> Callable[[StepContext[Any, Any, Any]], Any]:
+    ) -> TransformFunction:
         """Wrap a sync Talk transform into a pydantic-graph TransformFunction."""
 
-        def _transform(ctx: StepContext[Any, Any, Any]) -> Any:
+        def _transform(ctx: StepContext) -> Any:
             return transform_fn(ctx.inputs)
 
-        return _transform
+        return cast(TransformFunction, _transform)
 
-    def _build_buffer_step(self, talk: Talk[Any]) -> Step[Any, Any, Any, Any]:
+    def _build_buffer_step(self, talk: Talk[Any]) -> Step:
         """Create a buffering :class:`Step` for queued connections.
 
         The step stores the incoming message in graph state and returns it
@@ -268,7 +272,7 @@ class TalkEdgeTranslator:
         runtime state management and are left to the adapter layer.
         """
 
-        async def _buffer_step(ctx: StepContext[Any, Any, Any]) -> Any:
+        async def _buffer_step(ctx: StepContext) -> Any:
             # In a real adapter, this would maintain a queue in state.
             # For the translator, we passthrough so the graph structure
             # is correct.
@@ -283,12 +287,12 @@ class TalkEdgeTranslator:
         self,
         talk: Talk[Any],
         condition: Callable[..., bool | Any],
-        target_steps: list[Step[Any, Any, Any, Any]],
+        target_steps: list[Step],
         target_nodes: list[MessageNode[Any, Any]],
         *,
         invert: bool,
         suffix: str,
-    ) -> Decision[Any, Any, Any]:
+    ) -> Decision:
         """Build a :class:`Decision` that routes to targets or EndNode.
 
         Args:
@@ -351,15 +355,15 @@ class TalkEdgeTranslator:
         talk: Talk[Any],
         condition: Callable[..., Any],
         target_nodes: list[MessageNode[Any, Any]],
-    ) -> Step[Any, Any, Any, Any]:
+    ) -> Step:
         """Create a :class:`Step` that evaluates an async condition."""
 
-        async def _eval_step(ctx: StepContext[Any, Any, Any]) -> _ConditionResult:
+        async def _eval_step(ctx: StepContext) -> _ConditionResult:
             from agentpool.talk.registry import EventContext
             from agentpool.utils.inspection import execute
 
             # Evaluate against the first target (stop/exit are "any target")
-            event_ctx = EventContext(
+            event_ctx: EventContext[Any] = EventContext(
                 message=ctx.inputs,
                 target=target_nodes[0],
                 stats=talk.stats,
@@ -379,11 +383,11 @@ class TalkEdgeTranslator:
     def _build_filter_decisions(
         self,
         talk: Talk[Any],
-        target_steps: list[Step[Any, Any, Any, Any]],
+        target_steps: list[Step],
         target_nodes: list[MessageNode[Any, Any]],
-    ) -> list[Decision[Any, Any, Any]]:
+    ) -> list[Decision]:
         """Build per-target :class:`Decision` nodes for filter conditions."""
-        decisions: list[Decision[Any, Any, Any]] = []
+        decisions: list[Decision] = []
         condition = talk.filter_condition
         assert condition is not None
 
@@ -419,14 +423,14 @@ class TalkEdgeTranslator:
         condition: Callable[..., Any],
         target_node: MessageNode[Any, Any],
         index: int,
-    ) -> Step[Any, Any, Any, Any]:
+    ) -> Step:
         """Create a :class:`Step` that evaluates an async filter condition."""
 
-        async def _eval_filter(ctx: StepContext[Any, Any, Any]) -> _ConditionResult:
+        async def _eval_filter(ctx: StepContext) -> _ConditionResult:
             from agentpool.talk.registry import EventContext
             from agentpool.utils.inspection import execute
 
-            event_ctx = EventContext(
+            event_ctx: EventContext[Any] = EventContext(
                 message=ctx.inputs,
                 target=target_node,
                 stats=talk.stats,

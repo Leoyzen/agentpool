@@ -6,7 +6,7 @@ from dataclasses import replace
 from functools import wraps
 import inspect
 import time
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ApprovalRequired, CallDeferred
@@ -147,10 +147,13 @@ def wrap_tool[TReturn](  # noqa: PLR0915
 
             # modified_output replaces the tool result entirely
             if "modified_output" in post_result:
-                result = post_result["modified_output"]
+                result = cast(TReturn | ToolResult | ToolReturn, post_result["modified_output"])
             elif additional := post_result.get("additional_context"):
                 result = _inject_additional_context(result, additional)
 
+        if isinstance(result, ToolResult):
+            val = result.structured_content or result.content
+            result = ToolReturn(return_value=val, content=result.content, metadata=result.metadata)
         return result
 
     if run_ctx_key or agent_ctx_key:
@@ -188,30 +191,21 @@ def wrap_tool[TReturn](  # noqa: PLR0915
                     call_ctx_for_hooks = call_ctx
 
                 tool_input = kwargs.copy()
+                # Build execution function based on whether RunContext is expected
                 if run_ctx_key:
-                    # Pass RunContext to original function
-                    if tool.deferred:
-                        try:
-                            return await _execute_with_hooks(
-                                lambda *a, **kw: execute(fn, ctx, *a, **kw),
-                                tool_input,
-                                *args,
-                                **kwargs,
-                            )
-                        except (CallDeferred, ApprovalRequired) as exc:
-                            return await _handle_deferred_exception(exc, tool)
-                    return await _execute_with_hooks(
-                        lambda *a, **kw: execute(fn, ctx, *a, **kw),
-                        tool_input,
-                        *args,
-                        hook_ctx=call_ctx_for_hooks,
-                        **kwargs,
-                    )
-                # Don't pass RunContext to original function since it didn't expect it
+
+                    def _exec(*a: Any, **kw: Any) -> Any:
+                        return execute(fn, ctx, *a, **kw)
+
+                else:
+
+                    def _exec(*a: Any, **kw: Any) -> Any:
+                        return execute(fn, *a, **kw)
+
                 if tool.deferred:
                     try:
                         return await _execute_with_hooks(
-                            lambda *a, **kw: execute(fn, *a, **kw),
+                            _exec,
                             tool_input,
                             *args,
                             **kwargs,
@@ -219,7 +213,7 @@ def wrap_tool[TReturn](  # noqa: PLR0915
                     except (CallDeferred, ApprovalRequired) as exc:
                         return await _handle_deferred_exception(exc, tool)
                 return await _execute_with_hooks(
-                    lambda *a, **kw: execute(fn, *a, **kw),
+                    _exec,
                     tool_input,
                     *args,
                     hook_ctx=call_ctx_for_hooks,

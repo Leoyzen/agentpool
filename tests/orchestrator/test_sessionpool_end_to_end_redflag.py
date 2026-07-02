@@ -7,18 +7,13 @@ This test simulates the exact scenario described by the user:
 """
 
 import asyncio
-import contextlib
-import pytest
-from unittest.mock import AsyncMock, MagicMock
 
 from pydantic_ai.messages import (
-    PartDeltaEvent,
     PartStartEvent,
     ThinkingPart,
-    ThinkingPartDelta,
 )
+import pytest
 
-from agentpool.agents.events import RunStartedEvent
 from agentpool.orchestrator.core import EventBus
 from agentpool_server.opencode_server.session_pool_integration import OpenCodeSessionPoolIntegration
 
@@ -42,7 +37,9 @@ class MockSessionPool:
         self.event_bus = EventBus()
         self.sessions = MockSessions()
 
-    async def receive_request(self, session_id, content, priority="when_idle", input_provider=None, **kwargs):
+    async def receive_request(
+        self, session_id, content, priority="when_idle", input_provider=None, **kwargs
+    ):
         return None
 
 
@@ -55,8 +52,8 @@ class MockSessions:
 
     async def get_or_create_session(self, session_id, agent_name=None, **metadata):
         if session_id not in self._sessions:
-            from dataclasses import dataclass, field
             from agentpool.orchestrator.core import SessionState
+
             state = SessionState(
                 session_id=session_id,
                 agent_name=agent_name or "default",
@@ -71,15 +68,15 @@ class MockSessions:
 
 @pytest.mark.asyncio
 async def test_send_message_async_does_not_start_consumer():
-    """
-    Red-flag: send_message_async calls session_pool.receive_request directly
-    without going through integration.route_message, so the event consumer
+    """Red-flag: send_message_async calls session_pool.receive_request directly.
+
+    Without going through integration.route_message, so the event consumer
     is never started for new sessions.
     """
     server_state = MockServerState()
     session_pool = MockSessionPool()
 
-    integration = OpenCodeSessionPoolIntegration(
+    OpenCodeSessionPoolIntegration(
         session_pool=session_pool,
         server_state=server_state,
     )
@@ -99,15 +96,16 @@ async def test_send_message_async_does_not_start_consumer():
     await asyncio.sleep(0.1)
 
     # Verify no events were broadcast to OpenCode
-    assert len(server_state.events) == 0, \
+    assert len(server_state.events) == 0, (
         f"Expected NO OpenCode events (consumer not started), got: {server_state.events}"
+    )
 
 
 @pytest.mark.asyncio
 async def test_integration_route_message_starts_consumer():
-    """
-    Verify that integration.route_message starts the event consumer
-    and events are broadcast.
+    """Verify that integration.route_message starts the event consumer.
+
+    And events are broadcast.
     """
     server_state = MockServerState()
     session_pool = MockSessionPool()
@@ -132,8 +130,9 @@ async def test_integration_route_message_starts_consumer():
     await asyncio.sleep(0.1)
 
     # Verify events WERE broadcast
-    assert len(server_state.events) > 0, \
+    assert len(server_state.events) > 0, (
         f"Expected OpenCode events (consumer started), got: {server_state.events}"
+    )
 
     # Stop consumer
     await integration._stop_event_consumer(session_id)
@@ -141,8 +140,8 @@ async def test_integration_route_message_starts_consumer():
 
 @pytest.mark.asyncio
 async def test_integration_route_message_starts_consumer_for_existing_session():
-    """
-    Red-flag: route_message must start consumer even for pre-existing sessions.
+    """Red-flag: route_message must start consumer even for pre-existing sessions.
+
     Sessions created via other paths (e.g. get_or_load_session) don't have
     the consumer started, which would leave EventBus events unconsumed.
     """
@@ -179,8 +178,9 @@ async def test_integration_route_message_starts_consumer_for_existing_session():
     await asyncio.sleep(0.1)
 
     # Verify events WERE broadcast
-    assert len(server_state.events) > 0, \
+    assert len(server_state.events) > 0, (
         f"Expected OpenCode events (consumer started), got: {server_state.events}"
+    )
 
     # Stop consumer
     await integration._stop_event_consumer(session_id)
@@ -188,9 +188,9 @@ async def test_integration_route_message_starts_consumer_for_existing_session():
 
 @pytest.mark.asyncio
 async def test_consumer_restarted_after_crash():
-    """
-    Red-flag: If consumer loop crashes, _start_event_consumer should restart it
-    by cleaning up the old task and starting a new one.
+    """Red-flag: If consumer loop crashes, _start_event_consumer should restart it.
+
+    By cleaning up the old task and starting a new one.
     """
     server_state = MockServerState()
     session_pool = MockSessionPool()
@@ -224,8 +224,9 @@ async def test_consumer_restarted_after_crash():
     await session_pool.event_bus.publish(session_id, thinking_event)
     await asyncio.sleep(0.1)
 
-    assert len(server_state.events) > 0, \
+    assert len(server_state.events) > 0, (
         f"Expected events after restart, got: {server_state.events}"
+    )
 
     # Stop consumer
     await integration._stop_event_consumer(session_id)

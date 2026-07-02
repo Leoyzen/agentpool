@@ -19,7 +19,7 @@ agent.load_session() returns None for a cached session.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -73,7 +73,8 @@ class TestGetOrLoadSessionCacheHit:
         self,
         server_state: ServerState,
     ) -> None:
-        """A session cached in state.sessions must be returned even when
+        """A session cached in state.sessions must be returned even when.
+
         agent.session_id points to a different session.
 
         This is the core TUI bug: create 4 sessions, only the last one
@@ -126,8 +127,10 @@ class TestGetOrLoadSessionCacheHit:
         self,
         server_state: ServerState,
     ) -> None:
-        """When a cached session exists but agent.load_session returns None,
+        """When a cached session exists but agent.load_session returns None,.
+
         the session should still be returned with its existing (possibly empty)
+
         message list.
         """
         state = server_state
@@ -168,7 +171,8 @@ class TestGetOrLoadSessionCacheHit:
         self,
         server_state: ServerState,
     ) -> None:
-        """When a cached session exists with messages in memory, it is
+        """When a cached session exists with messages in memory, it is.
+
         returned directly without calling load_session.
 
         With per-session agents, each session has its own agent instance

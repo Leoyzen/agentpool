@@ -50,7 +50,12 @@ class TestAcpMcpTransportMessageForwarding:
     async def test_message_forwarding_from_session_to_client(self, connection):
         """Messages from MCP server should be forwarded to the client."""
         transport = AcpMcpTransport(connection)
-        msg = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}}
+        msg = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05"},
+        }
 
         with patch("mcp.client.session.ClientSession.initialize", new_callable=AsyncMock):
             async with transport.connect_session():
@@ -133,7 +138,12 @@ class TestAcpMcpTransportReusability:
         """Each session should get its own forwarder task."""
         transport = AcpMcpTransport(connection)
 
-        msg1 = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}}
+        msg1 = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05"},
+        }
         with patch("mcp.client.session.ClientSession.initialize", new_callable=AsyncMock):
             async with transport.connect_session():
                 await connection.from_session.send(msg1)

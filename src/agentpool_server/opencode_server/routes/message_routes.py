@@ -407,7 +407,6 @@ async def _process_message_locked(  # noqa: PLR0915
     # Per-session agent: each session has its own agent instance,
     # so no global agent_lock is needed. Same-session serialization
     # is handled by get_session_lock() in _process_message().
-    agent = state.agent
     # Delegate agent resolution (for subagent requests).
     # Only resolve a delegate when the request names a *different* agent
     # from the default session agent.  A request.agent value of "default"
@@ -418,18 +417,17 @@ async def _process_message_locked(  # noqa: PLR0915
     # Uses SessionPool's get_or_create_session_agent to create per-session
     # agent instances.  Each delegate agent name gets a unique sub-session
     # ID derived from the main session ID, ensuring per-agent isolation.
-    if state.pool is not None:
+    if state.pool is not None and agent_name in state.pool.manifest.agents:
         # Only delegate to a different agent from the pool — if the request
         # names the same agent as the session's default, the per-session
         # instance is already the right one.
-        if agent_name in state.pool.manifest.agents:
-            current_agent_name = getattr(state.agent, "name", None)
-            if agent_name != current_agent_name:
-                session_pool = state.pool.session_pool
-                if session_pool is not None:
-                    agent = await session_pool.sessions.get_or_create_session_agent(
-                        f"{session_id}-agent-{agent_name}", agent_name
-                    )
+        current_agent_name = getattr(state.agent, "name", None)
+        if agent_name != current_agent_name:
+            session_pool = state.pool.session_pool
+            if session_pool is not None:
+                await session_pool.sessions.get_or_create_session_agent(
+                    f"{session_id}-agent-{agent_name}", agent_name
+                )
     # Get input provider for this session — stored on SessionState, NOT on agent.
     # SessionController passes input_provider to the agent via kwargs at run time.
     input_provider = state.ensure_input_provider(session_id)
@@ -565,12 +563,9 @@ async def _process_message_locked(  # noqa: PLR0915
             event_stream = await session_pool.event_bus.subscribe(session_id)
 
             async def _feed_adapter() -> None:
-                try:
-                    async for event in event_stream:
-                        async for _ in adapter.convert_event(event.event):
-                            pass
-                except asyncio.CancelledError:
-                    raise
+                async for event in event_stream:
+                    async for _ in adapter.convert_event(event.event):
+                        pass
 
             adapter_task = asyncio.create_task(_feed_adapter(), name=f"adapter_feed_{session_id}")
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 import structlog
 
 from acp.schema import AgentCapabilities

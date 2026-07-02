@@ -9,7 +9,7 @@ to point to the wrong session.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -55,7 +55,8 @@ class TestSessionSwitchInputProvider:
         server_state: ServerState,
         tmp_project_dir: Path,
     ):
-        """Loading an existing session via get_or_load_session preserves
+        """Loading an existing session via get_or_load_session preserves.
+
         the session's input provider.
 
         With per-session agents, each session has its own agent with its

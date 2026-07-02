@@ -7,12 +7,13 @@ from typing import TYPE_CHECKING
 from pydantic import ConfigDict, Field
 from schemez import Schema
 
-from agentpool.prompts.prompts import PromptType
 from agentpool_config.paths import ConfigPath
 
 
 if TYPE_CHECKING:
     from upathtools import UPath
+
+    from agentpool.prompts.prompts import PromptType  # noqa: TC004
 
 
 class Knowledge(Schema):

@@ -95,7 +95,7 @@ class SlowAgentMock:
 
 
 @pytest.fixture
-def slow_mock_agent():
+def slow_mock_agent():  # noqa: PLR0915
     """Create a slow mock agent for testing concurrency."""
     agent = SlowAgentMock(delay=0.3)
     saved_sessions: dict[str, Any] = {}
@@ -137,12 +137,8 @@ def slow_mock_agent():
     pool.session_pool.get_messages = AsyncMock(return_value=[])
 
     # Mock SessionPool methods that are awaited in _process_message_locked
-    pool.session_pool.sessions.get_or_create_session = AsyncMock(
-        return_value=(Mock(), True)
-    )
-    pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(
-        return_value=agent
-    )
+    pool.session_pool.sessions.get_or_create_session = AsyncMock(return_value=(Mock(), True))
+    pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=agent)
     pool.session_pool.sessions.get_session = Mock(return_value=None)
 
     # Set up a real EventBus so adapter can subscribe/unsubscribe
@@ -168,12 +164,12 @@ def slow_mock_agent():
                 async for event in stream:
                     await event_bus.publish(session_id, event)
                 handle.status = RunStatus.completed
-            except Exception:
+            except Exception:  # noqa: BLE001
                 handle.status = RunStatus.failed
             finally:
                 complete_event.set()
 
-        asyncio.create_task(_do_run())
+        _task = asyncio.create_task(_do_run())  # noqa: RUF006
         return handle
 
     pool.session_pool.receive_request = AsyncMock(side_effect=_mock_receive_request)

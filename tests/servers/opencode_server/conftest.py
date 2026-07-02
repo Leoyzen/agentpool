@@ -10,7 +10,6 @@ Provides fixtures for testing the OpenCode server API, including:
 
 from __future__ import annotations
 
-import anyio
 import asyncio
 import contextlib
 import json
@@ -19,6 +18,7 @@ import tempfile
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, Mock
 
+import anyio
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
@@ -41,6 +41,8 @@ from agentpool_server.opencode_server.state import ServerState
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
 
+    from agentpool.sessions.models import SessionData
+
 
 def _make_functional_event_bus() -> Mock:
     """Create a Mock EventBus that properly routes publish to subscribe streams.
@@ -56,7 +58,7 @@ def _make_functional_event_bus() -> Mock:
     Supports scope="all" subscriptions which receive events from any session_id,
     matching the real EventBus._should_receive behavior.
     """
-    _STREAM_BUFFER_SIZE: int = 1024
+    _stream_buffer_size: int = 1024
     bus = Mock()
     _streams: dict[str, list[tuple[anyio.abc.ObjectSendStream[Any], str]]] = {}
     _stream_pairs: dict[int, anyio.abc.ObjectSendStream[Any]] = {}
@@ -65,7 +67,7 @@ def _make_functional_event_bus() -> Mock:
         session_id: str, scope: str = "session"
     ) -> anyio.abc.ObjectReceiveStream[Any]:
         send_stream, receive_stream = anyio.create_memory_object_stream(
-            max_buffer_size=_STREAM_BUFFER_SIZE
+            max_buffer_size=_stream_buffer_size
         )
         _streams.setdefault(session_id, []).append((send_stream, scope))
         _stream_pairs[id(receive_stream)] = send_stream
@@ -88,10 +90,8 @@ def _make_functional_event_bus() -> Mock:
         for subscriber_sid, subscribers in _streams.items():
             for send_stream, scope in subscribers:
                 if scope == "all" or subscriber_sid == session_id:
-                    try:
+                    with contextlib.suppress(anyio.WouldBlock):
                         send_stream.send_nowait(event)
-                    except anyio.WouldBlock:
-                        pass
 
     bus.subscribe = AsyncMock(side_effect=_subscribe)
     bus.unsubscribe = AsyncMock(side_effect=_unsubscribe)
@@ -186,7 +186,7 @@ def manifest() -> AgentsManifest:
 
 
 @pytest.fixture
-def mock_pool(
+def mock_pool(  # noqa: PLR0915
     storage_manager: StorageManager,
     file_ops: FileOpsTracker,
     todos: TodoTracker,
@@ -255,9 +255,7 @@ def mock_pool(
     pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(
         return_value=_mock_session_agent
     )
-    pool.session_pool.sessions.get_or_create_session = AsyncMock(
-        return_value=(Mock(), True)
-    )
+    pool.session_pool.sessions.get_or_create_session = AsyncMock(return_value=(Mock(), True))
     _run_handle = Mock()
     _run_handle.complete_event = Mock()
     _run_handle.complete_event.wait = AsyncMock()
@@ -329,7 +327,6 @@ def mock_agent(mock_env: Mock, mock_pool: Mock, storage_manager: StorageManager)
     # list_sessions delegates to storage_manager so that sessions created via
     # pool.sessions.store.save() are visible in GET /session.
     async def _list_sessions(**kwargs: object) -> list[SessionData]:
-        from agentpool.sessions.models import SessionData
 
         ids = await storage_manager.list_session_ids()
         results: list[SessionData] = []
@@ -368,8 +365,7 @@ def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
     # This ensures GET /session returns sessions created via POST /session.
     if session_controller is not None:
         session_controller.list_sessions = lambda: [
-            type("SessionInfo", (), {"session_id": sid})()
-            for sid in state.sessions
+            type("SessionInfo", (), {"session_id": sid})() for sid in state.sessions
         ]
     # Initialize backward-compat dicts removed from ServerState dataclass
     # so tests and helper fallbacks can access them.
@@ -385,6 +381,7 @@ def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
     # create_session returns a mock session state that supports attribute assignment
     state.session_pool_integration.create_session = AsyncMock(return_value=Mock())
     state.session_pool_integration.get_session_status = AsyncMock(return_value=None)
+
     # route_message delegates to session_pool.receive_request so spies/tests
     # that monitor receive_request call counts work correctly.
     async def _mock_route_message(
@@ -407,9 +404,7 @@ def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
             **kwargs,
         )
 
-    state.session_pool_integration.route_message = AsyncMock(
-        side_effect=_mock_route_message
-    )
+    state.session_pool_integration.route_message = AsyncMock(side_effect=_mock_route_message)
     # event_bridge is automatically set up by __post_init__ when
     # session_controller is present, but ensure it's initialized for cases
     # where the mock pool's event_bus isn't available at construction time.

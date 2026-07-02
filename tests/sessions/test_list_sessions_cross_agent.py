@@ -105,15 +105,11 @@ class TestListSessionIdsCrossAgent:
             for s in sessions:
                 await provider.save_session(s)
 
-            result = await provider.list_session_ids(
-                cwd=shared_cwd, agent_name="agent_a"
-            )
+            result = await provider.list_session_ids(cwd=shared_cwd, agent_name="agent_a")
 
         assert result == ["sess_a1"]
 
-    async def test_list_session_ids_cwd_no_match(
-        self, provider: SQLModelProvider
-    ) -> None:
+    async def test_list_session_ids_cwd_no_match(self, provider: SQLModelProvider) -> None:
         """list_session_ids(cwd=...) with non-existent cwd returns empty list."""
         sessions = [
             _make_session("sess_a1", agent_name="agent_a", cwd="/tmp/real_project"),

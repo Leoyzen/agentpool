@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager, suppress
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 from pydantic_ai.models.test import TestModel, TestStreamedResponse
@@ -20,9 +20,12 @@ import pytest
 
 from agentpool import Agent
 from agentpool.agents.base_agent import _current_run_ctx_var
-from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import StreamCompleteEvent
 from agentpool.orchestrator.core import SessionState
+
+
+if TYPE_CHECKING:
+    from agentpool.agents.context import AgentRunContext
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +106,7 @@ def fast_agent() -> Agent[None]:
 def _mock_session_pool(agent: Agent, run_ctx: AgentRunContext) -> None:
     """Mock agent_pool.session_pool so get_active_run_context() returns run_ctx."""
     from unittest.mock import AsyncMock
+
     from agentpool.orchestrator.run import RunHandle
 
     session_state = SessionState(session_id="test-session", agent_name="test")
@@ -137,7 +141,8 @@ def _mock_session_pool(agent: Agent, run_ctx: AgentRunContext) -> None:
 async def test_inject_prompt_from_different_task_with_session_pool(
     slow_agent: Agent[None],
 ) -> None:
-    """inject_prompt() called from a different task MUST reach the injection manager
+    """inject_prompt() called from a different task MUST reach the injection manager.
+
     when SessionPool fallback is available.
     """
     stream_started = asyncio.Event()
@@ -189,7 +194,8 @@ async def test_inject_prompt_from_different_task_with_session_pool(
 async def test_queue_prompt_from_different_task_with_session_pool(
     slow_agent: Agent[None],
 ) -> None:
-    """queue_prompt() called from a different task MUST reach the injection manager
+    """queue_prompt() called from a different task MUST reach the injection manager.
+
     when SessionPool fallback is available.
     """
     stream_started = asyncio.Event()
@@ -238,7 +244,8 @@ async def test_queue_prompt_from_different_task_with_session_pool(
 async def test_has_pending_injections_from_different_task_with_session_pool(
     slow_agent: Agent[None],
 ) -> None:
-    """has_pending_injections() called from a different task MUST reflect actual state
+    """has_pending_injections() called from a different task MUST reflect actual state.
+
     when SessionPool fallback is available.
     """
     stream_started = asyncio.Event()
@@ -372,7 +379,8 @@ async def test_inject_prompt_same_task_still_works(fast_agent: Agent[None]) -> N
 async def test_hook_manager_consumes_cross_task_injection_with_session_pool(
     slow_agent: Agent[None],
 ) -> None:
-    """NativeAgentHookManager must consume injections queued from a different task
+    """NativeAgentHookManager must consume injections queued from a different task.
+
     when SessionPool fallback is available.
     """
     from agentpool.agents.native_agent.hook_manager import NativeAgentHookManager
@@ -413,9 +421,7 @@ async def test_hook_manager_consumes_cross_task_injection_with_session_pool(
     assert isinstance(hook_mgr, NativeAgentHookManager)
 
     active_run_ctx = slow_agent.get_active_run_context(session_id="test-session")
-    assert active_run_ctx is not None, (
-        "Hook manager must find run_ctx via SessionPool fallback"
-    )
+    assert active_run_ctx is not None, "Hook manager must find run_ctx via SessionPool fallback"
 
     await slow_agent.interrupt(session_id="test-session")
     with suppress(asyncio.CancelledError):

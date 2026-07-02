@@ -11,8 +11,6 @@ from dataclasses import dataclass, field
 import time
 from typing import TYPE_CHECKING
 
-import anyio
-
 from agentpool.log import get_logger
 from agentpool.resource_providers.aggregating import AggregatingResourceProvider
 from agentpool.resource_providers.mcp_provider import MCPResourceProvider
@@ -178,6 +176,7 @@ class MCPConnectionPool:
                 await _pending_close.__aexit__(None, None, None)
             except Exception:
                 logger.exception("Error closing recycled MCP provider")
+        return None
 
     def release_connection(self, server_config: MCPServerConfig) -> None:
         """Release a previously acquired connection.

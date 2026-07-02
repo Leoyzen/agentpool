@@ -16,10 +16,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from mcp.types import ElicitResult
-import pytest
-
-from acp.schema import ToolCallStart
-from agentpool_server.acp_server.event_converter import ACPEventConverter
 
 
 if TYPE_CHECKING:

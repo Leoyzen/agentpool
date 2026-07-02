@@ -6,10 +6,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai import AgentRunResult
 from pydantic_ai.capabilities import Hooks
-from pydantic_ai.messages import ToolCallPart
-from pydantic_ai.tools import RunContext, ToolDefinition
 
 from agentpool.hooks.base import HookInput, HookResult
 from agentpool.log import get_logger
@@ -19,7 +16,10 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from exxec import ExecutionEnvironment
+    from pydantic_ai import AgentRunResult
     from pydantic_ai.capabilities.abstract import ValidatedToolArgs
+    from pydantic_ai.messages import ToolCallPart
+    from pydantic_ai.tools import RunContext, ToolDefinition
 
     from agentpool.hooks.base import Hook
 

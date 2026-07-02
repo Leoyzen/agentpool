@@ -143,10 +143,12 @@ class ToolCallTestHarness:
             agent.env = self.mock_env
             # Patch session pool to set mock_env on session agents
             original_get_agent = pool.session_pool.sessions.get_or_create_session_agent
+
             async def _patched_get_agent(*args: Any, **kwargs: Any) -> Any:
                 session_agent = await original_get_agent(*args, **kwargs)
                 session_agent.env = self.mock_env
                 return session_agent
+
             pool.session_pool.sessions.get_or_create_session_agent = _patched_get_agent
             capabilities = ClientCapabilities(fs=None, terminal=False)
             session = ACPSession(
@@ -192,10 +194,12 @@ class ToolCallTestHarness:
             harness_agent.env = self.mock_env
             # Patch session pool to set mock_env on session agents
             original_get_agent = pool.session_pool.sessions.get_or_create_session_agent
+
             async def _patched_get_agent(*args: Any, **kwargs: Any) -> Any:
                 session_agent = await original_get_agent(*args, **kwargs)
                 session_agent.env = self.mock_env
                 return session_agent
+
             pool.session_pool.sessions.get_or_create_session_agent = _patched_get_agent
             capabilities = ClientCapabilities(fs=None, terminal=False)
             session = ACPSession(

@@ -407,7 +407,7 @@ class ToolManagerBridge:
                 context_params = _get_context_param_names(fn, "AgentContext")
                 run_context_params = _get_context_param_names(fn, "RunContext")
                 all_context_params = context_params | run_context_params
-                filtered_schema = filter_schema_params(input_schema, all_context_params)
+                filtered_schema = filter_schema_params(dict(input_schema), all_context_params)
                 desc = tool.description or "No description"
                 super().__init__(
                     name=tool.name,

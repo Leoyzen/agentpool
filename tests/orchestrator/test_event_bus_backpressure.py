@@ -6,7 +6,6 @@ drop subscriber) works correctly with anyio memory object streams.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import anyio
@@ -54,10 +53,11 @@ async def test_backpressure_no_deadlock_with_slow_consumer(
 
     await publisher()
 
-    received: list[str] = []
-    async for envelope in stream:
-        if isinstance(envelope.event, RunStartedEvent):
-            received.append(envelope.event.run_id)
+    received: list[str] = [
+        envelope.event.run_id
+        async for envelope in stream
+        if isinstance(envelope.event, RunStartedEvent)
+    ]
 
     assert len(received) > 0
     assert len(received) <= 50
@@ -68,7 +68,7 @@ async def test_backpressure_drops_subscriber_when_buffer_full(
     make_event: Any,
 ) -> None:
     """A subscriber whose buffer is full and can't be drained gets dropped."""
-    stream = await event_bus.subscribe("sess-bp")
+    await event_bus.subscribe("sess-bp")
 
     for i in range(5):
         await event_bus.publish(
@@ -105,9 +105,7 @@ async def test_unsubscribe_closes_stream(
     await event_bus.publish("sess-bp", make_event("ev-1"))
     await event_bus.unsubscribe("sess-bp", stream)
 
-    received: list[Any] = []
-    async for envelope in stream:
-        received.append(envelope)
+    received: list[Any] = [envelope async for envelope in stream]
 
     assert len(received) <= 1
 
@@ -121,9 +119,7 @@ async def test_close_session_signals_end_of_stream(
     await event_bus.publish("sess-bp", make_event("ev-1"))
     await event_bus.close_session("sess-bp")
 
-    received: list[Any] = []
-    async for envelope in stream:
-        received.append(envelope)
+    received: list[Any] = [envelope async for envelope in stream]
 
     assert len(received) >= 0
     counts = await event_bus.get_subscriber_counts()
@@ -151,10 +147,11 @@ async def test_parallel_publishers_no_deadlock(
         tg.start_soon(publisher, "b")
         tg.start_soon(publisher, "c")
 
-    received: list[str] = []
-    async for envelope in stream:
-        if isinstance(envelope.event, RunStartedEvent):
-            received.append(envelope.event.run_id)
+    received: list[str] = [
+        envelope.event.run_id
+        async for envelope in stream
+        if isinstance(envelope.event, RunStartedEvent)
+    ]
 
     assert len(received) > 0
     assert len(received) <= 60
@@ -175,7 +172,7 @@ async def test_replay_buffer_with_memory_stream(
         with anyio.fail_after(0.5):
             async for envelope in stream:
                 if isinstance(envelope.event, RunStartedEvent):
-                    received.append(envelope.event.run_id)
+                    received.append(envelope.event.run_id)  # noqa: PERF401
     except TimeoutError:
         pass
 

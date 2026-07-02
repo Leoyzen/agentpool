@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-
 from acp.schema import (
     AgentMessageChunk,
     LoadSessionResponse,
@@ -70,6 +69,7 @@ async def test_load_session_calls_api_with_correct_params(acp_agent, mock_api):
 @pytest.mark.unit
 async def test_load_session_captures_updates_during_load(acp_agent, mock_api, mock_state):
     """Test that updates are captured during load (start_load/finish_load)."""
+
     # Simulate updates being added during load
     async def side_effect(*args, **kwargs):
         # During load, the state should be collecting updates
@@ -87,6 +87,7 @@ async def test_load_session_captures_updates_during_load(acp_agent, mock_api, mo
 @pytest.mark.unit
 async def test_load_session_converts_updates_to_chat_messages(acp_agent, mock_api, mock_state):
     """Test that captured updates are converted to chat_messages."""
+
     # Add a mock update to the state during load
     async def side_effect(*args, **kwargs):
         mock_state.add_update(UserMessageChunk.text("Hello from history"))
@@ -119,9 +120,7 @@ async def test_load_session_updates_sdk_session_id(acp_agent, mock_api):
 async def test_load_session_updates_state_models(acp_agent, mock_api, mock_state):
     """Test that state.models is updated from response."""
     models = SessionModelState(available_models=[], current_model_id="gpt-4o")
-    mock_api.load_session = AsyncMock(
-        return_value=LoadSessionResponse(models=models)
-    )
+    mock_api.load_session = AsyncMock(return_value=LoadSessionResponse(models=models))
 
     await acp_agent.load_session("sess-123")
 
@@ -133,9 +132,7 @@ async def test_load_session_updates_state_models(acp_agent, mock_api, mock_state
 async def test_load_session_updates_state_modes(acp_agent, mock_api, mock_state):
     """Test that state.modes is updated from response."""
     modes = SessionModeState(available_modes=[], current_mode_id="code")
-    mock_api.load_session = AsyncMock(
-        return_value=LoadSessionResponse(modes=modes)
-    )
+    mock_api.load_session = AsyncMock(return_value=LoadSessionResponse(modes=modes))
 
     await acp_agent.load_session("sess-123")
 

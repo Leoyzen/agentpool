@@ -15,6 +15,7 @@ from slashed import Command
 from upathtools import UPath, to_upath
 
 from agentpool.log import get_logger
+from agentpool.mcp_server import MCPClient
 from agentpool.utils import importing
 from agentpool.utils.inspection import execute
 
@@ -29,7 +30,6 @@ if TYPE_CHECKING:
     from slashed import CommandContext
 
     from agentpool.agents.staged_content import StagedContent
-    from agentpool.mcp_server import MCPClient
 
 logger = get_logger(__name__)
 

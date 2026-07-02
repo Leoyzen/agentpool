@@ -462,5 +462,6 @@ def read_session(session_path: Path) -> Session | None:
         content = session_path.read_text(encoding="utf-8")
         data = anyenv.load_json(content)
         return Session.model_validate(data)
-    except (anyenv.JsonLoadError, Exception) as e:
+    except (anyenv.JsonLoadError, ValueError, OSError, Exception) as e:  # noqa: BLE001
         logger.warning("Failed to parse session file", path=str(session_path), error=str(e))
+        return None

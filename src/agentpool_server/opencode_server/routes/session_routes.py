@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 from anyenv.text_sharing.opencode import Message, MessagePart, OpenCodeSharer
@@ -21,6 +22,7 @@ from agentpool_server.opencode_server.converters import (
     session_data_to_opencode,
 )
 from agentpool_server.opencode_server.dependencies import StateDep
+from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 from agentpool_server.opencode_server.models import (
     AssistantMessage,
     CommandExecutedEvent,
@@ -169,7 +171,7 @@ def _process_skill_template(template: str, arguments: str | None) -> str:
     return result
 
 
-async def _execute_slashed_command(
+async def _execute_slashed_command(  # noqa: PLR0915
     state: ServerState,
     session_id: str,
     request: CommandRequest,
@@ -338,7 +340,7 @@ async def _execute_slashed_command(
     return message_with_parts
 
 
-async def _execute_skill_command(
+async def _execute_skill_command(  # noqa: PLR0915
     state: ServerState,
     session_id: str,
     request: CommandRequest,
@@ -481,7 +483,7 @@ async def _execute_skill_command(
             async for oc_event in adapter.process_stream(iterator):
                 await state.broadcast_event(oc_event)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             error_text = f"Error: {e}"
             text_part = TextPart(
                 id=identifier.ascending("part"),
@@ -784,7 +786,8 @@ async def get_session_messages(
     Loads from storage if session not in memory cache.
 
     Args:
-        session_id: Unique identifier for the session
+        session_id: The session ID to get messages for
+        state: The server state for accessing storage and sessions
         limit: Optional maximum number of messages to return
 
     Returns:
@@ -922,7 +925,7 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
 
     if sp_session is not None:
         # Native agents: interrupt the per-session agent
-        if sp_session.is_per_session_agent:
+        if sp_session.is_per_session_agent and state.session_controller is not None:
             session_agent = state.session_controller.get_session_agent(session_id)
             if session_agent is not None:
                 try:
@@ -936,10 +939,8 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
         if sp_session.current_run_id is not None:
             session_pool = state.pool.session_pool
             if session_pool is not None:
-                try:
+                with contextlib.suppress(ValueError):
                     session_pool.cancel_run(sp_session.current_run_id)
-                except ValueError:
-                    pass  # Run already completed or not found
     else:
         # Fallback: legacy behavior when SessionController is unavailable
         session_pool = state.pool.session_pool
@@ -1043,14 +1044,12 @@ async def fork_session(  # noqa: D417
 
     # Copy messages in storage via SessionPool
     if session_pool is not None:
-        try:
+        with contextlib.suppress(KeyError, TypeError):
             await session_pool.copy_messages(
                 session_id,
                 new_session_id,
                 up_to_message_id=request.message_id if request else None,
             )
-        except (KeyError, TypeError):
-            pass  # Session not in SessionPool or mock, use in-memory only
 
     # Cache in memory
     state.sessions[new_session_id] = forked_session
@@ -1087,7 +1086,7 @@ async def fork_session(  # noqa: D417
 
 
 @router.post("/{session_id}/init")
-async def init_session(  # noqa: D417
+async def init_session(  # noqa: D417,PLR0915
     session_id: str,
     state: StateDep,
     request: SessionInitRequest | None = None,
@@ -1352,7 +1351,7 @@ async def get_pending_permissions(
         raise HTTPException(status_code=404, detail="Session not found")
 
     # Get the input provider for this session
-    input_provider = None
+    input_provider: OpenCodeInputProvider | None = None
     if state.session_controller is not None:
         sp_session = state.session_controller.get_session(session_id)
         if sp_session is not None:
@@ -1485,11 +1484,11 @@ async def summarize_session(  # noqa: PLR0915
             usage = None
             cost = 0.0
             text_part: TextPart | None = None
+            session_pool = state.pool.session_pool
+            if session_pool is None:
+                msg = "SessionPool is not available"
+                raise RuntimeError(msg)
             try:
-                session_pool = state.pool.session_pool
-                if session_pool is None:
-                    msg = "SessionPool is not available"
-                    raise RuntimeError(msg)
                 stream = session_pool.run_stream(session_id, SUMMARIZE_PROMPT, scope="session")
                 async for event in stream:
                     match event:
@@ -1532,9 +1531,15 @@ async def summarize_session(  # noqa: PLR0915
                                 )
 
                         # Stream complete - extract token usage
-                        case StreamCompleteEvent(message=msg) if msg and msg.usage:
-                            usage = msg.usage
-                            cost = float(msg.cost_info.total_cost) if msg.cost_info else 0
+                        case StreamCompleteEvent(message=complete_msg) if (
+                            complete_msg and complete_msg.usage
+                        ):
+                            usage = complete_msg.usage
+                            cost = (
+                                float(complete_msg.cost_info.total_cost)
+                                if complete_msg.cost_info
+                                else 0
+                            )
 
             except Exception as e:  # noqa: BLE001
                 response_text = f"Error generating summary: {e}"
@@ -1697,10 +1702,8 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
     # Persist truncation via SessionPool
     session_pool = getattr(state.pool, "session_pool", None)
     if session_pool is not None:
-        try:
+        with contextlib.suppress(KeyError, TypeError):
             await session_pool.truncate_messages(session_id, request.message_id)
-        except (KeyError, TypeError):
-            pass  # Session not in SessionPool or mock, use in-memory only
 
     # Store removed messages for unrevert
     state.reverted_messages[session_id] = messages_to_remove

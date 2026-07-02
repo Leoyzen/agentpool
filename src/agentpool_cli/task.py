@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import TYPE_CHECKING, Annotated, cast
 import uuid
 
@@ -70,10 +71,8 @@ async def execute_job(
                 raise RuntimeError(msg)
             return cast(str, final_message.data)
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 await sp.close_session(session_id)
-            except Exception:
-                pass
 
 
 def task_command(

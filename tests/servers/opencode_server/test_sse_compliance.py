@@ -14,11 +14,11 @@ Validates that the SSE event stream conforms to the OpenCode TUI protocol:
 
 from __future__ import annotations
 
-import anyio
 import asyncio
 import json
 from typing import TYPE_CHECKING, Any
 
+import anyio
 import pytest
 
 from agentpool_server.opencode_server.models import GlobalEvent
@@ -118,10 +118,8 @@ class _MockEventBus:
         for subscriber_sid, subscribers in self._streams.items():
             for send_stream, scope in subscribers:
                 if scope == "all" or subscriber_sid == session_id:
-                    try:
+                    with contextlib.suppress(anyio.WouldBlock):
                         send_stream.send_nowait(envelope)
-                    except anyio.WouldBlock:
-                        pass
 
 
 class _MockSessionPool:

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from agentpool.agents.native_agent.checkpoint import compute_agent_config_hash
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from agentpool.tools.base import Tool
+from agentpool.agents.native_agent.checkpoint import compute_agent_config_hash
+
+
+if TYPE_CHECKING:
+    from agentpool.tools.base import Tool
 
 
 def _make_tool(
@@ -103,9 +106,7 @@ class TestConfigHashIgnoresNonDeterministic:
         hash_1 = compute_agent_config_hash([tool_1])
         hash_2 = compute_agent_config_hash([tool_2])
 
-        assert hash_1 == hash_2, (
-            "Description changes must not affect the config hash"
-        )
+        assert hash_1 == hash_2, "Description changes must not affect the config hash"
 
     def test_config_hash_ignores_enabled_change(self) -> None:
         """Different enabled flags must not change the hash."""
@@ -121,6 +122,4 @@ class TestConfigHashIgnoresNonDeterministic:
         hash_1 = compute_agent_config_hash([tool_1b])
         hash_2 = compute_agent_config_hash([tool_2b])
 
-        assert hash_1 == hash_2, (
-            "Enabled flag changes must not affect the config hash"
-        )
+        assert hash_1 == hash_2, "Enabled flag changes must not affect the config hash"

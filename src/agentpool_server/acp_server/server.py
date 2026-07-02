@@ -22,6 +22,8 @@ from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from upathtools import JoinablePathLike
 
     from acp import Transport
@@ -54,7 +56,7 @@ def _coerce_subagent_display_mode(value: str) -> SubagentDisplayMode:
     return "legacy"
 
 
-def _acp_event_observer(show_detailed: bool = False):
+def _acp_event_observer(show_detailed: bool = False) -> Callable[[Any], None]:
     """Create an ACP stream observer that prints JSON-RPC messages to stderr.
 
     Args:
@@ -64,7 +66,7 @@ def _acp_event_observer(show_detailed: bool = False):
         StreamObserver callable for Connection._observers.
     """
 
-    def observer(event) -> None:
+    def observer(event: Any) -> None:
         direction_icon = "→" if event.direction == "outgoing" else "←"
         method = event.message.get("method", "response")
         if show_detailed:
@@ -165,6 +167,8 @@ class ACPServer(BaseServer):
             transport: Transport configuration ("stdio", "websocket", or transport object)
             subagent_display_mode: Override for subagent display mode (argument > config > default)
             raw_input_mode: Override for raw input mode (argument > config > default)
+            show_events: Whether to print agent stream events to stderr
+            show_events_detailed: Whether to print detailed agent stream events to stderr
 
         Returns:
             Configured ACP server instance with agent pool

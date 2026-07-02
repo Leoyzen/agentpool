@@ -324,79 +324,23 @@ async def _serve_websocket(
     """Run agent as WebSocket server."""
     import websockets
 
-    from acp.agent.connection import AgentSideConnection
-
     agent_factory = _ensure_factory(agent)
     shutdown = shutdown_event or asyncio.Event()
     connections: list[AgentSideConnection] = []
 
     async def handle_client(websocket: ServerConnection) -> None:
         """Handle a single WebSocket client connection."""
-        logger.info("WebSocket client connected")
-
-        # Create stream adapters for WebSocket
-        ws_reader = _WebSocketReadStream(websocket)
-        ws_writer = _WebSocketWriteStream(websocket)
-
-        conn = AgentSideConnection(
-            agent_factory, ws_writer, ws_reader, debug_file=debug_file, **kwargs
+        await _handle_websocket_client(
+            websocket,
+            agent_factory,
+            shutdown,
+            connections,
+            debug_file,
+            ping_interval,
+            pong_timeout,
+            max_missed_pongs,
+            kwargs,
         )
-        connections.append(conn)
-
-        heartbeat_task: asyncio.Task[None] | None = None
-        if ping_interval is not None:
-            logger.info(
-                "Starting WebSocket heartbeat with interval=%s, timeout=%s, max_missed=%s",
-                ping_interval,
-                pong_timeout,
-                max_missed_pongs,
-            )
-            heartbeat_task = asyncio.create_task(
-                _websocket_heartbeat(
-                    websocket,
-                    ping_interval=ping_interval,
-                    pong_timeout=pong_timeout,
-                    max_missed_pongs=max_missed_pongs,
-                )
-            )
-
-        try:
-            # Wait for shutdown or for the receive loop to end (client disconnect)
-            _recv_conn = getattr(conn, "_conn", None)
-            recv_task = getattr(_recv_conn, "_recv_task", None) if _recv_conn else None
-            waitables: list[asyncio.Future[Any]] = [asyncio.create_task(shutdown.wait())]
-            if isinstance(recv_task, asyncio.Task):
-                waitables.append(recv_task)
-            if heartbeat_task is not None:
-                waitables.append(heartbeat_task)
-
-            done, _ = await asyncio.wait(waitables, return_when=asyncio.FIRST_COMPLETED)
-
-            # Cancel any remaining tasks
-            for w in waitables:
-                if isinstance(w, asyncio.Task) and w not in done:
-                    w.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await w
-        except websockets.exceptions.ConnectionClosed:
-            logger.info("WebSocket client disconnected")
-        finally:
-            if heartbeat_task is not None and not heartbeat_task.done():
-                heartbeat_task.cancel()
-                try:
-                    await heartbeat_task
-                except asyncio.CancelledError:
-                    pass
-                except Exception:
-                    logger.exception("Unexpected error during heartbeat task cleanup")
-            try:
-                connections.remove(conn)
-            except ValueError:
-                pass
-            try:
-                await conn.close()
-            except Exception:
-                logger.exception("Unexpected error closing WebSocket connection")
 
     logger.info("Starting WebSocket server on ws://%s:%d", host, port)
     async with websockets.serve(handle_client, host, port, ping_interval=None):
@@ -406,6 +350,82 @@ async def _serve_websocket(
     # Clean up remaining connections
     for conn in connections:
         await conn.close()
+
+
+async def _handle_websocket_client(
+    websocket: ServerConnection,
+    agent_factory: Callable[[AgentSideConnection], Agent],
+    shutdown: asyncio.Event,
+    connections: list[AgentSideConnection],
+    debug_file: str | None,
+    ping_interval: float | None,
+    pong_timeout: float,
+    max_missed_pongs: int,
+    kwargs: dict[str, Any],
+) -> None:
+    """Handle a single WebSocket client connection lifecycle."""
+    import websockets
+
+    from acp.agent.connection import AgentSideConnection
+
+    logger.info("WebSocket client connected")
+
+    ws_reader = _WebSocketReadStream(websocket)
+    ws_writer = _WebSocketWriteStream(websocket)
+
+    conn = AgentSideConnection(agent_factory, ws_writer, ws_reader, debug_file=debug_file, **kwargs)
+    connections.append(conn)
+
+    heartbeat_task: asyncio.Task[None] | None = None
+    if ping_interval is not None:
+        logger.info(
+            "Starting WebSocket heartbeat with interval=%s, timeout=%s, max_missed=%s",
+            ping_interval,
+            pong_timeout,
+            max_missed_pongs,
+        )
+        heartbeat_task = asyncio.create_task(
+            _websocket_heartbeat(
+                websocket,
+                ping_interval=ping_interval,
+                pong_timeout=pong_timeout,
+                max_missed_pongs=max_missed_pongs,
+            )
+        )
+
+    try:
+        _recv_conn = getattr(conn, "_conn", None)
+        recv_task = getattr(_recv_conn, "_recv_task", None) if _recv_conn else None
+        waitables: list[asyncio.Future[Any]] = [asyncio.create_task(shutdown.wait())]
+        if isinstance(recv_task, asyncio.Task):
+            waitables.append(recv_task)
+        if heartbeat_task is not None:
+            waitables.append(heartbeat_task)
+
+        done, _ = await asyncio.wait(waitables, return_when=asyncio.FIRST_COMPLETED)
+
+        for w in waitables:
+            if isinstance(w, asyncio.Task) and w not in done:
+                w.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await w
+    except websockets.exceptions.ConnectionClosed:
+        logger.info("WebSocket client disconnected")
+    finally:
+        if heartbeat_task is not None and not heartbeat_task.done():
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Unexpected error during heartbeat task cleanup")
+        with contextlib.suppress(ValueError):
+            connections.remove(conn)
+        try:
+            await conn.close()
+        except Exception:
+            logger.exception("Unexpected error closing WebSocket connection")
 
 
 async def _websocket_heartbeat(

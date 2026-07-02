@@ -6,7 +6,7 @@ signal propagation, skill name collision resolution, and provider lifecycle.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 from unittest.mock import MagicMock
 
 import pytest
@@ -18,9 +18,10 @@ from agentpool.skills.skill import Skill
 
 
 if TYPE_CHECKING:
-    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
     from types import TracebackType
+
+    from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.prompts.prompts import BasePrompt
     from agentpool.resource_providers.resource_info import ResourceInfo
@@ -53,7 +54,7 @@ class MockLocalResourceProvider(ResourceProvider):
         self.entered = False
         self.exited = False
 
-    async def __aenter__(self) -> MockLocalResourceProvider:
+    async def __aenter__(self) -> Self:
         """Async context entry."""
         self.entered = True
         return self
@@ -121,7 +122,7 @@ class MockMCPResourceProvider(ResourceProvider):
         self.entered = False
         self.exited = False
 
-    async def __aenter__(self) -> MockMCPResourceProvider:
+    async def __aenter__(self) -> Self:
         """Async context entry."""
         self.entered = True
         return self
@@ -487,7 +488,7 @@ class TestAsyncContextManagerHandling:
         """Test AggregatingResourceProvider context manager delegates to children."""
         local_provider = MockLocalResourceProvider(name="local")
         mcp_provider = MockMCPResourceProvider(name="mcp")
-        aggregator = AggregatingResourceProvider(providers=[local_provider, mcp_provider])
+        AggregatingResourceProvider(providers=[local_provider, mcp_provider])
 
         # Aggregator doesn't require context manager, but children might
         # This tests that aggregator works with child providers that need cleanup
@@ -499,10 +500,9 @@ class TestAsyncContextManagerHandling:
         # Aggregator itself doesn't track enter/exit for children automatically
         # The lifecycle is managed by whoever creates the providers
 
-        async with local_provider:
-            async with mcp_provider:
-                assert local_provider.entered
-                assert mcp_provider.entered
+        async with local_provider, mcp_provider:
+            assert local_provider.entered
+            assert mcp_provider.entered
 
         assert local_provider.exited
         assert mcp_provider.exited

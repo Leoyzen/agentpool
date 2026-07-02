@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from agentpool.resource_providers.base import ResourceChangeEvent, ResourceProvider
 
@@ -232,7 +232,7 @@ class AggregatingResourceProvider(ResourceProvider):
 
         raise KeyError(f"Prompt {name!r} not found in any provider")
 
-    async def get_references(self, skill_name: str) -> list[str]:
+    async def get_references(self, skill_name: str) -> list[str | dict[str, Any]]:
         """Get list of available reference files for a skill from all providers.
 
         Aggregates results from child providers that have the skill.
@@ -243,7 +243,7 @@ class AggregatingResourceProvider(ResourceProvider):
         Returns:
             List of reference file paths
         """
-        references: list[str] = []
+        references: list[str | dict[str, Any]] = []
         for provider in self.providers:
             try:
                 skills = await provider.get_skills()

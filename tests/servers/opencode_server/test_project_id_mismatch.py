@@ -16,20 +16,24 @@ When these IDs differ, ALL events are silently dropped.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any
 
-import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+import pytest
 
 from agentpool_server.opencode_server.dependencies import get_state
 from agentpool_server.opencode_server.models import SessionStatusEvent
 from agentpool_server.opencode_server.routes import app_router, global_router
 from agentpool_server.opencode_server.routes.global_routes import GlobalEventFactory
-from agentpool_server.opencode_server.state import ServerState
 from agentpool_storage.opencode_provider.helpers import compute_project_id
-from agentpool_storage.project_store import generate_project_id
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from pathlib import Path
+
+    from agentpool_server.opencode_server.state import ServerState
 
 
 @pytest.fixture

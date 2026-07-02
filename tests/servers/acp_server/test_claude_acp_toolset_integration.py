@@ -7,7 +7,6 @@ The Claude agent can then use our internal tools through MCP.
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 import shutil
 
@@ -43,7 +42,9 @@ def manifest_with_claude(claude_config_with_subagent: ACPAgentConfig) -> AgentsM
     return AgentsManifest(agents={"claude_orchestrator": claude_config_with_subagent})
 
 
-@pytest.mark.skip(reason="pool.get_agents() was removed. ACP agents are now managed via SessionPool.")
+@pytest.mark.skip(
+    reason="pool.get_agents() was removed. ACP agents are now managed via SessionPool."
+)
 async def test_claude_acp_with_subagent_toolset_setup(manifest_with_claude: AgentsManifest):
     """Test that Claude ACP agent with Subagent toolset initializes correctly."""
     # NOTE: pool.get_agents(ACPAgent) was removed. ACP agent instances are now
@@ -85,8 +86,6 @@ async def test_claude_acp_multiple_toolsets():
         assert "list_available_nodes" in tool_names
         assert "task" in tool_names
         assert "execute_introspection" in tool_names
-
-
 
 
 if __name__ == "__main__":

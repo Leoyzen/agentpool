@@ -269,17 +269,23 @@ def test_input_match_multiple_fields_all_must_match():
         input_match={"task_tag": "^diagnosis_planning$", "mode": "^libarian$"},
     )
     # Both match
-    assert hook.matches({
-        "event": "post_tool_use",
-        "tool_name": "new_task",
-        "tool_input": {"mode": "libarian", "task_tag": "diagnosis_planning"},
-    }) is True
+    assert (
+        hook.matches({
+            "event": "post_tool_use",
+            "tool_name": "new_task",
+            "tool_input": {"mode": "libarian", "task_tag": "diagnosis_planning"},
+        })
+        is True
+    )
     # One mismatch
-    assert hook.matches({
-        "event": "post_tool_use",
-        "tool_name": "new_task",
-        "tool_input": {"mode": "rebuttal_agent", "task_tag": "diagnosis_planning"},
-    }) is False
+    assert (
+        hook.matches({
+            "event": "post_tool_use",
+            "tool_name": "new_task",
+            "tool_input": {"mode": "rebuttal_agent", "task_tag": "diagnosis_planning"},
+        })
+        is False
+    )
 
 
 def test_input_match_with_tool_name_mismatch():

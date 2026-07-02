@@ -185,8 +185,8 @@ def get_logger(name: str, log_level: LogLevel | None = None) -> structlog.stdlib
                 structlog.processors.StackInfoRenderer(),
                 logfire.StructlogProcessor(),
                 structlog.dev.ConsoleRenderer(
-                colors=False, exception_formatter=structlog.dev.plain_traceback
-            ),
+                    colors=False, exception_formatter=structlog.dev.plain_traceback
+                ),
             ],
             wrapper_class=structlog.stdlib.BoundLogger,
             logger_factory=structlog.stdlib.LoggerFactory(),

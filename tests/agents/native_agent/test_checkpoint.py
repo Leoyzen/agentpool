@@ -6,9 +6,9 @@ storage failure handling, and event emission.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
@@ -18,8 +18,8 @@ from pydantic_ai.messages import (
     ToolReturnPart,
     UserPromptPart,
 )
+import pytest
 
-from agentpool.agents.events.events import ToolCallDeferredEvent
 from agentpool.agents.native_agent.checkpoint import (
     CheckpointData,
     CheckpointManager,
@@ -27,6 +27,10 @@ from agentpool.agents.native_agent.checkpoint import (
 )
 from agentpool.sessions.models import PendingDeferredCall
 from agentpool.storage.manager import StorageManager
+
+
+if TYPE_CHECKING:
+    from agentpool.agents.events.events import ToolCallDeferredEvent
 
 
 class TestCheckpointData:
@@ -281,9 +285,7 @@ class TestCheckpointStorageFailure:
 
         mock_provider = MagicMock()
         mock_provider.can_load_history = True
-        mock_provider.save_checkpoint = AsyncMock(
-            side_effect=RuntimeError("disk full")
-        )
+        mock_provider.save_checkpoint = AsyncMock(side_effect=RuntimeError("disk full"))
         storage_manager.providers = [mock_provider]  # type: ignore[assignment]
 
         # Should NOT raise — StorageManager catches errors internally
@@ -305,9 +307,7 @@ class TestCheckpointStorageFailure:
 
         mock_provider = MagicMock()
         mock_provider.can_load_history = True
-        mock_provider.save_checkpoint = AsyncMock(
-            side_effect=RuntimeError("disk full")
-        )
+        mock_provider.save_checkpoint = AsyncMock(side_effect=RuntimeError("disk full"))
         storage_manager.providers = [mock_provider]  # type: ignore[assignment]
 
         await manager.checkpoint(
@@ -331,9 +331,7 @@ class TestCheckpointStorageFailure:
 
         mock_provider = MagicMock()
         mock_provider.can_load_history = True
-        mock_provider.save_checkpoint = AsyncMock(
-            side_effect=NotImplementedError
-        )
+        mock_provider.save_checkpoint = AsyncMock(side_effect=NotImplementedError)
         storage_manager.providers = [mock_provider]  # type: ignore[assignment]
 
         # Should NOT raise — NotImplementedError is caught internally
@@ -443,6 +441,7 @@ class TestCheckpointSerialization:
         assert json_str is not None
 
         from agentpool.storage.serialization import deserialize_messages
+
         restored = deserialize_messages(json_str)
         assert len(restored) == len(sample_messages)
 
@@ -487,9 +486,7 @@ class TestCheckpointAtomicConsistency:
 
         mock_provider = MagicMock()
         mock_provider.can_load_history = True
-        mock_provider.save_checkpoint = AsyncMock(
-            side_effect=RuntimeError("connection lost")
-        )
+        mock_provider.save_checkpoint = AsyncMock(side_effect=RuntimeError("connection lost"))
         storage_manager.providers = [mock_provider]  # type: ignore[assignment]
 
         # Should NOT raise — StorageManager handles errors internally

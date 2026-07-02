@@ -1,4 +1,4 @@
-"""Validate invalid deferred_kind × deferred_strategy combinations on Tool.
+"""Validate invalid deferred_kind x deferred_strategy combinations on Tool.
 
 These tests enforce the rules documented in
 .omo/notepads/durable-execution/decisions.md:
@@ -19,7 +19,7 @@ class TestInvalidCombinations:
     """Invalid combos must raise at Tool instantiation."""
 
     def test_unapproved_continue_raises(self):
-        """unapproved + continue is disallowed (would bypass approval)."""
+        """Unapproved + continue is disallowed (would bypass approval)."""
         with pytest.raises(ToolError, match="unapproved"):
             Tool(
                 name="test_unapproved_continue",
@@ -29,7 +29,7 @@ class TestInvalidCombinations:
             )
 
     def test_unapproved_stream_raises(self):
-        """unapproved + stream is disallowed."""
+        """Unapproved + stream is disallowed."""
         with pytest.raises(ToolError, match="unapproved"):
             Tool(
                 name="test_unapproved_stream",
@@ -43,7 +43,7 @@ class TestValidCombinations:
     """Valid combos must instantiate without error."""
 
     def test_external_block_valid(self):
-        """external + block is the default and always valid."""
+        """External + block is the default and always valid."""
         t = Tool(
             name="test_external_block",
             deferred=True,
@@ -55,7 +55,7 @@ class TestValidCombinations:
         assert t.deferred_strategy == "block"
 
     def test_external_continue_valid(self):
-        """external + continue allows non-blocking external tools."""
+        """External + continue allows non-blocking external tools."""
         t = Tool(
             name="test_external_continue",
             deferred=True,
@@ -71,7 +71,7 @@ class TestStreamNotImplemented:
     """Stream strategy is deferred to a follow-up change."""
 
     def test_external_stream_raises_not_implemented(self):
-        """external + stream is not yet implemented."""
+        """External + stream is not yet implemented."""
         with pytest.raises(NotImplementedError, match="stream"):
             Tool(
                 name="test_external_stream",
@@ -81,7 +81,7 @@ class TestStreamNotImplemented:
             )
 
     def test_unapproved_block_stream_raises_not_implemented(self):
-        """unapproved + stream raises ToolError first (kind check wins)."""
+        """Unapproved + stream raises ToolError first (kind check wins)."""
         with pytest.raises(ToolError, match="unapproved"):
             Tool(
                 name="test_unapproved_block_stream",

@@ -7,7 +7,7 @@ load_session calls.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -71,7 +71,7 @@ def session_manager(mock_agent: MagicMock, mock_session_store: MagicMock) -> ACP
 @pytest.fixture
 def known_session_data() -> SessionData:
     """Create a SessionData with known values for integrity checks."""
-    created = datetime(2025, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+    created = datetime(2025, 1, 15, 10, 30, 0, tzinfo=UTC)
     return SessionData(
         session_id="sess-abc-123",
         agent_name="test_agent",
@@ -91,7 +91,7 @@ def checkpointed_session_data() -> SessionData:
         agent_name="test_agent",
         cwd="/tmp/checkpointed",
         status="checkpointed",
-        created_at=datetime(2025, 3, 1, 0, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2025, 3, 1, 0, 0, 0, tzinfo=UTC),
     )
 
 
@@ -115,14 +115,14 @@ async def test_create_then_resume_preserves_conversation_history(
     # Arrange: store session data
     session_manager.session_store.load = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
 
-    with patch("agentpool_server.acp_server.session_manager.ACPSession") as MockSession:
+    with patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls:
         mock_session_instance = MagicMock()
         mock_session_instance.session_id = "sess-abc-123"
         mock_session_instance.initialize = AsyncMock()
         mock_session_instance.initialize_mcp_servers = AsyncMock()
         mock_session_instance.agent = mock_agent
         mock_session_instance.register_update_callback = MagicMock()
-        MockSession.return_value = mock_session_instance
+        mock_session_cls.return_value = mock_session_instance
 
         # Act
         result = await session_manager.resume_session(
@@ -153,13 +153,13 @@ async def test_resume_preserves_created_at_timestamp(
     # Arrange
     session_manager.session_store.load = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
 
-    with patch("agentpool_server.acp_server.session_manager.ACPSession") as MockSession:
+    with patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls:
         mock_session_instance = MagicMock()
         mock_session_instance.initialize = AsyncMock()
         mock_session_instance.initialize_mcp_servers = AsyncMock()
         mock_session_instance.agent = mock_agent
         mock_session_instance.register_update_callback = MagicMock()
-        MockSession.return_value = mock_session_instance
+        mock_session_cls.return_value = mock_session_instance
 
         # Act
         await session_manager.resume_session(
@@ -188,13 +188,13 @@ async def test_resume_preserves_status_field(
     # Arrange
     session_manager.session_store.load = AsyncMock(return_value=checkpointed_session_data)  # type: ignore[union-attr]
 
-    with patch("agentpool_server.acp_server.session_manager.ACPSession") as MockSession:
+    with patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls:
         mock_session_instance = MagicMock()
         mock_session_instance.initialize = AsyncMock()
         mock_session_instance.initialize_mcp_servers = AsyncMock()
         mock_session_instance.agent = mock_agent
         mock_session_instance.register_update_callback = MagicMock()
-        MockSession.return_value = mock_session_instance
+        mock_session_cls.return_value = mock_session_instance
 
         # Act
         await session_manager.resume_session(
@@ -223,13 +223,13 @@ async def test_resume_with_mcp_servers_initializes_connections(
     session_manager.session_store.load = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
     mock_mcp_server = MagicMock()
 
-    with patch("agentpool_server.acp_server.session_manager.ACPSession") as MockSession:
+    with patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls:
         mock_session_instance = MagicMock()
         mock_session_instance.initialize = AsyncMock()
         mock_session_instance.initialize_mcp_servers = AsyncMock()
         mock_session_instance.agent = mock_agent
         mock_session_instance.register_update_callback = MagicMock()
-        MockSession.return_value = mock_session_instance
+        mock_session_cls.return_value = mock_session_instance
 
         # Act
         result = await session_manager.resume_session(
@@ -318,13 +318,13 @@ async def test_no_duplicate_load_session_call_on_resume(
     # Arrange
     session_manager.session_store.load = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
 
-    with patch("agentpool_server.acp_server.session_manager.ACPSession") as MockSession:
+    with patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls:
         mock_session_instance = MagicMock()
         mock_session_instance.initialize = AsyncMock()
         mock_session_instance.initialize_mcp_servers = AsyncMock()
         mock_session_instance.agent = mock_agent
         mock_session_instance.register_update_callback = MagicMock()
-        MockSession.return_value = mock_session_instance
+        mock_session_cls.return_value = mock_session_instance
 
         # Act
         await session_manager.resume_session(

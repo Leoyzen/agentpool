@@ -136,13 +136,17 @@ class A2AServer(HTTPServer):
             """List all available agents."""
             from starlette.responses import JSONResponse
 
+            from agentpool.models.agents import NativeAgentConfig
+
             agent_list = [
                 {
                     "name": name,
                     "route": f"/{name}",
                     "agent_card": f"/{name}/.well-known/agent-card.json",
                     "docs": f"/{name}/docs",
-                    "model": agent.model_name,
+                    "model": str(agent.model)
+                    if isinstance(agent, NativeAgentConfig)
+                    else "external",
                 }
                 for name, agent in self.pool.manifest.agents.items()
             ]

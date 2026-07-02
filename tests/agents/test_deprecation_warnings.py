@@ -9,8 +9,8 @@ Standalone native agents and non-native agents should NOT emit any warning.
 
 from __future__ import annotations
 
-import warnings
 from unittest.mock import AsyncMock, MagicMock
+import warnings
 
 from pydantic_ai.models.test import TestModel
 import pytest

@@ -146,10 +146,10 @@ class TestACPEventConverter:
 
 @pytest.mark.anyio
 async def test_cancelled_turn_emits_single_turn_complete():
-    """RunFailedEvent with 'cancelled' emits exactly one TurnCompleteUpdate(stop_reason='cancelled').
+    """RunFailedEvent with 'cancelled' emits exactly one TurnCompleteUpdate.
 
-    No preceding StreamCompleteEvent — the whole point is that cancel
-    does NOT emit StreamCompleteEvent.
+    The stop_reason is 'cancelled' with no preceding StreamCompleteEvent,
+    since cancel does NOT emit StreamCompleteEvent.
     """
     converter = ACPEventConverter()
     converter.client_supports_turn_complete = True
@@ -164,5 +164,3 @@ async def test_cancelled_turn_emits_single_turn_complete():
     turn_completes = [u for u in updates if isinstance(u, TurnCompleteUpdate)]
     assert len(turn_completes) == 1
     assert turn_completes[0].stop_reason == "cancelled"
-
-

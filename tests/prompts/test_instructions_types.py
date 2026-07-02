@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -20,6 +19,8 @@ from agentpool.prompts.instructions import (
 
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable
+
     from pydantic_ai import RunContext
 
     from agentpool.agents.context import AgentContext

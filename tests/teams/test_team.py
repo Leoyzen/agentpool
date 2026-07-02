@@ -29,6 +29,7 @@ async def test_team_parallel_execution():
 
 async def test_team_shared_prompt():
     """Test that shared prompt is prepended to individual prompts."""
+
     # Create agents that echo their input
     def echo(prompt: str) -> str:
         return prompt

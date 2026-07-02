@@ -9,18 +9,13 @@ Consolidated from:
 from __future__ import annotations
 
 import asyncio
-import contextlib
-from collections.abc import AsyncIterator
 import inspect
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
-import anyio
-
 import pytest
 
-from agentpool.agents.events import RunFailedEvent, RunStartedEvent, StreamCompleteEvent
-from agentpool.messaging.messages import ChatMessage
+from agentpool.agents.events import RunStartedEvent
 from agentpool.orchestrator.core import (
     EventBus,
     SessionController,
@@ -28,9 +23,11 @@ from agentpool.orchestrator.core import (
     SessionPool,
     SessionState,
 )
-from agentpool.orchestrator.run import RunHandle
+
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from agentpool.agents.context import AgentRunContext
 
 
@@ -125,6 +122,8 @@ async def _setup_session(
 
 
 class TestSessionLifecyclePolicy:
+    """Tests for SessionLifecyclePolicy enum and validation."""
+
     def test_default_is_cascade(self) -> None:
         assert SessionLifecyclePolicy.default() == "cascade"
 
@@ -136,6 +135,8 @@ class TestSessionLifecyclePolicy:
 
 
 class TestSessionStateParentChild:
+    """Tests for SessionState parent-child relationship fields."""
+
     def test_session_state_has_parent_and_policy(self) -> None:
         state = SessionState(
             session_id="s1",
@@ -153,13 +154,13 @@ class TestSessionStateParentChild:
 
 
 class TestSessionControllerParentChild:
+    """Tests for SessionController parent-child session management."""
+
     @pytest.mark.anyio
     async def test_creates_child_session(self) -> None:
         ctrl = SessionController(pool=MagicMock())
         parent, _ = await ctrl.get_or_create_session("parent1")
-        child, _ = await ctrl.get_or_create_session(
-            "child1", parent_session_id="parent1"
-        )
+        child, _ = await ctrl.get_or_create_session("child1", parent_session_id="parent1")
         assert child.parent_session_id == "parent1"
         assert ctrl.get_children("parent1") == ["child1"]
         assert ctrl.get_parent("child1") == parent
@@ -199,6 +200,8 @@ class TestSessionControllerParentChild:
 
 
 class TestEventBusScopedSubscription:
+    """Tests for EventBus scoped subscription behavior."""
+
     @pytest.mark.anyio
     async def test_session_scope_receives_own_events(self) -> None:
         bus = EventBus()
@@ -255,6 +258,8 @@ async def test_close_session_no_active_run(
 
     await session_pool.close_session("sess-4")
     assert session_pool.sessions.get_session("sess-4") is None
+
+
 @pytest.mark.anyio
 async def test_close_session_acquires_request_lock(
     session_pool: SessionPool,
@@ -287,7 +292,7 @@ async def test_close_session_acquires_request_lock(
 # ============================================================================
 # Error propagation
 # ============================================================================
-    # Should complete without error
+# Should complete without error
 
 
 # ============================================================================

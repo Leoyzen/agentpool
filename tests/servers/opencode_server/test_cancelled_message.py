@@ -17,33 +17,27 @@ user messages to display "QUEUED" indefinitely.
 from __future__ import annotations
 
 import asyncio
-
-import anyio
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from agentpool.utils import identifiers as identifier
+from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.models import (
     AssistantMessage,
-    MessagePath,
     MessageRequest,
-    MessageTime,
     MessageUpdatedEvent,
-    SessionStatus,
     TextPartInput,
     TimeCreated,
     UserMessage,
 )
 from agentpool_server.opencode_server.models.message import (
     MessageAbortedError,
-    MessageAbortedErrorData,
     MessageWithParts,
 )
 from agentpool_server.opencode_server.routes.message_routes import _process_message_locked
 from agentpool_server.opencode_server.state import ServerState
-from agentpool.utils import identifiers as identifier
-from agentpool.utils.time_utils import now_ms
 
 
 class CancellableAgentMock:
@@ -74,7 +68,6 @@ class CancellableAgentMock:
 
     async def set_mode(self, mode: str, category_id: str | None = None) -> None:
         """Mock set_mode method."""
-        pass
 
     async def get_available_models(self):
         """Mock get_available_models method."""
@@ -82,7 +75,7 @@ class CancellableAgentMock:
 
     async def load_session(self, session_id: str) -> None:
         """Mock load_session method."""
-        return None
+        return
 
     def run_stream(self, *args: Any, **kwargs: Any):
         """Raise CancelledError immediately to simulate user abort."""
@@ -92,7 +85,7 @@ class CancellableAgentMock:
             # Simulate: agent starts, then gets cancelled mid-stream.
             # The yield makes this an async generator (which is what
             # OpenCodeStreamAdapter.process_stream expects).
-            raise asyncio.CancelledError()
+            raise asyncio.CancelledError
             yield  # noqa: unreachable — makes this an async generator
 
         return stream()
@@ -130,9 +123,7 @@ def cancellable_mock_agent():
     mock_session = Mock()
     mock_session.agent = agent
     session_pool.sessions.get_session = Mock(return_value=mock_session)
-    session_pool.sessions.get_or_create_session = AsyncMock(
-        return_value=(mock_session, True)
-    )
+    session_pool.sessions.get_or_create_session = AsyncMock(return_value=(mock_session, True))
     session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=agent)
     session_pool.sessions.store = None
     # Create a RunHandle that raises CancelledError when waiting
@@ -146,6 +137,7 @@ def cancellable_mock_agent():
     # Set up a mock event_bus so _process_message_locked can subscribe
     session_pool.event_bus = Mock()
     from tests._helpers.mock_stream import EmptyReceiveStream
+
     session_pool.event_bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     session_pool.event_bus.unsubscribe = AsyncMock()
     pool.session_pool = session_pool
@@ -191,9 +183,8 @@ def sample_message_request():
 
 def _setup_session(state: ServerState, session_id: str) -> None:
     """Set up session state manually (bypassing ensure_session which needs pool.storage)."""
-    from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
-
     from agentpool_server.opencode_server.models import Session
+    from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
 
     now = now_ms()
     session = Session(

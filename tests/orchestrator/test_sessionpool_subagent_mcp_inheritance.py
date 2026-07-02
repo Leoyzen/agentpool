@@ -11,15 +11,20 @@ the child does NOT call agent.__aexit__().
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
 from agentpool.resource_providers import ResourceProvider
-from agentpool.resource_providers.resource_info import ResourceInfo
-from agentpool.skills.skill import Skill
 from agentpool.tools.base import Tool
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from agentpool.resource_providers.resource_info import ResourceInfo
+    from agentpool.skills.skill import Skill
 
 
 class MockMCPResourceProvider(ResourceProvider):
@@ -90,9 +95,7 @@ async def test_child_session_agent_inherits_parent_mcp_providers() -> None:
 
         # Create parent session and get its per-session agent
         await session_pool.create_session(parent_session_id, agent_name="test_agent")
-        parent_agent = await session_pool.sessions.get_or_create_session_agent(
-            parent_session_id
-        )
+        parent_agent = await session_pool.sessions.get_or_create_session_agent(parent_session_id)
 
         # Add a mock MCP provider ONLY to the parent agent
         mock_tool = Tool.from_callable(_mock_tool, name_override="mock_tool")
@@ -115,9 +118,7 @@ async def test_child_session_agent_inherits_parent_mcp_providers() -> None:
             agent_name="test_agent",
         )
 
-        child_agent = await session_pool.sessions.get_or_create_session_agent(
-            child_session_id
-        )
+        child_agent = await session_pool.sessions.get_or_create_session_agent(child_session_id)
 
         # Child is a NEW agent object (not parent's agent)
         assert child_agent is not parent_agent, (
@@ -157,12 +158,10 @@ async def test_child_session_agent_does_not_inherit_non_mcp_providers() -> None:
         parent_session_id = "parent-non-mcp-test"
         child_session_id = "child-non-mcp-test"
 
-        base_agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
+        pool.manifest.agents["test_agent"].get_agent(pool=pool)
 
         await session_pool.create_session(parent_session_id, agent_name="test_agent")
-        parent_agent = await session_pool.sessions.get_or_create_session_agent(
-            parent_session_id
-        )
+        parent_agent = await session_pool.sessions.get_or_create_session_agent(parent_session_id)
 
         # Add non-MCP provider to parent
         non_mcp_tool = Tool.from_callable(_mock_tool, name_override="lead_agent_tool")
@@ -186,9 +185,7 @@ async def test_child_session_agent_does_not_inherit_non_mcp_providers() -> None:
             parent_session_id=parent_session_id,
             agent_name="test_agent",
         )
-        child_agent = await session_pool.sessions.get_or_create_session_agent(
-            child_session_id
-        )
+        child_agent = await session_pool.sessions.get_or_create_session_agent(child_session_id)
 
         # Child inherits MCP provider
         assert mcp_provider in child_agent.tools.external_providers, (
@@ -231,9 +228,7 @@ async def test_child_session_agent_shares_base_agent_mcp() -> None:
             parent_session_id=parent_session_id,
             agent_name="test_agent",
         )
-        child_agent = await session_pool.sessions.get_or_create_session_agent(
-            child_session_id
-        )
+        child_agent = await session_pool.sessions.get_or_create_session_agent(child_session_id)
 
         # Child shares base_agent's MCP manager
         assert child_agent.mcp is base_agent.mcp, (
@@ -282,8 +277,6 @@ async def test_child_session_is_not_per_session_agent() -> None:
         await session_pool.close_session(child_session_id)
 
         parent_state = session_pool.sessions._sessions.get(parent_session_id)
-        assert parent_state is not None, (
-            "Parent session should still exist after child close"
-        )
+        assert parent_state is not None, "Parent session should still exist after child close"
 
         await session_pool.shutdown()

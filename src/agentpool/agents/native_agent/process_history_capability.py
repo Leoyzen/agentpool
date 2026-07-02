@@ -14,12 +14,12 @@ import inspect
 from typing import TYPE_CHECKING, Any, get_type_hints
 
 from pydantic_ai.capabilities import ProcessHistory
-from pydantic_ai.messages import ModelMessage
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from pydantic_ai.messages import ModelMessage
     from pydantic_ai.tools import RunContext
 
 
@@ -79,17 +79,15 @@ class ProcessHistoryAdapter:
         # from ``from __future__ import annotations``.
         try:
             hints = get_type_hints(processor)
-        except Exception:
+        except (TypeError, ValueError, NameError):
             hints = {}
 
         first_param_annotation = hints.get(first_param_name)
 
-        if first_param_annotation is not None:
-            # The first parameter already has a type annotation.
-            # If it is (or wraps) ``RunContext``, pydantic-ai will detect it
-            # correctly, so we can pass the processor through as-is.
-            if _is_run_context_annotation(first_param_annotation):
-                return processor
+        if first_param_annotation is not None and _is_run_context_annotation(
+            first_param_annotation
+        ):
+            return processor
 
         # The first parameter is untyped or typed as something other than
         # ``RunContext``. Wrap the processor so pydantic-ai sees a properly
@@ -100,13 +98,15 @@ class ProcessHistoryAdapter:
             async def _wrapped_async(
                 ctx: RunContext[Any], messages: list[ModelMessage]
             ) -> list[ModelMessage]:
-                return await processor(ctx, messages)
+                result: list[ModelMessage] = await processor(ctx, messages)
+                return result
 
             return _wrapped_async
 
         @functools.wraps(processor)
         def _wrapped_sync(ctx: RunContext[Any], messages: list[ModelMessage]) -> list[ModelMessage]:
-            return processor(ctx, messages)
+            result: list[ModelMessage] = processor(ctx, messages)
+            return result
 
         return _wrapped_sync
 

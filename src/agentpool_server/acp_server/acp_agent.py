@@ -634,6 +634,9 @@ class AgentPoolACPAgent(ACPAgent):
                 logger.error("Failed to resume session")
                 return ResumeSessionResponse()
 
+            if self.agent_pool is None:
+                logger.error("Agent pool not available")
+                return ResumeSessionResponse()
             session_pool = self.agent_pool.session_pool
             if session_pool is not None:
                 try:
@@ -688,11 +691,10 @@ class AgentPoolACPAgent(ACPAgent):
 
         # Delegate to SessionPool-backed handler when feature flag is enabled
         if self._protocol_handler is not None:
-            response = await self._protocol_handler.handle_prompt(
+            return await self._protocol_handler.handle_prompt(
                 params.session_id,
                 params.prompt,
             )
-            return response
         raise RuntimeError("No protocol handler configured for prompt processing")
 
     async def close_session(self, params: CloseSessionRequest) -> CloseSessionResponse:

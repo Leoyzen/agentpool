@@ -127,7 +127,7 @@ class TestSessionHistoryLoading:
 
         # Create session B
         response_b = await async_client.post("/session", json={"title": "Session B"})
-        session_b_id = response_b.json()["id"]
+        response_b.json()["id"]
 
         # Add session A to cache
         from agentpool_server.opencode_server.models import (

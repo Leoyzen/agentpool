@@ -170,9 +170,7 @@ class TestShareSession:
             "agentpool_server.opencode_server.routes.session_routes.OpenCodeSharer",
             return_value=mock_sharer,
         ):
-            share_response = await async_client.post(
-                f"/session/{session_id}/share?num_messages=3"
-            )
+            share_response = await async_client.post(f"/session/{session_id}/share?num_messages=3")
 
         assert share_response.status_code == 200
         call_args = mock_sharer.share_conversation.call_args
@@ -269,9 +267,7 @@ class TestRevertSession:
 
         # Verify SessionPool.truncate_messages was called
         session_pool = cast(Mock, server_state.pool.session_pool)
-        session_pool.truncate_messages.assert_awaited_once_with(
-            session_id, revert_message_id
-        )
+        session_pool.truncate_messages.assert_awaited_once_with(session_id, revert_message_id)
 
     async def test_revert_session_with_single_message(
         self,
@@ -537,7 +533,7 @@ class TestShareRevertEdgeCases:
         # Fork the reverted session
         fork_response = await async_client.post(f"/session/{session_id}/fork")
         assert fork_response.status_code == 200
-        forked_id = fork_response.json()["id"]
+        fork_response.json()["id"]
 
         # After reverting, the fork endpoint copies messages via SessionPool.
         # Verify copy_messages was called (core behavior checked by fork tests).

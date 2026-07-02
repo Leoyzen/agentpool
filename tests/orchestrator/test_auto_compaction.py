@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-import pytest
 from pydantic_ai import ToolReturnPart
 from pydantic_ai.messages import (
     ModelMessage,
@@ -18,6 +17,7 @@ from pydantic_ai.messages import (
     TextPart,
     UserPromptPart,
 )
+import pytest
 
 from agentpool.agents.native_agent.checkpoint import CheckpointManager
 from agentpool.storage.serialization import messages_adapter
@@ -66,9 +66,7 @@ def mock_storage() -> AsyncMock:
 class TestAutoCompaction:
     """Tests for compaction-trigger logic in CheckpointManager.checkpoint()."""
 
-    async def test_below_threshold_skips_compaction(
-        self, mock_storage: AsyncMock
-    ) -> None:
+    async def test_below_threshold_skips_compaction(self, mock_storage: AsyncMock) -> None:
         """Compaction is NOT triggered when message count and byte size are below thresholds."""
         messages = _make_small_messages(2)
         original_json = messages_adapter.dump_json(messages).decode()
@@ -111,16 +109,10 @@ class TestAutoCompaction:
         saved_json = mock_storage.save_checkpoint.call_args.kwargs["messages_json"]
 
         # Compaction should have truncated the large tool outputs
-        assert "... [truncated]" in saved_json, (
-            "Expected compaction to truncate tool outputs"
-        )
-        assert saved_json != original_json, (
-            "Expected compacted JSON to differ from original"
-        )
+        assert "... [truncated]" in saved_json, "Expected compaction to truncate tool outputs"
+        assert saved_json != original_json, "Expected compacted JSON to differ from original"
 
-    async def test_above_byte_threshold_triggers_compaction(
-        self, mock_storage: AsyncMock
-    ) -> None:
+    async def test_above_byte_threshold_triggers_compaction(self, mock_storage: AsyncMock) -> None:
         """Compaction IS triggered when serialized byte size exceeds threshold."""
         messages = _make_messages_with_large_output(5)
         original_json = messages_adapter.dump_json(messages).decode()
@@ -141,9 +133,5 @@ class TestAutoCompaction:
         saved_json = mock_storage.save_checkpoint.call_args.kwargs["messages_json"]
 
         # Compaction should have truncated the large tool outputs
-        assert "... [truncated]" in saved_json, (
-            "Expected compaction to truncate tool outputs"
-        )
-        assert saved_json != original_json, (
-            "Expected compacted JSON to differ from original"
-        )
+        assert "... [truncated]" in saved_json, "Expected compaction to truncate tool outputs"
+        assert saved_json != original_json, "Expected compacted JSON to differ from original"

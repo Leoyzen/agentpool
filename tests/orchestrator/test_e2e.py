@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator
-from typing import Any
+from dataclasses import field
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import anyio
+from pydantic_ai import TextPartDelta
 import pytest
 
-from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     PartDeltaEvent,
     RunStartedEvent,
@@ -25,7 +25,12 @@ from agentpool.agents.events import (
 )
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionPool
-from pydantic_ai import TextPartDelta
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from agentpool.agents.context import AgentRunContext
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
@@ -58,12 +63,13 @@ def mock_agent_full_lifecycle() -> MagicMock:
     agent = MagicMock()
 
     def _make_turn(prompts: Any, run_ctx: AgentRunContext, **kw: Any) -> Any:
-        sid = run_ctx.session_id
 
         class _MockTurn:
-            message_history: list[Any] = []
+            message_history: list[Any] = field(default_factory=list)
 
-            async def execute(self) -> AsyncIterator[
+            async def execute(
+                self,
+            ) -> AsyncIterator[
                 PartDeltaEvent
                 | ToolCallStartEvent
                 | ToolCallCompleteEvent
@@ -99,14 +105,11 @@ def mock_agent_with_text(text: str = "response") -> MagicMock:
     agent = MagicMock()
 
     def _make_turn(prompts: Any, run_ctx: AgentRunContext, **kw: Any) -> Any:
-        sid = run_ctx.session_id
 
         class _MockTurn:
-            message_history: list[Any] = []
+            message_history: list[Any] = field(default_factory=list)
 
-            async def execute(self) -> AsyncIterator[
-                PartDeltaEvent | StreamCompleteEvent[Any]
-            ]:
+            async def execute(self) -> AsyncIterator[PartDeltaEvent | StreamCompleteEvent[Any]]:
                 yield PartDeltaEvent.text(index=0, content=text)
                 yield StreamCompleteEvent(
                     message=ChatMessage(content=text, role="assistant"),
@@ -169,7 +172,7 @@ async def test_full_session_lifecycle_create_prompt_events_close(
         try:
             event = await asyncio.wait_for(queue.receive(), timeout=0.5)
             events.append(event)
-        except (asyncio.TimeoutError, anyio.EndOfStream):
+        except (TimeoutError, anyio.EndOfStream):
             break
 
     # Verify event ordering and types
@@ -251,7 +254,7 @@ async def test_multi_agent_concurrent_sessions_no_contamination(
     agent_a = MagicMock()
 
     class _TurnA:
-        message_history: list[Any] = []
+        message_history: list[Any] = field(default_factory=list)
 
         async def execute(self) -> AsyncIterator[PartDeltaEvent | StreamCompleteEvent[Any]]:
             yield PartDeltaEvent.text(index=0, content="response-from-agent-a")
@@ -264,7 +267,7 @@ async def test_multi_agent_concurrent_sessions_no_contamination(
     agent_b = MagicMock()
 
     class _TurnB:
-        message_history: list[Any] = []
+        message_history: list[Any] = field(default_factory=list)
 
         async def execute(self) -> AsyncIterator[PartDeltaEvent | StreamCompleteEvent[Any]]:
             yield PartDeltaEvent.text(index=0, content="response-from-agent-b")
@@ -337,7 +340,12 @@ async def test_multi_agent_concurrent_sessions_no_contamination(
     await session_pool.shutdown()
 
 
-@pytest.mark.skip(reason="Concurrent process_prompt for same session now steers into active run, not separate turns. Needs rewrite for run-turn-separation architecture.")
+@pytest.mark.skip(
+    reason=(
+        "Concurrent process_prompt for same session now steers into active run, "
+        "not separate turns. Needs rewrite for run-turn-separation architecture."
+    )
+)
 @pytest.mark.anyio
 async def test_concurrent_sessions_turn_serialization_per_session(
     mock_pool: MagicMock,
@@ -359,7 +367,7 @@ async def test_concurrent_sessions_turn_serialization_per_session(
         sid = run_ctx.session_id
 
         class _Turn:
-            message_history: list[Any] = []
+            message_history: list[Any] = field(default_factory=list)
 
             async def execute(self) -> AsyncIterator[StreamCompleteEvent[Any]]:
                 start = asyncio.get_event_loop().time()
@@ -421,10 +429,9 @@ async def test_concurrent_sessions_event_bus_isolation(
     agent = MagicMock()
 
     def _make_turn(prompts: Any, run_ctx: AgentRunContext, **kw: Any) -> Any:
-        sid = run_ctx.session_id
 
         class _Turn:
-            message_history: list[Any] = []
+            message_history: list[Any] = field(default_factory=list)
 
             async def execute(self) -> AsyncIterator[StreamCompleteEvent[Any]]:
                 yield StreamCompleteEvent(

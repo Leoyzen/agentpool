@@ -9,8 +9,6 @@ import pytest
 
 
 if TYPE_CHECKING:
-    from unittest.mock import MagicMock
-
     from httpx import AsyncClient
 
     from agentpool_server.opencode_server.state import ServerState
@@ -147,17 +145,19 @@ async def test_summarize_routes_through_session_pool(
     ]
 
     # Mock session_pool.run_stream
-    mock_pool.session_pool.run_stream = AsyncMock(return_value=[
-        PartStartEvent(index=0, part=TextPart(content="SessionPool summary")),
-        PartDeltaEvent(index=0, delta=TextPartDelta(content_delta=" done")),
-        StreamCompleteEvent(
-            message=ChatMessage(
-                content="SessionPool summary done",
-                role="assistant",
-                usage=RequestUsage(input_tokens=5, output_tokens=3),
-            )
-        )
-    ])
+    mock_pool.session_pool.run_stream = AsyncMock(
+        return_value=[
+            PartStartEvent(index=0, part=TextPart(content="SessionPool summary")),
+            PartDeltaEvent(index=0, delta=TextPartDelta(content_delta=" done")),
+            StreamCompleteEvent(
+                message=ChatMessage(
+                    content="SessionPool summary done",
+                    role="assistant",
+                    usage=RequestUsage(input_tokens=5, output_tokens=3),
+                )
+            ),
+        ]
+    )
 
     # Mock compact_conversation and get_messages_for_session
     with (

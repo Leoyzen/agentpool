@@ -14,17 +14,21 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+import sys
+from typing import TYPE_CHECKING, Any
 
 from pydantic_graph import GraphBuilder, StepContext, TypeExpression
-from pydantic_graph.graph_builder import EndMarker, GraphTask
+from pydantic_graph.graph_builder import EndMarker
 from pydantic_graph.join import reduce_list_append
-from pydantic_graph.node_types import AnyNode
 from pydantic_graph.paths import DestinationMarker
-from pydantic_graph.id_types import NodeID
+
+
+if TYPE_CHECKING:
+    from pydantic_graph.id_types import NodeID
+    from pydantic_graph.node_types import AnyNode
+
 
 # ---------------------------------------------------------------------------
 # State
@@ -120,7 +124,8 @@ def build_decision_graph() -> GraphBuilder[GraphState, None, int, str]:
     g.add(
         g.edge_from(g.start_node).to(emit_value),
         g.edge_from(emit_value).to(
-            g.decision(node_id="type_decision")
+            g
+            .decision(node_id="type_decision")
             .branch(g.match(TypeExpression[int]).to(handle_int))
             .branch(g.match(TypeExpression[str]).to(handle_str))
         ),
@@ -325,8 +330,7 @@ async def test_stream() -> dict[str, Any]:
 
     events: list[Any] = []
     async with graph.iter(state=state) as run:
-        async for event in run:
-            events.append(event)
+        events.extend([event async for event in run])
 
     # Should see task lists and a final EndMarker
     task_events = [e for e in events if isinstance(e, list)]
@@ -358,13 +362,13 @@ async def test_cancel() -> dict[str, Any]:
     async with graph.iter(state=state) as run:
         async for event in run:
             events.append(event)
-            if len(events) >= 2:
+            if len(events) >= 2:  # noqa: PLR2004
                 break  # Cancel early
 
     # We broke out early; no exception should have been raised
-    ok = len(events) >= 2
+    ok = len(events) >= 2  # noqa: PLR2004
     # Not all steps should have completed
-    ok = ok and len(state.log) < 2
+    ok = ok and len(state.log) < 2  # noqa: PLR2004
 
     return {
         "name": "cancel",
@@ -420,12 +424,12 @@ def _detect_cycles(
 
     def _neighbors(node_id: NodeID) -> list[NodeID]:
         """Extract destination IDs from outgoing paths."""
-        dests: list[NodeID] = []
-        for path in edges_by_source.get(node_id, []):
-            for item in path.items if hasattr(path, "items") else []:
-                if isinstance(item, DestinationMarker):
-                    dests.append(item.destination_id)
-        return dests
+        return [
+            item.destination_id
+            for path in edges_by_source.get(node_id, [])
+            for item in (path.items if hasattr(path, "items") else [])
+            if isinstance(item, DestinationMarker)
+        ]
 
     def _dfs(node_id: NodeID) -> list[NodeID] | None:
         visited.add(node_id)
@@ -526,9 +530,7 @@ async def run_single(name: str) -> dict[str, Any]:
     result = await TESTS[name]()
     path = evidence_path(f"task-1-{name}.txt")
     path.write_text(
-        f"Test: {name}\n"
-        f"Passed: {result['passed']}\n"
-        f"Details: {result}\n",
+        f"Test: {name}\nPassed: {result['passed']}\nDetails: {result}\n",
         encoding="utf-8",
     )
     return result
@@ -551,11 +553,7 @@ async def main() -> int:
     parser.add_argument("--test-all", action="store_true", help="Run all tests")
     args = parser.parse_args()
 
-    selected = [
-        name
-        for name in TESTS
-        if getattr(args, f"test_{name}") or args.test_all
-    ]
+    selected = [name for name in TESTS if getattr(args, f"test_{name}") or args.test_all]
 
     if not selected:
         parser.print_help()
@@ -573,7 +571,7 @@ async def main() -> int:
     notepad.parent.mkdir(parents=True, exist_ok=True)
     with notepad.open("a", encoding="utf-8") as fh:
         fh.write("\n## Prototype Validation Findings\n\n")
-        fh.write(f"Date: 2026-06-03\n\n")
+        fh.write("Date: 2026-06-03\n\n")
         for r in results:
             fh.write(f"- **{r['name']}**: {'PASS' if r['passed'] else 'FAIL'}\n")
             if not r["passed"]:

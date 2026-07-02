@@ -1,25 +1,24 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from typing import TYPE_CHECKING, Any, cast
 
 import anyio
-
 from pydantic import BaseModel
 from pydantic_ai.models.test import TestModel
 import pytest
 
 from agentpool import Agent, AgentPool, AgentsManifest
-from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.events import RunErrorEvent, SpawnSessionStart, StreamCompleteEvent
-from agentpool.agents.exceptions import DelegationDepthError, MAX_DELEGATION_DEPTH
+from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from pathlib import Path
 
+    from agentpool.agents.base_agent import BaseAgent
     from agentpool.orchestrator.core import SessionPool
 
 
@@ -341,11 +340,13 @@ async def test_worker_emits_spawn_session_start_event(tmp_path: Path):
         await _preregister_session_agent(session_pool, "ses_test", "main", main_model)
 
         async with _patch_agent_models(session_pool, {"worker": worker_model}):
-            async for event in _run_and_collect_events(
-                session_pool, "ses_test", "Ask worker: do something"
-            ):
-                if isinstance(event, SpawnSessionStart):
-                    events.append(event)
+            events.extend([
+                event
+                async for event in _run_and_collect_events(
+                    session_pool, "ses_test", "Ask worker: do something"
+                )
+                if isinstance(event, SpawnSessionStart)
+            ])
 
     # Verify SpawnSessionStart was emitted
     assert len(events) == 1
@@ -412,11 +413,13 @@ async def test_worker_session_isolation(tmp_path: Path):
         await _preregister_session_agent(session_pool, "ses_test", "main", main_model)
 
         async with _patch_agent_models(session_pool, {"worker": worker_model}):
-            async for event in _run_and_collect_events(
-                session_pool, "ses_test", "Ask worker twice"
-            ):
-                if isinstance(event, SpawnSessionStart):
-                    spawn_events.append(event)
+            spawn_events.extend([
+                event
+                async for event in _run_and_collect_events(
+                    session_pool, "ses_test", "Ask worker twice"
+                )
+                if isinstance(event, SpawnSessionStart)
+            ])
 
     assert len(spawn_events) == 2
     session_ids = [e.child_session_id for e in spawn_events]
@@ -426,15 +429,17 @@ async def test_worker_session_isolation(tmp_path: Path):
     assert parent_ids[0] == parent_ids[1], "All worker runs should share same parent session"
 
 
-@pytest.mark.skip(reason=(
-    "Team workers run directly via worker.run() instead of session_pool.run_stream(), "
-    "so StreamCompleteEvent is not published to the session pool's EventBus. "
-    "The _run_and_collect_events helper times out waiting for a terminal event. "
-    "This is an architectural difference in how teams are executed, not a regression."
-))
+@pytest.mark.skip(
+    reason=(
+        "Team workers run directly via worker.run() instead of session_pool.run_stream(), "
+        "so StreamCompleteEvent is not published to the session pool's EventBus. "
+        "The _run_and_collect_events helper times out waiting for a terminal event. "
+        "This is an architectural difference in how teams are executed, not a regression."
+    )
+)
 async def test_worker_team_emits_events(tmp_path: Path):
     """Test that team workers also emit proper events."""
-    TEAM_CONFIG = """\
+    team_config = """\
 agents:
   main:
     type: native
@@ -460,7 +465,7 @@ teams:
     mode: parallel
     members: [agent1, agent2]
 """
-    config_path = write_config(TEAM_CONFIG, tmp_path)
+    config_path = write_config(team_config, tmp_path)
     manifest = AgentsManifest.from_file(config_path)
 
     spawn_events: list[SpawnSessionStart] = []
@@ -478,11 +483,13 @@ teams:
             "agent2": TestModel(custom_output_text="Agent 2 result"),
         }
         async with _patch_agent_models(session_pool, team_models):
-            async for event in _run_and_collect_events(
-                session_pool, "ses_test", "Ask team to do something", timeout=25.0
-            ):
-                if isinstance(event, SpawnSessionStart):
-                    spawn_events.append(event)
+            spawn_events.extend([
+                event
+                async for event in _run_and_collect_events(
+                    session_pool, "ses_test", "Ask team to do something", timeout=25.0
+                )
+                if isinstance(event, SpawnSessionStart)
+            ])
 
     assert len(spawn_events) == 1
     assert spawn_events[0].source_name == "my_team"
@@ -506,11 +513,13 @@ async def test_worker_spawn_depth_equals_parent_depth_plus_one(tmp_path: Path):
         await _preregister_session_agent(session_pool, "ses_test", "main", main_model)
 
         async with _patch_agent_models(session_pool, {"worker": worker_model}):
-            async for event in _run_and_collect_events(
-                session_pool, "ses_test", "Ask worker: do something"
-            ):
-                if isinstance(event, SpawnSessionStart):
-                    spawn_events.append(event)
+            spawn_events.extend([
+                event
+                async for event in _run_and_collect_events(
+                    session_pool, "ses_test", "Ask worker: do something"
+                )
+                if isinstance(event, SpawnSessionStart)
+            ])
 
     assert len(spawn_events) == 1
     assert spawn_events[0].depth == 1
@@ -533,11 +542,13 @@ async def test_worker_child_session_has_correct_parent(tmp_path: Path):
         await _preregister_session_agent(session_pool, "ses_test", "main", main_model)
 
         async with _patch_agent_models(session_pool, {"worker": worker_model}):
-            async for event in _run_and_collect_events(
-                session_pool, "ses_test", "Ask worker: do something"
-            ):
-                if isinstance(event, SpawnSessionStart):
-                    spawn_events.append(event)
+            spawn_events.extend([
+                event
+                async for event in _run_and_collect_events(
+                    session_pool, "ses_test", "Ask worker: do something"
+                )
+                if isinstance(event, SpawnSessionStart)
+            ])
 
     assert len(spawn_events) == 1
     spawn = spawn_events[0]
@@ -546,11 +557,13 @@ async def test_worker_child_session_has_correct_parent(tmp_path: Path):
     assert spawn.parent_session_id.startswith("ses_")
 
 
-@pytest.mark.skip(reason=(
-    "DelegationDepthError raised inside a tool is caught by pydantic-ai's "
-    "tool error handling and does not propagate to the run_stream consumer. "
-    "This is a pydantic-ai behavior change, not an AgentPool regression."
-))
+@pytest.mark.skip(
+    reason=(
+        "DelegationDepthError raised inside a tool is caught by pydantic-ai's "
+        "tool error handling and does not propagate to the run_stream consumer. "
+        "This is a pydantic-ai behavior change, not an AgentPool regression."
+    )
+)
 async def test_delegation_depth_error_at_max_depth(tmp_path: Path):
     """Test that DelegationDepthError is raised when max delegation depth is exceeded."""
     config_path = write_config(BASIC_WORKERS, tmp_path)
@@ -571,7 +584,9 @@ async def test_delegation_depth_error_at_max_depth(tmp_path: Path):
                 depth_exceeded = False
                 try:
                     async for event in main_agent.run_stream(
-                        "Ask worker: do something", depth=MAX_DELEGATION_DEPTH, session_id="ses_test"
+                        "Ask worker: do something",
+                        depth=MAX_DELEGATION_DEPTH,
+                        session_id="ses_test",
                     ):
                         if isinstance(event, SpawnSessionStart):
                             pass  # Should not reach here

@@ -34,8 +34,7 @@ async def test_streaming_event_ordering(ordering_agent: Agent[None]) -> None:
     """
     events = []
 
-    async for event in ordering_agent.run_stream("Hello"):
-        events.append(event)
+    events.extend([event async for event in ordering_agent.run_stream("Hello")])
 
     assert len(events) >= 1, "Expected at least StreamCompleteEvent"
 

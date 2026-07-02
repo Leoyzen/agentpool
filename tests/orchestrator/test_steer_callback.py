@@ -117,10 +117,7 @@ async def test_steer_callback_queues_message_when_running() -> None:
             await run_ctx.steer_callback("any-session", "steer msg")
             # Message should be queued in queued_steer_messages or
             # _message_queue depending on handle state.
-            assert (
-                len(run_ctx.queued_steer_messages) > 0
-                or len(handle._message_queue) > 0
-            )
+            assert len(run_ctx.queued_steer_messages) > 0 or len(handle._message_queue) > 0
             break
 
     consumer = asyncio.create_task(_consume())

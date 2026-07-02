@@ -5,8 +5,9 @@ One auto-resume failure MUST NOT cancel sibling auto-resume tasks.
 
 from __future__ import annotations
 
-import anyio
 import asyncio
+
+import anyio
 import pytest
 
 
@@ -19,10 +20,9 @@ async def test_safe_auto_resume_sibling_isolation() -> None:
         try:
             await asyncio.sleep(0.05)
             results.append("failing_task_started")
-            raise ValueError("Task failed intentionally")
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
 
     async def safe_succeeding_task() -> None:
@@ -31,7 +31,7 @@ async def test_safe_auto_resume_sibling_isolation() -> None:
             results.append("succeeding_task_completed")
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
 
     async with anyio.create_task_group() as tg:

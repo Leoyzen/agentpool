@@ -29,15 +29,18 @@ from agentpool.agents.events import StreamCompleteEvent, ToolCallCompleteEvent
 
 # Mark all tests in this module as integration tests
 
+
 def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
     """Check if a memory receive stream has no buffered items."""
     try:
         stream.receive_nowait()
-        return False
     except anyio.WouldBlock:
         return True
     except anyio.EndOfStream:
         return True
+    else:
+        return False
+
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 

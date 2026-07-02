@@ -360,13 +360,14 @@ class StreamEventEmitter:
             if session_id:
                 try:
                     await self._event_bus.publish(session_id, event)
-                    return
-                except Exception:
+                except (ValueError, TypeError, RuntimeError, KeyError, AttributeError):
                     logger.warning(
                         "EventBus publish failed — event dropped",
                         session_id=session_id,
                         event_type=type(event).__name__,
                     )
+                    return
+                else:
                     return
             logger.warning(
                 "Event dropped: no session_id for event_bus publish",

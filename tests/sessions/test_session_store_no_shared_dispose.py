@@ -7,8 +7,8 @@ reference to a disposed engine, breaking all subsequent users.
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
+import tempfile
 from unittest.mock import patch
 
 import pytest

@@ -11,7 +11,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentpool.orchestrator.core import SessionController
-from agentpool.orchestrator.run import RunHandle, RunStatus
 
 
 pytestmark = pytest.mark.unit

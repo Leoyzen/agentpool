@@ -6,10 +6,10 @@ from collections.abc import Awaitable
 from typing import Any, cast
 from unittest.mock import MagicMock
 
-import pytest
 from pydantic_ai import RunContext
 from pydantic_ai.capabilities import Toolset
 from pydantic_ai.toolsets import AbstractToolset
+import pytest
 
 from agentpool.resource_providers import ResourceProvider, StaticResourceProvider
 from agentpool_toolsets.builtin import (

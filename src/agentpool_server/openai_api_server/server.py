@@ -22,7 +22,7 @@ from agentpool_server.openai_api_server.completions.models import (
     OpenAIModelInfo,
 )
 from agentpool_server.openai_api_server.responses.helpers import handle_request
-from agentpool_server.openai_api_server.responses.models import (
+from agentpool_server.openai_api_server.responses.models import (  # noqa: TC001
     Response as ResponsesResponse,
     ResponseRequest,
 )
@@ -153,7 +153,9 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
         self.app.post("/v1/chat/completions", dependencies=[dep], response_model=None)(
             self.create_chat_completion
         )
-        self.app.post("/v1/responses", dependencies=[dep])(self.create_response)
+        self.app.post("/v1/responses", dependencies=[dep], response_model=None)(
+            self.create_response
+        )
 
     def verify_api_key(
         self, authorization: Annotated[str | None, Header(alias="Authorization")] = None
@@ -203,22 +205,6 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
             async for event in session_pool.run_stream(session_id, content):
                 if isinstance(event, StreamCompleteEvent):
                     final_message = event.message
-
-            if final_message is None:
-                raise HTTPException(500, "No response received from agent")
-
-            msg = OpenAIMessage(role="assistant", content=str(final_message.content))
-            completion_response = ChatCompletionResponse(
-                id=final_message.message_id,
-                created=int(final_message.timestamp.timestamp()),
-                model=request.model,
-                choices=[Choice(message=msg)],
-                usage=_serialize_completion_usage(
-                    final_message.cost_info.token_usage if final_message.cost_info else None
-                ),
-            )
-            json_str = completion_response.model_dump_json()
-            return Response(content=json_str, media_type="application/json")
         except HTTPException:
             raise
         except Exception as e:
@@ -229,6 +215,22 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
                 await session_pool.close_session(session_id)
             except Exception:
                 self.log.exception("Error closing session during cleanup", session_id=session_id)
+
+        if final_message is None:
+            raise HTTPException(500, "No response received from agent")
+
+        msg = OpenAIMessage(role="assistant", content=str(final_message.content))
+        completion_response = ChatCompletionResponse(
+            id=final_message.message_id,
+            created=int(final_message.timestamp.timestamp()),
+            model=request.model,
+            choices=[Choice(message=msg)],
+            usage=_serialize_completion_usage(
+                final_message.cost_info.token_usage if final_message.cost_info else None
+            ),
+        )
+        json_str = completion_response.model_dump_json()
+        return Response(content=json_str, media_type="application/json")
 
     async def create_response(self, req_body: ResponseRequest) -> ResponsesResponse:
         """Handle response creation requests."""
@@ -241,32 +243,27 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
         if req_body.model not in self.pool.manifest.agents:
             raise HTTPException(404, f"Model {req_body.model} not found")
 
+        match req_body.input:
+            case str():
+                content = req_body.input
+            case list():
+                last = req_body.input[-1]["content"]
+                text_parts = [p["text"] for p in last if p["type"] == "input_text"]
+                content = "\n".join(text_parts)
+            case _:
+                raise HTTPException(400, "Invalid input format")
+
+        session_id = f"openai-responses-{uuid.uuid4()}"
+        await session_pool.create_session(session_id, agent_name=req_body.model)
+
+        from agentpool.agents.events import StreamCompleteEvent
+
+        message = None
         try:
-            match req_body.input:
-                case str():
-                    content = req_body.input
-                case list():
-                    last = req_body.input[-1]["content"]
-                    text_parts = [p["text"] for p in last if p["type"] == "input_text"]
-                    content = "\n".join(text_parts)
-                case _:
-                    raise HTTPException(400, "Invalid input format")
-
-            session_id = f"openai-responses-{uuid.uuid4()}"
-            await session_pool.create_session(session_id, agent_name=req_body.model)
-
-            from agentpool.agents.events import StreamCompleteEvent
-
-            message = None
             async for event in session_pool.run_stream(session_id, content):
                 if isinstance(event, StreamCompleteEvent):
                     message = event.message
                     break
-
-            if message is None:
-                raise HTTPException(500, "No response received from agent")
-
-            return await handle_request(req_body, message)
         except KeyError:
             raise HTTPException(404, f"Model {req_body.model} not found") from None
         except Exception as e:
@@ -276,6 +273,11 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
                 await session_pool.close_session(session_id)
             except Exception:
                 self.log.exception("Error closing session during cleanup", session_id=session_id)
+
+        if message is None:
+            raise HTTPException(500, "No response received from agent")
+
+        return await handle_request(req_body, message)
 
     async def _start_async(self) -> None:
         """Start the server (blocking async - runs until stopped)."""

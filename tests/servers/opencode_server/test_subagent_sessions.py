@@ -13,7 +13,10 @@ from agentpool.agents.events import StreamCompleteEvent
 from agentpool.messaging import ChatMessage
 from agentpool_server.opencode_server.dependencies import get_state
 from agentpool_server.opencode_server.routes import file_router, message_router, session_router
-from agentpool_server.opencode_server.session_pool_integration import ensure_session, get_messages_for_session
+from agentpool_server.opencode_server.session_pool_integration import (
+    ensure_session,
+    get_messages_for_session,
+)
 
 
 if TYPE_CHECKING:

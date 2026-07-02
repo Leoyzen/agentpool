@@ -38,6 +38,7 @@ from agentpool_server.acp_server.commands.skill_commands import ACPSkillBridge
 from agentpool_server.agui_server.skill_tools import AGUISkillBridge
 from agentpool_server.opencode_server.skill_bridge import OpenCodeSkillBridge, create_skill_command
 
+
 # Performance benchmarks are excluded from CI (marked slow) because
 # timing thresholds are environment-dependent and unreliable on shared runners.
 pytestmark = pytest.mark.slow
@@ -635,7 +636,8 @@ async def test_skill_discovery_10_skills_rfc0020(tmp_path: str) -> None:
     # Use acceptable threshold for CI environments
     assert duration_ms < RFC0020_DISCOVERY_ACCEPTABLE_MS, (
         f"Discovery of 10 skills took {duration_ms:.2f}ms, "
-        f"expected <{RFC0020_DISCOVERY_ACCEPTABLE_MS}ms (RFC-0020: <{RFC0020_DISCOVERY_THRESHOLD_MS}ms target)"
+        f"expected <{RFC0020_DISCOVERY_ACCEPTABLE_MS}ms"
+        f" (RFC-0020: <{RFC0020_DISCOVERY_THRESHOLD_MS}ms target)"
     )
 
 

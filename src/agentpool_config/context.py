@@ -53,7 +53,6 @@ def get_config_dir() -> UPath | None:
         ... # Outside with block - still accessible!
         ... dir2 = get_config_dir()  # Returns same path
     """
-    global _config_dir_global
     if _config_dir_global is not None:
         return _config_dir_global
     return CONFIG_DIR.get()
@@ -93,7 +92,7 @@ class ConfigContextManager(AbstractContextManager["ConfigContextManager"]):
     def __enter__(self) -> Self:
         """Enter the context and set CONFIG_DIR."""
         if self._config_dir is not None:
-            global _config_dir_global
+            global _config_dir_global  # noqa: PLW0603
             self._previous_dir = _config_dir_global
             _config_dir_global = self._config_dir
             self._token = CONFIG_DIR.set(self._config_dir)
@@ -116,7 +115,7 @@ class ConfigContextManager(AbstractContextManager["ConfigContextManager"]):
         if self._token is not None:
             CONFIG_DIR.reset(self._token)
         # Restore previous global config dir (handles nested contexts)
-        global _config_dir_global
+        global _config_dir_global  # noqa: PLW0603
         old_value = _config_dir_global
         _config_dir_global = self._previous_dir
         import logging

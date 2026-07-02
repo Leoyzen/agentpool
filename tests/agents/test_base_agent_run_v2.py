@@ -287,9 +287,7 @@ async def test_run_stream_breaks_on_stream_complete() -> None:
                 if isinstance(event.event, StreamCompleteEvent | RunErrorEvent):
                     break
     except TimeoutError:
-        pytest.fail(
-            "Loop hung — StreamCompleteEvent was received but loop didn't break"
-        )
+        pytest.fail("Loop hung — StreamCompleteEvent was received but loop didn't break")
     finally:
         publish_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -314,9 +312,7 @@ def test_no_duplicate_stream_complete_in_run_once() -> None:
     # in docstrings or comments).
     import re
 
-    publish_matches = re.findall(
-        r"await\s+event_bus\.publish\s*\([^)]*StreamCompleteEvent", source
-    )
+    publish_matches = re.findall(r"await\s+event_bus\.publish\s*\([^)]*StreamCompleteEvent", source)
     assert len(publish_matches) == 0, (
         f"_execute_node still publishes StreamCompleteEvent {len(publish_matches)} "
         "time(s) — duplicate publish should be removed since turn.execute() "
@@ -335,9 +331,7 @@ def test_no_duplicate_stream_complete_in_run_stream_once() -> None:
     source = inspect.getsource(agent_module.Agent._stream_events)
     import re
 
-    publish_matches = re.findall(
-        r"await\s+event_bus\.publish\s*\([^)]*StreamCompleteEvent", source
-    )
+    publish_matches = re.findall(r"await\s+event_bus\.publish\s*\([^)]*StreamCompleteEvent", source)
     assert len(publish_matches) == 0, (
         f"_stream_events still publishes StreamCompleteEvent {len(publish_matches)} "
         "time(s) — duplicate publish should be removed since turn.execute() "

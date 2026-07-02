@@ -16,6 +16,12 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, Mock
 
+import anyio
+from pydantic_ai.messages import (
+    PartDeltaEvent as PydanticPartDeltaEvent,
+    PartStartEvent,
+    TextPartDelta,
+)
 import pytest
 
 from agentpool.agents.events import (
@@ -25,7 +31,6 @@ from agentpool.agents.events import (
     ToolCallStartEvent,
 )
 from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import SessionPool
 from agentpool_server.opencode_server.models import PartDeltaEvent, PartUpdatedEvent
 from agentpool_server.opencode_server.models.events import (
     SessionErrorEvent,
@@ -42,16 +47,10 @@ from agentpool_server.opencode_server.session_pool_integration import (
     OpenCodeSessionPoolIntegration,
 )
 from agentpool_server.opencode_server.state import ServerState
-import anyio
-from pydantic_ai.messages import (
-    PartDeltaEvent as PydanticPartDeltaEvent,
-    PartStartEvent,
-    TextPartDelta,
-)
 
 
 if TYPE_CHECKING:
-    pass
+    from agentpool.orchestrator.core import SessionPool
 
 
 # =============================================================================
@@ -59,16 +58,17 @@ if TYPE_CHECKING:
 # =============================================================================
 
 
-
 def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
     """Check if a memory receive stream has no buffered items."""
     try:
         stream.receive_nowait()
-        return False
     except anyio.WouldBlock:
         return True
     except anyio.EndOfStream:
         return True
+    else:
+        return False
+
 
 def _extract_opencode_events(sse_queue: Any) -> list[Any]:
     """Extract OpenCode events from the SSE subscriber queue.
@@ -119,7 +119,7 @@ def server_state(tmp_path: Any) -> ServerState:
 @pytest.fixture
 async def session_pool(server_state: ServerState):  # type: ignore[no-untyped-def]
     """Create a real SessionPool with a real EventBus."""
-    from agentpool.orchestrator.core import SessionPool as SP
+    from agentpool.orchestrator.core import SessionPool
 
     pool_mock = Mock()
     pool_mock.main_agent = Mock()
@@ -134,7 +134,7 @@ async def session_pool(server_state: ServerState):  # type: ignore[no-untyped-de
     store_mock.load = AsyncMock(return_value=None)
     store_mock.list_sessions = AsyncMock(return_value=[])
 
-    sp = SP(
+    sp = SessionPool(
         pool=pool_mock,
         store=store_mock,
         enable_auto_resume=False,
@@ -194,9 +194,7 @@ class TestEventPipelineE2E:
         await _async_wait(0.15)
 
         # Simulate agent emitting PartDeltaEvent
-        text_delta = PydanticPartDeltaEvent(
-            index=0, delta=TextPartDelta(content_delta=" world")
-        )
+        text_delta = PydanticPartDeltaEvent(index=0, delta=TextPartDelta(content_delta=" world"))
         await session_pool.event_bus.publish(session_id, text_delta)
         await _async_wait(0.15)
 
@@ -221,8 +219,7 @@ class TestEventPipelineE2E:
 
         # The first PartUpdatedEvent should contain a TextPart
         text_part_events = [
-            e for e in part_updated_events
-            if isinstance(e.properties.part, TextPart)
+            e for e in part_updated_events if isinstance(e.properties.part, TextPart)
         ]
         assert len(text_part_events) >= 1, (
             "At least one PartUpdatedEvent should contain a TextPart "
@@ -230,14 +227,11 @@ class TestEventPipelineE2E:
         )
 
         # Assert: PartDeltaEvents reached SSE
-        assert len(part_delta_events) >= 1, (
-            "PartDeltaEvent should reach SST subscriber"
-        )
+        assert len(part_delta_events) >= 1, "PartDeltaEvent should reach SST subscriber"
 
         # Assert: StreamComplete produces StepFinishPart as PartUpdatedEvent
         step_finish_events = [
-            e for e in part_updated_events
-            if isinstance(e.properties.part, StepFinishPart)
+            e for e in part_updated_events if isinstance(e.properties.part, StepFinishPart)
         ]
         assert len(step_finish_events) >= 1, (
             "StreamCompleteEvent should produce StepFinishPart PartUpdatedEvent"
@@ -293,9 +287,9 @@ class TestEventPipelineE2E:
         oc_events = _extract_opencode_events(sse_queue)
 
         tool_part_events = [
-            e for e in oc_events
-            if isinstance(e, PartUpdatedEvent)
-            and isinstance(e.properties.part, ToolPart)
+            e
+            for e in oc_events
+            if isinstance(e, PartUpdatedEvent) and isinstance(e.properties.part, ToolPart)
         ]
 
         assert len(tool_part_events) >= 2, (
@@ -304,15 +298,15 @@ class TestEventPipelineE2E:
 
         # First should be running state
         running_states = [
-            t for t in tool_part_events
-            if isinstance(t.properties.part.state, ToolStateRunning)
+            t for t in tool_part_events if isinstance(t.properties.part.state, ToolStateRunning)
         ]
-        assert len(running_states) >= 1, "ToolCallStart should produce ToolPart with ToolStateRunning"
+        assert len(running_states) >= 1, (
+            "ToolCallStart should produce ToolPart with ToolStateRunning"
+        )
 
         # Last should be completed state
         completed_states = [
-            t for t in tool_part_events
-            if isinstance(t.properties.part.state, ToolStateCompleted)
+            t for t in tool_part_events if isinstance(t.properties.part.state, ToolStateCompleted)
         ]
         assert len(completed_states) >= 1, (
             "ToolCallComplete should produce ToolPart with ToolStateCompleted"
@@ -347,14 +341,9 @@ class TestEventPipelineE2E:
 
         oc_events = _extract_opencode_events(sse_queue)
 
-        status_events = [
-            e for e in oc_events
-            if isinstance(e, SessionStatusEvent)
-        ]
+        status_events = [e for e in oc_events if isinstance(e, SessionStatusEvent)]
 
-        assert len(status_events) >= 1, (
-            "RunStartedEvent should produce SessionStatusEvent"
-        )
+        assert len(status_events) >= 1, "RunStartedEvent should produce SessionStatusEvent"
         assert status_events[0].properties.status.type == "busy"
 
         await integration._stop_event_consumer(session_id)
@@ -392,14 +381,9 @@ class TestEventPipelineE2E:
 
         oc_events = _extract_opencode_events(sse_queue)
 
-        error_events = [
-            e for e in oc_events
-            if isinstance(e, SessionErrorEvent)
-        ]
+        error_events = [e for e in oc_events if isinstance(e, SessionErrorEvent)]
 
-        assert len(error_events) >= 1, (
-            "RunErrorEvent should produce SessionErrorEvent"
-        )
+        assert len(error_events) >= 1, "RunErrorEvent should produce SessionErrorEvent"
 
         await integration._stop_event_consumer(session_id)
 
@@ -465,9 +449,9 @@ class TestEventPipelineE2E:
         # Collect events and count PartUpdatedEvents with TextPart
         oc_events = _extract_opencode_events(sse_queue)
         part_updated_count = sum(
-            1 for e in oc_events
-            if isinstance(e, PartUpdatedEvent)
-            and isinstance(e.properties.part, TextPart)
+            1
+            for e in oc_events
+            if isinstance(e, PartUpdatedEvent) and isinstance(e.properties.part, TextPart)
         )
 
         # Should be exactly 1 (the converted PartStartEvent), not 2+ (loopback)

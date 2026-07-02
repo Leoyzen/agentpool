@@ -273,9 +273,7 @@ class TestNativeAgentPydanticAIInstructions:
         agent.tools.add_provider(provider)
 
         async with agent:
-            agentlet: PydanticAgent[Any, str] = await agent.get_agentlet(
-                None, None, None
-            )
+            agentlet: PydanticAgent[Any, str] = await agent.get_agentlet(None, None, None)
 
             assert isinstance(agentlet, PydanticAgent)
             # Should have system prompt + provider instruction

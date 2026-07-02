@@ -16,6 +16,8 @@ from agentpool.log import get_logger
 
 if TYPE_CHECKING:
     from exxec import ExecutionEnvironment
+    from pydantic_ai.messages import ToolCallPart
+    from pydantic_ai.tools import RunContext, ToolDefinition
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.hooks import AgentHooks
@@ -74,8 +76,6 @@ class NativeAgentHookManager:
             A pydantic-ai :class:`~pydantic_ai.capabilities.Hooks` instance.
         """
         from pydantic_ai.capabilities import Hooks
-        from pydantic_ai.messages import ToolCallPart
-        from pydantic_ai.tools import RunContext, ToolDefinition
 
         if TYPE_CHECKING:
             from pydantic_ai.capabilities.abstract import ValidatedToolArgs

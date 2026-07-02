@@ -70,9 +70,7 @@ class TestStorageManagerTitleGeneration:
             # First create the conversation
             await manager.log_session(session_id=conv_id, node_name="test_agent")
             # Directly call the title generation method (bypasses PYTEST check)
-            title = await manager._generate_title_from_prompt(
-                conv_id, "What is the weather today?"
-            )
+            title = await manager._generate_title_from_prompt(conv_id, "What is the weather today?")
 
             # Title should be generated
             assert title is not None

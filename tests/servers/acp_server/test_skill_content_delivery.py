@@ -6,21 +6,16 @@ receives it as part of the prompt - not just that run_stream is called.
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock
 
-import anyio
 import pytest
 
-from pathlib import PurePosixPath
-
 from agentpool import Agent, AgentPool
-from agentpool.agents.context import AgentContext
-from agentpool.messaging import ChatMessage
 from agentpool.skills.command import SkillCommand
 from agentpool.skills.command_registry import SkillCommandRegistry
 from agentpool.skills.skill import Skill
-from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.session import ACPSession
 from agentpool_server.opencode_server.skill_bridge import create_skill_command
 
@@ -28,16 +23,10 @@ from agentpool_server.opencode_server.skill_bridge import create_skill_command
 @pytest.fixture
 def agent_pool_with_skill() -> AgentPool:
     """Create an agent pool with a skill command registered."""
-    from unittest.mock import MagicMock
-
     from agentpool.models.agents import NativeAgentConfig
-
-
     from agentpool.models.manifest import AgentsManifest
 
-
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
-
 
     pool = AgentPool(manifest)
 
@@ -51,13 +40,16 @@ def agent_pool_with_skill() -> AgentPool:
     mock_session_pool.sessions = MagicMock()
     mock_session_pool.event_bus = MagicMock()
     from tests._helpers.mock_stream import EmptyReceiveStream
+
     mock_session_pool.event_bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     mock_session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=agent)
     mock_session_pool.run_stream = MagicMock()
+
     # Override with a real async generator so process_prompt can iterate
     async def _empty_stream(*args: Any, **kwargs: Any) -> Any:
         return
         yield  # pragma: no cover
+
     mock_session_pool.run_stream = _empty_stream
     pool._session_pool = mock_session_pool  # type: ignore[reportPrivateUsage]
 
@@ -88,7 +80,9 @@ async def test_skill_content_reaches_model_prompt(agent_pool_with_skill: AgentPo
     calling agent._stream_events() directly. We verify that session_pool.run_stream
     is called, which means the agent would receive the staged content.
     """
-    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(pool=agent_pool_with_skill)
+    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(
+        pool=agent_pool_with_skill
+    )
     mock_client = AsyncMock()
     mock_acp_agent = Mock()
     mock_acp_agent.tasks = Mock()
@@ -121,9 +115,11 @@ async def test_skill_content_reaches_model_prompt(agent_pool_with_skill: AgentPo
         nonlocal captured_args, captured_kwargs
         captured_args = args
         captured_kwargs = kwargs
+
         async def _empty() -> Any:
             return
             yield  # pragma: no cover
+
         return _empty()
 
     session_pool.run_stream = mock_run_stream  # type: ignore[method-assign]
@@ -147,7 +143,9 @@ async def test_skill_content_format_matches_opencode_pattern(agent_pool_with_ski
     calling agent._stream_events() directly. We verify that run_stream is called
     with the skill instructions in the content.
     """
-    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(pool=agent_pool_with_skill)
+    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(
+        pool=agent_pool_with_skill
+    )
     mock_client = AsyncMock()
     mock_acp_agent = Mock()
     mock_acp_agent.tasks = Mock()
@@ -176,9 +174,11 @@ async def test_skill_content_format_matches_opencode_pattern(agent_pool_with_ski
     def mock_run_stream(*args: Any, **kwargs: Any) -> Any:
         nonlocal captured_args
         captured_args = args
+
         async def _empty() -> Any:
             return
             yield  # pragma: no cover
+
         return _empty()
 
     session_pool.run_stream = mock_run_stream  # type: ignore[method-assign]
@@ -198,7 +198,9 @@ async def test_staged_content_is_consumed_once(agent_pool_with_skill: AgentPool)
     A bug where staged_content is checked for length but not properly consumed
     could lead to duplicate or missing content.
     """
-    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(pool=agent_pool_with_skill)
+    agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(
+        pool=agent_pool_with_skill
+    )
 
     # Stage some content
     agent.staged_content.add_text("Test instructions")

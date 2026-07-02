@@ -319,9 +319,7 @@ async def test_consumer_handles_spawn_session_start(
     )
     await asyncio.sleep(0.1)
 
-    completed_child_messages = await get_messages_for_session(
-        server_state, "test-child-session"
-    )
+    completed_child_messages = await get_messages_for_session(server_state, "test-child-session")
     completed_child_text = " ".join(str(message.parts) for message in completed_child_messages)
     assert "Child task finished" in completed_child_text
 

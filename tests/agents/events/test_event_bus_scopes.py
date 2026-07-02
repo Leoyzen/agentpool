@@ -8,28 +8,27 @@ Consolidated from:
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
+import anyio
 import pytest
 
 from agentpool import Agent
 from agentpool.agents.context import AgentContext, AgentRunContext
 from agentpool.agents.events import RunStartedEvent, StreamEventEmitter
 from agentpool.orchestrator.core import EventBus
-import anyio
-
-
 
 
 def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
     """Check if a memory receive stream has no buffered items."""
     try:
         stream.receive_nowait()
-        return False
     except anyio.WouldBlock:
         return True
     except anyio.EndOfStream:
         return True
+    else:
+        return False
+
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
@@ -153,9 +152,7 @@ async def test_descendant_scope_with_session_controller() -> None:
     """Descendant scope works when using a SessionController for hierarchy queries."""
     from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
 
-    manifest = AgentsManifest(
-        agents={"agent1": NativeAgentConfig(name="agent1", model="test")}
-    )
+    manifest = AgentsManifest(agents={"agent1": NativeAgentConfig(name="agent1", model="test")})
     async with AgentPool(manifest) as pool:
         from agentpool.orchestrator.core import SessionController
 
@@ -236,10 +233,7 @@ async def test_emit_multiple_events_each_published_once() -> None:
 
     emitter = StreamEventEmitter(ctx, event_bus=event_bus)
 
-    events = [
-        RunStartedEvent(session_id=session_id, run_id=f"run-{i}")
-        for i in range(3)
-    ]
+    events = [RunStartedEvent(session_id=session_id, run_id=f"run-{i}") for i in range(3)]
     for event in events:
         await emitter.emit_event(event)
 

@@ -170,16 +170,16 @@ class SQLModelProvider(StorageProvider):
                 )
                 await session.execute(stmt)
             elif dialect_name == "postgresql" and pg_insert is not None:
-                stmt = pg_insert(Message).values(**values)
-                stmt = stmt.on_conflict_do_update(
+                pg_stmt = pg_insert(Message).values(**values)
+                pg_stmt = pg_stmt.on_conflict_do_update(
                     index_elements=["id"],
                     set_=update_values,
                 )
-                await session.execute(stmt)
+                await session.execute(pg_stmt)
             elif dialect_name in ("mysql", "mariadb") and mysql_insert is not None:
-                stmt = mysql_insert(Message).values(**values)
-                stmt = stmt.on_duplicate_key_update(**update_values)
-                await session.execute(stmt)
+                mysql_stmt = mysql_insert(Message).values(**values)
+                mysql_stmt = mysql_stmt.on_duplicate_key_update(**update_values)
+                await session.execute(mysql_stmt)
             else:
                 existing = await session.get(Message, message.message_id)
                 if existing is None:
@@ -216,6 +216,7 @@ class SQLModelProvider(StorageProvider):
         node_name: str,
         start_time: datetime | None = None,
         model: str | None = None,
+        agent_type: str | None = None,
         parent_session_id: str | None = None,
     ) -> None:
         """Log conversation to database.

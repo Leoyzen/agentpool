@@ -16,16 +16,19 @@ from __future__ import annotations
 import asyncio
 import statistics
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import pytest
 from pydantic_ai.models.test import TestModel
+import pytest
 
 from agentpool import Agent, Team
 from agentpool.agents.events import RunStartedEvent
 from agentpool.delegation.graph_team import build_team_graph
 from agentpool.delegation.teamrun import TeamRun
-from agentpool.messaging import ChatMessage
+
+
+if TYPE_CHECKING:
+    from agentpool.messaging import ChatMessage
 
 
 # Threshold: graph-based must be within 40% of direct execution.
@@ -99,8 +102,8 @@ async def test_single_agent_pipeline_overhead() -> None:
 
     assert overhead < OVERHEAD_THRESHOLD, (
         f"Single-agent TeamRun graph overhead too high: "
-        f"{overhead:.2f}x (direct={direct_time*1000:.3f}ms, "
-        f"graph={graph_time*1000:.3f}ms, threshold={OVERHEAD_THRESHOLD:.2f}x)"
+        f"{overhead:.2f}x (direct={direct_time * 1000:.3f}ms, "
+        f"graph={graph_time * 1000:.3f}ms, threshold={OVERHEAD_THRESHOLD:.2f}x)"
     )
 
 
@@ -129,17 +132,15 @@ async def test_parallel_team_overhead() -> None:
 
     async with agent_a, agent_b, agent_c:
         # Use more warmup runs for parallel to stabilise timing
-        direct_time = await _median_time(
-            _run_parallel_direct, agents, "test", warmup=5, runs=15
-        )
+        direct_time = await _median_time(_run_parallel_direct, agents, "test", warmup=5, runs=15)
         graph_time = await _median_time(team.execute, "test", warmup=5, runs=15)
 
     overhead = graph_time / direct_time if direct_time > 0 else 0
 
     assert overhead < OVERHEAD_THRESHOLD, (
         f"Parallel Team graph overhead too high: "
-        f"{overhead:.2f}x (direct={direct_time*1000:.3f}ms, "
-        f"graph={graph_time*1000:.3f}ms, threshold={OVERHEAD_THRESHOLD:.2f}x)"
+        f"{overhead:.2f}x (direct={direct_time * 1000:.3f}ms, "
+        f"graph={graph_time * 1000:.3f}ms, threshold={OVERHEAD_THRESHOLD:.2f}x)"
     )
 
 
@@ -165,7 +166,7 @@ async def _first_event_latency(
         if not isinstance(event, RunStartedEvent):
             return end - start
         # If first event is RunStartedEvent, continue to next
-        async for event in source.run_stream(*args, **kwargs):
+        async for _event in source.run_stream(*args, **kwargs):
             end = time.perf_counter()
             return end - start
     return 0.0
@@ -202,19 +203,15 @@ async def test_streaming_latency_overhead() -> None:
     teamrun = TeamRun([agent], name="stream_seq")
 
     async with agent:
-        direct_latency = await _median_first_event_latency(
-            agent, "test", session_id="ses_direct"
-        )
-        graph_latency = await _median_first_event_latency(
-            teamrun, "test", session_id="ses_graph"
-        )
+        direct_latency = await _median_first_event_latency(agent, "test", session_id="ses_direct")
+        graph_latency = await _median_first_event_latency(teamrun, "test", session_id="ses_graph")
 
     overhead = graph_latency / direct_latency if direct_latency > 0 else 0
 
     assert overhead < OVERHEAD_THRESHOLD, (
         f"Streaming latency overhead too high: "
-        f"{overhead:.2f}x (direct={direct_latency*1000:.3f}ms, "
-        f"graph={graph_latency*1000:.3f}ms, threshold={OVERHEAD_THRESHOLD:.2f}x)"
+        f"{overhead:.2f}x (direct={direct_latency * 1000:.3f}ms, "
+        f"graph={graph_latency * 1000:.3f}ms, threshold={OVERHEAD_THRESHOLD:.2f}x)"
     )
 
 
@@ -315,8 +312,8 @@ async def test_sequential_team_overhead() -> None:
 
     assert overhead < OVERHEAD_THRESHOLD, (
         f"Sequential TeamRun graph overhead too high: "
-        f"{overhead:.2f}x (direct={direct_time*1000:.3f}ms, "
-        f"graph={graph_time*1000:.3f}ms, threshold={OVERHEAD_THRESHOLD:.2f}x)"
+        f"{overhead:.2f}x (direct={direct_time * 1000:.3f}ms, "
+        f"graph={graph_time * 1000:.3f}ms, threshold={OVERHEAD_THRESHOLD:.2f}x)"
     )
 
 

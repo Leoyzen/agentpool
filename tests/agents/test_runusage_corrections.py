@@ -3,24 +3,25 @@
 Tests that RunUsage is instantiated with correct field names and values.
 """
 
+from __future__ import annotations
+
 from decimal import Decimal
 from pathlib import Path
+import sys
 
-import pytest
 
 # Add src to path for imports
 sys_path = Path(__file__).parent.parent.parent / "src"
-import sys
 
 sys.path.insert(0, str(sys_path))
 
-from pydantic_ai.usage import RequestUsage, RunUsage
-from agentpool.messaging.messages import TokenCost
+from pydantic_ai.usage import RequestUsage, RunUsage  # noqa: E402
+
+from agentpool.messaging.messages import TokenCost  # noqa: E402
 
 
 def test_runusage_with_cache_tokens():
     """Test RunUsage with cache_read_tokens and cache_write_tokens."""
-
     usage = RunUsage(
         input_tokens=100,
         output_tokens=200,
@@ -38,7 +39,6 @@ def test_runusage_with_cache_tokens():
 
 def test_runusage_from_usage_dict():
     """Test RunUsage instantiation from Claude API usage dict."""
-
     # Simulate Claude API usage dict (actual keys may vary)
     usage_dict = {
         "input_tokens": 150,
@@ -64,7 +64,6 @@ def test_runusage_from_usage_dict():
 
 def test_requestusage_with_cache_tokens():
     """Test RequestUsage with cache_read_tokens and cache_write_tokens."""
-
     request_usage = RequestUsage(
         input_tokens=100,
         output_tokens=200,
@@ -82,7 +81,6 @@ def test_requestusage_with_cache_tokens():
 
 def test_tokencost_with_runusage():
     """Test TokenCost creation with RunUsage."""
-
     run_usage = RunUsage(
         input_tokens=100,
         output_tokens=200,
@@ -106,7 +104,6 @@ def test_tokencost_with_runusage():
 
 def test_runusage_default_values():
     """Test RunUsage with default values."""
-
     usage = RunUsage()
 
     assert usage.input_tokens == 0
@@ -119,7 +116,6 @@ def test_runusage_default_values():
 
 def test_runusage_partial_values():
     """Test RunUsage with partial values (missing some fields)."""
-
     usage = RunUsage(
         input_tokens=100,
         output_tokens=200,
@@ -136,7 +132,6 @@ def test_runusage_partial_values():
 
 def test_usage_dict_with_missing_keys():
     """Test RunUsage instantiation from usage dict with missing keys."""
-
     usage_dict = {
         "input_tokens": 100,
         "output_tokens": 200,

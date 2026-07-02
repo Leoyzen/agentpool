@@ -22,7 +22,12 @@ import pytest
 
 from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import RunErrorEvent, RunFailedEvent, RunStartedEvent, StreamCompleteEvent
+from agentpool.agents.events import (
+    RunErrorEvent,
+    RunFailedEvent,
+    RunStartedEvent,
+    StreamCompleteEvent,
+)
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, SessionState
 from agentpool.orchestrator.run import RunHandle, RunStatus
@@ -78,7 +83,7 @@ class _BlockingTurn(Turn):
         while not self._run_ctx.cancelled:
             await asyncio.sleep(0.01)
         return
-        yield  # noqa: unreachable — makes this an async generator
+        yield  # makes this an async generator
 
 
 def _make_run_handle(
@@ -143,8 +148,7 @@ async def test_idle_wake_execute_idle_cycle() -> None:
     gen = handle.start("hello")
 
     async def _consume() -> None:
-        async for event in gen:
-            events.append(event)
+        events.extend([event async for event in gen])
 
     consumer_task = asyncio.create_task(_consume())
     await asyncio.sleep(0.05)
@@ -182,8 +186,7 @@ async def test_steer_while_idle_queues_and_wakes() -> None:
     gen = handle.start("initial")
 
     async def _consume() -> None:
-        async for event in gen:
-            events.append(event)
+        events.extend([event async for event in gen])
 
     consumer_task = asyncio.create_task(_consume())
     await asyncio.sleep(0.05)
@@ -221,8 +224,7 @@ async def test_followup_while_idle_queues() -> None:
     gen = handle.start("first")
 
     async def _consume() -> None:
-        async for event in gen:
-            events.append(event)
+        events.extend([event async for event in gen])
 
     consumer_task = asyncio.create_task(_consume())
     await asyncio.sleep(0.05)
@@ -254,8 +256,7 @@ async def test_close_during_idle_sets_closing_and_wakes() -> None:
     gen = handle.start("initial")
 
     async def _consume() -> None:
-        async for event in gen:
-            events.append(event)
+        events.extend([event async for event in gen])
 
     consumer_task = asyncio.create_task(_consume())
     await asyncio.sleep(0.05)
@@ -286,8 +287,7 @@ async def test_cancel_during_running_sets_cancelled() -> None:
     gen = handle.start("prompt")
 
     async def _consume() -> None:
-        async for event in gen:
-            events.append(event)
+        events.extend([event async for event in gen])
 
     consumer_task = asyncio.create_task(_consume())
     await asyncio.sleep(0.05)
@@ -374,8 +374,7 @@ async def test_start_publishes_run_error_on_turn_exception() -> None:
     gen = handle.start("prompt")
 
     async def _consume() -> None:
-        async for event in gen:
-            events.append(event)
+        events.extend([event async for event in gen])
 
     consumer_task = asyncio.create_task(_consume())
     await asyncio.sleep(0.05)
@@ -440,8 +439,9 @@ async def test_cancel_with_cancel_fn_delegates() -> None:
 
 @pytest.mark.unit
 async def test_cancel_does_not_cancel_current_task() -> None:
-    """Given a RunHandle with current_task set and no _cancel_fn, cancel()
-    does NOT cancel current_task — the start() loop must keep running to
+    """Given a RunHandle with current_task set and no _cancel_fn, cancel().
+
+    Does NOT cancel current_task — the start() loop must keep running to
     process the cancelled flag and emit stream-complete events gracefully.
     """
     handle = _make_run_handle()
@@ -458,7 +458,8 @@ async def test_cancel_does_not_cancel_current_task() -> None:
 
 @pytest.mark.unit
 async def test_cancel_with_done_task_does_not_cancel() -> None:
-    """Given a RunHandle with current_task already done, cancel() does not
+    """Given a RunHandle with current_task already done, cancel() does not.
+
     cancel it (cancel() never cancels current_task regardless of state).
     """
     handle = _make_run_handle()
@@ -479,9 +480,9 @@ async def test_start_raises_when_agent_none() -> None:
     handle = _make_run_handle()
     handle.agent = None
 
+    # start() is an async generator; need to step into it
+    gen = handle.start("hello")
     with pytest.raises(RuntimeError, match="agent must be set"):
-        # start() is an async generator; need to step into it
-        gen = handle.start("hello")
         await gen.__anext__()
 
 
@@ -491,8 +492,8 @@ async def test_start_raises_when_event_bus_none() -> None:
     handle = _make_run_handle()
     handle.event_bus = None
 
+    gen = handle.start("hello")
     with pytest.raises(RuntimeError, match="event_bus must be set"):
-        gen = handle.start("hello")
         await gen.__anext__()
 
 
@@ -502,14 +503,15 @@ async def test_start_raises_when_session_none() -> None:
     handle = _make_run_handle()
     handle.session = None
 
+    gen = handle.start("hello")
     with pytest.raises(RuntimeError, match="session must be set"):
-        gen = handle.start("hello")
         await gen.__anext__()
 
 
 @pytest.mark.unit
 async def test_multiple_followups_queued_all_become_next_turn_prompts() -> None:
-    """Given multiple followup() calls while idle, all messages become
+    """Given multiple followup() calls while idle, all messages become.
+
     prompts for the next turn.
     """
     turn = _StubTurn(events=[_stream_complete_event()], message_history=["m"])
@@ -521,8 +523,7 @@ async def test_multiple_followups_queued_all_become_next_turn_prompts() -> None:
     gen = handle.start("initial")
 
     async def _consume() -> None:
-        async for event in gen:
-            events.append(event)
+        events.extend([event async for event in gen])
 
     consumer_task = asyncio.create_task(_consume())
     await asyncio.sleep(0.05)
@@ -555,7 +556,8 @@ async def test_multiple_followups_queued_all_become_next_turn_prompts() -> None:
 
 @pytest.mark.unit
 async def test_close_is_idempotent() -> None:
-    """Given close() called twice, the second call does not crash and
+    """Given close() called twice, the second call does not crash and.
+
     _closing remains True.
     """
     handle = _make_run_handle()
@@ -593,7 +595,7 @@ async def test_followup_returns_false_when_done_status() -> None:
 
 @pytest.mark.unit
 async def test_cancelled_property_reflects_turn_cancel_state() -> None:
-    """cancelled property returns _turn_was_cancelled, not live run_ctx.cancelled.
+    """Cancelled property returns _turn_was_cancelled, not live run_ctx.cancelled.
 
     The property captures the cancelled state at the moment _turn_complete_event
     is set, so handle_prompt() can observe it even after the loop resets
@@ -656,8 +658,7 @@ async def test_complete_event_set_after_start_completes() -> None:
 
         # complete_event must be set
         assert run_handle.complete_event.is_set(), (
-            "complete_event was not set after start() completed — "
-            "close_session() will hang for 30s"
+            "complete_event was not set after start() completed — close_session() will hang for 30s"
         )
 
 
@@ -738,7 +739,7 @@ async def test_run_error_event_yielded_to_consumer() -> None:
         class FailingTurn:
             async def execute(self) -> Any:
                 raise RuntimeError("turn failed")
-                yield  # noqa: unreachable — make it an async generator
+                yield  # make it an async generator
 
         agent.create_turn = MagicMock(return_value=FailingTurn())  # type: ignore[method-assign]
 
@@ -826,8 +827,7 @@ async def test_input_provider_contextvar_set_during_turn() -> None:
         # The tool should have captured the input provider
         assert len(captured_provider) > 0, "Tool was never called"
         assert captured_provider[0] is mock_provider, (
-            f"ContextVar was not set — got {captured_provider[0]!r}, "
-            f"expected {mock_provider!r}"
+            f"ContextVar was not set — got {captured_provider[0]!r}, expected {mock_provider!r}"
         )
 
         # Note: We intentionally do NOT reset _current_input_provider.
@@ -874,7 +874,7 @@ async def test_turn_failure_breaks_loop_not_continue_to_idle() -> None:
         class FailingTurn:
             async def execute(self) -> Any:
                 raise RuntimeError("turn failed")
-                yield  # noqa: unreachable
+                yield
 
         agent.create_turn = MagicMock(return_value=FailingTurn())  # type: ignore[method-assign]
 
@@ -888,8 +888,7 @@ async def test_turn_failure_breaks_loop_not_continue_to_idle() -> None:
                         break
         except TimeoutError:
             pytest.fail(
-                "start() hung after turn failure — loop continued to idle "
-                "instead of breaking"
+                "start() hung after turn failure — loop continued to idle instead of breaking"
             )
         finally:
             with contextlib.suppress(Exception):
@@ -982,12 +981,9 @@ def test_start_sets_current_task() -> None:
 
     source = inspect.getsource(run_module.RunHandle.start)
     assert "current_task" in source, (
-        "run_ctx.current_task must be set in start() so cancel() can "
-        "interrupt the running turn"
+        "run_ctx.current_task must be set in start() so cancel() can interrupt the running turn"
     )
-    assert "asyncio.current_task()" in source, (
-        "current_task must be set to asyncio.current_task()"
-    )
+    assert "asyncio.current_task()" in source, "current_task must be set to asyncio.current_task()"
 
 
 @pytest.mark.asyncio
@@ -1088,8 +1084,7 @@ async def test_cancel_during_llm_call() -> None:
     gen = handle.start("hello")
 
     async def _consume() -> None:
-        async for event in gen:
-            events.append(event)
+        events.extend([event async for event in gen])
 
     consumer_task = asyncio.create_task(_consume())
     await asyncio.sleep(0.05)
@@ -1279,6 +1274,5 @@ async def test_no_value_error_when_generator_abandoned_in_different_context() ->
             loop.set_exception_handler(original_handler)
 
         assert not gc_exceptions, (
-            f"ValueError(s) raised during generator GC cleanup: "
-            f"{[str(e) for e in gc_exceptions]}"
+            f"ValueError(s) raised during generator GC cleanup: {[str(e) for e in gc_exceptions]}"
         )

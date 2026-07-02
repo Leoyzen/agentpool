@@ -10,16 +10,15 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import (
     DeferredToolRequests,
-    DeferredToolResults,
     RunContext,
     ToolApproved,
     ToolDenied,
 )
+import pytest
 
 from agentpool import Agent
 from agentpool.agents.context import AgentContext, AgentRunContext
@@ -34,8 +33,7 @@ from agentpool.agents.native_agent.approval_bridge import (
 def mock_agent() -> Agent[Any]:
     """Create an agent with mocked internals for approval bridge testing."""
     model = TestModel(custom_output_text="test")
-    agent = Agent(name="approval-test-agent", model=model)
-    return agent
+    return Agent(name="approval-test-agent", model=model)
 
 
 @pytest.fixture
@@ -82,12 +80,12 @@ class TestMapConfirmationResult:
     """Test suite for _map_confirmation_result helper."""
 
     def test_allow_maps_to_tool_approved(self) -> None:
-        """allow result maps to ToolApproved."""
+        """Allow result maps to ToolApproved."""
         result = _map_confirmation_result("allow", "test_tool")
         assert isinstance(result, ToolApproved)
 
     def test_skip_maps_to_tool_denied(self) -> None:
-        """skip result maps to ToolDenied with skip message."""
+        """Skip result maps to ToolDenied with skip message."""
         result = _map_confirmation_result("skip", "test_tool")
         assert isinstance(result, ToolDenied)
         assert "skipped" in result.message
@@ -123,9 +121,7 @@ class TestResolveDeferredApprovals:
 
         mock_run_context.deps.input_provider = mock_provider
 
-        result = await _resolve_deferred_approvals(
-            mock_run_context, sample_deferred_requests
-        )
+        result = await _resolve_deferred_approvals(mock_run_context, sample_deferred_requests)
 
         assert result is not None
         assert mock_provider.get_tool_confirmation.call_count == 2
@@ -142,9 +138,7 @@ class TestResolveDeferredApprovals:
 
         mock_run_context.deps.input_provider = mock_provider
 
-        result = await _resolve_deferred_approvals(
-            mock_run_context, sample_deferred_requests
-        )
+        result = await _resolve_deferred_approvals(mock_run_context, sample_deferred_requests)
 
         assert result is not None
         assert isinstance(result.approvals["tc-123"], ToolApproved)
@@ -162,9 +156,7 @@ class TestResolveDeferredApprovals:
 
         mock_run_context.deps.input_provider = mock_provider
 
-        result = await _resolve_deferred_approvals(
-            mock_run_context, sample_deferred_requests
-        )
+        result = await _resolve_deferred_approvals(mock_run_context, sample_deferred_requests)
 
         assert result is not None
         assert isinstance(result.approvals["tc-123"], ToolDenied)
@@ -178,15 +170,11 @@ class TestResolveDeferredApprovals:
     ) -> None:
         """Mixed allow/skip results handled correctly."""
         mock_provider = MagicMock()
-        mock_provider.get_tool_confirmation = AsyncMock(
-            side_effect=["allow", "skip"]
-        )
+        mock_provider.get_tool_confirmation = AsyncMock(side_effect=["allow", "skip"])
 
         mock_run_context.deps.input_provider = mock_provider
 
-        result = await _resolve_deferred_approvals(
-            mock_run_context, sample_deferred_requests
-        )
+        result = await _resolve_deferred_approvals(mock_run_context, sample_deferred_requests)
 
         assert result is not None
         assert isinstance(result.approvals["tc-123"], ToolApproved)
@@ -205,9 +193,7 @@ class TestResolveDeferredApprovals:
         mock_run_context.deps.input_provider = mock_provider
         mock_run_context.deps.node.tool_confirmation_mode = "never"
 
-        result = await _resolve_deferred_approvals(
-            mock_run_context, sample_deferred_requests
-        )
+        result = await _resolve_deferred_approvals(mock_run_context, sample_deferred_requests)
 
         assert result is not None
         assert isinstance(result.approvals["tc-123"], ToolApproved)
@@ -223,15 +209,11 @@ class TestResolveDeferredApprovals:
     ) -> None:
         """InputProvider error defaults to ToolDenied."""
         mock_provider = MagicMock()
-        mock_provider.get_tool_confirmation = AsyncMock(
-            side_effect=RuntimeError("Provider failed")
-        )
+        mock_provider.get_tool_confirmation = AsyncMock(side_effect=RuntimeError("Provider failed"))
 
         mock_run_context.deps.input_provider = mock_provider
 
-        result = await _resolve_deferred_approvals(
-            mock_run_context, sample_deferred_requests
-        )
+        result = await _resolve_deferred_approvals(mock_run_context, sample_deferred_requests)
 
         assert result is not None
         assert isinstance(result.approvals["tc-123"], ToolDenied)
@@ -261,9 +243,7 @@ class TestResolveDeferredApprovals:
 
         mock_run_context.deps.input_provider = mock_provider
 
-        await _resolve_deferred_approvals(
-            mock_run_context, sample_deferred_requests
-        )
+        await _resolve_deferred_approvals(mock_run_context, sample_deferred_requests)
 
         # Check first call
         call_args = mock_provider.get_tool_confirmation.call_args_list[0]
@@ -314,9 +294,7 @@ class TestCreateApprovalBridgeCapability:
         requests = DeferredToolRequests(approvals=[])
 
         cap = create_approval_bridge_capability(mock_agent)
-        result = await cap.handle_deferred_tool_calls(
-            mock_run_context, requests=requests
-        )
+        result = await cap.handle_deferred_tool_calls(mock_run_context, requests=requests)
 
         assert result is None
 
@@ -339,9 +317,7 @@ class TestGetAgentletIntegration:
             call_kwargs = mock_pydantic_agent.call_args.kwargs
             capabilities = call_kwargs.get("capabilities", []) or []
 
-            bridge_caps = [
-                cap for cap in capabilities if isinstance(cap, HandleDeferredToolCalls)
-            ]
+            bridge_caps = [cap for cap in capabilities if isinstance(cap, HandleDeferredToolCalls)]
             assert len(bridge_caps) == 2, (
                 "Expected two HandleDeferredToolCalls capabilities "
                 "(DeferredToolBridge + ApprovalBridge)"

@@ -1,8 +1,15 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
 from schemez import OpenAIFunctionDefinition
 
 from agentpool.resource_providers import ResourceProvider
-from pydantic_ai.capabilities import AbstractCapability
+
+
+if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
 
 
 class MockProvider(ResourceProvider):

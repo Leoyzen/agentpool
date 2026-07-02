@@ -16,21 +16,18 @@ import asyncio
 from typing import Any
 
 import pytest
-from pydantic_ai.models.test import TestModel
 
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
 from agentpool.agents.events import SpawnSessionStart, StreamCompleteEvent
 from agentpool.messaging import ChatMessage
-from agentpool_server.opencode_server.session_pool_integration import (
-    OpenCodeSessionPoolIntegration,
-)
-from agentpool_server.opencode_server.models import PartUpdatedEvent
 from agentpool_server.opencode_server.models.parts import (
     ToolPart,
     ToolStateCompleted,
     ToolStateRunning,
 )
-from agentpool_server.opencode_server.state import ServerState
+from agentpool_server.opencode_server.session_pool_integration import (
+    OpenCodeSessionPoolIntegration,
+)
 
 
 class MockServerState:
@@ -179,9 +176,7 @@ async def test_subagent_toolpart_transitions_running_to_completed() -> None:
             f"The ToolPart is stuck in a non-completed state. "
             f"This usually means _event_consumer_loop or _update_parent_toolpart failed."
         )
-        assert tool_part.state.time.end is not None, (
-            "Completed ToolPart should have end time set"
-        )
+        assert tool_part.state.time.end is not None, "Completed ToolPart should have end time set"
         assert tool_part.state.output == "Task completed successfully", (
             f"ToolPart output mismatch: {tool_part.state.output}"
         )

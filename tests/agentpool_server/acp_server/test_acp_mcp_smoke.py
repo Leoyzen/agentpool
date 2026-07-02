@@ -111,7 +111,7 @@ async def test_initialize_and_get_tools_with_json_round_trip(
             if conn is None:
                 return {}
 
-            req_id = deserialized.get("params", {}).get("protocolVersion")
+            deserialized.get("params", {}).get("protocolVersion")
 
             if req_method == "initialize":
                 result = InitializeResult(
@@ -151,9 +151,7 @@ async def test_initialize_and_get_tools_with_json_round_trip(
         name=server_config.name,
         timeout=10.0,
     )
-    provider = MCPResourceProvider(
-        server=acp_server_config, transport=transport
-    )
+    provider = MCPResourceProvider(server=acp_server_config, transport=transport)
 
     # Step 1: initialize() must complete without hanging
     with anyio.fail_after(5):
@@ -175,10 +173,6 @@ async def test_initialize_and_get_tools_with_json_round_trip(
         f"Expected at least 2 mcp/message calls, got {len(received_mcp_messages)}"
     )
 
-    methods = [
-        m.get("method")
-        for m in received_mcp_messages
-        if isinstance(m.get("method"), str)
-    ]
+    methods = [m.get("method") for m in received_mcp_messages if isinstance(m.get("method"), str)]
     assert "initialize" in methods, f"Expected initialize in {methods}"
     assert "tools/list" in methods, f"Expected tools/list in {methods}"

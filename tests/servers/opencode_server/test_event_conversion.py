@@ -20,19 +20,16 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import Mock
 
-import pytest
 from pydantic_ai import (
     PartStartEvent as PydanticPartStartEvent,
     TextPart as PydanticTextPart,
     TextPartDelta,
-    ThinkingPart,
-    ThinkingPartDelta,
 )
 from pydantic_ai.messages import PartDeltaEvent as PydanticPartDeltaEvent
+import pytest
 
 from agentpool.agents.events import (
     RunErrorEvent,
-    RunFailedEvent,
     RunStartedEvent,
     StreamCompleteEvent,
     TextContentItem,
@@ -48,7 +45,6 @@ from agentpool_server.opencode_server.models import (
     PartDeltaEvent,
     PartUpdatedEvent,
     SessionErrorEvent,
-    SessionIdleEvent,
     SessionStatusEvent,
 )
 from agentpool_server.opencode_server.models.parts import (
@@ -108,10 +104,7 @@ def event_context():
 
 async def _collect_events(async_gen) -> list[Any]:
     """Collect all events from an async generator."""
-    events = []
-    async for event in async_gen:
-        events.append(event)
-    return events
+    return [event async for event in async_gen]
 
 
 # =============================================================================
@@ -211,7 +204,10 @@ class TestPartDeltaEventConversion:
         event_context,
     ) -> None:
         """Text delta should yield PartDeltaEvent."""
-        from agentpool.agents.events import PartStartEvent, PartDeltaEvent as AgentPoolPartDeltaEvent
+        from agentpool.agents.events import (
+            PartDeltaEvent as AgentPoolPartDeltaEvent,
+            PartStartEvent,
+        )
 
         adapter = OpenCodeEventAdapter(context=event_context)
 
@@ -233,7 +229,10 @@ class TestPartDeltaEventConversion:
         event_context,
     ) -> None:
         """Thinking delta should yield PartDeltaEvent."""
-        from agentpool.agents.events import PartStartEvent, PartDeltaEvent as AgentPoolPartDeltaEvent
+        from agentpool.agents.events import (
+            PartDeltaEvent as AgentPoolPartDeltaEvent,
+            PartStartEvent,
+        )
 
         adapter = OpenCodeEventAdapter(context=event_context)
 
@@ -257,9 +256,7 @@ class TestPartDeltaEventConversion:
         adapter = OpenCodeEventAdapter(context=event_context)
 
         # First establish a text part
-        start_event = PydanticPartStartEvent(
-            index=0, part=PydanticTextPart(content="Base")
-        )
+        start_event = PydanticPartStartEvent(index=0, part=PydanticTextPart(content="Base"))
         await _collect_events(adapter.convert_event(start_event))
 
         delta_event = PydanticPartDeltaEvent(
@@ -454,8 +451,6 @@ class TestStreamCompleteEventConversion:
         assert step_finish[0].properties.part.tokens.output == 50
 
 
-
-
 class TestRunStartedEventConversion:
     """Tests for RunStartedEvent -> SessionStatusEvent (busy)."""
 
@@ -517,8 +512,6 @@ class TestRunErrorEventConversion:
 
 class TestRunFailedEventConversion:
     """Tests for RunFailedEvent -> SessionErrorEvent + SessionStatusEvent (idle)."""
-
-
 
 
 class TestToolCallProgressEventConversion:
@@ -630,9 +623,7 @@ class TestConversionCompleteness:
         required_events = [
             PartStartEvent.text(index=0, content="test"),
             PartDeltaEvent.text(index=0, content="test"),
-            ToolCallStartEvent(
-                tool_call_id="t1", tool_name="test", title="Test"
-            ),
+            ToolCallStartEvent(tool_call_id="t1", tool_name="test", title="Test"),
             ToolCallCompleteEvent(
                 tool_name="test",
                 tool_call_id="t1",

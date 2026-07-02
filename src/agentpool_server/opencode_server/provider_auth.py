@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 from llmling_models.auth.anthropic_auth import (
+    OAUTH_MANUAL_REDIRECT_URI,
     AnthropicOAuthToken,
     AnthropicTokenStore,
     build_authorization_url,
@@ -105,7 +106,9 @@ class AnthropicAuthBackend(ProviderAuthBackend):
 
     async def authorize(self, method: int = 0) -> ProviderAuthAuthorization:
         verifier, challenge = generate_pkce()
-        auth_url = build_authorization_url(verifier, challenge)
+        auth_url = build_authorization_url(
+            verifier, challenge, redirect_uri=OAUTH_MANUAL_REDIRECT_URI
+        )
         self._pending_verifiers[verifier] = verifier
         return ProviderAuthAuthorization(
             url=auth_url,
@@ -122,7 +125,9 @@ class AnthropicAuthBackend(ProviderAuthBackend):
     ) -> bool:
         if not code or not verifier:
             raise ValueError("Missing code or verifier for Anthropic OAuth")
-        token = exchange_code_for_token(code, verifier)
+        token = exchange_code_for_token(
+            code, state=verifier, verifier=verifier, redirect_uri=OAUTH_MANUAL_REDIRECT_URI
+        )
         store = AnthropicTokenStore()
         store.save(token)
         self._pending_verifiers.pop(verifier, None)

@@ -79,7 +79,7 @@ async def execute[T](
     return result
 
 
-def get_argument_key(
+def get_argument_key(  # noqa: PLR0911
     func: Callable[..., Any],
     arg_type: type | str | UnionType | Sequence[type | str | UnionType],
     include_return: bool = False,

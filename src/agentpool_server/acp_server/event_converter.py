@@ -95,9 +95,6 @@ ACPSessionUpdate = (
     | UsageUpdate
     | TurnCompleteUpdate
 )
-ACPSessionUpdate = (
-    AgentMessageChunk | AgentThoughtChunk | ToolCallStart | ToolCallProgress | AgentPlanUpdate
-)
 
 
 def get_compaction_text(trigger: str) -> str:
@@ -694,8 +691,8 @@ class ACPEventConverter:
                 # Turn-complete signal: explicit end-of-turn barrier for clients.
                 # Based on draft RFD PR #644 (not yet merged into ACP spec).
                 # See: https://github.com/agentclientprotocol/agent-client-protocol/pull/644
-                async for progress in self.cancel_pending_tools():
-                    yield progress
+                async for cancel_update in self.cancel_pending_tools():
+                    yield cancel_update
                 if self.client_supports_turn_complete:
                     yield TurnCompleteUpdate(stop_reason="end_turn")
 
@@ -731,7 +728,7 @@ class ACPEventConverter:
                 elif self.subagent_display_mode == "zed":
                     tool_call_id = event.tool_call_id or str(uuid.uuid4())
                     self._subagent_tool_call_ids[child_session_id] = tool_call_id
-                    _meta = self._build_subagent_field_meta(
+                    field_meta = self._build_subagent_field_meta(
                         child_session_id=child_session_id, message_start_index=0
                     )
                     yield ToolCallStart(
@@ -739,7 +736,7 @@ class ACPEventConverter:
                         title=f"{source_name}: {description}" if description else source_name,
                         kind="other",
                         status="pending",
-                        field_meta=_meta,
+                        field_meta=field_meta,
                     )
                 elif self.subagent_display_mode == "qwen":
                     tool_call_id = event.tool_call_id or str(uuid.uuid4())
@@ -827,8 +824,8 @@ class ACPEventConverter:
                 agent_prefix = f"[{agent_name}] " if agent_name else ""
                 error_text = f"\n\n❌ **Error**: {agent_prefix}{message}\n\n"
                 yield AgentMessageChunk.text(error_text, message_id=self._current_message_id)
-                async for progress in self.cancel_pending_tools():
-                    yield progress
+                async for cancel_update in self.cancel_pending_tools():
+                    yield cancel_update
                 if self.client_supports_turn_complete:
                     yield TurnCompleteUpdate(stop_reason="end_turn")
 
@@ -850,8 +847,8 @@ class ACPEventConverter:
                 if not is_cancellation:
                     error_text = f"\n\n❌ **Run Failed** [{run_id}]: {exc}\n\n"
                     yield AgentMessageChunk.text(error_text, message_id=self._current_message_id)
-                async for progress in self.cancel_pending_tools():
-                    yield progress
+                async for cancel_update in self.cancel_pending_tools():
+                    yield cancel_update
                 if self.client_supports_turn_complete:
                     yield TurnCompleteUpdate(stop_reason=stop_reason)
 

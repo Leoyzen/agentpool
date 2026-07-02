@@ -130,7 +130,7 @@ class TestSwapSessionAgent:
         session.switch_active_agent = AsyncMock(side_effect=ValueError("Agent not found"))
         acp_agent.session_manager.get_session = lambda sid: session
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match="Agent not found"):
             await acp_agent._swap_session_agent("sess_1", "nonexistent")
 
     async def test_swap_no_history_inheritance(self, mock_acp_agent):

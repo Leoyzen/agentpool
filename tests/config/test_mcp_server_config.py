@@ -6,7 +6,6 @@ Tests cover custom names, fallback to client_id, and edge cases.
 
 from __future__ import annotations
 
-import pytest
 from pydantic import HttpUrl
 
 from agentpool_config.mcp_server import (

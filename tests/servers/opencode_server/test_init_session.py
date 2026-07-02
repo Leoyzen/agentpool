@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-
-from agentpool_config.session_pool import OpenCodeConfig
 
 
 if TYPE_CHECKING:
@@ -78,7 +75,5 @@ async def test_init_session_routes_through_session_pool(
     assert response.json() is True
 
     # Verify session_pool.receive_request was called
-    assert (
-        hasattr(mock_pool.session_pool.receive_request, "call_count")
-        and mock_pool.session_pool.receive_request.call_count == 1
-    )
+    assert hasattr(mock_pool.session_pool.receive_request, "call_count")
+    assert mock_pool.session_pool.receive_request.call_count == 1

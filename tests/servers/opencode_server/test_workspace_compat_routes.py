@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
+from typing import TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
 
 
 def test_list_workspaces_returns_local_response(client: TestClient) -> None:

@@ -18,12 +18,12 @@ from pathlib import PurePosixPath
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from upathtools import UPath
 
 from agentpool.resource_providers.mcp_provider import MCPResourceProvider
 from agentpool.skills.exceptions import SkillNotFoundError
 from agentpool.skills.skill import Skill
 from agentpool.skills.uri_resolver import SkillURIResolver, _name_alternatives
-from upathtools import UPath
 
 
 # =============================================================================
@@ -53,7 +53,7 @@ def mcp_provider(mock_mcp_client):
 
 
 # =============================================================================
-# _name_alternatives() – helper function tests
+# _name_alternatives() - helper function tests
 # =============================================================================
 
 
@@ -78,7 +78,7 @@ def test_name_alternatives_mixed_prefers_underscore() -> None:
 
 
 # =============================================================================
-# _get_resource_skills() – original_name preservation tests
+# _get_resource_skills() - original_name preservation tests
 # =============================================================================
 
 
@@ -131,7 +131,7 @@ async def test_resource_skills_hyphenated_name_original_name_matches(
 
 
 # =============================================================================
-# _get_resource_skill_instructions() – URI construction tests
+# _get_resource_skill_instructions() - URI construction tests
 # =============================================================================
 
 
@@ -217,7 +217,7 @@ async def test_resource_skill_instructions_not_found(
 
 
 # =============================================================================
-# SkillURIResolver – fuzzy matching tests
+# SkillURIResolver - fuzzy matching tests
 # =============================================================================
 
 

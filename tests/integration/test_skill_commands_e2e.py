@@ -6,15 +6,14 @@ and exposure across ACP, AG-UI, and OpenCode protocols.
 
 from __future__ import annotations
 
-import asyncio
-from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock, patch
+from typing import TYPE_CHECKING
 
 import pytest
 from upathtools import UPath
 
+# Import AvailableCommand at runtime for isinstance checks
+from acp.schema.slash_commands import AvailableCommand
 from agentpool.skills.command import SkillCommand
 from agentpool.skills.command_registry import SkillCommandRegistry
 from agentpool.skills.registry import SkillsRegistry
@@ -23,11 +22,9 @@ from agentpool_server.acp_server.commands.skill_commands import ACPSkillBridge
 from agentpool_server.agui_server.skill_tools import AGUISkillBridge
 from agentpool_server.opencode_server.skill_bridge import OpenCodeSkillBridge
 
-if TYPE_CHECKING:
-    pass
 
-# Import AvailableCommand at runtime for isinstance checks
-from acp.schema.slash_commands import AvailableCommand
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 
 # =============================================================================
@@ -52,7 +49,7 @@ async def skill_registry(skills_dir_upath: UPath) -> AsyncGenerator[SkillsRegist
     """Create a SkillsRegistry loaded with test skills from filesystem."""
     registry = SkillsRegistry(skills_dirs=[skills_dir_upath])
     await registry.discover_skills()
-    yield registry
+    return registry
 
 
 @pytest.fixture
@@ -62,7 +59,7 @@ async def command_registry(
     """Create a SkillCommandRegistry initialized with skills."""
     registry = SkillCommandRegistry(skills_registry=skill_registry)
     await registry.initialize()
-    yield registry
+    return registry
 
 
 @pytest.fixture
@@ -463,8 +460,6 @@ class TestOpenCodeEndToEnd:
         self, command_registry: SkillCommandRegistry
     ) -> None:
         """Test that OpenCode commands are callable with execute method."""
-        from slashed import CommandContext
-
         bridge = OpenCodeSkillBridge()
         command_registry.on_command_change(bridge.handle_change)
 
@@ -612,7 +607,6 @@ class TestSkillLifecycle:
         # Get original description
         original_cmd = command_registry.get("hello-world")
         assert original_cmd is not None
-        original_desc = original_cmd.description
 
         # Update skill with new description
         updated_skill = Skill(
@@ -801,24 +795,24 @@ class TestErrorHandling:
 
     async def test_invalid_skill_name_handling(self) -> None:
         """Test handling of skills with invalid names."""
-        registry = SkillsRegistry()
+        SkillsRegistry()
 
         # Try to create skill with invalid name (will fail validation)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="name"):
             Skill(
                 name="Invalid Name With Spaces",  # Invalid: has spaces
                 description="Test",
                 skill_path=UPath("/tmp/test"),
             )
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="name"):
             Skill(
                 name="Invalid-",  # Invalid: ends with hyphen
                 description="Test",
                 skill_path=UPath("/tmp/test"),
             )
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="name"):
             Skill(
                 name="-Invalid",  # Invalid: starts with hyphen
                 description="Test",

@@ -88,9 +88,7 @@ class EventMapper:
                     return PartDeltaEvent(index=event.index, delta=event.delta)
                 if isinstance(event, PyAIPartStartEvent) and not isinstance(event, PartStartEvent):
                     return PartStartEvent(index=event.index, part=event.part)
-                if self._is_rich_event(event):
-                    return event
-                return None
+                return event if self._is_rich_event(event) else None
 
     def _emit_tool_call_start(
         self,

@@ -37,7 +37,6 @@ from agentpool_server.opencode_server.models.parts import (
     ToolStateError,
     ToolStateRunning,
 )
-import anyio
 from agentpool_server.opencode_server.session_pool_integration import (
     OpenCodeSessionPoolIntegration,
 )
@@ -70,7 +69,6 @@ class MockServerState:
 
     def ensure_runtime_session_state(self, session_id: str) -> None:
         """No-op stub for ServerState.ensure_runtime_session_state."""
-        pass
 
     def ensure_input_provider(self, session_id: str) -> Any:
         """No-op stub for ServerState.ensure_input_provider."""
@@ -78,7 +76,6 @@ class MockServerState:
 
     async def mark_session_idle(self, session_id: str) -> None:
         """No-op stub for ServerState.mark_session_idle."""
-        pass
 
     async def broadcast_event(self, event: Any) -> None:
         self.events.append(event)

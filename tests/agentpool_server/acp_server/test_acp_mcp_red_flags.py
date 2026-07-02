@@ -110,8 +110,7 @@ async def test_no_double_wrap_on_mcp_message_forwarding(
     # Step 5: Verify what the mock client received
     # Find the send_request call for "mcp/message"
     mcp_message_calls = [
-        call for call in send_request_mock.call_args_list
-        if call.args[0] == "mcp/message"
+        call for call in send_request_mock.call_args_list if call.args[0] == "mcp/message"
     ]
     assert len(mcp_message_calls) == 1, (
         f"Expected exactly one mcp/message call, got {len(mcp_message_calls)}"
@@ -119,7 +118,8 @@ async def test_no_double_wrap_on_mcp_message_forwarding(
 
     _, params = mcp_message_calls[0].args
 
-    # The params MUST be in flattened ACP format: {"connectionId": ..., "method": ..., "params": ...}
+    # The params MUST be in flattened ACP format: {"connectionId": ..., "method": ..., "params":
+    # ...}
     assert "connectionId" in params, "params must contain connectionId"
     assert "method" in params, "params must contain method"
     assert params["connectionId"] == connection_id
@@ -231,7 +231,7 @@ async def test_send_to_client_notification_no_session_forward() -> None:
     await conn.open()
 
     notification = {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {}}
-    result = await conn.send_to_client(notification)
+    await conn.send_to_client(notification)
 
     # Notification sent to client
     mock_send.assert_awaited_once()

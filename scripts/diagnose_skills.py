@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Skills TUI display diagnostic script.
 
 Checks every stage of the skill discovery pipeline to identify
@@ -11,9 +10,9 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import sys
 from pathlib import Path
-from typing import Any
+import sys
+
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -32,9 +31,9 @@ def print_result(name: str, passed: bool, detail: str = "") -> None:
         print(f"     {detail}")
 
 
-async def diagnose(config_path: str | None = None) -> None:
+async def diagnose(config_path: str | None = None) -> None:  # noqa: PLR0915
     """Run full diagnostic pipeline."""
-    from upathtools import UPath, to_upath
+    from upathtools import to_upath
 
     # ============================================================
     # Stage 1: Filesystem Discovery
@@ -100,7 +99,7 @@ async def diagnose(config_path: str | None = None) -> None:
                                             True,
                                             "Passes strict validation",
                                         )
-                                    except Exception as e:
+                                    except Exception as e:  # noqa: BLE001
                                         print_result(
                                             "  Frontmatter validation", False, f"FAILED: {e}"
                                         )
@@ -114,7 +113,7 @@ async def diagnose(config_path: str | None = None) -> None:
                                     False,
                                     "No YAML frontmatter (must start with ---)",
                                 )
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001
                             print_result("  Frontmatter parsing", False, str(e))
             else:
                 print_result(
@@ -146,12 +145,11 @@ async def diagnose(config_path: str | None = None) -> None:
                 )
             else:
                 print_result("Skills config in manifest", False, "No skills section in config")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print_result("Config loading", False, str(e))
 
     # ============================================================
     # Stage 2: SkillsManager / SkillsRegistry
-    # ============================================================
     print_header("Stage 2: SkillsManager / SkillsRegistry")
 
     from agentpool.skills.manager import SkillsManager
@@ -189,7 +187,7 @@ async def diagnose(config_path: str | None = None) -> None:
             except RuntimeError as e:
                 print_result("ResourceProvider available", False, str(e))
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print_result("SkillsManager initialization", False, str(e))
 
     # ============================================================
@@ -234,9 +232,12 @@ async def diagnose(config_path: str | None = None) -> None:
                         print_result(
                             "skill_provider returns skills",
                             len(provider_skills) > 0,
-                            f"Found {len(provider_skills)} skills: {[s.name for s in provider_skills]}",
+                            (
+                                f"Found {len(provider_skills)} skills:"
+                                f" {[s.name for s in provider_skills]}"
+                            ),
                         )
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         print_result("skill_provider.get_skills()", False, str(e))
 
                 # Check skills registry
@@ -248,7 +249,7 @@ async def diagnose(config_path: str | None = None) -> None:
                     f"Found {len(skill_list)} skills: {[s.name for s in skill_list]}",
                 )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print_result("AgentPool initialization", False, str(e))
             import traceback
 
@@ -293,9 +294,12 @@ async def diagnose(config_path: str | None = None) -> None:
                     print_result(
                         "Bridge creation",
                         False,
-                        "skill_commands is None - bridge will NOT be created! This is the root cause.",
+                        (
+                            "skill_commands is None - bridge will NOT be created!"
+                            " This is the root cause."
+                        ),
                     )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print_result("Bridge simulation", False, str(e))
     else:
         print("  ⚠️  Skipped (no config path provided)")
@@ -305,8 +309,8 @@ async def diagnose(config_path: str | None = None) -> None:
     # ============================================================
     print_header("Stage 5: HTTP API Check")
 
-    import urllib.request
     import json
+    import urllib.request
 
     base_url = "http://127.0.0.1:4096"
     for endpoint in ["/skill", "/command"]:
@@ -322,7 +326,7 @@ async def diagnose(config_path: str | None = None) -> None:
                     )
                 else:
                     print_result(f"GET {endpoint}", True, f"Returns: {data}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print_result(f"GET {endpoint}", False, f"Server not reachable or error: {e}")
 
     # ============================================================

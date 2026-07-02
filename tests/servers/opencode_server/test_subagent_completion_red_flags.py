@@ -13,22 +13,9 @@ The remaining tests cover behavior that is still handled by EventProcessor.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, Mock
 
 import pytest
-from pydantic_ai.messages import (
-    PartStartEvent,
-    TextPart as PydanticTextPart,
-)
 
-from agentpool.agents.events import (
-    RunStartedEvent,
-    SpawnSessionStart,
-    StreamCompleteEvent,
-    SubAgentEvent,
-)
-from agentpool.messaging import ChatMessage
-from agentpool_server.opencode_server.event_processor import EventProcessor
 from agentpool_server.opencode_server.event_processor_context import (
     EventProcessorContext,
 )
@@ -36,18 +23,11 @@ from agentpool_server.opencode_server.models import (
     MessagePath,
     MessageTime,
     MessageWithParts,
-    PartUpdatedEvent,
-    SessionIdleEvent,
-    SessionStatusEvent,
-)
-from agentpool_server.opencode_server.models.parts import (
-    ToolPart,
-    ToolStateCompleted,
-    ToolStateRunning,
 )
 
 
 if TYPE_CHECKING:
+    from agentpool_server.opencode_server.event_processor import EventProcessor
     from agentpool_server.opencode_server.state import ServerState
 
 
@@ -89,8 +69,7 @@ async def _process_events(
     """Process a sequence of events and collect all emitted SSE events."""
     emitted: list[Any] = []
     for event in events:
-        async for e in processor.process(event, ctx):
-            emitted.append(e)
+        emitted.extend([e async for e in processor.process(event, ctx)])
     return emitted
 
 

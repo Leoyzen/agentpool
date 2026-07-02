@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import anyio
 import asyncio
 import contextlib
 import json
@@ -10,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
+import anyio
 import pytest
 
 from agentpool_server.opencode_server.models import GlobalEvent
@@ -62,7 +62,7 @@ from agentpool_server.opencode_server.models.events import (
 from agentpool_server.opencode_server.models.message import (
     UserMessage,
 )
-from agentpool_server.opencode_server.models.parts import Part, TextPart  # noqa: TC001
+from agentpool_server.opencode_server.models.parts import Part, TextPart
 from agentpool_server.opencode_server.models.pty import PtyInfo
 from agentpool_server.opencode_server.models.question import (
     QuestionInfo,
@@ -79,7 +79,6 @@ from agentpool_server.opencode_server.routes.global_routes import (
     _serialize_event,
 )
 from agentpool_server.opencode_server.state import ServerState
-from agentpool_storage.opencode_provider import helpers
 
 
 if TYPE_CHECKING:
@@ -245,10 +244,8 @@ class _MockEventBus:
         for subscriber_sid, subscribers in self._streams.items():
             for send_stream, scope in subscribers:
                 if scope == "all" or subscriber_sid == session_id:
-                    try:
+                    with contextlib.suppress(anyio.WouldBlock):
                         send_stream.send_nowait(envelope)
-                    except anyio.WouldBlock:
-                        pass
 
 
 class _MockSessionPool:

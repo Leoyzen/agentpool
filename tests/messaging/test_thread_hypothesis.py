@@ -1,13 +1,13 @@
 """Minimal test to isolate the piping hang."""
 
-import pytest
+from pydantic_ai._utils import disable_threads
 
 from agentpool import Agent
-from pydantic_ai._utils import disable_threads
 
 
 async def test_sync_callback_pipe_no_threads():
     """Test with sync named function, threads disabled."""
+
     def callback(text: str) -> str:
         return f"model: {text}"
 
@@ -21,6 +21,7 @@ async def test_sync_callback_pipe_no_threads():
 
 async def test_sync_callback_pipe_with_threads():
     """Test with sync named function, threads enabled (default)."""
+
     def callback(text: str) -> str:
         return f"model: {text}"
 

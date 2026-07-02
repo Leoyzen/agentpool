@@ -205,7 +205,7 @@ def _serialize_event(event: Event, wrap_payload: bool = False) -> str:
     return json.dumps(event_data, ensure_ascii=False)
 
 
-async def _event_generator(
+async def _event_generator(  # noqa: PLR0915
     state: ServerState, *, wrap_payload: bool = False, last_event_id: str | None = None
 ) -> AsyncGenerator[dict[str, Any]]:
     """Generate SSE events for connected clients.
@@ -216,6 +216,7 @@ async def _event_generator(
     Args:
         state: The server state holding subscribers and event factory
         wrap_payload: Whether to wrap events in GlobalEvent envelopes
+        last_event_id: The last event ID received by the client, for replay
     """
     factory = state.get_event_factory() if wrap_payload else None
     # Track connection for diagnostic subscriber counting.
@@ -278,10 +279,7 @@ async def _event_generator(
                 from agentpool.orchestrator.core import EventEnvelope
 
                 inner_event: Any
-                if isinstance(raw_event, EventEnvelope):
-                    inner_event = raw_event.event
-                else:
-                    inner_event = raw_event
+                inner_event = raw_event.event if isinstance(raw_event, EventEnvelope) else raw_event
 
                 if isinstance(inner_event, CustomEvent):
                     if inner_event.event_data is None:

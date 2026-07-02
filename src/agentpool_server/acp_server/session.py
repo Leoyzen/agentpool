@@ -11,7 +11,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 import hashlib
 import re
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NoReturn
 
 import anyio
 from exxec.acp_provider import ACPExecutionEnvironment
@@ -27,6 +27,7 @@ from acp.schema import AvailableCommand, ClientCapabilities
 from acp.schema.mcp import AcpMcpServer
 from agentpool import Agent, AgentPool
 from agentpool.agents.acp_agent import ACPAgent
+from agentpool.agents.events import ToastInfo
 from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
 from agentpool.log import get_logger
 from agentpool.resource_providers.mcp_provider import MCPResourceProvider
@@ -246,8 +247,7 @@ class ACPSession:
                 params: RequestPermissionRequest,
             ) -> RequestPermissionResponse:
                 forwarded = params.model_copy(update={"session_id": self.session_id})
-                response = await self.requests.client.request_permission(forwarded)
-                return response
+                return await self.requests.client.request_permission(forwarded)
 
             self.agent.acp_permission_callback = permission_callback
 
@@ -365,7 +365,8 @@ class ACPSession:
             self.log.info("Registered manifest commands", count=cmd_count)
 
     async def _on_state_updated(
-        self, state: ModeInfo | ModelInfo | AvailableCommandsUpdate | ConfigOptionChanged
+        self,
+        state: ModeInfo | ModelInfo | AvailableCommandsUpdate | ConfigOptionChanged | ToastInfo,
     ) -> None:
         """Handle state update signal from agent - forward to ACP client."""
         from acp.schema import (
@@ -407,6 +408,15 @@ class ACPSession:
                 if config_id == "permissions":
                     await self.notifications.update_session_mode(value_id)
                     self.log.debug("Also sent legacy mode update", mode_id=value_id)
+            case ToastInfo():
+                # Forward toast notifications to client
+                await self._send_toast(
+                    message=state.message,
+                    level=state.level,
+                    duration=state.duration,
+                    action=state.action,
+                )
+                return
         await self.notifications.send_update(update)
 
     async def initialize(self) -> None:
@@ -418,7 +428,10 @@ class ACPSession:
         if not self.client_capabilities.terminal:
             import platform
 
-            self.acp_env._os_type = platform.system()  # type: ignore[attr-defined]
+            os_name = platform.system()
+            match os_name:
+                case "Windows" | "Darwin" | "Linux":
+                    self.acp_env._os_type = os_name
         await self.acp_env.__aenter__()
 
     def _make_provider_name(self, display_name: str) -> str:
@@ -443,6 +456,40 @@ class ACPSession:
         truncated = hashlib.sha256(self.session_id.encode()).hexdigest()[:safe_budget]
         return f"{prefix}{truncated}{suffix}"
 
+    @staticmethod
+    def _raise_missing_connection(connection_id: str) -> NoReturn:
+        """Raise RuntimeError for a missing ACP MCP connection."""
+        raise RuntimeError(f"AcpMcpConnection not found for {connection_id}")
+
+    @staticmethod
+    def _raise_no_session_pool(session_id: str) -> NoReturn:
+        """Raise RuntimeError when SessionPool is unavailable."""
+        raise RuntimeError(f"SessionPool is required for prompt processing in session {session_id}")
+
+    def _create_event_converter(self) -> ACPEventConverter:
+        """Create a new event converter for this prompt turn."""
+        client_supports_turn_complete = (
+            bool(self.client_capabilities.turn_complete)
+            if self.client_capabilities is not None
+            else False
+        )
+        return ACPEventConverter(
+            subagent_display_mode=self.subagent_display_mode,
+            raw_input_mode=self.raw_input_mode,
+            client_supports_turn_complete=client_supports_turn_complete,
+        )
+
+    async def _ensure_session_mcp_providers_on_agent(self, session_pool: Any) -> None:
+        """Ensure session MCP providers are registered on the session agent."""
+        if not self.session_mcp_providers:
+            return
+        session_agent = await session_pool.sessions.get_or_create_session_agent(
+            self.session_id, input_provider=self.input_provider
+        )
+        for provider in self.session_mcp_providers:
+            if provider not in session_agent.tools.external_providers:
+                session_agent.tools.add_provider(provider)
+
     async def initialize_mcp_servers(self) -> None:
         """Initialize MCP servers if any are configured.
 
@@ -466,7 +513,7 @@ class ACPSession:
                         connection_id = await self.acp_agent.connect_acp_mcp_server(server)
                         conn = self.acp_agent._mcp_manager.get_connection(connection_id)
                         if conn is None:
-                            raise RuntimeError(f"AcpMcpConnection not found for {connection_id}")
+                            self._raise_missing_connection(connection_id)
                         from agentpool_server.acp_server.acp_mcp_transport import (
                             AcpMcpTransport,
                         )
@@ -576,9 +623,8 @@ class ACPSession:
             self.agent.state_updated.disconnect(self._on_state_updated)
 
         # Remove session-specific mutations from old agent before switching
-        if isinstance(self.agent, Agent):
-            if self.get_cwd_context in self.agent.sys_prompts.prompts:
-                self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        if isinstance(self.agent, Agent) and self.get_cwd_context in self.agent.sys_prompts.prompts:
+            self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
         # Create new session agent via SessionPool (pool-level agents removed)
         pool = self.agent_pool
@@ -660,18 +706,8 @@ class ACPSession:
 
             self.log.debug("Processing prompt", content_items=len(non_command_content))
             event_count = 0
-            # Derive turn-complete support from client capabilities
-            client_supports_turn_complete = (
-                bool(self.client_capabilities.turn_complete)
-                if self.client_capabilities is not None
-                else False
-            )
             # Create a new event converter for this prompt
-            converter = ACPEventConverter(
-                subagent_display_mode=self.subagent_display_mode,
-                raw_input_mode=self.raw_input_mode,
-                client_supports_turn_complete=client_supports_turn_complete,
-            )
+            converter = self._create_event_converter()
             self._current_converter = converter  # Track for cancellation
 
             # Route through SessionPool for unified session management.
@@ -681,14 +717,7 @@ class ACPSession:
             session_pool = agent_pool_ref.session_pool if agent_pool_ref is not None else None
             try:
                 if session_pool is not None:
-                    # Ensure MCP providers are on the session agent (one-time setup per session)
-                    if self.session_mcp_providers:
-                        session_agent = await session_pool.sessions.get_or_create_session_agent(
-                            self.session_id, input_provider=self.input_provider
-                        )
-                        for provider in self.session_mcp_providers:
-                            if provider not in session_agent.tools.external_providers:
-                                session_agent.tools.add_provider(provider)
+                    await self._ensure_session_mcp_providers_on_agent(session_pool)
 
                     stream = session_pool.run_stream(
                         self.session_id,
@@ -697,9 +726,7 @@ class ACPSession:
                         deps=self,
                     )
                 else:
-                    raise RuntimeError(
-                        f"SessionPool is required for prompt processing in session {self.session_id}"
-                    )
+                    self._raise_no_session_pool(self.session_id)
 
                 async for event in stream:
                     if self._cancelled:
@@ -835,9 +862,11 @@ class ACPSession:
                 self.agent.state_updated.disconnect(self._on_state_updated)
 
             # Clean up sys_prompts from THIS session's agent only
-            if isinstance(self.agent, Agent):
-                if self.get_cwd_context in self.agent.sys_prompts.prompts:
-                    self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            if (
+                isinstance(self.agent, Agent)
+                and self.get_cwd_context in self.agent.sys_prompts.prompts
+            ):
+                self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
             # Unregister skill command callback to prevent memory leak
             if hasattr(self, "_skill_command_callback"):
@@ -845,10 +874,8 @@ class ACPSession:
                 if skill_registry is not None and hasattr(
                     skill_registry, "_command_change_handlers"
                 ):
-                    try:
+                    with suppress(ValueError):
                         skill_registry._command_change_handlers.remove(self._skill_command_callback)
-                    except ValueError:
-                        pass  # Already removed
 
             # Note: Individual agents are managed by the pool's lifecycle
             # The pool will handle agent cleanup when it's closed

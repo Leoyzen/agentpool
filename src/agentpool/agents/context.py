@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 import time
 from typing import TYPE_CHECKING, Any, Literal
@@ -16,6 +15,7 @@ from agentpool.messaging.context import NodeContext
 
 
 if TYPE_CHECKING:
+    import asyncio
     from collections.abc import Awaitable, Callable
 
     from mcp.types import ElicitRequestParams, ElicitResult, ErrorData

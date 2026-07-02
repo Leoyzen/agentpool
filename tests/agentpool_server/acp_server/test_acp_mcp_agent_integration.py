@@ -144,9 +144,7 @@ async def test_disconnect_acp_mcp_server(
 
     await acp_agent.disconnect_acp_mcp_server("conn-456")
 
-    disconnect_mock.assert_awaited_once_with(
-        "mcp/disconnect", {"connectionId": "conn-456"}
-    )
+    disconnect_mock.assert_awaited_once_with("mcp/disconnect", {"connectionId": "conn-456"})
     assert acp_agent._mcp_manager.get_connection("conn-456") is None
     assert "conn-456" not in acp_agent._mcp_manager
 
@@ -163,8 +161,9 @@ async def test_ext_method_routes_message(
     acp_agent.client.send_request = send_request_mock  # type: ignore[method-assign]
     await acp_agent.connect_acp_mcp_server(server_config)
 
-    msg = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
-    await acp_agent.ext_method("mcp/message", {"connectionId": "conn-789", "method": "tools/list", "id": 1})
+    await acp_agent.ext_method(
+        "mcp/message", {"connectionId": "conn-789", "method": "tools/list", "id": 1}
+    )
 
     # Give the async task a chance to run, then receive with timeout
     conn = acp_agent._mcp_manager.get_connection("conn-789")
@@ -209,16 +208,15 @@ async def test_ext_method_concurrent_messages(
     acp_agent.client.send_request = send_request_mock  # type: ignore[method-assign]
 
     await acp_agent.connect_acp_mcp_server(server_config)
-    await acp_agent.connect_acp_mcp_server(
-        AcpMcpServer(name="test-server-2", id="test-id-2")
-    )
-
-    msg_a = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
-    msg_b = {"jsonrpc": "2.0", "id": 2, "method": "tools/call"}
+    await acp_agent.connect_acp_mcp_server(AcpMcpServer(name="test-server-2", id="test-id-2"))
 
     await asyncio.gather(
-        acp_agent.ext_method("mcp/message", {"connectionId": "conn-a", "method": "tools/list", "id": 1}),
-        acp_agent.ext_method("mcp/message", {"connectionId": "conn-b", "method": "tools/call", "id": 2}),
+        acp_agent.ext_method(
+            "mcp/message", {"connectionId": "conn-a", "method": "tools/list", "id": 1}
+        ),
+        acp_agent.ext_method(
+            "mcp/message", {"connectionId": "conn-b", "method": "tools/call", "id": 2}
+        ),
     )
 
     conn_a = acp_agent._mcp_manager.get_connection("conn-a")
@@ -309,7 +307,7 @@ async def test_session_initialize_triggers_mcp_message(
             if req_method == "initialize":
                 conn = acp_agent._mcp_manager.get_connection("test-conn-init")
                 if conn is not None:
-                    req_id = params.get("params", {}).get("protocolVersion")
+                    params.get("params", {}).get("protocolVersion")
                     # Find the original request id from the session
                     result = InitializeResult(
                         protocolVersion="2024-11-05",
@@ -319,9 +317,7 @@ async def test_session_initialize_triggers_mcp_message(
                     response = JSONRPCResponse(
                         jsonrpc="2.0",
                         id=0,  # Will be matched by session
-                        result=result.model_dump(
-                            by_alias=True, mode="json", exclude_none=True
-                        ),
+                        result=result.model_dump(by_alias=True, mode="json", exclude_none=True),
                     )
                     response_msg = SessionMessage(message=JSONRPCMessage(response))
                     assert conn._to_session_send is not None
@@ -353,9 +349,7 @@ async def test_session_initialize_triggers_mcp_message(
             initialize_found = True
             break
 
-    assert initialize_found, (
-        f"No initialize request found in {len(received_mcp_messages)} messages"
-    )
+    assert initialize_found, f"No initialize request found in {len(received_mcp_messages)} messages"
 
 
 # Test 9: get_tools() sends tools/list through the ACP channel
@@ -430,9 +424,7 @@ async def test_get_tools_sends_tools_list_via_acp(
         name=server_config.name,
         timeout=10.0,
     )
-    provider = MCPResourceProvider(
-        server=acp_server_config, transport=transport
-    )
+    provider = MCPResourceProvider(server=acp_server_config, transport=transport)
 
     with anyio.fail_after(5):
         async with provider:
@@ -446,6 +438,4 @@ async def test_get_tools_sends_tools_list_via_acp(
             tools_list_found = True
             break
 
-    assert tools_list_found, (
-        f"No tools/list request found in {len(received_mcp_messages)} messages"
-    )
+    assert tools_list_found, f"No tools/list request found in {len(received_mcp_messages)} messages"

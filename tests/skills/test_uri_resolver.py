@@ -11,7 +11,6 @@ This module provides comprehensive tests for:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -25,9 +24,6 @@ from agentpool.skills.uri_resolver import (
     _validate_provider_name,
     _validate_skill_name,
 )
-
-if TYPE_CHECKING:
-    from agentpool.skills.skill import Skill
 
 
 # =============================================================================

@@ -6,11 +6,7 @@ in OpenCode TUI are not reflected in agentpool runtime.
 
 from __future__ import annotations
 
-import asyncio
-
-import anyio
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock, patch
 
 import pytest
@@ -25,6 +21,10 @@ from agentpool_server.opencode_server.models import (
     UserMessage,
 )
 from agentpool_server.opencode_server.models.config import Config
+
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 # =============================================================================
@@ -99,7 +99,7 @@ async def test_resolve_model_string_with_variant(agent_with_variants: Agent):
     agent = agent_with_variants
 
     # Test that variant can be resolved
-    model, settings = agent._resolve_model_string("qwen35")
+    model, _settings = agent._resolve_model_string("qwen35")
 
     # The model should be resolved from the variant
     assert model is not None
@@ -108,8 +108,7 @@ async def test_resolve_model_string_with_variant(agent_with_variants: Agent):
 @pytest.mark.unit
 @pytest.mark.requires_openai_key
 async def test_get_available_models_excludes_variants(agent_with_variants: Agent):
-    """CRITICAL TEST: Verify that get_available_models() returns tokonomics models,
-    NOT model_variants from config.
+    """CRITICAL TEST: get_available_models() returns tokonomics models, not config variants.
 
     This is the ROOT CAUSE of the validation failure.
 
@@ -178,7 +177,7 @@ async def test_set_mode_validation_fails_for_variants(agent_with_variants: Agent
 
         # Try to set mode to a variant
         # This simulates what happens when OpenCode TUI sends 'qwen35'
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(Exception, match=r"(?i:unknown|qwen35)") as exc_info:
             await agent._set_mode("model", "qwen35")
 
         # Should fail with UnknownModeError or similar
@@ -250,7 +249,7 @@ async def test_manual_set_model_works(agent_with_variants: Agent):
         await agent.set_model("openai-chat:svc/glm-4.7")
         # If it worked, model should change
         assert agent.model_name != initial_model or agent.model_name == "openai-chat:svc/glm-4.7"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # Expected to fail due to validation issues
         pytest.skip(f"set_model failed (expected due to validation bug): {e}")
 
@@ -334,8 +333,6 @@ agents:
     async with AgentPool(manifest) as pool:
         agent = pool.manifest.agents["assistant"].get_agent(pool=pool)
         async with agent:
-            initial_model = agent.model_name
-
             # Simulate OpenCode TUI getting available providers
             # In config_routes.py:_build_providers_from_variants(),
             # model_variants are exposed as a synthetic "agent" provider
@@ -379,7 +376,7 @@ agents:
 class _MockModelInfo:
     """Minimal stand-in for tokonomics ModelInfo."""
 
-    def __init__(self, id: str, id_override: str | None = None) -> None:
+    def __init__(self, id: str, id_override: str | None = None) -> None:  # noqa: A002
         self.id = id
         self.id_override = id_override
 
@@ -426,9 +423,8 @@ def _make_mock_state_with_session_agent(
     from unittest.mock import AsyncMock, Mock
 
     from agentpool.orchestrator.run import RunStatus
-    from agentpool_server.opencode_server.models import SessionStatus
-    from agentpool_server.opencode_server.state import ServerState
     from agentpool.utils.time_utils import now_ms
+    from agentpool_server.opencode_server.state import ServerState
 
     shared_agent = PerSessionAgentMock(name="shared-agent")
     shared_agent.env = Mock()
@@ -465,9 +461,7 @@ def _make_mock_state_with_session_agent(
     session_pool.sessions.get_or_create_session_agent = AsyncMock(
         side_effect=_get_or_create_session_agent
     )
-    session_pool.sessions.get_or_create_session = AsyncMock(
-        return_value=(Mock(), True)
-    )
+    session_pool.sessions.get_or_create_session = AsyncMock(return_value=(Mock(), True))
 
     # RunHandle that completes immediately
     run_handle = Mock()
@@ -479,6 +473,7 @@ def _make_mock_state_with_session_agent(
     # EventBus mock
     session_pool.event_bus = Mock()
     from tests._helpers.mock_stream import EmptyReceiveStream
+
     session_pool.event_bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     session_pool.event_bus.unsubscribe = AsyncMock(return_value=None)
 
@@ -539,7 +534,7 @@ async def test_model_switch_targets_per_session_agent(tmp_project_dir: Path) -> 
             available_models=["gpt-4o"],
         ),
     }
-    state, pool = _make_mock_state_with_session_agent(tmp_project_dir, session_agents)
+    state, _pool = _make_mock_state_with_session_agent(tmp_project_dir, session_agents)
 
     shared_agent = state.agent
     assert isinstance(shared_agent, PerSessionAgentMock)
@@ -588,7 +583,7 @@ async def test_model_switch_affects_only_target_session(tmp_project_dir: Path) -
         ),
         session_b: PerSessionAgentMock(name="agent-b", model_name="model-b"),
     }
-    state, pool = _make_mock_state_with_session_agent(tmp_project_dir, session_agents)
+    state, _pool = _make_mock_state_with_session_agent(tmp_project_dir, session_agents)
 
     # Process message for session A WITH model override
     request_a = MessageRequest(
@@ -651,7 +646,7 @@ async def test_other_sessions_retain_original_model(tmp_project_dir: Path) -> No
         ),
         session_b: PerSessionAgentMock(name="agent-b", model_name="original-model-b"),
     }
-    state, pool = _make_mock_state_with_session_agent(tmp_project_dir, session_agents)
+    state, _pool = _make_mock_state_with_session_agent(tmp_project_dir, session_agents)
 
     # Process message for session A with model override
     request = MessageRequest(

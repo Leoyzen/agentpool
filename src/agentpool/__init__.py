@@ -41,6 +41,22 @@ __url__ = "https://github.com/phil65/agentpool"
 load_dotenv()
 register_http_filesystems()
 
+# Rebuild models with forward references that couldn't be resolved during
+# module initialization due to circular import avoidance.
+# PromptType and BasePrompt are imported under TYPE_CHECKING in
+# agentpool_config.knowledge and agentpool_config.task to break a circular
+# import chain. By this point, agentpool.prompts.prompts is fully loaded,
+# so we can resolve the forward references.
+from agentpool.prompts.prompts import BasePrompt, PromptType
+from agentpool_config.knowledge import Knowledge
+from agentpool_config.task import Job
+
+_ns = {"PromptType": PromptType, "BasePrompt": BasePrompt}
+Knowledge.model_rebuild(_types_namespace=_ns)
+Job.model_rebuild(_types_namespace=_ns)
+NativeAgentConfig.model_rebuild(_types_namespace=_ns)
+AgentsManifest.model_rebuild(_types_namespace=_ns)
+
 __all__ = [
     "ACPAgent",
     "Agent",

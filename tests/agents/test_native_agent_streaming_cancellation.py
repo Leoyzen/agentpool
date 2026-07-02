@@ -15,18 +15,21 @@ This file tests agent-level streaming, not RunHandle lifecycle.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
-from typing import Any
+from contextlib import asynccontextmanager, suppress
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
-import pytest
 from pydantic_ai.models.test import TestModel, TestStreamedResponse
+import pytest
 
 from agentpool import Agent
 from agentpool.agents.base_agent import _current_run_ctx_var
 from agentpool.agents.events import StreamCompleteEvent
 from agentpool.orchestrator.core import SessionState
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 
 class SlowTestModel(TestModel):
@@ -75,11 +78,10 @@ class SlowTestModel(TestModel):
 
 
 @pytest.fixture
-async def slow_agent() -> AsyncGenerator[Agent[None], None]:
+async def slow_agent() -> AsyncGenerator[Agent[None]]:
     """Agent with SlowTestModel for cancellation testing."""
     model = SlowTestModel(custom_output_text="Hello world slow response", pre_stream_delay=0.5)
-    agent = Agent(name="cancel-test-agent", model=model, session=False)
-    yield agent
+    return Agent(name="cancel-test-agent", model=model, session=False)
 
 
 def _mock_session_pool(agent: Agent[Any], run_ctx: Any) -> None:
@@ -102,8 +104,12 @@ def _mock_session_pool(agent: Agent[Any], run_ctx: Any) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_run_stream_cancellation_sets_cancelled_and_cleans_up(slow_agent: Agent[None]) -> None:
-    """Cancelling the async generator mid-stream sets run_ctx.cancelled and cleans up iteration_task.
+async def test_run_stream_cancellation_sets_cancelled_and_cleans_up(
+    slow_agent: Agent[None],
+) -> None:
+    """Cancelling the async generator mid-stream sets run_ctx.cancelled.
+
+    Also cleans up iteration_task.
 
     Steps:
     1. Start streaming with a slow model
@@ -141,15 +147,11 @@ async def test_run_stream_cancellation_sets_cancelled_and_cleans_up(slow_agent: 
     await slow_agent.interrupt(session_id="test-session")
 
     # Wait for the consumer task to finish
-    try:
+    with suppress(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=3.0)
-    except asyncio.CancelledError:
-        pass  # Expected — the consumer task may be cancelled
 
     # Assert run_ctx.cancelled was set to True
-    assert run_ctx.cancelled is True, (
-        "run_ctx.cancelled must be True after stream cancellation"
-    )
+    assert run_ctx.cancelled is True, "run_ctx.cancelled must be True after stream cancellation"
 
     # Assert _iteration_task is None after cleanup
     assert slow_agent._iteration_task is None, (
@@ -160,7 +162,9 @@ async def test_run_stream_cancellation_sets_cancelled_and_cleans_up(slow_agent: 
     all_tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     # The iteration task should be gone; if any agent-related task remains, it's a leak
     agent_tasks = [t for t in all_tasks if "agent" in t.get_name() or "iteration" in t.get_name()]
-    assert len(agent_tasks) == 0, f"Dangling agent tasks found: {[t.get_name() for t in agent_tasks]}"
+    assert len(agent_tasks) == 0, (
+        f"Dangling agent tasks found: {[t.get_name() for t in agent_tasks]}"
+    )
 
 
 @pytest.mark.unit
@@ -188,10 +192,8 @@ async def test_run_stream_raw_task_cancellation_cleans_up(slow_agent: Agent[None
     # Cancel the consumer task directly (raw cancellation)
     task.cancel()
 
-    try:
+    with suppress(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=3.0)
-    except asyncio.CancelledError:
-        pass
 
     # _iteration_task must be cleaned up
     assert slow_agent._iteration_task is None, (
@@ -201,4 +203,6 @@ async def test_run_stream_raw_task_cancellation_cleans_up(slow_agent: Agent[None
     # No dangling agent tasks
     all_tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     agent_tasks = [t for t in all_tasks if "agent" in t.get_name() or "iteration" in t.get_name()]
-    assert len(agent_tasks) == 0, f"Dangling agent tasks found: {[t.get_name() for t in agent_tasks]}"
+    assert len(agent_tasks) == 0, (
+        f"Dangling agent tasks found: {[t.get_name() for t in agent_tasks]}"
+    )

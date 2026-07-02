@@ -7,13 +7,17 @@ that the data survives connection close/reopen.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentpool.sessions import SessionData
 from agentpool_config.storage import SQLStorageConfig
 from agentpool_storage.sql_provider import SQLModelProvider
+
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture
@@ -31,9 +35,7 @@ class TestSQLCheckpoint:
     async def test_save_and_load_checkpoint(self, provider: SQLModelProvider) -> None:
         """save_checkpoint stores JSON messages and pending calls; load_checkpoint returns them."""
         async with provider:
-            await provider.save_session(
-                SessionData(session_id="s1", agent_name="test_agent")
-            )
+            await provider.save_session(SessionData(session_id="s1", agent_name="test_agent"))
             await provider.save_checkpoint(
                 "s1",
                 '[{"role":"user","content":"hello"}]',
@@ -50,9 +52,7 @@ class TestSQLCheckpoint:
     async def test_load_checkpoint_nonexistent(self, provider: SQLModelProvider) -> None:
         """load_checkpoint returns None for a session with no checkpoint."""
         async with provider:
-            await provider.save_session(
-                SessionData(session_id="s1", agent_name="test_agent")
-            )
+            await provider.save_session(SessionData(session_id="s1", agent_name="test_agent"))
             result = await provider.load_checkpoint("s1")
 
         assert result is None
@@ -69,9 +69,7 @@ class TestSQLCheckpoint:
     async def test_delete_checkpoint(self, provider: SQLModelProvider) -> None:
         """delete_checkpoint removes stored checkpoint data from the database."""
         async with provider:
-            await provider.save_session(
-                SessionData(session_id="s1", agent_name="test_agent")
-            )
+            await provider.save_session(SessionData(session_id="s1", agent_name="test_agent"))
             await provider.save_checkpoint("s1", "[]", "[]")
 
             deleted = await provider.delete_checkpoint("s1")
@@ -84,9 +82,7 @@ class TestSQLCheckpoint:
     async def test_delete_checkpoint_nonexistent(self, provider: SQLModelProvider) -> None:
         """delete_checkpoint returns False for a session with no checkpoint."""
         async with provider:
-            await provider.save_session(
-                SessionData(session_id="s1", agent_name="test_agent")
-            )
+            await provider.save_session(SessionData(session_id="s1", agent_name="test_agent"))
             deleted = await provider.delete_checkpoint("s1")
 
         assert deleted is False
@@ -95,9 +91,7 @@ class TestSQLCheckpoint:
     async def test_checkpoint_survives_close_reopen(self, provider: SQLModelProvider) -> None:
         """Checkpoint data persists after closing and reopening the database connection."""
         async with provider:
-            await provider.save_session(
-                SessionData(session_id="s1", agent_name="test_agent")
-            )
+            await provider.save_session(SessionData(session_id="s1", agent_name="test_agent"))
             await provider.save_checkpoint(
                 "s1",
                 '[{"role":"user","content":"survive test"}]',
@@ -121,9 +115,7 @@ class TestSQLCheckpoint:
     async def test_overwrite_checkpoint(self, provider: SQLModelProvider) -> None:
         """save_checkpoint overwrites existing checkpoint data for the same session."""
         async with provider:
-            await provider.save_session(
-                SessionData(session_id="s1", agent_name="test_agent")
-            )
+            await provider.save_session(SessionData(session_id="s1", agent_name="test_agent"))
             await provider.save_checkpoint("s1", "old", "old_calls")
             await provider.save_checkpoint("s1", "new", "new_calls")
 
@@ -142,9 +134,7 @@ class TestSQLCheckpoint:
         deleting the conversation row naturally removes the checkpoint data.
         """
         async with provider:
-            await provider.save_session(
-                SessionData(session_id="s1", agent_name="test_agent")
-            )
+            await provider.save_session(SessionData(session_id="s1", agent_name="test_agent"))
             await provider.save_checkpoint("s1", "[]", "[]")
 
             deleted = await provider.delete_session("s1")

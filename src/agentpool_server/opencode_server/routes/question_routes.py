@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 from agentpool_server.opencode_server.models import (
+    PermissionReply,
     PermissionResolvedEvent,
     QuestionRejectedEvent,
     QuestionRepliedEvent,
@@ -36,7 +37,7 @@ def _find_permission_provider(
     return None
 
 
-def _extract_permission_reply(reply: QuestionReply) -> str | None:
+def _extract_permission_reply(reply: QuestionReply) -> PermissionReply | None:
     if len(reply.answers) != 1:
         return None
     selected_answers = reply.answers[0]
@@ -125,12 +126,12 @@ async def reply_to_question(requestID: str, reply: QuestionReply, state: StateDe
         if not provider.resolve_permission(requestID, permission_reply):
             raise HTTPException(status_code=404, detail="Permission not found or already resolved")
 
-        event = PermissionResolvedEvent.create(
+        resolved_event = PermissionResolvedEvent.create(
             session_id=session_id,
             request_id=requestID,
             reply=permission_reply,
         )
-        await state.broadcast_event(event)
+        await state.broadcast_event(resolved_event)
         return True
 
     session_id = pending.session_id
@@ -139,19 +140,21 @@ async def reply_to_question(requestID: str, reply: QuestionReply, state: StateDe
         if state.session_controller is not None
         else None
     )
-    provider = session.input_provider if session is not None else None
-    if not isinstance(provider, OpenCodeInputProvider):
+    question_provider: OpenCodeInputProvider | None = (
+        session.input_provider if session is not None else None
+    )
+    if not isinstance(question_provider, OpenCodeInputProvider):
         raise HTTPException(status_code=500, detail="Invalid provider for session")
     # Resolve via provider
-    if not provider.resolve_question(requestID, reply.answers):
+    if not question_provider.resolve_question(requestID, reply.answers):
         raise HTTPException(status_code=404, detail="Question already resolved")
     # Broadcast replied event
-    event = QuestionRepliedEvent.create(
+    replied_event = QuestionRepliedEvent.create(
         session_id=session_id,
         request_id=requestID,
         answers=reply.answers,
     )
-    await state.broadcast_event(event)
+    await state.broadcast_event(replied_event)
     return True
 
 
@@ -181,12 +184,12 @@ async def reject_question(requestID: str, state: StateDep) -> bool:  # noqa: N80
         if not provider.resolve_permission(requestID, "reject"):
             raise HTTPException(status_code=404, detail="Permission not found or already resolved")
 
-        event = PermissionResolvedEvent.create(
+        resolved_event = PermissionResolvedEvent.create(
             session_id=session_id,
             request_id=requestID,
             reply="reject",
         )
-        await state.broadcast_event(event)
+        await state.broadcast_event(resolved_event)
         return True
     # Cancel the future
     if not pending.future.done():
@@ -194,6 +197,8 @@ async def reject_question(requestID: str, state: StateDep) -> bool:  # noqa: N80
     # Remove from pending
     _remove_pending_question(state, requestID)
     # Broadcast rejected event
-    event = QuestionRejectedEvent.create(session_id=pending.session_id, request_id=requestID)
-    await state.broadcast_event(event)
+    rejected_event = QuestionRejectedEvent.create(
+        session_id=pending.session_id, request_id=requestID
+    )
+    await state.broadcast_event(rejected_event)
     return True

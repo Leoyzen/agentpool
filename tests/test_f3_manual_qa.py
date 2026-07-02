@@ -13,11 +13,11 @@ import inspect
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import pytest
 from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import FilteredToolset, FunctionToolset, PrefixedToolset
+import pytest
 from upathtools import UPath
 
 from agentpool import Agent
@@ -34,8 +34,7 @@ from agentpool.skills.skill import Skill
 def mock_agent() -> Agent[Any]:
     """Create an agent with TestModel for get_agentlet testing."""
     model = TestModel(custom_output_text="test")
-    agent = Agent(name="f3-qa-test-agent", model=model)
-    return agent
+    return Agent(name="f3-qa-test-agent", model=model)
 
 
 @pytest.fixture
@@ -105,7 +104,9 @@ async def test_scenario_a_skill_capability_in_chain_after_mcp(
             return MagicMock()
 
     with (
-        patch.object(mock_agent, "_resolve_history_processors", return_value=[mock_history_processor]),
+        patch.object(
+            mock_agent, "_resolve_history_processors", return_value=[mock_history_processor]
+        ),
         patch.object(agent_module, "PydanticAgent", CapturingPydanticAgent),
     ):
         await mock_agent.get_agentlet(None, None, None)
@@ -114,9 +115,7 @@ async def test_scenario_a_skill_capability_in_chain_after_mcp(
 
     # Find SkillCapabilities
     skill_caps = [cap for cap in capabilities if isinstance(cap, SkillCapability)]
-    assert len(skill_caps) == 2, (
-        f"Expected 2 SkillCapability instances, got {len(skill_caps)}"
-    )
+    assert len(skill_caps) == 2, f"Expected 2 SkillCapability instances, got {len(skill_caps)}"
 
     # MCP caps are MagicMock instances — track via identity
     mcp_caps = mock_mcp_manager.as_capability.return_value
@@ -259,12 +258,8 @@ No MCP servers or tools declared.
         assert "Skill URI:" in result, "Skill URI trailer"
 
         # No activation sections
-        assert "## Activated MCP Servers" not in result, (
-            "No MCP section for plain skill"
-        )
-        assert "## Activated Tools" not in result, (
-            "No Tools section for plain skill"
-        )
+        assert "## Activated MCP Servers" not in result, "No MCP section for plain skill"
+        assert "## Activated Tools" not in result, "No Tools section for plain skill"
     finally:
         await pool.__aexit__(None, None, None)
 
@@ -341,9 +336,7 @@ async def test_scenario_d_allowed_tools_filter_func_rejects_unwanted() -> None:
             result = await result_or_coro
         else:
             result = result_or_coro
-        assert result is True, (
-            f"Non-skill tool '{tool_name}' should pass through but got {result}"
-        )
+        assert result is True, f"Non-skill tool '{tool_name}' should pass through but got {result}"
 
 
 @pytest.mark.anyio
@@ -357,6 +350,3 @@ async def test_scenario_d_allowed_tools_passthrough_when_none() -> None:
 
     # Should be the same object — no filtering
     assert wrapped is inner, "Toolset should pass through unchanged when no allowed_tools"
-
-
-

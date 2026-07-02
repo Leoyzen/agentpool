@@ -14,9 +14,9 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from pydantic_ai.exceptions import UndrainedPendingMessagesError
 from pydantic_ai.models.test import TestModel
+import pytest
 
 from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
@@ -64,9 +64,7 @@ async def test_normal_cycle_yields_events_and_sets_properties() -> None:
             run_ctx=run_ctx,
             message_history=[],
         )
-        events: list[Any] = []
-        async for event in turn.execute():
-            events.append(event)
+        events = [event async for event in turn.execute()]
 
         # Should have yielded some events (pydantic-ai stream events pass through EventMapper)
         assert len(events) > 0, "Expected at least one event from normal cycle"
@@ -86,6 +84,7 @@ async def test_normal_cycle_yields_events_and_sets_properties() -> None:
 @pytest.mark.asyncio
 async def test_terminal_tool_stops_execution() -> None:
     """Terminal tool detection stops the iter/next loop early."""
+
     def terminal_tool() -> str:
         """A terminal tool."""
         return "terminal result"
@@ -112,15 +111,15 @@ async def test_terminal_tool_stops_execution() -> None:
             "agentpool.agents.native_agent.turn.is_terminal_tool",
             side_effect=fake_is_terminal,
         ):
-            async for event in turn.execute():
-                events.append(event)
+            events.extend([event async for event in turn.execute()])
 
         # Terminal tool name should be set on run_ctx
         assert run_ctx.terminal_tool_name == "terminal_tool"
 
         # A ToolCallCompleteEvent for the terminal tool should have been yielded
         complete_events = [
-            e for e in events
+            e
+            for e in events
             if isinstance(e, ToolCallCompleteEvent) and e.tool_name == "terminal_tool"
         ]
         assert len(complete_events) == 1, (
@@ -154,8 +153,7 @@ async def test_run_aborted_error_graceful_stop() -> None:
 
         events: list[Any] = []
         with patch.object(agent, "get_agentlet", AsyncMock(return_value=mock_agentlet)):
-            async for event in turn.execute():
-                events.append(event)
+            events.extend([event async for event in turn.execute()])
 
         # No RunErrorEvent should be yielded for RunAbortedError
         assert not any(isinstance(e, RunErrorEvent) for e in events), (
@@ -191,8 +189,7 @@ async def test_undrained_pending_messages_error_graceful_stop() -> None:
 
         events: list[Any] = []
         with patch.object(agent, "get_agentlet", AsyncMock(return_value=mock_agentlet)):
-            async for event in turn.execute():
-                events.append(event)
+            events.extend([event async for event in turn.execute()])
 
         # No RunErrorEvent should be yielded for UndrainedPendingMessagesError
         assert not any(isinstance(e, RunErrorEvent) for e in events), (
@@ -224,10 +221,12 @@ async def test_cancelled_error_is_reraised() -> None:
             message_history=[],
         )
 
-        with patch.object(agent, "get_agentlet", AsyncMock(return_value=mock_agentlet)):
-            with pytest.raises(asyncio.CancelledError):
-                async for _ in turn.execute():
-                    pass
+        with (
+            patch.object(agent, "get_agentlet", AsyncMock(return_value=mock_agentlet)),
+            pytest.raises(asyncio.CancelledError),
+        ):
+            async for _ in turn.execute():
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -323,14 +322,10 @@ async def test_execute_yields_stream_complete_as_last_event() -> None:
             message_history=[],
         )
 
-        events: list[Any] = []
-        async for event in turn.execute():
-            events.append(event)
+        events = [event async for event in turn.execute()]
 
         # Must have at least one event (StreamCompleteEvent)
-        assert len(events) >= 1, (
-            f"Expected at least 1 event, got {len(events)}"
-        )
+        assert len(events) >= 1, f"Expected at least 1 event, got {len(events)}"
 
         # Last event must be StreamCompleteEvent
         assert isinstance(events[-1], StreamCompleteEvent), (
@@ -338,17 +333,13 @@ async def test_execute_yields_stream_complete_as_last_event() -> None:
         )
 
         # StreamCompleteEvent must have a non-None message
-        assert events[-1].message is not None, (
-            "StreamCompleteEvent.message must not be None"
-        )
+        assert events[-1].message is not None, "StreamCompleteEvent.message must not be None"
         assert "final response" in events[-1].message.content, (
             f"Expected 'final response' in message, got {events[-1].message.content!r}"
         )
 
         # Must have exactly one StreamCompleteEvent
-        stream_complete_count = sum(
-            1 for e in events if isinstance(e, StreamCompleteEvent)
-        )
+        stream_complete_count = sum(1 for e in events if isinstance(e, StreamCompleteEvent))
         assert stream_complete_count == 1, (
             f"Expected exactly one StreamCompleteEvent, got {stream_complete_count}"
         )

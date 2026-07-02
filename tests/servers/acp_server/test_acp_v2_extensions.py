@@ -36,9 +36,7 @@ class TestV2ExtensionPoints:
         assert hasattr(converter, "_on_state_change"), (
             "_on_state_change should be defined on ACPEventConverter"
         )
-        assert callable(converter._on_state_change), (
-            "_on_state_change should be callable"
-        )
+        assert callable(converter._on_state_change), "_on_state_change should be callable"
         source = self._get_method_source(ACPEventConverter, "_on_state_change")
         assert "# V2_EXTENSION:" in source, (
             f"_on_state_change must have # V2_EXTENSION: comment, got:\n{source}"
@@ -68,9 +66,7 @@ class TestV2ExtensionPoints:
         """_on_out_of_turn_update() is a no-op — returns None, no side effects."""
         converter = ACPEventConverter()
         result = converter._on_out_of_turn_update()
-        assert result is None, (
-            f"_on_out_of_turn_update should return None, got {result!r}"
-        )
+        assert result is None, f"_on_out_of_turn_update should return None, got {result!r}"
 
     def test_no_v2_behavior_activated(self) -> None:
         """No V2 behavior is activated — both hooks are pure no-ops."""
@@ -245,7 +241,7 @@ class TestCheckpointedSessionListing:
 
     def test_checkpointed_sessions_are_listed(self) -> None:
         """Checkpointed sessions appear in listing with SessionInfo.
-        
+
         The session/list should return checkpointed sessions alongside
         active ones, but checkpointed sessions have state='idle' in meta.
         """

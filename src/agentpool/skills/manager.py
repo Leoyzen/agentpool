@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from types import TracebackType
 from typing import TYPE_CHECKING, Self, cast, overload
 
 from upathtools import JoinablePathLike, UPath, to_upath
@@ -13,9 +12,12 @@ from agentpool_config.skills import SkillsConfig  # noqa: TC001
 
 
 if TYPE_CHECKING:
+    from types import TracebackType
+
     from fsspec import AbstractFileSystem
 
     from agentpool.resource_providers.base import ResourceProvider
+    from agentpool.resource_providers.local import LocalResourceProvider
     from agentpool.skills.skill import Skill
 
 

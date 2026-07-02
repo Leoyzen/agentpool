@@ -1,7 +1,5 @@
 """Minimal test to isolate the piping hang."""
 
-import pytest
-
 from agentpool import Agent
 
 

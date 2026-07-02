@@ -33,7 +33,7 @@ def test_run_status_is_enum() -> None:
 
 @pytest.mark.unit
 def test_run_status_idle_and_done_are_distinct() -> None:
-    """Given RunStatus has idle and done, they should be distinct values from all existing states."""
+    """Given RunStatus has idle and done, they should be distinct from all existing states."""
     assert RunStatus.idle is not RunStatus.done
     assert RunStatus.idle is not RunStatus.pending
     assert RunStatus.idle is not RunStatus.running

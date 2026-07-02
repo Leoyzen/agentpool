@@ -24,7 +24,6 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 from tests.orchestrator.test_resume_session import (  # noqa: E402
-    _FakeDeferredResults,
     make_deferred_tool_results,
     make_pending_call,
     make_session_data,
@@ -56,8 +55,7 @@ async def session_pool(mock_pool: MagicMock) -> SessionPool:
     from agentpool.sessions.store import MemorySessionStore
 
     store = MemorySessionStore()
-    sp = SessionPool(pool=mock_pool, store=store)
-    return sp
+    return SessionPool(pool=mock_pool, store=store)
 
 
 # ---------------------------------------------------------------------------
@@ -89,9 +87,7 @@ async def test_with_resume_lock_raises_busy_for_active_run(
     session_pool: SessionPool,
 ) -> None:
     """_with_resume_lock raises SessionBusyError when session has active run."""
-    state, _ = await session_pool.sessions.get_or_create_session(
-        "sess-1", agent_name="test-agent"
-    )
+    state, _ = await session_pool.sessions.get_or_create_session("sess-1", agent_name="test-agent")
     state.current_run_id = "run-active"
 
     with pytest.raises(SessionBusyError, match="already has an active run"):
@@ -210,12 +206,8 @@ async def test_resume_session_concurrent_calls_serialize(
         results = make_deferred_tool_results(["call-1"])
 
         # Fire two concurrent resume calls
-        task1 = asyncio.create_task(
-            session_pool.resume_session("sess-1", results)
-        )
-        task2 = asyncio.create_task(
-            session_pool.resume_session("sess-1", results)
-        )
+        task1 = asyncio.create_task(session_pool.resume_session("sess-1", results))
+        task2 = asyncio.create_task(session_pool.resume_session("sess-1", results))
 
         # Give tasks time to start: one acquires lock, the other waits
         await asyncio.sleep(0.05)
@@ -284,17 +276,15 @@ async def test_resume_session_rejects_second_after_success(
             AsyncMock(return_value=mock_native),
         ),
     ):
-            results = make_deferred_tool_results(["call-1"])
+        results = make_deferred_tool_results(["call-1"])
 
-            # First call succeeds (pending calls are cleared)
-            await session_pool.resume_session("sess-1", results)
+        # First call succeeds (pending calls are cleared)
+        await session_pool.resume_session("sess-1", results)
 
-            # Second call: pending_deferred_calls is now empty, so pass empty results.
-            # The call should reach the lock, see status="active", and raise.
-            with pytest.raises(SessionBusyError):
-                await session_pool.resume_session(
-                    "sess-1", make_deferred_tool_results([])
-                )
+        # Second call: pending_deferred_calls is now empty, so pass empty results.
+        # The call should reach the lock, see status="active", and raise.
+        with pytest.raises(SessionBusyError):
+            await session_pool.resume_session("sess-1", make_deferred_tool_results([]))
 
 
 # ---------------------------------------------------------------------------

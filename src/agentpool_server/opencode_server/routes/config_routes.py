@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import contextlib
 from datetime import timedelta
 import os
 from typing import TYPE_CHECKING, Any
@@ -298,6 +299,10 @@ def _infer_default_model(state: StateDep) -> str | None:
     # agent_cfg.model may be a raw str or a structured config (e.g.
     # StringModelConfig with identifier).  The identifier itself can be
     # either a variant name ("glm47") or a full model id ("openai-chat:svc/glm-4.7").
+    from agentpool.models.agents import NativeAgentConfig
+
+    if not isinstance(agent_cfg, NativeAgentConfig):
+        return None
     agent_model = agent_cfg.model
     variant_name: str | None = None
 
@@ -432,10 +437,8 @@ async def get_providers(state: StateDep) -> ProvidersResponse:
     """Get available providers and models from agent."""
     # Get manifest from agent pool (may be None if not loaded)
     manifest: AgentsManifest | None = None
-    try:
+    with contextlib.suppress(AttributeError, RuntimeError):
         manifest = state.pool.manifest
-    except (AttributeError, RuntimeError):
-        pass  # No manifest available
 
     # Build providers using fallback hierarchy
     providers = await _build_providers_with_fallback(manifest, state.agent)
@@ -459,10 +462,8 @@ async def list_providers(state: StateDep) -> ProviderListResponse:
     """List all providers."""
     # Get manifest from agent pool (may be None if not loaded)
     manifest: AgentsManifest | None = None
-    try:
+    with contextlib.suppress(AttributeError, RuntimeError):
         manifest = state.pool.manifest
-    except (AttributeError, RuntimeError):
-        pass  # No manifest available
 
     # Build providers using fallback hierarchy
     providers = await _build_providers_with_fallback(manifest, state.agent)

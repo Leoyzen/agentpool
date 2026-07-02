@@ -8,14 +8,14 @@ backward compatibility for the legacy path.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
+import anyio
 import pytest
 
 from agentpool.agents.events.events import CustomEvent
 from agentpool.orchestrator.core import EventBus, EventEnvelope
-from agentpool_server.opencode_server.event_bridge import OpenCodeEventBridge
 from agentpool_server.opencode_server.models import (
     SessionIdleEvent,
     SessionStatus,
@@ -23,8 +23,6 @@ from agentpool_server.opencode_server.models import (
 )
 from agentpool_server.opencode_server.models.events import ServerConnectedEvent
 from agentpool_server.opencode_server.state import ServerState
-import anyio
-
 
 
 if TYPE_CHECKING:
@@ -46,12 +44,11 @@ def bridged_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
     # Wire a real EventBus into the mock pool so __post_init__ can discover it
     mock_agent.agent_pool.session_pool.event_bus = EventBus()
 
-    state = ServerState(
+    return ServerState(
         working_dir=str(tmp_project_dir),
         agent=mock_agent,
         session_controller=Mock(),  # non-None triggers bridge instantiation
     )
-    return state
 
 
 @pytest.fixture
@@ -161,7 +158,7 @@ async def test_bridge_wraps_different_event_types(
 
     await asyncio.sleep(0.05)
 
-    for i, evt in enumerate(events):
+    for _i, evt in enumerate(events):
         envelope = subscriber.receive_nowait()
         assert isinstance(envelope, EventEnvelope)
         wrapped = envelope.event

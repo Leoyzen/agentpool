@@ -393,7 +393,9 @@ class TestMixedMode:
             agent_enabled = pool_enabled.manifest.agents["test_agent"].get_agent(pool=pool_enabled)
 
         async with AgentPool(basic_manifest) as pool_disabled:
-            agent_disabled = pool_disabled.manifest.agents["test_agent"].get_agent(pool=pool_disabled)
+            agent_disabled = pool_disabled.manifest.agents["test_agent"].get_agent(
+                pool=pool_disabled
+            )
 
         assert type(agent_enabled) is Agent
         assert type(agent_disabled) is Agent

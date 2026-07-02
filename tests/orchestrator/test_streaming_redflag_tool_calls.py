@@ -12,8 +12,7 @@ progress indicators.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic_ai.messages import PartDeltaEvent as PyAIPartDeltaEvent
 from pydantic_ai.models.test import TestModel
@@ -29,9 +28,14 @@ from agentpool.agents.events import (
 from agentpool.tools import Tool
 
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 async def _collect_events(stream: AsyncIterator[Any]) -> list[Any]:
     """Drain an async event stream into a list."""
@@ -128,7 +132,8 @@ async def test_tool_call_only_response_has_no_text_deltas() -> None:
     ]
     assert len(text_deltas_before_tool_complete) == 0, (
         f"RED FLAG: Expected 0 text/thinking deltas before tool call completes, "
-        f"got {len(text_deltas_before_tool_complete)}. Frontend has nothing to render until tool completes."
+        f"got {len(text_deltas_before_tool_complete)}."
+        " Frontend has nothing to render until tool completes."
     )
 
     # Tool call lifecycle: native agent emits ToolCallStartEvent for

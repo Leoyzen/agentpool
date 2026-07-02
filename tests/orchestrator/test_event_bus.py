@@ -137,7 +137,7 @@ async def test_unsubscribe_removes_stream(event_bus: EventBus) -> None:
 @pytest.mark.anyio
 async def test_unsubscribe_unknown_session_noop(event_bus: EventBus) -> None:
     """Unsubscribing from a non-existent session is a no-op."""
-    send, recv = anyio.create_memory_object_stream(max_buffer_size=10)
+    _send, recv = anyio.create_memory_object_stream(max_buffer_size=10)
     await event_bus.unsubscribe("missing", recv)
     counts = await event_bus.get_subscriber_counts()
     assert counts == {}
@@ -147,7 +147,7 @@ async def test_unsubscribe_unknown_session_noop(event_bus: EventBus) -> None:
 async def test_unsubscribe_wrong_stream_noop(event_bus: EventBus) -> None:
     """Unsubscribing a stream that was never subscribed is a no-op."""
     s_real = await event_bus.subscribe("sess-1")
-    send, recv_fake = anyio.create_memory_object_stream(max_buffer_size=10)
+    _send, recv_fake = anyio.create_memory_object_stream(max_buffer_size=10)
     await event_bus.unsubscribe("sess-1", recv_fake)
     counts = await event_bus.get_subscriber_counts()
     assert counts["sess-1"] == 1
@@ -155,7 +155,7 @@ async def test_unsubscribe_wrong_stream_noop(event_bus: EventBus) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Publish – single & multiple subscribers
+# Publish - single & multiple subscribers
 # ---------------------------------------------------------------------------
 
 
@@ -271,13 +271,9 @@ async def test_close_session_signals_end_of_stream(
     await event_bus.publish("sess-1", sample_event)
     await event_bus.close_session("sess-1")
 
-    received1: list[Any] = []
-    async for envelope in s1:
-        received1.append(envelope)
+    received1: list[Any] = [envelope async for envelope in s1]
 
-    received2: list[Any] = []
-    async for envelope in s2:
-        received2.append(envelope)
+    received2: list[Any] = [envelope async for envelope in s2]
 
     assert len(received1) >= 1
     assert len(received2) >= 1
@@ -1586,7 +1582,8 @@ async def test_coalescing_plan_update_last_wins_in_drain() -> None:
     await bus.close_session("sess-1")
 
     # drain_and_merge groups by consecutive merge_key:
-    # text1 → ("delta_text","") group, plan+plan → ("plan","") group, text2 → ("delta_text","") group
+    # text1 -> ("delta_text","") group, plan+plan -> ("plan","") group,
+    # text2 -> ("delta_text","") group
     results = [env async for env in drain_and_merge(stream)]
     assert len(results) == 3
     # First: text1 (single text delta)

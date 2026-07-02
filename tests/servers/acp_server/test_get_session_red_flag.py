@@ -1,4 +1,5 @@
-"""Red-flag test: ACPSessionManager.get_session() should not return None
+"""Red-flag test: ACPSessionManager.get_session() should not return None.
+
 when the session exists in _acp_sessions but not yet in _session_controller.
 
 This is a standalone test that mocks all dependencies to avoid circular imports.
@@ -7,8 +8,6 @@ This is a standalone test that mocks all dependencies to avoid circular imports.
 from __future__ import annotations
 
 from unittest.mock import MagicMock
-
-import pytest
 
 
 def _make_manager_with_controller() -> tuple[object, MagicMock]:
@@ -42,7 +41,8 @@ class TestGetSessionRedFlag:
     """Red-flag tests for get_session() behavior with _session_controller."""
 
     def test_returns_session_when_not_yet_in_controller(self):
-        """RED FLAG: get_session() MUST return the ACPSession from _acp_sessions
+        """RED FLAG: get_session() MUST return the ACPSession from _acp_sessions.
+
         even when _session_controller doesn't have it yet.
 
         This reproduces the bug: during session/new, create_session() adds the
@@ -100,8 +100,11 @@ class TestGetSessionRedFlag:
         assert result is mock_session
 
     def test_returns_session_without_controller(self):
-        """get_session() should work when _session_controller is None
-        (no SessionPool active)."""
+        """get_session() should work when _session_controller is None.
+
+        (no SessionPool active).
+
+        """
         manager = _make_manager_without_controller()
         session_id = "sess-no-controller-001"
 

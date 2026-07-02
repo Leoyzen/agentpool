@@ -18,25 +18,26 @@ Covers three bugs:
 from __future__ import annotations
 
 import asyncio
-import contextlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.test import TestModel
+import pytest
 
 from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
-    RunFailedEvent,
     StreamCompleteEvent,
 )
+from agentpool.agents.native_agent.turn import NativeTurn
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, SessionState
-from agentpool.agents.native_agent.turn import NativeTurn
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
+
+
+if TYPE_CHECKING:
+    from pydantic_ai.messages import ModelMessage
 
 
 pytestmark = pytest.mark.unit
@@ -307,7 +308,7 @@ async def test_cancellederror_path_captures_history() -> None:
             # Simulate what cancel() does: set cancelled=True, then
             # the task cancellation propagates as CancelledError.
             run_ctx.cancelled = True
-            raise asyncio.CancelledError()
+            raise asyncio.CancelledError
 
         mock_agent_run.next = _next_with_cancel
         mock_agent_run.all_messages = MagicMock(
@@ -330,14 +331,12 @@ async def test_cancellederror_path_captures_history() -> None:
         # Patch get_agentlet to return our mock
         with patch.object(agent, "get_agentlet", AsyncMock(return_value=mock_agentlet)):
             events: list[Any] = []
-            async for event in turn.execute():
-                events.append(event)
+            events.extend([event async for event in turn.execute()])
 
         # Path B should have captured _message_history from agent_run
         # BUG: This fails because Path B doesn't call agent_run.all_messages()
         assert turn._message_history is not None, (
-            "turn._message_history should be set after CancelledError — "
-            "Path B doesn't capture it"
+            "turn._message_history should be set after CancelledError — Path B doesn't capture it"
         )
         assert len(turn._message_history) == 2, (
             f"Expected 2 messages from agent_run.all_messages(), "
@@ -380,10 +379,12 @@ async def test_multi_turn_preserves_context_via_consume_run() -> None:
     agent.AGENT_TYPE = "native"
     agent.conversation = MagicMock()
     agent.conversation.get_history.return_value = [chat_msg, chat_msg2]
-    agent.create_turn = MagicMock(return_value=_StubTurn(
-        events=[_stream_complete_event()],
-        message_history=["new_msg"],
-    ))
+    agent.create_turn = MagicMock(
+        return_value=_StubTurn(
+            events=[_stream_complete_event()],
+            message_history=["new_msg"],
+        )
+    )
 
     event_bus = EventBus()
     session = SessionState(
@@ -509,16 +510,13 @@ async def test_bridged_history_injects_cancelled_tool_results() -> None:
     )
     retry_parts = [p for p in last_msg.parts if isinstance(p, RetryPromptPart)]
     assert len(retry_parts) == 1, (
-        f"Expected 1 RetryPromptPart for the cancelled tool call, "
-        f"got {len(retry_parts)}"
+        f"Expected 1 RetryPromptPart for the cancelled tool call, got {len(retry_parts)}"
     )
     assert retry_parts[0].tool_name == "bash", (
-        f"Expected RetryPromptPart tool_name='bash', "
-        f"got {retry_parts[0].tool_name!r}"
+        f"Expected RetryPromptPart tool_name='bash', got {retry_parts[0].tool_name!r}"
     )
     assert "cancel" in str(retry_parts[0].content).lower(), (
-        f"RetryPromptPart content should mention cancellation, "
-        f"got {retry_parts[0].content!r}"
+        f"RetryPromptPart content should mention cancellation, got {retry_parts[0].content!r}"
     )
 
     run_handle.close()

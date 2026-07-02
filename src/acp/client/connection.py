@@ -14,11 +14,13 @@ from acp.schema import (
     AuthenticateResponse,
     CloseSessionResponse,
     CreateTerminalRequest,
+    DisableProvidersResponse,
     ElicitationCompleteNotification,
     ElicitationCreateRequest,
     ForkSessionResponse,
     InitializeResponse,
     KillTerminalCommandRequest,
+    ListProvidersResponse,
     ListSessionsResponse,
     LoadSessionResponse,
     NewSessionResponse,
@@ -28,6 +30,7 @@ from acp.schema import (
     RequestPermissionRequest,
     ResumeSessionResponse,
     SessionNotification,
+    SetProvidersResponse,
     SetSessionConfigOptionResponse,
     SetSessionModelResponse,
     SetSessionModeResponse,
@@ -50,10 +53,12 @@ if TYPE_CHECKING:
         ClientMethod,
         CloseSessionRequest,
         CreateTerminalResponse,
+        DisableProvidersRequest,
         ElicitationCreateResponse,
         ForkSessionRequest,
         InitializeRequest,
         KillTerminalCommandResponse,
+        ListProvidersRequest,
         ListSessionsRequest,
         LoadSessionRequest,
         NewSessionRequest,
@@ -62,6 +67,7 @@ if TYPE_CHECKING:
         ReleaseTerminalResponse,
         RequestPermissionResponse,
         ResumeSessionRequest,
+        SetProvidersRequest,
         SetSessionConfigOptionRequest,
         SetSessionModelRequest,
         SetSessionModeRequest,
@@ -192,6 +198,30 @@ class ClientSideConnection(Agent):
             mode="json", by_alias=True, exclude_none=True, exclude_defaults=True
         )
         await self._conn.send_notification("session/cancel", dct)
+
+    async def list_providers(self, params: ListProvidersRequest) -> ListProvidersResponse:
+        """List available providers from the agent."""
+        dct = params.model_dump(
+            mode="json", by_alias=True, exclude_none=True, exclude_defaults=True
+        )
+        resp = await self._conn.send_request("providers/list", dct)
+        return ListProvidersResponse.model_validate(resp)
+
+    async def set_provider(self, params: SetProvidersRequest) -> SetProvidersResponse:
+        """Set the active provider on the agent."""
+        dct = params.model_dump(
+            mode="json", by_alias=True, exclude_none=True, exclude_defaults=True
+        )
+        resp = await self._conn.send_request("providers/set", dct)
+        return SetProvidersResponse.model_validate(resp)
+
+    async def disable_provider(self, params: DisableProvidersRequest) -> DisableProvidersResponse:
+        """Disable a provider on the agent."""
+        dct = params.model_dump(
+            mode="json", by_alias=True, exclude_none=True, exclude_defaults=True
+        )
+        resp = await self._conn.send_request("providers/disable", dct)
+        return DisableProvidersResponse.model_validate(resp)
 
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         return await self._conn.send_request(f"_{method}", params)  # type: ignore[no-any-return]

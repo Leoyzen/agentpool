@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import hashlib
 import time
 from typing import TYPE_CHECKING, Any
@@ -16,6 +15,8 @@ from agentpool.log import get_logger
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentpool.skills.command import SkillCommand
 
 

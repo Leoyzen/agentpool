@@ -9,12 +9,12 @@ This module tests that MCP-based skills are properly exposed through:
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from agentpool.skills.skill import Skill
-from agentpool_toolsets.builtin.skills import load_skill, list_skills
+from agentpool_toolsets.builtin.skills import list_skills, load_skill
 
 
 @pytest.fixture
@@ -65,9 +65,9 @@ def mock_agent_context():
     async def mock_resolve(uri: str):
         if "systematic-troubleshooting" in uri:
             return mcp_skill_hyphen
-        elif "equipment-operation-assistant" in uri:
+        if "equipment-operation-assistant" in uri:
             return mcp_skill_from_underscore
-        raise Exception(f"Skill not found: {uri}")
+        raise ValueError(f"Skill not found: {uri}")
 
     mock_resolver.resolve = mock_resolve
     ctx.pool.skill_resolver = mock_resolver
@@ -78,7 +78,7 @@ def mock_agent_context():
 @pytest.mark.asyncio
 async def test_list_skills_includes_mcp_skills(mock_agent_context):
     """Test that list_skills includes MCP-based skills."""
-    ctx, mcp_skill_hyphen, mcp_skill_from_underscore = mock_agent_context
+    ctx, _mcp_skill_hyphen, _mcp_skill_from_underscore = mock_agent_context
 
     result = await list_skills(ctx)
 
@@ -91,7 +91,7 @@ async def test_list_skills_includes_mcp_skills(mock_agent_context):
 @pytest.mark.asyncio
 async def test_load_skill_finds_mcp_skills_with_hyphen(mock_agent_context):
     """Test that load_skill can find MCP-based skills with hyphen names."""
-    ctx, mcp_skill_hyphen, _ = mock_agent_context
+    ctx, _mcp_skill_hyphen, _ = mock_agent_context
 
     result = await load_skill(ctx, "systematic-troubleshooting")
 
@@ -104,7 +104,7 @@ async def test_load_skill_finds_mcp_skills_with_hyphen(mock_agent_context):
 @pytest.mark.asyncio
 async def test_load_skill_normalizes_underscore_to_hyphen(mock_agent_context):
     """Test that load_skill normalizes underscore names to hyphens per spec."""
-    ctx, _, mcp_skill_from_underscore = mock_agent_context
+    ctx, _, _mcp_skill_from_underscore = mock_agent_context
 
     # Calling with underscores should work because normalization converts to hyphens
     result = await load_skill(ctx, "equipment_operation_assistant")

@@ -16,7 +16,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock, Mock
 
-import pytest
 from pydantic_ai.capabilities import CapabilityOrdering, NativeTool, ProcessHistory
 from pydantic_ai.tools import RunContext
 from pydantic_ai.toolsets import (
@@ -25,6 +24,7 @@ from pydantic_ai.toolsets import (
     FunctionToolset,
     PrefixedToolset,
 )
+import pytest
 from upathtools import UPath
 
 from agentpool.skills.capability import SkillCapability
@@ -38,6 +38,7 @@ from agentpool_config.skills import SkillMcpServerConfig, SkillToolConfig
 @dataclass
 class FakeDeps:
     """Minimal deps with a session_id for RunContext."""
+
     session_id: str
 
 
@@ -147,7 +148,9 @@ class TestNoToolsOrMCP:
         """get_toolset() returns None even when managers are present but skill has no tools."""
         mcp_manager = Mock()
         tool_manager = Mock()
-        cap = SkillCapability(skill=skill_no_tools, mcp_manager=mcp_manager, tool_manager=tool_manager)
+        cap = SkillCapability(
+            skill=skill_no_tools, mcp_manager=mcp_manager, tool_manager=tool_manager
+        )
         # Neither import_tools nor prepare should be called
         tool_manager.import_tools.assert_not_called()
         mcp_manager.prepare.assert_not_called()
@@ -176,7 +179,7 @@ class TestMCPOnly:
         mcp_manager.prepare.assert_called_once()
 
     async def test_build_toolset_prefixed_mcp(self, skill_with_mcp: Skill) -> None:
-        """The lazy toolset builds a PrefixedToolset with prefix \"{name}__mcp__\"."""
+        r"""The lazy toolset builds a PrefixedToolset with prefix \"{name}__mcp__\"."""
         mcp_manager = AsyncMock()
         mcp_manager.prepare = Mock()
         mcp_manager.get_tools = AsyncMock(return_value=[])
@@ -198,7 +201,7 @@ class TestMCPOnly:
 
         build_fn = cap.get_toolset()
         ctx = make_run_context(session_id="ses_custom")
-        result = await build_fn(ctx)
+        await build_fn(ctx)
 
         mcp_manager.get_tools.assert_awaited_once_with("playwright", "ses_custom")
 
@@ -212,9 +215,11 @@ class TestToolsOnly:
     """SkillCapability with Python tools, no MCP servers."""
 
     def test_get_toolset_returns_prefixed_toolset(self, skill_with_tools: Skill) -> None:
-        """get_toolset() returns a PrefixedToolset with prefix \"{name}__tool__\"."""
+        r"""get_toolset() returns a PrefixedToolset with prefix \"{name}__tool__\"."""
         tool_manager = Mock()
+
         async def _fake_pa_tool() -> None: ...
+
         tool_manager.import_tools.return_value = [
             Mock(spec_set=["to_pydantic_ai"], to_pydantic_ai=Mock(return_value=_fake_pa_tool)),
         ]
@@ -228,7 +233,7 @@ class TestToolsOnly:
         """Construction calls import_tools with the skill's tool configs."""
         tool_manager = Mock()
         tool_manager.import_tools.return_value = []
-        cap = SkillCapability(skill=skill_with_tools, tool_manager=tool_manager)
+        SkillCapability(skill=skill_with_tools, tool_manager=tool_manager)
 
         tool_manager.import_tools.assert_called_once()
         # Verify the configs match
@@ -239,7 +244,9 @@ class TestToolsOnly:
     def test_get_toolset_wraps_function_toolset(self, skill_with_tools: Skill) -> None:
         """The PrefixedToolset wraps a FunctionToolset with pydantic-ai tools."""
         tool_manager = Mock()
+
         async def _fake_pa_tool() -> None: ...
+
         tool_manager.import_tools.return_value = [
             Mock(spec_set=["to_pydantic_ai"], to_pydantic_ai=Mock(return_value=_fake_pa_tool)),
         ]
@@ -266,7 +273,9 @@ class TestBoth:
         mcp_manager.prepare = Mock()
         mcp_manager.get_tools = AsyncMock(return_value=[])
         tool_manager = Mock()
+
         async def _fake_pa_tool() -> None: ...
+
         tool_manager.import_tools.return_value = [
             Mock(spec_set=["to_pydantic_ai"], to_pydantic_ai=Mock(return_value=_fake_pa_tool)),
         ]
@@ -329,7 +338,10 @@ class TestOrdering:
     """SkillCapability ordering."""
 
     def test_get_ordering_returns_capability_ordering(self) -> None:
-        """get_ordering() returns CapabilityOrdering with wrapped_by=[ProcessHistory, NativeTool]."""
+        """get_ordering() returns CapabilityOrdering with wrapped_by list.
+
+        The wrapped_by list contains ProcessHistory and NativeTool.
+        """
         skill = make_skill_with_instructions()
         cap = SkillCapability(skill=skill)
 

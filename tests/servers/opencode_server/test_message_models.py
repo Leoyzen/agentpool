@@ -6,8 +6,6 @@ backward-compatible variant deserialization.
 
 from __future__ import annotations
 
-import json
-
 from agentpool_server.opencode_server.models import (
     MessagePath,
     MessageRequest,
@@ -55,7 +53,7 @@ class TestMessageWithPartsRole:
         assert msg.info.role == "assistant"
 
     def test_role_property_matches_info_role(self):
-        """role property should match info.role for both message types."""
+        """Role property should match info.role for both message types."""
         user_msg = MessageWithParts.user(
             message_id="user-1",
             session_id="session-1",

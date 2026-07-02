@@ -22,7 +22,6 @@ from agentpool.sessions import SessionData
 from agentpool.sessions.store import MemorySessionStore
 
 
-
 # ---------------------------------------------------------------------------
 # 1. Session store lookups are opaque
 # ---------------------------------------------------------------------------
@@ -73,9 +72,7 @@ class TestSessionStoreOpaqueLookup:
         ],
         ids=["ascending", "uuid4", "arbitrary"],
     )
-    async def test_store_delete_opaque_id(
-        self, store: MemorySessionStore, session_id: str
-    ) -> None:
+    async def test_store_delete_opaque_id(self, store: MemorySessionStore, session_id: str) -> None:
         """MemorySessionStore.delete must work with any string ID."""
         data = SessionData(session_id=session_id, agent_name="test_agent")
 
@@ -121,9 +118,7 @@ class TestSessionPoolOpaqueChildId:
         pool.manifest.name = "test_pool"
         return pool
 
-    async def test_child_session_id_is_opaque_string(
-        self, mock_pool: MagicMock
-    ) -> None:
+    async def test_child_session_id_is_opaque_string(self, mock_pool: MagicMock) -> None:
         """Child session IDs must be non-empty opaque strings."""
         from agentpool.orchestrator import SessionPool
         from agentpool.utils.identifiers import generate_session_id
@@ -216,7 +211,7 @@ class TestNoSessionIdParsing:
     """
 
     def test_no_sequential_session_id_regex(self) -> None:
-        """No production code should match session IDs with \\d+ counters.
+        r"""No production code should match session IDs with \\d+ counters.
 
         The grep audit in this task confirmed no such patterns exist.
         This test documents that the identifiers module doesn't encourage
@@ -267,10 +262,10 @@ class TestServerSessionLookupOpaque:
 
     def test_opencode_state_sessions_dict_opaque(self) -> None:
         """ServerState.sessions dict accepts any string key."""
-        from agentpool_server.opencode_server.state import ServerState
+        from agentpool.utils.time_utils import now_ms
         from agentpool_server.opencode_server.models import Session
         from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
-        from agentpool.utils.time_utils import now_ms
+        from agentpool_server.opencode_server.state import ServerState
 
         agent = MagicMock()
         state = ServerState(working_dir="/tmp", agent=agent)

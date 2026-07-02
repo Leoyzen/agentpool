@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from agentpool.resource_providers import ResourceProvider
 from agentpool_config.toolsets import CustomToolsetConfig
-from pydantic_ai.capabilities import AbstractCapability
+
+
+if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
 
 
 class MockProvider(ResourceProvider):

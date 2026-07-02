@@ -1,18 +1,15 @@
-#!/usr/bin/env python3
-"""
-Diagnostic: Check AgentPool skill_resolver initialization without full agent startup.
-"""
+"""Diagnostic: Check AgentPool skill_resolver initialization without full agent startup."""
 
 from __future__ import annotations
 
 import asyncio
-import sys
 from pathlib import Path
+import sys
+
 
 sys.path.insert(0, "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/src")
 
 from agentpool import AgentPool
-from agentpool.skills.uri_resolver import SkillURIResolver
 
 
 async def main():
@@ -21,7 +18,9 @@ async def main():
     print("=" * 60)
     print()
 
-    config_path = "/Users/yuchen.liu/src/yilab/iroot-llm/packages/xeno-agent/config/diag-agent-ng.yaml"
+    config_path = (
+        "/Users/yuchen.liu/src/yilab/iroot-llm/packages/xeno-agent/config/diag-agent-ng.yaml"
+    )
     print(f"Config: {config_path}")
     print()
 
@@ -56,7 +55,7 @@ async def main():
                 try:
                     skill = await pool.skill_resolver.resolve("systematic-troubleshooting")
                     print(f"  OK: {skill.name}")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     print(f"  FAIL: {e}")
                 print()
 
@@ -68,13 +67,14 @@ async def main():
                     print(f"  OK: {skill.name}")
                     ref = getattr(skill, "_resolved_reference_path", None)
                     print(f"  ref_path: {ref}")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     print(f"  FAIL: {e}")
                 print()
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"ERROR: {e}")
         import traceback
+
         traceback.print_exc()
 
     print("Done")

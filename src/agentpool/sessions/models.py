@@ -103,7 +103,7 @@ class SessionData(Schema):
 
     pending_deferred_calls: list[PendingDeferredCall] = Field(default_factory=list)
     """Unresolved deferred tool calls pending external resolution.
-    
+
     Each entry represents a tool call that was deferred (external execution
     or awaiting human approval). O(1) lookup of what's unresolved. When
     results arrive, match by tool_call_id, build DeferredToolResults,
@@ -115,7 +115,7 @@ class SessionData(Schema):
 
     agent_config_hash: str | None = None
     """Hash of the agent configuration used to start this session.
-    
+
     Used to detect config changes between checkpoint and resume, ensuring
     the resumed agent matches the original configuration.
     """

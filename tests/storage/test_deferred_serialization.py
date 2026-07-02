@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from agentpool.sessions.models import PendingDeferredCall
 from agentpool.storage.serialization import (
@@ -24,7 +24,7 @@ def _make_call(
         tool_name=tool_name,
         deferred_kind=deferred_kind,  # type: ignore[arg-type]
         deferred_strategy=deferred_strategy,  # type: ignore[arg-type]
-        created_at=created_at or datetime(2025, 1, 1, tzinfo=timezone.utc),
+        created_at=created_at or datetime(2025, 1, 1, tzinfo=UTC),
         timeout=timeout,
     )
 
@@ -47,15 +47,30 @@ def test_round_trip_single_call():
 def test_round_trip_multiple_calls():
     """Multiple PendingDeferredCalls survive round-trip serialization."""
     calls = [
-        _make_call(tool_call_id="call_a", tool_name="bash", deferred_kind="unapproved", deferred_strategy="continue"),
-        _make_call(tool_call_id="call_b", tool_name="subagent", deferred_kind="external", deferred_strategy="stream"),
-        _make_call(tool_call_id="call_c", tool_name="read", deferred_kind="external", deferred_strategy="block"),
+        _make_call(
+            tool_call_id="call_a",
+            tool_name="bash",
+            deferred_kind="unapproved",
+            deferred_strategy="continue",
+        ),
+        _make_call(
+            tool_call_id="call_b",
+            tool_name="subagent",
+            deferred_kind="external",
+            deferred_strategy="stream",
+        ),
+        _make_call(
+            tool_call_id="call_c",
+            tool_name="read",
+            deferred_kind="external",
+            deferred_strategy="block",
+        ),
     ]
     json_str = serialize_pending_calls(calls)
     result = deserialize_pending_calls(json_str)
 
     assert len(result) == 3
-    for original, restored in zip(calls, result):
+    for original, restored in zip(calls, result, strict=False):
         assert restored.tool_call_id == original.tool_call_id
         assert restored.tool_name == original.tool_name
         assert restored.deferred_kind == original.deferred_kind

@@ -25,8 +25,11 @@ class TestDeferredToolConfigOnBaseConfig:
     """Tests that BaseToolConfig has deferred fields with correct defaults."""
 
     def test_base_tool_config_has_deferred_fields(self):
-        """BaseToolConfig should have deferred, deferred_kind, deferred_strategy,
-        deferred_placeholder, deferred_timeout fields with correct defaults."""
+        """BaseToolConfig should have deferred fields with correct defaults.
+
+        Checks deferred, deferred_kind, deferred_strategy, deferred_placeholder,
+        deferred_timeout fields.
+        """
         from agentpool_config.tools import BaseToolConfig
 
         # Check fields exist and have correct defaults
@@ -42,7 +45,9 @@ class TestDeferredToolConfigOnBaseConfig:
         assert fields["deferred_strategy"].default == "block"
 
         assert "deferred_placeholder" in fields
-        assert fields["deferred_placeholder"].default == "This tool is processing in the background."
+        assert (
+            fields["deferred_placeholder"].default == "This tool is processing in the background."
+        )
 
         assert "deferred_timeout" in fields
         assert fields["deferred_timeout"].default is None

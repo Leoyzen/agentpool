@@ -9,7 +9,6 @@ This module provides comprehensive tests for:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -17,9 +16,6 @@ import pytest
 from agentpool.resource_providers.aggregating import AggregatingResourceProvider
 from agentpool.resource_providers.base import ResourceChangeEvent, ResourceProvider
 from agentpool.skills.exceptions import SkillNotFoundError
-
-if TYPE_CHECKING:
-    from agentpool.skills.skill import Skill
 
 
 # =============================================================================
@@ -231,7 +227,7 @@ def test_aggregating_connects_to_child_signals_on_init() -> None:
     provider2.skills_changed.connect = MagicMock()
     provider2.skills_changed.disconnect = MagicMock()
 
-    aggregating = AggregatingResourceProvider([provider1, provider2])
+    AggregatingResourceProvider([provider1, provider2])
 
     # Should connect to skills_changed for both providers
     assert provider1.skills_changed.connect.call_count == 1
@@ -280,7 +276,7 @@ async def test_skills_changed_signal_forwarded() -> None:
 
     # Track forwarded events
     forwarded_events: list[ResourceChangeEvent] = []
-    aggregating.skills_changed.connect(lambda event: forwarded_events.append(event))
+    aggregating.skills_changed.connect(forwarded_events.append)
 
     # Simulate child provider emitting skills_changed
     event = ResourceChangeEvent(
@@ -318,7 +314,7 @@ async def test_tools_changed_signal_forwarded() -> None:
 
     # Track forwarded events
     forwarded_events: list[ResourceChangeEvent] = []
-    aggregating.tools_changed.connect(lambda event: forwarded_events.append(event))
+    aggregating.tools_changed.connect(forwarded_events.append)
 
     # Simulate child provider emitting tools_changed
     event = ResourceChangeEvent(
@@ -353,7 +349,7 @@ async def test_prompts_changed_signal_forwarded() -> None:
     aggregating = AggregatingResourceProvider([provider])
 
     forwarded_events: list[ResourceChangeEvent] = []
-    aggregating.prompts_changed.connect(lambda event: forwarded_events.append(event))
+    aggregating.prompts_changed.connect(forwarded_events.append)
 
     event = ResourceChangeEvent(
         provider_name="child",
@@ -387,7 +383,7 @@ async def test_resources_changed_signal_forwarded() -> None:
     aggregating = AggregatingResourceProvider([provider])
 
     forwarded_events: list[ResourceChangeEvent] = []
-    aggregating.resources_changed.connect(lambda event: forwarded_events.append(event))
+    aggregating.resources_changed.connect(forwarded_events.append)
 
     event = ResourceChangeEvent(
         provider_name="child",

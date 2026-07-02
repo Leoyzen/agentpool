@@ -7,21 +7,26 @@ for native agents and executes it for non-native agents.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 from unittest.mock import MagicMock
 
 import pytest
 
 from agentpool.agents.base_agent import BaseAgent
-from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import RichAgentStreamEvent
 from agentpool.orchestrator.turn import Turn
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from agentpool.agents.context import AgentRunContext
+    from agentpool.agents.events import RichAgentStreamEvent
 
 
 # ---------------------------------------------------------------------------
 # Test helper: minimal BaseAgent subclass that spies on _run_stream_once
 # ---------------------------------------------------------------------------
+
 
 class _FakeEvent:
     """Minimal concrete event for stream testing (no real event fields needed)."""
@@ -115,11 +120,13 @@ class _GatingTestAgent(BaseAgent[None, str]):
 
 class _NativeTestAgent(_GatingTestAgent):
     """Agent with AGENT_TYPE = 'native' (skips manual loop)."""
+
     AGENT_TYPE: ClassVar = "native"
 
 
 class _NonNativeTestAgent(_GatingTestAgent):
     """Agent with AGENT_TYPE = 'acp' (executes manual loop)."""
+
     AGENT_TYPE: ClassVar = "acp"
 
 
@@ -139,13 +146,11 @@ async def test_native_agent_skips_manual_loop() -> None:
     agent = _NativeTestAgent(call_log)
 
     events: list[object] = []
-    async for event in agent.run_stream("test prompt"):
-        events.append(event)
+    events.extend([event async for event in agent.run_stream("test prompt")])
 
     # Native path: _run_stream_once is called exactly once
     assert len(call_log) == 1, (
-        f"Expected 1 call to _run_stream_once for native agent, "
-        f"got {len(call_log)}"
+        f"Expected 1 call to _run_stream_once for native agent, got {len(call_log)}"
     )
     # The queued extra prompt should still be in the injection manager
     assert agent._has_queued_extra, "Extra prompt should have been queued"
@@ -166,14 +171,12 @@ async def test_non_native_agent_executes_manual_loop() -> None:
     agent = _NonNativeTestAgent(call_log)
 
     events: list[object] = []
-    async for event in agent.run_stream("test prompt"):
-        events.append(event)
+    events.extend([event async for event in agent.run_stream("test prompt")])
 
     # Non-native path: _run_stream_once is called twice
     # (initial prompt + queued extra prompt)
     assert len(call_log) == 2, (
-        f"Expected 2 calls to _run_stream_once for non-native agent, "
-        f"got {len(call_log)}"
+        f"Expected 2 calls to _run_stream_once for non-native agent, got {len(call_log)}"
     )
     # First call should have the original prompt
     assert "test prompt" in call_log[0], (

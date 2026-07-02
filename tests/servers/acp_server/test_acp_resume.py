@@ -45,13 +45,9 @@ def mock_agent_pool_with_agent():
         return f"Test response: {message}"
 
     from agentpool.models.agents import NativeAgentConfig
-
-
     from agentpool.models.manifest import AgentsManifest
 
-
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
-
 
     pool = AgentPool(manifest)
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)

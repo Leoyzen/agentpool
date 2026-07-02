@@ -210,7 +210,8 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
             count = 0
             for skill in skills:
                 # Build skill URI using the actual provider name from skill metadata
-                # The provider name in metadata is the real source (e.g., "local" or MCP server name)
+                # The provider name in metadata is the real source (e.g., "local"
+                # or MCP server name)
                 provider_name = skill.metadata.get("provider") if skill.metadata else None
                 if provider_name is None:
                     provider_name = self._skill_provider.name
@@ -231,7 +232,7 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
                 duration_ms=round(duration_ms, 2),
                 total_commands=len(self._items),
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             duration_ms = (time.time() - start_time) * 1000
             logger.warning(
                 "Failed to sync commands from skill provider",
@@ -284,13 +285,13 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
                         )
                         self.register(skill.name, command, replace=True)
                         count += 1
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         logger.warning(
                             "Failed to register provider skill command",
                             name=skill.name,
                             error=str(e),
                         )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to sync from skill_provider", error=str(e))
 
         # 2. Sync from SkillsRegistry (local filesystem skills) last
@@ -307,9 +308,9 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
                         )
                         self.register(name, command, replace=True)
                         count += 1
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         logger.warning("Failed to register skill command", name=name, error=str(e))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to sync from SkillsRegistry", error=str(e))
 
         duration_ms = (time.time() - start_time) * 1000

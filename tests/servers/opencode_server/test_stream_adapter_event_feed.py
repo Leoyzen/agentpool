@@ -26,7 +26,6 @@ from agentpool_server.opencode_server.models import (
     MessageRequest,
     MessageTime,
     PartUpdatedEvent,
-    SessionStatus,
     TextPartInput,
     TimeCreated,
     TimeCreatedUpdated,
@@ -112,9 +111,7 @@ def mock_agent_with_event_bus(tmp_project_dir):
     session_pool.sessions.get_session = Mock(return_value=None)
     session_pool.sessions.cancel_run_for_session = Mock()
     session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=Mock())
-    session_pool.sessions.get_or_create_session = AsyncMock(
-        return_value=(Mock(), True)
-    )
+    session_pool.sessions.get_or_create_session = AsyncMock(return_value=(Mock(), True))
     session_pool.event_bus = event_bus
 
     # RunHandle whose complete_event we control from the test
@@ -196,9 +193,7 @@ async def test_adapter_receives_events_before_finalize(
 
     # Find the assistant message
     messages = await get_messages_for_session(state, session_id)
-    assistant_msgs = [
-        msg for msg in messages if isinstance(msg.info, AssistantMessage)
-    ]
+    assistant_msgs = [msg for msg in messages if isinstance(msg.info, AssistantMessage)]
     assert len(assistant_msgs) == 1
     assistant = assistant_msgs[0].info
     assert isinstance(assistant, AssistantMessage)
@@ -285,9 +280,7 @@ async def test_adapter_response_text_populated_after_finalize(
     await process_task
 
     messages = await get_messages_for_session(state, session_id)
-    assistant_msgs = [
-        msg for msg in messages if isinstance(msg.info, AssistantMessage)
-    ]
+    assistant_msgs = [msg for msg in messages if isinstance(msg.info, AssistantMessage)]
     assert len(assistant_msgs) == 1
     assistant = assistant_msgs[0].info
     assert isinstance(assistant, AssistantMessage)
@@ -357,7 +350,8 @@ async def test_adapter_convert_event_updates_context() -> None:
     # StepFinishPart, but the tokens remain available via usage property
     finalized = list(adapter.finalize())
     step_finish_events = [
-        e for e in finalized
+        e
+        for e in finalized
         if isinstance(e, PartUpdatedEvent) and isinstance(e.properties.part, StepFinishPart)
     ]
     assert len(step_finish_events) == 0, (

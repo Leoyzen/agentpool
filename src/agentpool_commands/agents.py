@@ -242,10 +242,13 @@ class CreateTeamCommand(NodeCommand):
             pool.agent_configs[name].get_agent(pool=pool) for name in node_names
         ]
         # Create the team
+        from agentpool.delegation.team import Team
+        from agentpool.delegation.teamrun import TeamRun
+
         if mode == "sequential":
-            team: BaseTeam[Any, Any] = ctx.context.pool.create_team_run(node_instances, name=name)
+            team: BaseTeam[Any, Any] = TeamRun(node_instances, name=name)
         else:
-            team = ctx.context.pool.create_team(node_instances, name=name)
+            team = Team(node_instances, name=name)
 
         mode_str = "pipeline" if mode == "sequential" else "parallel"
         await ctx.print(

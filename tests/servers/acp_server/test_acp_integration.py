@@ -20,7 +20,6 @@ from agentpool_server.acp_server.session import ACPSession
 async def agent_pool():
     """Create a real agent pool from config."""
     from agentpool.models.agents import NativeAgentConfig
-
     from agentpool.models.manifest import AgentsManifest
 
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
@@ -31,7 +30,7 @@ async def agent_pool():
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
-    agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
+    Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
     return pool
 

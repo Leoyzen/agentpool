@@ -1,6 +1,5 @@
 """Test that deprecated feature flag fields have been removed from OpenCodeConfig."""
 
-import pytest
 from agentpool_config.session_pool import OpenCodeConfig
 
 
@@ -32,5 +31,3 @@ def test_deprecated_method_should_use_session_pool_for_removed() -> None:
     assert not hasattr(OpenCodeConfig, "should_use_session_pool_for"), (
         "OpenCodeConfig.should_use_session_pool_for should have been removed"
     )
-
-

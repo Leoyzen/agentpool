@@ -15,10 +15,10 @@ Key design:
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
 
 import pytest
 from upathtools import UPath
-from unittest.mock import MagicMock, patch
 
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
 from agentpool.agents.context import AgentContext
@@ -227,9 +227,7 @@ class TestLoadSkillWithMCPServers:
         """SkillMcpManager.prepare() is called once per declared server."""
         ctx, pool = await _make_context(tmp_path, mcp_skill_dir)
         try:
-            with patch(
-                "agentpool_toolsets.builtin.skills.SkillMcpManager"
-            ) as mock_mcp_class:
+            with patch("agentpool_toolsets.builtin.skills.SkillMcpManager") as mock_mcp_class:
                 mock_mcp_instance = MagicMock()
                 mock_mcp_class.return_value = mock_mcp_instance
 
@@ -266,9 +264,7 @@ class TestLoadSkillWithMCPServers:
         """Server description uses command or url as appropriate."""
         ctx, pool = await _make_context(tmp_path, mcp_skill_dir)
         try:
-            with patch(
-                "agentpool_toolsets.builtin.skills.SkillMcpManager"
-            ) as mock_mcp_class:
+            with patch("agentpool_toolsets.builtin.skills.SkillMcpManager") as mock_mcp_class:
                 mock_mcp_instance = MagicMock()
                 mock_mcp_class.return_value = mock_mcp_instance
 
@@ -316,9 +312,7 @@ class TestLoadSkillWithTools:
         """SkillToolManager.import_tool() is called once per declared tool."""
         ctx, pool = await _make_context(tmp_path, tool_skill_dir)
         try:
-            with patch(
-                "agentpool_toolsets.builtin.skills.SkillToolManager"
-            ) as mock_tool_class:
+            with patch("agentpool_toolsets.builtin.skills.SkillToolManager") as mock_tool_class:
                 mock_tool_instance = MagicMock()
                 # Return a sentinel tool to simulate successful import
                 mock_tool_instance.import_tool.return_value = MagicMock()
@@ -339,9 +333,7 @@ class TestLoadSkillWithTools:
         """Successfully imported tools show a checkmark indicator."""
         ctx, pool = await _make_context(tmp_path, tool_skill_dir)
         try:
-            with patch(
-                "agentpool_toolsets.builtin.skills.SkillToolManager"
-            ) as mock_tool_class:
+            with patch("agentpool_toolsets.builtin.skills.SkillToolManager") as mock_tool_class:
                 mock_tool_instance = MagicMock()
                 mock_tool_instance.import_tool.return_value = MagicMock()
                 mock_tool_class.return_value = mock_tool_instance
@@ -383,8 +375,10 @@ class TestLoadSkillBackwardCompatNoMCPOrTools:
         tmp_path: Path,
         plain_skill_dir: UPath,
     ) -> None:
-        """Response without MCP/Tools has the same structure as pre-refactor:
+        """Response without MCP/Tools has the same structure as pre-refactor:.
+
         header, meta, instructions, skill URI.
+
         """
         ctx, pool = await _make_context(tmp_path, plain_skill_dir)
         try:
@@ -519,19 +513,21 @@ tools:
         tmp_path: Path,
         mcp_skill_dir: UPath,
     ) -> None:
-        """If SkillMcpManager() constructor raises, the skill content still loads
+        """If SkillMcpManager() constructor raises, the skill content still loads.
+
         and the error is surfaced in the response.
+
         """
         ctx, pool = await _make_context(tmp_path, mcp_skill_dir)
         try:
-            with pytest.raises(RuntimeError, match="MCP manager failure"):
-                with (
-                    patch(
-                        "agentpool_toolsets.builtin.skills.SkillMcpManager",
-                        side_effect=RuntimeError("MCP manager failure"),
-                    ) as mock_mcp_class,
-                ):
-                    await load_skill(ctx, "mcp-skill")
+            with (
+                pytest.raises(RuntimeError, match="MCP manager failure"),
+                patch(
+                    "agentpool_toolsets.builtin.skills.SkillMcpManager",
+                    side_effect=RuntimeError("MCP manager failure"),
+                ),
+            ):
+                await load_skill(ctx, "mcp-skill")
         finally:
             await pool.__aexit__(None, None, None)
 
@@ -543,13 +539,9 @@ tools:
         """If SkillMcpManager.prepare() raises, the error propagates."""
         ctx, pool = await _make_context(tmp_path, mcp_skill_dir)
         try:
-            with patch(
-                "agentpool_toolsets.builtin.skills.SkillMcpManager"
-            ) as mock_mcp_class:
+            with patch("agentpool_toolsets.builtin.skills.SkillMcpManager") as mock_mcp_class:
                 mock_mcp_instance = MagicMock()
-                mock_mcp_instance.prepare.side_effect = RuntimeError(
-                    "Failed to prepare MCP server"
-                )
+                mock_mcp_instance.prepare.side_effect = RuntimeError("Failed to prepare MCP server")
                 mock_mcp_class.return_value = mock_mcp_instance
 
                 with pytest.raises(RuntimeError, match="Failed to prepare MCP server"):
@@ -565,12 +557,14 @@ tools:
         """If SkillToolManager() constructor raises, the error propagates."""
         ctx, pool = await _make_context(tmp_path, tool_skill_dir)
         try:
-            with patch(
-                "agentpool_toolsets.builtin.skills.SkillToolManager",
-                side_effect=RuntimeError("Tool manager failure"),
+            with (
+                patch(
+                    "agentpool_toolsets.builtin.skills.SkillToolManager",
+                    side_effect=RuntimeError("Tool manager failure"),
+                ),
+                pytest.raises(RuntimeError, match="Tool manager failure"),
             ):
-                with pytest.raises(RuntimeError, match="Tool manager failure"):
-                    await load_skill(ctx, "tool-skill")
+                await load_skill(ctx, "tool-skill")
         finally:
             await pool.__aexit__(None, None, None)
 
@@ -622,9 +616,9 @@ class TestLoadSkillFullIntegration:
             # The keyword "Skill URI:" should appear before activation sections
             uri_pos = result.index("Skill URI:")
             mcp_pos = result.index("## Activated MCP Servers")
-            tool_pos = result.index("## Activated Tools")
+            result.index("## Activated Tools")
 
             assert uri_pos < mcp_pos, "Skill URI should appear before MCP section"
-            assert mcp_pos < tool_pos or True, "Ordering between MCP and tools is flexible"
+            assert True, "Ordering between MCP and tools is flexible"
         finally:
             await pool.__aexit__(None, None, None)

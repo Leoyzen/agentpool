@@ -2,16 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from pydantic import BaseModel
 import pytest
 
 from agentpool import AgentPool, AgentsManifest
-
-
-if TYPE_CHECKING:
-    from agentpool import ChatMessage
 
 
 class ConversationOutput(BaseModel):
@@ -69,7 +63,7 @@ async def test_agent_pool_conversation_flow():
     """Test conversation flow maintaining history between messages."""
     manifest = AgentsManifest.from_yaml(TEST_CONFIG)
 
-    async with AgentPool(manifest) as pool:
+    async with AgentPool(manifest):
         # NOTE: pool.get_agent() was removed. Agent instances are now managed
         # per-session via SessionPool. This test needs rewriting for the new API.
         pass
