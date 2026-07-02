@@ -55,7 +55,6 @@ if TYPE_CHECKING:
     from agentpool.delegation.team import Team
     from agentpool.delegation.teamrun import TeamRun
     from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
-    from agentpool.mcp_server.session_pool import SessionConnectionPool
     from agentpool.sessions.store import SessionStore
     from agentpool_config.teams import TeamConfig
 
@@ -876,14 +875,17 @@ class SessionController:
             else SessionLifecyclePolicy.default()
         )
 
-        # Ensure agent_name is always a real string (guards against Mock
-        # attributes in tests where pool.main_agent_name is a MagicMock).
-        _main_agent_name = self.pool.main_agent_name
-        if not isinstance(_main_agent_name, str):
-            _main_agent_name = "default"
+        # Only touch pool.main_agent_name when the caller did not supply
+        # an agent_name — that property raises when the manifest is empty.
+        # The isinstance check guards against Mock attributes in tests.
+        if not agent_name:
+            _main_agent_name = self.pool.main_agent_name
+            if not isinstance(_main_agent_name, str):
+                _main_agent_name = "default"
+            agent_name = _main_agent_name
         state = SessionState(
             session_id=session_id,
-            agent_name=agent_name or _main_agent_name,
+            agent_name=agent_name,
             parent_session_id=parent_session_id,
             lifecycle_policy=effective_policy,
             metadata=metadata,
@@ -1030,15 +1032,11 @@ class SessionController:
 
                     snapshot = _McpConfigSnapshot(
                         pool_configs=(
-                            parent_snapshot.pool_configs
-                            if parent_snapshot is not None
-                            else ()
+                            parent_snapshot.pool_configs if parent_snapshot is not None else ()
                         ),
                         agent_configs=agent._build_agent_configs(),
                         session_configs=(
-                            parent_snapshot.session_configs
-                            if parent_snapshot is not None
-                            else ()
+                            parent_snapshot.session_configs if parent_snapshot is not None else ()
                         ),
                         skill_configs=(),
                     )

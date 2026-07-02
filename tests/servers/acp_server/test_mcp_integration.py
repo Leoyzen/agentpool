@@ -104,14 +104,18 @@ async def test_session_manager_with_mcp(
     client_capabilities: ClientCapabilities,
 ):
     """Test session manager creating sessions with MCP servers."""
-    agent_pool = AgentPool()  # Create empty pool and register the agent
+    from agentpool.models.agents import NativeAgentConfig
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+    agent_pool = AgentPool(manifest)
     session_manager = ACPSessionManager(agent_pool)
 
-    def simple_callback(message: str) -> str:
-        return f"Test response for: {message}"
-
-    agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=agent_pool)
-    # pool.register() removed; agent created from callback/config above
+    agent = Agent.from_callback(
+        name="test_agent",
+        callback=lambda message: f"Test response for: {message}",
+        agent_pool=agent_pool,
+    )
     mcp_servers = [StdioMcpServer(name="tools", command="echo", args=["tools"], env=[])]
     async with agent_pool:
         try:
