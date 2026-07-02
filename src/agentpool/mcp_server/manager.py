@@ -279,9 +279,7 @@ class MCPManager:
         Non-ACP providers are excluded because they are handled separately
         by :meth:`as_capability()`.
         """
-        acp_providers = [
-            p for p in self.providers if isinstance(p.server, AcpMCPServerConfig)
-        ]
+        acp_providers = [p for p in self.providers if isinstance(p.server, AcpMCPServerConfig)]
         return AggregatingResourceProvider(
             providers=cast(list[ResourceProvider], acp_providers),
             name=f"{self.name}_acp_aggregated",
@@ -341,15 +339,14 @@ class MCPManager:
                 "read_timeout": server.timeout,
                 "elicitation_handler": _make_elicitation_handler(),
             }
-            if isinstance(
-                server, (SSEMCPServerConfig, StreamableHTTPMCPServerConfig)
-            ) and server.auth.oauth:
+            if (
+                isinstance(server, (SSEMCPServerConfig, StreamableHTTPMCPServerConfig))
+                and server.auth.oauth
+            ):
                 kwargs["auth"] = "oauth"
             return kwargs
 
-        def _make_capability(
-            server: BaseMCPServerConfig, transport: Any
-        ) -> MCP:
+        def _make_capability(server: BaseMCPServerConfig, transport: Any) -> MCP:
             """Create a fresh MCPToolset and wrap it in an MCP capability."""
             toolset = MCPToolset(client=transport, **_make_kwargs(server))
 
@@ -398,15 +395,11 @@ class MCPManager:
                         # If not found, skip — the ACP aggregating provider
                         # handles ACP MCP tool exposure.
                         try:
-                            transport = await session_pool.get_transport(
-                                server, entry.skill_name
-                            )
+                            transport = await session_pool.get_transport(server, entry.skill_name)
                         except NotImplementedError:
                             continue
                     else:
-                        transport = await session_pool.get_transport(
-                            server, entry.skill_name
-                        )
+                        transport = await session_pool.get_transport(server, entry.skill_name)
                     capabilities.append(_make_capability(server, transport))
         else:
             # Legacy path: pool servers only, no snapshot
@@ -436,6 +429,3 @@ class MCPManager:
             msg = "Error during MCP manager cleanup"
             logger.exception(msg, exc_info=e)
             raise RuntimeError(msg) from e
-
-
-

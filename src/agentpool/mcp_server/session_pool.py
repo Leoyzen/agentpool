@@ -235,9 +235,7 @@ class SessionConnectionPool:
         """
         with source._lock:
             pre_created = {
-                key: conn
-                for key, conn in source._connections.items()
-                if conn.is_pre_created
+                key: conn for key, conn in source._connections.items() if conn.is_pre_created
             }
         with self._lock:
             for key, conn in pre_created.items():

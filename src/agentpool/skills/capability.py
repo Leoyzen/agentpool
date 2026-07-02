@@ -228,9 +228,7 @@ class SkillCapability(AbstractCapability[AgentDepsT]):
 
         # Filter skill configs from the snapshot for this skill.
         skill_entries = [
-            entry
-            for entry in snapshot.skill_configs
-            if entry.skill_name == self._skill.name
+            entry for entry in snapshot.skill_configs if entry.skill_name == self._skill.name
         ]
 
         if not skill_entries:
