@@ -1098,6 +1098,10 @@ class SessionController:
         if session is None:
             return None
 
+        # Update last_active_at on every incoming request so the TTL sweeper
+        # does not expire sessions that are actively receiving messages.
+        session.last_active_at = time.monotonic()
+
         async with session._request_lock:
             if session.closing or session.is_closing:
                 return None
