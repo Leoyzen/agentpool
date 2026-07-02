@@ -383,7 +383,7 @@ async def test_acp_child_session_inherits_parent_project_and_cwd() -> None:
         mock_session_cls.return_value = mock_session_instance
 
         session_id = await manager.create_session(
-            agent=agent,
+            agent_name="acp_agent",
             cwd="/different/cwd",
             client=mock_client,
             acp_agent=mock_acp_agent,
