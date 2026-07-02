@@ -19,7 +19,17 @@ from agentpool_config.mcp_server import MCPServerConfig
 
 
 class GraphStepConfig(Schema):
-    """Configuration for a single step (node) in a graph."""
+    """Configuration for a single step (node) in a graph.
+
+    When translated from legacy ``teams:`` YAML, the following fields carry
+    per-member team configuration that has no native ``graph:`` equivalent:
+
+    - ``shared_prompt``: team-level shared prompt injected into this step
+    - ``prompt_template``: Jinja2 template for per-member prompt rendering
+    - ``member_timeout``: maximum seconds this step may run before cancellation
+    - ``member_retry_attempts``: number of retry attempts on failure
+    - ``member_retry_delay``: delay between retry attempts in seconds
+    """
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -37,6 +47,26 @@ class GraphStepConfig(Schema):
 
     mcp_servers: list[str | MCPServerConfig] = Field(default_factory=list)
     """MCP servers available to this step."""
+
+    shared_prompt: str | None = Field(default=None, title="Shared prompt")
+    """Optional shared prompt injected into this step (from team config)."""
+
+    prompt_template: str | None = Field(default=None, title="Jinja2 prompt template")
+    """Optional Jinja2 template for per-step prompt rendering (from team member config)."""
+
+    member_timeout: float | None = Field(default=None, title="Per-step timeout (seconds)")
+    """Maximum seconds this step may run before being cancelled.
+
+    When set, steps that exceed this deadline are cancelled and their
+    errors are recorded.  Other steps that finish in time are not affected.
+    ``None`` (default) means no timeout.
+    """
+
+    member_retry_attempts: int = Field(default=0, title="Retry attempts")
+    """Number of retry attempts on step failure (0 = no retries)."""
+
+    member_retry_delay: float = Field(default=0.0, title="Retry delay (seconds)")
+    """Delay between retry attempts in seconds."""
 
 
 class GraphJoinConfig(Schema):
