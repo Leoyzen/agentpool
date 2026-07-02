@@ -9,7 +9,6 @@ import webbrowser
 from pydantic import ConfigDict, Field, ImportString
 from schemez import Schema
 
-from agentpool.prompts.prompts import BasePrompt
 from agentpool.tools.base import Tool
 from agentpool_config.knowledge import Knowledge
 from agentpool_config.tools import ImportToolConfig
@@ -17,6 +16,7 @@ from agentpool_config.tools import ImportToolConfig
 
 if TYPE_CHECKING:
     from agentpool.agents import Agent
+    from agentpool.prompts.prompts import BasePrompt  # noqa: TC004
 
 
 class Job[TDeps, TResult = str](Schema):
@@ -129,6 +129,8 @@ class Job[TDeps, TResult = str](Schema):
         ]
 
     async def get_prompt(self) -> str:
+        from agentpool.prompts.prompts import BasePrompt
+
         if isinstance(self.prompt, BasePrompt):
             messages = await self.prompt.format()
             return "\n\n".join(m.get_text_content() for m in messages)
