@@ -22,6 +22,10 @@ from agentpool_server.openai_api_server.completions.models import (
     OpenAIModelInfo,
 )
 from agentpool_server.openai_api_server.responses.helpers import handle_request
+from agentpool_server.openai_api_server.responses.models import (  # noqa: TC001
+    Response as ResponsesResponse,
+    ResponseRequest,
+)
 
 
 if TYPE_CHECKING:
@@ -29,10 +33,6 @@ if TYPE_CHECKING:
 
     from agentpool import AgentPool
     from agentpool.orchestrator.core import EventBus, EventEnvelope
-    from agentpool_server.openai_api_server.responses.models import (
-        Response as ResponsesResponse,
-        ResponseRequest,
-    )
 
 
 logger = get_logger(__name__)
