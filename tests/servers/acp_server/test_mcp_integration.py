@@ -52,12 +52,17 @@ async def test_session_with_mcp_servers(
 ):
     """Test creating an ACP session with MCP servers."""
     agent_pool = AgentPool(main_agent_name="test_agent")
+    # Register agent config in runtime registry so create_session() can find it
+    from agentpool.models.agents import NativeAgentConfig
+
+    agent_pool.runtime_registry.register(
+        "test_agent", NativeAgentConfig(name="test_agent", model="test:")
+    )
 
     def simple_callback(message: str) -> str:
         return f"Test response for: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=agent_pool)
-    # pool.register() removed; agent created from callback/config above
     # Sample MCP servers (these won't actually connect in the test)
     mcp_servers = [
         StdioMcpServer(
@@ -104,14 +109,19 @@ async def test_session_manager_with_mcp(
     client_capabilities: ClientCapabilities,
 ):
     """Test session manager creating sessions with MCP servers."""
+
     def simple_callback(message: str) -> str:
         return f"Test response for: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback)
     agent_pool = AgentPool(main_agent_name=agent.name)
+    # Register agent config in runtime registry so create_session() can find it
+    from agentpool.models.agents import NativeAgentConfig
+
+    agent_pool.runtime_registry.register(
+        "test_agent", NativeAgentConfig(name="test_agent", model="test:")
+    )
     session_manager = ACPSessionManager(agent_pool)
-    # pool.register() removed; agent created from callback/config above
-    # pool.register() removed; agent created from callback/config above
     mcp_servers = [StdioMcpServer(name="tools", command="echo", args=["tools"], env=[])]
     async with agent_pool:
         try:
