@@ -310,7 +310,7 @@ async def test_receive_request_list_content_joins_elements() -> None:
 
     captured_content: list[str] = []
 
-    async def _capture(run_handle: Any, initial_prompt: str) -> None:
+    async def _capture(run_handle: object, initial_prompt: str) -> None:
         captured_content.append(initial_prompt)
 
     controller._consume_run = _capture  # type: ignore[method-assign]

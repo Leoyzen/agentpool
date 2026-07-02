@@ -58,10 +58,7 @@ def _make_echo_agent(name: str, response: str = "hello") -> Agent[Any, str]:
 
 async def _collect_events(source: Any, *args: Any, **kwargs: Any) -> list[Any]:
     """Collect all events from run_stream into a list."""
-    events: list[Any] = []
-    async for event in source.run_stream(*args, **kwargs):
-        events.append(event)
-    return events
+    return [event async for event in source.run_stream(*args, **kwargs)]
 
 
 # ---------------------------------------------------------------------------
@@ -131,9 +128,7 @@ agents:
 
 
 async def test_team_spawn_precedes_subagent_for_each_member() -> None:
-    """TG-3: For each team member, SpawnSessionStart appears before any
-    SubAgentEvent from that member.
-    """
+    """TG-3: For each team member, SpawnSessionStart appears before any SubAgentEvent from...."""
     agent_a = _make_echo_agent("alpha")
     agent_b = _make_echo_agent("beta")
     team = Team([agent_a, agent_b])
@@ -213,9 +208,7 @@ agents:
 
 
 async def test_team_member_child_session_id_in_subagent_event() -> None:
-    """TG-7: Each team member's SpawnSessionStart.child_session_id must
-    also appear in subsequent SubAgentEvent.child_session_id.
-    """
+    """TG-7: Each team member's SpawnSessionStart.child_session_id must also appear in...."""
     agent_a = _make_echo_agent("alpha")
     agent_b = _make_echo_agent("beta")
     team = Team([agent_a, agent_b])
@@ -241,9 +234,7 @@ async def test_team_member_child_session_id_in_subagent_event() -> None:
 
 
 async def test_subagent_run_started_matches_spawn_child_id() -> None:
-    """TG-8: RunStartedEvent from child agent carries same session_id
-    as SpawnSessionStart.child_session_id (subagent path).
-    """
+    """TG-8: RunStartedEvent from child agent carries same session_id as...."""
     manifest = AgentsManifest.from_yaml("""
 agents:
   worker:
@@ -345,9 +336,7 @@ agents:
 
 
 async def test_acp_child_session_inherits_parent_project_and_cwd() -> None:
-    """TG-10: ACP child session created via ACPSessionManager with
-    parent_session_id inherits project_id and cwd from parent.
-    """
+    """TG-10: ACP child session created via ACPSessionManager with parent_session_id...."""
     from agentpool.models.agents import NativeAgentConfig
     from agentpool.models.manifest import AgentsManifest
     from agentpool.orchestrator.core import SessionPool
@@ -384,14 +373,14 @@ async def test_acp_child_session_inherits_parent_project_and_cwd() -> None:
     mock_acp_agent = MagicMock()
 
     with (
-        patch("agentpool_server.acp_server.session_manager.ACPSession") as MockSession,
+        patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls,
         patch("agentpool_server.acp_server.session_manager.ClientCapabilities"),
     ):
-        mock_session = MagicMock()
-        mock_session.register_update_callback = MagicMock()
-        mock_session.initialize = AsyncMock()
-        mock_session.initialize_mcp_servers = AsyncMock()
-        MockSession.return_value = mock_session
+        mock_session_instance = MagicMock()
+        mock_session_instance.register_update_callback = MagicMock()
+        mock_session_instance.initialize = AsyncMock()
+        mock_session_instance.initialize_mcp_servers = AsyncMock()
+        mock_session_cls.return_value = mock_session_instance
 
         session_id = await manager.create_session(
             agent=agent,
@@ -416,9 +405,7 @@ async def test_acp_child_session_inherits_parent_project_and_cwd() -> None:
 
 
 async def test_subagent_depth_guard_before_session_creation() -> None:
-    """TG-14: When depth >= MAX_DELEGATION_DEPTH, DelegationDepthError
-    is raised BEFORE create_child_session is called.
-    """
+    """TG-14: When depth >= MAX_DELEGATION_DEPTH, DelegationDepthError is raised BEFORE...."""
     from agentpool_toolsets.builtin.subagent_tools import SubagentTools
 
     manifest = AgentsManifest.from_yaml("""
@@ -469,9 +456,7 @@ agents:
 
 
 async def test_workers_child_session_persisted_with_correct_parent() -> None:
-    """TG-15: WorkersTools creates child session with correct parent_session_id
-    and the child SessionData is persisted with correct parent_id.
-    """
+    """TG-15: WorkersTools creates child session with correct parent_session_id and the...."""
     store = MemorySessionStore()
     manifest = AgentsManifest.from_yaml("""
 agents:
@@ -527,9 +512,7 @@ agents:
 
 
 async def test_teamrun_each_member_gets_own_child_session() -> None:
-    """TG-16: TeamRun sequential members each get their own SpawnSessionStart
-    with unique child_session_id, all referencing the same parent.
-    """
+    """TG-16: TeamRun sequential members each get their own SpawnSessionStart with unique...."""
     agent1 = _make_echo_agent("step1", "first")
     agent2 = _make_echo_agent("step2", "second")
     team = TeamRun([agent1, agent2], name="pipeline")
@@ -563,9 +546,7 @@ async def test_teamrun_each_member_gets_own_child_session() -> None:
 
 
 async def test_nested_team_subagent_preserves_inner_session_ids() -> None:
-    """TG-18: When a Team contains a nested team, SubAgentEvents from
-    inner team preserve child_session_id and parent_session_id.
-    """
+    """TG-18: When a Team contains a nested team, SubAgentEvents from inner team preserve...."""
     inner_a = _make_echo_agent("inner_a")
     inner_b = _make_echo_agent("inner_b")
     inner_team = Team([inner_a, inner_b], name="inner_team")
@@ -588,8 +569,7 @@ async def test_nested_team_subagent_preserves_inner_session_ids() -> None:
 
 
 async def test_mixed_agent_type_team_all_get_child_sessions() -> None:
-    """TG-22: Team with mixed agent types (native + ACP) must create
-    SpawnSessionStart for each member.
+    """TG-22: Team with mixed agent types must create SpawnSessionStart for each member.
 
     Note: ACP agents in a Team require a real ACP client which we cannot
     provide in unit tests. Instead we verify the cross-provider contract
@@ -634,9 +614,10 @@ async def test_mixed_agent_type_team_all_get_child_sessions() -> None:
 
 
 async def test_event_ordering_spawn_before_subagent_per_child() -> None:
-    """Cross-provider invariant: for every child_session_id, the
-    SpawnSessionStart event must appear at a lower index than the first
-    SubAgentEvent carrying that child_session_id.
+    """Cross-provider invariant: SpawnSessionStart precedes SubAgentEvent per child.
+
+    For every child_session_id, the SpawnSessionStart event must appear at a
+    lower index than the first SubAgentEvent carrying that child_session_id.
     """
     # Test with Team (multiple members → multiple child sessions)
     agent_a = _make_echo_agent("alpha")
@@ -675,10 +656,7 @@ async def test_event_ordering_spawn_before_subagent_per_child() -> None:
 
 
 async def test_team_run_does_not_emit_spawn_session_start() -> None:
-    """Non-streaming Team.run() should NOT emit SpawnSessionStart.
-
-    This is out-of-scope behavior that must remain unchanged.
-    """
+    """Non-streaming Team.run() should NOT emit SpawnSessionStart. This is out-of-scope...."""
     agent_a = _make_echo_agent("alpha")
     agent_b = _make_echo_agent("beta")
     team = Team([agent_a, agent_b])
@@ -690,10 +668,7 @@ async def test_team_run_does_not_emit_spawn_session_start() -> None:
 
 
 async def test_teamrun_run_does_not_emit_spawn_session_start() -> None:
-    """Non-streaming TeamRun.run() should NOT emit SpawnSessionStart.
-
-    This is out-of-scope behavior that must remain unchanged.
-    """
+    """Non-streaming TeamRun.run() should NOT emit SpawnSessionStart. This is out-of-scope...."""
     agent1 = _make_echo_agent("step1", "first")
     agent2 = _make_echo_agent("step2", "second")
     team = TeamRun([agent1, agent2], name="pipeline")
@@ -711,9 +686,7 @@ async def test_teamrun_run_does_not_emit_spawn_session_start() -> None:
 
 
 async def test_spawn_and_subagent_depth_consistency() -> None:
-    """SpawnSessionStart.depth must equal SubAgentEvent.depth for the same
-    child delegation (both are computed as child_depth = parent_depth + 1).
-    """
+    """SpawnSessionStart.depth must equal SubAgentEvent.depth for the same child delegation...."""
     agent_a = _make_echo_agent("alpha")
     team = Team([agent_a])
 
@@ -743,9 +716,7 @@ async def test_spawn_and_subagent_depth_consistency() -> None:
 
 
 async def test_pool_backed_team_and_teamrun_create_child_sessions() -> None:
-    """Both Team and TeamRun with pool.session_pool should call
-    create_child_session for each member.
-    """
+    """Both Team and TeamRun with pool.session_pool should call create_child_session for...."""
     agent_a = _make_echo_agent("alpha")
     agent_b = _make_echo_agent("beta")
 
@@ -808,9 +779,7 @@ async def test_pool_backed_team_and_teamrun_create_child_sessions() -> None:
 
 
 async def test_child_session_ids_unique_across_providers() -> None:
-    """When SubagentTools delegates to a Team, the SubagentTools child session
-    and the Team member child sessions must all be unique.
-    """
+    """When SubagentTools delegates to a Team, the SubagentTools child session and the Team...."""
     agent_a = _make_echo_agent("alpha")
     agent_b = _make_echo_agent("beta")
     inner_team = Team([agent_a, agent_b], name="work_team")
@@ -848,9 +817,11 @@ agents:
         agent_b.agent_pool = pool
 
         orch = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
-        async for event in orch.run_stream("Delegate to team", session_id="ses_test"):
-            if isinstance(event, SpawnSessionStart):
-                all_child_ids.append(event.child_session_id)
+        all_child_ids.extend(
+            event.child_session_id
+            async for event in orch.run_stream("Delegate to team", session_id="ses_test")
+            if isinstance(event, SpawnSessionStart)
+        )
 
     # All child_session_ids must be unique
     assert len(set(all_child_ids)) == len(all_child_ids), (

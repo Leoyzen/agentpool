@@ -439,7 +439,9 @@ async def test_get_skill_instructions_missing_args_returns_template(mcp_provider
     mcp_provider.get_skills = AsyncMock(return_value=[skill])
     mcp_provider.get_prompts = AsyncMock(return_value=[mock_prompt])
     mcp_provider._get_prompt_skill_instructions = AsyncMock(
-        return_value="# arg-prompt\n\n## Arguments\n- **required_arg** (required): A required argument"
+        return_value=(
+            "# arg-prompt\n\n## Arguments\n- **required_arg** (required): A required argument"
+        )
     )
 
     instructions = await mcp_provider.get_skill_instructions("arg-prompt")

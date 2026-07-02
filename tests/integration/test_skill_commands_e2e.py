@@ -798,21 +798,21 @@ class TestErrorHandling:
         SkillsRegistry()
 
         # Try to create skill with invalid name (will fail validation)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="name"):
             Skill(
                 name="Invalid Name With Spaces",  # Invalid: has spaces
                 description="Test",
                 skill_path=UPath("/tmp/test"),
             )
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="name"):
             Skill(
                 name="Invalid-",  # Invalid: ends with hyphen
                 description="Test",
                 skill_path=UPath("/tmp/test"),
             )
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="name"):
             Skill(
                 name="-Invalid",  # Invalid: starts with hyphen
                 description="Test",

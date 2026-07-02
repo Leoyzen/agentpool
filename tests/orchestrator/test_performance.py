@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 from unittest.mock import MagicMock
 
 import anyio
@@ -35,11 +35,12 @@ def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
     """Check if a memory receive stream has no buffered items."""
     try:
         stream.receive_nowait()
-        return False
     except anyio.WouldBlock:
         return True
     except anyio.EndOfStream:
         return True
+    else:
+        return False
 
 
 @pytest.fixture
@@ -56,7 +57,7 @@ def mock_pool() -> MagicMock:
 class _MockTurn:
     """Minimal turn that yields RunStartedEvent + StreamCompleteEvent."""
 
-    message_history: list[Any] = []
+    message_history: ClassVar[list[Any]] = []
 
     def __init__(self, *, delay: float = 0.0) -> None:
         self._delay = delay

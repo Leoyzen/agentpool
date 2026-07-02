@@ -194,9 +194,9 @@ class TestTitleGenerationDoesNotBlockAgent:
             ),
             patch(
                 "agentpool_server.opencode_server.routes.message_routes.OpenCodeStreamAdapter"
-            ) as MockAdapter,
+            ) as mock_adapter_class,
         ):
-            mock_adapter_instance = MockAdapter.return_value
+            mock_adapter_instance = mock_adapter_class.return_value
             mock_adapter_instance.process_stream = Mock(
                 return_value=_AsyncIteratorMock([]),
             )
@@ -221,7 +221,8 @@ class TestTitleGenerationDoesNotBlockAgent:
         )
 
     async def test_maybe_generate_title_e2e_returns_fast(self, tmp_path: Any) -> None:
-        """End-to-end: _maybe_generate_title called from _process_message_locked
+        """End-to-end: _maybe_generate_title called from _process_message_locked.
+
         should not block, even with a slow title model.
 
         This test uses a real slow _generate_title_core mock to test the
@@ -254,12 +255,12 @@ class TestTitleGenerationDoesNotBlockAgent:
             ),
             patch(
                 "agentpool_server.opencode_server.routes.message_routes.OpenCodeStreamAdapter"
-            ) as MockAdapter,
+            ) as mock_adapter_class,
         ):
             os.environ.pop("PYTEST_CURRENT_TEST", None)
 
             with patch.object(StorageManager, "_generate_title_core", slow_core):
-                mock_adapter_instance = MockAdapter.return_value
+                mock_adapter_instance = mock_adapter_class.return_value
                 mock_adapter_instance.process_stream = Mock(
                     return_value=_AsyncIteratorMock([]),
                 )

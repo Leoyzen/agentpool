@@ -183,8 +183,7 @@ async def test_run_aborted_error_yields_stream_complete() -> None:
 
         events: list[Any] = []
         with patch.object(agent, "get_agentlet", AsyncMock(return_value=mock_agentlet)):
-            async for event in turn.execute():
-                events.append(event)
+            events.extend([event async for event in turn.execute()])
 
         # Must have StreamCompleteEvent as last event
         stream_complete = [e for e in events if isinstance(e, StreamCompleteEvent)]
@@ -218,8 +217,7 @@ async def test_undrained_pending_yields_stream_complete() -> None:
 
         events: list[Any] = []
         with patch.object(agent, "get_agentlet", AsyncMock(return_value=mock_agentlet)):
-            async for event in turn.execute():
-                events.append(event)
+            events.extend(event async for event in turn.execute())
 
         stream_complete = [e for e in events if isinstance(e, StreamCompleteEvent)]
         assert len(stream_complete) == 1, (
@@ -254,8 +252,7 @@ async def test_native_turn_checks_cancelled_before_next() -> None:
         # verify the fix exists by checking the source code has the guard.
         # This test documents the expected behavior.
         events: list[Any] = []
-        async for event in turn.execute():
-            events.append(event)
+        events = [event async for event in turn.execute()]
 
         # Normal execution should work fine
         assert any(isinstance(e, StreamCompleteEvent) for e in events)

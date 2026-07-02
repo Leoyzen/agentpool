@@ -121,10 +121,7 @@ class TestHandlePromptInputProvider:
         handler: ACPProtocolHandler,
         mock_pool: MagicMock,
     ) -> None:
-        """When handle_prompt() is called, an ACPInputProvider is created
-        and passed to SessionPool.receive_request() so elicitation goes
-        through the ACP protocol.
-        """
+        """When handle_prompt() is called, an ACPInputProvider is created and passed to...."""
         prompt = [TextContentBlock(text="hello")]
 
         await handler.handle_prompt("sess-1", prompt)
@@ -141,9 +138,7 @@ class TestHandlePromptInputProvider:
         handler: ACPProtocolHandler,
         mock_pool: MagicMock,
     ) -> None:
-        """The ACPInputProvider must have a requests object wired to
-        the ACP client so request_permission / elicitation_create work.
-        """
+        """The ACPInputProvider must have a requests object wired to the ACP client so...."""
         prompt = [TextContentBlock(text="hello")]
 
         await handler.handle_prompt("sess-1", prompt)
@@ -159,10 +154,7 @@ class TestHandlePromptInputProvider:
         handler: ACPProtocolHandler,
         mock_pool: MagicMock,
     ) -> None:
-        """The ACPInputProvider must have client_capabilities so
-        capability-gated elicitation paths work correctly.
-        When no capabilities are passed, elicitation is not advertised.
-        """
+        """The ACPInputProvider must have client_capabilities so capability-gated...."""
         prompt = [TextContentBlock(text="hello")]
 
         await handler.handle_prompt("sess-1", prompt)
@@ -179,10 +171,7 @@ class TestHandlePromptInputProvider:
         handler_with_elicitation: ACPProtocolHandler,
         mock_pool: MagicMock,
     ) -> None:
-        """When the handler is created with elicitation capabilities,
-        the ACPInputProvider must advertise them so elicitation/create
-        is used instead of falling back to request_permission.
-        """
+        """When the handler is created with elicitation capabilities, the ACPInputProvider...."""
         prompt = [TextContentBlock(text="hello")]
 
         await handler_with_elicitation.handle_prompt("sess-1", prompt)
@@ -250,9 +239,7 @@ class TestACPSessionProxy:
         assert proxy.requests is requests
 
     def test_proxy_defaults_capabilities(self) -> None:
-        """When no capabilities are given, _ACPSessionProxy defaults to
-        an empty ClientCapabilities instance with no elicitation support.
-        """
+        """When no capabilities are given, _ACPSessionProxy defaults to an empty...."""
         from acp.schema.capabilities import ClientCapabilities
 
         proxy = _ACPSessionProxy(requests=MagicMock())

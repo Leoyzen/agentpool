@@ -338,7 +338,10 @@ class TestOrdering:
     """SkillCapability ordering."""
 
     def test_get_ordering_returns_capability_ordering(self) -> None:
-        """get_ordering() returns CapabilityOrdering with wrapped_by=[ProcessHistory, NativeTool]."""
+        """get_ordering() returns CapabilityOrdering with wrapped_by list.
+
+        The wrapped_by list contains ProcessHistory and NativeTool.
+        """
         skill = make_skill_with_instructions()
         cap = SkillCapability(skill=skill)
 

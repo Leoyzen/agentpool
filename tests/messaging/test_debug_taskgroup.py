@@ -1,4 +1,4 @@
-"""Diagnostic test: does calling agent.run() twice hang (without pipeline)?
+"""Diagnostic test for whether calling agent.run() twice hangs (without pipeline).
 
 If the second call hangs, the issue is in the Agent level.
 If it works, the issue is specific to the pydantic-graph TaskGroup interaction.
@@ -27,7 +27,7 @@ async def test_sequential_sync_agents_no_pipeline():
 
 
 async def test_same_sync_agent_twice():
-    """Run the SAME sync agent twice - does second call hang?"""
+    """Run the SAME sync agent twice to check if second call hangs."""
     agent = Agent.from_callback(lambda x: f"processed: {x}", name="agent")
 
     result1 = await asyncio.wait_for(agent.run("first"), timeout=10)

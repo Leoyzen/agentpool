@@ -115,14 +115,14 @@ async def test_create_then_resume_preserves_conversation_history(
     # Arrange: store session data
     session_manager.session_store.load = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
 
-    with patch("agentpool_server.acp_server.session_manager.ACPSession") as MockSession:
+    with patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls:
         mock_session_instance = MagicMock()
         mock_session_instance.session_id = "sess-abc-123"
         mock_session_instance.initialize = AsyncMock()
         mock_session_instance.initialize_mcp_servers = AsyncMock()
         mock_session_instance.agent = mock_agent
         mock_session_instance.register_update_callback = MagicMock()
-        MockSession.return_value = mock_session_instance
+        mock_session_cls.return_value = mock_session_instance
 
         # Act
         result = await session_manager.resume_session(
@@ -153,13 +153,13 @@ async def test_resume_preserves_created_at_timestamp(
     # Arrange
     session_manager.session_store.load = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
 
-    with patch("agentpool_server.acp_server.session_manager.ACPSession") as MockSession:
+    with patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls:
         mock_session_instance = MagicMock()
         mock_session_instance.initialize = AsyncMock()
         mock_session_instance.initialize_mcp_servers = AsyncMock()
         mock_session_instance.agent = mock_agent
         mock_session_instance.register_update_callback = MagicMock()
-        MockSession.return_value = mock_session_instance
+        mock_session_cls.return_value = mock_session_instance
 
         # Act
         await session_manager.resume_session(
@@ -188,13 +188,13 @@ async def test_resume_preserves_status_field(
     # Arrange
     session_manager.session_store.load = AsyncMock(return_value=checkpointed_session_data)  # type: ignore[union-attr]
 
-    with patch("agentpool_server.acp_server.session_manager.ACPSession") as MockSession:
+    with patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls:
         mock_session_instance = MagicMock()
         mock_session_instance.initialize = AsyncMock()
         mock_session_instance.initialize_mcp_servers = AsyncMock()
         mock_session_instance.agent = mock_agent
         mock_session_instance.register_update_callback = MagicMock()
-        MockSession.return_value = mock_session_instance
+        mock_session_cls.return_value = mock_session_instance
 
         # Act
         await session_manager.resume_session(
@@ -223,13 +223,13 @@ async def test_resume_with_mcp_servers_initializes_connections(
     session_manager.session_store.load = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
     mock_mcp_server = MagicMock()
 
-    with patch("agentpool_server.acp_server.session_manager.ACPSession") as MockSession:
+    with patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls:
         mock_session_instance = MagicMock()
         mock_session_instance.initialize = AsyncMock()
         mock_session_instance.initialize_mcp_servers = AsyncMock()
         mock_session_instance.agent = mock_agent
         mock_session_instance.register_update_callback = MagicMock()
-        MockSession.return_value = mock_session_instance
+        mock_session_cls.return_value = mock_session_instance
 
         # Act
         result = await session_manager.resume_session(
@@ -318,13 +318,13 @@ async def test_no_duplicate_load_session_call_on_resume(
     # Arrange
     session_manager.session_store.load = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
 
-    with patch("agentpool_server.acp_server.session_manager.ACPSession") as MockSession:
+    with patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls:
         mock_session_instance = MagicMock()
         mock_session_instance.initialize = AsyncMock()
         mock_session_instance.initialize_mcp_servers = AsyncMock()
         mock_session_instance.agent = mock_agent
         mock_session_instance.register_update_callback = MagicMock()
-        MockSession.return_value = mock_session_instance
+        mock_session_cls.return_value = mock_session_instance
 
         # Act
         await session_manager.resume_session(

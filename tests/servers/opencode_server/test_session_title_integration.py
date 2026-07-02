@@ -246,24 +246,26 @@ class TestSessionTitleGeneration:
             icon="mdi:test-tube",
         )
 
-        with patch.object(
-            StorageManager,
-            "_generate_title_core",
-            return_value=mock_metadata,
-        ):
+        with (
+            patch.object(
+                StorageManager,
+                "_generate_title_core",
+                return_value=mock_metadata,
+            ),
             # Remove pytest env temporarily to trigger generation
-            with patch.dict(os.environ, {}, clear=False):
-                os.environ.pop("PYTEST_CURRENT_TEST", None)
+            patch.dict(os.environ, {}, clear=False),
+        ):
+            os.environ.pop("PYTEST_CURRENT_TEST", None)
 
-                # Call log_session with initial_prompt
-                await server_state.storage.log_session(
-                    session_id=session_id,
-                    node_name="test_agent",
-                    initial_prompt="Tell me about Python programming",
-                )
+            # Call log_session with initial_prompt
+            await server_state.storage.log_session(
+                session_id=session_id,
+                node_name="test_agent",
+                initial_prompt="Tell me about Python programming",
+            )
 
-                # Wait for async processing
-                await anyio.sleep(0.1)
+            # Wait for async processing
+            await anyio.sleep(0.1)
 
         # Verify title was updated
         stored_title = await server_state.storage.get_session_title(session_id)

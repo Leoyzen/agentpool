@@ -35,11 +35,12 @@ from agentpool_toolsets.builtin.subagent_tools import SubagentTools
 def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
     try:
         stream.receive_nowait()
-        return False
     except anyio.WouldBlock:
         return True
     except anyio.EndOfStream:
         return True
+    else:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +92,10 @@ agents:
 
 
 async def test_run_started_session_id_matches_spawn_child_id() -> None:
-    """RunStartedEvent from child agent carries same session_id as SpawnSessionStart.child_session_id."""
+    """RunStartedEvent from child agent carries same session_id as SpawnSessionStart.
+
+    SpawnSessionStart.child_session_id should match.
+    """
     manifest = AgentsManifest.from_yaml("""
 agents:
   worker:

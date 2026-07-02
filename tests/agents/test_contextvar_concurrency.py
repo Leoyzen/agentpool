@@ -144,7 +144,7 @@ def test_no_instance_variable():
         )
 
         print("✓ _current_run_ctx is not an instance variable")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"⚠️  Could not fully test instance variable: {e}")
         print("  (This may be due to MockAgent initialization requirements)")
 
@@ -161,7 +161,7 @@ def test_background_run_ctx_unchanged():
             class _EmptyTurn(Turn):
                 async def execute(self):
                     return
-                    yield  # noqa: make it a generator
+                    yield
 
             return _EmptyTurn()
 
@@ -174,7 +174,7 @@ def test_background_run_ctx_unchanged():
         )
 
         print("✓ _background_run_ctx remains an instance variable")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"⚠️  Could not fully test _background_run_ctx: {e}")
 
 

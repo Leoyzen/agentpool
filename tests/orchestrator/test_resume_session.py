@@ -21,11 +21,12 @@ def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
     """Check if a memory receive stream has no buffered items."""
     try:
         stream.receive_nowait()
-        return False
     except anyio.WouldBlock:
         return True
     except anyio.EndOfStream:
         return True
+    else:
+        return False
 
 
 pytestmark = pytest.mark.unit
@@ -251,7 +252,10 @@ async def test_resume_native_agent_loads_checkpoint_and_runs(
     session_pool: SessionPool,
     mock_pool: MagicMock,
 ) -> None:
-    """resume_session for native agent loads checkpoint, reconstructs agent, runs with history+results."""
+    """resume_session for native agent loads checkpoint, reconstructs agent.
+
+    Runs with history+results.
+    """
     from unittest.mock import AsyncMock
 
     store = session_pool.sessions.store

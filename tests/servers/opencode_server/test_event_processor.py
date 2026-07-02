@@ -70,9 +70,7 @@ async def test_process_text_start_creates_text_part(server_state: ServerState) -
 
     # WHEN: PartStartEvent with PydanticTextPart received
     event = PartStartEvent(index=0, part=PydanticTextPart(content="Hello, world!"))
-    events = []
-    async for e in processor.process(event, ctx):
-        events.append(e)
+    events = [e async for e in processor.process(event, ctx)]
 
     # THEN: PartUpdatedEvent is yielded
     assert len(events) == 1
@@ -128,9 +126,7 @@ async def test_process_text_delta_accumulates_text(server_state: ServerState) ->
 
     # WHEN: PartDeltaEvent with TextPartDelta received
     delta_event = PydanticPartDeltaEvent(index=0, delta=TextPartDelta(content_delta="world!"))
-    events = []
-    async for e in processor.process(delta_event, ctx):
-        events.append(e)
+    events = [e async for e in processor.process(delta_event, ctx)]
 
     # THEN: PartDeltaEvent is yielded (not PartUpdatedEvent for deltas)
     assert len(events) == 1
@@ -178,9 +174,7 @@ async def test_process_text_delta_without_start(server_state: ServerState) -> No
 
     # WHEN: PartDeltaEvent without prior PartStartEvent
     delta_event = PydanticPartDeltaEvent(index=0, delta=TextPartDelta(content_delta="Some text"))
-    events = []
-    async for e in processor.process(delta_event, ctx):
-        events.append(e)
+    events = [e async for e in processor.process(delta_event, ctx)]
 
     # THEN: PartUpdatedEvent is yielded
     assert len(events) == 1

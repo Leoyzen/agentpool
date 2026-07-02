@@ -49,7 +49,7 @@ def test_filediff_schema_has_patch_no_before_after():
     assert "from" not in data
 
 
-def test_filediff_schema_camelCase_serialization():
+def test_filediff_schema_camelcase_serialization():
     """FileDiff camelCase serialization must not leak before/after."""
     diff = FileDiff(
         file="app.ts",

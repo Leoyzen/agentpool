@@ -19,7 +19,7 @@ from agentpool_server.agui_server.skill_tools import (
 
 # Skip all tests in this module if ag_ui is not available
 try:
-    from ag_ui.core import Tool
+    import ag_ui  # noqa: F401
 except ImportError:
     pytest.skip("ag_ui module not available", allow_module_level=True)
 

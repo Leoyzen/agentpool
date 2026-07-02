@@ -58,7 +58,7 @@ def _make_functional_event_bus() -> Mock:
     Supports scope="all" subscriptions which receive events from any session_id,
     matching the real EventBus._should_receive behavior.
     """
-    _STREAM_BUFFER_SIZE: int = 1024
+    _stream_buffer_size: int = 1024
     bus = Mock()
     _streams: dict[str, list[tuple[anyio.abc.ObjectSendStream[Any], str]]] = {}
     _stream_pairs: dict[int, anyio.abc.ObjectSendStream[Any]] = {}
@@ -67,7 +67,7 @@ def _make_functional_event_bus() -> Mock:
         session_id: str, scope: str = "session"
     ) -> anyio.abc.ObjectReceiveStream[Any]:
         send_stream, receive_stream = anyio.create_memory_object_stream(
-            max_buffer_size=_STREAM_BUFFER_SIZE
+            max_buffer_size=_stream_buffer_size
         )
         _streams.setdefault(session_id, []).append((send_stream, scope))
         _stream_pairs[id(receive_stream)] = send_stream
@@ -186,7 +186,7 @@ def manifest() -> AgentsManifest:
 
 
 @pytest.fixture
-def mock_pool(
+def mock_pool(  # noqa: PLR0915
     storage_manager: StorageManager,
     file_ops: FileOpsTracker,
     todos: TodoTracker,

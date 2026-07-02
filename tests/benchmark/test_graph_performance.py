@@ -166,7 +166,7 @@ async def _first_event_latency(
         if not isinstance(event, RunStartedEvent):
             return end - start
         # If first event is RunStartedEvent, continue to next
-        async for event in source.run_stream(*args, **kwargs):
+        async for _event in source.run_stream(*args, **kwargs):
             end = time.perf_counter()
             return end - start
     return 0.0

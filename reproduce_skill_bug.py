@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Quick red flag test: verify skill reference loading against local MCP scratchpad.
 
 Run from packages/agentpool directory:
@@ -47,7 +46,7 @@ async def main():
         try:
             skill = await resolver.resolve("systematic-troubleshooting")
             print(f"OK: {skill.name}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"FAIL: {e}")
 
         # Test 2: skill:// URI with reference (the bug)
@@ -58,7 +57,7 @@ async def main():
             print(f"OK: {skill.name}")
             ref_path = getattr(skill, "_resolved_reference_path", None)
             print(f"    _resolved_reference_path: {ref_path}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"FAIL: {e}")
 
     finally:

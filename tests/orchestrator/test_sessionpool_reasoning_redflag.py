@@ -22,8 +22,9 @@ from agentpool.orchestrator.core import EventBus
 
 @pytest.mark.asyncio
 async def test_reasoning_events_published_to_eventbus():
-    """Red-flag: Verify that reasoning/thinking events are published to EventBus
-    and can be consumed by subscribers.
+    """Red-flag: Verify that reasoning/thinking events are published to EventBus.
+
+    And can be consumed by subscribers.
     """
     event_bus = EventBus()
     session_id = "test_session"
@@ -60,6 +61,7 @@ async def test_reasoning_events_published_to_eventbus():
 @pytest.mark.asyncio
 async def test_eventbus_preserves_event_types_after_copy():
     """Red-flag: EventBus uses copy.copy() before publishing to each subscriber.
+
     Verify that copied thinking events maintain their type and content.
     """
     event_bus = EventBus()
@@ -90,6 +92,7 @@ async def test_eventbus_preserves_event_types_after_copy():
 @pytest.mark.asyncio
 async def test_multiple_subscribers_receive_reasoning():
     """Red-flag: Verify all subscribers receive reasoning events.
+
     This simulates the scenario where both the adapter_task and _event_consumer_loop
     subscribe to the same EventBus.
     """
@@ -130,7 +133,8 @@ async def test_multiple_subscribers_receive_reasoning():
 
 @pytest.mark.asyncio
 async def test_eventbus_with_subagent_wrapping():
-    """Red-flag: Verify that events wrapped in SubAgentEvent still contain
+    """Red-flag: Verify that events wrapped in SubAgentEvent still contain.
+
     reasoning events that can be extracted.
     """
     from agentpool.agents.events import SubAgentEvent

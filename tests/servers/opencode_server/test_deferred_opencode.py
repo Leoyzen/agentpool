@@ -81,9 +81,7 @@ async def test_deferred_event_creates_tool_part_running(server_state: ServerStat
         status="pending",
         session_id="test-session",
     )
-    events = []
-    async for e in processor.process(event, ctx):
-        events.append(e)
+    events = [e async for e in processor.process(event, ctx)]
 
     # THEN: PartUpdatedEvent is yielded
     assert len(events) == 1
@@ -149,9 +147,7 @@ async def test_deferred_event_sets_title_with_deferred_strategy(
         status="pending",
         session_id="test-session",
     )
-    events = []
-    async for e in processor.process(event, ctx):
-        events.append(e)
+    events = [e async for e in processor.process(event, ctx)]
 
     # THEN: title reflects deferral
     assert len(events) == 1
@@ -232,9 +228,7 @@ async def test_deferred_event_skipped_when_already_completed(
         status="pending",
         session_id="test-session",
     )
-    events = []
-    async for e in processor.process(event, ctx):
-        events.append(e)
+    events = [e async for e in processor.process(event, ctx)]
 
     # THEN: No new PartUpdatedEvent is yielded (deduplicated)
     assert len(events) == 0
@@ -305,9 +299,7 @@ async def test_deferred_event_skipped_when_already_errored(
         status="pending",
         session_id="test-session",
     )
-    events = []
-    async for e in processor.process(event, ctx):
-        events.append(e)
+    events = [e async for e in processor.process(event, ctx)]
 
     # THEN: No new PartUpdatedEvent is yielded (deduplicated)
     assert len(events) == 0

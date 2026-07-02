@@ -74,8 +74,7 @@ async def test_staged_content_consumed_by_native_turn() -> None:
         )
 
         events: list[Any] = []
-        async for event in turn.execute():
-            events.append(event)
+        events.extend([event async for event in turn.execute()])
 
         # After execute(), staged_content should be consumed (empty)
         assert len(agent.staged_content) == 0, (
@@ -171,9 +170,7 @@ async def test_no_staged_content_does_not_break_native_turn() -> None:
             message_history=[],
         )
 
-        events: list[Any] = []
-        async for event in turn.execute():
-            events.append(event)
+        events: list[Any] = [event async for event in turn.execute()]
 
         # Should still work normally
         assert len(events) > 0

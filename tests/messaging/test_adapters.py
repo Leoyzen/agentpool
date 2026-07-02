@@ -464,8 +464,7 @@ async def test_error_marker_raises():
 
     events: list[Any] = []
     with pytest.raises(ValueError, match="boom"):
-        async for event in adapter:
-            events.append(event)
+        events.extend([event async for event in adapter])
 
     error_events = [e for e in events if isinstance(e, RunErrorEvent)]
     assert len(error_events) == 1
@@ -489,7 +488,7 @@ async def test_step_event_collector_flat():
         await collector.emit_text_delta(0, "hello")
         await collector.emit_text_delta(1, " world")
 
-    asyncio.create_task(emit_while_running())
+    _task = asyncio.create_task(emit_while_running())  # noqa: RUF006
     events = [e async for e in adapter]
 
     deltas = [e for e in events if hasattr(e, "delta")]
@@ -511,7 +510,7 @@ async def test_step_event_collector_nested():
         await asyncio.sleep(0.02)
         await collector.emit_text_delta(0, "nested text")
 
-    asyncio.create_task(emit_while_running())
+    _task = asyncio.create_task(emit_while_running())  # noqa: RUF006
     events = [e async for e in adapter]
 
     subagent_events = [e for e in events if isinstance(e, SubAgentEvent)]
@@ -583,7 +582,7 @@ async def test_event_ordering():
         await collector.emit_text_delta(0, "chunk")
         await sync_queue.put("done")
 
-    asyncio.create_task(emit_after_step_1())
+    _task = asyncio.create_task(emit_after_step_1())  # noqa: RUF006
     events = [e async for e in adapter]
 
     kinds = [type(e).__name__ for e in events]

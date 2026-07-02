@@ -146,7 +146,7 @@ async def test_list_sessions_returns_session_info(
 
 
 # ---------------------------------------------------------------------------
-# get_or_create_session_agent – shared agent fallback
+# get_or_create_session_agent - shared agent fallback
 # ---------------------------------------------------------------------------
 
 
@@ -169,7 +169,7 @@ async def test_get_or_create_session_agent_returns_shared_for_non_native(
 
 
 # ---------------------------------------------------------------------------
-# get_or_create_session_agent – per-session native agent
+# get_or_create_session_agent - per-session native agent
 # ---------------------------------------------------------------------------
 
 
@@ -498,7 +498,7 @@ def test_cancel_run_for_session_noop_for_idle_session(
     controller: SessionController,
 ) -> None:
     """cancel_run_for_session is a no-op when the session has no active run."""
-    # No session exists – should not raise
+    # No session exists - should not raise
     controller.cancel_run_for_session("missing")
 
 

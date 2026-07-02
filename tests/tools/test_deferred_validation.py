@@ -1,4 +1,4 @@
-"""Validate invalid deferred_kind × deferred_strategy combinations on Tool.
+"""Validate invalid deferred_kind x deferred_strategy combinations on Tool.
 
 These tests enforce the rules documented in
 .omo/notepads/durable-execution/decisions.md:

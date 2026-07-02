@@ -96,7 +96,7 @@ class TestPendingDeferredCall:
             "deferred_strategy": "block",
         }
         adapter = TypeAdapter(PendingDeferredCall)
-        with pytest.raises(Exception):
+        with pytest.raises(Exception, match="deferred_kind"):
             adapter.validate_python(dct)
 
     def test_deferred_strategy_rejects_invalid(self) -> None:
@@ -108,7 +108,7 @@ class TestPendingDeferredCall:
             "deferred_strategy": "bogus",
         }
         adapter = TypeAdapter(PendingDeferredCall)
-        with pytest.raises(Exception):
+        with pytest.raises(Exception, match="deferred_strategy"):
             adapter.validate_python(dct)
 
     def test_model_copy_update(self) -> None:

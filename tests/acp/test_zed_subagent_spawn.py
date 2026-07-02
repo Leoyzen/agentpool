@@ -243,8 +243,7 @@ async def test_tool_call_id_flows_event_to_converter_consistently() -> None:
     )
 
     updates: list[Any] = []
-    async for update in converter.convert(event):
-        updates.append(update)
+    updates.extend([update async for update in converter.convert(event)])
 
     assert len(updates) == 1
     tcs: ToolCallStart = updates[0]  # type: ignore[assignment]

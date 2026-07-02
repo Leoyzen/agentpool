@@ -132,7 +132,8 @@ async def test_tool_call_only_response_has_no_text_deltas() -> None:
     ]
     assert len(text_deltas_before_tool_complete) == 0, (
         f"RED FLAG: Expected 0 text/thinking deltas before tool call completes, "
-        f"got {len(text_deltas_before_tool_complete)}. Frontend has nothing to render until tool completes."
+        f"got {len(text_deltas_before_tool_complete)}."
+        " Frontend has nothing to render until tool completes."
     )
 
     # Tool call lifecycle: native agent emits ToolCallStartEvent for

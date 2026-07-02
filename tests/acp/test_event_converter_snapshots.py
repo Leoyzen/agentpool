@@ -499,9 +499,7 @@ class TestZedModeKindAndMeta:
             description="Kind test",
         )
 
-        updates: list[object] = []
-        async for update in converter.convert(event):
-            updates.append(update)
+        updates = [update async for update in converter.convert(event)]
 
         assert len(updates) == 1
         tcs = updates[0]
@@ -510,11 +508,13 @@ class TestZedModeKindAndMeta:
 
     @pytest.mark.anyio
     async def test_zed_mode_build_subagent_completed_has_meta_and_tool_name(self):
-        """ToolCallProgress from build_subagent_completed carries field_meta with subagent_session_info and tool_name.
+        """ToolCallProgress from build_subagent_completed carries field_meta.
 
-        Given: A zed-mode converter that has processed a SpawnSessionStart (seeding _subagent_tool_call_ids).
+        Given: A zed-mode converter that has processed a SpawnSessionStart
+        (seeding _subagent_tool_call_ids).
         When: build_subagent_completed is called for the child session.
-        Then: The yielded ToolCallProgress has field_meta with subagent_session_info and tool_name keys.
+        Then: The yielded ToolCallProgress has field_meta with
+        subagent_session_info and tool_name keys.
         """
         from agentpool.agents.events import SpawnSessionStart
 
@@ -537,9 +537,10 @@ class TestZedModeKindAndMeta:
             pass
 
         # Now call build_subagent_completed
-        progress_updates: list[object] = []
-        async for update in converter.build_subagent_completed(child_session_id=child_sid):
-            progress_updates.append(update)
+        progress_updates = [
+            update
+            async for update in converter.build_subagent_completed(child_session_id=child_sid)
+        ]
 
         assert len(progress_updates) == 1
         progress = progress_updates[0]

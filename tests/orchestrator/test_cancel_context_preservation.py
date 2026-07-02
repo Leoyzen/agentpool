@@ -331,8 +331,7 @@ async def test_cancellederror_path_captures_history() -> None:
         # Patch get_agentlet to return our mock
         with patch.object(agent, "get_agentlet", AsyncMock(return_value=mock_agentlet)):
             events: list[Any] = []
-            async for event in turn.execute():
-                events.append(event)
+            events.extend([event async for event in turn.execute()])
 
         # Path B should have captured _message_history from agent_run
         # BUG: This fails because Path B doesn't call agent_run.all_messages()

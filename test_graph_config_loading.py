@@ -142,7 +142,7 @@ async def test_old_connections_config_loads(old_config_path: Path) -> None:
     # Graph config should be translated from connections
     assert pool._graph_config is not None
     assert isinstance(pool._graph_config, GraphConfig)
-    assert len(pool._graph_config.steps) == 2
+    assert len(pool._graph_config.steps) == 2  # noqa: PLR2004
     assert len(pool._graph_config.edges) == 1
 
     async with pool:
@@ -158,9 +158,9 @@ async def test_old_teams_config_loads(old_teams_config_path: Path) -> None:
     # Graph config should be translated from teams
     assert pool._graph_config is not None
     assert isinstance(pool._graph_config, GraphConfig)
-    assert len(pool._graph_config.steps) == 2
+    assert len(pool._graph_config.steps) == 2  # noqa: PLR2004
     # Sequential team: start -> analyzer -> reviewer -> end = 3 edges
-    assert len(pool._graph_config.edges) == 3
+    assert len(pool._graph_config.edges) == 3  # noqa: PLR2004
 
     async with pool:
         assert pool._graph is not None
@@ -174,8 +174,8 @@ async def test_new_graph_config_loads(new_graph_config_path: Path) -> None:
     assert pool._graph_config is not None
     assert isinstance(pool._graph_config, GraphConfig)
     assert pool._graph_config.name == "test_workflow"
-    assert len(pool._graph_config.steps) == 2
-    assert len(pool._graph_config.edges) == 3
+    assert len(pool._graph_config.steps) == 2  # noqa: PLR2004
+    assert len(pool._graph_config.edges) == 3  # noqa: PLR2004
 
     async with pool:
         assert pool._graph is not None

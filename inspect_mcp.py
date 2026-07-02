@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Inspect MCP server resources at http://127.0.0.1:8890/mcp."""
 
 import asyncio

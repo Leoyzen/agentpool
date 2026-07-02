@@ -65,8 +65,7 @@ def _create_skill(
         for srv_name, srv_cfg in mcp_servers.items():
             frontmatter_lines.append(f"  {srv_name}:")
             frontmatter_lines.append(f"    command: {srv_cfg['command']}")
-            for arg in srv_cfg.get("args", []):
-                frontmatter_lines.append(f"    args: [{arg}]")
+            frontmatter_lines.extend(f"    args: [{arg}]" for arg in srv_cfg.get("args", []))
     if tools:
         frontmatter_lines.append("tools:")
         for t in tools:
@@ -365,8 +364,10 @@ class TestSkillCapabilityBrokenMCP:
 
 @pytest.mark.integration
 class TestSkillCapabilityAgentPoolIntegration:
-    """End-to-end test through AgentPool: skill discovery, capability creation,
+    """End-to-end test through AgentPool: skill discovery, capability creation,.
+
     agentlet building, and instruction injection with TestModel.
+
     """
 
     async def test_skill_discovered_and_capability_built(

@@ -724,7 +724,9 @@ async def test_double_cancel_then_new_prompt(mock_pool: MagicMock) -> None:
 
 @pytest.mark.anyio
 async def test_runhandle_dies_in_idle_loop(mock_pool: MagicMock) -> None:
-    """Simulate unrecoverable error in start() — finally block sets events, cleanup clears current_run_id.
+    """Simulate unrecoverable error in start().
+
+    Finally block sets events, cleanup clears current_run_id.
 
     Given: an agent whose second create_turn call raises RuntimeError.
     When: the first turn completes, followup triggers the second create_turn which raises.

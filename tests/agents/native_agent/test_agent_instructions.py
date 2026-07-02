@@ -299,11 +299,3 @@ class TestNativeAgentInstructions:
             A pydantic-ai AbstractCapability instance, or None.
         """
         return None
-
-    def as_capability(self) -> AbstractCapability | None:
-        """Return a pydantic-ai capability for this provider.
-
-        Returns:
-            A pydantic-ai AbstractCapability instance, or None.
-        """
-        return None

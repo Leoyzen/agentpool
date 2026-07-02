@@ -20,6 +20,7 @@ Methodology:
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 import statistics
 import sys
 import time
@@ -103,7 +104,7 @@ def _format_latency(times: list[float]) -> dict[str, float]:
 
 def _format_memory(peak: int) -> str:
     """Format memory peak in human-readable units."""
-    if peak < 1024:
+    if peak < 1024:  # noqa: PLR2004
         return f"{peak} B"
     if peak < 1024 * 1024:
         return f"{peak / 1024:.2f} KB"
@@ -465,7 +466,7 @@ async def run_all_benchmarks() -> dict[str, Any]:
     return results
 
 
-def _print_results(results: dict[str, Any]) -> None:
+def _print_results(results: dict[str, Any]) -> None:  # noqa: PLR0915
     """Pretty-print benchmark results to stdout."""
     print()
     print("=" * 70)
@@ -477,13 +478,11 @@ def _print_results(results: dict[str, Any]) -> None:
     print("--- Tool Shim: ToolManager.get_tools() vs as_capability() ---")
     tool = results["tool_shim"]
     print("  Old approach (ToolManager.get_tools):")
-    print(
-        f"    mean={tool['old_approach']['mean_ms']:.3f}ms, median={tool['old_approach']['median_ms']:.3f}ms"
-    )
+    oa = tool["old_approach"]
+    print(f"    mean={oa['mean_ms']:.3f}ms, median={oa['median_ms']:.3f}ms")
     print("  New approach (ResourceProvider.as_capability):")
-    print(
-        f"    mean={tool['new_approach']['mean_ms']:.3f}ms, median={tool['new_approach']['median_ms']:.3f}ms"
-    )
+    na = tool["new_approach"]
+    print(f"    mean={na['mean_ms']:.3f}ms, median={na['median_ms']:.3f}ms")
     print(f"  Overhead: {tool['overhead_ms']:+.3f}ms ({tool['overhead_pct']:+.1f}%)")
 
     # Hooks shim
@@ -491,13 +490,11 @@ def _print_results(results: dict[str, Any]) -> None:
     print("--- Hooks Shim: AgentHooks vs as_capability() ---")
     hooks = results["hooks_shim"]
     print("  Old approach (direct access):")
-    print(
-        f"    mean={hooks['old_approach']['mean_ms']:.3f}ms, median={hooks['old_approach']['median_ms']:.3f}ms"
-    )
+    hoa = hooks["old_approach"]
+    print(f"    mean={hoa['mean_ms']:.3f}ms, median={hoa['median_ms']:.3f}ms")
     print("  New approach (AgentHooks.as_capability):")
-    print(
-        f"    mean={hooks['new_approach']['mean_ms']:.3f}ms, median={hooks['new_approach']['median_ms']:.3f}ms"
-    )
+    hna = hooks["new_approach"]
+    print(f"    mean={hna['mean_ms']:.3f}ms, median={hna['median_ms']:.3f}ms")
     print(f"  Overhead: {hooks['overhead_ms']:+.3f}ms ({hooks['overhead_pct']:+.1f}%)")
 
     # MCP shim
@@ -505,13 +502,11 @@ def _print_results(results: dict[str, Any]) -> None:
     print("--- MCP Shim: MCPManager vs as_capability() ---")
     mcp = results["mcp_shim"]
     print("  Old approach (get_mcp_providers):")
-    print(
-        f"    mean={mcp['old_approach']['mean_ms']:.3f}ms, median={mcp['old_approach']['median_ms']:.3f}ms"
-    )
+    moa = mcp["old_approach"]
+    print(f"    mean={moa['mean_ms']:.3f}ms, median={moa['median_ms']:.3f}ms")
     print("  New approach (MCPManager.as_capability):")
-    print(
-        f"    mean={mcp['new_approach']['mean_ms']:.3f}ms, median={mcp['new_approach']['median_ms']:.3f}ms"
-    )
+    mna = mcp["new_approach"]
+    print(f"    mean={mna['mean_ms']:.3f}ms, median={mna['median_ms']:.3f}ms")
     print(f"  Overhead: {mcp['overhead_ms']:+.3f}ms ({mcp['overhead_pct']:+.1f}%)")
 
     # Agent construction
@@ -519,17 +514,14 @@ def _print_results(results: dict[str, Any]) -> None:
     print("--- Agent Construction: get_agentlet() latency ---")
     agent = results["agent_construction"]
     print("  Baseline (no tools/hooks/MCP):")
-    print(
-        f"    mean={agent['baseline_no_tools']['mean_ms']:.3f}ms, median={agent['baseline_no_tools']['median_ms']:.3f}ms"
-    )
+    abl = agent["baseline_no_tools"]
+    print(f"    mean={abl['mean_ms']:.3f}ms, median={abl['median_ms']:.3f}ms")
     print("  With capabilities (new approach):")
-    print(
-        f"    mean={agent['with_capabilities']['mean_ms']:.3f}ms, median={agent['with_capabilities']['median_ms']:.3f}ms"
-    )
+    awc = agent["with_capabilities"]
+    print(f"    mean={awc['mean_ms']:.3f}ms, median={awc['median_ms']:.3f}ms")
     print("  With old shims (deprecated approach):")
-    print(
-        f"    mean={agent['with_old_shims']['mean_ms']:.3f}ms, median={agent['with_old_shims']['median_ms']:.3f}ms"
-    )
+    aws = agent["with_old_shims"]
+    print(f"    mean={aws['mean_ms']:.3f}ms, median={aws['median_ms']:.3f}ms")
     print(
         f"  Capability overhead vs baseline: {agent['capability_overhead_vs_baseline_ms']:+.3f}ms"
     )
@@ -541,32 +533,32 @@ def _print_results(results: dict[str, Any]) -> None:
     print("--- Memory Overhead ---")
     mem = results["memory"]
     print("  Tool shim:")
-    print(f"    Old: {mem['tool_shim']['old_formatted']}, New: {mem['tool_shim']['new_formatted']}")
-    print(f"    Delta: {mem['tool_shim']['delta_formatted']}")
+    ts = mem["tool_shim"]
+    print(f"    Old: {ts['old_formatted']}, New: {ts['new_formatted']}")
+    print(f"    Delta: {ts['delta_formatted']}")
     print("  Hooks shim:")
-    print(
-        f"    Old: {mem['hooks_shim']['old_formatted']}, New: {mem['hooks_shim']['new_formatted']}"
-    )
-    print(f"    Delta: {mem['hooks_shim']['delta_formatted']}")
+    hs = mem["hooks_shim"]
+    print(f"    Old: {hs['old_formatted']}, New: {hs['new_formatted']}")
+    print(f"    Delta: {hs['delta_formatted']}")
     print("  MCP shim:")
-    print(f"    Old: {mem['mcp_shim']['old_formatted']}, New: {mem['mcp_shim']['new_formatted']}")
-    print(f"    Delta: {mem['mcp_shim']['delta_formatted']}")
+    ms = mem["mcp_shim"]
+    print(f"    Old: {ms['old_formatted']}, New: {ms['new_formatted']}")
+    print(f"    Delta: {ms['delta_formatted']}")
     print("  Full agent construction:")
-    print(f"    Baseline: {mem['agent_construction']['baseline_formatted']}")
-    print(f"    Capability: {mem['agent_construction']['capability_formatted']}")
-    print(f"    Old shim: {mem['agent_construction']['old_formatted']}")
-    print(
-        f"    Cap vs baseline delta: {_format_memory(mem['agent_construction']['capability_delta_vs_baseline_bytes'])}"
-    )
-    print(
-        f"    Old vs baseline delta: {_format_memory(mem['agent_construction']['old_delta_vs_baseline_bytes'])}"
-    )
+    ac = mem["agent_construction"]
+    print(f"    Baseline: {ac['baseline_formatted']}")
+    print(f"    Capability: {ac['capability_formatted']}")
+    print(f"    Old shim: {ac['old_formatted']}")
+    cd = ac["capability_delta_vs_baseline_bytes"]
+    print(f"    Cap vs baseline delta: {_format_memory(cd)}")
+    od = ac["old_delta_vs_baseline_bytes"]
+    print(f"    Old vs baseline delta: {_format_memory(od)}")
 
     print()
     print("=" * 70)
 
 
-def _write_markdown(results: dict[str, Any], path: str) -> None:
+def _write_markdown(results: dict[str, Any], path_str: str) -> None:
     """Write results to a markdown file for evidence collection."""
     lines: list[str] = [
         "# Task 62 Benchmark Results: Capability Overhead",
@@ -592,9 +584,11 @@ def _write_markdown(results: dict[str, Any], path: str) -> None:
     ]
 
     tool = results["tool_shim"]
+    toa = tool["old_approach"]
+    tna = tool["new_approach"]
     lines.append(
-        f"| Mean latency | {tool['old_approach']['mean_ms']:.3f}ms | "
-        f"{tool['new_approach']['mean_ms']:.3f}ms | {tool['overhead_ms']:+.3f}ms ({tool['overhead_pct']:+.1f}%) |"
+        f"| Mean latency | {toa['mean_ms']:.3f}ms | {tna['mean_ms']:.3f}ms"
+        f" | {tool['overhead_ms']:+.3f}ms ({tool['overhead_pct']:+.1f}%) |"
     )
 
     lines.extend([
@@ -608,9 +602,11 @@ def _write_markdown(results: dict[str, Any], path: str) -> None:
     ])
 
     hooks = results["hooks_shim"]
+    hoa = hooks["old_approach"]
+    hna = hooks["new_approach"]
     lines.append(
-        f"| Mean latency | {hooks['old_approach']['mean_ms']:.3f}ms | "
-        f"{hooks['new_approach']['mean_ms']:.3f}ms | {hooks['overhead_ms']:+.3f}ms ({hooks['overhead_pct']:+.1f}%) |"
+        f"| Mean latency | {hoa['mean_ms']:.3f}ms | {hna['mean_ms']:.3f}ms"
+        f" | {hooks['overhead_ms']:+.3f}ms ({hooks['overhead_pct']:+.1f}%) |"
     )
 
     lines.extend([
@@ -624,9 +620,11 @@ def _write_markdown(results: dict[str, Any], path: str) -> None:
     ])
 
     mcp = results["mcp_shim"]
+    moa = mcp["old_approach"]
+    mna = mcp["new_approach"]
     lines.append(
-        f"| Mean latency | {mcp['old_approach']['mean_ms']:.3f}ms | "
-        f"{mcp['new_approach']['mean_ms']:.3f}ms | {mcp['overhead_ms']:+.3f}ms ({mcp['overhead_pct']:+.1f}%) |"
+        f"| Mean latency | {moa['mean_ms']:.3f}ms | {mna['mean_ms']:.3f}ms"
+        f" | {mcp['overhead_ms']:+.3f}ms ({mcp['overhead_pct']:+.1f}%) |"
     )
 
     lines.extend([
@@ -656,9 +654,15 @@ def _write_markdown(results: dict[str, Any], path: str) -> None:
         "",
         "### Overhead Analysis",
         "",
-        f"- Capability overhead vs baseline: **{agent['capability_overhead_vs_baseline_ms']:+.3f}ms**",
-        f"- Old shim overhead vs baseline: **{agent['old_shim_overhead_vs_baseline_ms']:+.3f}ms**",
-        f"- Capability vs old shim delta: **{agent['capability_vs_old_shim_delta_ms']:+.3f}ms**",
+        (
+            f"- Capability overhead vs baseline:"
+            f" **{agent['capability_overhead_vs_baseline_ms']:+.3f}ms**"
+        ),
+        (
+            f"- Old shim overhead vs baseline:"
+            f" **{agent['old_shim_overhead_vs_baseline_ms']:+.3f}ms**"
+        ),
+        (f"- Capability vs old shim delta: **{agent['capability_vs_old_shim_delta_ms']:+.3f}ms**"),
         "",
         "## 5. Memory Overhead",
         "",
@@ -688,23 +692,37 @@ def _write_markdown(results: dict[str, Any], path: str) -> None:
         "",
         "| Configuration | Peak Memory |",
         "|---------------|-------------|",
-        f"| Baseline (no tools/hooks/MCP) | {mem['agent_construction']['baseline_formatted']} |",
-        f"| With capabilities (new approach) | {mem['agent_construction']['capability_formatted']} |",
-        f"| With old shims (deprecated approach) | {mem['agent_construction']['old_formatted']} |",
+        (f"| Baseline (no tools/hooks/MCP) | {mem['agent_construction']['baseline_formatted']} |"),
+        (
+            f"| With capabilities (new approach)"
+            f" | {mem['agent_construction']['capability_formatted']} |"
+        ),
+        (
+            f"| With old shims (deprecated approach)"
+            f" | {mem['agent_construction']['old_formatted']} |"
+        ),
         "",
         "## Summary",
         "",
-        "- The capability-based approach introduces a small latency overhead compared to direct manager access.",
-        "- The overhead is primarily in the `as_capability()` wrapper creation, not in the underlying data structures.",
-        "- Memory overhead is negligible for typical agent configurations (10 tools, 4 hooks, 0 MCP servers).",
+        (
+            "- The capability-based approach introduces a small latency overhead"
+            " compared to direct manager access."
+        ),
+        (
+            "- The overhead is primarily in the `as_capability()` wrapper creation,"
+            " not in the underlying data structures."
+        ),
+        (
+            "- Memory overhead is negligible for typical agent configurations"
+            " (10 tools, 4 hooks, 0 MCP servers)."
+        ),
         "- Both old and new approaches coexist; the new approach is the recommended path forward.",
         "",
     ])
 
-    with open(path, "w") as f:
-        f.write("\n".join(lines))
+    Path(path_str).write_text("\n".join(lines))
 
-    print(f"Results written to: {path}")
+    print(f"Results written to: {path_str}")
 
 
 async def main() -> None:

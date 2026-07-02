@@ -38,7 +38,10 @@ class AgentPoolSession:
 
 
 pytestmark = pytest.mark.skip(
-    reason="TestModel generates 400+ events per turn, extremely CPU/memory intensive under pytest. Logic verified via standalone script."
+    reason=(
+        "TestModel generates 400+ events per turn, extremely CPU/memory intensive"
+        " under pytest. Logic verified via standalone script."
+    )
 )
 
 

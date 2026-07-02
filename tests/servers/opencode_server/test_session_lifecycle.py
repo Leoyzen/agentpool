@@ -370,7 +370,7 @@ class TestSessionStatus:
         status_events: list[SessionStatusEvent] = []
         original_broadcast = server_state.broadcast_event
 
-        async def tracking_broadcast(event: Any) -> None:
+        async def tracking_broadcast(event: object) -> None:
             if isinstance(event, SessionStatusEvent):
                 status_events.append(event)
             await original_broadcast(event)

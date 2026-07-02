@@ -146,8 +146,7 @@ async def test_native_agent_skips_manual_loop() -> None:
     agent = _NativeTestAgent(call_log)
 
     events: list[object] = []
-    async for event in agent.run_stream("test prompt"):
-        events.append(event)
+    events.extend([event async for event in agent.run_stream("test prompt")])
 
     # Native path: _run_stream_once is called exactly once
     assert len(call_log) == 1, (
@@ -172,8 +171,7 @@ async def test_non_native_agent_executes_manual_loop() -> None:
     agent = _NonNativeTestAgent(call_log)
 
     events: list[object] = []
-    async for event in agent.run_stream("test prompt"):
-        events.append(event)
+    events.extend(event async for event in agent.run_stream("test prompt"))
 
     # Non-native path: _run_stream_once is called twice
     # (initial prompt + queued extra prompt)

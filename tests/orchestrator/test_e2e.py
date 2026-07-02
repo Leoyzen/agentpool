@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from dataclasses import field
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
@@ -64,7 +65,7 @@ def mock_agent_full_lifecycle() -> MagicMock:
     def _make_turn(prompts: Any, run_ctx: AgentRunContext, **kw: Any) -> Any:
 
         class _MockTurn:
-            message_history: list[Any] = []
+            message_history: list[Any] = field(default_factory=list)
 
             async def execute(
                 self,
@@ -106,7 +107,7 @@ def mock_agent_with_text(text: str = "response") -> MagicMock:
     def _make_turn(prompts: Any, run_ctx: AgentRunContext, **kw: Any) -> Any:
 
         class _MockTurn:
-            message_history: list[Any] = []
+            message_history: list[Any] = field(default_factory=list)
 
             async def execute(self) -> AsyncIterator[PartDeltaEvent | StreamCompleteEvent[Any]]:
                 yield PartDeltaEvent.text(index=0, content=text)
@@ -253,7 +254,7 @@ async def test_multi_agent_concurrent_sessions_no_contamination(
     agent_a = MagicMock()
 
     class _TurnA:
-        message_history: list[Any] = []
+        message_history: list[Any] = field(default_factory=list)
 
         async def execute(self) -> AsyncIterator[PartDeltaEvent | StreamCompleteEvent[Any]]:
             yield PartDeltaEvent.text(index=0, content="response-from-agent-a")
@@ -266,7 +267,7 @@ async def test_multi_agent_concurrent_sessions_no_contamination(
     agent_b = MagicMock()
 
     class _TurnB:
-        message_history: list[Any] = []
+        message_history: list[Any] = field(default_factory=list)
 
         async def execute(self) -> AsyncIterator[PartDeltaEvent | StreamCompleteEvent[Any]]:
             yield PartDeltaEvent.text(index=0, content="response-from-agent-b")
@@ -340,7 +341,10 @@ async def test_multi_agent_concurrent_sessions_no_contamination(
 
 
 @pytest.mark.skip(
-    reason="Concurrent process_prompt for same session now steers into active run, not separate turns. Needs rewrite for run-turn-separation architecture."
+    reason=(
+        "Concurrent process_prompt for same session now steers into active run, "
+        "not separate turns. Needs rewrite for run-turn-separation architecture."
+    )
 )
 @pytest.mark.anyio
 async def test_concurrent_sessions_turn_serialization_per_session(
@@ -363,7 +367,7 @@ async def test_concurrent_sessions_turn_serialization_per_session(
         sid = run_ctx.session_id
 
         class _Turn:
-            message_history: list[Any] = []
+            message_history: list[Any] = field(default_factory=list)
 
             async def execute(self) -> AsyncIterator[StreamCompleteEvent[Any]]:
                 start = asyncio.get_event_loop().time()
@@ -427,7 +431,7 @@ async def test_concurrent_sessions_event_bus_isolation(
     def _make_turn(prompts: Any, run_ctx: AgentRunContext, **kw: Any) -> Any:
 
         class _Turn:
-            message_history: list[Any] = []
+            message_history: list[Any] = field(default_factory=list)
 
             async def execute(self) -> AsyncIterator[StreamCompleteEvent[Any]]:
                 yield StreamCompleteEvent(

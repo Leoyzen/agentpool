@@ -69,8 +69,7 @@ async def _process_events(
     """Process a sequence of events and collect all emitted SSE events."""
     emitted: list[Any] = []
     for event in events:
-        async for e in processor.process(event, ctx):
-            emitted.append(e)
+        emitted.extend([e async for e in processor.process(event, ctx)])
     return emitted
 
 

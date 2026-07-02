@@ -59,7 +59,7 @@ def test_delegation_depth_error_catchable_as_runtime_error() -> None:
 
 def test_import_from_agents_init() -> None:
     """DelegationDepthError and MAX_DELEGATION_DEPTH should be importable from agents package."""
-    from agentpool.agents import MAX_DELEGATION_DEPTH as MDD, DelegationDepthError as DDE
+    import agentpool.agents as agents_mod
 
-    assert DDE is DelegationDepthError
-    assert MDD is MAX_DELEGATION_DEPTH
+    assert agents_mod.DelegationDepthError is DelegationDepthError
+    assert agents_mod.MAX_DELEGATION_DEPTH is MAX_DELEGATION_DEPTH

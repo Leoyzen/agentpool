@@ -43,21 +43,19 @@ def _make_acp_session_manager(pool: AgentPool) -> ACPSessionManager:
 
     # Mock out ACPSession creation and initialization to avoid needing
     # a real ACP client and all the initialization machinery.
-    with patch("agentpool_server.acp_server.session_manager.ACPSession") as MockSession:
+    with patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls:
         mock_session = MagicMock()
         mock_session.session_id = "session_top_001"
         mock_session.register_update_callback = MagicMock()
         mock_session.initialize = AsyncMock()
         mock_session.initialize_mcp_servers = AsyncMock()
-        MockSession.return_value = mock_session
+        mock_session_cls.return_value = mock_session
 
     return manager
 
 
 async def test_top_level_session_has_no_parent():
-    """Top-level ACP session (no parent_session_id) should have parent_id=None
-    and a computed project_id.
-    """
+    """Top-level ACP session (no parent_session_id) should have parent_id=None and a...."""
     pool, agent, _sessions, store = _make_pool_with_sessions()
 
     manager = ACPSessionManager(pool=pool)
@@ -65,14 +63,14 @@ async def test_top_level_session_has_no_parent():
     mock_acp_agent = MagicMock()
 
     with (
-        patch("agentpool_server.acp_server.session_manager.ACPSession") as MockSession,
+        patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls,
         patch("agentpool_server.acp_server.session_manager.ClientCapabilities"),
     ):
         mock_session = MagicMock()
         mock_session.register_update_callback = MagicMock()
         mock_session.initialize = AsyncMock()
         mock_session.initialize_mcp_servers = AsyncMock()
-        MockSession.return_value = mock_session
+        mock_session_cls.return_value = mock_session
 
         session_id = await manager.create_session(
             agent=agent,
@@ -90,9 +88,7 @@ async def test_top_level_session_has_no_parent():
 
 
 async def test_child_session_inherits_parent_project_id():
-    """Child ACP session (with parent_session_id) should inherit
-    project_id and cwd from the parent session.
-    """
+    """Child ACP session (with parent_session_id) should inherit project_id and cwd from the...."""
     pool, agent, _sessions, store = _make_pool_with_sessions()
 
     # Create a parent session in the store first
@@ -113,14 +109,14 @@ async def test_child_session_inherits_parent_project_id():
     mock_acp_agent = MagicMock()
 
     with (
-        patch("agentpool_server.acp_server.session_manager.ACPSession") as MockSession,
+        patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls,
         patch("agentpool_server.acp_server.session_manager.ClientCapabilities"),
     ):
         mock_session = MagicMock()
         mock_session.register_update_callback = MagicMock()
         mock_session.initialize = AsyncMock()
         mock_session.initialize_mcp_servers = AsyncMock()
-        MockSession.return_value = mock_session
+        mock_session_cls.return_value = mock_session
 
         session_id = await manager.create_session(
             agent=agent,
@@ -144,9 +140,7 @@ async def test_child_session_inherits_parent_project_id():
 
 
 async def test_child_session_uses_effective_cwd_for_acp_session():
-    """When creating a child ACP session, the ACPSession object should
-    receive the inherited cwd, not the caller-provided cwd.
-    """
+    """When creating a child ACP session, the ACPSession object should receive the inherited...."""
     pool, agent, _sessions, store = _make_pool_with_sessions()
 
     parent_cwd = tempfile.gettempdir()
@@ -166,14 +160,14 @@ async def test_child_session_uses_effective_cwd_for_acp_session():
     mock_acp_agent = MagicMock()
 
     with (
-        patch("agentpool_server.acp_server.session_manager.ACPSession") as MockSession,
+        patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls,
         patch("agentpool_server.acp_server.session_manager.ClientCapabilities"),
     ):
         mock_session = MagicMock()
         mock_session.register_update_callback = MagicMock()
         mock_session.initialize = AsyncMock()
         mock_session.initialize_mcp_servers = AsyncMock()
-        MockSession.return_value = mock_session
+        mock_session_cls.return_value = mock_session
 
         await manager.create_session(
             agent=agent,
@@ -184,16 +178,14 @@ async def test_child_session_uses_effective_cwd_for_acp_session():
         )
 
         # Verify ACPSession was constructed with the inherited cwd
-        call_kwargs = MockSession.call_args
+        call_kwargs = mock_session_cls.call_args
         assert (
             call_kwargs.kwargs.get("cwd") == parent_cwd or call_kwargs[1].get("cwd") == parent_cwd
         )
 
 
 async def test_no_parent_session_id_preserves_existing_behavior():
-    """When parent_session_id is None, the existing top-level behavior
-    (compute project_id from cwd, direct SessionData save) is preserved.
-    """
+    """When parent_session_id is None, the existing top-level behavior (compute project_id...."""
     pool, agent, _sessions, store = _make_pool_with_sessions()
 
     manager = ACPSessionManager(pool=pool)
@@ -201,14 +193,14 @@ async def test_no_parent_session_id_preserves_existing_behavior():
     mock_acp_agent = MagicMock()
 
     with (
-        patch("agentpool_server.acp_server.session_manager.ACPSession") as MockSession,
+        patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls,
         patch("agentpool_server.acp_server.session_manager.ClientCapabilities"),
     ):
         mock_session = MagicMock()
         mock_session.register_update_callback = MagicMock()
         mock_session.initialize = AsyncMock()
         mock_session.initialize_mcp_servers = AsyncMock()
-        MockSession.return_value = mock_session
+        mock_session_cls.return_value = mock_session
 
         cwd = tempfile.gettempdir()
         session_id = await manager.create_session(
@@ -228,9 +220,7 @@ async def test_no_parent_session_id_preserves_existing_behavior():
 
 
 async def test_child_session_without_pool_sessions_falls_back_to_top_level():
-    """When pool.sessions is None but parent_session_id is provided,
-    should fall back to top-level behavior.
-    """
+    """When pool.sessions is None but parent_session_id is provided, should fall back to...."""
     from agentpool.models.agents import NativeAgentConfig
     from agentpool.models.manifest import AgentsManifest
 
@@ -252,14 +242,14 @@ async def test_child_session_without_pool_sessions_falls_back_to_top_level():
     mock_acp_agent = MagicMock()
 
     with (
-        patch("agentpool_server.acp_server.session_manager.ACPSession") as MockSession,
+        patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls,
         patch("agentpool_server.acp_server.session_manager.ClientCapabilities"),
     ):
         mock_session = MagicMock()
         mock_session.register_update_callback = MagicMock()
         mock_session.initialize = AsyncMock()
         mock_session.initialize_mcp_servers = AsyncMock()
-        MockSession.return_value = mock_session
+        mock_session_cls.return_value = mock_session
 
         cwd = tempfile.gettempdir()
         session_id = await manager.create_session(
@@ -283,10 +273,9 @@ async def test_child_session_without_pool_sessions_falls_back_to_top_level():
 
 
 async def test_get_session_returns_session_when_not_yet_in_controller():
-    """get_session() should return the ACPSession from _acp_sessions even
-    when _session_controller exists but hasn't registered the session yet.
+    """get_session() should return ACPSession from _acp_sessions even when not in controller.
 
-    This is a red-flag test — it verifies the bug where get_session()
+    This is a red-flag test - it verifies the bug where get_session()
     returns None because _session_controller.get_session() returns None,
     even though the session IS in _acp_sessions.
 
@@ -327,9 +316,7 @@ async def test_get_session_returns_session_when_not_yet_in_controller():
 
 
 async def test_get_session_returns_none_when_not_in_either():
-    """get_session() should return None when session is in neither
-    _session_controller nor _acp_sessions.
-    """
+    """get_session() should return None when session is in neither _session_controller nor...."""
     pool, _agent, _sessions, _store = _make_pool_with_sessions()
     manager = ACPSessionManager(pool=pool)
 
@@ -338,9 +325,7 @@ async def test_get_session_returns_none_when_not_in_either():
 
 
 async def test_get_session_returns_session_when_in_both():
-    """get_session() should return the session when it exists in both
-    _session_controller and _acp_sessions.
-    """
+    """get_session() should return the session when it exists in both _session_controller...."""
     pool, agent, sessions, _store = _make_pool_with_sessions()
     manager = ACPSessionManager(pool=pool)
 

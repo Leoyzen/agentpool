@@ -25,8 +25,10 @@ class TestDeferredToolConfigOnBaseConfig:
     """Tests that BaseToolConfig has deferred fields with correct defaults."""
 
     def test_base_tool_config_has_deferred_fields(self):
-        """BaseToolConfig should have deferred, deferred_kind, deferred_strategy,
-        deferred_placeholder, deferred_timeout fields with correct defaults.
+        """BaseToolConfig should have deferred fields with correct defaults.
+
+        Checks deferred, deferred_kind, deferred_strategy, deferred_placeholder,
+        deferred_timeout fields.
         """
         from agentpool_config.tools import BaseToolConfig
 

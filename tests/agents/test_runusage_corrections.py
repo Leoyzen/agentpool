@@ -3,20 +3,21 @@
 Tests that RunUsage is instantiated with correct field names and values.
 """
 
+from __future__ import annotations
+
 from decimal import Decimal
 from pathlib import Path
+import sys
 
 
 # Add src to path for imports
 sys_path = Path(__file__).parent.parent.parent / "src"
-import sys
-
 
 sys.path.insert(0, str(sys_path))
 
-from pydantic_ai.usage import RequestUsage, RunUsage
+from pydantic_ai.usage import RequestUsage, RunUsage  # noqa: E402
 
-from agentpool.messaging.messages import TokenCost
+from agentpool.messaging.messages import TokenCost  # noqa: E402
 
 
 def test_runusage_with_cache_tokens():

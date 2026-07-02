@@ -18,7 +18,7 @@ pytestmark = [pytest.mark.unit]
 
 
 def test_tool_call_deferred_event_json_roundtrip() -> None:
-    """ToolCallDeferredEvent survives JSON serialization/deserialization with all 6 fields preserved."""
+    """ToolCallDeferredEvent survives JSON roundtrip with all 6 fields preserved."""
     event = ToolCallDeferredEvent(
         tool_call_id="tc-001",
         tool_name="bash",
@@ -81,7 +81,7 @@ def test_tool_call_deferred_event_all_statuses(status: str) -> None:
 
 
 def test_session_resume_event_json_roundtrip() -> None:
-    """SessionResumeEvent survives JSON serialization/deserialization with all 3 fields preserved."""
+    """SessionResumeEvent survives JSON roundtrip with all 3 fields preserved."""
     event = SessionResumeEvent(
         session_id="sess-resume-1",
         resolved_call_count=5,

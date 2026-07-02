@@ -67,7 +67,7 @@ def mock_agent_context():
             return mcp_skill_hyphen
         if "equipment-operation-assistant" in uri:
             return mcp_skill_from_underscore
-        raise Exception(f"Skill not found: {uri}")
+        raise ValueError(f"Skill not found: {uri}")
 
     mock_resolver.resolve = mock_resolve
     ctx.pool.skill_resolver = mock_resolver

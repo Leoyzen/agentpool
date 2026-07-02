@@ -36,7 +36,10 @@ class TestSQLProviderLogSession:
                 yield provider
 
     async def test_log_session_duplicate_idempotent(self, provider: SQLModelProvider) -> None:
-        """Test that log_session is idempotent - calling twice with same session_id should not raise."""
+        """Test that log_session is idempotent.
+
+        Calling twice with same session_id should not raise.
+        """
         session_id = "test_session_001"
         node_name = "test_agent"
 
@@ -463,7 +466,9 @@ class TestOpenCodeListSessionIdsCwdParameter:
     async def test_list_session_ids_cwd_excludes_corrupted_session(
         self, provider: OpenCodeStorageProvider
     ) -> None:
-        """Corrupted session files (read_session returns None) must be excluded when cwd filter is active.
+        """Corrupted session files (read_session returns None) must be excluded.
+
+        This applies when cwd filter is active.
 
         Regression test: previously, if read_session returned None (corrupted JSON / I/O error),
         the cwd filter was bypassed and the session was incorrectly included in results.

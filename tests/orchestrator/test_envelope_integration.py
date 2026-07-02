@@ -21,9 +21,10 @@ def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
     """
     try:
         stats = stream.statistics()
-        return stats.current_buffer_used == 0
-    except Exception:
+    except Exception:  # noqa: BLE001
         return True
+    else:
+        return stats.current_buffer_used == 0
 
 
 class TestEventEnvelopeIntegration:
@@ -68,7 +69,8 @@ class TestEventEnvelopeIntegration:
 
         # Transparent forwarding: envelope.message should equal envelope.event.message
         assert envelope.message is envelope.event.message, (
-            "envelope.message should transparently forward to envelope.event.message via __getattr__"
+            "envelope.message should transparently forward to"
+            " envelope.event.message via __getattr__"
         )
         assert envelope.message.content == "hello world", (
             "Forwarded attribute should expose the wrapped event's data"

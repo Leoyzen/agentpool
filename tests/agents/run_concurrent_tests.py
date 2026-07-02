@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Run concurrent safety tests and report baseline results.
 
 Usage:
@@ -21,7 +20,7 @@ from agentpool import Agent
 from agentpool.agents.events import StreamCompleteEvent
 
 
-async def run_baseline_test():
+async def run_baseline_test():  # noqa: PLR0915
     """Run basic baseline test to verify setup."""
     print("=" * 70)
     print("RFC-0021 Pre-Flight Test Suite")
@@ -58,14 +57,15 @@ async def run_baseline_test():
                 event_count += 1
                 if isinstance(event, StreamCompleteEvent):
                     break
-            duration = time.perf_counter() - start
-            return (task_id, event_count, f"completed in {duration:.2f}s")
         except asyncio.CancelledError:
             duration = time.perf_counter() - start
             return (task_id, event_count, f"CANCELLED after {duration:.2f}s")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             duration = time.perf_counter() - start
             return (task_id, event_count, f"ERROR: {e}")
+        else:
+            duration = time.perf_counter() - start
+            return (task_id, event_count, f"completed in {duration:.2f}s")
 
     # Run 3 tasks concurrently
     results = await asyncio.gather(
@@ -137,7 +137,7 @@ def main():
     except KeyboardInterrupt:
         print("\n\nInterrupted by user")
         sys.exit(130)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"\n\nError: {e}")
         import traceback
 

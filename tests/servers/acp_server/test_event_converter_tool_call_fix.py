@@ -27,8 +27,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 async def _collect(converter: ACPEventConverter, event: Any) -> list[Any]:
     """Collect all notifications yielded by converter.convert(event)."""
     results: list[Any] = []
-    async for update in converter.convert(event):
-        results.append(update)
+    results.extend([update async for update in converter.convert(event)])
     return results
 
 

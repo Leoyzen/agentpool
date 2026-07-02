@@ -118,7 +118,8 @@ async def test_no_double_wrap_on_mcp_message_forwarding(
 
     _, params = mcp_message_calls[0].args
 
-    # The params MUST be in flattened ACP format: {"connectionId": ..., "method": ..., "params": ...}
+    # The params MUST be in flattened ACP format: {"connectionId": ..., "method": ..., "params":
+    # ...}
     assert "connectionId" in params, "params must contain connectionId"
     assert "method" in params, "params must contain method"
     assert params["connectionId"] == connection_id

@@ -375,8 +375,10 @@ class TestLoadSkillBackwardCompatNoMCPOrTools:
         tmp_path: Path,
         plain_skill_dir: UPath,
     ) -> None:
-        """Response without MCP/Tools has the same structure as pre-refactor:
+        """Response without MCP/Tools has the same structure as pre-refactor:.
+
         header, meta, instructions, skill URI.
+
         """
         ctx, pool = await _make_context(tmp_path, plain_skill_dir)
         try:
@@ -511,8 +513,10 @@ tools:
         tmp_path: Path,
         mcp_skill_dir: UPath,
     ) -> None:
-        """If SkillMcpManager() constructor raises, the skill content still loads
+        """If SkillMcpManager() constructor raises, the skill content still loads.
+
         and the error is surfaced in the response.
+
         """
         ctx, pool = await _make_context(tmp_path, mcp_skill_dir)
         try:

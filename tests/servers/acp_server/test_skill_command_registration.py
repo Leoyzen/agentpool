@@ -109,7 +109,8 @@ async def test_available_commands_update_sent_after_create_session(
     # Create session manager
     manager = ACPSessionManager(pool=agent_pool_with_skill)
 
-    # Create session via the real create_session path (used by new_session/load_session/resume_session)
+    # Create session via the real create_session path (used by
+    # new_session/load_session/resume_session)
     session_id = await manager.create_session(
         agent=agent,
         cwd="/tmp",

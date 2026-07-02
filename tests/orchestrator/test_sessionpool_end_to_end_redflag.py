@@ -68,8 +68,9 @@ class MockSessions:
 
 @pytest.mark.asyncio
 async def test_send_message_async_does_not_start_consumer():
-    """Red-flag: send_message_async calls session_pool.receive_request directly
-    without going through integration.route_message, so the event consumer
+    """Red-flag: send_message_async calls session_pool.receive_request directly.
+
+    Without going through integration.route_message, so the event consumer
     is never started for new sessions.
     """
     server_state = MockServerState()
@@ -102,8 +103,9 @@ async def test_send_message_async_does_not_start_consumer():
 
 @pytest.mark.asyncio
 async def test_integration_route_message_starts_consumer():
-    """Verify that integration.route_message starts the event consumer
-    and events are broadcast.
+    """Verify that integration.route_message starts the event consumer.
+
+    And events are broadcast.
     """
     server_state = MockServerState()
     session_pool = MockSessionPool()
@@ -139,6 +141,7 @@ async def test_integration_route_message_starts_consumer():
 @pytest.mark.asyncio
 async def test_integration_route_message_starts_consumer_for_existing_session():
     """Red-flag: route_message must start consumer even for pre-existing sessions.
+
     Sessions created via other paths (e.g. get_or_load_session) don't have
     the consumer started, which would leave EventBus events unconsumed.
     """
@@ -185,8 +188,9 @@ async def test_integration_route_message_starts_consumer_for_existing_session():
 
 @pytest.mark.asyncio
 async def test_consumer_restarted_after_crash():
-    """Red-flag: If consumer loop crashes, _start_event_consumer should restart it
-    by cleaning up the old task and starting a new one.
+    """Red-flag: If consumer loop crashes, _start_event_consumer should restart it.
+
+    By cleaning up the old task and starting a new one.
     """
     server_state = MockServerState()
     session_pool = MockSessionPool()

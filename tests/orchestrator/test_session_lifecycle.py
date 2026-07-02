@@ -122,6 +122,8 @@ async def _setup_session(
 
 
 class TestSessionLifecyclePolicy:
+    """Tests for SessionLifecyclePolicy enum and validation."""
+
     def test_default_is_cascade(self) -> None:
         assert SessionLifecyclePolicy.default() == "cascade"
 
@@ -133,6 +135,8 @@ class TestSessionLifecyclePolicy:
 
 
 class TestSessionStateParentChild:
+    """Tests for SessionState parent-child relationship fields."""
+
     def test_session_state_has_parent_and_policy(self) -> None:
         state = SessionState(
             session_id="s1",
@@ -150,6 +154,8 @@ class TestSessionStateParentChild:
 
 
 class TestSessionControllerParentChild:
+    """Tests for SessionController parent-child session management."""
+
     @pytest.mark.anyio
     async def test_creates_child_session(self) -> None:
         ctrl = SessionController(pool=MagicMock())
@@ -194,6 +200,8 @@ class TestSessionControllerParentChild:
 
 
 class TestEventBusScopedSubscription:
+    """Tests for EventBus scoped subscription behavior."""
+
     @pytest.mark.anyio
     async def test_session_scope_receives_own_events(self) -> None:
         bus = EventBus()

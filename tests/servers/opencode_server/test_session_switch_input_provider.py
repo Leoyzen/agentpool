@@ -55,7 +55,8 @@ class TestSessionSwitchInputProvider:
         server_state: ServerState,
         tmp_project_dir: Path,
     ):
-        """Loading an existing session via get_or_load_session preserves
+        """Loading an existing session via get_or_load_session preserves.
+
         the session's input provider.
 
         With per-session agents, each session has its own agent with its

@@ -727,15 +727,15 @@ class TestCreateAndConnect:
         with patch(
             "agentpool.resource_providers.mcp_provider.MCPResourceProvider",
             autospec=True,
-        ) as MockProvider:
-            mock_instance = MockProvider.return_value
+        ) as mock_provider:
+            mock_instance = mock_provider.return_value
             mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
 
             result = await manager._create_and_connect(config, "test-server")
 
-        MockProvider.assert_called_once()
+        mock_provider.assert_called_once()
         # Verify StdioMCPServerConfig was passed
-        call_args = MockProvider.call_args.kwargs
+        call_args = mock_provider.call_args.kwargs
         assert call_args["server"].command == "uvx"
         assert call_args["server"].args == ["mcp-server"]
         assert call_args["name"] == "skill_mcp_test-server"
@@ -752,14 +752,14 @@ class TestCreateAndConnect:
         with patch(
             "agentpool.resource_providers.mcp_provider.MCPResourceProvider",
             autospec=True,
-        ) as MockProvider:
-            mock_instance = MockProvider.return_value
+        ) as mock_provider:
+            mock_instance = mock_provider.return_value
             mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
 
             result = await manager._create_and_connect(config, "remote-server")
 
-        MockProvider.assert_called_once()
-        call_args = MockProvider.call_args.kwargs
+        mock_provider.assert_called_once()
+        call_args = mock_provider.call_args.kwargs
         # Should be a StreamableHTTPMCPServerConfig with url
         assert str(call_args["server"].url) == "http://remote:8080/mcp"
         assert call_args["name"] == "skill_mcp_remote-server"

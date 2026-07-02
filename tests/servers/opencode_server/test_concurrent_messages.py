@@ -95,7 +95,7 @@ class SlowAgentMock:
 
 
 @pytest.fixture
-def slow_mock_agent():
+def slow_mock_agent():  # noqa: PLR0915
     """Create a slow mock agent for testing concurrency."""
     agent = SlowAgentMock(delay=0.3)
     saved_sessions: dict[str, Any] = {}
@@ -164,12 +164,12 @@ def slow_mock_agent():
                 async for event in stream:
                     await event_bus.publish(session_id, event)
                 handle.status = RunStatus.completed
-            except Exception:
+            except Exception:  # noqa: BLE001
                 handle.status = RunStatus.failed
             finally:
                 complete_event.set()
 
-        asyncio.create_task(_do_run())
+        _task = asyncio.create_task(_do_run())  # noqa: RUF006
         return handle
 
     pool.session_pool.receive_request = AsyncMock(side_effect=_mock_receive_request)

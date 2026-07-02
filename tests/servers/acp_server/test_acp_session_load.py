@@ -177,8 +177,8 @@ async def test_load_session_response_contains_config_options(
     """Test that LoadSessionResponse contains correct config_options."""
 
     class _MockMode:
-        def __init__(self, id: str, name: str, description: str) -> None:
-            self.id = id
+        def __init__(self, mode_id: str, name: str, description: str) -> None:
+            self.id = mode_id
             self.name = name
             self.description = description
 
@@ -202,10 +202,10 @@ async def test_load_session_response_contains_config_options(
 
 
 @pytest.mark.unit
-async def test_load_session_response_contains_config_options(
+async def test_load_session_response_contains_config_options_empty_modes(
     mock_acp_agent, mock_session, load_session_request
 ):
-    """Test that LoadSessionResponse contains correct config_options."""
+    """Test that LoadSessionResponse handles empty modes correctly."""
     mock_session.agent.get_modes = AsyncMock(return_value=[])
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)
     mock_acp_agent._initialized = True

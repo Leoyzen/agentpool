@@ -104,10 +104,7 @@ def event_context():
 
 async def _collect_events(async_gen) -> list[Any]:
     """Collect all events from an async generator."""
-    events = []
-    async for event in async_gen:
-        events.append(event)
-    return events
+    return [event async for event in async_gen]
 
 
 # =============================================================================

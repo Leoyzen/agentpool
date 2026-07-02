@@ -365,16 +365,18 @@ async def test_get_agentlet_no_duplicate_history_resolution(
     mock_agent: Agent[Any],
 ) -> None:
     """_resolve_history_processors called exactly once."""
-    with patch.object(
-        mock_agent,
-        "_resolve_history_processors",
-        return_value=[],
-    ) as mock_resolve:
-        with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
-            mock_pydantic_agent.return_value = MagicMock()
-            await mock_agent.get_agentlet(None, None, None)
+    with (
+        patch.object(
+            mock_agent,
+            "_resolve_history_processors",
+            return_value=[],
+        ) as mock_resolve,
+        patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent,
+    ):
+        mock_pydantic_agent.return_value = MagicMock()
+        await mock_agent.get_agentlet(None, None, None)
 
-            mock_resolve.assert_called_once()
+        mock_resolve.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

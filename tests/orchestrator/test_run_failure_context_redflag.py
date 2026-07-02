@@ -39,7 +39,8 @@ async def test_conversation_preserved_after_run_failure(
 
     Steps:
     1. Run first prompt → succeeds → conversation has 2 messages (user + assistant)
-    2. Run second prompt → fails with exception → conversation has 3 messages (no assistant added for failed run)
+    2. Run second prompt → fails with exception → conversation has 3 messages (no assistant added
+    for failed run)
     3. Run third prompt → succeeds → should have at least 4 messages (including step 1's history)
     """
     async with AgentPool(manifest) as pool:

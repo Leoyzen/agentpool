@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Manual QA test server for OpenCode server.
 
 Starts a minimal OpenCode server with mock agent/pool for manual testing.
@@ -25,7 +24,7 @@ if TYPE_CHECKING:
     from agentpool.sessions.models import SessionData
 
 
-def create_test_app() -> FastAPI:
+def create_test_app() -> FastAPI:  # noqa: PLR0915
     """Create a FastAPI app with mock dependencies for QA testing."""
     # Create mock pool
     pool = Mock()

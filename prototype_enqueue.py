@@ -83,7 +83,7 @@ async def test_bare_async_for_fails() -> None:
             async for _node in run:
                 pass  # Bare iteration skips after_node_run hooks
         test("Bare async for raises UndrainedPendingMessagesError", False)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         test(
             "Bare async for raises UndrainedPendingMessagesError",
             "UndrainedPendingMessagesError" in type(e).__name__,
@@ -194,8 +194,7 @@ async def test_event_mapping() -> None:
 
             if hasattr(node, "stream"):
                 async with node.stream(run.ctx) as stream:
-                    async for event in stream:
-                        event_log.append((node_name, type(event).__name__))
+                    event_log.extend([(node_name, type(event).__name__) async for event in stream])
 
             node = await run.next(node)
             if type(node).__name__ == "End":

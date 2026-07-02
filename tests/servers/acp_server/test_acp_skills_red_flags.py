@@ -265,7 +265,8 @@ class TestSkillsIncludeDefault:
             from agentpool.resource_providers.local import LocalResourceProvider
 
             print(
-                f"DEBUG: skills_manager.registry.skills_dirs = {skills_manager.registry.skills_dirs}"
+                f"DEBUG: skills_manager.registry.skills_dirs ="
+                f" {skills_manager.registry.skills_dirs}"
             )
             provider = skills_manager.resource_provider
             assert isinstance(provider, LocalResourceProvider)
@@ -273,7 +274,8 @@ class TestSkillsIncludeDefault:
             print(f"DEBUG: provider._registry.skills_dirs = {provider._registry.skills_dirs}")
 
             print(
-                f"DEBUG: skills_manager.registry.list_items() = {skills_manager.registry.list_items()}"
+                f"DEBUG: skills_manager.registry.list_items() ="
+                f" {skills_manager.registry.list_items()}"
             )
 
             skills = await provider.get_skills()

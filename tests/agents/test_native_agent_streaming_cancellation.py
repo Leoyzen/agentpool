@@ -107,7 +107,9 @@ def _mock_session_pool(agent: Agent[Any], run_ctx: Any) -> None:
 async def test_run_stream_cancellation_sets_cancelled_and_cleans_up(
     slow_agent: Agent[None],
 ) -> None:
-    """Cancelling the async generator mid-stream sets run_ctx.cancelled and cleans up iteration_task.
+    """Cancelling the async generator mid-stream sets run_ctx.cancelled.
+
+    Also cleans up iteration_task.
 
     Steps:
     1. Start streaming with a slow model
@@ -145,10 +147,8 @@ async def test_run_stream_cancellation_sets_cancelled_and_cleans_up(
     await slow_agent.interrupt(session_id="test-session")
 
     # Wait for the consumer task to finish
-    try:
+    with suppress(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=3.0)
-    except asyncio.CancelledError:
-        pass  # Expected — the consumer task may be cancelled
 
     # Assert run_ctx.cancelled was set to True
     assert run_ctx.cancelled is True, "run_ctx.cancelled must be True after stream cancellation"

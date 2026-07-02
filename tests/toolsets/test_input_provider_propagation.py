@@ -216,7 +216,9 @@ class FakeInputProviderSession(InputProvider):
 
 
 @pytest.mark.skip(
-    reason="Mock setup incomplete for pool-less architecture; SubagentTools.task() requires full SessionPool. Other input_provider tests cover propagation."
+    reason="Mock setup incomplete for pool-less architecture;"
+    " SubagentTools.task() requires full SessionPool."
+    " Other input_provider tests cover propagation."
 )
 @pytest.mark.anyio
 async def test_input_provider_propagated_when_session_bound_only() -> None:

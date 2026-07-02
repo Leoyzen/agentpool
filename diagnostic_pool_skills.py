@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Diagnostic: Check AgentPool skill_resolver initialization without full agent startup."""
 
 from __future__ import annotations
@@ -56,7 +55,7 @@ async def main():
                 try:
                     skill = await pool.skill_resolver.resolve("systematic-troubleshooting")
                     print(f"  OK: {skill.name}")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     print(f"  FAIL: {e}")
                 print()
 
@@ -68,11 +67,11 @@ async def main():
                     print(f"  OK: {skill.name}")
                     ref = getattr(skill, "_resolved_reference_path", None)
                     print(f"  ref_path: {ref}")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     print(f"  FAIL: {e}")
                 print()
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"ERROR: {e}")
         import traceback
 

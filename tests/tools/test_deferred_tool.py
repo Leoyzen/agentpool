@@ -77,7 +77,11 @@ def test_to_pydantic_ai_not_deferred():
 
 
 def test_to_pydantic_ai_deferred_unapproved():
-    """Tool(deferred=True, deferred_kind='unapproved').to_pydantic_ai() maps to requires_approval=True."""
+    """Deferred unapproved tool maps to requires_approval=True.
+
+    The deferred_kind 'unapproved' should set requires_approval=True on the
+    pydantic-ai tool.
+    """
     t = _make_tool(deferred=True, deferred_kind="unapproved")
     pydantic_tool = t.to_pydantic_ai()
     assert pydantic_tool.requires_approval is True
@@ -85,20 +89,27 @@ def test_to_pydantic_ai_deferred_unapproved():
 
 
 def test_to_pydantic_ai_deferred_external_kind():
-    """Tool(deferred=True, deferred_kind='external').to_pydantic_ai() produces ToolDefinition with kind='external' via prepare."""
+    """Deferred external tool produces ToolDefinition with kind='external'.
+
+    The kind override is applied via a prepare function during prepare_tool_def().
+    """
     t = _make_tool(deferred=True, deferred_kind="external")
     pydantic_tool = t.to_pydantic_ai()
     # The raw tool_def property will still show 'function' because the kind
     # override is applied via a prepare function during prepare_tool_def().
     # Verify that a prepare function is set to handle the external kind mapping.
     assert pydantic_tool.prepare is not None, (
-        "A prepare function must be set to map deferred_kind='external' to ToolDefinition.kind='external'"
+        "A prepare function must be set to map deferred_kind='external' "
+        "to ToolDefinition.kind='external'"
     )
 
 
 @pytest.mark.asyncio
 async def test_to_pydantic_ai_deferred_external_prepare_sets_kind():
-    """The prepare function on an external deferred tool sets kind='external' on the ToolDefinition."""
+    """The prepare function on an external deferred tool sets kind='external'.
+
+    The prepare function on the ToolDefinition should override the kind.
+    """
     from pydantic_ai.tools import ToolDefinition
 
     t = _make_tool(deferred=True, deferred_kind="external")
@@ -121,7 +132,10 @@ async def test_to_pydantic_ai_deferred_external_prepare_sets_kind():
 
 
 def test_to_pydantic_ai_deferred_does_not_affect_requires_confirmation_flag():
-    """Tool(requires_confirmation=True, deferred=False) preserves requires_confirmation in pydantic-ai tool."""
+    """Tool(requires_confirmation=True, deferred=False) preserves requires_confirmation.
+
+    The pydantic-ai tool should keep requires_approval=True.
+    """
     t = _make_tool(requires_confirmation=True, deferred=False)
     pydantic_tool = t.to_pydantic_ai()
     assert pydantic_tool.requires_approval is True
@@ -129,7 +143,11 @@ def test_to_pydantic_ai_deferred_does_not_affect_requires_confirmation_flag():
 
 
 def test_to_pydantic_ai_deferred_unapproved_overrides_requires_confirmation():
-    """Tool(requires_confirmation=False, deferred=True, deferred_kind='unapproved') still sets requires_approval=True."""
+    """Deferred unapproved overrides requires_confirmation=False.
+
+    Tool with requires_confirmation=False, deferred=True, deferred_kind='unapproved'
+    still sets requires_approval.
+    """
     t = _make_tool(requires_confirmation=False, deferred=True, deferred_kind="unapproved")
     pydantic_tool = t.to_pydantic_ai()
     assert pydantic_tool.requires_approval is True

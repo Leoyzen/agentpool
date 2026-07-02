@@ -199,10 +199,10 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     - ``incompatible_with_thinking``: skipped when ``TEST_DEFAULT_MODEL``
       points to a thinking-mode model (deepseek, kimi) — see issue #84
     """
-    _THINKING_MODEL_PREFIXES = ("deepseek", "kimi", "moonshot")
+    _thinking_model_prefixes = ("deepseek", "kimi", "moonshot")
 
     model = os.getenv("TEST_DEFAULT_MODEL", "")
-    is_thinking_model = any(p in model for p in _THINKING_MODEL_PREFIXES)
+    is_thinking_model = any(p in model for p in _thinking_model_prefixes)
 
     for item in items:
         if "requires_openai_key" in item.keywords and not os.environ.get("OPENAI_API_KEY"):

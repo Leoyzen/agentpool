@@ -96,7 +96,7 @@ class RunAbortedAgentMock:
             # Simulate: agent starts streaming, calls question_for_user,
             # which raises RunAbortedError when user cancels.
             raise RunAbortedError("User cancelled the questionnaire")
-            yield  # noqa: unreachable — makes this an async generator
+            yield
 
         return stream()
 
@@ -144,7 +144,7 @@ class BlockingOnQuestionAgentMock:
             # Here we just wait on an Event that nobody will set.
             await self.block_forever_event.wait()
             if False:
-                yield None  # noqa: unreachable — makes this an async generator
+                yield None
 
         return stream()
 
@@ -276,12 +276,12 @@ def _make_pool_mock(agent: Any) -> Mock:
                 async for _ in stream:
                     pass
                 run_handle.status = RunStatus.completed
-            except Exception:
+            except Exception:  # noqa: BLE001
                 run_handle.status = RunStatus.failed
             finally:
                 complete_event.set()
 
-        asyncio.create_task(_background_run())
+        _task = asyncio.create_task(_background_run())  # noqa: RUF006
         return run_handle
 
     session_pool.receive_request = _mock_receive_request
@@ -520,8 +520,7 @@ class TestRunAbortedErrorCorruptsConversation:
         aborted_test_state: ServerState,
         sample_message_request: MessageRequest,
     ) -> None:
-        """CRITICAL: After RunAbortedError, the agent's conversation MUST include
-        the aborted assistant message.
+        """CRITICAL: After RunAbortedError, conversation MUST include aborted message.
 
         This is the root cause of the TUI black screen bug:
         - RunAbortedError is NOT caught by `except (CancelledError, TimeoutError)`
@@ -695,8 +694,7 @@ class TestAgentLockDeadlockOnUnresolvedQuestion:
         blocking_test_state: ServerState,
         sample_message_request: MessageRequest,
     ) -> None:
-        """With per-session agents, a blocking question in one session
-        doesn't prevent another session from being accessed.
+        """With per-session agents, a blocking question in one session doesn't block another.
 
         In the old shared-agent model, agent_lock was held while the agent
         blocked on a question, preventing get_or_load_session from working
@@ -744,10 +742,9 @@ class TestAgentLockDeadlockOnUnresolvedQuestion:
         blocking_test_state: ServerState,
         sample_message_request: MessageRequest,
     ) -> None:
-        """With per-session agents, a blocking question in one session
-        doesn't prevent another session from being loaded.
+        """With per-session agents, a blocking question doesn't prevent loading another session.
 
-        This verifies that the "关了 opencode 重新启动，无法在新 session 中发送
+        This verifies that the "关了 opencode 重新启动, 无法在新 session 中发送
         user message" bug is resolved by per-session agents.
         """
         state = blocking_test_state
@@ -890,11 +887,8 @@ class TestSSEDisconnectReleasesAgentLock:
                 break
             await asyncio.sleep(0.05)
 
-        assert session and session.pending_questions, (
-            "Agent should have created a pending question, but no pending questions found."
-        )
-
-        assert session and session.pending_questions, (
+        assert session is not None, "Session should exist"
+        assert session.pending_questions, (
             "Agent should have created a pending question, but no pending questions found."
         )
 
@@ -928,10 +922,9 @@ class TestSSEDisconnectReleasesAgentLock:
         blocking_real_question_state: ServerState,
         sample_message_request: MessageRequest,
     ) -> None:
-        """After SSE disconnect + cancel_all_pending_questions, a new session
-        can be accessed via get_or_load_session (no deadlock).
+        """After SSE disconnect, a new session can be accessed without deadlock.
 
-        This reproduces the exact user scenario: "关了 opencode 重新启动，无法在新
+        This reproduces the exact user scenario: "关了 opencode 重新启动, 无法在新
         session 中发送 user message". With per-session agents, get_or_load_session
         no longer uses agent_lock, so this scenario cannot deadlock.
         """
@@ -1032,7 +1025,7 @@ class CancelBeforeAgentAssignmentMock:
 
         async def stream():
             if False:
-                yield None  # noqa: unreachable — makes this an async generator
+                yield None
 
         return stream()
 

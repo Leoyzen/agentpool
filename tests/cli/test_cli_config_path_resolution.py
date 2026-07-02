@@ -100,7 +100,7 @@ class TestServeOpenCode:
         config_dir = config_path.parent
 
         # Simulate being in a different working directory
-        original_cwd = os.getcwd()
+        original_cwd = Path.cwd()
         try:
             os.chdir(cwd_outside_config)
 
@@ -140,7 +140,7 @@ class TestServeOpenCode:
         config_path = test_config_with_relative_path
 
         # Simulate being in a different working directory
-        original_cwd = os.getcwd()
+        original_cwd = Path.cwd()
         try:
             os.chdir(cwd_outside_config)
 
@@ -178,7 +178,7 @@ class TestServeAcp:
         """Relative paths should resolve to config file, not CWD."""
         config_path = test_config_with_relative_path
 
-        original_cwd = os.getcwd()
+        original_cwd = Path.cwd()
         try:
             os.chdir(cwd_outside_config)
 
@@ -217,7 +217,7 @@ class TestServeAgui:
         """serve-agui should resolve paths relative to config file."""
         config_path = test_config_with_relative_path
 
-        original_cwd = os.getcwd()
+        original_cwd = Path.cwd()
         try:
             os.chdir(cwd_outside_config)
 
@@ -249,7 +249,7 @@ class TestServeMcp:
         """serve-mcp should resolve paths relative to config file."""
         config_path = test_config_with_relative_path
 
-        original_cwd = os.getcwd()
+        original_cwd = Path.cwd()
         try:
             os.chdir(cwd_outside_config)
 
@@ -281,7 +281,7 @@ class TestServeApi:
         """serve-api should resolve paths relative to config file."""
         config_path = test_config_with_relative_path
 
-        original_cwd = os.getcwd()
+        original_cwd = Path.cwd()
         try:
             os.chdir(cwd_outside_config)
 
@@ -313,7 +313,7 @@ class TestServeVercel:
         """serve-vercel should resolve paths relative to config file."""
         config_path = test_config_with_relative_path
 
-        original_cwd = os.getcwd()
+        original_cwd = Path.cwd()
         try:
             os.chdir(cwd_outside_config)
 
@@ -345,7 +345,7 @@ class TestWatch:
         """Watch should resolve paths relative to config file."""
         config_path = test_config_with_relative_path
 
-        original_cwd = os.getcwd()
+        original_cwd = Path.cwd()
         try:
             os.chdir(cwd_outside_config)
 
@@ -377,7 +377,7 @@ class TestTask:
         """Task should resolve paths relative to config file."""
         config_path = test_config_with_relative_path
 
-        original_cwd = os.getcwd()
+        original_cwd = Path.cwd()
         try:
             os.chdir(cwd_outside_config)
 
@@ -438,7 +438,7 @@ class TestConfigContextEdgeCases:
 
         try:
             with ConfigContextManager(config_dir):
-                raise ValueError("Test exception")
+                raise ValueError("Test exception")  # noqa: TRY301
         except ValueError:
             pass
 

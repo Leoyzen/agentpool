@@ -141,7 +141,8 @@ def _mock_session_pool(agent: Agent, run_ctx: AgentRunContext) -> None:
 async def test_inject_prompt_from_different_task_with_session_pool(
     slow_agent: Agent[None],
 ) -> None:
-    """inject_prompt() called from a different task MUST reach the injection manager
+    """inject_prompt() called from a different task MUST reach the injection manager.
+
     when SessionPool fallback is available.
     """
     stream_started = asyncio.Event()
@@ -193,7 +194,8 @@ async def test_inject_prompt_from_different_task_with_session_pool(
 async def test_queue_prompt_from_different_task_with_session_pool(
     slow_agent: Agent[None],
 ) -> None:
-    """queue_prompt() called from a different task MUST reach the injection manager
+    """queue_prompt() called from a different task MUST reach the injection manager.
+
     when SessionPool fallback is available.
     """
     stream_started = asyncio.Event()
@@ -242,7 +244,8 @@ async def test_queue_prompt_from_different_task_with_session_pool(
 async def test_has_pending_injections_from_different_task_with_session_pool(
     slow_agent: Agent[None],
 ) -> None:
-    """has_pending_injections() called from a different task MUST reflect actual state
+    """has_pending_injections() called from a different task MUST reflect actual state.
+
     when SessionPool fallback is available.
     """
     stream_started = asyncio.Event()
@@ -376,7 +379,8 @@ async def test_inject_prompt_same_task_still_works(fast_agent: Agent[None]) -> N
 async def test_hook_manager_consumes_cross_task_injection_with_session_pool(
     slow_agent: Agent[None],
 ) -> None:
-    """NativeAgentHookManager must consume injections queued from a different task
+    """NativeAgentHookManager must consume injections queued from a different task.
+
     when SessionPool fallback is available.
     """
     from agentpool.agents.native_agent.hook_manager import NativeAgentHookManager

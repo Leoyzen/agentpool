@@ -19,11 +19,12 @@ def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
     """Check if a memory receive stream has no buffered items."""
     try:
         stream.receive_nowait()
-        return False
     except anyio.WouldBlock:
         return True
     except anyio.EndOfStream:
         return True
+    else:
+        return False
 
 
 @pytest.fixture
@@ -63,7 +64,10 @@ async def test_pool(sql_provider):
 
 
 @pytest.mark.skip(
-    reason="SubagentTools.task() now requires a run_ctx from SessionPool. Use test_subagent_event_lineage for SpawnSessionStart verification."
+    reason=(
+        "SubagentTools.task() now requires a run_ctx from SessionPool. "
+        "Use test_subagent_event_lineage for SpawnSessionStart verification."
+    )
 )
 @pytest.mark.asyncio
 async def test_subagent_independent_session(test_pool):
@@ -114,9 +118,9 @@ async def test_run_started_event_lineage(test_pool):
     child = test_pool.manifest.agents["child"].get_agent(pool=test_pool)
     parent_session_id = "parent-123"
 
-    events = []
-    async for event in child.run_stream("hello", parent_session_id=parent_session_id):
-        events.append(event)
+    events = [
+        event async for event in child.run_stream("hello", parent_session_id=parent_session_id)
+    ]
 
     run_started = next(e for e in events if isinstance(e, RunStartedEvent))
     assert run_started.parent_session_id == parent_session_id

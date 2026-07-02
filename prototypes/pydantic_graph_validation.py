@@ -17,14 +17,17 @@ import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic_graph import GraphBuilder, StepContext, TypeExpression
 from pydantic_graph.graph_builder import EndMarker
-from pydantic_graph.id_types import NodeID
 from pydantic_graph.join import reduce_list_append
-from pydantic_graph.node_types import AnyNode
 from pydantic_graph.paths import DestinationMarker
+
+
+if TYPE_CHECKING:
+    from pydantic_graph.id_types import NodeID
+    from pydantic_graph.node_types import AnyNode
 
 
 # ---------------------------------------------------------------------------
@@ -327,8 +330,7 @@ async def test_stream() -> dict[str, Any]:
 
     events: list[Any] = []
     async with graph.iter(state=state) as run:
-        async for event in run:
-            events.append(event)
+        events.extend([event async for event in run])
 
     # Should see task lists and a final EndMarker
     task_events = [e for e in events if isinstance(e, list)]
@@ -360,13 +362,13 @@ async def test_cancel() -> dict[str, Any]:
     async with graph.iter(state=state) as run:
         async for event in run:
             events.append(event)
-            if len(events) >= 2:
+            if len(events) >= 2:  # noqa: PLR2004
                 break  # Cancel early
 
     # We broke out early; no exception should have been raised
-    ok = len(events) >= 2
+    ok = len(events) >= 2  # noqa: PLR2004
     # Not all steps should have completed
-    ok = ok and len(state.log) < 2
+    ok = ok and len(state.log) < 2  # noqa: PLR2004
 
     return {
         "name": "cancel",
@@ -422,12 +424,12 @@ def _detect_cycles(
 
     def _neighbors(node_id: NodeID) -> list[NodeID]:
         """Extract destination IDs from outgoing paths."""
-        dests: list[NodeID] = []
-        for path in edges_by_source.get(node_id, []):
-            for item in path.items if hasattr(path, "items") else []:
-                if isinstance(item, DestinationMarker):
-                    dests.append(item.destination_id)
-        return dests
+        return [
+            item.destination_id
+            for path in edges_by_source.get(node_id, [])
+            for item in (path.items if hasattr(path, "items") else [])
+            if isinstance(item, DestinationMarker)
+        ]
 
     def _dfs(node_id: NodeID) -> list[NodeID] | None:
         visited.add(node_id)

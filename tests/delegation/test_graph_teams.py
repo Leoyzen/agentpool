@@ -259,8 +259,7 @@ class SlowAgent(MessageNode[Any, Any]):
 async def _collect_events(source: Any, *args: Any, **kwargs: Any) -> list[Any]:
     """Collect all events from run_stream into a list."""
     events: list[Any] = []
-    async for event in source.run_stream(*args, **kwargs):
-        events.append(event)
+    events.extend([event async for event in source.run_stream(*args, **kwargs)])
     return events
 
 

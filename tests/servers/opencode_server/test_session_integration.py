@@ -39,11 +39,12 @@ def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
     """Check if a memory receive stream has no buffered items."""
     try:
         stream.receive_nowait()
-        return False
     except anyio.WouldBlock:
         return True
     except anyio.EndOfStream:
         return True
+    else:
+        return False
 
 
 @pytest.fixture

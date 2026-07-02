@@ -108,8 +108,7 @@ async def test_resolve_model_string_with_variant(agent_with_variants: Agent):
 @pytest.mark.unit
 @pytest.mark.requires_openai_key
 async def test_get_available_models_excludes_variants(agent_with_variants: Agent):
-    """CRITICAL TEST: Verify that get_available_models() returns tokonomics models,
-    NOT model_variants from config.
+    """CRITICAL TEST: get_available_models() returns tokonomics models, not config variants.
 
     This is the ROOT CAUSE of the validation failure.
 
@@ -178,7 +177,7 @@ async def test_set_mode_validation_fails_for_variants(agent_with_variants: Agent
 
         # Try to set mode to a variant
         # This simulates what happens when OpenCode TUI sends 'qwen35'
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(Exception, match="unknown") as exc_info:
             await agent._set_mode("model", "qwen35")
 
         # Should fail with UnknownModeError or similar
@@ -250,7 +249,7 @@ async def test_manual_set_model_works(agent_with_variants: Agent):
         await agent.set_model("openai-chat:svc/glm-4.7")
         # If it worked, model should change
         assert agent.model_name != initial_model or agent.model_name == "openai-chat:svc/glm-4.7"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # Expected to fail due to validation issues
         pytest.skip(f"set_model failed (expected due to validation bug): {e}")
 
@@ -377,7 +376,7 @@ agents:
 class _MockModelInfo:
     """Minimal stand-in for tokonomics ModelInfo."""
 
-    def __init__(self, id: str, id_override: str | None = None) -> None:
+    def __init__(self, id: str, id_override: str | None = None) -> None:  # noqa: A002
         self.id = id
         self.id_override = id_override
 

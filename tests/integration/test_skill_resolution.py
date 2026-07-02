@@ -393,7 +393,7 @@ class TestErrorHandlingAndSecurity:
 
         async with AgentPool(str(config_path)) as pool:
             # Test via SkillsManager
-            with pytest.raises(Exception):  # Skill registry raises KeyError
+            with pytest.raises(KeyError):
                 pool.skills.get_skill("non-existent-skill")
 
     async def test_path_traversal_detection(
