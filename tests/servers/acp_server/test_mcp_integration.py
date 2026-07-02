@@ -115,7 +115,7 @@ async def test_session_manager_with_mcp(
         # Register agent config in runtime registry so create_session() can find it
         from agentpool.models.agents import NativeAgentConfig
 
-        agent_pool.session_pool.runtime_registry.register(
+        agent_pool.session_pool.sessions.runtime_registry.register(
             "test_agent", NativeAgentConfig(name="test_agent", model="test:")
         )
         try:
