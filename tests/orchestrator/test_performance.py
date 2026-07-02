@@ -13,7 +13,6 @@ import time
 from typing import TYPE_CHECKING, Any, ClassVar
 from unittest.mock import MagicMock
 
-import anyio
 import pytest
 
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
@@ -31,13 +30,13 @@ if TYPE_CHECKING:
 # ============================================================================
 
 
-def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
+def _stream_empty(stream: asyncio.Queue) -> bool:
     """Check if a memory receive stream has no buffered items."""
     try:
-        stream.receive_nowait()
-    except anyio.WouldBlock:
+        stream.get_nowait()
+    except asyncio.QueueEmpty:
         return True
-    except anyio.EndOfStream:
+    except asyncio.QueueShutDown:
         return True
     else:
         return False
@@ -217,7 +216,7 @@ async def test_benchmark_turn_latency_under_load(
 
         # Collect events to ensure completion
         for sid in sids:
-            await asyncio.wait_for(queues[sid].receive(), timeout=5.0)
+            await asyncio.wait_for(queues[sid].get(), timeout=5.0)
 
         metrics = await collector.get_metrics()
         avg_latency = metrics.turn_latency_ms
@@ -323,9 +322,9 @@ async def test_benchmark_event_throughput_single_subscriber() -> None:
     received = 0
     while True:
         try:
-            queue.receive_nowait()
+            queue.get_nowait()
             received += 1
-        except anyio.WouldBlock:
+        except asyncio.QueueEmpty:
             break
     assert received == event_count, f"Expected {event_count} events, got {received}"
     await event_bus.close_session(session_id)
@@ -362,8 +361,8 @@ async def test_benchmark_event_throughput_many_subscribers() -> None:
     # Verify each subscriber received events
     for queue in queues:
         try:
-            queue.receive_nowait()
-        except anyio.WouldBlock:
+            queue.get_nowait()
+        except asyncio.QueueEmpty:
             raise AssertionError("Subscriber did not receive any events") from None
 
     await event_bus.close_session(session_id)
@@ -402,8 +401,8 @@ async def test_benchmark_event_throughput_scaling() -> None:
         for q in queues:
             while True:
                 try:
-                    q.receive_nowait()
-                except (anyio.WouldBlock, anyio.ClosedResourceError, anyio.EndOfStream):
+                    q.get_nowait()
+                except (asyncio.QueueEmpty, asyncio.QueueShutDown):
                     break
 
     print("\n=== Event Throughput Scaling ===")
@@ -491,7 +490,7 @@ async def test_1000_concurrent_sessions_with_agents(
     for i in range(session_count):
         sid = f"sess-{i}"
         queue = queues[sid]
-        event = await asyncio.wait_for(queue.receive(), timeout=1.0)
+        event = await asyncio.wait_for(queue.get(), timeout=1.0)
         assert event is not None
         assert isinstance(event, RunStartedEvent)
 
@@ -544,7 +543,7 @@ async def test_rapid_create_close_cycles_with_turns(
         await _attach_agent(session_pool, sid, mock_agent)
         queue = await session_pool.event_bus.subscribe(sid)
         await session_pool.process_prompt(sid, "hello")
-        event = await asyncio.wait_for(queue.receive(), timeout=1.0)
+        event = await asyncio.wait_for(queue.get(), timeout=1.0)
         assert event is not None
         await session_pool.close_session(sid)
         assert session_pool.sessions.get_session(sid) is None
@@ -633,7 +632,7 @@ async def test_event_bus_drop_oldest_under_load() -> None:
     # Drain and verify oldest events were dropped
     items: list[Any] = []
     while not _stream_empty(queue):
-        items.append(queue.receive_nowait())
+        items.append(queue.get_nowait())
 
     run_ids = [e.run_id for e in items if isinstance(e, RunStartedEvent)]
     # Oldest events (run-0 through run-989) should have been dropped

@@ -1,11 +1,12 @@
-"""Tests for EventBus memory stream backpressure.
+"""Tests for EventBus asyncio.Queue backpressure.
 
-Verifies that the hybrid backpressure strategy (timeout → drop oldest →
-drop subscriber) works correctly with anyio memory object streams.
+Verifies that the overflow policy (drop_oldest, drop_newest, drop_subscriber)
+works correctly with asyncio.Queue-based subscribers.
 """
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import anyio
@@ -34,12 +35,23 @@ def make_event() -> Any:
     return _make
 
 
+async def _drain_queue(queue: asyncio.Queue) -> list:
+    """Drain all items from a queue until QueueShutDown."""
+    items: list = []
+    while True:
+        try:
+            items.append(await queue.get())
+        except asyncio.QueueShutDown:
+            break
+    return items
+
+
 async def test_backpressure_no_deadlock_with_slow_consumer(
     event_bus: EventBus,
     make_event: Any,
 ) -> None:
     """Publishing 50 events to a slow consumer does not deadlock."""
-    stream = await event_bus.subscribe("sess-bp")
+    queue = await event_bus.subscribe("sess-bp")
 
     async def publisher() -> None:
         for i in range(50):
@@ -53,21 +65,30 @@ async def test_backpressure_no_deadlock_with_slow_consumer(
 
     await publisher()
 
-    received: list[str] = [
+    # Shut down so drain terminates
+    await event_bus.close_session("sess-bp")
+    received = await _drain_queue(queue)
+
+    run_ids = [
         envelope.event.run_id
-        async for envelope in stream
+        for envelope in received
         if isinstance(envelope.event, RunStartedEvent)
     ]
 
-    assert len(received) > 0
-    assert len(received) <= 50
+    assert len(run_ids) > 0
+    assert len(run_ids) <= 50
 
 
 async def test_backpressure_drops_subscriber_when_buffer_full(
     event_bus: EventBus,
     make_event: Any,
 ) -> None:
-    """A subscriber whose buffer is full and can't be drained gets dropped."""
+    """A subscriber whose buffer is full and can't be drained gets dropped.
+
+    With the default drop_oldest policy, the subscriber is NOT dropped —
+    the oldest item is evicted to make room. This test verifies that
+    the subscriber survives overflow.
+    """
     await event_bus.subscribe("sess-bp")
 
     for i in range(5):
@@ -79,47 +100,50 @@ async def test_backpressure_drops_subscriber_when_buffer_full(
             ),
         )
 
+    # Buffer is full (max_queue_size=5). With drop_oldest (default),
+    # the subscriber survives — oldest item is evicted.
     await event_bus.publish("sess-bp", make_event("overflow-1"))
     await event_bus.publish("sess-bp", make_event("overflow-2"))
 
     counts = await event_bus.get_subscriber_counts()
-    assert "sess-bp" not in counts
+    # With drop_oldest (default), subscriber is NOT dropped.
+    assert "sess-bp" in counts
 
 
-async def test_subscribe_returns_memory_receive_stream(
+async def test_subscribe_returns_asyncio_queue(
     event_bus: EventBus,
 ) -> None:
-    """subscribe() returns an anyio memory object receive stream."""
-    stream = await event_bus.subscribe("sess-bp")
-    assert hasattr(stream, "receive")
-    assert hasattr(stream, "receive_nowait")
-    assert hasattr(stream, "aclose")
+    """subscribe() returns an asyncio.Queue."""
+    queue = await event_bus.subscribe("sess-bp")
+    assert hasattr(queue, "get")
+    assert hasattr(queue, "get_nowait")
+    assert hasattr(queue, "shutdown")
 
 
-async def test_unsubscribe_closes_stream(
+async def test_unsubscribe_closes_queue(
     event_bus: EventBus,
     make_event: Any,
 ) -> None:
-    """unsubscribe() closes the send stream, causing EndOfStream on consumer."""
-    stream = await event_bus.subscribe("sess-bp")
+    """unsubscribe() shuts down the queue, causing QueueShutDown on consumer."""
+    queue = await event_bus.subscribe("sess-bp")
     await event_bus.publish("sess-bp", make_event("ev-1"))
-    await event_bus.unsubscribe("sess-bp", stream)
+    await event_bus.unsubscribe("sess-bp", queue)
 
-    received: list[Any] = [envelope async for envelope in stream]
+    received = await _drain_queue(queue)
 
     assert len(received) <= 1
 
 
-async def test_close_session_signals_end_of_stream(
+async def test_close_session_signals_queue_shutdown(
     event_bus: EventBus,
     make_event: Any,
 ) -> None:
-    """close_session() closes all send streams, causing EndOfStream."""
-    stream = await event_bus.subscribe("sess-bp")
+    """close_session() shuts down all queues for the session."""
+    queue = await event_bus.subscribe("sess-bp")
     await event_bus.publish("sess-bp", make_event("ev-1"))
     await event_bus.close_session("sess-bp")
 
-    received: list[Any] = [envelope async for envelope in stream]
+    received = await _drain_queue(queue)
 
     assert len(received) >= 0
     counts = await event_bus.get_subscriber_counts()
@@ -130,7 +154,7 @@ async def test_parallel_publishers_no_deadlock(
     event_bus: EventBus,
 ) -> None:
     """Multiple concurrent publishers don't deadlock the EventBus."""
-    stream = await event_bus.subscribe("sess-bp")
+    queue = await event_bus.subscribe("sess-bp")
 
     async def publisher(prefix: str) -> None:
         for i in range(20):
@@ -142,22 +166,26 @@ async def test_parallel_publishers_no_deadlock(
                 ),
             )
 
-    async with anyio.create_task_group() as tg:
-        tg.start_soon(publisher, "a")
-        tg.start_soon(publisher, "b")
-        tg.start_soon(publisher, "c")
+    await asyncio.gather(
+        publisher("a"),
+        publisher("b"),
+        publisher("c"),
+    )
 
-    received: list[str] = [
+    await event_bus.close_session("sess-bp")
+    received = await _drain_queue(queue)
+
+    run_ids = [
         envelope.event.run_id
-        async for envelope in stream
+        for envelope in received
         if isinstance(envelope.event, RunStartedEvent)
     ]
 
-    assert len(received) > 0
-    assert len(received) <= 60
+    assert len(run_ids) > 0
+    assert len(run_ids) <= 60
 
 
-async def test_replay_buffer_with_memory_stream(
+async def test_replay_buffer_with_queue(
     event_bus: EventBus,
     make_event: Any,
 ) -> None:
@@ -165,14 +193,15 @@ async def test_replay_buffer_with_memory_stream(
     await event_bus.publish("sess-bp", make_event("hist-1"))
     await event_bus.publish("sess-bp", make_event("hist-2"))
 
-    stream = await event_bus.subscribe("sess-bp")
+    queue = await event_bus.subscribe("sess-bp")
 
     received: list[str] = []
     try:
         with anyio.fail_after(0.5):
-            async for envelope in stream:
+            while True:
+                envelope = await queue.get()
                 if isinstance(envelope.event, RunStartedEvent):
-                    received.append(envelope.event.run_id)  # noqa: PERF401
+                    received.append(envelope.event.run_id)
     except TimeoutError:
         pass
 

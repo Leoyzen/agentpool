@@ -45,37 +45,27 @@ def _make_part_delta(session_id: str = "s1") -> PartDeltaEvent:
 
 @pytest.mark.unit
 async def test_clear_replay_buffer_prevents_stale_events() -> None:
-    """After clear_replay_buffer, new subscribers must NOT receive.
-
-    events from previous turns.
-
-    """
+    """After clear_replay_buffer, new subscribers must NOT receive events from previous turns."""
     bus = EventBus()
 
-    # Simulate turn 1 publishing events including StreamCompleteEvent
     for event in [_make_run_started(), _make_stream_complete()]:
         await bus._send("s1", EventEnvelope(event=event, source_session_id="s1"))
 
     assert "s1" in bus._replay_buffers
     assert len(bus._replay_buffers["s1"]) == 2
 
-    # Clear replay buffer (as _run_turn_unlocked now does)
     bus.clear_replay_buffer("s1")
     assert "s1" not in bus._replay_buffers
 
-    # New subscriber should NOT receive any replayed events
-    stream = await bus.subscribe("s1", scope="session")
+    queue = await bus.subscribe("s1", scope="session")
 
-    # Publish a new event (turn 2's RunStartedEvent)
     new_event = _make_run_started()
     await bus._send("s1", EventEnvelope(event=new_event, source_session_id="s1"))
 
-    # Consumer should only receive the NEW event
     received: list = []
     with anyio.fail_after(1.0):
-        async for envelope in stream:
-            received.append(envelope.event)
-            break
+        envelope = await queue.get()
+        received.append(envelope.event)
 
     assert len(received) == 1
     assert isinstance(received[0], RunStartedEvent)
@@ -83,24 +73,18 @@ async def test_clear_replay_buffer_prevents_stale_events() -> None:
 
 @pytest.mark.unit
 async def test_replay_buffer_replays_stale_without_clear() -> None:
-    """Without clear_replay_buffer, new subscribers DO receive stale events.
-
-    This documents the bug behavior that the fix prevents.
-
-    """
+    """Without clear_replay_buffer, new subscribers DO receive stale events."""
     bus = EventBus()
 
-    # Turn 1 publishes events including StreamCompleteEvent
     for event in [_make_run_started(), _make_stream_complete()]:
         await bus._send("s1", EventEnvelope(event=event, source_session_id="s1"))
 
-    # New subscriber WITHOUT clearing replay buffer
-    stream = await bus.subscribe("s1", scope="session")
+    queue = await bus.subscribe("s1", scope="session")
 
-    # Consumer WILL receive stale StreamCompleteEvent from replay
     received: list = []
     with anyio.fail_after(1.0):
-        async for envelope in stream:
+        while True:
+            envelope = await queue.get()
             received.append(envelope.event)
             if isinstance(envelope.event, (StreamCompleteEvent, RunErrorEvent)):
                 break
@@ -112,25 +96,20 @@ async def test_replay_buffer_replays_stale_without_clear() -> None:
 
 @pytest.mark.unit
 async def test_clear_replay_buffer_preserves_active_subscribers() -> None:
-    """clear_replay_buffer must NOT close active subscriber streams."""
+    """clear_replay_buffer must NOT close active subscriber queues."""
     bus = EventBus()
 
-    # Create a subscriber BEFORE clearing
-    stream1 = await bus.subscribe("s1", scope="session")
+    queue1 = await bus.subscribe("s1", scope="session")
 
-    # Clear replay buffer
     bus.clear_replay_buffer("s1")
 
-    # Publish a new event
     new_event = _make_part_delta()
     await bus._send("s1", EventEnvelope(event=new_event, source_session_id="s1"))
 
-    # Existing subscriber should still receive the new event
     received: list = []
     with anyio.fail_after(1.0):
-        async for envelope in stream1:
-            received.append(envelope.event)
-            break
+        envelope = await queue1.get()
+        received.append(envelope.event)
 
     assert len(received) == 1
     assert isinstance(received[0], PartDeltaEvent)

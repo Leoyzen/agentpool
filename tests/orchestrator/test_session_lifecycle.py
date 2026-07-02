@@ -207,7 +207,7 @@ class TestEventBusScopedSubscription:
         bus = EventBus()
         queue = await bus.subscribe("s1", scope="session")
         await bus.publish("s1", "event1")
-        envelope = await asyncio.wait_for(queue.receive(), timeout=1.0)
+        envelope = await asyncio.wait_for(queue.get(), timeout=1.0)
         assert envelope is not None
         assert envelope.event == "event1"
 
@@ -220,7 +220,7 @@ class TestEventBusScopedSubscription:
         await bus.publish("s1.1", "event1")
         # Should NOT receive - queue should be empty
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(queue.receive(), timeout=0.5)
+            await asyncio.wait_for(queue.get(), timeout=0.5)
 
     @pytest.mark.anyio
     async def test_descendants_scope_receives_child_events(self) -> None:
@@ -228,7 +228,7 @@ class TestEventBusScopedSubscription:
         bus._session_tree = {"s1": ["s1.1"], "s1.1": []}
         queue = await bus.subscribe("s1", scope="descendants")
         await bus.publish("s1.1", "event1")
-        envelope = await asyncio.wait_for(queue.receive(), timeout=1.0)
+        envelope = await asyncio.wait_for(queue.get(), timeout=1.0)
         assert envelope is not None
         assert envelope.event == "event1"
 
@@ -238,7 +238,7 @@ class TestEventBusScopedSubscription:
         bus._session_tree = {"s1": ["s1.1", "s1.2"], "s1.1": [], "s1.2": []}
         queue = await bus.subscribe("s1.1", scope="subtree")
         await bus.publish("s1.2", "event1")
-        envelope = await asyncio.wait_for(queue.receive(), timeout=1.0)
+        envelope = await asyncio.wait_for(queue.get(), timeout=1.0)
         assert envelope is not None
         assert envelope.event == "event1"
 

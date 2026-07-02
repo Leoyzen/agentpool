@@ -23,7 +23,6 @@ import inspect
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import anyio
 from pydantic_ai.exceptions import UndrainedPendingMessagesError
 from pydantic_ai.models.test import TestModel
 import pytest
@@ -112,8 +111,8 @@ async def test_native_turn_events_reach_event_bus_consumer() -> None:
             async with asyncio.timeout(10):
                 while True:
                     try:
-                        envelope = await receive_stream.receive()
-                    except anyio.EndOfStream:
+                        envelope = await receive_stream.get()
+                    except asyncio.QueueShutDown:
                         break
 
                     event = envelope.event if hasattr(envelope, "event") else envelope

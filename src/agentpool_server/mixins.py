@@ -54,7 +54,7 @@ class ProtocolEventConsumerMixin(ABC):
         super().__init__()
         self._session_scopes: dict[str, anyio.CancelScope] = {}
         self._session_groups: dict[str, anyio.abc.TaskGroup] = {}
-        self._consumer_streams: dict[str, anyio.abc.ObjectReceiveStream[EventEnvelope]] = {}
+        self._consumer_streams: dict[str, asyncio.Queue[EventEnvelope]] = {}
         self._consumer_locks: dict[str, asyncio.Lock] = {}
         self._consumer_tasks: dict[str, asyncio.Task[None] | None] = {}
         self._consumer_done_events: dict[str, anyio.Event] = {}
