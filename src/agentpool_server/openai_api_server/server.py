@@ -153,7 +153,9 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
         self.app.post("/v1/chat/completions", dependencies=[dep], response_model=None)(
             self.create_chat_completion
         )
-        self.app.post("/v1/responses", dependencies=[dep])(self.create_response)
+        self.app.post("/v1/responses", dependencies=[dep], response_model=None)(
+            self.create_response
+        )
 
     def verify_api_key(
         self, authorization: Annotated[str | None, Header(alias="Authorization")] = None
