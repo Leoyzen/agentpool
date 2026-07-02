@@ -52,12 +52,6 @@ async def test_session_with_mcp_servers(
 ):
     """Test creating an ACP session with MCP servers."""
     agent_pool = AgentPool(main_agent_name="test_agent")
-    # Register agent config in runtime registry so create_session() can find it
-    from agentpool.models.agents import NativeAgentConfig
-
-    agent_pool.runtime_registry.register(
-        "test_agent", NativeAgentConfig(name="test_agent", model="test:")
-    )
 
     def simple_callback(message: str) -> str:
         return f"Test response for: {message}"
@@ -115,15 +109,15 @@ async def test_session_manager_with_mcp(
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback)
     agent_pool = AgentPool(main_agent_name=agent.name)
-    # Register agent config in runtime registry so create_session() can find it
-    from agentpool.models.agents import NativeAgentConfig
-
-    agent_pool.runtime_registry.register(
-        "test_agent", NativeAgentConfig(name="test_agent", model="test:")
-    )
     session_manager = ACPSessionManager(agent_pool)
     mcp_servers = [StdioMcpServer(name="tools", command="echo", args=["tools"], env=[])]
     async with agent_pool:
+        # Register agent config in runtime registry so create_session() can find it
+        from agentpool.models.agents import NativeAgentConfig
+
+        agent_pool.session_pool.runtime_registry.register(
+            "test_agent", NativeAgentConfig(name="test_agent", model="test:")
+        )
         try:
             session_id = await session_manager.create_session(
                 agent_name=agent.name,
