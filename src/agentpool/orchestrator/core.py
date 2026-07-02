@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import AsyncIterator, Awaitable, Callable
 import contextlib
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -19,7 +18,6 @@ import uuid
 
 import anyio
 from pydantic_ai import TextPartDelta, ThinkingPartDelta, ToolCallPartDelta
-from pydantic_ai.messages import ModelMessage
 
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
@@ -38,10 +36,7 @@ from agentpool.agents.events import (
     ToolCallProgressEvent,
     ToolCallStartEvent,
 )
-from agentpool.agents.native_agent.checkpoint import CheckpointData
 from agentpool.log import get_logger
-from agentpool.messaging import ChatMessage
-from agentpool.models.pending_interaction import PendingPermission
 from agentpool.orchestrator.run import RunHandle, RunStatus, inject_cancelled_tool_results
 from agentpool.orchestrator.runtime_registry import RuntimeAgentRegistry
 from agentpool.sessions.models import PendingDeferredCall, SessionData
@@ -49,13 +44,20 @@ from agentpool_server.opencode_server.models.session_info import SessionInfo
 
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Awaitable, Callable
+
+    from pydantic_ai.messages import ModelMessage
+
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.agents.native_agent import Agent
+    from agentpool.agents.native_agent.checkpoint import CheckpointData
     from agentpool.delegation import AgentPool
     from agentpool.delegation.team import Team
     from agentpool.delegation.teamrun import TeamRun
     from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
-    from agentpool.mcp_server.session_pool import SessionConnectionPool
+    from agentpool.messaging import ChatMessage
+    from agentpool.messaging.messagenode import MessageNode
+    from agentpool.models.pending_interaction import PendingPermission
     from agentpool.sessions.store import SessionStore
     from agentpool_config.teams import TeamConfig
 
@@ -107,7 +109,8 @@ class SessionBusyError(Exception):
 
     def __init__(self, session_id: str, run_id: str) -> None:
         super().__init__(
-            f"Session '{session_id}' already has an active run '{run_id}'. Wait for it to complete or cancel it first."
+            f"Session '{session_id}' already has an active run '{run_id}'. "
+            "Wait for it to complete or cancel it first."
         )
         self.session_id = session_id
         self.run_id = run_id
@@ -247,7 +250,7 @@ def _is_immediate(event: Any) -> bool:
             return False
 
 
-def _merge_key(event: Any) -> tuple[str, str] | None:
+def _merge_key(event: Any) -> tuple[str, str] | None:  # noqa: PLR0911
     """Compute the coalescing merge key for an event.
 
     Returns:
@@ -274,10 +277,11 @@ def _merge_key(event: Any) -> tuple[str, str] | None:
 
 def _merge_text_deltas(events: list[PartDeltaEvent]) -> PartDeltaEvent:
     """Concatenate TextPartDelta content_delta strings. Uses first event's index."""
-    parts: list[str] = []
-    for event in events:
-        if isinstance(event.delta, TextPartDelta) and event.delta.content_delta is not None:
-            parts.append(event.delta.content_delta)
+    parts = [
+        event.delta.content_delta
+        for event in events
+        if isinstance(event.delta, TextPartDelta) and event.delta.content_delta is not None
+    ]
     return PartDeltaEvent(
         index=events[0].index,
         delta=TextPartDelta(content_delta="".join(parts)),
@@ -286,10 +290,11 @@ def _merge_text_deltas(events: list[PartDeltaEvent]) -> PartDeltaEvent:
 
 def _merge_thinking_deltas(events: list[PartDeltaEvent]) -> PartDeltaEvent:
     """Concatenate ThinkingPartDelta content_delta strings. Uses first event's index."""
-    parts: list[str] = []
-    for event in events:
-        if isinstance(event.delta, ThinkingPartDelta) and event.delta.content_delta is not None:
-            parts.append(event.delta.content_delta)
+    parts = [
+        event.delta.content_delta
+        for event in events
+        if isinstance(event.delta, ThinkingPartDelta) and event.delta.content_delta is not None
+    ]
     return PartDeltaEvent(
         index=events[0].index,
         delta=ThinkingPartDelta(content_delta="".join(parts)),
@@ -934,7 +939,7 @@ class SessionController:
         logger.info("Created session", session_id=session_id, agent_name=state.agent_name)
         return state, True
 
-    async def get_or_create_session_agent(
+    async def get_or_create_session_agent(  # noqa: PLR0915
         self,
         session_id: str,
         agent_name: str | None = None,
@@ -1030,15 +1035,11 @@ class SessionController:
 
                     snapshot = _McpConfigSnapshot(
                         pool_configs=(
-                            parent_snapshot.pool_configs
-                            if parent_snapshot is not None
-                            else ()
+                            parent_snapshot.pool_configs if parent_snapshot is not None else ()
                         ),
                         agent_configs=agent._build_agent_configs(),
                         session_configs=(
-                            parent_snapshot.session_configs
-                            if parent_snapshot is not None
-                            else ()
+                            parent_snapshot.session_configs if parent_snapshot is not None else ()
                         ),
                         skill_configs=(),
                     )
@@ -1308,11 +1309,11 @@ class SessionController:
             elapsed. Returns an empty list if none have expired.
         """
         now = datetime.now()
-        expired: list[PendingDeferredCall] = []
-        for call in session_data.pending_deferred_calls:
-            if call.timeout is not None and (now - call.created_at) > call.timeout:
-                expired.append(call)
-        return expired
+        return [
+            call
+            for call in session_data.pending_deferred_calls
+            if call.timeout is not None and (now - call.created_at) > call.timeout
+        ]
 
     async def _save_close_checkpoint(self, session_id: str, data: SessionData) -> bool:
         """Save session data with checkpointed status before close.
@@ -1338,13 +1339,14 @@ class SessionController:
                 session_id=session_id,
                 pending_call_count=len(data.pending_deferred_calls),
             )
-            return True
         except Exception:
             logger.exception(
                 "Failed to save checkpoint before close",
                 session_id=session_id,
             )
             return False
+        else:
+            return True
 
     async def _mark_session_closed(self, session_id: str) -> None:
         """Mark a session as closed in the store instead of deleting it.
@@ -1858,10 +1860,8 @@ class SessionController:
         """Stop the cleanup background task."""
         if self._cleanup_task is not None:
             self._cleanup_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._cleanup_task
-            except asyncio.CancelledError:
-                pass
             self._cleanup_task = None
 
     async def _cleanup_loop(self) -> None:
@@ -2072,7 +2072,6 @@ class SessionPool:
             ValueError: If a member name is not found in the manifest
                 agents or teams sections.
         """
-        from agentpool.messaging.messagenode import MessageNode
         from agentpool.utils.identifiers import generate_session_id
 
         member_names = [team_config.get_member_name(m) for m in team_config.members]
@@ -2308,7 +2307,7 @@ class SessionPool:
                         stored_hash=session_data.agent_config_hash,
                         current_hash=current_hash,
                     )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.debug(
                     "Could not compute agent config hash for drift check",
                     session_id=session_data.session_id,

@@ -216,6 +216,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 Defaults to ["models.dev"] if not specified.
             commands: Slash commands
             metadata: Arbitrary metadata for the agent (e.g., feature flags)
+            history_processors: Callable history processors for message processing
         """
         from agentpool.agents.interactions import Interactions
         from agentpool.agents.native_agent.hook_manager import NativeAgentHookManager
@@ -389,7 +390,10 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if len(params) == two_params:
             last_param_name = params[1].name.lower()
             if last_param_name not in ("messages", "msgs", "history"):
-                msg = f"Second parameter of history processor must be messages/msgs/history, got {params[1].name}"
+                msg = (
+                    f"Second parameter of history processor must be "
+                    f"messages/msgs/history, got {params[1].name}"
+                )
                 raise ValueError(msg)
 
     def _resolve_history_processors(self, *, _warn: bool = True) -> list[Callable[..., Any]]:
@@ -440,7 +444,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         return resolved
 
     @classmethod
-    def from_config(
+    def from_config(  # noqa: PLR0915
         cls,
         config: NativeAgentConfig,
         *,
@@ -764,7 +768,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         wrapped_tool.__name__ = tool_name
         return Tool.from_callable(wrapped_tool, source="agent")
 
-    async def get_agentlet[AgentOutputType](
+    async def get_agentlet[AgentOutputType](  # noqa: PLR0915
         self,
         model: ModelType | None,
         output_type: type[AgentOutputType] | None,
@@ -841,7 +845,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             for tool in all_tools:
                 if tool.deferred:
                     deferred_tools[tool.name] = tool.deferred_strategy
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("get_tools() timed out in get_agentlet(), using empty deferred_tools")
         except Exception:
             logger.exception("Failed to collect deferred tools — using empty dict")
@@ -995,7 +999,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         state = kwargs.get("_state")
         if not isinstance(state, AgentPoolState):
-            raise RuntimeError(
+            raise TypeError(
                 f"{self.__class__.__name__}._execute_node() requires _state in kwargs. "
                 "Use MessageNodeStep to wrap this agent for graph execution."
             )
@@ -1091,7 +1095,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             message_history=model_messages,
             parent_id=user_msg.message_id,
         )
-        session_id_local = session_id
         turn_failed = False
         error_msg = ""
         async for event in turn.execute():
@@ -1295,7 +1298,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             await self.update_state(config_id="mode", value_id=mode_id)
 
         elif category_id == "model":
-            self.log.info(f"_set_mode called for model: {mode_id}")
+            self.log.info("_set_mode called for model: %s", mode_id)
             # Resolve variant name from actual model identifier if needed
             variant_name = mode_id
             if self.agent_pool and mode_id not in self.agent_pool.manifest.model_variants:
@@ -1306,7 +1309,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     if resolved == mode_id:
                         variant_name = vn
                         self.log.info(
-                            f"Resolved model identifier {mode_id} to variant {variant_name}"
+                            "Resolved model identifier %s to variant %s",
+                            mode_id,
+                            variant_name,
                         )
                         break
             # Validate model exists (check both tokonomics models and model_variants)
@@ -1315,7 +1320,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 valid_ids = [m.pydantic_ai_id for m in models]
                 if mode_id in valid_ids:
                     is_valid = True
-                    self.log.info(f"Model {mode_id} validated against tokonomics")
+                    self.log.info("Model %s validated against tokonomics", mode_id)
             # Also check model_variants from manifest (by variant name or identifier)
             if (
                 not is_valid
@@ -1324,11 +1329,20 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             ):
                 is_valid = True
                 self.log.info(
-                    f"Model {mode_id} validated against model_variants (variant: {variant_name})"
+                    "Model %s validated against model_variants (variant: %s)",
+                    mode_id,
+                    variant_name,
                 )
             if not is_valid:
+                available = (
+                    list(self.agent_pool.manifest.model_variants.keys())
+                    if self.agent_pool
+                    else "N/A"
+                )
                 self.log.warning(
-                    f"Model {mode_id} validation failed. Available variants: {list(self.agent_pool.manifest.model_variants.keys()) if self.agent_pool else 'N/A'}"
+                    "Model %s validation failed. Available variants: %s",
+                    mode_id,
+                    available,
                 )
                 raise UnknownModeError(mode_id, valid_ids if models else [])
             # Set the model using variant name (preserves model_settings)
@@ -1336,7 +1350,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             self._model, settings = self._resolve_model_string(variant_name)
             if settings:
                 self.model_settings = settings
-            self.log.info(f"Model changed from {old_model} to {self._model}")
+            self.log.info("Model changed from %s to %s", old_model, self._model)
             await self.update_state(config_id="model", value_id=mode_id)
         else:
             raise UnknownCategoryError(category_id, ["mode", "model"])
@@ -1381,11 +1395,11 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             # Apply limit
             if limit is not None:
                 sessions = sessions[:limit]
-            return sessions
-
         except Exception:
             self.log.exception("Failed to list sessions")
             return []
+        else:
+            return sessions
 
     async def load_session(self, session_id: str) -> SessionData | None:
         """Load and restore a session from storage.

@@ -131,16 +131,12 @@ class TestSnapshotInheritance:
 
     def test_child_does_not_inherit_parent_agent_configs(self):
         """Agent-level configs are NOT inherited — child uses its own."""
-        parent_agent_entry = McpConfigEntry(
-            server_config=_stdio_cfg("parent_only"), source="agent"
-        )
+        parent_agent_entry = McpConfigEntry(server_config=_stdio_cfg("parent_only"), source="agent")
         parent_snapshot = McpConfigSnapshot(
             agent_configs=(parent_agent_entry,),
         )
 
-        child_agent_entry = McpConfigEntry(
-            server_config=_stdio_cfg("child_only"), source="agent"
-        )
+        child_agent_entry = McpConfigEntry(server_config=_stdio_cfg("child_only"), source="agent")
         child_snapshot = McpConfigSnapshot(
             pool_configs=parent_snapshot.pool_configs,
             agent_configs=(child_agent_entry,),
@@ -153,9 +149,7 @@ class TestSnapshotInheritance:
 
     def test_child_inherits_session_configs_from_parent(self):
         """Session-scoped configs are inherited from parent."""
-        session_entry = McpConfigEntry(
-            server_config=_http_cfg("session_srv"), source="session"
-        )
+        session_entry = McpConfigEntry(server_config=_http_cfg("session_srv"), source="session")
         parent_snapshot = McpConfigSnapshot(
             session_configs=(session_entry,),
         )
@@ -334,9 +328,7 @@ class TestAsCapabilityWithSessionPool:
             session_configs=(session_entry,),
             skill_configs=(skill_entry,),
         )
-        caps = await manager.as_capability(
-            snapshot=snapshot, session_pool=session_pool
-        )
+        caps = await manager.as_capability(snapshot=snapshot, session_pool=session_pool)
         assert len(caps) == 2
         ids = {c.id for c in caps}
         assert "session_srv" in ids
@@ -523,14 +515,10 @@ class TestSkillConfigsInSnapshot:
 
     def test_with_session_configs_replaces_session_configs(self):
         """with_session_configs() replaces session configs."""
-        old_session = McpConfigEntry(
-            server_config=_stdio_cfg("old_sess"), source="session"
-        )
+        old_session = McpConfigEntry(server_config=_stdio_cfg("old_sess"), source="session")
         snapshot = McpConfigSnapshot(session_configs=(old_session,))
 
-        new_session = McpConfigEntry(
-            server_config=_stdio_cfg("new_sess"), source="session"
-        )
+        new_session = McpConfigEntry(server_config=_stdio_cfg("new_sess"), source="session")
         updated = snapshot.with_session_configs((new_session,))
 
         assert old_session not in updated.session_configs
@@ -586,9 +574,7 @@ class TestFullLifecycle:
             pool_configs=(pool_entry,),
             session_configs=(session_entry,),
         )
-        caps = await manager.as_capability(
-            snapshot=snapshot, session_pool=session_pool
-        )
+        caps = await manager.as_capability(snapshot=snapshot, session_pool=session_pool)
 
         # 1 global + 1 session-scoped
         assert len(caps) == 2
@@ -610,9 +596,7 @@ class TestFullLifecycle:
         snapshot = McpConfigSnapshot(pool_configs=(pool_entry,))
 
         # First call without skill configs
-        caps1 = await manager.as_capability(
-            snapshot=snapshot, session_pool=session_pool
-        )
+        caps1 = await manager.as_capability(snapshot=snapshot, session_pool=session_pool)
         assert len(caps1) == 1
 
         # Update snapshot with skill configs
@@ -624,9 +608,7 @@ class TestFullLifecycle:
         updated_snapshot = snapshot.with_skill_configs((skill_entry,))
 
         # Second call with skill configs
-        caps2 = await manager.as_capability(
-            snapshot=updated_snapshot, session_pool=session_pool
-        )
+        caps2 = await manager.as_capability(snapshot=updated_snapshot, session_pool=session_pool)
         assert len(caps2) == 2  # 1 global + 1 session-scoped
 
         await session_pool.cleanup()
@@ -660,9 +642,7 @@ class TestFullLifecycle:
             session_configs=(session_entry,),
             skill_configs=(skill_entry,),
         )
-        caps = await manager.as_capability(
-            snapshot=snapshot, session_pool=session_pool
-        )
+        caps = await manager.as_capability(snapshot=snapshot, session_pool=session_pool)
 
         # 2 global (pool + agent) + 2 session-scoped (session + skill) = 4
         assert len(caps) == 4
@@ -781,12 +761,8 @@ class TestRealToolCallsViaSnapshot:
                 tools2 = await ts2.get_tools(run_context)
                 assert set(tools1) == set(tools2)
 
-                r1 = await ts1.call_tool(
-                    "greet", {"name": "first"}, run_context, tools1["greet"]
-                )
-                r2 = await ts2.call_tool(
-                    "greet", {"name": "second"}, run_context, tools2["greet"]
-                )
+                r1 = await ts1.call_tool("greet", {"name": "first"}, run_context, tools1["greet"])
+                r2 = await ts2.call_tool("greet", {"name": "second"}, run_context, tools2["greet"])
                 assert r1 == "Hello, first!"
                 assert r2 == "Hello, second!"
         finally:
@@ -807,9 +783,7 @@ class TestRealToolCallsViaSnapshot:
         # Add the in-process server as a pre-created transport
         await session_pool.add_transport(cfg.client_id, fastmcp_server)
 
-        caps = await manager.as_capability(
-            snapshot=snapshot, session_pool=session_pool
-        )
+        caps = await manager.as_capability(snapshot=snapshot, session_pool=session_pool)
         assert len(caps) == 1
         cap = caps[0]
         assert isinstance(cap.local, MCPToolset)
@@ -853,9 +827,7 @@ class TestSnapshotImmutability:
         pool_e = McpConfigEntry(server_config=_stdio_cfg("p"), source="pool")
         agent_e = McpConfigEntry(server_config=_stdio_cfg("a"), source="agent")
         session_e = McpConfigEntry(server_config=_stdio_cfg("s"), source="session")
-        skill_e = McpConfigEntry(
-            server_config=_stdio_cfg("sk"), source="skill", skill_name="sk1"
-        )
+        skill_e = McpConfigEntry(server_config=_stdio_cfg("sk"), source="skill", skill_name="sk1")
         snapshot = McpConfigSnapshot(
             pool_configs=(pool_e,),
             agent_configs=(agent_e,),
@@ -893,9 +865,7 @@ class TestOrchestratorSnapshotPattern:
         parent_agent_e = McpConfigEntry(
             server_config=_stdio_cfg("parent_agent_srv"), source="agent"
         )
-        session_e = McpConfigEntry(
-            server_config=_http_cfg("session_srv"), source="session"
-        )
+        session_e = McpConfigEntry(server_config=_http_cfg("session_srv"), source="session")
         parent_snapshot = McpConfigSnapshot(
             pool_configs=(pool_e,),
             agent_configs=(parent_agent_e,),
@@ -903,9 +873,7 @@ class TestOrchestratorSnapshotPattern:
         )
 
         # Child builds its own agent_configs
-        child_agent_e = McpConfigEntry(
-            server_config=_stdio_cfg("child_agent_srv"), source="agent"
-        )
+        child_agent_e = McpConfigEntry(server_config=_stdio_cfg("child_agent_srv"), source="agent")
 
         # This is the pattern from orchestrator/core.py L1026-1039
         child_snapshot = McpConfigSnapshot(
@@ -930,9 +898,7 @@ class TestOrchestratorSnapshotPattern:
         """Main session snapshot pattern from orchestrator/core.py L1099-1104."""
         # Simulate _build_pool_configs() and _build_agent_configs()
         pool_e = McpConfigEntry(server_config=_stdio_cfg("pool_srv"), source="pool")
-        agent_e = McpConfigEntry(
-            server_config=_stdio_cfg("agent_srv"), source="agent"
-        )
+        agent_e = McpConfigEntry(server_config=_stdio_cfg("agent_srv"), source="agent")
 
         # Pattern from L1099-1104
         snapshot = McpConfigSnapshot(
@@ -947,9 +913,7 @@ class TestOrchestratorSnapshotPattern:
     def test_non_native_snapshot_pattern(self):
         """Non-native agent snapshot pattern from orchestrator/core.py L1148-1165."""
         pool_e = McpConfigEntry(server_config=_stdio_cfg("pool_srv"), source="pool")
-        agent_e = McpConfigEntry(
-            server_config=_stdio_cfg("agent_srv"), source="agent"
-        )
+        agent_e = McpConfigEntry(server_config=_stdio_cfg("agent_srv"), source="agent")
 
         # Pattern from L1160-1165
         snapshot = McpConfigSnapshot(

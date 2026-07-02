@@ -348,7 +348,7 @@ async def test_acp_child_session_inherits_parent_project_and_cwd() -> None:
     def simple_callback(message: str) -> str:
         return f"Response: {message}"
 
-    agent = Agent.from_callback(name="acp_agent", callback=simple_callback, agent_pool=pool)
+    Agent.from_callback(name="acp_agent", callback=simple_callback, agent_pool=pool)
 
     store = MemorySessionStore()
     session_pool = SessionPool(pool=pool, store=store)

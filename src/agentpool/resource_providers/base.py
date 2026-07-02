@@ -140,7 +140,7 @@ class ResourceProvider(ABC):  # noqa: B024
         async def _build_toolset(ctx: Any) -> Any:
             try:
                 tools = await self.get_tools()
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning(
                     "Failed to retrieve tools from provider",
                     provider=self.name,

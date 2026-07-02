@@ -8,16 +8,13 @@ without message corruption or stream contention.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 
 from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnection
 from agentpool_server.acp_server.acp_mcp_transport import AcpMcpTransport
-
-if TYPE_CHECKING:
-    pass
 
 
 pytestmark = pytest.mark.integration
@@ -31,12 +28,11 @@ def _make_connection(
 
     server = AcpMcpServer(name="test-server", id="test-id")
     send_callback = AsyncMock(side_effect=handler or (lambda wrapped: {}))
-    conn = AcpMcpConnection(
+    return AcpMcpConnection(
         connection_id="test-conn-1",
         server_config=server,
         send_to_client=send_callback,
     )
-    return conn
 
 
 def _make_initialize_result() -> dict[str, Any]:
@@ -51,11 +47,13 @@ def _make_initialize_result() -> dict[str, Any]:
 def _make_tools_list_result(tool_name: str) -> dict[str, Any]:
     """Return a tools/list result payload with one tool."""
     return {
-        "tools": [{
-            "name": tool_name,
-            "description": f"Tool {tool_name}",
-            "inputSchema": {"type": "object", "properties": {}},
-        }],
+        "tools": [
+            {
+                "name": tool_name,
+                "description": f"Tool {tool_name}",
+                "inputSchema": {"type": "object", "properties": {}},
+            }
+        ],
     }
 
 
@@ -81,7 +79,9 @@ class TestAcpMcpTransportReuse:
     """Tests for sharing a single AcpMcpTransport across multiple sessions."""
 
     async def test_two_sessions_independent_connect(self) -> None:
-        """Given a shared AcpMcpTransport, when two sessions enter
+        """Two sessions connect independently.
+
+        Given a shared AcpMcpTransport, when two sessions enter
         connect_session() concurrently, then each gets an independent
         ClientSession that doesn't interfere with the other.
         """
@@ -106,7 +106,9 @@ class TestAcpMcpTransportReuse:
             assert len(r["tools"].tools) == 1
 
     async def test_one_session_exit_does_not_break_other(self) -> None:
-        """Given two sessions sharing a transport, when one exits
+        """One session exit does not break the other.
+
+        Given two sessions sharing a transport, when one exits
         connect_session(), then the other can still call tools.
         """
         handler = _make_handler(tool_name_fn=lambda n: "tool")
@@ -132,7 +134,9 @@ class TestAcpMcpTransportReuse:
         await asyncio.gather(_session_a(), _session_b())
 
     async def test_concurrent_tool_calls_no_interference(self) -> None:
-        """Given four sessions sharing a transport, when all call
+        """Concurrent tool calls have no interference.
+
+        Given four sessions sharing a transport, when all call
         tools concurrently, then each gets its own correct response.
         """
         handler = _make_handler(tool_name_fn=lambda n: f"tool_{n}")
@@ -148,8 +152,10 @@ class TestAcpMcpTransportReuse:
                 results.append(label)
 
         await asyncio.gather(
-            _session("A"), _session("B"),
-            _session("C"), _session("D"),
+            _session("A"),
+            _session("B"),
+            _session("C"),
+            _session("D"),
         )
 
         assert set(results) == {"A", "B", "C", "D"}

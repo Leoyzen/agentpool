@@ -118,11 +118,11 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         if isinstance(event, SpawnSessionStart):
             child_sid = event.child_session_id
             if child_sid and child_sid != session_id:
-                if event.spawn_mechanism == "task":
-                    # Skip background tasks in non-zed modes only.
-                    # Zed mode needs background task sessions too for card display.
-                    if self._event_converter_template.subagent_display_mode not in ("zed", "qwen"):
-                        return
+                if (
+                    event.spawn_mechanism == "task"
+                    and self._event_converter_template.subagent_display_mode not in ("zed", "qwen")
+                ):
+                    return
                 # Create child converter with subagent context
                 client_supports_turn_complete = (
                     self.client_capabilities is not None
@@ -350,7 +350,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         await self.start_event_consumer(session_id)
         logger.debug("Started event consumer", session_id=session_id)
 
-    async def handle_prompt(
+    async def handle_prompt(  # noqa: PLR0915
         self,
         session_id: str,
         prompt: Sequence[ContentBlock],

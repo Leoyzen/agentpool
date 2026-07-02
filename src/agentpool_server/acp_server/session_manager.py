@@ -164,10 +164,8 @@ class ACPSessionManager:
         # initialize_mcp_servers() updates the same agent object
         # that child sessions inherit MCP configs from.
         if self._pool.session_pool is not None:
-            session_agent = (
-                await self._pool.session_pool.sessions.get_or_create_session_agent(
-                    session_id, agent_name=agent_name
-                )
+            session_agent = await self._pool.session_pool.sessions.get_or_create_session_agent(
+                session_id, agent_name=agent_name
             )
         else:
             # Fallback: create directly from manifest (tests only)

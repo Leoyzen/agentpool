@@ -33,7 +33,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Sequence
 from contextlib import suppress
-from typing import Any, Generic, TypeVar, final
+from typing import Any, TypeVar, final
 from uuid import uuid4
 
 from pydantic_graph.graph_builder import EndMarker, ErrorMarker, GraphRun
@@ -150,7 +150,7 @@ class StepEventCollector:
 
 
 @final
-class GraphStreamingAdapter(Generic[StateT, DepsT, OutputT]):
+class GraphStreamingAdapter[StateT, DepsT, OutputT]:
     """Adapts a ``GraphRun`` iterator to AgentPool ``RichAgentStreamEvent`` types.
 
     The adapter runs graph iteration in a background task and feeds events
@@ -238,7 +238,7 @@ class GraphStreamingAdapter(Generic[StateT, DepsT, OutputT]):
                                 run_id=self.run_id,
                             )
                         )
-                        raise error_marker.error
+                        raise error_marker.error  # noqa: TRY301
         except asyncio.CancelledError:
             logger.debug("Graph iteration task cancelled")
         except BaseException as exc:  # noqa: BLE001
@@ -308,7 +308,7 @@ class GraphStreamingAdapter(Generic[StateT, DepsT, OutputT]):
             self._iteration_done.set()
 
 
-async def adapt_graph_run(
+async def adapt_graph_run[StateT, DepsT, OutputT](
     graph_run: GraphRun[StateT, DepsT, OutputT],
     *,
     session_id: str,

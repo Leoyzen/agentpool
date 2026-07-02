@@ -88,9 +88,7 @@ async def test_initialize_mcp_servers_registers_providers_on_agent() -> None:
         "_mcp_snapshot should be set after initialize_mcp_servers()"
     )
     session_configs = session_agent._mcp_snapshot.session_configs
-    assert len(session_configs) >= 1, (
-        "session_configs should contain at least one entry"
-    )
+    assert len(session_configs) >= 1, "session_configs should contain at least one entry"
     config_names = [e.server_config.name for e in session_configs]
     assert "workspace-fs" in config_names, (
         "session_configs should contain the MCP server 'workspace-fs'"

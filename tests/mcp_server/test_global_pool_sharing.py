@@ -29,7 +29,10 @@ class _FakeTransport:
 
     @asynccontextmanager
     async def connect_session(self, **kwargs: Any) -> Any:
-        """Track each connect_session() call."""
+        """Track connect_session calls.
+
+        Increments connect_count and _active_sessions on each call.
+        """
         self.connect_count += 1
         self._active_sessions += 1
         fake_session = MagicMock()
@@ -43,7 +46,9 @@ class TestGlobalConnectionPoolSharing:
     """Tests for sharing transports across multiple sessions."""
 
     async def test_http_transport_not_shared_directly(self) -> None:
-        """Given an HTTP config, when get_transport() is called twice,
+        """HTTP transport is not shared directly.
+
+        Given an HTTP config, when get_transport() is called twice,
         then each call returns a fresh transport whose connect_session()
         can be entered independently without interference.
 
@@ -80,7 +85,9 @@ class TestGlobalConnectionPoolSharing:
         await pool.shutdown_all()
 
     async def test_stdio_transport_owner_task_manages_lifecycle(self) -> None:
-        """Given a stdio config, when get_transport() is called,
+        """Stdio transport owner task manages lifecycle.
+
+        Given a stdio config, when get_transport() is called,
         then the owner task enters connect_session() once and
         get_transport() returns a transport that can be used
         without calling connect_session() again on the underlying transport.
@@ -110,7 +117,9 @@ class TestGlobalConnectionPoolSharing:
         await pool.shutdown_all()
 
     async def test_two_sessions_share_stdio_without_duplicate_connect(self) -> None:
-        """Given a stdio config, when two sessions call get_transport(),
+        """Two sessions share stdio without duplicate connect.
+
+        Given a stdio config, when two sessions call get_transport(),
         then the underlying transport's connect_session() is called
         only once (by the owner task), and both sessions can use it.
         """

@@ -243,8 +243,7 @@ class ACPSession:
                 params: RequestPermissionRequest,
             ) -> RequestPermissionResponse:
                 forwarded = params.model_copy(update={"session_id": self.session_id})
-                response = await self.requests.client.request_permission(forwarded)
-                return response
+                return await self.requests.client.request_permission(forwarded)
 
             self.agent.acp_permission_callback = permission_callback
 
@@ -470,7 +469,7 @@ class ACPSession:
                         connection_id = await self.acp_agent.connect_acp_mcp_server(server)
                         conn = self.acp_agent._mcp_manager.get_connection(connection_id)
                         if conn is None:
-                            raise RuntimeError(
+                            raise RuntimeError(  # noqa: TRY301
                                 f"AcpMcpConnection not found for {connection_id}"
                             )
                         from agentpool_server.acp_server.acp_mcp_transport import (
@@ -525,9 +524,7 @@ class ACPSession:
                 if entry.server_config.client_id not in seen_ids:
                     merged.append(entry)
                     seen_ids.add(entry.server_config.client_id)
-            new_snapshot = (existing or McpConfigSnapshot()).with_session_configs(
-                tuple(merged)
-            )
+            new_snapshot = (existing or McpConfigSnapshot()).with_session_configs(tuple(merged))
             self.agent._mcp_snapshot = new_snapshot
             self.log.info(
                 "Updated agent MCP snapshot with session configs",
@@ -581,9 +578,8 @@ class ACPSession:
             self.agent.state_updated.disconnect(self._on_state_updated)
 
         # Remove session-specific mutations from old agent before switching
-        if isinstance(self.agent, Agent):
-            if self.get_cwd_context in self.agent.sys_prompts.prompts:
-                self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        if isinstance(self.agent, Agent) and self.get_cwd_context in self.agent.sys_prompts.prompts:
+            self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
         # Create new session agent via SessionPool (pool-level agents removed)
         pool = self.agent_pool
@@ -693,8 +689,9 @@ class ACPSession:
                         deps=self,
                     )
                 else:
-                    raise RuntimeError(
-                        f"SessionPool is required for prompt processing in session {self.session_id}"
+                    raise RuntimeError(  # noqa: TRY301
+                        f"SessionPool is required for prompt processing "
+                        f"in session {self.session_id}"
                     )
 
                 async for event in stream:
@@ -796,9 +793,10 @@ class ACPSession:
                 self.agent.state_updated.disconnect(self._on_state_updated)
 
             # Clean up sys_prompts from THIS session's agent only
-            if isinstance(self.agent, Agent):
-                if self.get_cwd_context in self.agent.sys_prompts.prompts:
-                    self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            if isinstance(self.agent, Agent) and (
+                self.get_cwd_context in self.agent.sys_prompts.prompts
+            ):
+                self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
             # Unregister skill command callback to prevent memory leak
             if hasattr(self, "_skill_command_callback"):
@@ -806,10 +804,8 @@ class ACPSession:
                 if skill_registry is not None and hasattr(
                     skill_registry, "_command_change_handlers"
                 ):
-                    try:
+                    with suppress(ValueError):
                         skill_registry._command_change_handlers.remove(self._skill_command_callback)
-                    except ValueError:
-                        pass  # Already removed
 
             # Note: Individual agents are managed by the pool's lifecycle
             # The pool will handle agent cleanup when it's closed

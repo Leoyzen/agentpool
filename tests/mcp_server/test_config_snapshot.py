@@ -54,9 +54,7 @@ def session_entry(http_config: StreamableHTTPMCPServerConfig) -> McpConfigEntry:
 
 @pytest.fixture
 def skill_entry(stdio_config: StdioMCPServerConfig) -> McpConfigEntry:
-    return McpConfigEntry(
-        server_config=stdio_config, source="skill", skill_name="my-skill"
-    )
+    return McpConfigEntry(server_config=stdio_config, source="skill", skill_name="my-skill")
 
 
 # ---------------------------------------------------------------------------
@@ -76,9 +74,7 @@ def test_entry_creation_with_defaults(stdio_config: StdioMCPServerConfig) -> Non
 @pytest.mark.unit
 def test_entry_creation_with_skill_name(stdio_config: StdioMCPServerConfig) -> None:
     """McpConfigEntry stores skill_name when provided."""
-    entry = McpConfigEntry(
-        server_config=stdio_config, source="skill", skill_name="my-skill"
-    )
+    entry = McpConfigEntry(server_config=stdio_config, source="skill", skill_name="my-skill")
     assert entry.skill_name == "my-skill"
 
 

@@ -145,10 +145,10 @@ class AcpMcpConnection:
         try:
             result = await self._send_to_client(wrapped)
         except Exception as exc:
-            is_optional_mcp = (
-                isinstance(method, str)
-                and method.startswith(("resources/", "prompts/"))
-            )
+            is_optional_mcp = isinstance(method, str) and method.startswith((
+                "resources/",
+                "prompts/",
+            ))
             if is_optional_mcp:
                 logger.debug(
                     "MCP method not supported by client",

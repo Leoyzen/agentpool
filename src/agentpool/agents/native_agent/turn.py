@@ -125,7 +125,7 @@ class NativeTurn(Turn):
                     mapper.tool_kind_map[tool.name] = tool.category
                 if is_terminal_tool(tool):
                     terminal_tool_names.add(tool.name)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "get_tools() timed out after 5s, skipping tool kind map",
                 agent=self._agent.name,

@@ -48,7 +48,13 @@ class _FakeMCP:
     the source code provides and exposes the attributes tests need.
     """
 
-    def __init__(self, local: Any = None, allowed_tools: list[str] | None = None, id: str | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        local: Any = None,
+        allowed_tools: list[str] | None = None,
+        id: str | None = None,  # noqa: A002
+        **kwargs: Any,
+    ) -> None:
         self.local = local
         self.allowed_tools = allowed_tools
         self.id = id
@@ -107,8 +113,9 @@ async def test_mcpmanager_toolset_cache_shares_connection() -> None:
     )
     manager = MCPManager(servers=[config])
 
-    with patch("pydantic_ai.mcp.MCPToolset", _FakeToolset), patch(
-        "pydantic_ai.capabilities.MCP", _FakeMCP
+    with (
+        patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
+        patch("pydantic_ai.capabilities.MCP", _FakeMCP),
     ):
         caps1 = await manager.as_capability()
         caps2 = await manager.as_capability()
@@ -148,8 +155,9 @@ async def test_mcpmanager_toolset_cache_keyed_by_client_id() -> None:
     )
     manager = MCPManager(servers=[config_a, config_b])
 
-    with patch("pydantic_ai.mcp.MCPToolset", _FakeToolset), patch(
-        "pydantic_ai.capabilities.MCP", _FakeMCP
+    with (
+        patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
+        patch("pydantic_ai.capabilities.MCP", _FakeMCP),
     ):
         caps1 = await manager.as_capability()
         caps2 = await manager.as_capability()
@@ -241,8 +249,9 @@ async def test_non_acp_providers_excluded_from_aggregating_provider() -> None:
     assert len(agg.providers) == 0
 
     # Non-ACP capability should still be available via as_capability()
-    with patch("pydantic_ai.mcp.MCPToolset", _FakeToolset), patch(
-        "pydantic_ai.capabilities.MCP", _FakeMCP
+    with (
+        patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
+        patch("pydantic_ai.capabilities.MCP", _FakeMCP),
     ):
         caps = await manager.as_capability()
 
@@ -266,7 +275,14 @@ def test_no_dedup_hack_in_get_agentlet() -> None:
     removed; the test verifies it stays removed by checking the source
     of ``get_agentlet()`` for the variable name.
     """
-    agent_py = Path(__file__).resolve().parents[2] / "src" / "agentpool" / "agents" / "native_agent" / "agent.py"
+    agent_py = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "agentpool"
+        / "agents"
+        / "native_agent"
+        / "agent.py"
+    )
     source = agent_py.read_text()
 
     # The dedup hack variable must not exist anywhere in agent.py
@@ -277,8 +293,7 @@ def test_no_dedup_hack_in_get_agentlet() -> None:
 
     # Verify get_agentlet still calls as_capability() for MCP
     assert "await self.mcp.as_capability()" in source, (
-        "get_agentlet() should call 'await self.mcp.as_capability()' "
-        "to collect MCP capabilities."
+        "get_agentlet() should call 'await self.mcp.as_capability()' to collect MCP capabilities."
     )
 
 
@@ -322,8 +337,9 @@ async def test_engineer_librarian_mcp_tool_scoping() -> None:
         ],
     )
 
-    with patch("pydantic_ai.mcp.MCPToolset", _FakeToolset), patch(
-        "pydantic_ai.capabilities.MCP", _FakeMCP
+    with (
+        patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
+        patch("pydantic_ai.capabilities.MCP", _FakeMCP),
     ):
         pool_caps = await pool_mcp.as_capability()
         agent_caps = await agent_mcp.as_capability()
