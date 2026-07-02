@@ -160,7 +160,7 @@ class _FakeAgentPool:
         self.session_pool = _FakeSessionPool()
         self.all_agents = {agent.name: agent for agent in agents}
         self.storage = _FakeStorage()
-        self.mcp = MCPManager("fake-pool", _warn=False)
+        self.mcp = MCPManager("fake-pool")
         # Provide a minimal manifest with agents and teams dicts for
         # _resolve_scoped_team_nodes which accesses pool.manifest.agents
         # and pool.manifest.teams.
