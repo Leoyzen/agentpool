@@ -59,6 +59,8 @@ def mock_agent_pool() -> Mock:
     pool.main_agent.name = "test-agent"
     pool.manifest = Mock()
     pool._config_file_path = None
+    pool.mcp = Mock()
+    pool.mcp.servers = []
 
     async def _mock_run_stream(*args: Any, **kwargs: Any) -> Any:
         """Yield a minimal run event sequence for testing."""
@@ -100,6 +102,7 @@ def mock_agent_pool() -> Mock:
     mock_cfg = Mock()
     mock_cfg.name = "test-agent"
     mock_cfg.get_agent = Mock(return_value=mock_agent)
+    mock_cfg.get_mcp_servers = Mock(return_value=[])
     pool.manifest.agents = {"test-agent": mock_cfg}
     pool.get_agent = Mock(return_value=mock_agent)
 
