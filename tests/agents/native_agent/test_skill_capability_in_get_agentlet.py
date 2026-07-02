@@ -9,7 +9,7 @@ filtered skills).
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic_ai.capabilities import ProcessHistory
@@ -33,7 +33,7 @@ def mock_mcp_manager() -> MagicMock:
     mcp_mgr = MagicMock()
     cap1 = MagicMock()
     cap2 = MagicMock()
-    mcp_mgr.as_capability.return_value = [cap1, cap2]
+    mcp_mgr.as_capability = AsyncMock(return_value=[cap1, cap2])
     return mcp_mgr
 
 
