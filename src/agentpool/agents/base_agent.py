@@ -1144,7 +1144,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Yields:
             Stream events during execution
         """
-        from agentpool.orchestrator.core import drain_and_merge
+        from agentpool.orchestrator.core import EventBus
 
         # --- Path A: SessionPool available & outside a turn context ---
         pool_stream = self._maybe_pool_stream(
@@ -1162,11 +1162,14 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             return
 
         # --- Path B: Standalone / in-turn react loop ---
+        # Direct delegation to _run_stream_once() — no producer/consumer
+        # indirection through EventBus. NativeTurn already uses
+        # agent_run.next(node) which fires all pdai Capability hooks.
         (
             run_ctx,
             effective_session_id,
             local_bus,
-            stream,
+            _stream,  # unused — direct iteration, no EventBus subscription
             _created_local_bus,
         ) = await self._prepare_standalone_context(
             prompts=prompts,
@@ -1185,57 +1188,32 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         try:
             token = _current_run_ctx_var.set(run_ctx)
 
-            producer_error: BaseException | None = None
+            consumer_handler = self._get_consumer_handler(event_handlers)
+            consumer_context = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
 
-            async def _producer() -> None:
-                nonlocal producer_error
-                try:
-                    async for event in self._run_stream_once(
-                        run_ctx,
-                        *prompts,
-                        store_history=store_history,
-                        message_id=message_id,
-                        session_id=effective_session_id,
-                        parent_session_id=parent_session_id,
-                        parent_id=parent_id,
-                        message_history=message_history,
-                        input_provider=input_provider,
-                        wait_for_connections=wait_for_connections,
-                        deps=deps,
-                        event_handlers=event_handlers,
-                        _owns_event_bus=_created_local_bus,
-                    ):
-                        await local_bus.publish(effective_session_id, event)
-                except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
-                    producer_error = exc
-                finally:
-                    with anyio.CancelScope(shield=True):
-                        if _created_local_bus:
-                            await local_bus.close_session(effective_session_id)
-                        else:
-                            await local_bus.unsubscribe(effective_session_id, stream)
-
-            producer_task = asyncio.ensure_future(_producer())
-            try:
-                consumer_handler = self._get_consumer_handler(event_handlers)
-                consumer_context = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
-
-                async for envelope in drain_and_merge(stream):
-                    event = envelope.event
-                    with suppress(ValueError, TypeError, RuntimeError, KeyError, AttributeError):
-                        await consumer_handler(consumer_context, event)
-                    yield event
-                    if isinstance(event, StreamCompleteEvent):
-                        break
-                    if isinstance(event, RunErrorEvent):
-                        break
-            finally:
-                with suppress(asyncio.CancelledError):
-                    await producer_task
-
-            if producer_error is not None:
-                raise producer_error
+            async for event in self._run_stream_once(
+                run_ctx,
+                *prompts,
+                store_history=store_history,
+                message_id=message_id,
+                session_id=effective_session_id,
+                parent_session_id=parent_session_id,
+                parent_id=parent_id,
+                message_history=message_history,
+                input_provider=input_provider,
+                wait_for_connections=wait_for_connections,
+                deps=deps,
+                event_handlers=event_handlers,
+                _owns_event_bus=_created_local_bus,
+            ):
+                with suppress(ValueError, TypeError, RuntimeError, KeyError, AttributeError):
+                    await consumer_handler(consumer_context, event)
+                yield event
         finally:
+            # Close local EventBus if we created one
+            if _created_local_bus:
+                with anyio.CancelScope(shield=True):
+                    await local_bus.close_session(effective_session_id)
             self._cleanup_after_stream(run_ctx, token)
 
     async def _run_stream_once(

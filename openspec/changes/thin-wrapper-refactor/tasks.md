@@ -11,20 +11,20 @@
 
 ## 2. Phase 2: Run Stream Unification
 
-- [ ] 2.1 Write comparison tests — assert `RunExecutor` output matches `BaseAgent.run_stream()` event ordering for all event types
-- [ ] 2.2 Refactor `BaseAgent.run_stream()` to delegate to `RunExecutor` instead of using standalone producer/consumer pattern
-- [ ] 2.3 Remove or gut `BaseAgent._run_stream_once()` — no `asyncio.ensure_future` producer task
-- [ ] 2.4 Verify pdai Capability hooks fire on standalone run path (write test with a mock `wrap_node_run` Capability)
-- [ ] 2.5 Verify pdai `before_model_request` hook fires on standalone run path
-- [ ] 2.6 Verify pdai `after_node_run` hook fires on standalone run path
-- [ ] 2.7 Update all 44 callers of `run_stream` across protocol servers — ensure they work with unified path
-- [ ] 2.8 Update ACP server (`acp_server/handler.py`) — verify `ProtocolEventConsumerMixin` works with unified run
-- [ ] 2.9 Update OpenCode server (`opencode_server/session_pool_integration.py`)
-- [ ] 2.10 Update AG-UI server (`agui_server/server.py`)
-- [ ] 2.11 Update OpenAI API server (`openai_api_server/server.py`)
-- [ ] 2.12 Run `uv run pytest tests/agents/` — all agent tests pass
-- [ ] 2.13 Run `uv run pytest tests/servers/` — all server integration tests pass
-- [ ] 2.14 Run `uv run pytest -m acp_snapshot` — ACP snapshot tests pass
+- [x] 2.1 Write comparison tests — assert `RunExecutor` output matches `BaseAgent.run_stream()` event ordering for all event types
+- [x] 2.2 Refactor `BaseAgent.run_stream()` to delegate to `RunExecutor` instead of using standalone producer/consumer pattern
+- [x] 2.3 Remove or gut `BaseAgent._run_stream_once()` — no `asyncio.ensure_future` producer task
+- [x] 2.4 Verify pdai Capability hooks fire on standalone run path (write test with a mock `wrap_node_run` Capability)
+- [x] 2.5 Verify pdai `before_model_request` hook fires on standalone run path
+- [x] 2.6 Verify pdai `after_node_run` hook fires on standalone run path
+- [x] 2.7 Update all 44 callers of `run_stream` across protocol servers — ensure they work with unified path
+- [x] 2.8 Update ACP server (`acp_server/handler.py`) — verify `ProtocolEventConsumerMixin` works with unified run
+- [x] 2.9 Update OpenCode server (`opencode_server/session_pool_integration.py`)
+- [x] 2.10 Update AG-UI server (`agui_server/server.py`)
+- [x] 2.11 Update OpenAI API server (`openai_api_server/server.py`)
+- [x] 2.12 Run `uv run pytest tests/agents/` — all agent tests pass
+- [x] 2.13 Run `uv run pytest tests/servers/` — all server integration tests pass
+- [x] 2.14 Run `uv run pytest -m acp_snapshot` — ACP snapshot tests pass
 
 ## 3. Phase 3: EventBus Backpressure
 
