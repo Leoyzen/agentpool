@@ -164,7 +164,9 @@ class BashTool(Tool[ToolResult]):
         if not is_valid:
             logger.warning(
                 "Bash command validation failed",
-                command=command[:100] if len(command) > _MAX_COMMAND_LOG_LENGTH else command,
+                command=command[:_MAX_COMMAND_LOG_LENGTH]
+                if len(command) > _MAX_COMMAND_LOG_LENGTH
+                else command,
                 error=validation_error,
             )
             return ToolResult(

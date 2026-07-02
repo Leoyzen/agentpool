@@ -88,7 +88,11 @@ def _extract_provider(config: AnyModelConfig) -> str:  # noqa: PLR0911
                 return _extract_provider_from_identifier(first)
             if isinstance(
                 first,
-                StringModelConfig | AnthropicModelConfig | OpenAIModelConfig | GeminiModelConfig,
+                StringModelConfig
+                | AnthropicModelConfig
+                | OpenAIModelConfig
+                | GeminiModelConfig
+                | FallbackModelConfig,
             ):
                 return _extract_provider(first)
             return "unknown"
