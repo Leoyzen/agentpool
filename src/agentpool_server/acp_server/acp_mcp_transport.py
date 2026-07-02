@@ -83,8 +83,8 @@ class AcpMcpTransport(ClientTransport):
 
         session_kwargs.pop("read_timeout_seconds", None)
         session = ClientSession(
-            pair.to_session_receive,  # type: ignore[arg-type]
-            pair.from_session_send,  # type: ignore[arg-type]
+            pair.to_session_receive,
+            pair.from_session_send,
             read_timeout_seconds=timedelta(seconds=self._timeout),
             **session_kwargs,
         )

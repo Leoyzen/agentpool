@@ -243,7 +243,7 @@ class AcpMcpConnection:
 
         for pair in list(self._session_streams.values()):
             with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
-                await pair.to_session_send.send(session_msg)  # type: ignore[arg-type]
+                await pair.to_session_send.send(session_msg)
 
     async def handle_client_message(self, message: dict[str, Any]) -> None:
         """Handle an incoming mcp/message from the client by broadcasting to all sessions."""

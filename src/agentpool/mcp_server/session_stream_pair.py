@@ -8,7 +8,7 @@ instances can coexist without stream contention.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import anyio
 
@@ -29,10 +29,10 @@ class SessionStreamPair:
         from_session_receive: Read end consumed by the forwarder task.
     """
 
-    to_session_send: MemoryObjectSendStream
-    to_session_receive: MemoryObjectReceiveStream
-    from_session_send: MemoryObjectSendStream
-    from_session_receive: MemoryObjectReceiveStream
+    to_session_send: MemoryObjectSendStream[Any]
+    to_session_receive: MemoryObjectReceiveStream[Any]
+    from_session_send: MemoryObjectSendStream[Any]
+    from_session_receive: MemoryObjectReceiveStream[Any]
 
     async def close(self) -> None:
         """Close all four streams."""

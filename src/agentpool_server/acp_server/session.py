@@ -27,6 +27,7 @@ from acp.schema import AvailableCommand, ClientCapabilities
 from acp.schema.mcp import AcpMcpServer
 from agentpool import Agent, AgentPool
 from agentpool.agents.acp_agent import ACPAgent
+from agentpool.agents.events.events import ToastInfo
 from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
 from agentpool.log import get_logger
 from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
@@ -49,14 +50,13 @@ if TYPE_CHECKING:
 
     from acp import Client, RequestPermissionRequest, RequestPermissionResponse
     from acp.schema import (
-        AvailableCommandsUpdate,
         ContentBlock,
         Implementation,
         McpServer,
         StopReason,
         Usage,
     )
-    from agentpool.agents.base_agent import BaseAgent
+    from agentpool.agents.base_agent import BaseAgent, StateUpdate
     from agentpool.common_types import PathReference
     from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
     from agentpool_server.acp_server.session_manager import ACPSessionManager
@@ -360,9 +360,7 @@ class ACPSession:
             self._notify_command_update()
             self.log.info("Registered manifest commands", count=cmd_count)
 
-    async def _on_state_updated(
-        self, state: ModeInfo | ModelInfo | AvailableCommandsUpdate | ConfigOptionChanged
-    ) -> None:
+    async def _on_state_updated(self, state: StateUpdate) -> None:
         """Handle state update signal from agent - forward to ACP client."""
         from acp.schema import (
             AvailableCommandsUpdate,
@@ -385,6 +383,9 @@ class ACPSession:
                 self._remote_commands = list(cmds)
                 await self.send_available_commands_update()
                 self.log.debug("Merged and sent commands update to client")
+                return
+            case ToastInfo():
+                self.log.debug("Received ToastInfo, ignoring")
                 return
             case ConfigOptionChanged(config_id=config_id, value_id=value_id):
                 # Get full config_options from agent (required by ACP protocol)
@@ -414,7 +415,7 @@ class ACPSession:
         if not self.client_capabilities.terminal:
             import platform
 
-            self.acp_env._os_type = platform.system()  # type: ignore[attr-defined]
+            self.acp_env._os_type = platform.system()  # type: ignore[assignment]
         await self.acp_env.__aenter__()
 
     def _make_provider_name(self, display_name: str) -> str:

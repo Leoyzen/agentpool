@@ -270,7 +270,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # Override conversation with Agent-specific MessageHistory (with storage, etc.)
         resources = list(resources)
         if knowledge:
-            resources.extend(knowledge.get_resources())
+            resources.extend(knowledge.get_resources())  # type: ignore[arg-type]
         manifest = agent_pool.manifest if agent_pool else AgentsManifest()
         storage = agent_pool.storage if agent_pool else StorageManager()
         self.conversation = MessageHistory(
@@ -1090,7 +1090,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         turn = NativeTurn(
             agent=self,
-            prompts=list(prompts),
+            prompts=list(prompts),  # type: ignore[arg-type]
             run_ctx=run_ctx,
             message_history=model_messages,
             parent_id=user_msg.message_id,
@@ -1137,7 +1137,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
     def create_turn(
         self,
-        prompts: list[str],
+        prompts: list[UserContent],
         run_ctx: AgentRunContext,
         message_history: list[ModelMessage],
     ) -> Turn:
@@ -1156,7 +1156,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         message_history = inject_cancelled_tool_results(message_history)
         return NativeTurn(
             agent=self,
-            prompts=prompts,
+            prompts=prompts,  # type: ignore[arg-type]
             run_ctx=run_ctx,
             message_history=message_history,
         )

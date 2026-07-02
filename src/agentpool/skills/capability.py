@@ -261,7 +261,7 @@ class SkillCapability(AbstractCapability[AgentDepsT]):
                 init_timeout=server_config.timeout,
                 read_timeout=server_config.timeout,
             )
-            toolsets.append(toolset)
+            toolsets.append(toolset)  # type: ignore[arg-type]
         return toolsets
 
     async def _build_mcp_toolsets_legacy_session(

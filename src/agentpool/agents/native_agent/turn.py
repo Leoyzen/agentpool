@@ -35,6 +35,7 @@ from agentpool.tools.base import is_terminal_tool
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from pydantic_ai import PydanticAgent
     from pydantic_ai.messages import ModelMessage
 
     from agentpool.agents.context import AgentRunContext
@@ -99,7 +100,7 @@ class NativeTurn(Turn):
         Raises:
             asyncio.CancelledError: If the turn is cancelled mid-execution.
         """
-        agentlet = await self._agent.get_agentlet(
+        agentlet: PydanticAgent[Any, Any] = await self._agent.get_agentlet(
             model=None,
             output_type=None,
             run_ctx=self._run_ctx,

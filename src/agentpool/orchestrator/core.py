@@ -250,7 +250,7 @@ def _is_immediate(event: Any) -> bool:
             return False
 
 
-def _merge_key(event: Any) -> tuple[str, str] | None:  # noqa: PLR0911
+def _merge_key(event: Any) -> tuple[str, str | None] | None:  # noqa: PLR0911
     """Compute the coalescing merge key for an event.
 
     Returns:
@@ -307,7 +307,7 @@ def _merge_tool_call_deltas(events: list[PartDeltaEvent]) -> PartDeltaEvent:
     Uses first event's index and tool_call_id.
     """
     parts: list[str] = []
-    tool_call_id = ""
+    tool_call_id: str | None = None
     for event in events:
         delta = event.delta
         if isinstance(delta, ToolCallPartDelta) and isinstance(delta.args_delta, str):
@@ -379,6 +379,7 @@ def _merge_envelopes(envelopes: list[EventEnvelope]) -> list[EventEnvelope]:
             result.append(group_list[-1])
         else:
             events = [env.event for env in group_list]
+            merged: PartDeltaEvent | ToolCallProgressEvent
             match key[0]:
                 case "delta_text":
                     merged = _merge_text_deltas(events)
@@ -444,7 +445,7 @@ async def drain_and_merge(
         # Drain all immediately-available items without blocking.
         while True:
             try:
-                item = stream.receive_nowait()
+                item = stream.receive_nowait()  # type: ignore[attr-defined]
             except anyio.WouldBlock:
                 break
             except (anyio.EndOfStream, anyio.ClosedResourceError):
@@ -669,7 +670,7 @@ class EventBus:
                     await send_stream.send(envelope)
             except TimeoutError:
                 try:
-                    send_stream.send_nowait(envelope)
+                    send_stream.send_nowait(envelope)  # type: ignore[attr-defined]
                 except anyio.WouldBlock:
                     dead_streams.append(send_stream)
             except (anyio.BrokenResourceError, anyio.ClosedResourceError):
@@ -995,7 +996,7 @@ class SessionController:
                         cfg = cfg.model_copy(update={"name": agent_name})
 
                     with ConfigContextManager(self.pool._config_file_path):
-                        agent: Agent[Any, Any] = cfg.get_agent(
+                        agent = cfg.get_agent(
                             input_provider=input_provider,
                             pool=self.pool,
                         )
@@ -1092,7 +1093,7 @@ class SessionController:
                     cfg = cfg.model_copy(update={"name": agent_name})
 
                 with ConfigContextManager(self.pool._config_file_path):
-                    agent: Agent[Any, Any] = cfg.get_agent(
+                    agent = cfg.get_agent(
                         input_provider=input_provider,
                         pool=self.pool,
                     )
@@ -1186,8 +1187,8 @@ class SessionController:
                     session_configs=(),
                     skill_configs=(),
                 )
-                agent._mcp_snapshot = snapshot
-                agent._session_connection_pool = _SessionConnectionPool(session_id)
+                agent._mcp_snapshot = snapshot  # type: ignore[attr-defined]
+                agent._session_connection_pool = _SessionConnectionPool(session_id)  # type: ignore[attr-defined]
 
                 # Add non-MCP pool-level providers (skills instruction
                 # and skills tools). MCP no longer goes through providers.
@@ -2247,7 +2248,7 @@ class SessionPool:
         input_provider = session.input_provider if session else None
 
         with ConfigContextManager(self.pool._config_file_path):
-            agent = cfg.get_agent(
+            agent: BaseAgent[Any, Any] = cfg.get_agent(
                 input_provider=input_provider,
                 pool=self.pool,
             )
@@ -2803,16 +2804,16 @@ class SessionPool:
         bus_stream = await self.event_bus.subscribe(session_id, scope=scope)
         gen = run_handle.start(content)
         try:
-            async for event in gen:
+            async for evt in gen:
                 # Drain any tool-published events from EventBus before
                 # yielding the start() event. This ensures SpawnSessionStart
                 # and similar events appear before the StreamCompleteEvent.
                 with contextlib.suppress(anyio.WouldBlock):
                     while True:
-                        envelope = bus_stream.receive_nowait()
+                        envelope = bus_stream.receive_nowait()  # type: ignore[attr-defined]
                         yield envelope.event
-                yield event
-                if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                yield evt
+                if isinstance(evt, StreamCompleteEvent | RunErrorEvent):
                     break
         finally:
             await gen.aclose()

@@ -15,7 +15,7 @@ based on configuration.
 
 Usage:
     async with graph.iter(...) as graph_run:
-        adapter = GraphStreamingAdapter(
+    adapter = GraphStreamingAdapter(
             graph_run,
             session_id=session_id,
             agent_name="my_agent",
@@ -33,7 +33,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Sequence
 from contextlib import suppress
-from typing import Any, TypeVar, final
+from typing import Any, final
 from uuid import uuid4
 
 from pydantic_graph.graph_builder import EndMarker, ErrorMarker, GraphRun
@@ -55,10 +55,6 @@ from agentpool.messaging.messages import ChatMessage
 
 logger = get_logger(__name__)
 
-StateT = TypeVar("StateT")
-DepsT = TypeVar("DepsT")
-OutputT = TypeVar("OutputT")
-
 
 @final
 class StepEventCollector:
@@ -76,7 +72,7 @@ class StepEventCollector:
 
     def __init__(
         self,
-        adapter: GraphStreamingAdapter[Any, Any, Any],
+        adapter: GraphStreamingAdapter,
         *,
         step_name: str,
         depth: int = 0,
@@ -150,7 +146,7 @@ class StepEventCollector:
 
 
 @final
-class GraphStreamingAdapter[StateT, DepsT, OutputT]:
+class GraphStreamingAdapter:
     """Adapts a ``GraphRun`` iterator to AgentPool ``RichAgentStreamEvent`` types.
 
     The adapter runs graph iteration in a background task and feeds events
@@ -176,7 +172,7 @@ class GraphStreamingAdapter[StateT, DepsT, OutputT]:
 
     def __init__(
         self,
-        graph_run: GraphRun[StateT, DepsT, OutputT],
+        graph_run: GraphRun,
         *,
         session_id: str,
         agent_name: str,
@@ -196,7 +192,7 @@ class GraphStreamingAdapter[StateT, DepsT, OutputT]:
         self._event_queue: asyncio.Queue[RichAgentStreamEvent[Any] | None] = asyncio.Queue()
         self._iteration_done = asyncio.Event()
         self._iteration_error: BaseException | None = None
-        self._final_value: OutputT | None = None
+        self._final_value: Any | None = None
 
     def create_collector(self, step_name: str, depth: int = 0) -> StepEventCollector:
         """Create an event collector for a step.
@@ -308,8 +304,8 @@ class GraphStreamingAdapter[StateT, DepsT, OutputT]:
             self._iteration_done.set()
 
 
-async def adapt_graph_run[StateT, DepsT, OutputT](
-    graph_run: GraphRun[StateT, DepsT, OutputT],
+async def adapt_graph_run(
+    graph_run: GraphRun,
     *,
     session_id: str,
     agent_name: str,
