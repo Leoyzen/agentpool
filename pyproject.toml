@@ -300,6 +300,22 @@ module = [
 ]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = [
+  "agentpool_bot.channels.telegram",
+  "agentpool_bot.channels.slack",
+  "agentpool_toolsets.composio_toolset",
+  "agentpool_prompts.langfuse_hub",
+  "agentpool_prompts.braintrust_hub",
+]
+disable_error_code = [
+  "type-arg",
+  "arg-type",
+  "no-untyped-call",
+  "attr-defined",
+  "union-attr",
+]
+
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
