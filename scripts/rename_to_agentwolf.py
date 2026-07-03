@@ -14,13 +14,9 @@ Pre-requisites:
 
 What this script does:
     1. Rename src/ directories (agentpool → agentwolf, agentpool_* → agentwolf_*)
-    2. Replace all Python imports (from agentpool → from agentwolf)
-    3. Update pyproject.toml (package names, entry points, scripts)
-    4. Update YAML configs in site/examples/ and docs/
-    5. Update Markdown documentation
-    6. Update mkdocs.yml
-    7. Update .github/workflows/ CI references
-    8. Update docstrings and inline comments
+    2. Replace all references in .py/.toml/.yml/.md/.json/etc files
+    3. Verify entry point files exist post-rename
+    4. Print verification checklist
 
 What this script does NOT do:
     - Rename the GitHub repository (do this separately after merge)
@@ -83,18 +79,24 @@ FILE_PATTERNS = [
     "*.json",
 ]
 
-EXCLUDE_DIRS = {
-    ".git",
-    ".venv",
-    "__pycache__",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".mypy_cache",
-    "node_modules",
-    ".codegraph",
-    "openspec/changes",  # Don't rename historical spec docs
-    ".omo",  # Don't rename evidence files
-}
+# Pre-compiled as Path objects for robust is_relative_to() checks.
+# Using string "in filepath.parts" would fail for multi-segment paths
+# like "openspec/changes" because parts splits them into ("openspec", "changes").
+EXCLUDE_DIRS: list[Path] = [
+    Path(d)
+    for d in [
+        ".git",
+        ".venv",
+        "__pycache__",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".mypy_cache",
+        "node_modules",
+        ".codegraph",
+        "openspec/changes",  # Don't rename historical spec docs
+        ".omo",  # Don't rename evidence files
+    ]
+]
 
 
 def rename_directories(dry_run: bool) -> None:
@@ -104,6 +106,9 @@ def rename_directories(dry_run: bool) -> None:
         old_path = REPO_ROOT / old
         new_path = REPO_ROOT / new
         if old_path.exists():
+            if new_path.exists():
+                print(f"  ERROR: {new} already exists — refusing to move {old} inside it")
+                sys.exit(1)
             print(f"  {old} → {new}")
             if not dry_run:
                 shutil.move(str(old_path), str(new_path))
@@ -117,7 +122,7 @@ def replace_references(dry_run: bool) -> None:
     files_changed = 0
     for pattern in FILE_PATTERNS:
         for filepath in REPO_ROOT.rglob(pattern):
-            if any(part in EXCLUDE_DIRS for part in filepath.parts):
+            if any(filepath.is_relative_to(REPO_ROOT / d) for d in EXCLUDE_DIRS):
                 continue
             try:
                 content = filepath.read_text(encoding="utf-8")
@@ -135,22 +140,9 @@ def replace_references(dry_run: bool) -> None:
     print(f"  Total files {'would be ' if dry_run else ''}changed: {files_changed}")
 
 
-def update_pyproject(dry_run: bool) -> None:
-    """Update pyproject.toml with new package names."""
-    print("\nStep 3: Updating pyproject.toml module names")
-    pyproject = REPO_ROOT / "pyproject.toml"
-    if pyproject.exists():
-        content = pyproject.read_text(encoding="utf-8")
-        for old, new in REPLACEMENTS:
-            content = content.replace(old, new)
-        if not dry_run:
-            pyproject.write_text(content, encoding="utf-8")
-        print("  pyproject.toml updated")
-
-
 def check_entry_points() -> None:
     """Check that renamed entry point files exist."""
-    print("\nStep 4: Updating entry points")
+    print("\nStep 3: Checking entry points")
     entry_files = [
         REPO_ROOT / "src" / "agentwolf" / "__init__.py",
         REPO_ROOT / "src" / "agentwolf_cli" / "__init__.py",
@@ -158,12 +150,14 @@ def check_entry_points() -> None:
     ]
     for ef in entry_files:
         if ef.exists():
-            print(f"  Checking: {ef.relative_to(REPO_ROOT)}")
+            print(f"  OK: {ef.relative_to(REPO_ROOT)}")
+        else:
+            print(f"  WARNING: {ef.relative_to(REPO_ROOT)} not found after rename!")
 
 
 def print_verification_checklist() -> None:
     """Print post-rename verification steps."""
-    print("\nStep 5: Verification checklist")
+    print("\nStep 4: Verification checklist")
     print("  [ ] Run: uv sync")
     print("  [ ] Run: uv run pytest")
     print("  [ ] Run: uv run ruff check src/")
@@ -182,7 +176,6 @@ def main() -> None:
 
     rename_directories(dry_run)
     replace_references(dry_run)
-    update_pyproject(dry_run)
     check_entry_points()
     print_verification_checklist()
 
