@@ -545,8 +545,12 @@ class EventBus:
                     self._stream_pairs.pop(sid, None)
 
         for stream in dead_streams:
-            with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
+            try:
                 await stream.aclose()
+            except (anyio.BrokenResourceError, anyio.ClosedResourceError):
+                pass
+            except Exception:
+                logger.exception("Failed to close dead stream")
 
     async def publish(self, session_id: str, event: Any) -> None:
         """Publish an event to all subscribers for a session.
@@ -580,8 +584,12 @@ class EventBus:
             send_streams = [send_stream for send_stream, _scope in subscribers]
 
         for send_stream in send_streams:
-            with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
+            try:
                 await send_stream.aclose()
+            except (anyio.BrokenResourceError, anyio.ClosedResourceError):
+                pass
+            except Exception:
+                logger.exception("Failed to close send stream during session close")
 
     async def get_subscriber_counts(self) -> dict[str, int]:
         """Get subscriber counts per session.

@@ -180,7 +180,7 @@ class SessionPool:
             ValueError: If a member name is not found in the manifest
                 agents or teams sections.
         """
-        from agentpool.utils.identifiers import generate_session_id
+        from agentpool_config.context import ConfigContextManager
 
         member_names = [team_config.get_member_name(m) for m in team_config.members]
 
@@ -188,11 +188,14 @@ class SessionPool:
         for member_name in member_names:
             cfg = self.pool.manifest.agents.get(member_name)
             if cfg is not None:
-                member_session_id = generate_session_id()
-                agent = await self.sessions.get_or_create_session_agent(
-                    member_session_id,
-                    agent_name=member_name,
-                )
+                # Create a stateless agent without entering its async context.
+                # This avoids spawning MCP subprocesses for temporary template
+                # agents — actual per-session agents are created later by
+                # Team._resolve_scoped_team_nodes() during execution.
+                if cfg.name is None:
+                    cfg = cfg.model_copy(update={"name": member_name})
+                with ConfigContextManager(self.pool._config_file_path):
+                    agent: MessageNode[Any, Any] = cfg.get_agent(pool=self.pool)
                 nodes.append(agent)
             elif member_name in self.pool.manifest.teams:
                 nested_config = self.pool.manifest.teams[member_name]
@@ -621,21 +624,33 @@ class SessionPool:
                     self.cancel_run(run_handle.run_id)
                     await asyncio.sleep(0.1)
 
-        await self.sessions.close_session(session_id)
-        # EventBus and message cache cleanup may be interrupted by
-        # CancelledError from garbage-collected async generator cleanup
-        # (e.g., when a consumer broke from run_stream without closing
-        # the generator). Suppress these spurious cancellations so
-        # shutdown proceeds.
         try:
-            await self.event_bus.close_session(session_id)
-        except asyncio.CancelledError:
-            logger.warning(
-                "EventBus close_session interrupted by spurious cancellation",
+            await self.sessions.close_session(session_id)
+        except Exception:
+            logger.exception(
+                "Failed to close session in controller",
                 session_id=session_id,
             )
+        finally:
+            # EventBus and message cache cleanup may be interrupted by
+            # CancelledError from garbage-collected async generator cleanup
+            # (e.g., when a consumer broke from run_stream without closing
+            # the generator). Suppress these spurious cancellations so
+            # shutdown proceeds.
+            try:
+                await self.event_bus.close_session(session_id)
+            except asyncio.CancelledError:
+                logger.warning(
+                    "EventBus close_session interrupted by spurious cancellation",
+                    session_id=session_id,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to close event bus session",
+                    session_id=session_id,
+                )
 
-        self._message_cache.pop(session_id, None)
+            self._message_cache.pop(session_id, None)
 
     async def _await_inflight_checkpoints(self) -> None:
         """Wait for any in-flight checkpoint operations to complete.

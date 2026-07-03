@@ -63,16 +63,17 @@ repos:
         types: [python]
         require_serial: true
 
-  # Phase 4: Tests (most expensive, system command)
+  # Phase 4: Tests (fast subset only — full suite runs in CI)
   - repo: local
     hooks:
       - id: pytest-check
         name: pytest-check
-        entry: uv run pytest
+        entry: uv run pytest tests/orchestrator/ -x -q --timeout=30
         language: system
         types: [python]
         pass_filenames: false
         require_serial: true
+        stages: [pre-commit]
 
   # Phase 5: Commit message validation (final)
   - repo: https://github.com/commitizen-tools/commitizen

@@ -207,6 +207,7 @@ class SessionController:
         self._lock = asyncio.Lock()
         self._session_ttl_seconds: float = DEFAULT_SESSION_TTL_SECONDS
         self._cleanup_task: asyncio.Task[Any] | None = None
+        self._deferred_cleanup_task: asyncio.Task[Any] | None = None
         self._mcp_max_processes: int = 100
         self._mcp_process_count: int = 0
         self._runs: dict[str, RunHandle] = {}
@@ -390,6 +391,9 @@ class SessionController:
         Returns:
             The agent instance (per-session or shared).
         """
+        if not session_id or not session_id.strip():
+            raise ValueError("session_id cannot be empty or whitespace")
+
         async with self._lock:
             if session_id in self._session_agents:
                 agent = self._session_agents[session_id]
@@ -700,7 +704,13 @@ class SessionController:
             child_session = self._sessions.get(child_id)
             if child_session is not None and child_session.lifecycle_policy == "independent":
                 continue
-            await self._close_session_unlocked(child_id)
+            try:
+                await self._close_session_unlocked(child_id)
+            except Exception:
+                logger.exception(
+                    "Failed to close child session during cascade close",
+                    child_id=child_id,
+                )
         self._session_agents.pop(session_id, None)
         self._sessions.pop(session_id, None)
         if self.store is not None:
@@ -887,7 +897,13 @@ class SessionController:
                         and child_session.lifecycle_policy == "independent"
                     ):
                         continue
-                    await self._close_session_unlocked(child_id)
+                    try:
+                        await self._close_session_unlocked(child_id)
+                    except Exception:
+                        logger.exception(
+                            "Failed to close child session during cascade close",
+                            child_id=child_id,
+                        )
 
             agent = self._session_agents.pop(session_id, None)
             self._sessions.pop(session_id, None)
@@ -1280,17 +1296,38 @@ class SessionController:
         return []
 
     async def start_cleanup_task(self) -> None:
-        """Start background task to periodically clean up expired sessions."""
+        """Start background tasks for session cleanup.
+
+        Launches two background tasks:
+        - ``_cleanup_loop``: periodically closes expired sessions (TTL-based).
+        - ``_start_cleanup_loop``: periodically expires stale deferred calls.
+
+        Both tasks are stored in ``_background_tasks`` to prevent garbage
+        collection mid-execution (per asyncio.create_task best practice).
+        """
         if self._cleanup_task is None:
-            self._cleanup_task = asyncio.create_task(self._cleanup_loop())
+            task = asyncio.create_task(self._cleanup_loop())
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+            self._cleanup_task = task
+        if self._deferred_cleanup_task is None:
+            task = asyncio.create_task(self._start_cleanup_loop())
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+            self._deferred_cleanup_task = task
 
     async def stop_cleanup_task(self) -> None:
-        """Stop the cleanup background task."""
+        """Stop both background cleanup tasks."""
         if self._cleanup_task is not None:
             self._cleanup_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._cleanup_task
             self._cleanup_task = None
+        if self._deferred_cleanup_task is not None:
+            self._deferred_cleanup_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._deferred_cleanup_task
+            self._deferred_cleanup_task = None
 
     async def _cleanup_loop(self) -> None:
         """Periodically scan and close expired sessions.

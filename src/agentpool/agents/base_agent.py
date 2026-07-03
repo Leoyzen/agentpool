@@ -1162,11 +1162,15 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             return
 
         # --- Path B: Standalone / in-turn react loop ---
+        # Producer/consumer pattern: _run_stream_once() publishes events to
+        # local_bus, consumer drains via drain_and_merge(). This captures
+        # events that bypass _stream_events() (e.g. ToolCallProgressEvent
+        # from report_progress, SpawnSessionStart from create_child_session).
         (
             run_ctx,
             effective_session_id,
             local_bus,
-            stream,
+            queue,
             _created_local_bus,
         ) = await self._prepare_standalone_context(
             prompts=prompts,
@@ -1213,14 +1217,14 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                         if _created_local_bus:
                             await local_bus.close_session(effective_session_id)
                         else:
-                            await local_bus.unsubscribe(effective_session_id, stream)
+                            await local_bus.unsubscribe(effective_session_id, queue)
 
             producer_task = asyncio.ensure_future(_producer())
             try:
                 consumer_handler = self._get_consumer_handler(event_handlers)
                 consumer_context = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
 
-                async for envelope in drain_and_merge(stream):
+                async for envelope in drain_and_merge(queue):
                     event = envelope.event
                     with suppress(ValueError, TypeError, RuntimeError, KeyError, AttributeError):
                         await consumer_handler(consumer_context, event)
