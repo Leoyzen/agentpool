@@ -66,11 +66,11 @@
 
 ## 5. Phase 5: ToolProvider Deprecation
 
-- [ ] 5.1 Define `ToolsetFactory` protocol in `src/agentpool/tools/factory.py` — `async def create_toolset() -> Toolset`
+- [x] 5.1 Define `ToolsetFactory` protocol in `src/agentpool/tools/factory.py` — `async def create_toolset() -> Toolset`
 - [ ] 5.2 Create `MCPToolsetFactory` — wraps MCP server, produces pdai `Toolset` with MCP tools
 - [ ] 5.3 Create `LocalSkillToolsetFactory` — discovers filesystem skills, produces `Toolset`
 - [ ] 5.4 Create `PoolToolsetFactory` — exposes agent/team delegation as subagent tools
-- [ ] 5.5 Create `ToolsetFactory` adapters — wrap old `ResourceProvider` methods for incremental migration
+- [x] 5.5 Create `ToolsetFactory` adapters — wrap old `ResourceProvider` methods for incremental migration
 - [ ] 5.6 Migrate `MCPResourceProvider` callers (25) to `MCPToolsetFactory`
 - [ ] 5.7 Migrate `LocalResourceProvider` callers (44) to `LocalSkillToolsetFactory`
 - [ ] 5.8 Migrate `PoolResourceProvider` callers (1) to `PoolToolsetFactory`
@@ -106,16 +106,16 @@
 
 ## 7. Phase 7: Server Modularization
 
-- [ ] 7.1 Add `import-linter` as dev dependency in `pyproject.toml`
-- [ ] 7.2 Create `.importlinter` config or `[tool.importlinter]` in `pyproject.toml` — define forbidden contracts (core→app)
-- [ ] 7.3 Run `lint-imports` to get full list of violations (may be more than 4 known)
+- [x] 7.1 Add `import-linter` as dev dependency in `pyproject.toml`
+- [x] 7.2 Create `.importlinter` config or `[tool.importlinter]` in `pyproject.toml` — define forbidden contracts (core→app)
+- [x] 7.3 Run `lint-imports` to get full list of violations — 80 direct violations across 3 contracts (8 server→cli/commands, 72 config→core, 0 acp→server direct); all documented in `ignore_imports` with `allow_indirect_imports = true` to keep CI green while preventing new direct violations
 - [ ] 7.4 Fix violation 1 — move code to core or invert dependency
 - [ ] 7.5 Fix violation 2 — move code to core or invert dependency
 - [ ] 7.6 Fix violation 3 — move code to core or invert dependency
 - [ ] 7.7 Fix violation 4 — move code to core or invert dependency
 - [ ] 7.8 Fix any additional violations discovered by `lint-imports`
 - [ ] 7.9 Add `lint-imports` to CI pipeline (`.github/workflows/`)
-- [ ] 7.10 Verify `lint-imports` passes with zero violations
+- [ ] 7.10 Verify `lint-imports` passes with zero violations (after removing all `ignore_imports` entries and `allow_indirect_imports`)
 - [ ] 7.11 Run `uv run pytest` — full test suite passes after import fixes
 
 ## 8. Phase 8: Rename to agentwolf
