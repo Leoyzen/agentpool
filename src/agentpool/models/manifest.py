@@ -21,6 +21,8 @@ from agentpool_config.commands import CommandConfig, StaticCommandConfig
 from agentpool_config.compaction import CompactionConfig
 from agentpool_config.context import ConfigContextManager
 from agentpool_config.converters import ConversionConfig
+from agentpool_config.graph_config import GraphConfig
+from agentpool_config.graph_translation import translate_config_to_graph
 from agentpool_config.mcp_server import BaseMCPServerConfig, MCPServerConfig
 from agentpool_config.observability import ObservabilityConfig
 from agentpool_config.output_types import StructuredResponseConfig
@@ -441,6 +443,14 @@ class AgentsManifest(Schema):
     Excluded from serialization.
     """
 
+    graph: GraphConfig | None = Field(default=None)
+    """Graph configuration for agent workflow definitions.
+
+    When set, defines the execution topology directly. When absent,
+    the manifest validator auto-translates from ``teams:`` and
+    ``connections:`` sections.
+    """
+
     model_config = ConfigDict(
         extra="allow",
         json_schema_extra={
@@ -774,15 +784,7 @@ class AgentsManifest(Schema):
 
     @model_validator(mode="after")
     def _populate_node_names(self) -> Self:
-        """Populate ``name`` on agent/team configs from their dict key.
-
-        When agents or teams are defined in YAML, the dict key (e.g.
-        ``worker:``) is the canonical identifier, but ``config.name``
-        stays ``None`` because ``NodeConfig`` is frozen and the field
-        defaults to ``None``.  This validator back-fills ``name`` so
-        that ``Agent.from_config()`` and graph step IDs use the correct
-        value instead of falling back to ``"native_agent"``.
-        """
+        """Populate ``name`` on agent/team configs from their dict key."""
         for name, config in self.agents.items():
             if config.name is None:
                 self.agents[name] = config.model_copy(update={"name": name})
@@ -790,6 +792,26 @@ class AgentsManifest(Schema):
             team_cfg = self.teams[name]
             if team_cfg.name is None:
                 self.teams[name] = team_cfg.model_copy(update={"name": name})
+        return self
+
+    @model_validator(mode="after")
+    def _auto_translate_teams_to_graph(self) -> Self:
+        """Auto-translate ``teams:`` and ``connections:`` to ``graph:``.
+
+        When a ``graph:`` section is already provided, it takes precedence
+        and no translation occurs. Otherwise, teams and agent connections
+        are translated to a unified ``GraphConfig``.
+        """
+        if self.graph is not None:
+            return self
+        all_nodes = self.nodes
+        translated = translate_config_to_graph(
+            agents=all_nodes,
+            teams=self.teams or None,
+            existing_graph=None,
+        )
+        if translated is not None:
+            self.graph = translated
         return self
 
     @model_validator(mode="after")

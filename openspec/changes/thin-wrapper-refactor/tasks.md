@@ -45,15 +45,15 @@
 
 ## 4. Phase 4: Team Cleanup
 
-- [ ] 4.1 Create `src/agentpool_config/graph_translation.py` module
-- [ ] 4.2 Implement `translate_team_to_graph()` for sequential teams — `members` → chained steps with implicit edges
-- [ ] 4.3 Implement `translate_team_to_graph()` for parallel teams — `members` → Fork/Join edges
-- [ ] 4.4 Map `shared_prompt` to step-level prompt in `GraphStepConfig`
-- [ ] 4.5 Map `member_timeout` to step-level timeout
-- [ ] 4.6 Map `member_prompt_templates` to per-step prompt templates
-- [ ] 4.7 Map `member_retry_attempts` and `member_retry_delay` (document dropped fields if no GraphConfig equivalent — see Open Question 8)
-- [ ] 4.8 Integrate translator into config loading — auto-translate when `teams:` present, `graph:` absent
-- [ ] 4.9 Write tests for translator covering all `TeamConfig` field combinations
+- [x] 4.1 Create `src/agentpool_config/graph_translation.py` module
+- [x] 4.2 Implement `translate_team_to_graph()` for sequential teams — `members` → chained steps with implicit edges
+- [x] 4.3 Implement `translate_team_to_graph()` for parallel teams — `members` → Fork/Join edges
+- [x] 4.4 Map `shared_prompt` to step-level prompt in `GraphStepConfig`
+- [x] 4.5 Map `member_timeout` to step-level timeout
+- [x] 4.6 Map `member_prompt_templates` to per-step prompt templates
+- [x] 4.7 Map `member_retry_attempts` and `member_retry_delay` (document dropped fields if no GraphConfig equivalent — see Open Question 8)
+- [x] 4.8 Integrate translator into config loading — auto-translate when `teams:` present, `graph:` absent
+- [x] 4.9 Write tests for translator covering all `TeamConfig` field combinations
 - [ ] 4.10 Test translator against all `teams:` YAML configs in `site/examples/`
 - [ ] 4.11 Remove `Team` class from `src/agentpool/delegation/team.py`
 - [ ] 4.12 Remove `TeamRun` class from `src/agentpool/delegation/teamrun.py`
