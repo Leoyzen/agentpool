@@ -41,7 +41,7 @@ repos:
         files: ^pyproject\.toml$
         require_serial: true
 
-  # Phase 3: Linting and type checking (system commands)
+  # Phase 3: Linting (ruff + config schema check, only staged files, ~2-3s)
   - repo: local
     hooks:
       - id: ruff
@@ -56,24 +56,28 @@ repos:
         language: system
         files: ^src/agentpool/config_resources/.*\.yml$|^docs/examples/.*/config\.yml$
         require_serial: true
-      - id: mypy
-        name: mypy
+
+  # Phase 4: pre-push — heavier checks, only when pushing (~30-60s)
+  # mypy and tests are too slow for per-commit; run on push as a safety net.
+  # Full suite (integration/slow/acp_snapshot) still runs in CI.
+  - repo: local
+    hooks:
+      - id: mypy-push
+        name: mypy (pre-push)
         entry: uv run mypy --fixed-format-cache
         language: system
         types: [python]
         require_serial: true
-
-  # Phase 4: Tests (fast subset only — full suite runs in CI)
-  - repo: local
-    hooks:
-      - id: pytest-check
-        name: pytest-check
-        entry: uv run pytest tests/orchestrator/ -x -q --timeout=30
+        pass_filenames: false
+        stages: [pre-push]
+      - id: pytest-unit-push
+        name: pytest unit (pre-push)
+        entry: uv run pytest -m unit -x -q --timeout=60
         language: system
         types: [python]
         pass_filenames: false
         require_serial: true
-        stages: [pre-commit]
+        stages: [pre-push]
 
   # Phase 5: Commit message validation (final)
   - repo: https://github.com/commitizen-tools/commitizen
