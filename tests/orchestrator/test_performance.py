@@ -30,16 +30,9 @@ if TYPE_CHECKING:
 # ============================================================================
 
 
-def _stream_empty(stream: asyncio.Queue) -> bool:
-    """Check if a memory receive stream has no buffered items."""
-    try:
-        stream.get_nowait()
-    except asyncio.QueueEmpty:
-        return True
-    except asyncio.QueueShutDown:
-        return True
-    else:
-        return False
+def _stream_empty(queue: asyncio.Queue[Any]) -> bool:
+    """Check if a subscriber queue has no buffered items."""
+    return queue.empty()
 
 
 @pytest.fixture
@@ -231,11 +224,11 @@ async def test_benchmark_turn_latency_under_load(
         await asyncio.gather(*[session_pool.close_session(sid) for sid in sids])
 
     print("\n=== Turn Latency Benchmark ===")
-    for label, metrics in results.items():
+    for label, metrics in results.items():  # type: ignore[assignment]
         print(
-            f"{label}: total={metrics['total_time_ms']:.1f}ms, "
-            f"avg_latency={metrics['avg_turn_latency_ms']:.2f}ms, "
-            f"throughput={metrics['throughput_turns_per_sec']:.1f} turns/s"
+            f"{label}: total={metrics['total_time_ms']:.1f}ms, "  # type: ignore[index]
+            f"avg_latency={metrics['avg_turn_latency_ms']:.2f}ms, "  # type: ignore[index]
+            f"throughput={metrics['throughput_turns_per_sec']:.1f} turns/s"  # type: ignore[index]
         )
 
     # Sanity: 100 sessions should complete in under 5 seconds
@@ -474,7 +467,7 @@ async def test_1000_concurrent_sessions_with_agents(
         await _attach_agent(session_pool, sid, mock_agent)
 
     # Subscribe to all sessions
-    queues: dict[str, asyncio.Queue] = {}
+    queues: dict[str, asyncio.Queue[Any]] = {}
     for i in range(session_count):
         sid = f"sess-{i}"
         queues[sid] = await session_pool.event_bus.subscribe(sid)

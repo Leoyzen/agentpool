@@ -344,13 +344,13 @@ class EventBus:
         Raises:
             ValueError: If ``overflow_policy`` is ``"block"`` or not a valid policy.
         """
-        if overflow_policy == "block":
-            raise ValueError(
-                "overflow_policy='block' is not supported on the publish path — "
-                "it would deadlock the run loop. Use 'drop_oldest', 'drop_newest', "
-                "or 'drop_subscriber' instead."
-            )
         if overflow_policy not in _VALID_OVERFLOW_POLICIES:
+            if str(overflow_policy) == "block":
+                raise ValueError(
+                    "overflow_policy='block' is not supported on the publish path — "
+                    "it would deadlock the run loop. Use 'drop_oldest', 'drop_newest', "
+                    "or 'drop_subscriber' instead."
+                )
             raise ValueError(
                 f"Invalid overflow_policy={overflow_policy!r}. "
                 f"Must be one of: {sorted(_VALID_OVERFLOW_POLICIES)}"

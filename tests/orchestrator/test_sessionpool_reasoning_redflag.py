@@ -5,6 +5,7 @@ through the SessionPool orchestration layer.
 """
 
 import asyncio
+from typing import Any
 
 from pydantic_ai.messages import (
     PartDeltaEvent,
@@ -20,9 +21,9 @@ from agentpool.agents.events import (
 from agentpool.orchestrator.core import EventBus
 
 
-async def _drain_queue(queue: asyncio.Queue) -> list:
+async def _drain_queue(queue: asyncio.Queue[Any]) -> list[Any]:
     """Drain all items from an asyncio.Queue until QueueShutDown."""
-    items: list = []
+    items: list[Any] = []
     while True:
         try:
             items.append(await queue.get())

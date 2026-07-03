@@ -77,7 +77,6 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from anyio.abc import Process
-    from anyio.streams.memory import MemoryObjectReceiveStream
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
     from pydantic_ai import ThinkingPart, ToolCallPart, UserContent
@@ -485,10 +484,6 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                     yield native_event
 
         tool_metadata: dict[str, dict[str, Any]] = {}
-        event_bus = run_ctx.event_bus
-        bus_stream: anyio.abc.ObjectReceiveStream[EventEnvelope] | None = None
-        if event_bus is not None:
-            bus_stream = await event_bus.subscribe(session_id)
 
         try:
             agent_ctx = self.get_context(run_ctx=run_ctx, input_provider=input_provider)
@@ -496,7 +491,6 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 send_stream, receive_stream = anyio.create_memory_object_stream(
                     max_buffer_size=1000
                 )
-                acp_done = anyio.Event()
 
                 async def _forward_acp_events() -> None:
                     try:
@@ -506,48 +500,15 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                             except (anyio.ClosedResourceError, anyio.BrokenResourceError):
                                 return
                     finally:
-                        acp_done.set()
-
-                async def _forward_secondary_events() -> None:
-                    try:
-                        if bus_stream is not None:
-                            while not acp_done.is_set():
-                                with anyio.move_on_after(0.05):
-                                    envelope = await bus_stream.receive()
-                                    await send_stream.send(envelope)
-                            while True:
-                                try:
-                                    envelope = cast(
-                                        "MemoryObjectReceiveStream[EventEnvelope]", bus_stream
-                                    ).receive_nowait()
-                                    await send_stream.send(envelope)
-                                except anyio.WouldBlock:
-                                    break
-                        else:
-                            logger.warning(
-                                "No EventBus stream available for ACP agent"
-                                " — secondary events will not be forwarded"
-                            )
-                            return
-                    except (
-                        anyio.EndOfStream,
-                        anyio.ClosedResourceError,
-                        anyio.BrokenResourceError,
-                    ):
-                        pass
-                    finally:
                         await send_stream.aclose()
 
-                # Forwarders run as background tasks; the consumer loop
-                # (with yield) runs after they start so events flow in
-                # real-time without blocking on a task group boundary.
+                # Do NOT subscribe to run_ctx.event_bus here: in standalone mode
+                # the producer publishes _stream_events() output back into the
+                # same local EventBus, creating a self-echo infinite loop.
                 _bg_tasks: set[asyncio.Task[Any]] = set()
                 task_a = asyncio.create_task(_forward_acp_events())
                 _bg_tasks.add(task_a)
                 task_a.add_done_callback(_bg_tasks.discard)
-                task_b = asyncio.create_task(_forward_secondary_events())
-                _bg_tasks.add(task_b)
-                task_b.add_done_callback(_bg_tasks.discard)
 
                 try:
                     async for raw_event in receive_stream:
@@ -594,15 +555,6 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         except asyncio.CancelledError:
             self.log.info("Stream cancelled via task cancellation")
             run_ctx.cancelled = True
-        finally:
-            if event_bus is not None and bus_stream is not None:
-                try:
-                    await event_bus.unsubscribe(session_id, bus_stream)
-                except Exception:
-                    self.log.exception(
-                        "Failed to unsubscribe from event bus during cleanup",
-                        session_id=session_id,
-                    )
 
         if run_ctx.cancelled:
             message = ChatMessage[str](

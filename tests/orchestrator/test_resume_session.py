@@ -17,16 +17,9 @@ from agentpool.orchestrator.core import SessionPool
 from agentpool.sessions.models import PendingDeferredCall, SessionData
 
 
-def _stream_empty(stream: asyncio.Queue) -> bool:
-    """Check if a memory receive stream has no buffered items."""
-    try:
-        stream.get_nowait()
-    except asyncio.QueueEmpty:
-        return True
-    except asyncio.QueueShutDown:
-        return True
-    else:
-        return False
+def _stream_empty(queue: asyncio.Queue[Any]) -> bool:
+    """Check if a subscriber queue has no buffered items."""
+    return queue.empty()
 
 
 pytestmark = pytest.mark.unit

@@ -35,9 +35,9 @@ def make_event() -> Any:
     return _make
 
 
-async def _drain_queue(queue: asyncio.Queue) -> list:
+async def _drain_queue(queue: asyncio.Queue[Any]) -> list[Any]:
     """Drain all items from a queue until QueueShutDown."""
-    items: list = []
+    items: list[Any] = []
     while True:
         try:
             items.append(await queue.get())
@@ -79,11 +79,11 @@ async def test_backpressure_no_deadlock_with_slow_consumer(
     assert len(run_ids) <= 50
 
 
-async def test_backpressure_drops_subscriber_when_buffer_full(
+async def test_backpressure_retains_subscriber_with_drop_oldest(
     event_bus: EventBus,
     make_event: Any,
 ) -> None:
-    """A subscriber whose buffer is full and can't be drained gets dropped.
+    """A subscriber whose buffer is full survives with drop_oldest policy.
 
     With the default drop_oldest policy, the subscriber is NOT dropped —
     the oldest item is evicted to make room. This test verifies that

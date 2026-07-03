@@ -202,7 +202,7 @@ async def test_create_child_session_auto_emits_spawn_with_tool_call_id() -> None
         tool_call_id="test-123",
     )
 
-    envelope = await recv.receive()
+    envelope = await recv.get()
     event = envelope.event
 
     assert isinstance(event, SpawnSessionStart)
