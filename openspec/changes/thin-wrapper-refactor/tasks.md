@@ -86,19 +86,19 @@
 
 ## 6. Phase 6: Capability Layer
 
-- [ ] 6.1 Create `src/agentpool/capabilities/` package with `__init__.py`
-- [ ] 6.2 Implement `LoopDetectionCapability` — tracks depth via `wrap_node_run`, raises `LoopDetectionError` at `max_depth`
-- [ ] 6.3 Write tests for `LoopDetectionCapability` — verify depth tracking, error at max_depth, reset between runs
-- [ ] 6.4 Implement `TokenBudgetCapability` — tracks tokens via `before_model_request`, raises `TokenBudgetExceededError`
-- [ ] 6.5 Write tests for `TokenBudgetCapability` — verify cumulative tracking, error on exceed, multiple model requests
-- [ ] 6.6 Implement `ToolOutputBudgetCapability` — truncates tool output via `after_tool_use` hook
-- [ ] 6.7 Write tests for `ToolOutputBudgetCapability` — verify truncation, truncation notice appended
-- [ ] 6.8 Implement `DynamicContextCapability` — applies compaction via `before_model_request` when near context limit
-- [ ] 6.9 Write tests for `DynamicContextCapability` — verify compaction triggers at 80% context
-- [ ] 6.10 Implement `SkillActivationCapability` — dynamic skill activation via `before_model_request`, supersedes `SkillBridgeCapability`
-- [ ] 6.11 Write tests for `SkillActivationCapability` — verify skill matching, mutual exclusivity with `SkillBridgeCapability`
-- [ ] 6.12 Implement `MemoryCapability` — persists/retrieves memory via `after_node_run` + `before_model_request`
-- [ ] 6.13 Write tests for `MemoryCapability` — verify persistence across turns, session scoping
+- [x] 6.1 Create `src/agentpool/capabilities/` package with `__init__.py`
+- [x] 6.2 Implement `LoopDetectionCapability` — tracks depth via `wrap_node_run`, raises `LoopDetectionError` at `max_depth`. Uses `contextvars.ContextVar` for cross-run depth propagation
+- [x] 6.3 Write tests for `LoopDetectionCapability` — verify depth tracking, error at max_depth, reset between runs
+- [x] 6.4 Implement `TokenBudgetCapability` — tracks tokens via `wrap_model_request`, raises `TokenBudgetExceededError`
+- [x] 6.5 Write tests for `TokenBudgetCapability` — verify cumulative tracking, error on exceed, multiple model requests
+- [x] 6.6 Implement `ToolOutputBudgetCapability` — truncates tool output via `wrap_tool_execute` hook
+- [x] 6.7 Write tests for `ToolOutputBudgetCapability` — verify truncation, truncation notice appended
+- [x] 6.8 Implement `DynamicContextCapability` — applies compaction via `before_model_request` when near context limit. Logs warning when compaction triggered but no fn configured
+- [x] 6.9 Write tests for `DynamicContextCapability` — verify compaction triggers at 80% context
+- [x] 6.10 Implement `SkillActivationCapability` — dynamic skill activation via `before_model_request`, supersedes `SkillBridgeCapability`. Injects into `SystemPromptPart.content` (not `msg.system_prompt`)
+- [x] 6.11 Write tests for `SkillActivationCapability` — verify skill matching, injection into SystemPromptPart
+- [x] 6.12 Implement `MemoryCapability` — persists/retrieves memory via `after_node_run` + `before_model_request`. Shares `_store` dict reference across runs (not shallow copy)
+- [x] 6.13 Write tests for `MemoryCapability` — verify persistence across turns, session scoping
 - [ ] 6.14 Audit existing hooks (`pre_run`, `post_run`, `pre_tool_use`, `post_tool_use`) — migrate or document overlap with Capabilities
 - [ ] 6.15 Add YAML config support for attaching Capabilities to agents (`capabilities:` section)
 - [ ] 6.16 Update `Agent` class to accept and attach Capabilities from config
