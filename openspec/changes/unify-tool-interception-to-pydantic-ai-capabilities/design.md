@@ -72,6 +72,37 @@ pydantic-ai already has a native confirmation mechanism: `ApprovalRequiredToolse
 
 **Rationale**: AgentContext injection is complex (RunContext/AgentContext parameter detection, signature manipulation) and tightly coupled to how pydantic-ai calls tool functions. Moving it to a capability would require significant refactoring of how direct tools are registered. This is better deferred to a future change where all tool providers migrate to `as_capability()`.
 
+### Decision 5: No deduplication needed for nested `ApprovalRequiredToolset`
+
+**Chosen**: Do not implement any deduplication or skip logic for nested `ApprovalRequiredToolset` instances. The capability-layer `ApprovalRequiredToolset` (from `get_wrapper_toolset()`) and the provider-layer `ApprovalRequiredToolset` (from `ResourceProvider.as_capability()` / `StaticToolsetFactory.create_capability()`) can safely coexist.
+
+**Rationale**: Verified against pydantic-ai source code (`pydantic_ai_slim/pydantic_ai/toolsets/approval_required.py`). The `ApprovalRequiredToolset.call_tool()` method uses `ctx.tool_call_approved` as an idempotency flag:
+
+```python
+# pydantic-ai source: approval_required.py
+async def call_tool(self, name, tool_args, ctx, tool):
+    if not ctx.tool_call_approved and self.approval_required_func(ctx, tool.tool_def, tool_args):
+        raise ApprovalRequired
+    return await super().call_tool(name, tool_args, ctx, tool)
+```
+
+When two `ApprovalRequiredToolset` instances are nested (outer from capability chain, inner from tool provider), the execution flow is:
+
+1. **Outer wrapper** (capability-layer): `ctx.tool_call_approved` is `False` → raises `ApprovalRequired` → pydantic-ai defers the call
+2. `HandleDeferredToolCalls` → `approval_bridge` → `InputProvider.get_tool_confirmation()` → user approves
+3. Pydantic-ai sets `ctx.tool_call_approved = True` and re-invokes the tool call
+4. **Outer wrapper** (re-invocation): `ctx.tool_call_approved` is `True` → skips check → calls `super().call_tool()`
+5. **Inner wrapper** (provider-layer): `ctx.tool_call_approved` is `True` → skips check → calls `super().call_tool()` → tool executes
+
+The `ctx.tool_call_approved` flag is set once by pydantic-ai after approval and persists for the duration of that tool call's re-invocation. Both wrappers see it and short-circuit. No double-deferral is possible.
+
+Additionally, `CombinedCapability.get_wrapper_toolset()` chains wrappers in reverse order (`reversed(self.capabilities)`), so the capability-layer wrapper is outermost (intercepts first) and the provider-layer wrapper is innermost (sees `tool_call_approved=True`). This ordering is correct — the capability-layer confirmation is the broader policy, and the provider-layer confirmation is the per-tool default.
+
+**Alternatives considered**:
+- Detect nested `ApprovalRequiredToolset` via toolset inspection and skip wrapping: Unnecessary complexity. The `ctx.tool_call_approved` mechanism already handles this correctly at runtime.
+- Remove provider-layer `ApprovalRequiredToolset` wrapping from `ResourceProvider.as_capability()` and `StaticToolsetFactory.create_capability()`: Would break the case where `tool_confirmation_mode="never"` (capability-layer wrapper is not applied) but individual tools still need per-tool confirmation. The provider-layer wrapping is the fallback for this scenario.
+- Use `prepare_tools()` to set `kind='unapproved'` instead of wrapping: Changes the model's view of the tool (model sees "requires human approval" in tool definition), which is undesirable. `ApprovalRequiredToolset` only affects execution, not the model's view.
+
 ## Risks / Trade-offs
 
 - **[Risk] `ApprovalRequiredToolset` wrapping may interfere with existing `ApprovalRequiredToolset` usage in the capability chain** → Mitigation: `CombinedCapability.get_wrapper_toolset()` chains wrappers in reverse order (outermost first). The confirmation wrapper from our capability is outermost, so it intercepts before any inner `ApprovalRequiredToolset` from tool providers. Test with tools that already have `requires_confirmation=True`.
@@ -88,9 +119,17 @@ pydantic-ai already has a native confirmation mechanism: `ApprovalRequiredToolse
 
 - **[Risk] `CombinedCapability` chains `after_tool_execute` in reverse order (last element runs first/outermost)** → Mitigation: The order `[_ToolInterceptCapability(), hooks_cap]` means `hooks_cap` runs outermost first. Since `hooks_cap`'s `after_tool_execute` does NOT run hooks (Decision 2), it passes through cleanly. `_ToolInterceptCapability` runs innermost (closest to tool), where it runs hooks, applies `modified_output`/`additional_context`, and consumes injections. Verified order: outermost `hooks_cap` (pass-through) → innermost `_ToolInterceptCapability` (runs hooks).
 
+- **[Risk] Nested `ApprovalRequiredToolset` may produce double-deferred behavior** → **RESOLVED: Not a real risk.** Verified against pydantic-ai source (`pydantic_ai_slim/pydantic_ai/toolsets/approval_required.py`): `ApprovalRequiredToolset.call_tool()` checks `ctx.tool_call_approved` — a runtime flag set by pydantic-ai after the first approval is granted. When the outer `ApprovalRequiredToolset` defers a tool call, pydantic-ai routes it through `HandleDeferredToolCalls` → user approves → `ctx.tool_call_approved` is set to `True` → the call is re-invoked. On re-invocation, the inner `ApprovalRequiredToolset` sees `ctx.tool_call_approved=True` and **short-circuits** (`if not ctx.tool_call_approved and ...` → `False`), calling `super().call_tool()` directly. No double-deferral occurs. **No deduplication logic needed.** Spike 0.2 remains as a verification task to confirm this behavior in the current pydantic-ai version, but the mechanism is understood.
+
 ## Migration Plan
 
+**Phase 0 (spikes)**: Complete all spike tasks (0.1, 0.2, 0.3) before any implementation. Spikes validate key assumptions and block specific implementation tasks:
+- Spike 0.1 (`ModelRetry` behavior) blocks Task 1.4
+- Spike 0.2 (nested `ApprovalRequiredToolset` verification) — does not block any task; mechanism already confirmed from source code, spike is empirical confirmation only
+- Spike 0.3 (`Hooks._registry` stripping) blocks Task 1.7
+
 1. **Phase 1**: Enhance `NativeAgentHookManager.as_capability()` → return `CombinedCapability` with `get_wrapper_toolset` (confirmation via `ApprovalRequiredToolset`), `prepare_tools` (schema modification), `wrap_tool_execute` (error handling). Remove `if not self.hooks` guard.
+   - **Critical ordering**: Task 2.1 (remove guard) must complete **before** Task 3.1 and 3.2 (remove hooks/confirmation from `wrap_tool()`). If `wrap_tool()` hooks are removed while the guard is still active, direct tools lose all hooks and confirmation with no capability-chain replacement.
 2. **Phase 2**: Remove confirmation logic from `wrap_tool()` → `handle_confirmation()` no longer called. Remove pre/post hooks from `wrap_tool()` → `_execute_with_hooks()` simplified.
 3. **Phase 3** (future): Migrate all tool providers to `as_capability()`, then remove `wrap_tool()` entirely.
 
