@@ -28,20 +28,20 @@
 
 ## 3. Phase 3: EventBus Backpressure
 
-- [ ] 3.1 Replace `anyio.create_memory_object_stream()` with `asyncio.Queue(maxsize=...)` in `EventBus.__init__`
-- [ ] 3.2 Update `subscribe()` to return `asyncio.Queue` (or wrapper with compatible interface)
-- [ ] 3.3 Update `_send()` to use `put_nowait()` with overflow policy handling
-- [ ] 3.4 Implement `drop_oldest` overflow policy — `get_nowait()` then `put_nowait()`
-- [ ] 3.5 Implement `drop_newest` overflow policy — silently discard on `QueueFull`
-- [ ] 3.6 Implement `drop_subscriber` overflow policy — close queue, remove subscriber
-- [ ] 3.7 Reject `block` overflow policy with `ValueError` in `EventBus.__init__`
-- [ ] 3.8 Update `unsubscribe()` to work with `asyncio.Queue` semantics
-- [ ] 3.9 Update dead subscriber cleanup — detect closed queues
-- [ ] 3.10 Update replay buffer to use `put_nowait()` for historical events
-- [ ] 3.11 Audit all `publish()` call sites — ensure no blocking `put()` calls
-- [ ] 3.12 Update `drain_and_merge()` to work with `asyncio.Queue` (use `get_nowait()` for drain)
-- [ ] 3.13 Run `uv run pytest tests/agents/events/` — EventBus tests pass
-- [ ] 3.14 Run `uv run pytest tests/orchestrator/test_envelope_integration.py`
+- [x] 3.1 Replace `anyio.create_memory_object_stream()` with `asyncio.Queue(maxsize=...)` in `EventBus.__init__` (PR #96)
+- [x] 3.2 Update `subscribe()` to return `asyncio.Queue` (or wrapper with compatible interface) (PR #96)
+- [x] 3.3 Update `_send()` to use `put_nowait()` with overflow policy handling (PR #96)
+- [x] 3.4 Implement `drop_oldest` overflow policy — `get_nowait()` then `put_nowait()` (PR #96)
+- [x] 3.5 Implement `drop_newest` overflow policy — silently discard on `QueueFull` (PR #96)
+- [x] 3.6 Implement `drop_subscriber` overflow policy — close queue, remove subscriber (PR #96)
+- [x] 3.7 Reject `block` overflow policy with `ValueError` in `EventBus.__init__` (PR #96)
+- [x] 3.8 Update `unsubscribe()` to work with `asyncio.Queue` semantics (PR #96)
+- [x] 3.9 Update dead subscriber cleanup — detect closed queues (PR #96)
+- [x] 3.10 Update replay buffer to use `put_nowait()` for historical events (PR #96)
+- [x] 3.11 Audit all `publish()` call sites — ensure no blocking `put()` calls (PR #96)
+- [x] 3.12 Update `drain_and_merge()` to work with `asyncio.Queue` (use `get_nowait()` for drain) (PR #96)
+- [x] 3.13 Run `uv run pytest tests/agents/events/` — EventBus tests pass (PR #96)
+- [x] 3.14 Run `uv run pytest tests/orchestrator/test_envelope_integration.py` (PR #96)
 
 ## 4. Phase 4: Team Cleanup
 
@@ -120,7 +120,8 @@
 
 ## 8. Phase 8: Rename to agentwolf
 
-- [ ] 8.1 Rename `src/agentpool/` → `src/agentwolf/`
+- [x] 8.0 Automated rename script created at `scripts/rename_to_agentwolf.py` (PR #101) — execution deferred until all phases merge
+- [ ] 8.1 Rename `src/agentpool/` → `src/agentwolf/` (execute script after all phases merge)
 - [ ] 8.2 Rename `src/agentpool_config/` → `src/agentwolf_config/`
 - [ ] 8.3 Rename `src/agentpool_server/` → `src/agentwolf_server/`
 - [ ] 8.4 Rename `src/agentpool_toolsets/` → `src/agentwolf_toolsets/`
