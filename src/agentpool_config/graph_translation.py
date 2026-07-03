@@ -129,6 +129,11 @@ def translate_connections_to_edges(
     for agent_name, agent_config in agents.items():
         for conn in agent_config.connections:
             conn_dict = _normalize_connection(conn)
+            # Only node connections have a ``name`` field (the target agent).
+            # File and callable connections write to external sinks and do
+            # not represent edges between graph steps, so skip them.
+            if "name" not in conn_dict:
+                continue
             edges.append(
                 GraphEdgeConfig(
                     **{
@@ -195,10 +200,9 @@ def translate_config_to_graph(
     Returns:
         A unified ``GraphConfig`` or ``None`` if no topology is configured.
     """
-    has_teams = teams and len(teams) > 0
     has_connections = any(agent_config.connections for agent_config in agents.values())
 
-    if not has_teams and not has_connections and existing_graph is None:
+    if teams is None and not has_connections and existing_graph is None:
         return None
 
     # Start with existing graph or empty
@@ -232,7 +236,7 @@ def translate_config_to_graph(
 
     # Translate teams to sub-graphs (each team becomes its own graph config,
     # but for the unified graph we merge their steps and edges)
-    if has_teams and teams is not None:
+    if teams is not None:
         for team_name, team_config in teams.items():
             team_graph = translate_team_to_graph(team_name, team_config)
             steps.extend(team_graph.steps)

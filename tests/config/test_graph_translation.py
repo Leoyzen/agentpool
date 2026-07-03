@@ -11,9 +11,16 @@ from agentpool_config import (
     TeamConfig,
     TeamMemberConfig,
     translate_config_to_graph,
+    translate_connections_to_edges,
     translate_team_to_graph,
     translate_teams_to_graphs,
 )
+from agentpool_config.forward_targets import (
+    CallableConnectionConfig,
+    FileConnectionConfig,
+    NodeConnectionConfig,
+)
+from agentpool_config.nodes import NodeConfig
 
 
 # =============================================================================
@@ -348,3 +355,118 @@ class TestEdgeCases:
         assert step.member_timeout is None
         assert step.member_retry_attempts == 0
         assert step.member_retry_delay == 0.0
+
+
+# =============================================================================
+# Connection translation tests
+# =============================================================================
+
+
+class TestConnectionTranslation:
+    """Test translation of agent connections to graph edges."""
+
+    def test_node_connection_translated_to_edge(self) -> None:
+        """NodeConnectionConfig is translated to a GraphEdgeConfig."""
+        agents = {
+            "analyzer": NodeConfig(
+                name="analyzer",
+                connections=[
+                    NodeConnectionConfig(name="reviewer", connection_type="run"),
+                ],
+            ),
+            "reviewer": NodeConfig(name="reviewer"),
+        }
+        edges = translate_connections_to_edges(agents)
+
+        assert len(edges) == 1
+        assert edges[0].from_ == "analyzer"
+        assert edges[0].to == "reviewer"
+        assert edges[0].mode == "run"
+
+    def test_file_connection_skipped(self) -> None:
+        """FileConnectionConfig is skipped (no 'name' key, no edge)."""
+        agents = {
+            "analyzer": NodeConfig(
+                name="analyzer",
+                connections=[
+                    FileConnectionConfig(path="logs/messages.txt"),
+                ],
+            ),
+        }
+        edges = translate_connections_to_edges(agents)
+
+        assert len(edges) == 0
+
+    def test_callable_connection_skipped(self) -> None:
+        """CallableConnectionConfig is skipped (no 'name' key, no edge)."""
+        agents = {
+            "analyzer": NodeConfig(
+                name="analyzer",
+                connections=[
+                    CallableConnectionConfig(callable="builtins:print"),
+                ],
+            ),
+        }
+        edges = translate_connections_to_edges(agents)
+
+        assert len(edges) == 0
+
+    def test_mixed_connections_only_node_translated(self) -> None:
+        """A mix of node, file, and callable connections: only node connections become edges."""
+        agents = {
+            "analyzer": NodeConfig(
+                name="analyzer",
+                connections=[
+                    FileConnectionConfig(path="logs/messages.txt"),
+                    NodeConnectionConfig(name="reviewer"),
+                    CallableConnectionConfig(callable="builtins:print"),
+                    NodeConnectionConfig(name="formatter", connection_type="forward"),
+                ],
+            ),
+            "reviewer": NodeConfig(name="reviewer"),
+            "formatter": NodeConfig(name="formatter"),
+        }
+        edges = translate_connections_to_edges(agents)
+
+        assert len(edges) == 2
+        assert edges[0].to == "reviewer"
+        assert edges[1].to == "formatter"
+        assert edges[1].mode == "forward"
+
+    def test_config_translation_with_connections(self) -> None:
+        """translate_config_to_graph produces edges from agent connections."""
+        agents = {
+            "analyzer": NodeConfig(
+                name="analyzer",
+                connections=[NodeConnectionConfig(name="reviewer")],
+            ),
+            "reviewer": NodeConfig(
+                name="reviewer",
+                connections=[FileConnectionConfig(path="out.txt")],
+            ),
+        }
+        result = translate_config_to_graph(agents, None, None)
+
+        assert result is not None
+        # Both agents appear as steps (analyzer has connections, reviewer has connections)
+        step_ids = {s.id for s in result.steps}
+        assert "analyzer" in step_ids
+        assert "reviewer" in step_ids
+        # Only the node→node connection becomes an edge; file connection is skipped
+        assert len(result.edges) == 1
+        assert result.edges[0].from_ == "analyzer"
+        assert result.edges[0].to == "reviewer"
+
+    def test_empty_teams_dict_still_translates_connections(self) -> None:
+        """An empty (but not None) teams dict does not break connection translation."""
+        agents = {
+            "a": NodeConfig(
+                name="a",
+                connections=[NodeConnectionConfig(name="b")],
+            ),
+            "b": NodeConfig(name="b"),
+        }
+        result = translate_config_to_graph(agents, {}, None)
+
+        assert result is not None
+        assert len(result.edges) == 1

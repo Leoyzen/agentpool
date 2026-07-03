@@ -43,3 +43,18 @@ After the translator is complete and all existing `teams:` configs translate suc
 #### Scenario: TeamConfig still parseable from YAML
 - **WHEN** a YAML config with `teams:` section is loaded
 - **THEN** `TeamConfig` SHALL parse successfully and be translatable to `GraphConfig`
+
+### Requirement: Agent connections translated to graph edges
+The translator SHALL convert agent `connections:` configuration to `GraphEdgeConfig` objects. Only `NodeConnectionConfig` entries (connections to other agents) SHALL produce edges. `FileConnectionConfig` and `CallableConnectionConfig` entries SHALL be skipped, as they write to external sinks and do not represent edges between graph steps.
+
+#### Scenario: NodeConnectionConfig translated to edge
+- **WHEN** an agent has a `NodeConnectionConfig(name="reviewer")` connection
+- **THEN** the translator SHALL produce a `GraphEdgeConfig` with `from` set to the source agent name and `to` set to `"reviewer"`
+
+#### Scenario: FileConnectionConfig skipped
+- **WHEN** an agent has a `FileConnectionConfig(path="logs/messages.txt")` connection
+- **THEN** the translator SHALL NOT produce a `GraphEdgeConfig` for this connection
+
+#### Scenario: CallableConnectionConfig skipped
+- **WHEN** an agent has a `CallableConnectionConfig(callable="builtins:print")` connection
+- **THEN** the translator SHALL NOT produce a `GraphEdgeConfig` for this connection
