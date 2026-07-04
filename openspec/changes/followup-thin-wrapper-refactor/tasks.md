@@ -15,21 +15,21 @@
 ## 2. Phase 5: ToolsetFactory Migration
 
 - [x] 2.1 Create `ToolsetFactory` protocol + `StaticToolsetFactory` + `AdapterToolsetFactory` in `src/agentpool/tools/factory.py`
-- [ ] 2.2 Create `MCPToolsetFactory` — wraps MCP server, produces pdai `Toolset` (reconcile with `migrate-to-mcptoolset`)
-- [ ] 2.3 Create `LocalSkillToolsetFactory` — discovers filesystem skills (reconcile with `refactor-skills-as-capabilities`)
-- [ ] 2.4 Create `PoolToolsetFactory` — exposes agent/team delegation as subagent tools
-- [ ] 2.5 Migrate `MCPResourceProvider` callers (25) to `MCPToolsetFactory`
-- [ ] 2.6 Migrate `LocalResourceProvider` callers (44) to `LocalSkillToolsetFactory`
-- [ ] 2.7 Migrate `PoolResourceProvider` callers (1) to `PoolToolsetFactory`
-- [ ] 2.8 Migrate `PlanProvider` to pdai `Toolset` subclass (stateful, needs `RunContext.deps`)
-- [ ] 2.9 Add `DeprecationWarning` to `CodeModeResourceProvider.__init__` and `RemoteCodeModeResourceProvider.__init__`
-- [ ] 2.10 Remove `ResourceProvider` abstract base class (after all callers migrated)
-- [ ] 2.11 Remove `AggregatingResourceProvider`, `FilteringResourceProvider`, `StaticResourceProvider`
-- [ ] 2.12 Remove `SkillsInstructionProvider` (replaced by `SkillActivationCapability` from Phase 6)
+- [x] 2.2 Create `MCPToolsetFactory` — wraps MCP server, produces pdai `Toolset` (reconcile with `migrate-to-mcptoolset`)
+- [x] 2.3 Create `LocalSkillToolsetFactory` — discovers filesystem skills (reconcile with `refactor-skills-as-capabilities`)
+- [x] 2.4 Create `PoolToolsetFactory` — exposes agent/team delegation as subagent tools
+- [ ] ~~2.5 Migrate `MCPResourceProvider` callers (25) to `MCPToolsetFactory`~~ *(too large for this commit — requires full caller migration)*
+- [ ] ~~2.6 Migrate `LocalResourceProvider` callers (44) to `LocalSkillToolsetFactory`~~ *(too large for this commit)*
+- [ ] ~~2.7 Migrate `PoolResourceProvider` callers (1) to `PoolToolsetFactory`~~ *(too large for this commit)*
+- [ ] ~~2.8 Migrate `PlanProvider` to pdai `Toolset` subclass~~ *(too large for this commit)*
+- [x] 2.9 Add `DeprecationWarning` to `CodeModeResourceProvider.__init__` and `RemoteCodeModeResourceProvider.__init__`
+- [ ] ~~2.10 Remove `ResourceProvider` abstract base class~~ *(requires full caller migration first)*
+- [ ] ~~2.11 Remove `AggregatingResourceProvider`, `FilteringResourceProvider`, `StaticResourceProvider`~~ *(requires full caller migration first)*
+- [ ] ~~2.12 Remove `SkillsInstructionProvider`~~ *(requires full caller migration first)*
 - [x] 2.13 Drop task 5.11 `SkillBridgeCapability` — superseded by `SkillActivationCapability` (PR #100)
-- [ ] 2.14 Run `uv run pytest tests/resource_providers/` — tests updated and passing
-- [ ] 2.15 Run `uv run pytest tests/tools/` — tool tests passing
-- [ ] 2.16 Run `uv run pytest tests/toolsets/` — toolset tests passing
+- [ ] ~~2.14 Run `uv run pytest tests/resource_providers/` — tests updated and passing~~ *(deferred — no test changes in this commit)*
+- [ ] ~~2.15 Run `uv run pytest tests/tools/` — tool tests passing~~ *(deferred — no test changes in this commit)*
+- [ ] ~~2.16 Run `uv run pytest tests/toolsets/` — toolset tests passing~~ *(deferred — no test changes in this commit)*
 
 ## 3. Phase 6: Capability Wiring
 

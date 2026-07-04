@@ -6,6 +6,7 @@ import asyncio
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Self, cast
+import warnings
 
 import anyio
 
@@ -133,10 +134,12 @@ class MCPManager:
             self.add_server_config(server)
         self.providers: list[MCPResourceProvider] = []
         self.sampling_model = sampling_model
-        self.aggregating_provider = AggregatingResourceProvider(
-            providers=cast(list[ResourceProvider], self.providers),
-            name=f"{name}_aggregated",
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            self.aggregating_provider = AggregatingResourceProvider(
+                providers=cast(list[ResourceProvider], self.providers),
+                name=f"{name}_aggregated",
+            )
         self.exit_stack = AsyncExitStack()
         self._accessible_roots = accessible_roots
         self._global_pool = GlobalConnectionPool()

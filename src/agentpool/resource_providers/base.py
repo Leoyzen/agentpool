@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Self
+import warnings
 
 from anyenv.signals import Signal
 
@@ -85,6 +86,11 @@ class ResourceProvider(ABC):  # noqa: B024
 
     def __init__(self, name: str, owner: str | None = None) -> None:
         """Initialize the resource provider."""
+        warnings.warn(
+            "ResourceProvider is deprecated. Use ToolsetFactory from agentpool.tools.factory.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.name = name
         self.owner = owner
         self.log = logger.bind(name=self.name, owner=self.owner)

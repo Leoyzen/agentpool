@@ -10,11 +10,9 @@ Each factory is a lightweight callable that returns a pydantic-ai
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
-
-if TYPE_CHECKING:
-    from pydantic_ai.toolsets import AbstractToolset
+from pydantic_ai.toolsets import AbstractToolset
 
 
 @runtime_checkable
@@ -91,6 +89,99 @@ class AdapterToolsetFactory:
     async def create_capability(self) -> AbstractToolset[Any] | None:
         from pydantic_ai.toolsets import AbstractToolset
 
+        cap = self._provider.as_capability()
+        if cap is None:
+            return None
+        if isinstance(cap, AbstractToolset):
+            return cap
+        return None
+
+    @property
+    def provider(self) -> Any:
+        return self._provider
+
+
+class MCPToolsetFactory:
+    """Factory wrapping an MCP server, producing a pydantic-ai toolset.
+
+    Replaces ``MCPResourceProvider`` for the common case where MCP tools
+    are needed without the full ``ResourceProvider`` lifecycle.
+    """
+
+    def __init__(self, mcp_provider: Any, *, name: str = "mcp") -> None:
+        """Initialize with an MCP resource provider.
+
+        Args:
+            mcp_provider: An ``MCPResourceProvider`` instance.
+            name: Name for the factory.
+        """
+        self._provider = mcp_provider
+        self._name = name
+
+    async def create_capability(self) -> AbstractToolset[Any] | None:
+        """Build and return a pydantic-ai toolset from the MCP server, or ``None``."""
+        cap = self._provider.as_capability()
+        if cap is None:
+            return None
+        if isinstance(cap, AbstractToolset):
+            return cap
+        return None
+
+    @property
+    def provider(self) -> Any:
+        return self._provider
+
+
+class LocalSkillToolsetFactory:
+    """Factory wrapping local skill discovery, producing a pydantic-ai toolset.
+
+    Replaces ``LocalResourceProvider`` for the common case where filesystem
+    skills are needed without the full ``ResourceProvider`` lifecycle.
+    """
+
+    def __init__(self, local_provider: Any, *, name: str = "local") -> None:
+        """Initialize with a local resource provider.
+
+        Args:
+            local_provider: A ``LocalResourceProvider`` instance.
+            name: Name for the factory.
+        """
+        self._provider = local_provider
+        self._name = name
+
+    async def create_capability(self) -> AbstractToolset[Any] | None:
+        """Build and return a pydantic-ai toolset from local skills, or ``None``."""
+        cap = self._provider.as_capability()
+        if cap is None:
+            return None
+        if isinstance(cap, AbstractToolset):
+            return cap
+        return None
+
+    @property
+    def provider(self) -> Any:
+        return self._provider
+
+
+class PoolToolsetFactory:
+    """Factory wrapping pool delegation tools, producing a pydantic-ai toolset.
+
+    Replaces ``PoolResourceProvider`` for the common case where subagent
+    delegation tools are needed without the full ``ResourceProvider`` lifecycle.
+    """
+
+    def __init__(self, pool_provider: Any, *, name: str = "pool") -> None:
+        """Initialize with a pool resource provider.
+
+        Args:
+            pool_provider: A ``PoolResourceProvider`` instance.
+            name: Name for the factory.
+        """
+        self._provider = pool_provider
+        self._name = name
+
+    async def create_capability(self) -> AbstractToolset[Any] | None:
+        """Build and return a pydantic-ai toolset from pool delegation, or ``None``."""
         cap = self._provider.as_capability()
         if cap is None:
             return None

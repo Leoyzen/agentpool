@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from functools import partial
 import inspect
 from typing import TYPE_CHECKING, Any
+import warnings
 
 import anyenv
 
@@ -46,6 +47,11 @@ class CodeModeResourceProvider(AggregatingResourceProvider):
             include_docstrings: Include function docstrings in documentation
             usage_notes: Usage notes for the codemode tool
         """
+        warnings.warn(
+            "CodeModeResourceProvider is deprecated. Use ToolsetFactory-based approach instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         super().__init__(providers=providers, name=name)
         self.include_docstrings = include_docstrings
         self._cached_tool: Tool | None = None
