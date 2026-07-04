@@ -168,6 +168,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         commands: Sequence[BaseCommand] | None = None,
         metadata: dict[str, Any] | None = None,
         history_processors: Sequence[Callable[..., Any]] | None = None,
+        capabilities: list[Any] | None = None,
     ) -> None:
         """Initialize agent.
 
@@ -217,6 +218,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             commands: Slash commands
             metadata: Arbitrary metadata for the agent (e.g., feature flags)
             history_processors: Callable history processors for message processing
+            capabilities: Extra capability instances or configs to attach
         """
         from agentpool.agents.interactions import Interactions
         from agentpool.agents.native_agent.hook_manager import NativeAgentHookManager
@@ -319,6 +321,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # When None, get_agentlet() falls back to the legacy as_capability() path.
         self._mcp_snapshot: McpConfigSnapshot | None = None
         self._session_connection_pool: SessionConnectionPool | None = None
+        self._extra_capabilities: list[Any] = capabilities or []
 
     def _build_pool_configs(self) -> tuple[McpConfigEntry, ...]:
         """Build MCP config entries from pool-level servers.
@@ -930,15 +933,29 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if self._builtin_tools:
             tool_capabilities.extend(NativeTool(t) for t in self._builtin_tools)
 
+        # Merge extra capabilities from Agent.__init__() API
+        if self._extra_capabilities:
+            tool_capabilities.extend(self._extra_capabilities)
+
         # Merge user-provided capabilities from config
         if self.config and self.config.capabilities:
-            from agentpool_config.capabilities import CapabilityConfig
+            from pydantic import BaseModel as _BaseModel
+
+            from agentpool_config.capabilities import (
+                GenericCapabilityConfig,
+                build_capability,
+            )
 
             for cap in self.config.capabilities:
                 if cap is None:
                     continue
-                if isinstance(cap, CapabilityConfig):
+                if isinstance(cap, GenericCapabilityConfig):
                     tool_capabilities.append(cap.build())
+                elif isinstance(cap, _BaseModel):
+                    from typing import cast as _cast
+
+                    # Typed built-in config (LoopDetectionCapabilityConfig, etc.)
+                    tool_capabilities.append(build_capability(_cast(Any, cap)))
                 else:
                     # Pre-instantiated AbstractCapability
                     tool_capabilities.append(cap)

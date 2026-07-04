@@ -33,21 +33,21 @@
 
 ## 3. Phase 6: Capability Wiring
 
-- [ ] 3.1 Audit `pre_run` hook — compare with `wrap_node_run` Capability hook
-- [ ] 3.2 Audit `post_run` hook — compare with `after_node_run` Capability hook
+- [x] 3.1 Audit `pre_run` hook — compare with `wrap_node_run` Capability hook
+- [x] 3.2 Audit `post_run` hook — compare with `after_node_run` Capability hook
 - [x] 3.3 Audit `pre_tool_use` hook — compare with `before_tool_execute` / `wrap_tool_execute`
 - [x] 3.4 Audit `post_tool_use` hook — compare with `after_tool_execute` Capability hook
-- [ ] 3.5 Document which hooks migrate to Capabilities and which remain distinct
+- [x] 3.5 Document which hooks migrate to Capabilities and which remain distinct
 - [x] 3.6 Add `capabilities:` section to agent config model in `agentpool_config/`
-- [ ] 3.7 Create config models for each capability (map YAML args to constructor)
-- [ ] 3.8 Validate capability configs at load time
-- [ ] 3.9 Update `Agent` class to accept and attach Capabilities from config
-- [ ] 3.10 Verify Capability hooks fire on standalone run path
-- [ ] 3.11 Verify Capability hooks fire on graph run path (after Phase 4 Team/TeamRun removal)
-- [ ] 3.12 Reconcile `SkillActivationCapability` with `refactor-skills-as-capabilities` (SkillCapability)
-- [ ] 3.13 Reconcile `ToolOutputBudgetCapability` with `unify-tool-interception-to-pydantic-ai-capabilities`
-- [ ] 3.14 Run `uv run pytest tests/agents/` — agent tests with Capabilities passing
-- [ ] 3.15 Run `uv run pytest tests/capabilities/` — capability tests still passing
+- [x] 3.7 Create config models for each capability (map YAML args to constructor)
+- [x] 3.8 Validate capability configs at load time
+- [x] 3.9 Update `Agent` class to accept and attach Capabilities from config
+- [x] 3.10 Verify Capability hooks fire on standalone run path
+- [x] 3.11 Verify Capability hooks fire on graph run path (after Phase 4 Team/TeamRun removal)
+- [x] 3.12 Reconcile `SkillActivationCapability` with `refactor-skills-as-capabilities` (SkillCapability)
+- [x] 3.13 Reconcile `ToolOutputBudgetCapability` with `unify-tool-interception-to-pydantic-ai-capabilities`
+- [x] 3.14 Run `uv run pytest tests/agents/` — agent tests with Capabilities passing
+- [x] 3.15 Run `uv run pytest tests/capabilities/` — capability tests still passing
 
 ## 4. Phase 7: Server Boundary Fixes
 

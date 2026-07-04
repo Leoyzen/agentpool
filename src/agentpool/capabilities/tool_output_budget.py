@@ -2,6 +2,37 @@
 
 Truncates tool results via ``wrap_tool_execute`` when they exceed
 ``max_output_chars``, appending a truncation notice.
+
+Relationship with _ToolInterceptCapability
+===========================================
+
+``_ToolInterceptCapability`` (``hook_manager.py``) owns ALL tool interception:
+pre-tool hooks, post-tool hooks, error handling, and injection.
+
+``ToolOutputBudgetCapability`` implements ``wrap_tool_execute`` to truncate
+tool outputs that exceed the budget.
+
+When both are in the capability chain, ``ToolOutputBudgetCapability``'s
+``wrap_tool_execute`` runs AFTER ``_ToolInterceptCapability``'s. This is
+because ``CombinedCapability`` chains ``wrap_tool_execute`` in **reverse**
+order — the last capability in the list wraps the outermost. The injection
+order in ``get_agentlet()`` places:
+
+1. ``_ToolInterceptCapability`` first (innermost — error handling + hooks)
+2. ``ToolOutputBudgetCapability`` last (outermost — budget truncation)
+
+This means:
+1. ``_ToolInterceptCapability`` wraps the tool first (innermost) — handles
+   errors, runs hooks, applies modifications.
+2. ``ToolOutputBudgetCapability`` wraps the result (outermost) — truncates
+   if over budget.
+
+This ordering is **correct**: budget truncation should happen last, after
+all post-tool hooks have had a chance to modify the output. If truncation
+ran first, hooks would see an artificially shortened output.
+
+No code change is needed — the ordering is already correct by virtue of
+capability injection order in ``get_agentlet()``.
 """
 
 from __future__ import annotations

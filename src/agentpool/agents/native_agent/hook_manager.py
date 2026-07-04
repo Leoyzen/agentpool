@@ -5,6 +5,59 @@ Centralizes all hook-related logic:
 - Injection consumption from PromptInjectionManager
 - Combined hook result handling
 - Unified tool interception via ``_ToolInterceptCapability``
+
+Hook Migration Audit (Phase 6)
+==============================
+
+This module documents the migration status of legacy ``AgentHooks``
+(from ``hooks/agent_hooks.py``) to pydantic-ai ``Capability`` hooks.
+
+**pre_run** -> ``Hooks.before_run``:
+    Documented only. ``AgentHooks.as_capability()`` returns ``Hooks``
+    with ``before_run`` registered. However,
+    ``NativeAgentHookManager.as_capability()`` **strips** all ``Hooks``
+    hooks (lines 429-433) to prevent double-firing with the old
+    ``run_pre_run_hooks()`` delegate. When ``ResourceProvider`` is
+    fully removed (Phase 5 complete) and all callers migrate to
+    Capabilities, ``before_run`` can be unstripped.
+
+**post_run** -> ``Hooks.after_run``:
+    Same status as ``pre_run``. Stripped in ``as_capability()``.
+    Old ``run_post_run_hooks()`` delegate remains for backward compat.
+
+**pre_tool_use** -> ``before_tool_execute`` (on
+``_ToolInterceptCapability``):
+    Fully migrated. ``_ToolInterceptCapability.before_tool_execute()``
+    (line 182) calls ``run_pre_tool_hooks()``. Legacy ``Hooks``
+    ``before_tool_execute`` is STRIPPED (line 430) to prevent
+    double-firing.
+
+**post_tool_use** -> ``after_tool_execute`` (on
+``_ToolInterceptCapability``):
+    Fully migrated. ``_ToolInterceptCapability.after_tool_execute()``
+    (line 239) calls ``run_post_tool_hooks()``. Legacy ``Hooks``
+    ``after_tool_execute`` is STRIPPED (line 429) to prevent
+    double-firing.
+
+Hooks that remain distinct:
+
+- ``wrap_node_run``: Not migrated; no equivalent in legacy
+  ``AgentHooks``. New capability hook introduced in Phase 6.
+- ``wrap_tool_execute``: Unified into
+  ``_ToolInterceptCapability.wrap_tool_execute()`` (line 120).
+  Handles error wrapping, timing, and ``ToolResult`` conversion.
+  Does NOT duplicate the legacy pre/post hooks — it is a separate
+  concern (error boundary).
+
+Migration Plan:
+1. When all callers of ``run_pre_run_hooks()`` /
+   ``run_post_run_hooks()`` are migrated to Capabilities, remove the
+   ``base_hooks._registry[...] = []`` stripping in
+   ``as_capability()`` (lines 429-432).
+2. Remove the legacy ``run_pre_run_hooks()`` /
+   ``run_post_run_hooks()`` methods from this class.
+3. Remove ``NativeAgentHookManager._agent`` and ``agent_hooks``
+   parameters.
 """
 
 from __future__ import annotations

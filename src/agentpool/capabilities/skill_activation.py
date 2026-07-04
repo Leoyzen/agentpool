@@ -3,6 +3,44 @@
 Supersedes ``SkillBridgeCapability`` (Phase 5 interim). Uses
 ``before_model_request`` to dynamically select and inject relevant
 skill instructions based on the current conversation context.
+
+Relationship with SkillCapability
+==================================
+
+``SkillCapability`` (``skills/capability.py``) provides skill instructions,
+tools, and MCP servers as a pydantic-ai capability. It is injected per-skill
+in ``get_agentlet()`` and remains constant for the agent's lifetime.
+
+``SkillActivationCapability`` (this file) provides dynamic per-turn skill
+activation via ``before_model_request``. It injects skill content into
+``SystemPromptPart`` on each turn, selecting skills relevant to the
+current conversation context.
+
+These two are **complementary** — they operate at different layers:
+
++---------------------------+------------------------------------------+
+| Aspect                    | SkillActivationCapability                |
++---------------------------+------------------------------------------+
+| Injection point           | ``before_model_request`` (per-turn)      |
+| Purpose                   | Dynamic relevance-based skill selection  |
+| What it provides          | Skill instructions in system prompt      |
+| Lifetime                  | Per-turn (dynamic)                       |
++---------------------------+------------------------------------------+
+| Aspect                    | SkillCapability                          |
++---------------------------+------------------------------------------+
+| Injection point           | ``get_agentlet()`` (agent construction)  |
+| Purpose                   | Static skill tools, MCP, instructions    |
+| What it provides          | Tools, MCP connections, instructions     |
+| Lifetime                  | Agent lifetime (static)                  |
++---------------------------+------------------------------------------+
+
+**Reconciliation**: No merge is needed — they operate at different layers.
+``SkillActivationCapability`` delegates to the pool's skill provider to
+discover available skills, then injects relevant ones via
+``before_model_request``. ``SkillCapability`` wraps each individual skill's
+tools and MCP as a static capability. When both are active, the static
+skill tools are always registered, and the activation capability adds
+extra instructions dynamically based on the current turn.
 """
 
 from __future__ import annotations
