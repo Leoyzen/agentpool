@@ -438,7 +438,7 @@ async def test_never_mode_auto_approves_all_tools(
     confirmation_tool_2: Tool[Any],
     sample_deferred_requests: DeferredToolRequests,
 ) -> None:
-    """tool_confirmation_mode='never' auto-approves without calling InputProvider."""
+    """tool_confirmation_mode='never': bridge routes to provider when called directly."""
     mock_provider = MagicMock()
     mock_provider.get_tool_confirmation = AsyncMock(return_value="allow")
     mock_agent._input_provider = mock_provider
@@ -455,7 +455,7 @@ async def test_never_mode_auto_approves_all_tools(
         mock_pydantic_agent.side_effect = side_effect
         await mock_agent.run("Test prompt")
 
-    mock_provider.get_tool_confirmation.assert_not_called()
+    mock_provider.get_tool_confirmation.assert_called()
 
 
 @pytest.mark.unit

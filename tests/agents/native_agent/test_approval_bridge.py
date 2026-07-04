@@ -186,9 +186,14 @@ class TestResolveDeferredApprovals:
         mock_run_context: RunContext[Any],
         sample_deferred_requests: DeferredToolRequests,
     ) -> None:
-        """tool_confirmation_mode 'never' auto-approves all deferred requests."""
+        """Never mode: bridge routes to provider when called directly.
+
+        In never mode, ApprovalRequiredToolset is not applied, so deferred
+        requests never reach the bridge. This test verifies the bridge
+        routes to the provider when called directly (no mode check).
+        """
         mock_provider = MagicMock()
-        mock_provider.get_tool_confirmation = AsyncMock(return_value="skip")
+        mock_provider.get_tool_confirmation = AsyncMock(return_value="allow")
 
         mock_run_context.deps.input_provider = mock_provider
         mock_run_context.deps.node.tool_confirmation_mode = "never"
@@ -196,10 +201,7 @@ class TestResolveDeferredApprovals:
         result = await _resolve_deferred_approvals(mock_run_context, sample_deferred_requests)
 
         assert result is not None
-        assert isinstance(result.approvals["tc-123"], ToolApproved)
-        assert isinstance(result.approvals["tc-456"], ToolApproved)
-        # Provider should NOT be called in never mode
-        mock_provider.get_tool_confirmation.assert_not_called()
+        assert mock_provider.get_tool_confirmation.call_count == 2
 
     @pytest.mark.anyio
     async def test_provider_error_defaults_to_denial(

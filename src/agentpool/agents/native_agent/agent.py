@@ -813,22 +813,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         context_for_tools = self.get_context(
                             input_provider=input_provider, run_ctx=run_ctx
                         )
-                        wrapped = wrap_tool(tool, context_for_tools, hooks=self._hook_manager)
+                        wrapped = wrap_tool(tool, context_for_tools)
                         direct_tools.append(tool.to_pydantic_ai(function_override=wrapped))
                 except Exception:
                     logger.exception(
                         "Failed to register tools from provider",
                         provider=provider.name,
                     )
-        # 2. Hooks — skip adding as capability when old mechanism is active
-        #    to avoid double-firing. Old base_agent.py hook mechanism handles
-        #    pre_run/post_run/pre_tool_use/post_tool_use directly.
-        #    EventBus events (RunStartedEvent, ToolCallStartEvent,
-        #    ToolCallCompleteEvent) are produced by NativeTurn, so the
-        #    removed EventBusHooksAdapter wrapping was redundant.
-        if not self.hooks:
-            hooks_capability = self._hook_manager.as_capability()
-            tool_capabilities.append(hooks_capability)
+        # 2. Hooks capability — always registered (unified tool interception)
+        hooks_capability = self._hook_manager.as_capability()
+        tool_capabilities.append(hooks_capability)
         # 3. Deferred tool bridge: intercepts deferred tool calls before
         #    approval_bridge can resolve them. Block-strategy calls are
         #    excluded from returned results so they remain unresolved for

@@ -4,25 +4,356 @@ Centralizes all hook-related logic:
 - AgentHooks integration (pre/post run, pre/post tool)
 - Injection consumption from PromptInjectionManager
 - Combined hook result handling
+- Unified tool interception via ``_ToolInterceptCapability``
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+
+from pydantic_ai.capabilities.abstract import AbstractCapability
 
 from agentpool.hooks.base import HookResult
 from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from exxec import ExecutionEnvironment
+    from pydantic_ai.capabilities import CombinedCapability
+    from pydantic_ai.capabilities.abstract import ValidatedToolArgs
     from pydantic_ai.messages import ToolCallPart
     from pydantic_ai.tools import RunContext, ToolDefinition
+    from pydantic_ai.toolsets import AbstractToolset
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.hooks import AgentHooks
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class _ToolInterceptCapability(AbstractCapability[Any]):
+    """Unified tool interception capability.
+
+    Provides uniform tool interception across all tool sources (direct tools,
+    MCP tools, ACP MCP tools) through pydantic-ai's ``AbstractCapability`` chain.
+
+    Owns:
+    - ``get_wrapper_toolset``: confirmation mode via ``ApprovalRequiredToolset``
+    - ``prepare_tools``: schema modification (placeholder for future use)
+    - ``wrap_tool_execute``: error handling with failure annotation
+    - ``before_tool_execute``: pre-tool hooks + deny via ``ModelRetry``
+    - ``after_tool_execute``: post-tool hooks + result modification + injection
+    """
+
+    hook_manager: NativeAgentHookManager
+    id: str | None = None
+    description: str | None = None
+    defer_loading: bool = False
+
+    def get_wrapper_toolset(self, toolset: AbstractToolset[Any]) -> AbstractToolset[Any] | None:
+        """Wrap the assembled toolset with ``ApprovalRequiredToolset`` based on mode.
+
+        Reads ``tool_confirmation_mode`` from the agent's node config:
+        - ``"always"``: all tools require approval
+        - ``"never"``: no wrapper (tools execute directly)
+        - ``"per_tool"``: only tools with ``requires_confirmation=True``
+
+        Args:
+            toolset: The agent's combined non-output toolset.
+
+        Returns:
+            A wrapped toolset or ``None`` if no wrapping is needed.
+        """
+        from pydantic_ai.toolsets import ApprovalRequiredToolset
+
+        mode = self._get_confirmation_mode()
+
+        if mode == "never":
+            return None
+
+        if mode == "always":
+            return ApprovalRequiredToolset(
+                wrapped=toolset,
+                approval_required_func=lambda *_: True,
+            )
+
+        # mode == "per_tool": check each tool's requires_confirmation flag
+        # ApprovalRequiredToolset expects a sync function, so we resolve
+        # the confirmation set eagerly and check membership synchronously.
+        confirm_tool_names = self._get_confirmation_tool_names()
+
+        def _check_per_tool(
+            ctx: RunContext[Any],
+            tool_def: ToolDefinition,
+            tool_args: dict[str, Any],
+        ) -> bool:
+            return tool_def.name in confirm_tool_names
+
+        return ApprovalRequiredToolset(
+            wrapped=toolset,
+            approval_required_func=_check_per_tool,
+        )
+
+    async def prepare_tools(
+        self,
+        ctx: RunContext[Any],
+        tool_defs: list[ToolDefinition],
+    ) -> list[ToolDefinition]:
+        """Modify tool definitions before the model sees them.
+
+        Currently a pass-through. Reserved for future schema modification
+        (e.g., injecting bridge metadata into dynamic MCP tool descriptions).
+
+        Args:
+            ctx: The pydantic-ai run context.
+            tool_defs: Current tool definitions.
+
+        Returns:
+            Tool definitions (unchanged for now).
+        """
+        return tool_defs
+
+    async def wrap_tool_execute(
+        self,
+        ctx: RunContext[Any],
+        *,
+        call: ToolCallPart,
+        tool_def: ToolDefinition,
+        args: dict[str, Any],
+        handler: Callable[[dict[str, Any]], Awaitable[Any]],
+    ) -> Any:
+        """Wrap tool execution with error handling.
+
+        Catches exceptions and returns annotated ``ToolReturn`` with failure
+        details, enabling the model to recover or try alternatives.
+
+        Args:
+            ctx: The pydantic-ai run context.
+            call: The tool call part.
+            tool_def: The tool definition.
+            args: Validated tool arguments.
+            handler: The inner execution handler.
+
+        Returns:
+            Tool result, or annotated ``ToolReturn`` on failure.
+        """
+        from time import perf_counter
+
+        from pydantic_ai.messages import ToolReturn
+
+        from agentpool.tools.base import ToolResult
+
+        agent_ctx = ctx.deps
+        tool_start_times: dict[str, float] | None = getattr(agent_ctx, "_tool_start_times", None)
+        if tool_start_times is None:
+            tool_start_times = {}
+            agent_ctx._tool_start_times = tool_start_times
+        tool_start_times[call.tool_call_id] = perf_counter()
+
+        try:
+            result = await handler(args)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Tool execution failed",
+                tool_name=call.tool_name,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+            return ToolReturn(
+                return_value=f"Error: {exc}",
+                content=f"Tool '{call.tool_name}' failed: {exc}",
+            )
+
+        # Convert AgentPool ToolResult to pydantic-ai ToolReturn
+        if isinstance(result, ToolResult):
+            val = result.structured_content or result.content
+            result = ToolReturn(
+                return_value=val,
+                content=result.content,
+                metadata=result.metadata,
+            )
+
+        return result
+
+    async def before_tool_execute(
+        self,
+        ctx: RunContext[Any],
+        *,
+        call: ToolCallPart,
+        tool_def: ToolDefinition,
+        args: ValidatedToolArgs,
+    ) -> ValidatedToolArgs:
+        """Execute pre-tool hooks and handle deny.
+
+        Runs pre-tool hooks from ``AgentHooks``. If a hook denies the tool
+        call, raises ``ModelRetry`` to ask the model to try a different
+        approach (instead of aborting the entire run).
+
+        Args:
+            ctx: The pydantic-ai run context.
+            call: The tool call part.
+            tool_def: The tool definition.
+            args: Validated tool arguments.
+
+        Returns:
+            Possibly modified tool arguments.
+
+        Raises:
+            ModelRetry: If a pre-tool hook denies the tool call.
+        """
+        from pydantic_ai import ModelRetry
+
+        from agentpool.agents.context import AgentContext
+
+        agent_ctx = ctx.deps
+        env = agent_ctx.agent.env if isinstance(agent_ctx, AgentContext) else None
+        session_id = (
+            agent_ctx.run_ctx.session_id
+            if isinstance(agent_ctx, AgentContext) and agent_ctx.run_ctx
+            else None
+        )
+
+        hook_result = await self.hook_manager.run_pre_tool_hooks(
+            agent_name=self.hook_manager.agent_name,
+            tool_name=call.tool_name,
+            tool_input=dict(args),
+            session_id=session_id,
+            env=env,
+            agent_context=agent_ctx,
+        )
+
+        if hook_result["decision"] == "deny":
+            reason = hook_result.get("reason", "Blocked by pre-tool hook")
+            raise ModelRetry(f"Tool '{call.tool_name}' blocked: {reason}")
+
+        # Apply modified input if provided
+        if modified := hook_result.get("modified_input"):
+            return {**dict(args), **modified}
+
+        return args
+
+    async def after_tool_execute(
+        self,
+        ctx: RunContext[Any],
+        *,
+        call: ToolCallPart,
+        tool_def: ToolDefinition,
+        args: ValidatedToolArgs,
+        result: Any,
+    ) -> Any:
+        """Execute post-tool hooks, apply modifications, and consume injections.
+
+        Runs post-tool hooks from ``AgentHooks`` and explicitly applies:
+        - ``modified_output``: replaces the tool result entirely
+        - ``additional_context``: appended to the tool result
+
+        Also consumes pending prompt injections from
+        ``PromptInjectionManager``.
+
+        This fixes the existing gap where ``AgentHooks._wrap_after_tool_execute``
+        discards ``modified_output`` and ``additional_context``.
+
+        Args:
+            ctx: The pydantic-ai run context.
+            call: The tool call part.
+            tool_def: The tool definition.
+            args: Validated tool arguments.
+            result: The tool execution result.
+
+        Returns:
+            Possibly modified tool result.
+        """
+        from agentpool.agents.context import AgentContext
+        from agentpool.agents.native_agent.tool_wrapping import (
+            _inject_additional_context,
+        )
+
+        agent_ctx = ctx.deps
+        env = agent_ctx.agent.env if isinstance(agent_ctx, AgentContext) else None
+        session_id = (
+            agent_ctx.run_ctx.session_id
+            if isinstance(agent_ctx, AgentContext) and agent_ctx.run_ctx
+            else None
+        )
+
+        from time import perf_counter
+
+        tool_start_times: dict[str, float] | None = getattr(agent_ctx, "_tool_start_times", None)
+        if tool_start_times is not None:
+            start_time = tool_start_times.pop(call.tool_call_id, None)
+            duration_ms = (perf_counter() - start_time) * 1000 if start_time else 0.0
+        else:
+            duration_ms = 0.0
+
+        hook_result = await self.hook_manager.run_post_tool_hooks(
+            agent_name=self.hook_manager.agent_name,
+            tool_name=call.tool_name,
+            tool_input=dict(args),
+            tool_output=result,
+            duration_ms=duration_ms,
+            session_id=session_id,
+            env=env,
+            agent_context=agent_ctx,
+        )
+
+        # Apply modified_output (replaces result entirely)
+        if "modified_output" in hook_result:
+            result = hook_result["modified_output"]
+
+        # Apply additional_context (appended to result)
+        if additional := hook_result.get("additional_context"):
+            result = _inject_additional_context(result, additional)
+
+        # Consume pending injection from PromptInjectionManager
+        run_ctx = self.hook_manager._agent.get_active_run_context()
+        injection_manager = run_ctx.injection_manager if run_ctx else None
+        if injection_manager:
+            injection = await injection_manager.consume()
+            if injection:
+                logger.debug(
+                    "Consuming injection after tool use",
+                    agent=self.hook_manager.agent_name,
+                    tool=call.tool_name,
+                    injection_len=len(injection),
+                )
+                result = _inject_additional_context(result, injection)
+
+        return result
+
+    def _get_confirmation_mode(self) -> str:
+        """Read tool_confirmation_mode from the agent's node config.
+
+        Returns:
+            One of "always", "never", or "per_tool".
+        """
+        run_ctx = self.hook_manager._agent.get_active_run_context()
+        if run_ctx is not None:
+            node = run_ctx.node if hasattr(run_ctx, "node") else None
+            if node is not None:
+                return str(node.tool_confirmation_mode)
+        agent = self.hook_manager._agent
+        if hasattr(agent, "tool_confirmation_mode"):
+            return str(agent.tool_confirmation_mode)
+        return "per_tool"
+
+    def _get_confirmation_tool_names(self) -> set[str]:
+        """Get the set of tool names that require confirmation.
+
+        Returns:
+            Set of tool names with ``requires_confirmation=True``.
+        """
+        tool_manager = self.hook_manager._agent.tools
+        try:
+            # Access cached tools if available (get_tools is async, but
+            # the tool list is typically populated during agent setup)
+            tools = tool_manager._tools if hasattr(tool_manager, "_tools") else []
+        except Exception:  # noqa: BLE001
+            tools = []
+        return {t.name for t in tools if t.requires_confirmation}
 
 
 class NativeAgentHookManager:
@@ -32,6 +363,7 @@ class NativeAgentHookManager:
     - Wraps AgentHooks and delegates to it
     - Consumes injections from PromptInjectionManager (via agent's run context)
     - Combines injection with post-tool hook results
+    - Provides unified tool interception via ``_ToolInterceptCapability``
 
     Example:
         hook_manager = NativeAgentHookManager(
@@ -65,20 +397,26 @@ class NativeAgentHookManager:
         """Check if any hooks are configured."""
         return bool(self.agent_hooks and self.agent_hooks.has_hooks())
 
-    def as_capability(self) -> Any:
-        """Return a pydantic-ai Hooks capability with injection consumption.
+    def as_capability(self) -> CombinedCapability:
+        """Return a ``CombinedCapability`` with unified tool interception.
 
-        Delegates to :meth:`AgentHooks.as_capability` for base hook behaviour
-        and wraps ``after_tool_execute`` to consume pending prompt injections
-        after each tool call.
+        Returns a ``CombinedCapability`` containing:
+        1. ``_ToolInterceptCapability`` — owns all tool interception (confirmation,
+           hooks, injection, error handling)
+        2. ``hooks_cap`` — preserved for ``before_run``/``after_run`` lifecycle
+           callbacks, but its ``after_tool_execute`` is stripped to prevent
+           double-firing (per Decision 2).
+
+        The order ``[_ToolInterceptCapability(), hooks_cap]`` is correct:
+        ``CombinedCapability`` chains ``after_tool_execute`` in reverse, so
+        pass-through ``hooks_cap`` runs outermost first, then
+        ``_ToolInterceptCapability`` runs innermost (runs hooks, applies
+        results, consumes injections).
 
         Returns:
-            A pydantic-ai :class:`~pydantic_ai.capabilities.Hooks` instance.
+            A pydantic-ai ``CombinedCapability`` instance.
         """
-        from pydantic_ai.capabilities import Hooks
-
-        if TYPE_CHECKING:
-            from pydantic_ai.capabilities.abstract import ValidatedToolArgs
+        from pydantic_ai.capabilities import CombinedCapability, Hooks
 
         # Start with AgentHooks capability if available
         if self.agent_hooks and self.agent_hooks.has_hooks():
@@ -86,55 +424,21 @@ class NativeAgentHookManager:
         else:
             base_hooks = Hooks()
 
-        original_after_tool = base_hooks.after_tool_execute
+        # _ToolInterceptCapability owns all tool interception (Decision 2).
+        # base_agent.py owns before_run/after_run via the old mechanism.
+        base_hooks._registry["after_tool_execute"] = []
+        base_hooks._registry["before_tool_execute"] = []
+        base_hooks._registry["before_run"] = []
+        base_hooks._registry["after_run"] = []
 
-        async def wrapped_after_tool(
-            ctx: RunContext[Any],
-            *,
-            call: ToolCallPart,
-            tool_def: ToolDefinition,
-            args: ValidatedToolArgs,
-            result: Any,
-        ) -> Any:
-            # Run original hook first if it exists
-            if original_after_tool is not None:
-                result = await original_after_tool(
-                    ctx, call=call, tool_def=tool_def, args=args, result=result
-                )
-
-            # Consume pending injection from run context
-            run_ctx = self._agent.get_active_run_context()
-            injection_manager = run_ctx.injection_manager if run_ctx else None
-            if injection_manager:
-                injection = await injection_manager.consume()
-                if injection:
-                    from agentpool.agents.native_agent.tool_wrapping import (
-                        _inject_additional_context,
-                    )
-
-                    result = _inject_additional_context(result, injection)
-
-            return result
-
-        # Build kwargs for new Hooks, preserving existing callbacks
-        kwargs: dict[str, Any] = {"after_tool_execute": wrapped_after_tool}
-        if self.agent_hooks and self.agent_hooks.has_hooks():
-            if self.agent_hooks.pre_run:
-                kwargs["before_run"] = base_hooks.before_run
-            if self.agent_hooks.post_run:
-                kwargs["after_run"] = base_hooks.after_run
-            if self.agent_hooks.pre_tool_use:
-                kwargs["before_tool_execute"] = base_hooks.before_tool_execute
-            kwargs["ordering"] = base_hooks.get_ordering()
-
-        new_hooks = Hooks(**kwargs)
-
-        # Copy any additional registry entries from base hooks
-        for key, entries in base_hooks._registry.items():
-            if key not in {"before_run", "after_run", "before_tool_execute", "after_tool_execute"}:
-                new_hooks._registry.setdefault(key, []).extend(entries)
-
-        return new_hooks
+        # Build the combined capability: _ToolInterceptCapability innermost,
+        # hooks_cap outermost (for before_run/after_run lifecycle only).
+        return CombinedCapability(
+            capabilities=[
+                _ToolInterceptCapability(hook_manager=self),
+                base_hooks,
+            ]
+        )
 
     async def run_pre_run_hooks(
         self,
@@ -255,7 +559,7 @@ class NativeAgentHookManager:
             tool_name: Name of the tool that was called.
             tool_input: Input arguments that were passed to the tool.
             tool_output: Output from the tool.
-            duration_ms: How long the tool took to execute.
+            duration_ms: How long the tool took.
             session_id: Optional conversation identifier.
             env: Agent's execution environment, passed to command hooks.
             agent_context: Optional AgentContext for hooks that need pool access.
