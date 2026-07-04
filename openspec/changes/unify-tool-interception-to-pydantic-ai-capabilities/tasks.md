@@ -38,19 +38,19 @@
 
 ## 5. Testing
 
-- [ ] 5.1 Write unit test: `get_wrapper_toolset()` wraps toolset with `ApprovalRequiredToolset` when mode="always"
-- [ ] 5.2 Write unit test: `get_wrapper_toolset()` returns `None` when mode="never"
-- [ ] 5.3 Write unit test: `get_wrapper_toolset()` wraps with per-tool check when mode="per_tool"
-- [ ] 5.4 Write unit test: `wrap_tool_execute()` catches exception and returns annotated `ToolReturn`
-- [ ] 5.5 Write unit test: `wrap_tool_execute()` passes through successful results unchanged
-- [ ] 5.6 Write unit test: `before_tool_execute()` applies `modified_input` from pre-tool hooks
-- [ ] 5.7 Write unit test: `before_tool_execute()` raises `ModelRetry` when pre-tool hook denies
-- [ ] 5.8 Write unit test: `after_tool_execute()` applies `modified_output` from post-tool hooks
-- [ ] 5.9 Write unit test: `after_tool_execute()` applies `additional_context` from post-tool hooks
-- [ ] 5.10 Write unit test: `after_tool_execute()` consumes pending injection
-- [ ] 5.11 Write integration test: hooks fire for MCP tools (not just direct tools)
-- [ ] 5.12 Write integration test: confirmation works for MCP tools when mode="always"
-- [ ] 5.13 Write integration test: no double-firing when old `AgentHooks` is active AND capability chain is active
+- [x] 5.1 Write unit test: `get_wrapper_toolset()` wraps toolset with `ApprovalRequiredToolset` when mode="always"
+- [x] 5.2 Write unit test: `get_wrapper_toolset()` returns `None` when mode="never"
+- [x] 5.3 Write unit test: `get_wrapper_toolset()` wraps with per-tool check when mode="per_tool"
+- [x] 5.4 Write unit test: `wrap_tool_execute()` catches exception and returns annotated `ToolReturn`
+- [x] 5.5 Write unit test: `wrap_tool_execute()` passes through successful results unchanged
+- [x] 5.6 Write unit test: `before_tool_execute()` applies `modified_input` from pre-tool hooks
+- [x] 5.7 Write unit test: `before_tool_execute()` raises `ModelRetry` when pre-tool hook denies
+- [x] 5.8 Write unit test: `after_tool_execute()` applies `modified_output` from post-tool hooks
+- [x] 5.9 Write unit test: `after_tool_execute()` applies `additional_context` from post-tool hooks
+- [x] 5.10 Write unit test: `after_tool_execute()` consumes pending injection
+- [x] 5.11 Write integration test: hooks fire for MCP tools (not just direct tools)
+- [x] 5.12 Write integration test: confirmation works for MCP tools when mode="always"
+- [x] 5.13 Write integration test: no double-firing when old `AgentHooks` is active AND capability chain is active
 - [x] 5.14 Run existing test suite (`uv run pytest`) and fix any regressions
 - [x] 5.15 Run type checking (`uv run mypy src/`) and fix any new type errors
 
