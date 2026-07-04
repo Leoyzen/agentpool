@@ -65,7 +65,7 @@
 
 ## 5. Phase 8: Rename Execution
 
-- [ ] 5.1 Verify all Phase 4-7 follow-up changes are merged
+- [x] 5.1 Verify all Phase 4-7 follow-up changes are merged
 - [ ] 5.2 Verify clean working tree
 - [ ] 5.3 Run `python scripts/rename_to_agentwolf.py` (no --dry-run)
 - [ ] 5.4 Commit as single atomic commit: `refactor: rename agentpool to agentwolf`
@@ -76,3 +76,7 @@
 - [ ] 5.9 Verify `agentwolf --version` CLI command works
 - [ ] 5.10 Verify `agentwolf serve-acp config.yml` works with a sample config
 - [ ] 5.11 Verify no `agentpool` references remain (except openspec/changes/ historical artifacts)
+
+> **Phase 8 is BLOCKED** — deferred by user ("phase8先不做"). The rename script
+> (`scripts/rename_to_agentwolf.py`) is ready but execution is an irreversible
+> operation affecting 452+ files. Requires explicit user confirmation to proceed.
