@@ -59,7 +59,7 @@
 - [ ] 4.6 Fix runtime-import violations — move code or invert dependency
 - [ ] 4.7 Remove `allow_indirect_imports = true` from all contracts
 - [x] 4.8 Verify `lint-imports` passes with zero violations
-- [ ] 4.9 Add `lint-imports` to `.github/workflows/` CI pipeline
+- [x] 4.9 Add `lint-imports` to `.github/workflows/` CI pipeline
 - [x] 4.10 Run `uv run lint-imports` — zero violations
 - [ ] 4.11 Run `uv run pytest` — full test suite passes after import fixes
 

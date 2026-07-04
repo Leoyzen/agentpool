@@ -91,6 +91,26 @@ jobs:
       - name: Run mypy
         run: uv run --no-group docs mypy src/
 
+  import-linter:
+    name: Import Linter
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+          cache-suffix: py3.13
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: uv sync --all-extras --no-group lint
+      - name: Run lint-imports
+        run: uv run lint-imports
+
   smoke:
     name: Smoke (import + collect)
     runs-on: ubuntu-latest
@@ -195,7 +215,7 @@ jobs:
   report:
     name: CI Report
     runs-on: ubuntu-latest
-    needs: [lint, format, typecheck, smoke, unit, integration, core]
+    needs: [lint, format, typecheck, import-linter, smoke, unit, integration, core]
     if: always()
     steps:
       - name: Build summary table
@@ -207,6 +227,7 @@ jobs:
           echo '| Lint (ruff check) | ${{ needs.lint.result }} |' >> $GITHUB_STEP_SUMMARY
           echo '| Format (ruff format) | ${{ needs.format.result }} |' >> $GITHUB_STEP_SUMMARY
           echo '| Type Check (mypy) | ${{ needs.typecheck.result }} |' >> $GITHUB_STEP_SUMMARY
+          echo '| Import Linter | ${{ needs.import-linter.result }} |' >> $GITHUB_STEP_SUMMARY
           echo '| Smoke (import + collect) | ${{ needs.smoke.result }} |' >> $GITHUB_STEP_SUMMARY
           echo '| Unit tests | ${{ needs.unit.result }} |' >> $GITHUB_STEP_SUMMARY
           echo '| Integration tests | ${{ needs.integration.result }} |' >> $GITHUB_STEP_SUMMARY
@@ -215,6 +236,7 @@ jobs:
           if [ '${{ needs.lint.result }}' = 'failure' ] || \
              [ '${{ needs.format.result }}' = 'failure' ] || \
              [ '${{ needs.typecheck.result }}' = 'failure' ] || \
+             [ '${{ needs.import-linter.result }}' = 'failure' ] || \
              [ '${{ needs.smoke.result }}' = 'failure' ] || \
              [ '${{ needs.unit.result }}' = 'failure' ] || \
              [ '${{ needs.integration.result }}' = 'failure' ] || \

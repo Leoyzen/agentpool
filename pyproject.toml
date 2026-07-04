@@ -651,6 +651,7 @@ ignore_imports = [
     "agentpool_config.task -> agentpool.tools.base",
     "agentpool_config.task -> agentpool.utils.model_capabilities",
     "agentpool_config.teams -> agentpool",
+    "agentpool_config.teams -> agentpool.delegation.base_team",
     "agentpool_config.teams -> agentpool.messaging",
     "agentpool_config.tools -> agentpool.tools.base",
     "agentpool_config.tools -> agentpool.utils.parse_time",
