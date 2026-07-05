@@ -21,6 +21,7 @@ from pydantic_ai.messages import (
 )
 
 from agentpool.agents.events import (
+    ElicitationDeferredEvent,
     FileContentItem,
     LocationContentItem,
     RunErrorEvent,
@@ -163,6 +164,17 @@ class EventProcessor:
             ):
                 for e in self._process_tool_deferred(
                     ctx, tool_call_id, tool_name, deferred_handle, strategy
+                ):
+                    yield e
+
+            case ElicitationDeferredEvent(
+                deferred_handle=deferred_handle,
+                message=message,
+                requested_schema=requested_schema,
+                mode=mode,
+            ):
+                for e in self._process_elicitation_deferred(
+                    ctx, deferred_handle, message, requested_schema, mode
                 ):
                     yield e
 
@@ -472,6 +484,67 @@ class EventProcessor:
             metadata=metadata,
         )
         ctx.add_tool_part(tool_call_id, tool_part)
+        ctx.assistant_msg.parts.append(tool_part)
+        yield PartUpdatedEvent.create(tool_part)
+
+    def _process_elicitation_deferred(
+        self,
+        ctx: EventProcessorContext,
+        deferred_handle: str,
+        message: str,
+        requested_schema: dict[str, Any],
+        mode: str,
+    ) -> Iterator[Event]:
+        """Process an elicitation deferred event.
+
+        Produces a ToolPart with state=ToolStateRunning and elicitation metadata
+        so the OpenCode client can render an elicitation form.
+
+        Args:
+            ctx: The event processor context.
+            deferred_handle: Correlation ID for resolving the deferred elicitation.
+            message: Human-readable message describing what is being elicited.
+            requested_schema: JSON schema describing the expected response structure.
+            mode: Elicitation mode hint for client rendering.
+
+        Yields:
+            PartUpdatedEvent for the created elicitation tool part.
+        """
+        elicitation_call_id = f"elicitation_{deferred_handle}"
+
+        # Deduplication: skip if ToolPart already exists and is finalized
+        existing = ctx.get_tool_part(elicitation_call_id)
+        if existing is not None:
+            match existing.state:
+                case ToolStateCompleted() | ToolStateError():
+                    return
+                case _:
+                    pass
+
+        ts = TimeStart(start=now_ms())
+        tool_state = ToolStateRunning(
+            time=ts,
+            input={},
+            title=f"[Elicitation] {message}",
+        )
+        metadata: dict[str, Any] = {
+            "deferred": True,
+            "deferred_handle": deferred_handle,
+            "elicitation": True,
+            "elicitation_message": message,
+            "elicitation_schema": requested_schema,
+            "elicitation_mode": mode,
+        }
+        tool_part = ToolPart(
+            id=identifier.ascending("part"),
+            message_id=ctx.assistant_msg_id,
+            session_id=ctx.session_id,
+            tool="elicitation",
+            call_id=elicitation_call_id,
+            state=tool_state,
+            metadata=metadata,
+        )
+        ctx.add_tool_part(elicitation_call_id, tool_part)
         ctx.assistant_msg.parts.append(tool_part)
         yield PartUpdatedEvent.create(tool_part)
 

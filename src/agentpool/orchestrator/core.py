@@ -22,6 +22,7 @@ from pydantic_ai import TextPartDelta, ThinkingPartDelta, ToolCallPartDelta
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     CompactionEvent,
+    ElicitationDeferredEvent,
     PartDeltaEvent,
     PlanUpdateEvent,
     RunErrorEvent,
@@ -246,6 +247,7 @@ def _is_immediate(event: Any) -> bool:
             | ToolCallStartEvent()
             | ToolCallCompleteEvent()
             | ToolCallDeferredEvent()
+            | ElicitationDeferredEvent()
         ):
             return True
         case _:

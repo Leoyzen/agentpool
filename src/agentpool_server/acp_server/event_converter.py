@@ -54,6 +54,7 @@ from agentpool.agents.events import (
     CompactionEvent,
     CustomEvent,
     DiffContentItem,
+    ElicitationDeferredEvent,
     FileContentItem,
     LocationContentItem,
     PlanUpdateEvent,
@@ -876,6 +877,33 @@ class ACPEventConverter:
                 # Deferred events with status "resolved" or "expired" are no-ops
                 # on the converter side — resolution is handled by the session pool
                 pass
+
+            case ElicitationDeferredEvent(
+                deferred_handle=deferred_handle,
+                message=message,
+                requested_schema=requested_schema,
+                mode=mode,
+            ):
+                # Emit a tool_call_deferred notification with elicitation params
+                # in _meta so the ACP client can render an elicitation UI.
+                elicitation_call_id = f"elicitation_{deferred_handle}"
+                state = self._get_or_create_tool_state(elicitation_call_id, "elicitation", {})
+                if not state.started:
+                    state.started = True
+                    yield ToolCallStart(
+                        tool_call_id=elicitation_call_id,
+                        title=f"Elicitation: {message}",
+                        kind=state.kind,
+                        raw_input=self._format_raw_input(state.raw_input),
+                        status="pending",
+                        field_meta={
+                            "deferred_handle": deferred_handle,
+                            "elicitation": True,
+                            "elicitation_message": message,
+                            "elicitation_schema": requested_schema,
+                            "elicitation_mode": mode,
+                        },
+                    )
 
             case _:
                 # Graceful fallback for unknown event types
