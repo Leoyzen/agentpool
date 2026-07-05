@@ -58,6 +58,17 @@ class ElicitationFutureRegistry:
         """Initialize an empty future registry."""
         self._futures: dict[str, asyncio.Future[Any]] = {}
 
+    def __contains__(self, deferred_handle: str) -> bool:
+        """Check if a future exists for the given handle.
+
+        Args:
+            deferred_handle: Identifier matching a registered future.
+
+        Returns:
+            True if a future exists for the handle, False otherwise.
+        """
+        return deferred_handle in self._futures
+
     def register(self, deferred_handle: str) -> asyncio.Future[Any]:
         """Create and store a new future for a deferred elicitation call.
 

@@ -40,7 +40,7 @@ from agentpool.agents.events import (
 from agentpool.log import get_logger
 from agentpool.orchestrator.run import RunHandle, RunStatus, inject_cancelled_tool_results
 from agentpool.orchestrator.runtime_registry import RuntimeAgentRegistry
-from agentpool.sessions.models import PendingDeferredCall, SessionData
+from agentpool.sessions.models import ElicitationResumePayload, PendingDeferredCall, SessionData
 from agentpool_server.opencode_server.models.session_info import SessionInfo
 
 
@@ -115,6 +115,14 @@ class SessionBusyError(Exception):
         )
         self.session_id = session_id
         self.run_id = run_id
+
+
+class SessionClosedError(Exception):
+    """Raised when rejecting pending elicitation futures on session close."""
+
+    def __init__(self, session_id: str = "") -> None:
+        super().__init__(f"Session closed: {session_id}" if session_id else "Session closed")
+        self.session_id = session_id
 
 
 class CheckpointMismatchError(Exception):
@@ -2273,6 +2281,7 @@ class SessionPool:
         session_data: SessionData,
         checkpoint: CheckpointData,
         results: Any,
+        elicitation_payloads: list[ElicitationResumePayload] | None = None,
     ) -> None:
         """Resume a native agent from checkpoint with deferred results.
 
@@ -2280,10 +2289,22 @@ class SessionPool:
         original config, and calls agent.run() with the restored history and
         deferred results.
 
+        For elicitation deferred calls (``deferred_kind="elicitation"``), the
+        elicitation responses are pre-populated into
+        ``AgentRunContext.cached_elicitation_responses`` so that
+        ``handle_elicitation()`` returns the cached response during tool
+        re-execution instead of deferring again. The real MCP tool result
+        flows back through pydantic-ai as ``deferred_tool_results``.
+
+        For non-elicitation deferred calls, results are passed directly as
+        ``deferred_tool_results`` (existing behavior).
+
         Args:
             session_data: Persisted session data.
             checkpoint: Checkpoint data with message_history and pending_calls.
             results: DeferredToolResults for resolving pending deferred calls.
+            elicitation_payloads: Optional elicitation responses for crash
+                recovery resume of elicitation deferred calls.
 
         Raises:
             SessionNotFoundError: If agent config is not found.
@@ -2319,16 +2340,69 @@ class SessionPool:
                     exc_info=True,
                 )
 
+        # Build cached elicitation responses for crash recovery.
+        # When the agent run re-executes MCP tools that were deferred for
+        # elicitation, handle_elicitation() checks this dict and returns
+        # the cached response instead of deferring again.
+        cached_elicitation: dict[str, Any] = {}
+        if elicitation_payloads:
+            from mcp.types import ElicitResult as MCPElicitResult
+
+            for payload in elicitation_payloads:
+                match payload.action:
+                    case "accept":
+                        cached_elicitation[payload.deferred_handle] = MCPElicitResult(
+                            action="accept",
+                            content=payload.content,
+                        )
+                    case "decline":
+                        cached_elicitation[payload.deferred_handle] = MCPElicitResult(
+                            action="decline",
+                        )
+                    case "cancel":
+                        cached_elicitation[payload.deferred_handle] = MCPElicitResult(
+                            action="cancel",
+                        )
+
+        # Separate elicitation deferred calls from non-elicitation calls.
+        # Elicitation calls use the re-execution path (cached responses above),
+        # while non-elicitation calls pass results directly to pydantic-ai.
+        elicitation_call_ids: set[str] = set()
+        for call in session_data.pending_deferred_calls:
+            if call.deferred_kind == "elicitation":
+                elicitation_call_ids.add(call.tool_call_id)
+
+        # Filter deferred_tool_results to exclude elicitation calls.
+        # Elicitation calls are resolved through re-execution, not direct
+        # result injection. The results dict from the caller contains only
+        # non-elicitation results (elicitation payloads come separately).
+        non_elicitation_results = results
+
         try:
             message_history: list[Any] = list(checkpoint.message_history)
-            # deferred_tool_results is forwarded to pydantic-ai Agent.run()
-            # which accepts it natively; cast to Any since BaseAgent.run()
-            # doesn't declare this kwarg in its signature.
-            run_fn: Any = agent.run
-            await run_fn(
-                message_history=message_history,
-                deferred_tool_results=results,
+
+            # Set up run context with cached elicitation responses for
+            # crash recovery. The agent's get_agentlet() will use this
+            # run_ctx, and handle_elicitation() will check
+            # cached_elicitation_responses during tool re-execution.
+            run_ctx = AgentRunContext(
+                session_id=session_data.session_id,
+                event_bus=self._event_bus,
             )
+            if cached_elicitation:
+                run_ctx.cached_elicitation_responses = cached_elicitation
+
+            # Call run_stream() directly (instead of run()) so we can pass
+            # _run_ctx with cached elicitation responses. Cast to Any since
+            # BaseAgent.run_stream() doesn't declare deferred_tool_results
+            # in its signature — pydantic-ai picks it up via **kwargs.
+            stream_fn: Any = agent.run_stream
+            async for _ in stream_fn(
+                message_history=message_history,
+                deferred_tool_results=non_elicitation_results,
+                _run_ctx=run_ctx,
+            ):
+                pass
         finally:
             await agent.__aexit__(None, None, None)
 
@@ -2361,22 +2435,87 @@ class SessionPool:
             if hasattr(agent, "__aexit__"):
                 await agent.__aexit__(None, None, None)
 
-    async def resume_session(
+    async def _try_in_process_elicitation_resume(
+        self,
+        session_id: str,
+        elicitation_payloads: list[ElicitationResumePayload],
+    ) -> bool:
+        """Attempt in-process elicitation resume by resolving futures.
+
+        Checks if the agent run is still alive (in-process) and has an
+        ``ElicitationFutureRegistry`` with pending futures for the given
+        elicitation payloads. If so, resolves each future with the
+        corresponding payload, allowing the MCP client's ``call_tool()``
+        RPC to continue and complete normally.
+
+        Args:
+            session_id: The session to check.
+            elicitation_payloads: Elicitation responses to resolve.
+
+        Returns:
+            True if ALL payloads were resolved in-process (futures existed),
+            False if any future was not found (crash recovery path needed).
+        """
+        run_handle = self._get_active_run_handle(session_id)
+        if run_handle is None or run_handle.run_ctx is None:
+            return False
+
+        registry = run_handle.run_ctx.elicitation_registry
+        if registry is None:
+            return False
+
+        all_resolved = True
+        for payload in elicitation_payloads:
+            # Check if the future exists in the registry.
+            # resolve() is a no-op if the handle is not found.
+            if payload.deferred_handle not in registry:
+                all_resolved = False
+                continue
+            registry.resolve(payload.deferred_handle, payload)
+
+        if all_resolved:
+            logger.debug(
+                "In-process elicitation resume — all futures resolved",
+                session_id=session_id,
+                count=len(elicitation_payloads),
+            )
+        else:
+            logger.debug(
+                "In-process elicitation resume — some futures not found, "
+                "falling back to crash recovery",
+                session_id=session_id,
+            )
+
+        return all_resolved
+
+    async def resume_session(  # noqa: PLR0915
         self,
         session_id: str,
         deferred_tool_results: Any,
         *,
         source: str = "resume_prompt",
+        elicitation_payloads: list[ElicitationResumePayload] | None = None,
     ) -> None:
         """Resume a paused session with resolved deferred tool results.
 
         Loads the persisted SessionData, validates that deferred_tool_results
         cover all pending_deferred_calls (raising CheckpointMismatchError if not),
         and resumes execution via the appropriate path:
-        - Native agent: load checkpoint → reconstruct agent from config →
-          agent.run(message_history=restored, deferred_tool_results=results)
-        - ACP agent: load session data → reopen subprocess →
-          agent.run(message_history=restored, deferred_tool_results=results)
+
+        - **In-process elicitation resume**: If ``elicitation_payloads`` are
+          provided and the elicitation future still exists in the
+          ``ElicitationFutureRegistry`` (agent run is still alive), the future
+          is resolved directly. The MCP client's ``call_tool()`` RPC continues
+          and completes normally without re-executing the agent run.
+        - **Crash recovery elicitation resume**: If ``elicitation_payloads``
+          are provided but the future does NOT exist (process crashed), the
+          elicitation responses are pre-populated into
+          ``AgentRunContext.cached_elicitation_responses``. The agent run is
+          re-executed, and ``handle_elicitation()`` returns the cached
+          response during MCP tool re-execution.
+        - **Non-elicitation resume**: Native agent: load checkpoint →
+          reconstruct agent → ``agent.run()`` with deferred results.
+          ACP agent: reopen subprocess → ``agent.run()`` with deferred results.
 
         Per-session resume_lock ensures only one resume at a time.
         Emits SessionResumeEvent on success.
@@ -2386,6 +2525,9 @@ class SessionPool:
             deferred_tool_results: Results for pending deferred tool calls
                 (DeferredToolResults-compatible object with .calls dict).
             source: Identifier for the entity triggering the resume.
+            elicitation_payloads: Optional elicitation responses for resuming
+                deferred elicitation calls. Each payload carries the user's
+                response (accept/decline/cancel) keyed by ``deferred_handle``.
 
         Raises:
             SessionNotFoundError: If the session does not exist in storage.
@@ -2408,20 +2550,45 @@ class SessionPool:
         if session is not None and session.current_run_id is not None:
             raise SessionBusyError(session_id, session.current_run_id)
 
-        # Validate deferred_tool_results cover all pending_deferred_calls
-        pending_call_ids: set[str] = {call.tool_call_id for call in data.pending_deferred_calls}
+        # Validate deferred_tool_results cover all pending_deferred_calls.
+        # Elicitation deferred calls are covered by elicitation_payloads, not
+        # deferred_tool_results, so exclude them from the validation set.
+        elicitation_call_ids: set[str] = {
+            call.tool_call_id
+            for call in data.pending_deferred_calls
+            if call.deferred_kind == "elicitation"
+        }
+        non_elicitation_pending_ids: set[str] = {
+            call.tool_call_id for call in data.pending_deferred_calls
+        } - elicitation_call_ids
+
         provided_call_ids: set[str] = set(getattr(deferred_tool_results, "calls", {}).keys())
 
-        missing = pending_call_ids - provided_call_ids
-        extra = provided_call_ids - pending_call_ids
+        missing = non_elicitation_pending_ids - provided_call_ids
+        extra = provided_call_ids - non_elicitation_pending_ids - elicitation_call_ids
         if missing or extra:
             raise CheckpointMismatchError(
                 session_id=session_id,
-                expected=pending_call_ids,
+                expected=non_elicitation_pending_ids,
                 provided=provided_call_ids,
                 missing=missing,
                 extra=extra,
             )
+
+        # Validate elicitation_payloads cover all elicitation deferred calls.
+        if elicitation_call_ids:
+            provided_elicitation_ids: set[str] = {
+                p.deferred_handle for p in (elicitation_payloads or [])
+            }
+            missing_elicitation = elicitation_call_ids - provided_elicitation_ids
+            if missing_elicitation:
+                raise CheckpointMismatchError(
+                    session_id=session_id,
+                    expected=elicitation_call_ids,
+                    provided=provided_elicitation_ids,
+                    missing=missing_elicitation,
+                    extra=set(),
+                )
 
         # Determine agent type
         agent_type = data.metadata.get("agent_type", "native")
@@ -2429,6 +2596,43 @@ class SessionPool:
         # Per-session resume lock with state validation (Decision 8, Task 19)
         async with self._with_resume_lock(session_id) as session:
             try:
+                # In-process elicitation resume: if the elicitation future
+                # still exists in the registry (agent run is still alive),
+                # resolve it directly. The MCP client's call_tool() RPC
+                # continues and completes normally.
+                if elicitation_payloads:
+                    resolved_in_process = await self._try_in_process_elicitation_resume(
+                        session_id, elicitation_payloads
+                    )
+                    # All elicitation futures were resolved in-process.
+                    # If there are no non-elicitation deferred calls,
+                    # we're done — the agent run continues on its own.
+                    if resolved_in_process and not non_elicitation_pending_ids:
+                        data = data.model_copy(
+                            update={
+                                "status": "active",
+                                "pending_deferred_calls": [],
+                            }
+                        )
+                        data.touch()
+                        await store.save(data)
+                        if session is not None:
+                            session.last_active_at = time.monotonic()
+                        await self.event_bus.publish(
+                            session_id,
+                            SessionResumeEvent(
+                                session_id=session_id,
+                                resolved_call_count=len(elicitation_call_ids),
+                                source=source,
+                            ),
+                        )
+                        logger.info(
+                            "Session resumed (in-process elicitation)",
+                            session_id=session_id,
+                            resolved_calls=len(elicitation_call_ids),
+                        )
+                        return
+
                 # Load checkpoint data
                 checkpoint = await self._load_checkpoint_data(session_id)
 
@@ -2440,7 +2644,12 @@ class SessionPool:
                 if agent_type == "acp":
                     await self._resume_acp_agent(data, checkpoint, deferred_tool_results)
                 else:
-                    await self._resume_native_agent(data, checkpoint, deferred_tool_results)
+                    await self._resume_native_agent(
+                        data,
+                        checkpoint,
+                        deferred_tool_results,
+                        elicitation_payloads=elicitation_payloads,
+                    )
 
                 # Clear pending_deferred_calls ONLY after agent.run() succeeds (Decision 8)
                 data = data.model_copy(
@@ -2457,11 +2666,12 @@ class SessionPool:
                     session.last_active_at = time.monotonic()
 
                 # Emit SessionResumeEvent
+                total_resolved = len(non_elicitation_pending_ids) + len(elicitation_call_ids)
                 await self.event_bus.publish(
                     session_id,
                     SessionResumeEvent(
                         session_id=session_id,
-                        resolved_call_count=len(pending_call_ids),
+                        resolved_call_count=total_resolved,
                         source=source,
                     ),
                 )
@@ -2470,7 +2680,7 @@ class SessionPool:
                     "Session resumed successfully",
                     session_id=session_id,
                     agent_type=agent_type,
-                    resolved_calls=len(pending_call_ids),
+                    resolved_calls=total_resolved,
                 )
 
             except Exception:
@@ -2484,7 +2694,8 @@ class SessionPool:
         """Close a session.
 
         Waits for any active run to complete before proceeding.
-        Order: wait for run, session cleanup, event bus, then turn state.
+        Order: wait for run, reject elicitation futures, session cleanup,
+        event bus, then turn state.
 
         Args:
             session_id: The session to close.
@@ -2517,6 +2728,13 @@ class SessionPool:
                 except TimeoutError:
                     self.cancel_run(run_handle.run_id)
                     await asyncio.sleep(0.1)
+
+        # Reject all pending elicitation futures so blocked MCP tool calls
+        # unblock immediately instead of hanging on a closed session.
+        if run_handle is not None and run_handle.run_ctx is not None:
+            registry = run_handle.run_ctx.elicitation_registry
+            if registry is not None:
+                registry.reject_all(SessionClosedError(session_id))
 
         await self.sessions.close_session(session_id)
         # EventBus and message cache cleanup may be interrupted by

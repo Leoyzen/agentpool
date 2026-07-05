@@ -862,6 +862,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         )
 
         elicitation_registry = ElicitationFutureRegistry()
+        if run_ctx is not None:
+            run_ctx.elicitation_registry = elicitation_registry
         checkpoint_mgr: CheckpointManager | None = None
         if self.agent_pool is not None:
             checkpoint_mgr = CheckpointManager(

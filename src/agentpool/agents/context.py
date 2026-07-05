@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
     from agentpool import Agent
     from agentpool.agents.events import StreamEventEmitter
+    from agentpool.agents.native_agent.elicitation_bridge import ElicitationFutureRegistry
     from agentpool.orchestrator.core import EventBus
     from agentpool.orchestrator.run import RunHandle
     from agentpool.tools.base import Tool
@@ -127,6 +128,24 @@ class AgentRunContext:
     checkpointed: bool = False
     """Whether the run has been checkpointed (deferred tools pending)."""
 
+    elicitation_registry: ElicitationFutureRegistry | None = None
+    """Per-session registry of pending elicitation futures.
+
+    Set by ``get_agentlet()`` when the elicitation bridge capability is
+    created. Used by ``resume_session()`` to resolve futures for in-process
+    resume (the agent run is still alive but paused on elicitation).
+    """
+
+    cached_elicitation_responses: dict[str, ElicitResult] = field(default_factory=dict)
+    """Cached elicitation responses for crash recovery.
+
+    Maps ``tool_call_id`` to a pre-built ``ElicitResult``. When
+    ``handle_elicitation()`` is called during re-execution, it checks
+    this dict first and returns the cached response instead of deferring
+    again. Populated by ``_resume_native_agent()`` from
+    ``ElicitationResumePayload`` data.
+    """
+
     _run_handle: RunHandle | None = None
     """Run handle for this execution, set by RunHandle lifecycle."""
 
@@ -214,7 +233,21 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
 
         When durability is not supported, the provider's ``get_elicitation``
         is called directly (existing behavior).
+
+        During crash recovery resume, ``run_ctx.cached_elicitation_responses``
+        contains pre-built responses keyed by ``tool_call_id``. If a cached
+        response exists for the current tool call, it is returned immediately
+        without deferring, allowing the MCP tool to re-execute with the
+        user's prior response.
         """
+        # Crash recovery: return cached elicitation response if available.
+        if (
+            self.run_ctx is not None
+            and self.tool_call_id is not None
+            and self.tool_call_id in self.run_ctx.cached_elicitation_responses
+        ):
+            return self.run_ctx.cached_elicitation_responses[self.tool_call_id]
+
         provider = self.get_input_provider()
         if provider.supports_durable_elicitation:
             match params:
