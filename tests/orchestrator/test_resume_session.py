@@ -37,6 +37,30 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 
+async def _ok_gen(**kwargs: Any) -> Any:
+    """Async generator that yields nothing and completes silently."""
+    return
+    yield  # pragma: no cover
+
+
+async def _fail_gen(**kwargs: Any) -> Any:
+    """Async generator that raises RuntimeError during iteration."""
+    raise RuntimeError("Boom")
+    yield  # pragma: no cover
+
+
+def _track_calls() -> Any:
+    """Return (async_gen_fn, calls_list) — calls_list collects call kwargs."""
+    calls: list[dict[str, Any]] = []
+
+    async def _tracked_gen(**kwargs: Any) -> Any:
+        calls.append(dict(kwargs))
+        return
+        yield  # pragma: no cover
+
+    return _tracked_gen, calls
+
+
 def make_pending_call(
     tool_call_id: str = "call-1",
     tool_name: str = "bash",
@@ -256,7 +280,6 @@ async def test_resume_native_agent_loads_checkpoint_and_runs(
 
     Runs with history+results.
     """
-    from unittest.mock import AsyncMock
 
     store = session_pool.sessions.store
     assert store is not None
@@ -293,6 +316,8 @@ async def test_resume_native_agent_loads_checkpoint_and_runs(
     mock_native._model = None
     mock_native.model_settings = None
     mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
+    tracked_gen, run_stream_calls = _track_calls()
+    mock_native.run_stream = tracked_gen
 
     mock_pool.get_agent = MagicMock(return_value=mock_native)
 
@@ -311,9 +336,9 @@ async def test_resume_native_agent_loads_checkpoint_and_runs(
     # Verify agent was reconstructed
     mock_reconstruct.assert_awaited_once_with("sess-1", "test-agent")
 
-    # Verify agent.run was called with message_history and deferred_tool_results
-    mock_native.run.assert_called_once()
-    kwargs = mock_native.run.call_args.kwargs
+    # Verify agent.run_stream was called with message_history and deferred_tool_results
+    assert len(run_stream_calls) == 1
+    kwargs = run_stream_calls[0]
     assert "message_history" in kwargs
     assert kwargs["message_history"] == []
     assert "deferred_tool_results" in kwargs
@@ -356,7 +381,7 @@ async def test_resume_native_agent_clears_pending_after_success(
 
     mock_agentlet = MagicMock()
     mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run = AsyncMock(return_value=MagicMock())
+    mock_native.run_stream = _ok_gen
 
     mock_pool.get_agent = MagicMock(return_value=mock_native)
 
@@ -409,7 +434,7 @@ async def test_resume_native_agent_does_not_clear_pending_on_failure(
 
     mock_agentlet = MagicMock()
     mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run = AsyncMock(side_effect=RuntimeError("Boom"))
+    mock_native.run_stream = _fail_gen
 
     mock_pool.get_agent = MagicMock(return_value=mock_native)
 
@@ -469,7 +494,7 @@ async def test_resume_session_emits_resume_event(
 
     mock_agentlet = MagicMock()
     mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run = AsyncMock(return_value=MagicMock())
+    mock_native.run_stream = _ok_gen
 
     mock_pool.get_agent = MagicMock(return_value=mock_native)
 
@@ -544,7 +569,7 @@ async def test_resume_session_transitions_status_to_active(
 
     mock_agentlet = MagicMock()
     mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run = AsyncMock(return_value=MagicMock())
+    mock_native.run_stream = _ok_gen
 
     mock_pool.get_agent = MagicMock(return_value=mock_native)
 
@@ -601,7 +626,7 @@ async def test_resume_session_keeps_checkpointed_status_on_failure(
 
     mock_agentlet = MagicMock()
     mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run = AsyncMock(side_effect=RuntimeError("Boom"))
+    mock_native.run_stream = _fail_gen
 
     mock_pool.get_agent = MagicMock(return_value=mock_native)
 
@@ -714,7 +739,7 @@ async def test_resume_session_with_empty_pending_calls(
 
     mock_agentlet = MagicMock()
     mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run = AsyncMock(return_value=MagicMock())
+    mock_native.run_stream = _ok_gen
 
     mock_pool.get_agent = MagicMock(return_value=mock_native)
 
@@ -730,4 +755,7 @@ async def test_resume_session_with_empty_pending_calls(
         results = make_deferred_tool_results([])
         await session_pool.resume_session("sess-1", results)
 
-    mock_native.run.assert_called_once()
+    # Successful completion implies run_stream was called
+    session_data = await store.load("sess-1")
+    assert session_data is not None
+    assert session_data.status == "active"

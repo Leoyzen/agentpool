@@ -20,6 +20,23 @@ from agentpool.orchestrator.core import SessionBusyError, SessionPool
 pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
+# Helpers for async generator mocking
+# ---------------------------------------------------------------------------
+
+
+async def _ok_gen(**kwargs: Any) -> Any:
+    """Async generator that yields nothing and completes silently."""
+    return
+    yield  # pragma: no cover
+
+
+async def _fail_gen(**kwargs: Any) -> Any:
+    """Async generator that raises RuntimeError during iteration."""
+    raise RuntimeError("Boom")
+    yield  # pragma: no cover
+
+
+# ---------------------------------------------------------------------------
 # Reuse helpers from test_resume_session.py
 # ---------------------------------------------------------------------------
 
@@ -174,8 +191,13 @@ async def test_resume_session_concurrent_calls_serialize(
         pending_calls=[make_pending_call("call-1")],
     )
 
-    # A slow agent.run() that blocks until an event is set
+    # A slow agent.run_stream() that blocks until an event is set
     block_event = asyncio.Event()
+
+    async def slow_run_stream(**kwargs: Any) -> Any:
+        await block_event.wait()
+        return  # StopAsyncIteration
+        yield  # pragma: no cover
 
     mock_native = MagicMock()
     mock_native.name = "test-agent"
@@ -183,12 +205,8 @@ async def test_resume_session_concurrent_calls_serialize(
     mock_native.model_settings = None
     mock_agentlet = MagicMock()
     mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
+    mock_native.run_stream = slow_run_stream
 
-    async def slow_run(**kwargs: Any) -> Any:
-        await block_event.wait()
-        return MagicMock()
-
-    mock_native.run = AsyncMock(side_effect=slow_run)
     mock_pool.get_agent = MagicMock(return_value=mock_native)
 
     with (
@@ -212,8 +230,8 @@ async def test_resume_session_concurrent_calls_serialize(
         # Give tasks time to start: one acquires lock, the other waits
         await asyncio.sleep(0.05)
 
-        # task1 should be running (blocked on slow_run inside the lock)
-        assert not task1.done(), "First resume should be blocked on slow_run"
+        # task1 should be running (blocked on slow_run_stream inside the lock)
+        assert not task1.done(), "First resume should be blocked on slow_run_stream"
         # task2 should be blocked waiting for the lock
         assert not task2.done(), "Second resume should be waiting for lock"
 
@@ -260,7 +278,7 @@ async def test_resume_session_rejects_second_after_success(
     mock_native.model_settings = None
     mock_agentlet = MagicMock()
     mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run = AsyncMock(return_value=MagicMock())
+    mock_native.run_stream = _ok_gen
 
     mock_pool.get_agent = MagicMock(return_value=mock_native)
 
@@ -326,7 +344,7 @@ async def test_resume_session_does_not_clear_pending_on_failure(
     mock_native.model_settings = None
     mock_agentlet = MagicMock()
     mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run = AsyncMock(side_effect=RuntimeError("Boom"))
+    mock_native.run_stream = _fail_gen
 
     mock_pool.get_agent = MagicMock(return_value=mock_native)
 
@@ -399,14 +417,15 @@ async def test_resume_session_allows_retry_after_failure(
     mock_agentlet = MagicMock()
     mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
 
-    async def run_fail_then_succeed(**kwargs: Any) -> Any:
+    async def run_fail_then_succeed_stream(**kwargs: Any) -> Any:
         nonlocal fail_run
         if fail_run:
             fail_run = False
             raise RuntimeError("First attempt fails")
-        return MagicMock()
+        return  # StopAsyncIteration
+        yield  # pragma: no cover
 
-    mock_native.run = AsyncMock(side_effect=run_fail_then_succeed)
+    mock_native.run_stream = run_fail_then_succeed_stream
     mock_pool.get_agent = MagicMock(return_value=mock_native)
 
     with (
@@ -489,7 +508,7 @@ async def test_resume_session_status_transitions_checkpointed_to_resuming_to_act
     mock_native.model_settings = None
     mock_agentlet = MagicMock()
     mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run = AsyncMock(return_value=MagicMock())
+    mock_native.run_stream = _ok_gen
 
     mock_pool.get_agent = MagicMock(return_value=mock_native)
 
@@ -555,7 +574,7 @@ async def test_resume_session_status_reverts_to_checkpointed_on_failure(
     mock_native.model_settings = None
     mock_agentlet = MagicMock()
     mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run = AsyncMock(side_effect=RuntimeError("Boom"))
+    mock_native.run_stream = _fail_gen
 
     mock_pool.get_agent = MagicMock(return_value=mock_native)
 
