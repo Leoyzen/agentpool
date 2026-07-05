@@ -407,41 +407,33 @@ async def test_child_session_is_not_per_session_agent() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Rule 6: No cross-task CancelScope sharing (no _toolset_cache)
+# MCPToolset caching by client_id
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
-async def test_no_toolset_cache_on_mcp_manager() -> None:
-    """Rule 6: MCPManager does NOT have a _toolset_cache attribute.
+async def test_toolset_cache_exists_on_mcp_manager() -> None:
+    """MCPManager has a _toolset_cache attribute for connection reuse.
 
-    Each ``as_capability()`` call creates a fresh ``MCPToolset``.  This
-    prevents the ``RuntimeError: Attempted to exit cancel scope in a
-    different task`` when a parent agent (task A) and subagent (task B)
-    share the same MCPManager.
-
-    Regression: If someone re-adds ``_toolset_cache`` to MCPManager,
-    cross-task CancelScope errors will return.
+    ``as_capability()`` caches ``MCPToolset`` instances by ``client_id``
+    so repeated calls reuse the same underlying connection. The ``MCP``
+    wrapper instances remain distinct.
     """
     from agentpool.mcp_server.manager import MCPManager
 
     manager = MCPManager(name="test")
-    assert not hasattr(manager, "_toolset_cache"), (
-        "MCPManager must NOT have _toolset_cache. "
-        "Caching MCPToolset instances causes cross-task CancelScope errors "
-        "when shared between parent and subagent asyncio tasks."
-    )
+    assert hasattr(manager, "_toolset_cache")
 
     await manager.cleanup()
 
 
 @pytest.mark.integration
-async def test_as_capability_creates_distinct_toolsets() -> None:
-    """Rule 6: Each as_capability() call returns a DIFFERENT MCPToolset.
+async def test_as_capability_caches_toolset_by_client_id() -> None:
+    """as_capability() caches MCPToolset by client_id.
 
-    Two calls to ``manager.as_capability()`` must return MCP capabilities
-    with distinct ``MCPToolset`` instances.  This ensures no shared
-    anyio CancelScope between parent and child tasks.
+    Two calls to ``manager.as_capability()`` return MCP capabilities
+    with the same underlying ``MCPToolset`` instance (cached by
+    ``client_id``). The MCP wrappers themselves are distinct.
     """
     from agentpool.mcp_server.manager import MCPManager
     from agentpool_config.mcp_server import StdioMCPServerConfig
@@ -462,12 +454,11 @@ async def test_as_capability_creates_distinct_toolsets() -> None:
     assert len(caps1) == 1
     assert len(caps2) == 1
 
-    # Same server name, but DIFFERENT toolset instances
     assert caps1[0].id == caps2[0].id
-    assert caps1[0].local is not caps2[0].local, (
-        "Each as_capability() call must create a fresh MCPToolset. "
-        "If they are the same object, caching was reintroduced."
-    )
+    # MCP wrappers are distinct
+    assert caps1[0] is not caps2[0]
+    # Underlying MCPToolset is cached (shared)
+    assert caps1[0].local is caps2[0].local
 
     await manager.cleanup()
 
