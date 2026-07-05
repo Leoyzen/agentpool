@@ -422,7 +422,7 @@ class MCPClient:
             schema_override=schema,  # type: ignore[arg-type]
         )
 
-    async def call_tool(
+    async def call_tool(  # noqa: PLR0915
         self,
         name: str,
         run_context: RunContext,
@@ -458,7 +458,18 @@ class MCPClient:
                 from fastmcp.client.elicitation import ElicitResult
                 from mcp.types import ElicitResult as MCPElicitResult, ErrorData
 
-                result = await agent_ctx.handle_elicitation(params)
+                try:
+                    result = await agent_ctx.handle_elicitation(params)
+                except CallDeferred as exc:
+                    # FastMCP's callback wrapper catches exceptions, so
+                    # CallDeferred cannot propagate from here. Store the
+                    # elicitation params in the side-channel and return a
+                    # sentinel "decline" so FastMCP sees a normal decline.
+                    # MCPClient.call_tool() will check the side-channel
+                    # after the MCP call returns and re-raise CallDeferred.
+                    metadata = exc.metadata or {}
+                    agent_ctx._pending_elicitation_deferral = metadata.get("elicitation")
+                    return ElicitResult(action="decline")
                 match result:
                     case MCPElicitResult(action="accept", content=content):
                         return content

@@ -240,6 +240,7 @@ async def _handle_elicitation_deferred(
     session_id = run_ctx.session_id if run_ctx is not None else ""
 
     has_elicitation = False
+    pending_calls: list[PendingDeferredCall] = []
 
     for call in requests.calls:
         call_meta = requests.metadata.get(call.tool_call_id, {})
@@ -254,16 +255,7 @@ async def _handle_elicitation_deferred(
             tool_name=call.tool_name,
             elicitation_params=elicitation_params,
         )
-
-        # (a) Checkpoint session state if a CheckpointManager is available.
-        if checkpoint_manager is not None and run_ctx is not None:
-            messages: list[ModelMessage] = list(ctx.messages)
-            await checkpoint_manager.checkpoint(
-                session_id=session_id,
-                message_history=messages,
-                pending_calls=[pending_call],
-                agent_config_hash=agent_config_hash,
-            )
+        pending_calls.append(pending_call)
 
         # (b) Emit ElicitationDeferredEvent to the event bus.
         event = ElicitationDeferredEvent(
@@ -278,11 +270,6 @@ async def _handle_elicitation_deferred(
         # (c) Register future in ElicitationFutureRegistry.
         registry.register(call.tool_call_id)
 
-        # Mark the run as checkpointed so the orchestrator can transition
-        # the RunHandle to checkpointed status.
-        if run_ctx is not None:
-            run_ctx.checkpointed = True
-
         logger.debug(
             "Elicitation deferred tool call",
             tool_name=call.tool_name,
@@ -292,6 +279,23 @@ async def _handle_elicitation_deferred(
     if not has_elicitation:
         # No elicitation calls found — pass through to next capability
         return None
+
+    # (a) Checkpoint session state once with ALL pending calls.
+    # Must be after the loop to avoid overwriting the checkpoint with
+    # each individual call — only the last call would survive otherwise.
+    if checkpoint_manager is not None and run_ctx is not None and pending_calls:
+        messages: list[ModelMessage] = list(ctx.messages)
+        await checkpoint_manager.checkpoint(
+            session_id=session_id,
+            message_history=messages,
+            pending_calls=pending_calls,
+            agent_config_hash=agent_config_hash,
+        )
+
+    # Mark the run as checkpointed so the orchestrator can transition
+    # the RunHandle to checkpointed status.
+    if run_ctx is not None:
+        run_ctx.checkpointed = True
 
     # Elicitation calls remain unresolved (blocked) — return None so the
     # calls stay in DeferredToolRequests.calls for the next capability.

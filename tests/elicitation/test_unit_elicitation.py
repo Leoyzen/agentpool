@@ -137,21 +137,24 @@ def test_pending_deferred_call_serialization_none_fields() -> None:
 async def test_handle_elicitation_durable_true(
     agent_ctx: AgentContext, form_params: ElicitRequestFormParams
 ) -> None:
-    """handle_elicitation stores deferral and returns decline when durable."""
+    """handle_elicitation raises CallDeferred directly when durable."""
     provider = MagicMock(spec=InputProvider)
     provider.supports_durable_elicitation = True
     agent_ctx.input_provider = provider
-    result = await agent_ctx.handle_elicitation(form_params)
-    assert isinstance(result, ElicitResult)
-    assert result.action == "decline"
-    assert agent_ctx._pending_elicitation_deferral is not None
-    deferred = agent_ctx._pending_elicitation_deferral
-    assert deferred["message"] == "Please enter your name"
-    assert deferred["requestedSchema"] == {
+    with pytest.raises(CallDeferred) as exc_info:
+        await agent_ctx.handle_elicitation(form_params)
+    assert exc_info.value.metadata is not None
+    assert exc_info.value.metadata["deferred_kind"] == "elicitation"
+    elicitation = exc_info.value.metadata["elicitation"]
+    assert elicitation["message"] == "Please enter your name"
+    assert elicitation["requestedSchema"] == {
         "type": "object",
         "properties": {"name": {"type": "string"}},
     }
-    assert deferred["mode"] == "form"
+    assert elicitation["mode"] == "form"
+    # Side-channel should NOT be set by handle_elicitation directly.
+    # It is only set by the MCP elicitation callback wrapper.
+    assert agent_ctx._pending_elicitation_deferral is None
 
 
 # ============================================================================
@@ -204,10 +207,13 @@ async def test_call_tool_raises_call_deferred(agent_ctx: AgentContext) -> None:
     mock_inner_client.session.get_server_capabilities.return_value = None
     client._client = mock_inner_client
 
-    with patch(
-        "agentpool.mcp_server.conversions.from_mcp_content",
-        new=AsyncMock(return_value=[]),
-    ), pytest.raises(CallDeferred) as exc_info:
+    with (
+        patch(
+            "agentpool.mcp_server.conversions.from_mcp_content",
+            new=AsyncMock(return_value=[]),
+        ),
+        pytest.raises(CallDeferred) as exc_info,
+    ):
         await client.call_tool("test_tool", MagicMock(), {"arg": "val"}, agent_ctx)
     assert exc_info.value.metadata is not None
     assert exc_info.value.metadata["deferred_kind"] == "elicitation"

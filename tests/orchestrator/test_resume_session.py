@@ -280,7 +280,6 @@ async def test_resume_native_agent_loads_checkpoint_and_runs(
 
     Runs with history+results.
     """
-
     store = session_pool.sessions.store
     assert store is not None
     await store.save(

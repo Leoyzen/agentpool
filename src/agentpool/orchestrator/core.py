@@ -2126,7 +2126,9 @@ class SessionPool:
             return lock
 
     @contextlib.asynccontextmanager
-    async def _with_resume_lock(self, session_id: str) -> AsyncIterator[SessionState | None]:
+    async def _with_resume_lock(
+        self, session_id: str, *, allow_active_run: bool = False
+    ) -> AsyncIterator[SessionState | None]:
         """Acquire per-session resume lock with state validation.
 
         Ensures only one resume runs per session at a time and that
@@ -2135,6 +2137,9 @@ class SessionPool:
 
         Args:
             session_id: Session to lock.
+            allow_active_run: When True, skip the ``current_run_id`` check.
+                Used for in-process elicitation resume where the agent run
+                is intentionally still alive.
 
         Yields:
             The live ``SessionState``, or ``None`` if no live session exists.
@@ -2146,7 +2151,11 @@ class SessionPool:
         resume_lock = await self._get_resume_lock(session_id)
         async with resume_lock:
             session = self.sessions.get_session(session_id)
-            if session is not None and session.current_run_id is not None:
+            if (
+                not allow_active_run
+                and session is not None
+                and session.current_run_id is not None
+            ):
                 raise SessionBusyError(session_id, session.current_run_id)
 
             if self.sessions.store is not None:
@@ -2543,16 +2552,9 @@ class SessionPool:
         if data is None:
             raise SessionNotFoundError(session_id)
 
-        # Fast-path: check for active run in live sessions (before lock).
-        # The authoritative check is inside _with_resume_lock, but this
-        # early check avoids unnecessary store operations for busy sessions.
-        session = self.sessions.get_session(session_id)
-        if session is not None and session.current_run_id is not None:
-            raise SessionBusyError(session_id, session.current_run_id)
-
-        # Validate deferred_tool_results cover all pending_deferred_calls.
-        # Elicitation deferred calls are covered by elicitation_payloads, not
-        # deferred_tool_results, so exclude them from the validation set.
+        # Separate elicitation and non-elicitation pending call IDs.
+        # Must be done before the SessionBusyError check so we can detect
+        # in-process elicitation resume (where the agent run is still alive).
         elicitation_call_ids: set[str] = {
             call.tool_call_id
             for call in data.pending_deferred_calls
@@ -2561,6 +2563,37 @@ class SessionPool:
         non_elicitation_pending_ids: set[str] = {
             call.tool_call_id for call in data.pending_deferred_calls
         } - elicitation_call_ids
+
+        # Fast-path: check for active run in live sessions (before lock).
+        # The authoritative check is inside _with_resume_lock, but this
+        # early check avoids unnecessary store operations for busy sessions.
+        # EXCEPTION: in-process elicitation resume — the agent run is
+        # intentionally still alive, paused on elicitation futures.
+        session = self.sessions.get_session(session_id)
+        has_in_process_elicitation = False
+        if session is not None and session.current_run_id is not None:
+            # Check if this is an in-process elicitation resume: the active
+            # run has an elicitation registry containing all requested
+            # payloads, and there are no non-elicitation pending calls.
+            if (
+                elicitation_payloads is not None
+                and not non_elicitation_pending_ids
+                and elicitation_call_ids
+            ):
+                run_handle = self._get_active_run_handle(session_id)
+                if (
+                    run_handle is not None
+                    and run_handle.run_ctx is not None
+                    and run_handle.run_ctx.elicitation_registry is not None
+                    and all(
+                        p.deferred_handle in run_handle.run_ctx.elicitation_registry
+                        for p in elicitation_payloads
+                    )
+                ):
+                    has_in_process_elicitation = True
+
+            if not has_in_process_elicitation:
+                raise SessionBusyError(session_id, session.current_run_id)
 
         provided_call_ids: set[str] = set(getattr(deferred_tool_results, "calls", {}).keys())
 
@@ -2594,7 +2627,11 @@ class SessionPool:
         agent_type = data.metadata.get("agent_type", "native")
 
         # Per-session resume lock with state validation (Decision 8, Task 19)
-        async with self._with_resume_lock(session_id) as session:
+        # For in-process elicitation resume, allow the active run to persist
+        # since we're resolving futures in a still-alive agent run.
+        async with self._with_resume_lock(
+            session_id, allow_active_run=has_in_process_elicitation
+        ) as session:
             try:
                 # In-process elicitation resume: if the elicitation future
                 # still exists in the registry (agent run is still alive),

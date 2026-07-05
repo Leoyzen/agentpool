@@ -438,9 +438,7 @@ async def test_end_to_end_durable_elicitation_checkpoint_and_resume(
 
     captured_event: list[ElicitationDeferredEvent] = []
 
-    async def capture_emit(
-        ctx: RunContext[Any], event: ElicitationDeferredEvent
-    ) -> None:
+    async def capture_emit(ctx: RunContext[Any], event: ElicitationDeferredEvent) -> None:
         captured_event.append(event)
 
     with patch(

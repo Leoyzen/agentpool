@@ -19,6 +19,7 @@ from mcp.types import (
 from agentpool.agents.prompt_injection import PromptInjectionManager
 from agentpool.log import get_logger
 from agentpool.messaging.context import NodeContext
+from agentpool.tools import CallDeferred
 
 
 if TYPE_CHECKING:
@@ -225,11 +226,18 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
     async def handle_elicitation(self, params: ElicitRequestParams) -> ElicitResult | ErrorData:
         """Handle elicitation request for additional information.
 
-        When the input provider supports durable elicitation, the request
-        is stored in ``_pending_elicitation_deferral`` (side-channel) and a
-        sentinel ``decline`` result is returned.  This allows
-        ``MCPClient.call_tool`` to detect the pending deferral after the MCP
-        call returns and raise ``CallDeferred`` to checkpoint the run.
+        When the input provider supports durable elicitation, this method
+        raises ``CallDeferred`` directly so that pydantic-ai's
+        ``HandleDeferredToolCalls`` capability can checkpoint the run and
+        defer the tool call.  This is the single entry point for all
+        elicitation — both MCP tools and local Python tools (e.g.
+        ``question_for_user``) participate in the durable path
+        automatically with zero adaptation.
+
+        For MCP tools, FastMCP's elicitation callback wrapper catches
+        exceptions, so ``MCPClient.call_tool``'s ``elicitation_handler``
+        catches ``CallDeferred`` and converts it to a side-channel +
+        sentinel pattern (FastMCP workaround, isolated to the MCP client).
 
         When durability is not supported, the provider's ``get_elicitation``
         is called directly (existing behavior).
@@ -237,7 +245,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         During crash recovery resume, ``run_ctx.cached_elicitation_responses``
         contains pre-built responses keyed by ``tool_call_id``. If a cached
         response exists for the current tool call, it is returned immediately
-        without deferring, allowing the MCP tool to re-execute with the
+        without deferring, allowing the tool to re-execute with the
         user's prior response.
         """
         # Crash recovery: return cached elicitation response if available.
@@ -250,26 +258,37 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
 
         provider = self.get_input_provider()
         if provider.supports_durable_elicitation:
+            # Build elicitation params dict for CallDeferred metadata.
             match params:
                 case ElicitRequestFormParams():
-                    self._pending_elicitation_deferral = {
+                    elicitation_params: dict[str, Any] = {
                         "message": params.message,
                         "requestedSchema": params.requestedSchema,
                         "mode": params.mode,
                     }
                 case ElicitRequestURLParams():
-                    self._pending_elicitation_deferral = {
+                    elicitation_params = {
                         "message": params.message,
                         "url": params.url,
                         "elicitationId": params.elicitationId,
                         "mode": params.mode,
                     }
                 case _:
-                    self._pending_elicitation_deferral = {
+                    elicitation_params = {
                         "message": str(params),
                         "mode": None,
                     }
-            return ElicitResult(action="decline")
+            # Raise directly — let CallDeferred propagate through the call
+            # stack to pydantic-ai's HandleDeferredToolCalls capability.
+            # For MCP tools, the elicitation_handler in MCPClient.call_tool()
+            # catches this and converts to side-channel + sentinel (FastMCP
+            # workaround). For local tools, it propagates naturally.
+            raise CallDeferred(
+                metadata={
+                    "elicitation": elicitation_params,
+                    "deferred_kind": "elicitation",
+                }
+            )
         return await provider.get_elicitation(params)
 
     def get_session_state(self) -> Any | None:
