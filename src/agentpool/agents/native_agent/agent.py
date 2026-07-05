@@ -851,6 +851,28 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             logger.exception("Failed to collect deferred tools — using empty dict")
 
         tool_capabilities.append(create_deferred_bridge_capability(deferred_tools))
+        # 3b. Elicitation bridge: intercepts deferred elicitation calls (from
+        #     MCP servers) before approval_bridge. Checkpoints the session,
+        #     emits ElicitationDeferredEvent, and registers a future for
+        #     later resolution when the user responds.
+        from agentpool.agents.native_agent.checkpoint import CheckpointManager
+        from agentpool.agents.native_agent.elicitation_bridge import (
+            ElicitationFutureRegistry,
+            create_elicitation_bridge_capability,
+        )
+
+        elicitation_registry = ElicitationFutureRegistry()
+        checkpoint_mgr: CheckpointManager | None = None
+        if self.agent_pool is not None:
+            checkpoint_mgr = CheckpointManager(
+                storage_manager=self.agent_pool.storage,
+            )
+        tool_capabilities.append(
+            create_elicitation_bridge_capability(
+                registry=elicitation_registry,
+                checkpoint_manager=checkpoint_mgr,
+            )
+        )
         # 4. Approval bridge: routes pydantic-ai deferred approvals to InputProvider
         from agentpool.agents.native_agent.approval_bridge import (
             create_approval_bridge_capability,
