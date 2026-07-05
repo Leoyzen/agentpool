@@ -32,13 +32,17 @@ def mock_agent() -> Agent[Any]:
 async def test_deferred_bridge_before_approval_bridge(
     mock_agent: Agent[Any],
 ) -> None:
-    """DeferredToolBridge capability appears before ApprovalBridge in the chain."""
-    # Patch at the DEFINITION module (deferred_bridge, approval_bridge), not the
-    # importing module (agent), because get_agentlet() uses local imports.
+    """DeferredToolBridge capability appears before ElicitationBridge before ApprovalBridge."""
+    # Patch at the DEFINITION module (deferred_bridge, elicitation_bridge,
+    # approval_bridge), not the importing module (agent), because get_agentlet()
+    # uses local imports.
     with (
         patch(
             "agentpool.agents.native_agent.deferred_bridge.create_deferred_bridge_capability",
         ) as mock_create_deferred,
+        patch(
+            "agentpool.agents.native_agent.elicitation_bridge.create_elicitation_bridge_capability",
+        ) as mock_create_elicitation,
         patch(
             "agentpool.agents.native_agent.approval_bridge.create_approval_bridge_capability",
         ) as mock_create_approval,
@@ -48,8 +52,10 @@ async def test_deferred_bridge_before_approval_bridge(
     ):
         # Create distinguishable mock capabilities
         deferred_cap = MagicMock(spec=HandleDeferredToolCalls)
+        elicitation_cap = MagicMock(spec=HandleDeferredToolCalls)
         approval_cap = MagicMock(spec=HandleDeferredToolCalls)
         mock_create_deferred.return_value = deferred_cap
+        mock_create_elicitation.return_value = elicitation_cap
         mock_create_approval.return_value = approval_cap
         mock_pydantic_agent.return_value = MagicMock()
 
@@ -58,20 +64,25 @@ async def test_deferred_bridge_before_approval_bridge(
         call_kwargs = mock_pydantic_agent.call_args.kwargs
         capabilities = call_kwargs.get("capabilities", []) or []
 
-        # Both capabilities must be in the list
+        # All three capabilities must be in the list
         assert deferred_cap in capabilities, (
             "DeferredToolBridge capability must be present in capability chain"
+        )
+        assert elicitation_cap in capabilities, (
+            "ElicitationBridge capability must be present in capability chain"
         )
         assert approval_cap in capabilities, (
             "ApprovalBridge capability must be present in capability chain"
         )
 
-        # Deferred bridge MUST be before approval bridge in the capability list
+        # Deferred bridge → Elicitation bridge → Approval bridge (order matters)
         deferred_idx = capabilities.index(deferred_cap)
+        elicitation_idx = capabilities.index(elicitation_cap)
         approval_idx = capabilities.index(approval_cap)
-        assert deferred_idx < approval_idx, (
-            f"DeferredToolBridge at index {deferred_idx} must be BEFORE "
-            f"ApprovalBridge at index {approval_idx} in capability chain"
+        assert deferred_idx < elicitation_idx < approval_idx, (
+            f"DeferredToolBridge at {deferred_idx} must be BEFORE "
+            f"ElicitationBridge at {elicitation_idx} BEFORE "
+            f"ApprovalBridge at {approval_idx} in capability chain"
         )
 
 
