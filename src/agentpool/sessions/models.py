@@ -146,6 +146,28 @@ class SessionData(Schema):
         return self.last_active.isoformat() if self.last_active else None
 
 
+class ElicitationResumePayload(Schema):
+    """Payload for resuming a deferred elicitation call.
+
+    Carries the user's response to an elicitation prompt back to the
+    agent runtime so the deferred tool call can be resolved.
+
+    Attributes:
+        deferred_handle: Identifier matching the pending call's tool_call_id.
+        action: User's decision on the elicitation request.
+        content: Optional structured content when action is "accept".
+    """
+
+    deferred_handle: str
+    """Identifier matching the pending deferred call's tool_call_id."""
+
+    action: Literal["accept", "decline", "cancel"]
+    """User's decision: accept (provide content), decline, or cancel."""
+
+    content: dict[str, Any] | None = None
+    """Structured response content when action is 'accept'."""
+
+
 class PendingDeferredCall(Schema):
     """A deferred tool call awaiting external or human resolution.
 
@@ -160,8 +182,8 @@ class PendingDeferredCall(Schema):
     tool_name: str
     """Name of the tool that was deferred (e.g., 'bash', 'subagent')."""
 
-    deferred_kind: Literal["external", "unapproved"]
-    """Why the call was deferred: external execution or awaiting human approval."""
+    deferred_kind: Literal["external", "unapproved", "elicitation"]
+    """Why the call was deferred: external execution, awaiting human approval, or elicitation."""
 
     deferred_strategy: Literal["block", "continue", "stream"]
     """How to continue: block (checkpoint), continue (placeholder), stream (incremental)."""
@@ -171,3 +193,15 @@ class PendingDeferredCall(Schema):
 
     timeout: timedelta | None = None
     """Optional timeout after which the call expires."""
+
+    elicitation_message: str | None = None
+    """Human-readable message for elicitation prompts (only when deferred_kind is 'elicitation')."""
+
+    elicitation_schema: dict[str, Any] | None = None
+    """JSON schema describing the requested elicitation response structure."""
+
+    elicitation_mode: str | None = None
+    """Elicitation mode hint (e.g., 'form', 'inline') for client rendering."""
+
+    mcp_server_id: str | None = None
+    """Identifier of the MCP server that initiated the elicitation request."""
