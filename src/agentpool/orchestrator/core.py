@@ -207,6 +207,8 @@ class SessionState:
     input_provider: Any | None = None
     pending_questions: dict[str, Any] = field(default_factory=dict)
     """Pending questions stored on SessionState for per-session isolation."""
+    checkpoint_enabled: bool = False
+    """Whether durable elicitation checkpointing is enabled for this session."""
 
     @property
     def closing(self) -> bool:

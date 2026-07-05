@@ -19,6 +19,19 @@ if TYPE_CHECKING:
 class InputProvider(ABC):
     """Base class for handling all UI interactions."""
 
+    @property
+    def supports_durable_elicitation(self) -> bool:
+        """Whether this provider supports durable (checkpointable) elicitation.
+
+        Returns False by default. Providers that implement checkpoint-based
+        elicitation (e.g., ACP with checkpointing enabled) override this
+        property to return True dynamically based on runtime configuration.
+
+        Subclasses (StdlibInputProvider, MockInputProvider) inherit this
+        default and always return False — they do not support durability.
+        """
+        return False
+
     async def get_input(
         self,
         context: NodeContext,
