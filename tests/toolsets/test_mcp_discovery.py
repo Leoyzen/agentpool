@@ -91,6 +91,7 @@ async def test_mcp_client_call_tool_with_progress():
     client = MCPClient(config=TEST_SERVER_CONFIG)
     run_ctx = AsyncMock(spec=RunContext)
     agent_ctx = AsyncMock(spec=AgentContext)
+    agent_ctx._pending_elicitation_deferral = None
     agent_ctx.report_progress = AsyncMock()
 
     async with client:
@@ -112,6 +113,7 @@ async def test_mcp_client_call_tool_with_elicitation():
     client = MCPClient(config=TEST_SERVER_CONFIG)
     run_ctx = AsyncMock(spec=RunContext)
     agent_ctx = AsyncMock(spec=AgentContext)
+    agent_ctx._pending_elicitation_deferral = None
     agent_ctx.handle_elicitation = AsyncMock(
         return_value=ElicitResult(action="accept", content={"value": True})
     )
@@ -135,6 +137,7 @@ async def test_mcp_client_call_tool_with_sampling():
     client = MCPClient(config=TEST_SERVER_CONFIG, sampling_callback=sampling_callback)
     run_ctx = AsyncMock(spec=RunContext)
     agent_ctx = AsyncMock(spec=AgentContext)
+    agent_ctx._pending_elicitation_deferral = None
 
     async with client:
         result = await client.call_tool(
