@@ -2151,11 +2151,7 @@ class SessionPool:
         resume_lock = await self._get_resume_lock(session_id)
         async with resume_lock:
             session = self.sessions.get_session(session_id)
-            if (
-                not allow_active_run
-                and session is not None
-                and session.current_run_id is not None
-            ):
+            if not allow_active_run and session is not None and session.current_run_id is not None:
                 raise SessionBusyError(session_id, session.current_run_id)
 
             if self.sessions.store is not None:
