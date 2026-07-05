@@ -24,6 +24,7 @@ from agentpool.log import get_logger
 from agentpool.mcp_server.constants import MCP_TO_LOGGING
 from agentpool.mcp_server.helpers import extract_text_content, mcp_tool_to_fn_schema
 from agentpool.mcp_server.message_handler import MCPMessageHandler
+from agentpool.tools import CallDeferred
 from agentpool.tools.base import FunctionTool
 from agentpool.utils.signatures import create_modified_signature
 from agentpool_config.mcp_server import (
@@ -485,6 +486,16 @@ class MCPClient:
             result = await self._client.call_tool(
                 name, arguments, progress_handler=progress_handler, meta=meta, raise_on_error=False
             )
+            # Check side-channel for durable elicitation deferral
+            if agent_ctx and agent_ctx._pending_elicitation_deferral is not None:
+                deferred_params = agent_ctx._pending_elicitation_deferral
+                agent_ctx._pending_elicitation_deferral = None
+                raise CallDeferred(  # noqa: TRY301
+                    metadata={
+                        "elicitation": deferred_params,
+                        "deferred_kind": "elicitation",
+                    }
+                )
             if result.is_error:
                 # MCP tool returned an error - return it as content so LLM can see it
                 error_text = extract_text_content(result.content)
@@ -505,6 +516,8 @@ class MCPClient:
                     return extract_text_content(result.content)
                 case _:  # Handle unexpected cases
                     raise ValueError(f"Unexpected MCP content: {result.content}")  # noqa: TRY301
+        except CallDeferred:
+            raise
         except Exception as e:
             raise RuntimeError(f"MCP tool call failed: {e}") from e
         finally:

@@ -8,6 +8,13 @@ from typing import TYPE_CHECKING, Any, Literal
 import uuid
 
 import anyio
+from mcp.types import (
+    ElicitRequestFormParams,
+    ElicitRequestParams,
+    ElicitRequestURLParams,
+    ElicitResult,
+    ErrorData,
+)
 
 from agentpool.agents.prompt_injection import PromptInjectionManager
 from agentpool.log import get_logger
@@ -18,7 +25,6 @@ if TYPE_CHECKING:
     import asyncio
     from collections.abc import Awaitable, Callable
 
-    from mcp.types import ElicitRequestParams, ElicitResult, ErrorData
     from upathtools.filesystems import IsolatedMemoryFileSystem, OverlayFileSystem
 
     from agentpool import Agent
@@ -180,6 +186,15 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
     run_ctx: AgentRunContext | None = None
     """Reference to the per-run context for accessing run-isolated state."""
 
+    _pending_elicitation_deferral: dict[str, Any] | None = None
+    """Side-channel for durable elicitation.
+
+    When ``handle_elicitation`` detects a durable provider, it stores the
+    elicitation params here and returns a sentinel ``decline`` result.
+    ``MCPClient.call_tool`` checks this attribute after the MCP call returns
+    and raises ``CallDeferred`` so the run can be checkpointed and resumed.
+    """
+
     @property
     def native_agent(self) -> Agent[TDeps, Any]:
         """Current agent, type-narrowed to native pydantic-ai Agent."""
@@ -189,8 +204,39 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         return self.node  # ty: ignore[invalid-return-type]
 
     async def handle_elicitation(self, params: ElicitRequestParams) -> ElicitResult | ErrorData:
-        """Handle elicitation request for additional information."""
+        """Handle elicitation request for additional information.
+
+        When the input provider supports durable elicitation, the request
+        is stored in ``_pending_elicitation_deferral`` (side-channel) and a
+        sentinel ``decline`` result is returned.  This allows
+        ``MCPClient.call_tool`` to detect the pending deferral after the MCP
+        call returns and raise ``CallDeferred`` to checkpoint the run.
+
+        When durability is not supported, the provider's ``get_elicitation``
+        is called directly (existing behavior).
+        """
         provider = self.get_input_provider()
+        if provider.supports_durable_elicitation:
+            match params:
+                case ElicitRequestFormParams():
+                    self._pending_elicitation_deferral = {
+                        "message": params.message,
+                        "requestedSchema": params.requestedSchema,
+                        "mode": params.mode,
+                    }
+                case ElicitRequestURLParams():
+                    self._pending_elicitation_deferral = {
+                        "message": params.message,
+                        "url": params.url,
+                        "elicitationId": params.elicitationId,
+                        "mode": params.mode,
+                    }
+                case _:
+                    self._pending_elicitation_deferral = {
+                        "message": str(params),
+                        "mode": None,
+                    }
+            return ElicitResult(action="decline")
         return await provider.get_elicitation(params)
 
     def get_session_state(self) -> Any | None:
