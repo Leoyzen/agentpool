@@ -2630,42 +2630,18 @@ class SessionPool:
             session_id, allow_active_run=has_in_process_elicitation
         ) as session:
             try:
-                # In-process elicitation resume: if the elicitation future
-                # still exists in the registry (agent run is still alive),
-                # resolve it directly. The MCP client's call_tool() RPC
-                # continues and completes normally.
+                # In-process elicitation resume: resolve futures to clean up
+                # the registry, but always fall through to crash recovery.
+                # The in-process path can't resume the agent run because
+                # CallDeferred was already raised — the agent run ended with
+                # DeferredToolRequests as output. Nobody is awaiting the
+                # futures. The crash recovery path re-executes the agent
+                # with cached_elicitation_responses, which works correctly.
                 if elicitation_payloads:
-                    resolved_in_process = await self._try_in_process_elicitation_resume(
+                    await self._try_in_process_elicitation_resume(
                         session_id, elicitation_payloads
                     )
-                    # All elicitation futures were resolved in-process.
-                    # If there are no non-elicitation deferred calls,
-                    # we're done — the agent run continues on its own.
-                    if resolved_in_process and not non_elicitation_pending_ids:
-                        data = data.model_copy(
-                            update={
-                                "status": "active",
-                                "pending_deferred_calls": [],
-                            }
-                        )
-                        data.touch()
-                        await store.save(data)
-                        if session is not None:
-                            session.last_active_at = time.monotonic()
-                        await self.event_bus.publish(
-                            session_id,
-                            SessionResumeEvent(
-                                session_id=session_id,
-                                resolved_call_count=len(elicitation_call_ids),
-                                source=source,
-                            ),
-                        )
-                        logger.info(
-                            "Session resumed (in-process elicitation)",
-                            session_id=session_id,
-                            resolved_calls=len(elicitation_call_ids),
-                        )
-                        return
+                    # Always use crash recovery — don't return early.
 
                 # Load checkpoint data
                 checkpoint = await self._load_checkpoint_data(session_id)
