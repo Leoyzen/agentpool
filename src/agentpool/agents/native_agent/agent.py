@@ -8,7 +8,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import timedelta
 import inspect
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Self, TypedDict, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Self, TypedDict, TypeVar, overload
 import warnings
 
 import logfire
@@ -982,6 +982,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         else:
             retries_param = self._retries
 
+        # When HandleDeferredToolCalls capabilities are present, add
+        # DeferredToolRequests to output_type so pydantic-ai can return
+        # deferred tool requests as agent output (required for checkpoint/resume).
+        from pydantic_ai.tools import DeferredToolRequests
+
+        if tool_capabilities:
+            final_output_type: Any = [final_type, DeferredToolRequests]
+        else:
+            final_output_type = final_type
+
         agent_kwargs: dict[str, Any] = {
             "name": self.name,
             "model": model_,
@@ -990,7 +1000,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             "retries": retries_param,
             "end_strategy": self._end_strategy,
             "deps_type": AgentContext[TDeps],
-            "output_type": cast(Any, final_type),
+            "output_type": final_output_type,
             "tools": list(direct_tools),
             "capabilities": tool_capabilities if tool_capabilities else None,
         }
