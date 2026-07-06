@@ -536,10 +536,10 @@ async def test_python_api_capability_passthrough(mock_agent: Agent[Any]) -> None
 
 @pytest.mark.anyio
 async def test_yaml_config_capability_passthrough(mock_agent: Agent[Any]) -> None:
-    """YAML-loaded CapabilityConfig is built and included in capabilities."""
-    from agentpool_config.capabilities import CapabilityConfig
+    """YAML-loaded GenericCapabilityConfig is built and included in capabilities."""
+    from agentpool_config.capabilities import GenericCapabilityConfig
 
-    cap_config = CapabilityConfig(
+    cap_config = GenericCapabilityConfig(
         type="pydantic_ai.capabilities.Instrumentation",
         args={},
     )
@@ -586,17 +586,17 @@ async def test_user_capability_takes_precedence(mock_agent: Agent[Any]) -> None:
 
 @pytest.mark.anyio
 async def test_capability_config_build_called(mock_agent: Agent[Any]) -> None:
-    """CapabilityConfig.build() is called during get_agentlet()."""
-    from agentpool_config.capabilities import CapabilityConfig
+    """GenericCapabilityConfig.build() is called during get_agentlet()."""
+    from agentpool_config.capabilities import GenericCapabilityConfig
 
-    cap_config = CapabilityConfig(
+    cap_config = GenericCapabilityConfig(
         type="pydantic_ai.capabilities.Instrumentation",
         args={},
     )
     mock_agent.config = MagicMock()
     mock_agent.config.capabilities = [cap_config]
 
-    with patch.object(CapabilityConfig, "build") as mock_build:
+    with patch.object(GenericCapabilityConfig, "build") as mock_build:
         mock_build.return_value = MagicMock()
         with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
             mock_pydantic_agent.return_value = MagicMock()

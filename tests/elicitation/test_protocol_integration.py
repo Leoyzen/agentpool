@@ -16,6 +16,7 @@ Refs: https://github.com/Leoyzen/agentpool/issues/107
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -339,12 +340,13 @@ async def test_elicitation_bridge_handler_with_real_deferred_requests() -> None:
     checkpoint_manager_mock.checkpoint.assert_called_once()
 
     # Assert: ElicitationDeferredEvent was published to EventBus.
-    # Drain the receive stream to get the event.
+    # Drain the queue to get the event.
     received_events: list[Any] = []
-    async with receive_stream:
-        async for envelope in receive_stream:
-            received_events.append(envelope.event)
-            break  # We expect exactly one event.
+    try:
+        envelope = receive_stream.get_nowait()
+        received_events.append(envelope.event)
+    except asyncio.QueueEmpty:
+        pass
 
     assert len(received_events) == 1
     event = received_events[0]
@@ -395,10 +397,11 @@ async def test_acp_event_converter_with_real_event_bus() -> None:
 
     # Receive from the bus.
     received_events: list[Any] = []
-    async with receive_stream:
-        async for envelope in receive_stream:
-            received_events.append(envelope.event)
-            break
+    try:
+        envelope = receive_stream.get_nowait()
+        received_events.append(envelope.event)
+    except asyncio.QueueEmpty:
+        pass
 
     assert len(received_events) == 1
     received_event = received_events[0]

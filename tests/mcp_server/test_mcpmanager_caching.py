@@ -100,11 +100,11 @@ class _FakeProvider:
 
 @pytest.mark.unit
 async def test_mcpmanager_toolset_cache_shares_connection() -> None:
-    """as_capability() creates new MCPToolset instances on every call.
+    """as_capability() caches MCPToolset by client_id.
 
     Given an MCPManager with one StdioMCPServerConfig, calling
     ``as_capability()`` twice should produce two MCP capability objects
-    backed by *different* ``MCPToolset`` instances (no caching).
+    backed by the *same* ``MCPToolset`` instance (cached by client_id).
     """
     config = StdioMCPServerConfig(
         name="test_server",
@@ -123,8 +123,9 @@ async def test_mcpmanager_toolset_cache_shares_connection() -> None:
     assert len(caps1) == 1
     assert len(caps2) == 1
 
-    # Each call creates a new toolset (no caching)
-    assert caps1[0].local is not caps2[0].local
+    # MCP wrappers are distinct but share the cached toolset
+    assert caps1[0] is not caps2[0]
+    assert caps1[0].local is caps2[0].local
 
     await manager.cleanup()
 
@@ -136,12 +137,12 @@ async def test_mcpmanager_toolset_cache_shares_connection() -> None:
 
 @pytest.mark.unit
 async def test_mcpmanager_toolset_cache_keyed_by_client_id() -> None:
-    """Different client_ids produce distinct toolsets; each call creates new ones.
+    """Different client_ids produce distinct toolsets; caching reuses by client_id.
 
     Given an MCPManager with two StdioMCPServerConfig entries (different
-    ``client_id`` values), the first ``as_capability()`` call should
-    create two separate ``MCPToolset`` instances. A second call returns
-    fresh instances (no caching).
+    ``client_id`` values), the first ``as_capability()`` call creates
+    two separate ``MCPToolset`` instances. A second call reuses the
+    cached instances (keyed by client_id).
     """
     config_a = StdioMCPServerConfig(
         name="server_a",
@@ -168,9 +169,9 @@ async def test_mcpmanager_toolset_cache_keyed_by_client_id() -> None:
     # Different client_ids -> different toolset instances
     assert caps1[0].local is not caps1[1].local
 
-    # Each call creates fresh instances (no caching)
-    assert caps1[0].local is not caps2[0].local
-    assert caps1[1].local is not caps2[1].local
+    # Same client_id across calls -> same cached toolset
+    assert caps1[0].local is caps2[0].local
+    assert caps1[1].local is caps2[1].local
 
     await manager.cleanup()
 

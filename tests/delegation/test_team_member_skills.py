@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from agentpool import Team
+from agentpool import BaseTeam
 from agentpool.skills.exceptions import SkillNotFoundError
 
 
@@ -16,7 +16,7 @@ class _Pool:
 
 
 def test_team_loads_member_skills_from_pool_provider() -> None:
-    team = Team([], name="review_team")
+    team = BaseTeam([], mode="parallel", name="review_team")
     team.agent_pool = _Pool()
 
     result = asyncio.run(
@@ -30,7 +30,7 @@ def test_team_loads_member_skills_from_pool_provider() -> None:
 
 
 def test_team_requires_pool_skill_provider_for_member_skills() -> None:
-    team = Team([], name="review_team")
+    team = BaseTeam([], mode="parallel", name="review_team")
     team.agent_pool = None
 
     with pytest.raises(SkillNotFoundError):
@@ -38,7 +38,7 @@ def test_team_requires_pool_skill_provider_for_member_skills() -> None:
 
 
 def test_team_injects_member_skills_into_member_prompt() -> None:
-    prompt = Team._inject_member_skill_instructions(
+    prompt = BaseTeam._inject_member_skill_instructions(
         "root_cause_reviewer",
         ["Review the FTA."],
         {"root_cause_reviewer": "<skill-instruction>Skill body</skill-instruction>"},

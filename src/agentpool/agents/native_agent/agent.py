@@ -90,8 +90,19 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
-# OutputDataT = TypeVar('OutputDataT', default=str, covariant=True)
 NoneType = type(None)
+
+
+def _build_capability_from_config(config: Any) -> Any:
+    """Build a capability instance from a config model.
+
+    Delegates to ``agentpool_config.capabilities.build_capability()``,
+    using late import to avoid a static config→core dependency.
+    """
+    from agentpool_config.capabilities import build_capability
+
+    return build_capability(config)
+
 
 TResult = TypeVar("TResult")
 VALID_MODES = ["always", "never", "per_tool"]
@@ -168,6 +179,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         commands: Sequence[BaseCommand] | None = None,
         metadata: dict[str, Any] | None = None,
         history_processors: Sequence[Callable[..., Any]] | None = None,
+        capabilities: list[Any] | None = None,
     ) -> None:
         """Initialize agent.
 
@@ -217,6 +229,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             commands: Slash commands
             metadata: Arbitrary metadata for the agent (e.g., feature flags)
             history_processors: Callable history processors for message processing
+            capabilities: Extra capability instances or configs to attach
         """
         from agentpool.agents.interactions import Interactions
         from agentpool.agents.native_agent.hook_manager import NativeAgentHookManager
@@ -319,6 +332,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # When None, get_agentlet() falls back to the legacy as_capability() path.
         self._mcp_snapshot: McpConfigSnapshot | None = None
         self._session_connection_pool: SessionConnectionPool | None = None
+        self._extra_capabilities: list[Any] = capabilities or []
 
     def _build_pool_configs(self) -> tuple[McpConfigEntry, ...]:
         """Build MCP config entries from pool-level servers.
@@ -587,6 +601,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             usage_limits=config.usage_limits,
             providers=config.model_providers,
             metadata=getattr(config, "metadata", None),
+            capabilities=[_build_capability_from_config(c) for c in config.capabilities] or None,
         )
 
     async def __aenter__(self) -> Self:
@@ -813,22 +828,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         context_for_tools = self.get_context(
                             input_provider=input_provider, run_ctx=run_ctx
                         )
-                        wrapped = wrap_tool(tool, context_for_tools, hooks=self._hook_manager)
+                        wrapped = wrap_tool(tool, context_for_tools)
                         direct_tools.append(tool.to_pydantic_ai(function_override=wrapped))
                 except Exception:
                     logger.exception(
                         "Failed to register tools from provider",
                         provider=provider.name,
                     )
-        # 2. Hooks — skip adding as capability when old mechanism is active
-        #    to avoid double-firing. Old base_agent.py hook mechanism handles
-        #    pre_run/post_run/pre_tool_use/post_tool_use directly.
-        #    EventBus events (RunStartedEvent, ToolCallStartEvent,
-        #    ToolCallCompleteEvent) are produced by NativeTurn, so the
-        #    removed EventBusHooksAdapter wrapping was redundant.
-        if not self.hooks:
-            hooks_capability = self._hook_manager.as_capability()
-            tool_capabilities.append(hooks_capability)
+        # 2. Hooks capability — always registered (unified tool interception)
+        hooks_capability = self._hook_manager.as_capability()
+        tool_capabilities.append(hooks_capability)
         # 3. Deferred tool bridge: intercepts deferred tool calls before
         #    approval_bridge can resolve them. Block-strategy calls are
         #    excluded from returned results so they remain unresolved for
@@ -962,15 +971,29 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if self._builtin_tools:
             tool_capabilities.extend(NativeTool(t) for t in self._builtin_tools)
 
+        # Merge extra capabilities from Agent.__init__() API
+        if self._extra_capabilities:
+            tool_capabilities.extend(self._extra_capabilities)
+
         # Merge user-provided capabilities from config
         if self.config and self.config.capabilities:
-            from agentpool_config.capabilities import CapabilityConfig
+            from pydantic import BaseModel as _BaseModel
+
+            from agentpool_config.capabilities import (
+                GenericCapabilityConfig,
+                build_capability,
+            )
 
             for cap in self.config.capabilities:
                 if cap is None:
                     continue
-                if isinstance(cap, CapabilityConfig):
+                if isinstance(cap, GenericCapabilityConfig):
                     tool_capabilities.append(cap.build())
+                elif isinstance(cap, _BaseModel):
+                    from typing import cast as _cast
+
+                    # Typed built-in config (LoopDetectionCapabilityConfig, etc.)
+                    tool_capabilities.append(build_capability(_cast(Any, cap)))
                 else:
                     # Pre-instantiated AbstractCapability
                     tool_capabilities.append(cap)

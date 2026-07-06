@@ -12,14 +12,6 @@ import yamling
 from agentpool import Agent, AgentPool, AgentsManifest, NativeAgentConfig
 
 
-# Test files that are being migrated or have known issues.
-collect_ignore: list[str] = [
-    "orchestrator/test_phase2_native_queue.py",
-    "orchestrator/test_steer_followup_edge_cases.py",
-    "orchestrator/test_steer_followup_integration.py",
-]
-
-
 TEST_RESPONSE = "I am a test response"
 
 

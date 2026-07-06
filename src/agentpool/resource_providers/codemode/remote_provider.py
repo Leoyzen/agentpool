@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Any, Self
+import warnings
 
 from exxec_config import LocalExecutionEnvironmentConfig
 
@@ -63,6 +64,11 @@ class RemoteCodeModeResourceProvider(CodeModeResourceProvider):
             server_host: Host for tool server
             server_port: Port for tool server
         """
+        warnings.warn(
+            "RemoteCodeModeResourceProvider is deprecated. Use ToolsetFactory approach instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         super().__init__(
             providers=providers,
             name=name,

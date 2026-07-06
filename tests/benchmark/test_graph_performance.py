@@ -21,10 +21,9 @@ from typing import TYPE_CHECKING, Any
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent, Team
+from agentpool import Agent, BaseTeam
 from agentpool.agents.events import RunStartedEvent
 from agentpool.delegation.graph_team import build_team_graph
-from agentpool.delegation.teamrun import TeamRun
 
 
 if TYPE_CHECKING:
@@ -92,7 +91,7 @@ async def _median_time(
 async def test_single_agent_pipeline_overhead() -> None:
     """TeamRun with 1 agent: graph overhead vs direct agent.run()."""
     agent = _make_echo_agent("solo", "only")
-    teamrun = TeamRun([agent], name="single_seq")
+    teamrun = BaseTeam([agent], mode="sequential", name="single_seq")
 
     async with agent:
         direct_time = await _median_time(agent.run, "test", warmup=5, runs=15)
@@ -128,7 +127,7 @@ async def test_parallel_team_overhead() -> None:
     agent_b = _make_echo_agent("b", "B")
     agent_c = _make_echo_agent("c", "C")
     agents = [agent_a, agent_b, agent_c]
-    team = Team(agents, name="parallel_three")
+    team = BaseTeam(agents, mode="parallel", name="parallel_three")
 
     async with agent_a, agent_b, agent_c:
         # Use more warmup runs for parallel to stabilise timing
@@ -200,7 +199,7 @@ async def test_streaming_latency_overhead() -> None:
     spawn/session overhead; assert it is within 10% of direct.
     """
     agent = _make_echo_agent("stream_agent", "streamed")
-    teamrun = TeamRun([agent], name="stream_seq")
+    teamrun = BaseTeam([agent], mode="sequential", name="stream_seq")
 
     async with agent:
         direct_latency = await _median_first_event_latency(agent, "test", session_id="ses_direct")
@@ -302,7 +301,7 @@ async def test_sequential_team_overhead() -> None:
     agent_2 = _make_echo_agent("s2", "second")
     agent_3 = _make_echo_agent("s3", "third")
     agents = [agent_1, agent_2, agent_3]
-    teamrun = TeamRun(agents, name="sequential_three")
+    teamrun = BaseTeam(agents, mode="sequential", name="sequential_three")
 
     async with agent_1, agent_2, agent_3:
         direct_time = await _median_time(_run_sequential_direct, agents, "test")

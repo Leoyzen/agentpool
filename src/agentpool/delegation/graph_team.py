@@ -1,26 +1,29 @@
-"""Graph-based team execution using pydantic-graph Fork + Join.
+"""Graph-based team execution using pydantic-graph Fork + Join and sequential chains.
 
-This module provides an alternative implementation of :meth:`Team.execute`
-that uses :class:`pydantic_graph.GraphBuilder` with ``Fork`` and ``Join``
-nodes to run team members in parallel and collect their outputs.
+This module provides graph-based implementations for both parallel (Fork + Join)
+and sequential (chained steps) team execution using :class:`pydantic_graph.GraphBuilder`.
 """
 
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from itertools import pairwise
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Literal, NoReturn, cast
 
-from pydantic_graph import GraphBuilder, StepContext, reduce_list_append
+from pydantic_graph import GraphBuilder, Step, StepContext, reduce_list_append
 
 from agentpool.log import get_logger
-from agentpool.messaging import AgentResponse, TeamResponse
+from agentpool.messaging import AgentResponse, ChatMessage, TeamResponse
+from agentpool.talk.talk import Talk, TeamTalk
+from agentpool.utils.time_utils import get_now
 
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from agentpool.messaging.messagenode import MessageNode
-    from agentpool.talk.talk import Talk
 
 
 logger = get_logger(__name__)
@@ -248,8 +251,6 @@ async def run_team_graph(
     Returns:
         A :class:`TeamResponse` with successful responses and any errors.
     """
-    from agentpool.utils.time_utils import get_now
-
     start_time = get_now()
     graph = build_team_graph(nodes).build()
     results: list[_MemberOutput] = await graph.run(state=state)
@@ -268,3 +269,145 @@ async def run_team_graph(
         errors=errors,
         child_session_ids=state.child_session_ids,
     )
+
+
+# ---------------------------------------------------------------------------
+# Sequential (TeamRun) graph execution
+# ---------------------------------------------------------------------------
+
+ResultMode = Literal["last", "concat"]
+
+
+@dataclass
+class _TeamRunGraphState:
+    """Shared state for sequential (TeamRun) graph execution."""
+
+    prompts: tuple[Any, ...] = field(default_factory=tuple)
+    """Input prompts for this execution."""
+
+    kwargs: dict[str, Any] = field(default_factory=dict)
+    """Additional keyword arguments passed to member ``run()``."""
+
+    connections: list[Talk[Any]] = field(default_factory=list)
+    """Talk connections for tracking execution stats."""
+
+    responses: list[AgentResponse[Any]] = field(default_factory=list)
+    """Collected responses from completed steps."""
+
+
+@dataclass(frozen=True, kw_only=True)
+class ExtendedTeamTalk(TeamTalk):
+    """TeamTalk that also provides error tracking."""
+
+    errors: list[tuple[str, str, datetime]] = field(default_factory=list)
+
+    def clear(self) -> None:
+        """Reset all tracking data."""
+        super().clear()
+        self.errors.clear()
+
+    def add_error(self, agent: str, error: str) -> None:
+        """Track errors from AgentResponses."""
+        self.errors.append((agent, error, get_now()))
+
+
+def _make_sequential_step(
+    node: MessageNode[Any, Any],
+    node_index: int,
+) -> Any:
+    """Create a pydantic-graph step for a sequential team member.
+
+    Args:
+        node: The team member node to wrap.
+        node_index: Index of the node in the pipeline (0 = first).
+
+    Returns:
+        An async callable compatible with :meth:`GraphBuilder.step`.
+    """
+
+    async def _step(
+        ctx: StepContext,
+    ) -> ChatMessage[Any]:
+        state = cast(_TeamRunGraphState, ctx.state)
+        start = perf_counter()
+        if node_index == 0:
+            result = await node.run(*state.prompts, **state.kwargs)
+        else:
+            result = await node.run_message(ctx.inputs)
+        timing = perf_counter() - start
+        response = AgentResponse(agent_name=node.name, message=result, timing=timing)
+        state.responses.append(response)
+
+        # Update talk stats for the edge leaving this node (if any)
+        if node_index < len(state.connections):
+            talk = state.connections[node_index]
+            if result:
+                talk._stats.messages.append(result)
+
+        return result
+
+    return _step
+
+
+async def run_teamrun_graph(
+    nodes: list[MessageNode[Any, Any]],
+    prompts: tuple[Any, ...],
+    kwargs: dict[str, Any] | None = None,
+    connections: list[Talk[Any]] | None = None,
+) -> list[AgentResponse[Any]]:
+    """Execute a sequential team pipeline via pydantic-graph.
+
+    Builds and runs a chained graph: start -> step1 -> step2 -> ... -> end,
+    where each step runs one node with the output of the previous step.
+
+    Args:
+        nodes: Team members to execute sequentially.
+        prompts: Input prompts for the first node.
+        kwargs: Additional keyword arguments for member ``run()``.
+        connections: Optional Talk connections for tracking stats.
+
+    Returns:
+        List of :class:`AgentResponse` from each node, in execution order.
+    """
+    from pydantic_graph.id_types import NodeID
+
+    state = _TeamRunGraphState(
+        prompts=prompts,
+        kwargs=kwargs or {},
+        connections=connections or [],
+    )
+
+    # Build steps
+    steps: list[Any] = []
+    for i, node in enumerate(nodes):
+        step_fn = _make_sequential_step(node, i)
+        step = Step(
+            id=NodeID(f"{node.name}_{i}"),
+            call=step_fn,
+            label=node.description or node.name,
+        )
+        steps.append(step)
+
+    # Build graph: start -> step1 -> step2 -> ... -> end
+    builder = GraphBuilder(
+        state_type=_TeamRunGraphState,
+        input_type=Any,
+        output_type=ChatMessage[Any],
+    )
+    builder.add_edge(builder.start_node, steps[0])
+    for s, t in pairwise(steps):
+        builder.add_edge(s, t)
+    builder.add_edge(steps[-1], builder.end_node)
+
+    graph = builder.build()
+
+    try:
+        await graph.run(state=state, deps=None, inputs=None)
+    except Exception as exc:
+        # Unwrap single-exception ExceptionGroups produced by anyio
+        # task groups inside agent run_stream().
+        if isinstance(exc, BaseExceptionGroup) and len(exc.exceptions) == 1:
+            raise exc.exceptions[0] from None
+        raise
+
+    return state.responses

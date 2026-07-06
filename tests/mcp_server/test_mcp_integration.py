@@ -367,13 +367,13 @@ class TestSubagentMCPInheritance:
 class TestMCPManagerCleanup:
     """Verify MCPManager disconnect and cleanup properly tear down resources.
 
-    Previously, ``disconnect_all()`` iterated ``_toolset_cache`` to close
-    cached toolsets. Now it just calls ``cleanup()``. These tests verify
-    the new path works and doesn't leave dangling resources.
+    These tests verify ``disconnect_all()`` closes cached ``MCPToolset``
+    instances via ``__aexit__`` (guarding against toolsets that were never
+    entered) and resets internal state for reuse.
     """
 
     async def test_disconnect_all_does_not_raise(self):
-        """disconnect_all() works without _toolset_cache."""
+        """disconnect_all() handles cached toolsets that were never entered."""
         manager = MCPManager(
             servers=[
                 StdioMCPServerConfig(
@@ -384,15 +384,11 @@ class TestMCPManagerCleanup:
             ],
         )
 
-        # Call as_capability() to create toolsets
         caps = await manager.as_capability()
         assert len(caps) == 1
 
-        # disconnect_all() should not raise even though toolsets were created
-        # (they were never entered, so no __aexit__ needed)
         await manager.disconnect_all()
 
-        # Manager should still be usable after disconnect_all
         caps2 = await manager.as_capability()
         assert len(caps2) == 1
 
@@ -522,16 +518,15 @@ class TestCrossTaskAsCapability:
     """Simulate real subagent flow with cross-task as_capability() calls.
 
     Parent agent calls ``as_capability()`` in task A, subagent calls
-    ``as_capability()`` in task B. Both should succeed without
-    CancelScope errors.
+    ``as_capability()`` in task B. Both should succeed.
 
-    With the no-cache approach, each call creates a fresh MCPToolset, so
-    there's no shared state to conflict. These tests verify that the
-    approach actually works end-to-end.
+    With caching, both calls return MCP wrappers backed by the same
+    ``MCPToolset`` instance (cached by ``client_id``). The MCP wrappers
+    themselves are always distinct.
     """
 
     async def test_as_capability_in_different_tasks(self):
-        """as_capability() produces independent toolsets from different asyncio tasks."""
+        """as_capability() produces MCP wrappers sharing a cached MCPToolset."""
         manager = MCPManager(
             servers=[
                 StdioMCPServerConfig(
@@ -545,23 +540,24 @@ class TestCrossTaskAsCapability:
         async def get_caps() -> list[Any]:
             return await manager.as_capability()
 
-        # Call from task A
         task_a = asyncio.create_task(get_caps())
         caps_a = await task_a
 
-        # Call from task B
         task_b = asyncio.create_task(get_caps())
         caps_b = await task_b
 
         assert len(caps_a) == 1
         assert len(caps_b) == 1
-        assert caps_a[0].local is not caps_b[0].local
-        assert caps_a[0].id == caps_b[0].id  # Same server, different toolset
+        # MCP wrappers are distinct
+        assert caps_a[0] is not caps_b[0]
+        # Underlying MCPToolset is cached (shared by client_id)
+        assert caps_a[0].local is caps_b[0].local
+        assert caps_a[0].id == caps_b[0].id
 
         await manager.cleanup()
 
     async def test_as_capability_concurrent_tasks(self):
-        """Concurrent as_capability() calls from multiple tasks."""
+        """Concurrent as_capability() calls share cached MCPToolsets."""
         manager = MCPManager(
             servers=[
                 StdioMCPServerConfig(
@@ -592,9 +588,10 @@ class TestCrossTaskAsCapability:
         for caps in results:
             assert len(caps) == 2
 
-        # All toolsets must be distinct instances
+        # MCP wrappers are always distinct; underlying toolsets are cached
+        # by client_id, so there are 2 unique toolsets (one per server).
         all_toolsets = [cap.local for caps in results for cap in caps]
         assert len(all_toolsets) == 6
-        assert len({id(ts) for ts in all_toolsets}) == 6
+        assert len({id(ts) for ts in all_toolsets}) == 2
 
         await manager.cleanup()

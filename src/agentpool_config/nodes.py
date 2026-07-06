@@ -10,6 +10,7 @@ from exxec_config import E2bExecutionEnvironmentConfig, ExecutionEnvironmentConf
 from pydantic import ConfigDict, Field, HttpUrl, ImportString
 from schemez import Schema
 
+from agentpool_config.capabilities import CapabilityConfig
 from agentpool_config.event_handlers import EventHandlerConfig, StdoutEventHandlerConfig
 from agentpool_config.forward_targets import (
     FileConnectionConfig,
@@ -238,6 +239,27 @@ class BaseAgentConfig(NodeConfig):
         ),
     ] = None
     """Execution environment config for the agent's own toolsets."""
+
+    capabilities: list[CapabilityConfig] = Field(
+        default_factory=list,
+        title="Agent capabilities",
+    )
+    """Pydantic-ai capabilities attached to this agent.
+
+    Each entry is a capability config (built-in or generic import path).
+    Built-in types: ``loop_detection``, ``token_budget``,
+    ``tool_output_budget``, ``dynamic_context``, ``skill_activation``,
+    ``memory``.
+
+    Example:
+        ```yaml
+        capabilities:
+          - type: loop_detection
+            max_depth: 10
+          - type: token_budget
+            max_tokens: 100000
+        ```
+    """
 
     def get_execution_environment(self) -> ExecutionEnvironment:
         """Get the execution environment for this agent."""

@@ -5,11 +5,11 @@ Covers native agent resume, ACP agent resume, error cases, and event emission.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import anyio
 import pytest
 
 from agentpool.agents.events.events import SessionResumeEvent
@@ -17,16 +17,9 @@ from agentpool.orchestrator.core import SessionPool
 from agentpool.sessions.models import PendingDeferredCall, SessionData
 
 
-def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
-    """Check if a memory receive stream has no buffered items."""
-    try:
-        stream.receive_nowait()
-    except anyio.WouldBlock:
-        return True
-    except anyio.EndOfStream:
-        return True
-    else:
-        return False
+def _stream_empty(queue: asyncio.Queue[Any]) -> bool:
+    """Check if a subscriber queue has no buffered items."""
+    return queue.empty()
 
 
 pytestmark = pytest.mark.unit
@@ -515,12 +508,12 @@ async def test_resume_session_emits_resume_event(
     events: list[Any] = []
     try:
         while True:
-            envelope = queue.receive_nowait()
+            envelope = queue.get_nowait()
             if envelope is not None:
                 events.append(envelope.event)
-    except anyio.WouldBlock:
+    except asyncio.QueueEmpty:
         pass
-    except anyio.EndOfStream:
+    except asyncio.QueueShutDown:
         pass
 
     # Should find SessionResumeEvent

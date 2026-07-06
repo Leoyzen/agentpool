@@ -8,7 +8,6 @@ import inspect
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import anyio
 from pydantic_ai.models.test import TestModel
 import pytest
 
@@ -130,7 +129,7 @@ async def test_create_run_handle_fields_correctly_set() -> None:
     assert handle.run_id == "run-42"
     assert handle.session_id == "sess-42"
     assert handle.agent_type == "native"
-    assert handle._message_history == ["msg1", "msg2"]
+    assert handle._message_history == ["msg1", "msg2"]  # type: ignore[comparison-overlap]
 
 
 @pytest.mark.unit
@@ -260,10 +259,10 @@ async def test_run_stream_breaks_on_stream_complete() -> None:
 
     # We test the EventBus subscription loop logic directly
     session_id = "test-stream-break"
-    stream = await event_bus.subscribe(session_id, scope="session")
+    stream: asyncio.Queue[Any] = await event_bus.subscribe(session_id, scope="session")
 
     # Publish a StreamCompleteEvent
-    complete_event = StreamCompleteEvent(
+    complete_event: StreamCompleteEvent[Any] = StreamCompleteEvent(
         message=MagicMock(content="done"),
     )
 
@@ -279,8 +278,8 @@ async def test_run_stream_breaks_on_stream_complete() -> None:
         async with asyncio.timeout(5):
             while True:
                 try:
-                    event = await stream.receive()
-                except anyio.EndOfStream:
+                    event = await stream.get()
+                except asyncio.QueueShutDown:
                     break
                 received.append(event.event)
                 # This is the fix: break on terminal events

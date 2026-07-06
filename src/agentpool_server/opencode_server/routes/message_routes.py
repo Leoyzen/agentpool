@@ -563,7 +563,9 @@ async def _process_message_locked(  # noqa: PLR0915
             event_stream = await session_pool.event_bus.subscribe(session_id)
 
             async def _feed_adapter() -> None:
-                async for event in event_stream:
+                from agentpool.orchestrator.core import drain_and_merge
+
+                async for event in drain_and_merge(event_stream):
                     async for _ in adapter.convert_event(event.event):
                         pass
 

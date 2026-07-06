@@ -48,8 +48,8 @@ SourceType = Literal["agent", "team_parallel", "team_sequential"]
 
 Distinguishes the origin of a subagent event:
 - ``"agent"``: a single agent (native, ACP, Claude Code, etc.)
-- ``"team_parallel"``: a parallel team (:class:`Team`)
-- ``"team_sequential"``: a sequential team (:class:`TeamRun`)
+- ``"team_parallel"``: a parallel team (``BaseTeam`` with ``mode="parallel"``)
+- ``"team_sequential"``: a sequential team (``BaseTeam`` with ``mode="sequential"``)
 """
 
 
@@ -58,7 +58,7 @@ def get_source_type(node: MessageNode[Any, Any]) -> SourceType:
 
     Uses ``isinstance`` checks with **local** (deferred) imports so that
     calling this function never creates a circular import between
-    ``messagenode`` ↔ ``team`` / ``teamrun``.
+    ``messagenode`` ↔ ``base_team``.
 
     Args:
         node: Any :class:`MessageNode` instance.
@@ -67,13 +67,9 @@ def get_source_type(node: MessageNode[Any, Any]) -> SourceType:
         The corresponding :data:`SourceType` value.
     """
     from agentpool.delegation.base_team import BaseTeam
-    from agentpool.delegation.team import Team
 
-    if isinstance(node, Team):
-        return "team_parallel"
     if isinstance(node, BaseTeam):
-        # BaseTeam but not Team → TeamRun (or any future sequential subclass)
-        return "team_sequential"
+        return "team_parallel" if node.mode == "parallel" else "team_sequential"
     # Check it's at least a MessageNode — unknown subclasses get a warning
     if not isinstance(node, MessageNode):
         logger.warning("Unexpected node type %s, defaulting to 'agent'", type(node).__name__)

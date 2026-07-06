@@ -88,15 +88,7 @@
   },
   {
     "payload": {
-      "rawOutput": {
-        "content": "...[truncated]\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\n\n\n[output truncated]",
-        "metadata": {
-          "description": "cat bigfile",
-          "exit": 0,
-          "output": "...[truncated]\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\n"
-        },
-        "structured_content": null
-      },
+      "rawOutput": "...[truncated]\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\n\n\n[output truncated]",
       "sessionUpdate": "tool_call_update",
       "status": "completed",
       "toolCallId": "pyd_ai_tool_call_id__bash"
@@ -108,21 +100,13 @@
       "content": [
         {
           "content": {
-            "text": "ToolResult(content='...[truncated]\\nline\\nline\\nline\\nline\\nline\\nline\\nline\\nline\\nline\\nline\\n\\n\\n[output truncated]', structured_content=None, metadata={'output': '...[truncated]\\nline\\nline\\nline\\nline\\nline\\nline\\nline\\nline\\nline\\nline\\n', 'exit': 0, 'description': 'cat bigfile'})",
+            "text": "...[truncated]\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\n\n\n[output truncated]",
             "type": "text"
           },
           "type": "content"
         }
       ],
-      "rawOutput": {
-        "content": "...[truncated]\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\n\n\n[output truncated]",
-        "metadata": {
-          "description": "cat bigfile",
-          "exit": 0,
-          "output": "...[truncated]\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\n"
-        },
-        "structured_content": null
-      },
+      "rawOutput": "...[truncated]\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\n\n\n[output truncated]",
       "sessionUpdate": "tool_call_update",
       "status": "completed",
       "toolCallId": "pyd_ai_tool_call_id__bash"

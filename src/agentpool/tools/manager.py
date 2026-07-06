@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Callable, Sequence
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Literal, assert_never
+import warnings
 
 from agentpool.log import get_logger
 from agentpool.utils.baseregistry import AgentPoolError
@@ -17,7 +18,6 @@ if TYPE_CHECKING:
     from agentpool.common_types import MCPServerStatus, ToolType
     from agentpool.prompts.prompts import MCPClientPrompt
     from agentpool.resource_providers import ResourceProvider
-    from agentpool.resource_providers.codemode.provider import CodeModeResourceProvider
     from agentpool.resource_providers.resource_info import ResourceInfo
     from agentpool.tools.base import Tool
 
@@ -62,10 +62,12 @@ class ToolManager:
         super().__init__()
         self.external_providers: list[ResourceProvider] = []
         self.session_providers: list[ResourceProvider] = []
-        self.worker_provider = StaticResourceProvider(name="workers")
-        self.builtin_provider = StaticResourceProvider(name="builtin")
-        self.tool_mode = tool_mode
-        self._codemode_provider: CodeModeResourceProvider = CodeModeResourceProvider([])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            self.worker_provider = StaticResourceProvider(name="workers")
+            self.builtin_provider = StaticResourceProvider(name="builtin")
+            self.tool_mode = tool_mode
+            self._codemode_provider = CodeModeResourceProvider([])
         # Forward to provider methods
         self.tool = self.builtin_provider.tool
         self.register_tool = self.builtin_provider.register_tool

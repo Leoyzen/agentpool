@@ -84,15 +84,7 @@
   },
   {
     "payload": {
-      "rawOutput": {
-        "content": "hello\n",
-        "metadata": {
-          "description": "echo hello",
-          "exit": 0,
-          "output": "hello\n"
-        },
-        "structured_content": null
-      },
+      "rawOutput": "hello\n",
       "sessionUpdate": "tool_call_update",
       "status": "completed",
       "toolCallId": "pyd_ai_tool_call_id__bash"
@@ -104,21 +96,13 @@
       "content": [
         {
           "content": {
-            "text": "ToolResult(content='hello\\n', structured_content=None, metadata={'output': 'hello\\n', 'exit': 0, 'description': 'echo hello'})",
+            "text": "hello\n",
             "type": "text"
           },
           "type": "content"
         }
       ],
-      "rawOutput": {
-        "content": "hello\n",
-        "metadata": {
-          "description": "echo hello",
-          "exit": 0,
-          "output": "hello\n"
-        },
-        "structured_content": null
-      },
+      "rawOutput": "hello\n",
       "sessionUpdate": "tool_call_update",
       "status": "completed",
       "toolCallId": "pyd_ai_tool_call_id__bash"

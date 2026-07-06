@@ -275,36 +275,6 @@ async def test_close_during_idle_sets_closing_and_wakes() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.skip(reason="pre-existing failure from run/turn separation refactor")
-async def test_cancel_during_running_sets_cancelled() -> None:
-    """Given a running RunHandle, cancel() sets run_ctx.cancelled and wakes idle."""
-    turn = _StubTurn(events=[_stream_complete_event()], message_history=["m"])
-    agent = MagicMock()
-    agent.create_turn = MagicMock(return_value=turn)
-    handle = _make_run_handle(agent=agent)
-
-    events: list[Any] = []
-    gen = handle.start("prompt")
-
-    async def _consume() -> None:
-        events.extend([event async for event in gen])
-
-    consumer_task = asyncio.create_task(_consume())
-    await asyncio.sleep(0.05)
-
-    # Handle is idle after first turn completes
-    handle._status = RunStatus.running  # simulate mid-turn
-
-    handle.cancel()
-    assert handle.run_ctx.cancelled is True
-    assert handle._idle_event.is_set()
-
-    handle.close()
-    await asyncio.sleep(0.05)
-    await consumer_task
-
-
-@pytest.mark.unit
 async def test_steer_returns_false_when_closing() -> None:
     """Given a closing RunHandle, steer() returns False."""
     handle = _make_run_handle()

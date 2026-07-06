@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from typing import Any
 
 from pydantic import HttpUrl
 from pydantic_ai.mcp import MCPToolset
@@ -175,8 +176,8 @@ async def test_does_not_modify_manager_state() -> None:
     assert caps1[0].url == caps2[0].url
     # MCP wrappers are distinct objects
     assert caps1[0] is not caps2[0]
-    # Each call creates a new MCPToolset (no caching)
-    assert caps1[0].local is not caps2[0].local
+    # Underlying MCPToolset is shared (cached by client_id)
+    assert caps1[0].local is caps2[0].local
     # Manager state should be unchanged
     assert len(manager.servers) == 1
     assert len(manager.providers) == 0
@@ -252,3 +253,64 @@ def test_to_pydantic_ai_method_removed() -> None:
         assert "to_pydantic_ai" not in dir(config), (
             f"{type(config).__name__} should not have to_pydantic_ai"
         )
+
+
+async def test_different_client_ids_produce_distinct_toolsets() -> None:
+    """Two server configs with different client_ids should produce distinct MCPToolsets."""
+    config_a = StdioMCPServerConfig(command="python", args=["server_a.py"])
+    config_b = StdioMCPServerConfig(command="python", args=["server_b.py"])
+    manager = MCPManager(servers=[config_a, config_b])
+
+    caps = await manager.as_capability()
+
+    assert len(caps) == 2
+    assert caps[0].local is not caps[1].local
+    assert isinstance(caps[0].local, MCPToolset)
+    assert isinstance(caps[1].local, MCPToolset)
+
+
+async def test_cache_cleanup_calls_aexit_on_cached_toolsets() -> None:
+    """disconnect_all() should close cached MCPToolsets via __aexit__ before clearing."""
+    from unittest.mock import AsyncMock, patch
+
+    config = StdioMCPServerConfig(command="python", args=["server.py"])
+    manager = MCPManager(servers=[config])
+
+    await manager.as_capability()
+
+    assert len(manager._toolset_cache) == 1
+    cached_toolset = next(iter(manager._toolset_cache.values()))
+
+    with patch.object(cached_toolset, "__aexit__", new_callable=AsyncMock) as mock_aexit:
+        await manager.disconnect_all()
+        mock_aexit.assert_awaited_once_with(None, None, None)
+
+    assert len(manager._toolset_cache) == 0
+
+
+async def test_cached_toolset_shared_across_tasks_without_error() -> None:
+    """A cached MCPToolset shared across asyncio tasks must not raise CancelScope errors.
+
+    Regression test: if someone re-adds _toolset_cache, this verifies that
+    MCPToolset's reentrant design (running_count + anyio.Lock) handles
+    cross-task usage without RuntimeError.
+    """
+    import asyncio
+
+    config = StdioMCPServerConfig(command="python", args=["server.py"])
+    manager = MCPManager(servers=[config])
+
+    async def get_caps() -> list[Any]:
+        return await manager.as_capability()
+
+    task_a = asyncio.create_task(get_caps())
+    caps_a = await task_a
+    task_b = asyncio.create_task(get_caps())
+    caps_b = await task_b
+
+    assert len(caps_a) == 1
+    assert len(caps_b) == 1
+    # Cached toolset is shared across tasks
+    assert caps_a[0].local is caps_b[0].local
+
+    await manager.cleanup()

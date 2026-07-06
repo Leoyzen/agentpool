@@ -12,7 +12,6 @@ import contextlib
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
-import anyio
 import pytest
 
 from agentpool.agents.events import (
@@ -157,12 +156,12 @@ def _make_cancel_aware_agent() -> MagicMock:
     return agent
 
 
-async def _drain_queue(queue: anyio.streams.memory.MemoryObjectReceiveStream) -> list[Any]:
+async def _drain_queue(queue: asyncio.Queue) -> list[Any]:
     """Drain all currently-available events from a queue without blocking."""
     events: list[Any] = []
     while True:
-        with contextlib.suppress(anyio.WouldBlock):
-            events.append(queue.receive_nowait())
+        with contextlib.suppress(asyncio.QueueEmpty):
+            events.append(queue.get_nowait())
             continue
         break
     return events
@@ -241,7 +240,7 @@ async def test_cancel_then_new_prompt_full_flow(
         async with asyncio.timeout(30.0):
             while True:
                 try:
-                    event = await asyncio.wait_for(queue.receive(), timeout=5.0)
+                    event = await asyncio.wait_for(queue.get(), timeout=5.0)
                     post_events.append(event)
                     unwrapped = _unwrap_event(event)
                     if isinstance(unwrapped, StreamCompleteEvent):
@@ -367,7 +366,7 @@ def _make_stub_then_die_agent() -> MagicMock:
 
 
 async def _collect_events_until(
-    queue: anyio.streams.memory.MemoryObjectReceiveStream,
+    queue: asyncio.Queue,
     target_type: type,
     *,
     timeout: float = 30.0,
@@ -378,7 +377,7 @@ async def _collect_events_until(
         async with asyncio.timeout(timeout):
             while True:
                 try:
-                    event = await asyncio.wait_for(queue.receive(), timeout=5.0)
+                    event = await asyncio.wait_for(queue.get(), timeout=5.0)
                     events.append(event)
                     if isinstance(_unwrap_event(event), target_type):
                         break

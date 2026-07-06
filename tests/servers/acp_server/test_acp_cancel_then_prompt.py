@@ -14,11 +14,9 @@ a run and immediately sends a new prompt.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
-import anyio
 import pytest
 
 from agentpool.agents.events import RunFailedEvent, RunStartedEvent, StreamCompleteEvent
@@ -140,14 +138,14 @@ def _make_cancel_aware_agent() -> MagicMock:
     return agent
 
 
-async def _drain_queue(queue: anyio.streams.memory.MemoryObjectReceiveStream) -> list[Any]:
+async def _drain_queue(queue: asyncio.Queue[Any]) -> list[Any]:
     """Drain all currently-available events from a queue without blocking."""
     events: list[Any] = []
     while True:
-        with contextlib.suppress(anyio.WouldBlock):
-            events.append(queue.receive_nowait())
-            continue
-        break
+        try:
+            events.append(queue.get_nowait())
+        except (asyncio.QueueEmpty, asyncio.QueueShutDown):
+            break
     return events
 
 
@@ -221,7 +219,7 @@ async def test_acp_cancel_then_prompt_no_hang(
         async with asyncio.timeout(30.0):
             while True:
                 try:
-                    event = await asyncio.wait_for(queue.receive(), timeout=5.0)
+                    event = await asyncio.wait_for(queue.get(), timeout=5.0)
                     post_events.append(event)
                     unwrapped = _unwrap_event(event)
                     if isinstance(unwrapped, StreamCompleteEvent):

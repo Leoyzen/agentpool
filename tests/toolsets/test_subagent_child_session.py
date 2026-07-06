@@ -14,9 +14,10 @@ Verifies RFC-0028 Task T9 requirements:
 
 from __future__ import annotations
 
+import asyncio
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
-import anyio
 import pytest
 
 from agentpool import AgentPool, AgentsManifest
@@ -32,15 +33,8 @@ from agentpool.sessions.store import MemorySessionStore
 from agentpool_toolsets.builtin.subagent_tools import SubagentTools
 
 
-def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
-    try:
-        stream.receive_nowait()
-    except anyio.WouldBlock:
-        return True
-    except anyio.EndOfStream:
-        return True
-    else:
-        return False
+def _stream_empty(queue: asyncio.Queue[Any]) -> bool:
+    return queue.empty()
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +67,7 @@ agents:
     spawn_count = 0
 
     async with AgentPool(manifest) as pool:
-        orchestrator = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
+        orchestrator: Any = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
 
         async for envelope in orchestrator.run_stream("Delegate", session_id="ses_test"):
             event = envelope.event if isinstance(envelope, EventEnvelope) else envelope
@@ -120,7 +114,7 @@ agents:
     child_session_ids_from_run_started: list[str] = []
 
     async with AgentPool(manifest) as pool:
-        orchestrator = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
+        orchestrator: Any = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
         assert pool.session_pool is not None
 
         # Subscribe to parent with descendants scope to catch child events
@@ -134,15 +128,15 @@ agents:
         # Drain remaining events from the queue
         while True:
             try:
-                envelope = queue.receive_nowait()
-            except anyio.WouldBlock:
+                env = queue.get_nowait()
+            except asyncio.QueueEmpty:
                 break
-            except anyio.EndOfStream:
+            except asyncio.QueueShutDown:
                 break
-            if envelope is None:
+            if env is None:
                 break
             # Events are now wrapped in EventEnvelope by the EventBus
-            event = envelope.event if isinstance(envelope, EventEnvelope) else envelope
+            event = env.event if isinstance(env, EventEnvelope) else env
             if isinstance(event, RunStartedEvent):
                 child_session_ids_from_run_started.append(event.session_id)
             elif isinstance(event, SubAgentEvent) and isinstance(event.event, RunStartedEvent):
@@ -192,7 +186,7 @@ agents:
         assert pool.session_pool is not None
         pool.session_pool.sessions.store = store
 
-        orch = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
+        orch: Any = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
 
         child_session_id_from_spawn: str | None = None
 
@@ -242,7 +236,7 @@ agents:
       - type: subagent
 """)
     async with AgentPool(manifest) as pool:
-        orch = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
+        orch: Any = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
 
         tools_provider = SubagentTools()
 
@@ -289,7 +283,7 @@ agents:
       - type: subagent
 """)
     async with AgentPool(manifest) as pool:
-        orch = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
+        orch: Any = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
 
         tools_provider = SubagentTools()
 
@@ -342,7 +336,7 @@ agents:
     spawn_depth: int | None = None
 
     async with AgentPool(manifest) as pool:
-        orch = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
+        orch: Any = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
 
         # With depth=0 (default top-level), child should be depth=1
         async for envelope in orch.run_stream("Delegate", session_id="ses_test"):

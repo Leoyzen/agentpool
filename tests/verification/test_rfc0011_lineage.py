@@ -2,29 +2,21 @@ import asyncio
 import logging
 from typing import Any
 
-import anyio
 from pydantic_ai.models.test import TestModel
 import pytest
 from sqlalchemy import select
 
 from agentpool import Agent, AgentPool, AgentsManifest, NativeAgentConfig
-from agentpool.agents.events import RunStartedEvent, SpawnSessionStart
+from agentpool.agents.events import RunStartedEvent
 from agentpool_config.storage import SQLStorageConfig, StorageConfig
 from agentpool_storage.sql_provider import SQLModelProvider
 from agentpool_storage.sql_provider.models import Conversation
 from agentpool_toolsets.builtin.subagent_tools import SubagentTools
 
 
-def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
-    """Check if a memory receive stream has no buffered items."""
-    try:
-        stream.receive_nowait()
-    except anyio.WouldBlock:
-        return True
-    except anyio.EndOfStream:
-        return True
-    else:
-        return False
+def _stream_empty(queue: asyncio.Queue[Any]) -> bool:
+    """Check if a subscriber queue has no buffered items."""
+    return queue.empty()
 
 
 @pytest.fixture
@@ -50,66 +42,17 @@ async def test_pool(sql_provider):
     )
     async with AgentPool(manifest) as pool:
         # Register subagent tools on parent
-        parent = pool.manifest.agents["parent"].get_agent(pool=pool)
+        parent: Any = pool.manifest.agents["parent"].get_agent(pool=pool)
         assert isinstance(parent, Agent)
         parent.tools.add_provider(SubagentTools())
 
         # Mock models for both
         await parent.set_model(TestModel())
-        child = pool.manifest.agents["child"].get_agent(pool=pool)
+        child: Any = pool.manifest.agents["child"].get_agent(pool=pool)
         assert isinstance(child, Agent)
         await child.set_model(TestModel(custom_output_text="Child response"))
 
         yield pool
-
-
-@pytest.mark.skip(
-    reason=(
-        "SubagentTools.task() now requires a run_ctx from SessionPool. "
-        "Use test_subagent_event_lineage for SpawnSessionStart verification."
-    )
-)
-@pytest.mark.asyncio
-async def test_subagent_independent_session(test_pool):
-    """Test that subagent runs in independent session with unique ID."""
-    parent = test_pool.manifest.agents["parent"].get_agent(pool=test_pool)
-
-    parent_session_id = "parent-session-123"
-    parent.session_id = parent_session_id
-
-    # Execute task tool on parent and capture SpawnSessionStart
-    ctx = parent.get_context()
-    tools = SubagentTools()
-
-    captured_events: list[SpawnSessionStart] = []
-
-    # Patch StreamEventEmitter.emit_event to capture events
-    from agentpool.agents.events import StreamEventEmitter
-
-    original_emit = StreamEventEmitter.emit_event
-
-    async def mock_emit(self, event):
-        if isinstance(event, SpawnSessionStart):
-            captured_events.append(event)
-        await original_emit(self, event)
-
-    StreamEventEmitter.emit_event = mock_emit
-
-    try:
-        await tools.task(ctx, agent_or_team="child", prompt="Do something", description="test task")
-    finally:
-        StreamEventEmitter.emit_event = original_emit
-
-    assert len(captured_events) == 1, "Expected exactly one SpawnSessionStart"
-    spawn = captured_events[0]
-    child_session_id = spawn.child_session_id
-
-    assert child_session_id is not None
-    assert child_session_id != parent_session_id
-    assert spawn.parent_session_id == parent_session_id
-
-    assert isinstance(child_session_id, str)
-    assert len(child_session_id) > 0
 
 
 @pytest.mark.asyncio
@@ -153,10 +96,10 @@ async def test_subagent_event_lineage(test_pool):
 
     while True:
         try:
-            envelope = queue.receive_nowait()
-        except anyio.WouldBlock:
+            envelope = queue.get_nowait()
+        except asyncio.QueueEmpty:
             break
-        except anyio.EndOfStream:
+        except asyncio.QueueShutDown:
             break
         if envelope is None:
             break
@@ -205,7 +148,7 @@ async def test_sql_storage_parent_id(test_pool):
     from sqlalchemy.ext.asyncio import AsyncSession
 
     async with AsyncSession(sql_provider.engine) as session:
-        result = await session.execute(select(Conversation).where(Conversation.id == child_id))
+        result = await session.execute(select(Conversation).where(Conversation.id == child_id))  # type: ignore[arg-type]
         convo = result.scalar_one_or_none()
         assert convo is not None
         assert convo.parent_id == parent_id
@@ -241,7 +184,7 @@ async def test_storage_soft_validation(test_pool, caplog):
     from sqlalchemy.ext.asyncio import AsyncSession
 
     async with AsyncSession(sql_provider.engine) as session:
-        result = await session.execute(select(Conversation).where(Conversation.id == child_id))
+        result = await session.execute(select(Conversation).where(Conversation.id == child_id))  # type: ignore[arg-type]
         convo = result.scalar_one()
         assert convo.id == child_id
         assert convo.parent_id == ghost_parent_id

@@ -202,7 +202,7 @@ async def test_create_child_session_auto_emits_spawn_with_tool_call_id() -> None
         tool_call_id="test-123",
     )
 
-    envelope = await recv.receive()
+    envelope = await recv.get()
     event = envelope.event
 
     assert isinstance(event, SpawnSessionStart)
@@ -283,23 +283,21 @@ async def test_max_subagent_depth_raises_at_depth_6() -> None:
 
 @pytest.mark.unit
 def test_team_py_uses_yield_spawn_pattern() -> None:
-    """team.py still uses 'yield SpawnSessionStart(...)' pattern (not create_child_session).
+    """base_team.py still uses 'yield SpawnSessionStart(...)' pattern (not create_child_session).
 
-    Given: The team.py source file.
+    Given: The base_team.py source file.
     When: We inspect it for SpawnSessionStart usage.
     Then: It uses 'yield SpawnSessionStart(...)' in an async generator, NOT create_child_session().
     """
     import inspect
 
-    from agentpool.delegation import team
+    from agentpool.delegation import base_team
 
-    source = inspect.getsource(team)
+    source = inspect.getsource(base_team)
 
-    # team.py must use the yield SpawnSessionStart pattern
     assert "yield SpawnSessionStart(" in source, (
-        "team.py must still use 'yield SpawnSessionStart(...)' pattern"
+        "base_team.py must still use 'yield SpawnSessionStart(...)' pattern"
     )
-    # team.py must NOT use create_child_session (that's for AgentContext, not teams)
     assert "create_child_session" not in source, (
-        "team.py must NOT call create_child_session — it uses the yield pattern"
+        "base_team.py must NOT call create_child_session — it uses the yield pattern"
     )

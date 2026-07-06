@@ -54,7 +54,7 @@ class ProtocolEventConsumerMixin(ABC):
         super().__init__()
         self._session_scopes: dict[str, anyio.CancelScope] = {}
         self._session_groups: dict[str, anyio.abc.TaskGroup] = {}
-        self._consumer_streams: dict[str, anyio.abc.ObjectReceiveStream[EventEnvelope]] = {}
+        self._consumer_streams: dict[str, asyncio.Queue[EventEnvelope]] = {}
         self._consumer_locks: dict[str, asyncio.Lock] = {}
         self._consumer_tasks: dict[str, asyncio.Task[None] | None] = {}
         self._consumer_done_events: dict[str, anyio.Event] = {}
@@ -170,8 +170,7 @@ class ProtocolEventConsumerMixin(ABC):
             async def _run_consumer() -> None:
                 with scope:
                     async with tg:
-                        task_ref = tg.start_soon(self._event_consumer_loop, session_id)
-                        self._consumer_tasks[session_id] = task_ref
+                        tg.start_soon(self._event_consumer_loop, session_id)
                         await done_event.wait()
 
             task = asyncio.ensure_future(_run_consumer())
@@ -192,12 +191,22 @@ class ProtocolEventConsumerMixin(ABC):
         if cancel_scope is not None:
             cancel_scope.cancel()
 
+        # Wait for the consumer task to fully exit so its finally block
+        # (which pops _session_groups etc.) has run before we return.
+        # Without this, a subsequent start_event_consumer races with the
+        # old finally block, which clobbers the new state.
+        consumer_task = self._consumer_tasks.pop(session_id, None)
+        if consumer_task is not None:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await consumer_task
+
         # Cleanup after CancelScope ensures proper termination
         self._session_scopes.pop(session_id, None)
         self._session_groups.pop(session_id, None)
         stream = self._consumer_streams.pop(session_id, None)
         if stream is not None:
-            await self.event_bus.unsubscribe(session_id, stream)
+            with contextlib.suppress(Exception):
+                await self.event_bus.unsubscribe(session_id, stream)
 
         self._consumer_locks.pop(session_id, None)
         self._consumer_done_events.pop(session_id, None)

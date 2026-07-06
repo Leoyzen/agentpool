@@ -16,7 +16,6 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, Mock
 
-import anyio
 from pydantic_ai.messages import (
     PartDeltaEvent as PydanticPartDeltaEvent,
     PartStartEvent,
@@ -58,16 +57,9 @@ if TYPE_CHECKING:
 # =============================================================================
 
 
-def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
-    """Check if a memory receive stream has no buffered items."""
-    try:
-        stream.receive_nowait()
-    except anyio.WouldBlock:
-        return True
-    except anyio.EndOfStream:
-        return True
-    else:
-        return False
+def _stream_empty(queue: asyncio.Queue[Any]) -> bool:
+    """Check if a subscriber queue has no buffered items."""
+    return queue.empty()
 
 
 def _extract_opencode_events(sse_queue: Any) -> list[Any]:
@@ -83,7 +75,7 @@ def _extract_opencode_events(sse_queue: Any) -> list[Any]:
 
     result: list[Any] = []
     while not _stream_empty(sse_queue):
-        envelope = sse_queue.receive_nowait()
+        envelope = sse_queue.get_nowait()
         if isinstance(envelope, EventEnvelope):
             inner = envelope.event
             if isinstance(inner, CustomEvent) and inner.event_data is not None:
@@ -298,7 +290,9 @@ class TestEventPipelineE2E:
 
         # First should be running state
         running_states = [
-            t for t in tool_part_events if isinstance(t.properties.part.state, ToolStateRunning)
+            t
+            for t in tool_part_events
+            if isinstance(t.properties.part.state, ToolStateRunning)  # type: ignore[union-attr]
         ]
         assert len(running_states) >= 1, (
             "ToolCallStart should produce ToolPart with ToolStateRunning"
@@ -306,7 +300,9 @@ class TestEventPipelineE2E:
 
         # Last should be completed state
         completed_states = [
-            t for t in tool_part_events if isinstance(t.properties.part.state, ToolStateCompleted)
+            t
+            for t in tool_part_events
+            if isinstance(t.properties.part.state, ToolStateCompleted)  # type: ignore[union-attr]
         ]
         assert len(completed_states) >= 1, (
             "ToolCallComplete should produce ToolPart with ToolStateCompleted"

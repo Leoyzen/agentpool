@@ -15,7 +15,7 @@ from agentpool.models.manifest import AgentsManifest
 # Builtin toolsets imports removed to avoid circular dependency
 # Import them directly from agentpool_toolsets.builtin when needed
 from agentpool.agents import Agent, AgentContext, ACPAgent
-from agentpool.delegation import AgentPool, Team, TeamRun, BaseTeam
+from agentpool.delegation import AgentPool, BaseTeam
 from dotenv import load_dotenv
 from agentpool.messaging.messages import ChatMessage
 from agentpool.tools import Tool, ToolCallInfo
@@ -72,8 +72,6 @@ __all__ = [
     "ImageUrl",
     "MessageNode",
     "NativeAgentConfig",
-    "Team",
-    "TeamRun",
     "Tool",
     "ToolCallInfo",
     "VideoUrl",

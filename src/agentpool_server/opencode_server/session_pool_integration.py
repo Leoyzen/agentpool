@@ -797,7 +797,9 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
         event_stream = await self.session_pool.event_bus.subscribe(session_id)
 
         try:
-            async for event in event_stream:
+            from agentpool.orchestrator.core import drain_and_merge
+
+            async for event in drain_and_merge(event_stream):
                 async for oc_event in event_adapter.convert_event(event.event):
                     yield oc_event
         finally:

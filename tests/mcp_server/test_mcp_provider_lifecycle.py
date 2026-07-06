@@ -738,7 +738,7 @@ class TestRealToolCallsViaSnapshot:
     async def test_two_snapshots_produce_independent_toolsets(
         self, fastmcp_server: Any, run_context: RunContext[Any]
     ):
-        """Two as_capability() calls with the same snapshot produce independent toolsets."""
+        """Two as_capability() calls with the same snapshot share a cached MCPToolset."""
         manager = MCPManager(name="test")
         cfg = _http_cfg("shared_server", "http://localhost:0/mcp")
         entry = McpConfigEntry(server_config=cfg, source="pool")
@@ -754,17 +754,14 @@ class TestRealToolCallsViaSnapshot:
             caps1 = await manager.as_capability(snapshot=snapshot)
             caps2 = await manager.as_capability(snapshot=snapshot)
 
-            assert caps1[0].local is not caps2[0].local
+            # MCP wrappers are distinct but share the cached MCPToolset
+            assert caps1[0] is not caps2[0]
+            assert caps1[0].local is caps2[0].local
 
-            async with caps1[0].local as ts1, caps2[0].local as ts2:
+            async with caps1[0].local as ts1:
                 tools1 = await ts1.get_tools(run_context)
-                tools2 = await ts2.get_tools(run_context)
-                assert set(tools1) == set(tools2)
-
                 r1 = await ts1.call_tool("greet", {"name": "first"}, run_context, tools1["greet"])
-                r2 = await ts2.call_tool("greet", {"name": "second"}, run_context, tools2["greet"])
                 assert r1 == "Hello, first!"
-                assert r2 == "Hello, second!"
         finally:
             GlobalConnectionPool.get_transport = original_get_transport  # type: ignore[method-assign]
             await manager.cleanup()
@@ -986,10 +983,10 @@ class TestGlobalPoolIntegration:
         caps1 = await manager.as_capability(snapshot=snapshot)
         caps2 = await manager.as_capability(snapshot=snapshot)
 
-        # Same config → same transport from pool
-        # (GlobalConnectionPool deduplicates by client_id)
-        assert caps1[0].local is not caps2[0].local  # Different MCPToolset
-        # But the underlying transport should be shared
+        # MCP wrappers are distinct
+        assert caps1[0] is not caps2[0]
+        # MCPToolset is cached by client_id (shared)
+        assert caps1[0].local is caps2[0].local
         await manager.cleanup()
 
     async def test_global_pool_skips_acp(self):

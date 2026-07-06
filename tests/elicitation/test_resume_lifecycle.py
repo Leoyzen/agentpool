@@ -316,7 +316,7 @@ async def test_stream_complete_via_run_handle_event_bus() -> None:
             async with asyncio.timeout(30):
                 while True:
                     try:
-                        envelope: EventEnvelope = await receive_stream.receive()
+                        envelope: EventEnvelope = await receive_stream.get()
                     except anyio.EndOfStream:
                         break
 

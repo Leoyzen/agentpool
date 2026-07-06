@@ -7,7 +7,8 @@ from typing import Any
 from pydantic import BaseModel
 import pytest
 
-from agentpool import AgentPool, AgentsManifest, Team, TeamRun
+from agentpool import AgentPool, AgentsManifest
+from agentpool.delegation.base_team import BaseTeam
 
 
 class _TestOutput(BaseModel):
@@ -61,7 +62,7 @@ async def test_parallel_execution():
     async with AgentPool(manifest) as pool:
         agent_1 = pool.manifest.agents["agent_1"].get_agent(pool=pool)
         agent_2 = pool.manifest.agents["agent_2"].get_agent(pool=pool)
-        group = Team([agent_1, agent_2])
+        group = BaseTeam([agent_1, agent_2])
 
         async with agent_1, agent_2:
             prompt = "Test input"
@@ -83,7 +84,7 @@ async def test_sequential_execution():
     async with AgentPool(manifest) as pool:
         agent_1 = pool.manifest.agents["agent_1"].get_agent(pool=pool)
         agent_2 = pool.manifest.agents["agent_2"].get_agent(pool=pool)
-        group: TeamRun[Any, Any] = TeamRun([agent_1, agent_2])
+        group: BaseTeam[Any, Any] = BaseTeam([agent_1, agent_2], mode="sequential")
 
         async with agent_1, agent_2:
             prompt = "Test input"
