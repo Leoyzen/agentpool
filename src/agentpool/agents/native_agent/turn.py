@@ -15,6 +15,8 @@ from uuid import uuid4
 
 from pydantic_ai import CallToolsNode, ModelRequestNode
 from pydantic_ai.exceptions import UndrainedPendingMessagesError
+from pydantic_ai.messages import ModelResponse
+from pydantic_ai.usage import RequestUsage
 from pydantic_graph import End
 
 from agentpool.agents.events.events import (
@@ -210,9 +212,10 @@ class NativeTurn(Turn):
                         self._agent._iteration_task = None
 
                 self._message_history = agent_run.all_messages()
+                logger.info("After while loop — building final message")
 
         except RunAbortedError:
-            logger.debug("Run aborted — treating as graceful stop")
+            logger.info("RunAbortedError caught")
             if agent_run is not None:
                 try:
                     self._message_history = agent_run.all_messages()
@@ -222,10 +225,7 @@ class NativeTurn(Turn):
                     )
 
         except UndrainedPendingMessagesError as exc:
-            logger.warning(
-                "UndrainedPendingMessagesError — pending messages may have been dropped",
-                error=str(exc),
-            )
+            logger.info("UndrainedPendingMessagesError caught", error=str(exc))
             if agent_run is not None:
                 with contextlib.suppress(Exception):
                     self._message_history = agent_run.all_messages()
@@ -296,9 +296,10 @@ class NativeTurn(Turn):
         else:
             content = ""
 
-        # Extract cost_info from agent_run usage so downstream consumers
-        # (Talk stats, storage) can track token usage.
+        # Extract cost_info and usage from agent_run so downstream consumers
+        # (Talk stats, storage, ACP event converter) can track token usage.
         cost_info: TokenCost | None = None
+        request_usage: RequestUsage | None = None
         if agent_run is not None:
             try:
                 run_usage = agent_run.usage
@@ -306,6 +307,13 @@ class NativeTurn(Turn):
                     usage=run_usage,
                     model=self._agent.model_name or "",
                 )
+                # Extract RequestUsage from the last ModelResponse in new_messages.
+                # agent_run.usage is RunUsage (cumulative), but ChatMessage.usage
+                # expects RequestUsage (per-request) for ACP/OpenCode converters.
+                for msg in reversed(new_messages):
+                    if isinstance(msg, ModelResponse):
+                        request_usage = msg.usage
+                        break
             except Exception:  # noqa: BLE001
                 logger.debug("Failed to extract usage from agent run", exc_info=True)
 
@@ -317,6 +325,7 @@ class NativeTurn(Turn):
             session_id=self._run_ctx.session_id,
             parent_id=self._parent_id,
             cost_info=cost_info,
+            usage=request_usage or RequestUsage(),
             response_time=time.perf_counter() - self._run_ctx.start_time,
             messages=new_messages if agent_run is not None else [],
         )
@@ -325,6 +334,8 @@ class NativeTurn(Turn):
         # CancelledError swallowed by pydantic-ai inside agent_run.next()),
         # exit without yielding StreamCompleteEvent.
         if self._run_ctx.cancelled:
+            logger.info("Skipping StreamCompleteEvent — run_ctx.cancelled is True")
             return
 
+        logger.info("Yielding StreamCompleteEvent")
         yield StreamCompleteEvent(message=self._final_message)
