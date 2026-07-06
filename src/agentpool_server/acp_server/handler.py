@@ -628,6 +628,8 @@ class _ACPSessionProxy:
         self,
         requests: ACPRequests,
         client_capabilities: ClientCapabilities | None = None,
+        checkpoint_enabled: bool = False,
     ) -> None:
         self.requests = requests
         self.client_capabilities = client_capabilities or ClientCapabilities()
+        self.checkpoint_enabled = checkpoint_enabled
