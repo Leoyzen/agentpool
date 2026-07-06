@@ -798,6 +798,13 @@ class ElicitationDeferredEvent:
     event_kind: Literal["elicitation_deferred"] = "elicitation_deferred"
     """Event type identifier."""
 
+    timeout_seconds: float | None = None
+    """Elicitation timeout in seconds, for frontend countdown display.
+
+    ``None`` means no timeout (infinite wait). Set from
+    ``AgentRunContext.elicitation_timeout`` when the event is published.
+    """
+
 
 @dataclass(kw_only=True)
 class SessionResumeEvent:

@@ -873,6 +873,10 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         elicitation_registry = ElicitationFutureRegistry()
         if run_ctx is not None:
             run_ctx.elicitation_registry = elicitation_registry
+            # Set configurable elicitation timeout from agent config.
+            if self.config is not None:
+                td = self.config.elicitation_timeout
+                run_ctx.elicitation_timeout = td.total_seconds() if td is not None else None
         checkpoint_mgr: CheckpointManager | None = None
         if self.agent_pool is not None:
             checkpoint_mgr = CheckpointManager(

@@ -156,6 +156,14 @@ class AgentRunContext:
     before awaiting an elicitation future, enabling crash recovery.
     """
 
+    elicitation_timeout: float | None = 300.0
+    """Timeout in seconds for elicitation responses.
+
+    Set from agent config (``BaseAgentConfig.elicitation_timeout``) by
+    ``get_agentlet()``. ``None`` means no timeout (infinite wait). Used
+    by ``handle_elicitation()`` for ``asyncio.wait_for()``.
+    """
+
     _run_handle: RunHandle | None = None
     """Run handle for this execution, set by RunHandle lifecycle."""
 
@@ -354,6 +362,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                         requested_schema=elicitation_params.get("requestedSchema", {}),
                         mode=elicitation_params.get("mode", "form"),
                         session_id=run_ctx.session_id,
+                        timeout_seconds=run_ctx.elicitation_timeout,
                     )
                     await run_ctx.event_bus.publish(run_ctx.session_id, event)
                 await run_ctx.checkpoint_manager.checkpoint(
@@ -372,13 +381,21 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                 )
 
         # Register future and await — agent run suspends here.
+        timeout = run_ctx.elicitation_timeout
         future = registry.register(handle)
         try:
-            payload = await asyncio.wait_for(future, timeout=300)
+            if timeout is not None:
+                payload = await asyncio.wait_for(future, timeout=timeout)
+            else:
+                payload = await future
         except TimeoutError:
             from agentpool.tasks.exceptions import RunAbortedError
 
-            raise RunAbortedError("Elicitation timed out after 300s") from None
+            raise RunAbortedError(
+                f"Elicitation timed out after {timeout}s"
+                if timeout is not None
+                else "Elicitation timed out"
+            ) from None
         finally:
             # Ensure the future is removed from the registry even on
             # timeout or CancelledError, so retries don't hit ValueError.
