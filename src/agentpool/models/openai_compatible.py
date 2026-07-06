@@ -174,18 +174,8 @@ class OpenAICompatibleModel(OpenAIChatModel):
                 into the profile. Known boolean keys are coerced from
                 string to ``bool``.
         """
-        if provider is None:
-            provider = OpenAIProvider(base_url=base_url, api_key=api_key)
-
-        # Coerce tool_return_as_list to bool and store on instance
-        self._tool_return_as_list_enabled: bool = (
-            tool_return_as_list
-            if isinstance(tool_return_as_list, bool)
-            else isinstance(tool_return_as_list, str)
-            and tool_return_as_list.lower() in ("true", "1", "yes")
-        )
-
-        # Build openai_* overrides dict (coerced), filtering to real profile fields
+        # Validate openai_* kwargs before constructing OpenAIProvider,
+        # so invalid kwargs raise TypeError before any network/auth setup.
         real_overrides: dict[str, Any] = {}
         for key, value in profile_overrides.items():
             if key.startswith("openai_"):
@@ -198,6 +188,17 @@ class OpenAICompatibleModel(OpenAIChatModel):
                     f"Only 'openai_*' prefixed keys are accepted as profile overrides."
                 )
                 raise TypeError(msg)
+
+        if provider is None:
+            provider = OpenAIProvider(base_url=base_url, api_key=api_key)
+
+        # Coerce tool_return_as_list to bool and store on instance
+        self._tool_return_as_list_enabled: bool = (
+            tool_return_as_list
+            if isinstance(tool_return_as_list, bool)
+            else isinstance(tool_return_as_list, str)
+            and tool_return_as_list.lower() in ("true", "1", "yes")
+        )
 
         # Build the merged profile spec
         merged_profile = self._build_merged_profile(profile, real_overrides)
