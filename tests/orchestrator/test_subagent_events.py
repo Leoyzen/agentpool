@@ -564,6 +564,12 @@ async def test_nested_subagents_create_recursive_toolparts() -> None:
         # But actually, the parent consumer subscribes with descendants scope to parent_id,
         # and the spawn event for child would be published on parent_id by the agent runtime.
         # Let's publish on parent_id.
+        # Wait for parent consumer to initialize before publishing depth=2 event.
+        for _ in range(50):
+            if parent_id in integration._contexts:
+                break
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.05)
         await _publish_spawn_event(
             session_pool, parent_id, child_id, source_name="worker2", depth=2
         )

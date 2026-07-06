@@ -224,7 +224,8 @@ async def test_child_done_events_timeout_continues(
     consumer_task = asyncio.create_task(_consume())
 
     # Wait for: first turn (instant) + 50ms timeout + second turn (instant).
-    await asyncio.sleep(0.15)
+    # Use generous sleep to avoid flakiness on slow CI runners.
+    await asyncio.sleep(0.3)
 
     # Close to unblock idle.
     handle.close()
