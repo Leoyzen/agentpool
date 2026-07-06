@@ -694,3 +694,287 @@ def test_elicitation_timeout_serialization() -> None:
     assert result.timeout == timedelta(seconds=300)
     assert result.deferred_kind == "elicitation"
     assert result.elicitation_message == "Enter OTP"
+
+
+# ============================================================================
+# PR Review Coverage: P0 — message_history passed to checkpoint
+# ============================================================================
+
+
+@pytest.mark.unit
+async def test_handle_elicitation_passes_current_messages_to_checkpoint(
+    agent_ctx: AgentContext, form_params: ElicitRequestFormParams
+) -> None:
+    """handle_elicitation passes run_ctx.current_messages to checkpoint, not [].
+
+    Verifies that the P0 fix (message_history=[] bug) is in effect:
+    real message history from the pydantic-ai context is used for
+    checkpoint, preventing crash recovery from re-executing all prior
+    tool calls.
+    """
+    import asyncio
+
+    from agentpool.agents.native_agent.elicitation_bridge import (
+        ElicitationFutureRegistry,
+    )
+    from agentpool.sessions.models import ElicitationResumePayload
+
+    provider = MagicMock(spec=InputProvider)
+    provider.supports_durable_elicitation = True
+    agent_ctx.input_provider = provider
+    agent_ctx.in_mcp_callback = False
+    agent_ctx.tool_call_id = "tc-msg-1"
+
+    assert agent_ctx.run_ctx is not None
+    registry = ElicitationFutureRegistry()
+    agent_ctx.run_ctx.elicitation_registry = registry
+
+    # Set current_messages — simulates what tool_wrapping.py does
+    fake_messages = [
+        MagicMock(),
+        MagicMock(),
+    ]
+    agent_ctx.run_ctx.current_messages = fake_messages
+
+    mock_checkpoint = MagicMock()
+    mock_checkpoint.checkpoint = AsyncMock()
+    agent_ctx.run_ctx.checkpoint_manager = mock_checkpoint
+
+    mock_bus = MagicMock()
+    mock_bus.publish = AsyncMock()
+    agent_ctx.run_ctx.event_bus = mock_bus
+
+    payload = ElicitationResumePayload(
+        deferred_handle="tc-msg-1",
+        action="accept",
+        content={"name": "test"},
+    )
+
+    async def resolve_later() -> None:
+        await asyncio.sleep(0.05)
+        registry.resolve("tc-msg-1", payload)
+
+    task = asyncio.create_task(resolve_later())
+    await agent_ctx.handle_elicitation(form_params)
+    await task
+
+    mock_checkpoint.checkpoint.assert_awaited_once()
+    checkpoint_kwargs = mock_checkpoint.checkpoint.call_args.kwargs
+    # P0 fix: message_history should be the real messages, not []
+    assert checkpoint_kwargs["message_history"] is fake_messages
+    assert len(checkpoint_kwargs["message_history"]) == 2
+
+
+# ============================================================================
+# PR Review Coverage: P1a — checkpoint failure doesn't set checkpointed=True
+# ============================================================================
+
+
+@pytest.mark.unit
+async def test_handle_elicitation_checkpoint_failure_doesnt_set_checkpointed(
+    agent_ctx: AgentContext, form_params: ElicitRequestFormParams
+) -> None:
+    """When checkpoint fails, run_ctx.checkpointed stays False.
+
+    Verifies the P1a fix: checkpoint failure is logged but doesn't
+    set checkpointed=True. The in-process future await still works,
+    but crash recovery is unavailable.
+    """
+    import asyncio
+
+    from agentpool.agents.native_agent.elicitation_bridge import (
+        ElicitationFutureRegistry,
+    )
+    from agentpool.sessions.models import ElicitationResumePayload
+
+    provider = MagicMock(spec=InputProvider)
+    provider.supports_durable_elicitation = True
+    agent_ctx.input_provider = provider
+    agent_ctx.in_mcp_callback = False
+    agent_ctx.tool_call_id = "tc-fail-1"
+
+    assert agent_ctx.run_ctx is not None
+    registry = ElicitationFutureRegistry()
+    agent_ctx.run_ctx.elicitation_registry = registry
+
+    # Checkpoint manager that always fails
+    mock_checkpoint = MagicMock()
+    mock_checkpoint.checkpoint = AsyncMock(side_effect=RuntimeError("disk full"))
+    agent_ctx.run_ctx.checkpoint_manager = mock_checkpoint
+
+    mock_bus = MagicMock()
+    mock_bus.publish = AsyncMock()
+    agent_ctx.run_ctx.event_bus = mock_bus
+
+    payload = ElicitationResumePayload(
+        deferred_handle="tc-fail-1",
+        action="decline",
+    )
+
+    async def resolve_later() -> None:
+        await asyncio.sleep(0.05)
+        registry.resolve("tc-fail-1", payload)
+
+    task = asyncio.create_task(resolve_later())
+    result = await agent_ctx.handle_elicitation(form_params)
+    await task
+
+    # Checkpoint was attempted but failed
+    mock_checkpoint.checkpoint.assert_awaited_once()
+    # P1a fix: checkpointed should NOT be True on failure
+    assert agent_ctx.run_ctx.checkpointed is False
+    # The future await still works — result returned
+    assert isinstance(result, ElicitResult)
+    assert result.action == "decline"
+
+
+# ============================================================================
+# PR Review Coverage: P2 — session store status updated to "checkpointed"
+# ============================================================================
+
+
+@pytest.mark.unit
+async def test_handle_elicitation_updates_session_status_to_checkpointed(
+    agent_ctx: AgentContext, form_params: ElicitRequestFormParams
+) -> None:
+    """handle_elicitation updates session store status to 'checkpointed'.
+
+    Verifies the P2 fix: after saving checkpoint, the session store
+    status is updated from 'active' to 'checkpointed' so resume_session()
+    can find it without the allow_active_run workaround.
+    """
+    import asyncio
+
+    from agentpool.agents.native_agent.elicitation_bridge import (
+        ElicitationFutureRegistry,
+    )
+    from agentpool.sessions.models import ElicitationResumePayload, SessionData
+
+    provider = MagicMock(spec=InputProvider)
+    provider.supports_durable_elicitation = True
+    agent_ctx.input_provider = provider
+    agent_ctx.in_mcp_callback = False
+    agent_ctx.tool_call_id = "tc-status-1"
+
+    assert agent_ctx.run_ctx is not None
+    registry = ElicitationFutureRegistry()
+    agent_ctx.run_ctx.elicitation_registry = registry
+
+    mock_checkpoint = MagicMock()
+    mock_checkpoint.checkpoint = AsyncMock()
+    agent_ctx.run_ctx.checkpoint_manager = mock_checkpoint
+
+    mock_bus = MagicMock()
+    mock_bus.publish = AsyncMock()
+    agent_ctx.run_ctx.event_bus = mock_bus
+
+    # Set up session store with "active" status
+    session_data = SessionData(
+        session_id="test-session",
+        agent_name="test-agent",
+        status="active",
+        agent_type="native",
+    )
+    mock_store = MagicMock()
+    mock_store.load = AsyncMock(return_value=session_data)
+    mock_store.save = AsyncMock()
+
+    # Wire up the store through the mock chain
+    mock_pool = MagicMock()
+    mock_session_pool = MagicMock()
+    mock_sessions = MagicMock()
+    mock_sessions.store = mock_store
+    mock_session_pool.sessions = mock_sessions
+    mock_pool.session_pool = mock_session_pool
+    agent_ctx.node.agent_pool = mock_pool
+
+    payload = ElicitationResumePayload(
+        deferred_handle="tc-status-1",
+        action="accept",
+        content={"value": "yes"},
+    )
+
+    async def resolve_later() -> None:
+        await asyncio.sleep(0.05)
+        registry.resolve("tc-status-1", payload)
+
+    task = asyncio.create_task(resolve_later())
+    await agent_ctx.handle_elicitation(form_params)
+    await task
+
+    # P2 fix: session store status should be updated to "checkpointed"
+    mock_store.load.assert_awaited()
+    mock_store.save.assert_awaited_once()
+    saved_data = mock_store.save.call_args[0][0]
+    assert saved_data.status == "checkpointed"
+
+
+@pytest.mark.unit
+async def test_handle_elicitation_skips_status_update_if_not_active(
+    agent_ctx: AgentContext, form_params: ElicitRequestFormParams
+) -> None:
+    """Session status update is skipped if status is not 'active'.
+
+    If the status is already 'checkpointed' (e.g., from a prior
+    elicitation), the update is a no-op — no unnecessary writes.
+    """
+    import asyncio
+
+    from agentpool.agents.native_agent.elicitation_bridge import (
+        ElicitationFutureRegistry,
+    )
+    from agentpool.sessions.models import ElicitationResumePayload, SessionData
+
+    provider = MagicMock(spec=InputProvider)
+    provider.supports_durable_elicitation = True
+    agent_ctx.input_provider = provider
+    agent_ctx.in_mcp_callback = False
+    agent_ctx.tool_call_id = "tc-skip-1"
+
+    assert agent_ctx.run_ctx is not None
+    registry = ElicitationFutureRegistry()
+    agent_ctx.run_ctx.elicitation_registry = registry
+
+    mock_checkpoint = MagicMock()
+    mock_checkpoint.checkpoint = AsyncMock()
+    agent_ctx.run_ctx.checkpoint_manager = mock_checkpoint
+
+    mock_bus = MagicMock()
+    mock_bus.publish = AsyncMock()
+    agent_ctx.run_ctx.event_bus = mock_bus
+
+    # Session already checkpointed — no update needed
+    session_data = SessionData(
+        session_id="test-session",
+        agent_name="test-agent",
+        status="checkpointed",
+        agent_type="native",
+    )
+    mock_store = MagicMock()
+    mock_store.load = AsyncMock(return_value=session_data)
+    mock_store.save = AsyncMock()
+
+    mock_pool = MagicMock()
+    mock_session_pool = MagicMock()
+    mock_sessions = MagicMock()
+    mock_sessions.store = mock_store
+    mock_session_pool.sessions = mock_sessions
+    mock_pool.session_pool = mock_session_pool
+    agent_ctx.node.agent_pool = mock_pool
+
+    payload = ElicitationResumePayload(
+        deferred_handle="tc-skip-1",
+        action="decline",
+    )
+
+    async def resolve_later() -> None:
+        await asyncio.sleep(0.05)
+        registry.resolve("tc-skip-1", payload)
+
+    task = asyncio.create_task(resolve_later())
+    await agent_ctx.handle_elicitation(form_params)
+    await task
+
+    # Store was loaded but NOT saved (status was already "checkpointed")
+    mock_store.load.assert_awaited()
+    mock_store.save.assert_not_awaited()
