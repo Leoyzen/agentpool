@@ -11,7 +11,6 @@ from exxec_config import E2bExecutionEnvironmentConfig, ExecutionEnvironmentConf
 from pydantic import ConfigDict, Field, HttpUrl, ImportString, field_validator
 from schemez import Schema
 
-from agentpool.utils.parse_time import parse_time_period
 from agentpool_config.capabilities import CapabilityConfig
 from agentpool_config.event_handlers import EventHandlerConfig, StdoutEventHandlerConfig
 from agentpool_config.forward_targets import (
@@ -299,7 +298,36 @@ class BaseAgentConfig(NodeConfig):
             return v
         if isinstance(v, int | float):
             return timedelta(seconds=v)
-        return parse_time_period(v)
+        # Parse string like "5m", "1h", "300s" — simple inline parser
+        # to avoid importing from agentpool (layer separation).
+        import re
+
+        pattern = re.compile(
+            r"\s*(?P<weeks>[\d.]+)\s*w(?:ks?|eeks?)?"
+            r"|(?P<days>[\d.]+)\s*d(?:ys?|ays?)?"
+            r"|(?P<hours>[\d.]+)\s*h(?:rs?|ours?)?"
+            r"|(?P<mins>[\d.]+)\s*m(?:ins?|inutes?)?"
+            r"|(?P<secs>[\d.]+)\s*s(?:ecs?|econds?)?",
+            re.IGNORECASE,
+        )
+        matches = pattern.findall(v)
+        if not matches:
+            raise ValueError(f"Invalid time format: {v}")
+        multipliers = {
+            "weeks": 60 * 60 * 24 * 7,
+            "days": 60 * 60 * 24,
+            "hours": 60 * 60,
+            "mins": 60,
+            "secs": 1,
+        }
+        total = 0.0
+        for match in matches:
+            for unit, val in zip(multipliers, match, strict=False):
+                if val:
+                    total += multipliers[unit] * float(val)
+        if total <= 0:
+            raise ValueError(f"Invalid time format: {v}")
+        return timedelta(seconds=total)
 
     def get_execution_environment(self) -> ExecutionEnvironment:
         """Get the execution environment for this agent."""
