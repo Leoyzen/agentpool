@@ -1687,6 +1687,9 @@ class SessionController:
         session = self.get_session(session_id)
         if session is None:
             return None
+        # Update last_active_at on every incoming request so the TTL sweeper
+        # does not expire sessions that are actively receiving messages.
+        session.last_active_at = time.monotonic()
         # Extract input_provider from kwargs and set on session BEFORE
         # get_or_create_session_agent() so the agent is created with the
         # correct input_provider and the session state is consistent.
