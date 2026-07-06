@@ -90,8 +90,19 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
-# OutputDataT = TypeVar('OutputDataT', default=str, covariant=True)
 NoneType = type(None)
+
+
+def _build_capability_from_config(config: Any) -> Any:
+    """Build a capability instance from a config model.
+
+    Delegates to ``agentpool_config.capabilities.build_capability()``,
+    using late import to avoid a static config→core dependency.
+    """
+    from agentpool_config.capabilities import build_capability
+
+    return build_capability(config)
+
 
 TResult = TypeVar("TResult")
 VALID_MODES = ["always", "never", "per_tool"]
@@ -590,6 +601,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             usage_limits=config.usage_limits,
             providers=config.model_providers,
             metadata=getattr(config, "metadata", None),
+            capabilities=[_build_capability_from_config(c) for c in config.capabilities] or None,
         )
 
     async def __aenter__(self) -> Self:
