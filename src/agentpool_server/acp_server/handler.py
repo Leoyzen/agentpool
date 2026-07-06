@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import anyio
 
 from acp.agent.acp_requests import ACPRequests
 from acp.schema.capabilities import ClientCapabilities
-from agentpool.agents.events.events import SpawnSessionStart
+from agentpool.agents.events.events import ElicitationDeferredEvent, SpawnSessionStart
 from agentpool.log import get_logger
 from agentpool_server.acp_server.event_converter import ACPEventConverter, SubagentContext
 from agentpool_server.acp_server.input_provider import ACPInputProvider
@@ -75,6 +75,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         self._converters: dict[str, ACPEventConverter] = {}
         self._parent_of: dict[str, str] = {}
         self.acp_agent = acp_agent
+        self._elicitation_tasks: set[asyncio.Task[Any]] = set()
 
     @property
     def event_bus(self) -> EventBus:
@@ -270,6 +271,17 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         event_sid = envelope.source_session_id
         effective_sid = event_sid if event_sid else session_id
 
+        # Intercept ElicitationDeferredEvent: send an actual elicitation/create
+        # request to the ACP client (not just a notification). The client shows
+        # a form, the user responds, and we resume the session with the response.
+        if isinstance(envelope.event, ElicitationDeferredEvent):
+            task = asyncio.create_task(
+                self._handle_elicitation_deferred(effective_sid, envelope.event)
+            )
+            self._elicitation_tasks.add(task)
+            task.add_done_callback(self._elicitation_tasks.discard)
+            return
+
         # Look up converter: try event's session first, fall back to consumer's session
         converter = self._converters.get(effective_sid) or self._converters.get(session_id)
         if converter is None:
@@ -311,6 +323,93 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                 "Failed to convert or send event",
                 session_id=session_id,
                 event_type=type(envelope.event).__name__,
+            )
+
+    async def _handle_elicitation_deferred(
+        self,
+        session_id: str,
+        event: ElicitationDeferredEvent,
+    ) -> None:
+        """Send elicitation/create to ACP client and resume session with response.
+
+        This runs as a background task so the event consumer loop is not blocked
+        while waiting for the user to respond.
+
+        Args:
+            session_id: The session that has a pending elicitation.
+            event: The elicitation deferred event with params.
+        """
+        from agentpool.sessions.models import ElicitationResumePayload
+
+        session_pool = self.agent_pool.session_pool
+        if session_pool is None:
+            logger.error(
+                "Cannot handle elicitation: SessionPool not available",
+                session_id=session_id,
+            )
+            return
+
+        acp_requests = ACPRequests(client=self.client, session_id=session_id)
+
+        try:
+            raw_mode = event.mode or "form"
+            if raw_mode == "url":
+                elicitation_mode: Literal["form", "url"] = "url"
+            else:
+                elicitation_mode = "form"
+            response = await acp_requests.elicitation_create(
+                message=event.message,
+                mode=elicitation_mode,
+                requested_schema=event.requested_schema or {"type": "object"},
+            )
+        except asyncio.CancelledError:
+            logger.debug("Elicitation cancelled by user", session_id=session_id)
+            payload = ElicitationResumePayload(
+                deferred_handle=event.deferred_handle,
+                action="cancel",
+            )
+        except Exception:
+            logger.exception(
+                "Failed to send elicitation/create to ACP client",
+                session_id=session_id,
+            )
+            return
+        else:
+            match response.action:
+                case "accept":
+                    payload = ElicitationResumePayload(
+                        deferred_handle=event.deferred_handle,
+                        action="accept",
+                        content=response.content or {},
+                    )
+                case "decline":
+                    payload = ElicitationResumePayload(
+                        deferred_handle=event.deferred_handle,
+                        action="decline",
+                    )
+                case "cancel":
+                    payload = ElicitationResumePayload(
+                        deferred_handle=event.deferred_handle,
+                        action="cancel",
+                    )
+                case _ as unreachable:
+                    logger.warning(
+                        "Unknown elicitation response action",
+                        action=unreachable,
+                        session_id=session_id,
+                    )
+                    return
+
+        try:
+            await session_pool.resume_session(
+                session_id,
+                deferred_tool_results={},
+                elicitation_payloads=[payload],
+            )
+        except Exception:
+            logger.exception(
+                "Failed to resume session after elicitation response",
+                session_id=session_id,
             )
 
     async def _after_consumer_loop(self, session_id: str) -> None:
