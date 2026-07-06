@@ -134,13 +134,14 @@ def test_pending_deferred_call_serialization_none_fields() -> None:
 
 
 @pytest.mark.unit
-async def test_handle_elicitation_durable_true(
+async def test_handle_elicitation_durable_true_mcp(
     agent_ctx: AgentContext, form_params: ElicitRequestFormParams
 ) -> None:
-    """handle_elicitation raises CallDeferred directly when durable."""
+    """handle_elicitation raises CallDeferred when durable and in MCP callback."""
     provider = MagicMock(spec=InputProvider)
     provider.supports_durable_elicitation = True
     agent_ctx.input_provider = provider
+    agent_ctx.in_mcp_callback = True
     with pytest.raises(CallDeferred) as exc_info:
         await agent_ctx.handle_elicitation(form_params)
     assert exc_info.value.metadata is not None
@@ -153,8 +154,54 @@ async def test_handle_elicitation_durable_true(
     }
     assert elicitation["mode"] == "form"
     # Side-channel should NOT be set by handle_elicitation directly.
-    # It is only set by the MCP elicitation callback wrapper.
     assert agent_ctx._pending_elicitation_deferral is None
+
+
+@pytest.mark.unit
+async def test_handle_elicitation_durable_true_local(
+    agent_ctx: AgentContext, form_params: ElicitRequestFormParams
+) -> None:
+    """handle_elicitation awaits future when durable and NOT in MCP callback.
+
+    For local tools, the agent run suspends on `await future` instead of
+    raising CallDeferred. This is the "pause" pattern — no re-execution.
+    """
+    import asyncio
+
+    from agentpool.agents.native_agent.elicitation_bridge import (
+        ElicitationFutureRegistry,
+    )
+    from agentpool.sessions.models import ElicitationResumePayload
+
+    provider = MagicMock(spec=InputProvider)
+    provider.supports_durable_elicitation = True
+    agent_ctx.input_provider = provider
+    agent_ctx.in_mcp_callback = False  # Local tool path
+    agent_ctx.tool_call_id = "tc-local-1"
+
+    # Set up registry on run_ctx
+    registry = ElicitationFutureRegistry()
+    agent_ctx.run_ctx.elicitation_registry = registry
+
+    # Schedule future resolution after a short delay
+    payload = ElicitationResumePayload(
+        deferred_handle="tc-local-1",
+        action="accept",
+        content={"name": "Alice"},
+    )
+
+    async def resolve_later() -> None:
+        await asyncio.sleep(0.05)
+        registry.resolve("tc-local-1", payload)
+
+    task = asyncio.create_task(resolve_later())
+
+    result = await agent_ctx.handle_elicitation(form_params)
+    await task
+
+    assert result.action == "accept"
+    assert result.content == {"name": "Alice"}
+    # No CallDeferred, no side-channel — agent run continued naturally
 
 
 # ============================================================================

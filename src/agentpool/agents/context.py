@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 import time
 from typing import TYPE_CHECKING, Any, Literal
@@ -23,13 +24,13 @@ from agentpool.tools import CallDeferred
 
 
 if TYPE_CHECKING:
-    import asyncio
     from collections.abc import Awaitable, Callable
 
     from upathtools.filesystems import IsolatedMemoryFileSystem, OverlayFileSystem
 
     from agentpool import Agent
     from agentpool.agents.events import StreamEventEmitter
+    from agentpool.agents.native_agent.checkpoint import CheckpointManager
     from agentpool.agents.native_agent.elicitation_bridge import ElicitationFutureRegistry
     from agentpool.orchestrator.core import EventBus
     from agentpool.orchestrator.run import RunHandle
@@ -147,6 +148,14 @@ class AgentRunContext:
     ``ElicitationResumePayload`` data.
     """
 
+    checkpoint_manager: CheckpointManager | None = None
+    """Checkpoint manager for durable elicitation.
+
+    Set by ``get_agentlet()`` when the elicitation bridge capability is
+    created. Used by ``handle_elicitation()`` to checkpoint the session
+    before awaiting an elicitation future, enabling crash recovery.
+    """
+
     _run_handle: RunHandle | None = None
     """Run handle for this execution, set by RunHandle lifecycle."""
 
@@ -207,12 +216,24 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
     """Reference to the per-run context for accessing run-isolated state."""
 
     _pending_elicitation_deferral: dict[str, Any] | None = None
-    """Side-channel for durable elicitation.
+    """Side-channel for durable elicitation (MCP tools only).
 
-    When ``handle_elicitation`` detects a durable provider, it stores the
-    elicitation params here and returns a sentinel ``decline`` result.
-    ``MCPClient.call_tool`` checks this attribute after the MCP call returns
-    and raises ``CallDeferred`` so the run can be checkpointed and resumed.
+    When ``handle_elicitation`` is called inside an MCP callback and
+    raises ``CallDeferred``, the MCP ``elicitation_handler`` catches it
+    and stores the elicitation params here. ``MCPClient.call_tool``
+    checks this attribute after the MCP call returns and re-raises
+    ``CallDeferred`` so the run can be checkpointed and resumed.
+    """
+
+    in_mcp_callback: bool = False
+    """Whether this context is inside an MCP callback.
+
+    Set to ``True`` by ``MCPClient.call_tool()`` before invoking the
+    MCP tool. When ``True``, ``handle_elicitation()`` raises
+    ``CallDeferred`` (FastMCP callback wrapper catches exceptions,
+    so awaiting a future is not possible). When ``False``,
+    ``handle_elicitation()`` awaits a future directly (local tools
+    can suspend without ending the agent run).
     """
 
     @property
@@ -223,32 +244,37 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         assert isinstance(self.node, Agent)
         return self.node  # ty: ignore[invalid-return-type]
 
-    async def handle_elicitation(self, params: ElicitRequestParams) -> ElicitResult | ErrorData:
+    async def handle_elicitation(self, params: ElicitRequestParams) -> ElicitResult | ErrorData:  # noqa: PLR0911
         """Handle elicitation request for additional information.
 
-        When the input provider supports durable elicitation, this method
-        raises ``CallDeferred`` directly so that pydantic-ai's
-        ``HandleDeferredToolCalls`` capability can checkpoint the run and
-        defer the tool call.  This is the single entry point for all
-        elicitation — both MCP tools and local Python tools (e.g.
-        ``question_for_user``) participate in the durable path
-        automatically with zero adaptation.
+        Three paths based on context:
 
-        For MCP tools, FastMCP's elicitation callback wrapper catches
-        exceptions, so ``MCPClient.call_tool``'s ``elicitation_handler``
-        catches ``CallDeferred`` and converts it to a side-channel +
-        sentinel pattern (FastMCP workaround, isolated to the MCP client).
+        1. **Crash recovery**: If ``run_ctx.cached_elicitation_responses``
+           has a cached response for this ``tool_call_id``, return it
+           immediately. This allows re-executed tools to complete without
+           deferring again.
+
+        2. **MCP tools** (``in_mcp_callback=True``): Raises
+           ``CallDeferred`` directly. FastMCP's callback wrapper catches
+           exceptions, so the MCP ``elicitation_handler`` in
+           ``MCPClient.call_tool()`` catches this and converts to a
+           side-channel + sentinel. ``call_tool()`` then re-raises
+           ``CallDeferred`` after the MCP call returns. The run ends
+           with ``DeferredToolRequests`` and resumes via crash recovery.
+
+        3. **Local tools** (``in_mcp_callback=False``): Checkpoints the
+           session, emits ``ElicitationDeferredEvent``, registers a future
+           in ``ElicitationFutureRegistry``, and **awaits the future**.
+           The agent run suspends (not ends) at the ``await`` point.
+           When the user responds, ``resume_session()`` resolves the
+           future, ``handle_elicitation()`` returns the response, the
+           tool function continues naturally, and the agent run resumes.
+           No re-execution, no ``CallDeferred``, no ``DeferredToolRequests``.
 
         When durability is not supported, the provider's ``get_elicitation``
         is called directly (existing behavior).
-
-        During crash recovery resume, ``run_ctx.cached_elicitation_responses``
-        contains pre-built responses keyed by ``tool_call_id``. If a cached
-        response exists for the current tool call, it is returned immediately
-        without deferring, allowing the tool to re-execute with the
-        user's prior response.
         """
-        # Crash recovery: return cached elicitation response if available.
+        # Path 1: Crash recovery — return cached response.
         if (
             self.run_ctx is not None
             and self.tool_call_id is not None
@@ -257,39 +283,115 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             return self.run_ctx.cached_elicitation_responses[self.tool_call_id]
 
         provider = self.get_input_provider()
-        if provider.supports_durable_elicitation:
-            # Build elicitation params dict for CallDeferred metadata.
-            match params:
-                case ElicitRequestFormParams():
-                    elicitation_params: dict[str, Any] = {
-                        "message": params.message,
-                        "requestedSchema": params.requestedSchema,
-                        "mode": params.mode,
-                    }
-                case ElicitRequestURLParams():
-                    elicitation_params = {
-                        "message": params.message,
-                        "url": params.url,
-                        "elicitationId": params.elicitationId,
-                        "mode": params.mode,
-                    }
-                case _:
-                    elicitation_params = {
-                        "message": str(params),
-                        "mode": None,
-                    }
-            # Raise directly — let CallDeferred propagate through the call
-            # stack to pydantic-ai's HandleDeferredToolCalls capability.
-            # For MCP tools, the elicitation_handler in MCPClient.call_tool()
-            # catches this and converts to side-channel + sentinel (FastMCP
-            # workaround). For local tools, it propagates naturally.
+        if not provider.supports_durable_elicitation:
+            return await provider.get_elicitation(params)
+
+        # Build elicitation params dict (used in both MCP and local paths).
+        match params:
+            case ElicitRequestFormParams():
+                elicitation_params: dict[str, Any] = {
+                    "message": params.message,
+                    "requestedSchema": params.requestedSchema,
+                    "mode": params.mode,
+                }
+            case ElicitRequestURLParams():
+                elicitation_params = {
+                    "message": params.message,
+                    "url": params.url,
+                    "elicitationId": params.elicitationId,
+                    "mode": params.mode,
+                }
+            case _:
+                elicitation_params = {
+                    "message": str(params),
+                    "mode": None,
+                }
+
+        # Path 2: MCP tools — raise CallDeferred (FastMCP can't await).
+        if self.in_mcp_callback:
             raise CallDeferred(
                 metadata={
                     "elicitation": elicitation_params,
                     "deferred_kind": "elicitation",
                 }
             )
-        return await provider.get_elicitation(params)
+
+        # Path 3: Local tools — checkpoint, emit event, await future.
+        # The agent run suspends here without ending. When the future
+        # resolves, handle_elicitation() returns and the tool continues.
+        run_ctx = self.run_ctx
+        if run_ctx is None:
+            # No run context — fall back to synchronous path.
+            return await provider.get_elicitation(params)
+
+        registry = run_ctx.elicitation_registry
+        if registry is None:
+            # No registry — fall back to synchronous path.
+            return await provider.get_elicitation(params)
+
+        handle = self.tool_call_id or run_ctx.run_id
+
+        # Checkpoint the session for crash recovery.
+        if run_ctx.checkpoint_manager is not None:
+            try:
+                from agentpool.agents.events.events import ElicitationDeferredEvent
+                from agentpool.sessions.models import PendingDeferredCall
+
+                pending_call = PendingDeferredCall(
+                    tool_call_id=handle,
+                    tool_name=self.tool_name or "",
+                    deferred_kind="elicitation",
+                    deferred_strategy="block",
+                    elicitation_message=elicitation_params.get("message"),
+                    elicitation_schema=elicitation_params.get("requestedSchema"),
+                    elicitation_mode=elicitation_params.get("mode"),
+                )
+                # Emit event to EventBus for protocol converters.
+                if run_ctx.event_bus is not None:
+                    event = ElicitationDeferredEvent(
+                        deferred_handle=handle,
+                        message=elicitation_params.get("message", ""),
+                        requested_schema=elicitation_params.get("requestedSchema", {}),
+                        mode=elicitation_params.get("mode", "form"),
+                        session_id=run_ctx.session_id,
+                    )
+                    await run_ctx.event_bus.publish(run_ctx.session_id, event)
+                await run_ctx.checkpoint_manager.checkpoint(
+                    session_id=run_ctx.session_id,
+                    message_history=[],  # Advisory — bridge fills real history
+                    pending_calls=[pending_call],
+                    agent_config_hash="",  # Advisory
+                )
+                run_ctx.checkpointed = True
+            except Exception:
+                import logging
+
+                logging.getLogger(__name__).exception(
+                    "Failed to checkpoint for durable elicitation",
+                    extra={"session_id": run_ctx.session_id},
+                )
+
+        # Register future and await — agent run suspends here.
+        future = registry.register(handle)
+        try:
+            payload = await asyncio.wait_for(future, timeout=300)
+        except TimeoutError:
+            from agentpool.tasks.exceptions import RunAbortedError
+
+            raise RunAbortedError("Elicitation timed out after 300s") from None
+
+        # Convert ElicitationResumePayload to ElicitResult.
+        from mcp.types import ElicitResult as MCPElicitResult
+
+        match payload.action:
+            case "accept":
+                return MCPElicitResult(action="accept", content=payload.content)
+            case "decline":
+                return MCPElicitResult(action="decline")
+            case "cancel":
+                return MCPElicitResult(action="cancel")
+            case _:
+                return MCPElicitResult(action="decline")
 
     def get_session_state(self) -> Any | None:
         """Get the SessionState for the current run if available.

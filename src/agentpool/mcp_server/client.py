@@ -494,6 +494,11 @@ class MCPClient:
                 meta = {"claudecode/toolUseId": tool_call_id}
 
         try:
+            # Mark that we're inside an MCP callback so handle_elicitation()
+            # knows to raise CallDeferred (FastMCP callbacks can't await
+            # futures for long periods).
+            if agent_ctx:
+                agent_ctx.in_mcp_callback = True
             result = await self._client.call_tool(
                 name, arguments, progress_handler=progress_handler, meta=meta, raise_on_error=False
             )
@@ -532,8 +537,10 @@ class MCPClient:
         except Exception as e:
             raise RuntimeError(f"MCP tool call failed: {e}") from e
         finally:
-            # Clear per-call handler
+            # Clear per-call handler and MCP callback flag
             self._current_elicitation_handler = None
+            if agent_ctx:
+                agent_ctx.in_mcp_callback = False
 
 
 def _mcp_content_return_value(

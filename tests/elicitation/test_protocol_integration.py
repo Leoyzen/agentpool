@@ -436,17 +436,18 @@ async def test_acp_event_converter_with_real_event_bus() -> None:
 
 @pytest.mark.integration
 async def test_handle_elicitation_raises_call_deferred_with_durable_provider() -> None:
-    """handle_elicitation raises CallDeferred when provider supports durability.
+    """handle_elicitation raises CallDeferred for MCP tools (in_mcp_callback=True).
 
-    Creates a real AgentContext with a durable input provider and an empty
-    cached_elicitation_responses dict. Calling handle_elicitation() must
-    raise CallDeferred with the correct metadata.
+    Creates a real AgentContext with a durable input provider and
+    in_mcp_callback=True. Calling handle_elicitation() must raise
+    CallDeferred with the correct metadata.
     """
     node = MagicMock()
     node.name = "test-elicitation-agent"
     run_ctx = AgentRunContext(session_id="test-elicitation-session")
     provider = _DurableInputProvider()
     agent_ctx = AgentContext(node=node, run_ctx=run_ctx, input_provider=provider)
+    agent_ctx.in_mcp_callback = True  # MCP path raises CallDeferred
 
     params = ElicitRequestFormParams(
         message="Please enter your name",

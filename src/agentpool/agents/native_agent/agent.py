@@ -869,6 +869,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             checkpoint_mgr = CheckpointManager(
                 storage_manager=self.agent_pool.storage,
             )
+        if run_ctx is not None:
+            run_ctx.checkpoint_manager = checkpoint_mgr
         tool_capabilities.append(
             create_elicitation_bridge_capability(
                 registry=elicitation_registry,

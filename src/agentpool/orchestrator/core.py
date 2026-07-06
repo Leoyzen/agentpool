@@ -2639,18 +2639,49 @@ class SessionPool:
             session_id, allow_active_run=has_in_process_elicitation
         ) as session:
             try:
-                # In-process elicitation resume: resolve futures to clean up
-                # the registry, but always fall through to crash recovery.
-                # The in-process path can't resume the agent run because
-                # CallDeferred was already raised — the agent run ended with
-                # DeferredToolRequests as output. Nobody is awaiting the
-                # futures. The crash recovery path re-executes the agent
-                # with cached_elicitation_responses, which works correctly.
+                # In-process elicitation resume: resolve futures so the
+                # suspended agent run (awaiting on handle_elicitation's
+                # future) can continue naturally. The agent run was never
+                # ended — it's paused on `await future` inside
+                # handle_elicitation(). Resolving the future unblocks it,
+                # the tool function completes, and the agent run resumes
+                # without any re-execution.
                 if elicitation_payloads:
-                    await self._try_in_process_elicitation_resume(
+                    resolved = await self._try_in_process_elicitation_resume(
                         session_id, elicitation_payloads
                     )
-                    # Always use crash recovery — don't return early.
+                    if resolved:
+                        # All futures resolved — agent run will continue
+                        # naturally. No crash recovery needed.
+                        data = data.model_copy(
+                            update={
+                                "status": "active",
+                                "pending_deferred_calls": [],
+                            }
+                        )
+                        data.touch()
+                        await store.save(data)
+
+                        if session is not None:
+                            session.last_active_at = time.monotonic()
+
+                        total_resolved = len(elicitation_call_ids)
+                        await self.event_bus.publish(
+                            session_id,
+                            SessionResumeEvent(
+                                session_id=session_id,
+                                resolved_call_count=total_resolved,
+                                source=source,
+                            ),
+                        )
+
+                        logger.info(
+                            "In-process elicitation resume — futures resolved, "
+                            "agent run continuing naturally",
+                            session_id=session_id,
+                            count=total_resolved,
+                        )
+                        return
 
                 # Load checkpoint data
                 checkpoint = await self._load_checkpoint_data(session_id)
