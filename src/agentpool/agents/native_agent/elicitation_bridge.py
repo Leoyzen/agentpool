@@ -311,6 +311,24 @@ async def _handle_elicitation_deferred(
     # the RunHandle to checkpointed status.
     if run_ctx is not None:
         run_ctx.checkpointed = True
+        # Update session store status to "checkpointed" so resume_session()
+        # can find it without relying on the allow_active_run workaround.
+        pool = ctx.deps.node.agent_pool if ctx.deps is not None else None
+        if pool is not None and pool.session_pool is not None:
+            store = pool.session_pool.sessions.store
+            if store is not None:
+                try:
+                    data = await store.load(session_id)
+                    if data is not None and data.status == "active":
+                        data = data.model_copy(update={"status": "checkpointed"})
+                        data.touch()
+                        await store.save(data)
+                except Exception:  # noqa: BLE001
+                    logger.debug(
+                        "Failed to update session status to checkpointed",
+                        session_id=session_id,
+                        exc_info=True,
+                    )
 
     # Elicitation calls remain unresolved (blocked) — return None so the
     # calls stay in DeferredToolRequests.calls for the next capability.

@@ -410,13 +410,19 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             )
 
     async def _after_consumer_loop(self, session_id: str) -> None:
-        """Clean up per-session converter and parent-child tracking.
+        """Clean up per-session converter, parent-child tracking, and tasks.
 
         Args:
             session_id: The session whose consumer has stopped.
         """
         self._converters.pop(session_id, None)
         self._parent_of.pop(session_id, None)
+        # Cancel any pending elicitation tasks for this session.
+        # These are background tasks that send elicitation/create requests
+        # to the client — if the consumer is stopping, they're orphaned.
+        for task in self._elicitation_tasks:
+            if not task.done():
+                task.cancel()
 
     async def _event_consumer_loop(self, session_id: str) -> None:
         """Backward-compatible wrapper for mixin's consumer loop.
@@ -683,6 +689,12 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
 
         # Cancel all child sessions first (depth-first, pop-before-recurse)
         await self._cancel_subagents(session_id)
+
+        # Cancel any pending elicitation tasks for this session.
+        for task in self._elicitation_tasks:
+            if not task.done():
+                task.cancel()
+        self._elicitation_tasks.clear()
 
         # Stop the event consumer (mixin's stop handles cancellation + unsubscribe)
         await self.stop_event_consumer(session_id)

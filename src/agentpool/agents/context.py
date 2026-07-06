@@ -164,6 +164,16 @@ class AgentRunContext:
     by ``handle_elicitation()`` for ``asyncio.wait_for()``.
     """
 
+    current_messages: list[Any] | None = None
+    """Current pydantic-ai message history snapshot.
+
+    Set by the tool wrapping layer (``wrap_tool``) before each tool call
+    from ``ctx.messages``. Used by ``handle_elicitation()`` to pass real
+    message history to ``CheckpointManager.checkpoint()`` for crash
+    recovery. Without this, crash recovery would re-execute all prior
+    tool calls, causing duplicate side effects.
+    """
+
     _run_handle: RunHandle | None = None
     """Run handle for this execution, set by RunHandle lifecycle."""
 
@@ -252,7 +262,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         assert isinstance(self.node, Agent)
         return self.node  # ty: ignore[invalid-return-type]
 
-    async def handle_elicitation(self, params: ElicitRequestParams) -> ElicitResult | ErrorData:  # noqa: PLR0911
+    async def handle_elicitation(self, params: ElicitRequestParams) -> ElicitResult | ErrorData:  # noqa: PLR0911, PLR0915
         """Handle elicitation request for additional information.
 
         Three paths based on context:
@@ -367,17 +377,41 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                     await run_ctx.event_bus.publish(run_ctx.session_id, event)
                 await run_ctx.checkpoint_manager.checkpoint(
                     session_id=run_ctx.session_id,
-                    message_history=[],  # Advisory — bridge fills real history
+                    message_history=run_ctx.current_messages or [],
                     pending_calls=[pending_call],
-                    agent_config_hash="",  # Advisory
+                    agent_config_hash="",
                 )
                 run_ctx.checkpointed = True
-            except Exception:
-                import logging
-
-                logging.getLogger(__name__).exception(
-                    "Failed to checkpoint for durable elicitation",
-                    extra={"session_id": run_ctx.session_id},
+                # Update session store status to "checkpointed" so
+                # resume_session() can find it without relying on the
+                # allow_active_run workaround.
+                pool = self.node.agent_pool
+                if pool is not None and pool.session_pool is not None:
+                    store = pool.session_pool.sessions.store
+                    if store is not None:
+                        try:
+                            data = await store.load(run_ctx.session_id)
+                            if data is not None and data.status == "active":
+                                data = data.model_copy(update={"status": "checkpointed"})
+                                data.touch()
+                                await store.save(data)
+                        except Exception:  # noqa: BLE001
+                            logger.debug(
+                                "Failed to update session status to checkpointed",
+                                session_id=run_ctx.session_id,
+                                exc_info=True,
+                            )
+            except Exception:  # noqa: BLE001
+                # Checkpoint failed — the in-process future await still
+                # works, but crash recovery won't be available for this
+                # elicitation. Log prominently so operators know durability
+                # is degraded.
+                logger.warning(
+                    "Checkpoint failed for durable elicitation — "
+                    "crash recovery unavailable for this call",
+                    session_id=run_ctx.session_id,
+                    tool_call_id=handle,
+                    exc_info=True,
                 )
 
         # Register future and await — agent run suspends here.
