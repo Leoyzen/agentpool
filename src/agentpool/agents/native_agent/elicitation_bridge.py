@@ -69,6 +69,10 @@ class ElicitationFutureRegistry:
         """
         return deferred_handle in self._futures
 
+    def __len__(self) -> int:
+        """Return the number of pending futures."""
+        return len(self._futures)
+
     def register(self, deferred_handle: str) -> asyncio.Future[Any]:
         """Create and store a new future for a deferred elicitation call.
 

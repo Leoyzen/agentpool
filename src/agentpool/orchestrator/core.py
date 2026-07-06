@@ -2579,18 +2579,17 @@ class SessionPool:
         has_in_process_elicitation = False
         if session is not None and session.current_run_id is not None:
             # Check if this is an in-process elicitation resume: the active
-            # run has an elicitation registry containing all requested
-            # payloads, and there are no non-elicitation pending calls.
-            if (
-                elicitation_payloads is not None
-                and not non_elicitation_pending_ids
-                and elicitation_call_ids
-            ):
+            # run has an elicitation registry with pending futures matching
+            # the requested payloads. This works for both MCP tools (run
+            # ended, futures in registry from bridge) and local tools (run
+            # paused on await future, futures registered by handle_elicitation).
+            if elicitation_payloads is not None:
                 run_handle = self._get_active_run_handle(session_id)
                 if (
                     run_handle is not None
                     and run_handle.run_ctx is not None
                     and run_handle.run_ctx.elicitation_registry is not None
+                    and len(run_handle.run_ctx.elicitation_registry) > 0
                     and all(
                         p.deferred_handle in run_handle.run_ctx.elicitation_registry
                         for p in elicitation_payloads

@@ -196,16 +196,24 @@ class NativeTurn(Turn):
                         finally:
                             self._agent._iteration_task = None
 
+                        logger.info("Node stream ended", node_type=type(node).__name__)
+
                         if terminal_tool_completed:
                             break
 
                     if self._run_ctx.cancelled:
                         break
 
+                    node_type = type(node).__name__
+                    logger.info("Advancing agent_run.next()", node_type=node_type)
                     try:
                         iteration_task = asyncio.create_task(agent_run.next(node))
                         self._agent._iteration_task = iteration_task
                         node = await iteration_task
+                        logger.info(
+                            "agent_run.next() completed",
+                            next_node_type=type(node).__name__,
+                        )
                     finally:
                         self._agent._iteration_task = None
 
