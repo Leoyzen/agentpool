@@ -102,9 +102,7 @@ async def test_no_deferred_tool_requests_without_capabilities() -> None:
 
     # Simulate the "with capabilities" branch for contrast.
     tool_capabilities = [MagicMock()]
-    final_output_type = (
-        [final_type, DeferredToolRequests] if tool_capabilities else final_type
-    )
+    final_output_type = [final_type, DeferredToolRequests] if tool_capabilities else final_type
 
     assert isinstance(final_output_type, list)
     type_names = [t.__name__ if hasattr(t, "__name__") else str(t) for t in final_output_type]
