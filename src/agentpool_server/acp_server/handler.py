@@ -481,6 +481,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         session_proxy = _ACPSessionProxy(
             requests=acp_requests,
             client_capabilities=self.client_capabilities,
+            checkpoint_enabled=session_pool.sessions.store is not None,
         )
         input_provider = ACPInputProvider(session=session_proxy)  # type: ignore[arg-type]
 

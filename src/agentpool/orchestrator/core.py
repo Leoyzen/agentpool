@@ -905,6 +905,7 @@ class SessionController:
             parent_session_id=parent_session_id,
             lifecycle_policy=effective_policy,
             metadata=metadata,
+            checkpoint_enabled=self.store is not None,
         )
         self._sessions[session_id] = state
 
