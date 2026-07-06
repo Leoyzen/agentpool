@@ -2157,7 +2157,16 @@ class SessionPool:
 
             if self.sessions.store is not None:
                 current_data = await self.sessions.store.load(session_id)
-                if current_data is not None and current_data.status != "checkpointed":
+                # When allow_active_run is True (in-process elicitation
+                # resume), the persisted status may still be "active"
+                # because the elicitation bridge checkpoint saves
+                # checkpoint data but doesn't update the session store
+                # status. Allow "active" in that case.
+                if (
+                    current_data is not None
+                    and current_data.status != "checkpointed"
+                    and (not allow_active_run or current_data.status != "active")
+                ):
                     raise SessionBusyError(session_id, current_data.status)
 
             yield session
