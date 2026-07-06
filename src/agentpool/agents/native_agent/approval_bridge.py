@@ -79,27 +79,14 @@ async def _resolve_deferred_approvals(
         return None
 
     agent_ctx = ctx.deps
-    # Use passed provider directly, fall back to ctx.deps resolution
     provider = input_provider
     if provider is None:
         provider = agent_ctx.get_input_provider()
-    # Access tool_confirmation_mode directly from node to avoid agent property assertion
-    mode = getattr(agent_ctx.node, "tool_confirmation_mode", "per_tool")
 
     approvals: dict[str, bool | ToolApproved | ToolDenied] = {}
 
     for call in requests.approvals:
         tool_name = call.tool_name
-
-        # If tool_confirmation_mode is "never", auto-approve all
-        if mode == "never":
-            logger.debug(
-                "Auto-approving deferred tool (never mode)",
-                tool_name=tool_name,
-                tool_call_id=call.tool_call_id,
-            )
-            approvals[call.tool_call_id] = ToolApproved()
-            continue
 
         # Build confirmation context with tool execution details
         confirm_ctx = replace(

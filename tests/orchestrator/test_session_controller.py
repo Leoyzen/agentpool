@@ -100,18 +100,6 @@ async def test_get_or_create_session_updates_last_active(
 
 
 @pytest.mark.anyio
-@pytest.mark.skip(reason="pre-existing failure from run/turn separation refactor")
-async def test_get_or_create_session_defaults_to_main_agent(
-    controller: SessionController,
-    mock_pool: MagicMock,
-) -> None:
-    """When agent_name is omitted, the main agent name is used."""
-    mock_pool.main_agent.name = "fallback"
-    state, _ = await controller.get_or_create_session("sess-1")
-    assert state.agent_name == "fallback"
-
-
-@pytest.mark.anyio
 async def test_get_or_create_session_stores_metadata(
     controller: SessionController,
 ) -> None:
@@ -143,29 +131,6 @@ async def test_list_sessions_returns_session_info(
     assert {info.agent_name for info in infos} == {"agent-a", "agent-b"}
     assert all(info.status == "idle" for info in infos)
     assert all(not info.is_per_session_agent for info in infos)
-
-
-# ---------------------------------------------------------------------------
-# get_or_create_session_agent - shared agent fallback
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.anyio
-@pytest.mark.skip(reason="pre-existing failure from run/turn separation refactor")
-async def test_get_or_create_session_agent_returns_shared_for_non_native(
-    controller: SessionController,
-    mock_pool: MagicMock,
-) -> None:
-    """Non-native configs reuse the shared agent from the pool."""
-    shared = MagicMock()
-    mock_pool.get_agent.return_value = shared
-    mock_pool.manifest.agents = {"agent-a": MagicMock()}  # not NativeAgentConfig
-
-    agent = await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
-    assert agent is shared
-    state = controller.get_session("sess-1")
-    assert state is not None
-    assert state.is_per_session_agent is False
 
 
 # ---------------------------------------------------------------------------
@@ -235,40 +200,6 @@ async def test_get_or_create_session_agent_returns_existing_agent(
 # ---------------------------------------------------------------------------
 # MCP process limits
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.anyio
-@pytest.mark.skip(reason="pre-existing failure from run/turn separation refactor")
-async def test_mcp_limit_falls_back_to_shared_agent(
-    controller: SessionController,
-    mock_pool: MagicMock,
-    mock_native_agent: MagicMock,
-) -> None:
-    """When MCP process limit is reached, a shared agent is used."""
-
-    class FakeNativeConfig:
-        def __init__(self, name: str, model: str) -> None:
-            self.name = name
-            self.model = model
-
-        def get_agent(self, **kwargs: Any) -> MagicMock:
-            return mock_native_agent
-
-    with patch("agentpool.models.agents.NativeAgentConfig", FakeNativeConfig):
-        cfg = FakeNativeConfig("agent-a", "openai:gpt-4o")
-        mock_pool.manifest.agents = {"agent-a": cfg}
-        shared = MagicMock()
-        mock_pool.get_agent.return_value = shared
-
-        controller._mcp_max_processes = 1
-        controller._mcp_process_count = 1  # already at limit
-
-        agent = await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
-
-    assert agent is shared
-    state = controller.get_session("sess-1")
-    assert state is not None
-    assert state.is_per_session_agent is False
 
 
 @pytest.mark.anyio

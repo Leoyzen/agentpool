@@ -8,10 +8,9 @@ backward compatibility for the legacy path.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock
 
-import anyio
 import pytest
 
 from agentpool.agents.events.events import CustomEvent
@@ -74,7 +73,7 @@ async def test_legacy_path_broadcasts_to_sse_only(
         agent=mock_agent,
         session_controller=None,
     )
-    queue = asyncio.Queue()
+    queue: asyncio.Queue[Any] = asyncio.Queue()
     state.event_subscribers.append(queue)
 
     event = SessionStatusEvent.create("sess-legacy", SessionStatus(type="busy"))
@@ -108,7 +107,7 @@ async def test_session_pool_path_broadcasts_to_sse(
     bridged_state: ServerState,
 ) -> None:
     """With the bridge active, events still reach SSE subscribers."""
-    queue = asyncio.Queue()
+    queue: asyncio.Queue[Any] = asyncio.Queue()
     bridged_state.event_subscribers.append(queue)
 
     event = SessionStatusEvent.create("sess-pool", SessionStatus(type="busy"))
@@ -132,7 +131,7 @@ async def test_bridge_republishes_to_event_bus(
     # Allow the async publish to propagate
     await asyncio.sleep(0.05)
 
-    envelope = subscriber.receive_nowait()
+    envelope = subscriber.get_nowait()
     assert isinstance(envelope, EventEnvelope)
     wrapped = envelope.event
     assert isinstance(wrapped, CustomEvent)
@@ -159,7 +158,7 @@ async def test_bridge_wraps_different_event_types(
     await asyncio.sleep(0.05)
 
     for _i, evt in enumerate(events):
-        envelope = subscriber.receive_nowait()
+        envelope = subscriber.get_nowait()
         assert isinstance(envelope, EventEnvelope)
         wrapped = envelope.event
         assert isinstance(wrapped, CustomEvent)
@@ -184,11 +183,11 @@ async def test_global_event_not_republished_to_event_bus(
     await asyncio.sleep(0.05)
 
     # EventBus should receive nothing because the event has no session_id
-    with pytest.raises(anyio.WouldBlock):
-        subscriber.receive_nowait()
+    with pytest.raises(asyncio.QueueEmpty):
+        subscriber.get_nowait()
 
     # But SSE subscribers should still receive it
-    queue = asyncio.Queue()
+    queue: asyncio.Queue[Any] = asyncio.Queue()
     bridged_state.event_subscribers.append(queue)
     await bridged_state.broadcast_event(event)
     assert queue.qsize() == 1
@@ -204,7 +203,7 @@ async def test_bridge_publish_calls_original_broadcast(
     bridged_state: ServerState,
 ) -> None:
     """Bridge.publish invokes the original SSE broadcast implementation."""
-    queue = asyncio.Queue()
+    queue: asyncio.Queue[Any] = asyncio.Queue()
     bridged_state.event_subscribers.append(queue)
 
     event = SessionStatusEvent.create("sess-unit", SessionStatus(type="idle"))
@@ -269,10 +268,10 @@ async def test_bridge_isolation_between_sessions(
     )
     await asyncio.sleep(0.05)
 
-    envelope = sub_a.receive_nowait()
+    envelope = sub_a.get_nowait()
     assert isinstance(envelope, EventEnvelope)
     wrapped = envelope.event
     assert wrapped.event_data.properties.session_id == "sess-a"
 
-    with pytest.raises(anyio.WouldBlock):
-        sub_b.receive_nowait()
+    with pytest.raises(asyncio.QueueEmpty):
+        sub_b.get_nowait()

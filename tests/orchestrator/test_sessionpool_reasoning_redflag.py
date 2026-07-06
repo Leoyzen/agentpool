@@ -5,6 +5,7 @@ through the SessionPool orchestration layer.
 """
 
 import asyncio
+from typing import Any
 
 from pydantic_ai.messages import (
     PartDeltaEvent,
@@ -18,6 +19,17 @@ from agentpool.agents.events import (
     RunStartedEvent,
 )
 from agentpool.orchestrator.core import EventBus
+
+
+async def _drain_queue(queue: asyncio.Queue[Any]) -> list[Any]:
+    """Drain all items from an asyncio.Queue until QueueShutDown."""
+    items: list[Any] = []
+    while True:
+        try:
+            items.append(await queue.get())
+        except asyncio.QueueShutDown:
+            break
+    return items
 
 
 @pytest.mark.asyncio
@@ -42,9 +54,9 @@ async def test_reasoning_events_published_to_eventbus():
     await event_bus.publish(session_id, run_started)
     await event_bus.publish(session_id, thinking_start)
     await event_bus.publish(session_id, thinking_delta)
-    await event_bus.close_session(session_id)  # sends sentinel
+    await event_bus.close_session(session_id)  # shuts down queues
 
-    collected = [event async for event in queue]
+    collected = await _drain_queue(queue)
 
     await event_bus.unsubscribe(session_id, queue)
 
@@ -77,7 +89,7 @@ async def test_eventbus_preserves_event_types_after_copy():
 
     # Verify both subscribers got the event with correct type
     for queue in [queue1, queue2]:
-        collected = [event async for event in queue]
+        collected = await _drain_queue(queue)
 
         assert len(collected) == 1
         event = collected[0]
@@ -114,12 +126,9 @@ async def test_multiple_subscribers_receive_reasoning():
     await event_bus.close_session(session_id)
 
     # Both queues should receive all events
-    async def drain_queue(queue):
-        return [event async for event in queue]
-
     adapter_events, consumer_events = await asyncio.gather(
-        drain_queue(adapter_queue),
-        drain_queue(consumer_queue),
+        _drain_queue(adapter_queue),
+        _drain_queue(consumer_queue),
     )
 
     assert len(adapter_events) == 3
@@ -165,7 +174,7 @@ async def test_eventbus_with_subagent_wrapping():
     await event_bus.close_session(parent_session)
 
     # Parent subscriber should receive it
-    collected = [event async for event in queue]
+    collected = await _drain_queue(queue)
 
     assert len(collected) == 1
     assert isinstance(collected[0].event, SubAgentEvent)

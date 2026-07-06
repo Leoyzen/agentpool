@@ -1,12 +1,13 @@
 """Unit tests for EventBus (SessionPool Group 2.10).
 
-Tests pub/sub semantics, bounded stream dropping, EndOfStream-based
+Tests pub/sub semantics, bounded stream dropping, QueueShutDown-based
 shutdown, subscriber lifecycle management, and event coalescing infrastructure.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 
 import anyio
@@ -41,7 +42,7 @@ from agentpool.agents.events import (
     ToolResultMetadataEvent,
 )
 from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import (
+from agentpool.orchestrator.core import (  # type: ignore[attr-defined]
     EventBus,
     EventEnvelope,
     _is_immediate,
@@ -76,24 +77,22 @@ def sample_event() -> RunStartedEvent:
     return RunStartedEvent(session_id="sess-1", run_id="run-1")
 
 
-async def _drain_stream(stream: anyio.abc.ObjectReceiveStream[Any]) -> list[Any]:
+async def _drain_stream(stream: asyncio.Queue[Any]) -> list[Any]:
     """Drain all available items from a memory receive stream without blocking."""
     items: list[Any] = []
     while True:
         try:
-            items.append(stream.receive_nowait())
-        except (anyio.WouldBlock, anyio.EndOfStream, anyio.ClosedResourceError):
+            items.append(stream.get_nowait())
+        except (asyncio.QueueEmpty, asyncio.QueueShutDown):
             break
     return items
 
 
-async def _receive_one(
-    stream: anyio.abc.ObjectReceiveStream[Any], timeout: float = 0.5
-) -> Any | None:
+async def _receive_one(stream: asyncio.Queue[Any], timeout: float = 0.5) -> Any | None:
     """Receive one item from a stream with a timeout."""
     try:
         with anyio.fail_after(timeout):
-            return await stream.receive()
+            return await stream.get()
     except TimeoutError:
         return None
 
@@ -107,8 +106,8 @@ async def _receive_one(
 async def test_subscribe_creates_receive_stream(event_bus: EventBus) -> None:
     """subscribe() returns a memory object receive stream."""
     stream = await event_bus.subscribe("sess-1")
-    assert hasattr(stream, "receive")
-    assert hasattr(stream, "receive_nowait")
+    assert hasattr(stream, "get")
+    assert hasattr(stream, "get_nowait")
 
 
 @pytest.mark.anyio
@@ -137,8 +136,8 @@ async def test_unsubscribe_removes_stream(event_bus: EventBus) -> None:
 @pytest.mark.anyio
 async def test_unsubscribe_unknown_session_noop(event_bus: EventBus) -> None:
     """Unsubscribing from a non-existent session is a no-op."""
-    _send, recv = anyio.create_memory_object_stream(max_buffer_size=10)
-    await event_bus.unsubscribe("missing", recv)
+    _recv: asyncio.Queue[Any] = asyncio.Queue(maxsize=10)
+    await event_bus.unsubscribe("missing", _recv)
     counts = await event_bus.get_subscriber_counts()
     assert counts == {}
 
@@ -147,7 +146,7 @@ async def test_unsubscribe_unknown_session_noop(event_bus: EventBus) -> None:
 async def test_unsubscribe_wrong_stream_noop(event_bus: EventBus) -> None:
     """Unsubscribing a stream that was never subscribed is a no-op."""
     s_real = await event_bus.subscribe("sess-1")
-    _send, recv_fake = anyio.create_memory_object_stream(max_buffer_size=10)
+    recv_fake: asyncio.Queue[Any] = asyncio.Queue(maxsize=10)
     await event_bus.unsubscribe("sess-1", recv_fake)
     counts = await event_bus.get_subscriber_counts()
     assert counts["sess-1"] == 1
@@ -225,20 +224,20 @@ async def test_publish_different_sessions_isolated(
 
 @pytest.mark.anyio
 async def test_publish_drops_subscriber_when_buffer_full(
-    event_bus: EventBus,
     sample_event: RunStartedEvent,
 ) -> None:
     """When a subscriber buffer is full and can't drain, subscriber is dropped."""
-    stream = await event_bus.subscribe("sess-1")
+    bus = EventBus(max_queue_size=3, overflow_policy="drop_subscriber")
+    stream = await bus.subscribe("sess-1")
     for i in range(3):
-        await event_bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id=f"ev{i}"))
-    await event_bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id="ev3"))
-    await event_bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id="ev4"))
+        await bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id=f"ev{i}"))
+    await bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id="ev3"))
+    await bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id="ev4"))
 
     items = await _drain_stream(stream)
     run_ids = [e.event.run_id for e in items if isinstance(e.event, RunStartedEvent)]
     assert len(run_ids) <= 3
-    counts = await event_bus.get_subscriber_counts()
+    counts = await bus.get_subscriber_counts()
     assert "sess-1" not in counts
 
 
@@ -249,7 +248,7 @@ async def test_publish_removes_dead_subscriber_on_broken_resource(
 ) -> None:
     """Subscribers with broken send streams are removed."""
     stream = await event_bus.subscribe("sess-1")
-    await stream.aclose()
+    stream.shutdown()
     await event_bus.publish("sess-1", sample_event)
     counts = await event_bus.get_subscriber_counts()
     assert "sess-1" not in counts
@@ -265,15 +264,21 @@ async def test_close_session_signals_end_of_stream(
     event_bus: EventBus,
     sample_event: RunStartedEvent,
 ) -> None:
-    """close_session() closes send streams, causing EndOfStream on consumers."""
+    """close_session() closes send streams, causing QueueShutDown on consumers."""
     s1 = await event_bus.subscribe("sess-1")
     s2 = await event_bus.subscribe("sess-1")
     await event_bus.publish("sess-1", sample_event)
     await event_bus.close_session("sess-1")
 
-    received1: list[Any] = [envelope async for envelope in s1]
+    received1: list[Any] = []
+    with contextlib.suppress(asyncio.QueueShutDown):
+        while True:
+            received1.append(s1.get_nowait())
 
-    received2: list[Any] = [envelope async for envelope in s2]
+    received2: list[Any] = []
+    with contextlib.suppress(asyncio.QueueShutDown):
+        while True:
+            received2.append(s2.get_nowait())
 
     assert len(received1) >= 1
     assert len(received2) >= 1
@@ -809,7 +814,7 @@ def test_classify_tool_result_metadata_returns_none() -> None:
 
 def test_classify_none_delta_returns_none() -> None:
     """PartDeltaEvent with delta=None is passthrough (merge key None)."""
-    event: Any = PartDeltaEvent(index=0, delta=None)  # type: ignore[call-arg]
+    event: Any = PartDeltaEvent(index=0, delta=None)  # type: ignore[arg-type]
     assert _merge_key(event) is None
 
 
@@ -1006,7 +1011,7 @@ def test_merge_envelopes_drops_none_delta() -> None:
     """PartDeltaEvent with delta=None is dropped, not merged or dispatched."""
     envelopes = [
         EventEnvelope(source_session_id="s1", event=PartDeltaEvent.text(0, "keep")),
-        EventEnvelope(source_session_id="s1", event=PartDeltaEvent(index=0, delta=None)),  # type: ignore[call-arg]
+        EventEnvelope(source_session_id="s1", event=PartDeltaEvent(index=0, delta=None)),  # type: ignore[arg-type]
         EventEnvelope(source_session_id="s1", event=PartDeltaEvent.text(0, "this")),
     ]
     result = _merge_envelopes(envelopes)
@@ -1292,11 +1297,11 @@ async def test_coalescing_per_session_isolation() -> None:
 
     assert len(results_a) == 1
     assert isinstance(results_a[0].event, PartDeltaEvent)
-    assert results_a[0].event.delta.content_delta == "hello-a"
+    assert results_a[0].event.delta.content_delta == "hello-a"  # type: ignore[union-attr]
 
     assert len(results_b) == 1
     assert isinstance(results_b[0].event, PartDeltaEvent)
-    assert results_b[0].event.delta.content_delta == "hello-b"
+    assert results_b[0].event.delta.content_delta == "hello-b"  # type: ignore[union-attr]
 
 
 @pytest.mark.anyio
@@ -1320,7 +1325,7 @@ async def test_coalescing_passthrough_subagent_drains_buffer() -> None:
     assert len(results) == 2
     # First: merged text deltas
     assert isinstance(results[0].event, PartDeltaEvent)
-    assert results[0].event.delta.content_delta == "hello world"
+    assert results[0].event.delta.content_delta == "hello world"  # type: ignore[union-attr]
     # Second: passthrough subagent event
     assert isinstance(results[1].event, SubAgentEvent)
 
@@ -1339,7 +1344,7 @@ async def test_coalescing_passthrough_custom_drains_buffer() -> None:
     assert len(results) == 2
     # First: text delta
     assert isinstance(results[0].event, PartDeltaEvent)
-    assert results[0].event.delta.content_delta == "data"
+    assert results[0].event.delta.content_delta == "data"  # type: ignore[union-attr]
     # Second: passthrough custom event
     assert isinstance(results[1].event, CustomEvent)
 
@@ -1358,7 +1363,7 @@ async def test_coalescing_passthrough_tool_result_metadata_drains_buffer() -> No
     assert len(results) == 2
     # First: text delta
     assert isinstance(results[0].event, PartDeltaEvent)
-    assert results[0].event.delta.content_delta == "data"
+    assert results[0].event.delta.content_delta == "data"  # type: ignore[union-attr]
     # Second: passthrough tool result metadata
     assert isinstance(results[1].event, ToolResultMetadataEvent)
 
@@ -1393,7 +1398,7 @@ async def test_coalescing_none_delta_dropped() -> None:
     bus = EventBus(max_queue_size=100)
     stream = await bus.subscribe("sess-1")
 
-    none_delta: Any = PartDeltaEvent(index=0, delta=None)  # type: ignore[call-arg]
+    none_delta: Any = PartDeltaEvent(index=0, delta=None)  # type: ignore[arg-type]
     await bus.publish("sess-1", none_delta)
     await bus.close_session("sess-1")
 
@@ -1436,7 +1441,7 @@ async def test_close_session_drains_buffer() -> None:
     results = [env async for env in drain_and_merge(stream)]
     assert len(results) == 1
     assert isinstance(results[0].event, PartDeltaEvent)
-    assert results[0].event.delta.content_delta == "hello world"
+    assert results[0].event.delta.content_delta == "hello world"  # type: ignore[union-attr]
 
 
 @pytest.mark.anyio
@@ -1525,7 +1530,7 @@ async def test_coalescing_passthrough_alongside_batchable() -> None:
     assert len(results) == 2
     # First: merged text deltas
     assert isinstance(results[0].event, PartDeltaEvent)
-    assert results[0].event.delta.content_delta == "data1 data2"
+    assert results[0].event.delta.content_delta == "data1 data2"  # type: ignore[union-attr]
     # Second: passthrough subagent event
     assert isinstance(results[1].event, SubAgentEvent)
 
@@ -1588,12 +1593,12 @@ async def test_coalescing_plan_update_last_wins_in_drain() -> None:
     assert len(results) == 3
     # First: text1 (single text delta)
     assert isinstance(results[0].event, PartDeltaEvent)
-    assert results[0].event.delta.content_delta == "text1 "
+    assert results[0].event.delta.content_delta == "text1 "  # type: ignore[union-attr]
     # Second: plan update (last-wins, 2 merged into 1)
     assert isinstance(results[1].event, PlanUpdateEvent)
     # Third: text2 (single text delta)
     assert isinstance(results[2].event, PartDeltaEvent)
-    assert results[2].event.delta.content_delta == "text2"
+    assert results[2].event.delta.content_delta == "text2"  # type: ignore[union-attr]
 
 
 @pytest.mark.anyio
@@ -1634,7 +1639,7 @@ async def test_merge_helpers_callable_without_instance() -> None:
     merged_envs = _merge_envelopes(envelopes)
     assert len(merged_envs) == 1
     assert isinstance(merged_envs[0].event, PartDeltaEvent)
-    assert merged_envs[0].event.delta.content_delta == "ab"
+    assert merged_envs[0].event.delta.content_delta == "ab"  # type: ignore[union-attr]
 
 
 @pytest.mark.anyio
@@ -1713,11 +1718,11 @@ def _thinking_env(session: str, index: int, content: str) -> EventEnvelope:
 
 async def test_drain_and_merge_consecutive_same_type_merges() -> None:
     """Consecutive same-type TextPartDelta events merge into 1 event."""
-    send, recv = anyio.create_memory_object_stream[Any](64)
-    await send.send(_text_env("s1", 0, "hello"))
-    await send.send(_text_env("s1", 0, " "))
-    await send.send(_text_env("s1", 0, "world"))
-    await send.aclose()
+    recv: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
+    recv.put_nowait(_text_env("s1", 0, "hello"))
+    recv.put_nowait(_text_env("s1", 0, " "))
+    recv.put_nowait(_text_env("s1", 0, "world"))
+    recv.shutdown()
 
     results = [env async for env in drain_and_merge(recv)]
 
@@ -1731,39 +1736,37 @@ async def test_drain_and_merge_consecutive_same_type_merges() -> None:
 
 async def test_drain_and_merge_type_change_creates_separate_groups() -> None:
     """Type-change within a batch produces separate merged groups."""
-    send, recv = anyio.create_memory_object_stream[Any](64)
-    await send.send(_text_env("s1", 0, "foo"))
-    await send.send(_text_env("s1", 0, "bar"))
-    await send.send(_thinking_env("s1", 0, "think"))
-    await send.send(_thinking_env("s1", 0, "ing"))
-    await send.aclose()
+    recv: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
+    recv.put_nowait(_text_env("s1", 0, "foo"))
+    recv.put_nowait(_text_env("s1", 0, "bar"))
+    recv.put_nowait(_thinking_env("s1", 0, "think"))
+    recv.put_nowait(_thinking_env("s1", 0, "ing"))
+    recv.shutdown()
 
     results = [env async for env in drain_and_merge(recv)]
 
     assert len(results) == 2
-    # First merged: text deltas
     assert isinstance(results[0].event, PartDeltaEvent)
     assert isinstance(results[0].event.delta, TextPartDelta)
     assert results[0].event.delta.content_delta == "foobar"
-    # Second merged: thinking deltas
     assert isinstance(results[1].event, PartDeltaEvent)
     assert isinstance(results[1].event.delta, ThinkingPartDelta)
     assert results[1].event.delta.content_delta == "thinking"
 
 
 async def test_drain_and_merge_wouldblock_ends_batch() -> None:
-    """WouldBlock ends the current batch; merged result is yielded."""
-    send, recv = anyio.create_memory_object_stream[Any](64)
-    await send.send(_text_env("s1", 0, "x"))
-    await send.send(_text_env("s1", 0, "y"))
-    await send.send(_text_env("s1", 0, "z"))
+    """QueueEmpty ends the current batch; merged result is yielded."""
+    recv: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
+    recv.put_nowait(_text_env("s1", 0, "x"))
+    recv.put_nowait(_text_env("s1", 0, "y"))
+    recv.put_nowait(_text_env("s1", 0, "z"))
 
     results: list[EventEnvelope] = []
 
     async def consumer() -> None:
         async for env in drain_and_merge(recv):
             results.append(env)
-            await send.aclose()
+            recv.shutdown()
 
     with anyio.fail_after(5):
         async with anyio.create_task_group() as tg:
@@ -1776,12 +1779,12 @@ async def test_drain_and_merge_wouldblock_ends_batch() -> None:
 
 
 async def test_drain_and_merge_endofstream_mid_drain() -> None:
-    """EndOfStream mid-drain processes batch then terminates."""
-    send, recv = anyio.create_memory_object_stream[Any](64)
-    await send.send(_text_env("s1", 0, "a"))
-    await send.send(_text_env("s1", 0, "b"))
-    await send.send(_text_env("s1", 0, "c"))
-    await send.aclose()
+    """QueueShutDown mid-drain processes batch then terminates."""
+    recv: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
+    recv.put_nowait(_text_env("s1", 0, "a"))
+    recv.put_nowait(_text_env("s1", 0, "b"))
+    recv.put_nowait(_text_env("s1", 0, "c"))
+    recv.shutdown()
 
     results = [env async for env in drain_and_merge(recv)]
 
@@ -1792,9 +1795,9 @@ async def test_drain_and_merge_endofstream_mid_drain() -> None:
 
 
 async def test_drain_and_merge_endofstream_on_initial_receive() -> None:
-    """EndOfStream on initial receive terminates with no events yielded."""
-    send, recv = anyio.create_memory_object_stream[Any](64)
-    await send.aclose()
+    """QueueShutDown on initial receive terminates with no events yielded."""
+    recv: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
+    recv.shutdown()
 
     results = [env async for env in drain_and_merge(recv)]
 
@@ -1802,9 +1805,9 @@ async def test_drain_and_merge_endofstream_on_initial_receive() -> None:
 
 
 async def test_drain_and_merge_closed_resource_on_initial_receive() -> None:
-    """ClosedResourceError on initial receive terminates with no events."""
-    _send, recv = anyio.create_memory_object_stream[Any](64)
-    await recv.aclose()
+    """QueueShutDown on initial receive terminates with no events."""
+    recv: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
+    recv.shutdown()
 
     results = [env async for env in drain_and_merge(recv)]
 
@@ -1813,11 +1816,11 @@ async def test_drain_and_merge_closed_resource_on_initial_receive() -> None:
 
 async def test_drain_and_merge_raw_events_wrapped_and_merged() -> None:
     """Raw events (not EventEnvelope) are wrapped and merged correctly."""
-    send, recv = anyio.create_memory_object_stream[Any](64)
-    await send.send(PartDeltaEvent.text(0, "raw"))
-    await send.send(PartDeltaEvent.text(0, "_"))
-    await send.send(PartDeltaEvent.text(0, "event"))
-    await send.aclose()
+    recv: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
+    recv.put_nowait(PartDeltaEvent.text(0, "raw"))
+    recv.put_nowait(PartDeltaEvent.text(0, "_"))
+    recv.put_nowait(PartDeltaEvent.text(0, "event"))
+    recv.shutdown()
 
     results = [env async for env in drain_and_merge(recv)]
 

@@ -22,9 +22,9 @@ from acp.schema import (
     ToolCallStart,
     UserMessageChunk,
 )
+from agentpool.commands.base import NodeCommand
 from agentpool.log import get_logger
 from agentpool.messaging.context import NodeContext  # noqa: TC001
-from agentpool_commands.base import NodeCommand
 from agentpool_server.acp_server.session import ACPSession  # noqa: TC001
 
 
@@ -397,9 +397,10 @@ class DebugSetPoolCommand(NodeCommand):
             config: Config name (from store) or path to config file
             agent: Optional specific agent to use as default
         """
+        import importlib
         from pathlib import Path as FilePath
 
-        from agentpool_cli import agent_store
+        agent_store = importlib.import_module("agentpool_cli").agent_store
 
         session = ctx.context.data
         if not session:

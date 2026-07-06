@@ -2,18 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentpool_config.nodes import NodeConfig
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from agentpool import Team, TeamRun
-    from agentpool.messaging import MessageNode
 
 
 ExecutionMode = Literal["parallel", "sequential"]
@@ -103,31 +96,3 @@ class TeamConfig(NodeConfig):
             for m in self.members
             if isinstance(m, TeamMemberConfig) and m.prompt_template is not None
         }
-
-    def get_team(
-        self,
-        nodes: Sequence[MessageNode[Any, Any]],
-        name: str,
-    ) -> Team | TeamRun[Any, Any]:
-        """Create a team based on config."""
-        from agentpool import Team, TeamRun
-
-        member_configs = self.get_member_configs()
-
-        if self.mode == "parallel":
-            return Team(
-                nodes,
-                name=name,
-                display_name=self.display_name,
-                shared_prompt=self.shared_prompt,
-                mcp_servers=self.get_mcp_servers(),
-                member_prompt_templates=member_configs or None,
-                member_timeout=self.member_timeout,
-            )
-        return TeamRun(
-            nodes,
-            name=name,
-            display_name=self.display_name,
-            shared_prompt=self.shared_prompt,
-            mcp_servers=self.get_mcp_servers(),
-        )

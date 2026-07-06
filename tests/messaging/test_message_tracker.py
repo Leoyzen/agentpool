@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent, AgentPool, Team
+from agentpool import Agent, AgentPool, BaseTeam
 from agentpool.models.agents import NativeAgentConfig
 from agentpool.models.manifest import AgentsManifest
 
@@ -244,7 +244,7 @@ async def test_message_flow_tracker_nested():
         agent3 = Agent("agent3", model="test")
 
         # Create nested team using Team constructor instead of pool.create_team()
-        team = Team([agent2, agent3], name="team")
+        team = BaseTeam([agent2, agent3], mode="parallel", name="team")
         agent1 >> team
 
         async with pool.track_message_flow() as tracker:

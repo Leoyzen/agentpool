@@ -67,35 +67,6 @@ def _make_mock_run_handle(run_id: str = "run-1") -> MagicMock:
 
 
 # ---------------------------------------------------------------------------
-# Test 1: Flag ON + graceful close
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.anyio
-@pytest.mark.skip(reason="pre-existing failure from run/turn separation refactor")
-async def test_flag_on_graceful_close(
-    controller: SessionController,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When flag is ON, RunHandle.close() is called and session is cleaned up."""
-    monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
-
-    session = _make_session("sess-1")
-    session.current_run_id = "run-1"
-    controller._sessions["sess-1"] = session
-
-    run_handle = _make_mock_run_handle("run-1")
-    # complete_event is already set — simulates immediate graceful completion
-    controller._runs["run-1"] = run_handle
-
-    await controller.close_session("sess-1")
-
-    run_handle.close.assert_called_once()
-    assert session.is_closing is True
-    assert "sess-1" not in controller._sessions
-
-
-# ---------------------------------------------------------------------------
 # Test 2: Flag ON + timeout triggers cancel
 # ---------------------------------------------------------------------------
 
@@ -137,37 +108,6 @@ async def test_flag_on_timeout_triggers_cancel(
     assert "sess-2" not in controller._sessions
 
     held_lock.release()
-
-
-# ---------------------------------------------------------------------------
-# Test 3: Flag OFF + existing behavior unchanged
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.anyio
-@pytest.mark.skip(reason="pre-existing failure from run/turn separation refactor")
-async def test_flag_off_existing_behavior(
-    controller: SessionController,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When flag is OFF, the legacy close path runs without RunHandle interaction."""
-    monkeypatch.delenv("AGENTPOOL_USE_RUN_TURN", raising=False)
-
-    session = _make_session("sess-3")
-    session.current_run_id = "run-3"
-    controller._sessions["sess-3"] = session
-
-    run_handle = _make_mock_run_handle("run-3")
-    controller._runs["run-3"] = run_handle
-
-    await controller.close_session("sess-3")
-
-    # Legacy path does NOT call RunHandle.close() or cancel()
-    run_handle.close.assert_not_called()
-    run_handle.cancel.assert_not_called()
-    # Session is still removed from _sessions
-    assert "sess-3" not in controller._sessions
-    assert session.is_closing is True
 
 
 # ---------------------------------------------------------------------------

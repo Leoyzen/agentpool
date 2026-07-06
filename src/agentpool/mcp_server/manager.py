@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Self, cast
+import warnings
 
 import anyio
 
@@ -133,13 +135,16 @@ class MCPManager:
             self.add_server_config(server)
         self.providers: list[MCPResourceProvider] = []
         self.sampling_model = sampling_model
-        self.aggregating_provider = AggregatingResourceProvider(
-            providers=cast(list[ResourceProvider], self.providers),
-            name=f"{name}_aggregated",
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            self.aggregating_provider = AggregatingResourceProvider(
+                providers=cast(list[ResourceProvider], self.providers),
+                name=f"{name}_aggregated",
+            )
         self.exit_stack = AsyncExitStack()
         self._accessible_roots = accessible_roots
         self._global_pool = GlobalConnectionPool()
+        self._toolset_cache: dict[str, Any] = {}
 
     def add_server_config(self, cfg: MCPServerConfig | str) -> None:
         """Add a new MCP server to the manager."""
@@ -269,6 +274,14 @@ class MCPManager:
 
     async def disconnect_all(self) -> None:
         """Disconnect all MCP providers without clearing the servers list."""
+        # Close cached MCPToolset instances before clearing the cache.
+        # MCPToolset has no aclose() — must use __aexit__ for cleanup.
+        # Guard against toolsets that were constructed but never entered
+        # (MCPToolset.__aexit__ raises ValueError if __aenter__ wasn't called).
+        for toolset in self._toolset_cache.values():
+            with contextlib.suppress(ValueError):
+                await toolset.__aexit__(None, None, None)
+        self._toolset_cache.clear()
         await self._global_pool.shutdown_all()
         await self.cleanup()
         self.exit_stack = AsyncExitStack()
@@ -293,10 +306,10 @@ class MCPManager:
         """Return pydantic-ai MCP capabilities for all configured servers.
 
         Each enabled server is converted to a pydantic-ai ``MCP`` capability.
-        A new ``MCPToolset`` instance is created on every call — no caching.
-        Servers using ACP transport are skipped in global configs since
-        pydantic-ai does not support ACP directly. Disabled servers are
-        also skipped.
+        ``MCPToolset`` instances are cached by ``client_id`` so repeated calls
+        reuse the same underlying connection.  Servers using ACP transport are
+        skipped in global configs since pydantic-ai does not support ACP
+        directly. Disabled servers are also skipped.
 
         When ``snapshot`` is provided, configs are read from the snapshot
         and transports are obtained from the appropriate connection pool:
@@ -346,38 +359,51 @@ class MCPManager:
                 kwargs["auth"] = "oauth"
             return kwargs
 
-        def _make_capability(server: BaseMCPServerConfig, transport: Any) -> MCP:
-            """Create a fresh MCPToolset and wrap it in an MCP capability."""
-            toolset = MCPToolset(client=transport, **_make_kwargs(server))
-
+        def _derive_url(server: BaseMCPServerConfig) -> str:
+            """Derive the synthetic URL required by ``MCP.__init__``."""
             match server:
                 case SSEMCPServerConfig():
-                    url = str(server.url)
+                    return str(server.url)
                 case StreamableHTTPMCPServerConfig():
-                    url = str(server.url)
+                    return str(server.url)
                 case StdioMCPServerConfig():
-                    url = f"mcp://stdio/{server.client_id}"
+                    return f"mcp://stdio/{server.client_id}"
                 case _:
-                    url = f"mcp://{server.type}/{server.client_id}"
+                    return f"mcp://{server.type}/{server.client_id}"
+
+        def _make_capability(server: BaseMCPServerConfig, transport: Any) -> MCP:
+            """Create or reuse an MCPToolset and wrap it in an MCP capability.
+
+            On first call for a given ``client_id``, a new ``MCPToolset`` is
+            constructed and stored in ``_toolset_cache``.  Subsequent calls
+            reuse the cached instance, ensuring one underlying connection per
+            server config.  The ``MCP`` wrapper is always fresh.
+            """
+            client_id = server.client_id
+            toolset = self._toolset_cache.get(client_id)
+            if toolset is None:
+                toolset = MCPToolset(client=transport, **_make_kwargs(server))
+                self._toolset_cache[client_id] = toolset
 
             return MCP(
-                url=url,
+                url=_derive_url(server),
                 local=toolset,
                 native=False,
                 id=server.name or server.client_id,
                 allowed_tools=server.enabled_tools,
             )
 
-        if snapshot is not None:
-            # Global configs (pool + agent) — borrow from GlobalConnectionPool
-            for entry in snapshot.global_configs:
+        async def _process_snapshot(snap: McpConfigSnapshot) -> None:
+            """Process snapshot configs, appending capabilities to the list."""
+            for entry in snap.global_configs:
                 server = entry.server_config
-                if not server.enabled:
-                    continue
-                if isinstance(server, AcpMCPServerConfig):
+                if not server.enabled or isinstance(server, AcpMCPServerConfig):
                     continue
                 transport = await self._global_pool.get_transport(server)
                 capabilities.append(_make_capability(server, transport))
+
+            if session_pool is None:
+                return
 
             # Session-scoped configs (session + skill) — borrow from
             # SessionConnectionPool.  ACP entries have pre-stored transports
@@ -385,28 +411,24 @@ class MCPManager:
             # trying to create new ones.  Inherited ACP configs (from parent
             # session) that don't have a transport in this session's pool
             # are skipped — they go through the ACP aggregating provider.
-            if session_pool is not None:
-                for entry in snapshot.session_scoped_configs:
-                    server = entry.server_config
-                    if not server.enabled:
-                        continue
-                    if isinstance(server, AcpMCPServerConfig):
-                        # ACP transports are pre-stored via add_transport().
-                        # If not found, skip — the ACP aggregating provider
-                        # handles ACP MCP tool exposure.
-                        try:
-                            transport = await session_pool.get_transport(server, entry.skill_name)
-                        except NotImplementedError:
-                            continue
-                    else:
-                        transport = await session_pool.get_transport(server, entry.skill_name)
-                    capabilities.append(_make_capability(server, transport))
-        else:
-            # Legacy path: pool servers only, no snapshot
-            for server in self.servers:
+            for entry in snap.session_scoped_configs:
+                server = entry.server_config
                 if not server.enabled:
                     continue
                 if isinstance(server, AcpMCPServerConfig):
+                    try:
+                        transport = await session_pool.get_transport(server, entry.skill_name)
+                    except NotImplementedError:
+                        continue
+                else:
+                    transport = await session_pool.get_transport(server, entry.skill_name)
+                capabilities.append(_make_capability(server, transport))
+
+        if snapshot is not None:
+            await _process_snapshot(snapshot)
+        else:
+            for server in self.servers:
+                if not server.enabled or isinstance(server, AcpMCPServerConfig):
                     continue
                 transport = await self._global_pool.get_transport(server)
                 capabilities.append(_make_capability(server, transport))

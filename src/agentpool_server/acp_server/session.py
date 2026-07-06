@@ -29,10 +29,10 @@ from agentpool import Agent, AgentPool
 from agentpool.agents.acp_agent import ACPAgent
 from agentpool.agents.events.events import ToastInfo
 from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
+from agentpool.commands.base import NodeCommand
 from agentpool.log import get_logger
 from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
 from agentpool.skills.uri_resolver import MAX_PROVIDER_NAME_LENGTH
-from agentpool_commands.base import NodeCommand
 from agentpool_server.acp_server.converters import (
     convert_acp_mcp_server_to_config,
     from_acp_content,

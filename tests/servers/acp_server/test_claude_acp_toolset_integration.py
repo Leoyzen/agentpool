@@ -15,7 +15,6 @@ import pytest
 from agentpool import AgentPool
 from agentpool.agents.acp_agent import ACPAgent
 from agentpool.models.acp_agents.base import ACPAgentConfig
-from agentpool.models.manifest import AgentsManifest
 from agentpool_config.toolsets import SubagentToolsetConfig
 
 
@@ -34,25 +33,6 @@ def claude_config_with_subagent() -> ACPAgentConfig:
         tools=[SubagentToolsetConfig()],
         env_vars={"ANTHROPIC_API_KEY": ""},  # Use subscription, not direct API key
     )
-
-
-@pytest.fixture
-def manifest_with_claude(claude_config_with_subagent: ACPAgentConfig) -> AgentsManifest:
-    """Create manifest with Claude ACP agent."""
-    return AgentsManifest(agents={"claude_orchestrator": claude_config_with_subagent})
-
-
-@pytest.mark.skip(
-    reason="pool.get_agents() was removed. ACP agents are now managed via SessionPool."
-)
-async def test_claude_acp_with_subagent_toolset_setup(manifest_with_claude: AgentsManifest):
-    """Test that Claude ACP agent with Subagent toolset initializes correctly."""
-    # NOTE: pool.get_agents(ACPAgent) was removed. ACP agent instances are now
-    # created per-session via SessionPool. Use pool.manifest.agents for config checks.
-    async with AgentPool(manifest=manifest_with_claude) as pool:
-        # Verify ACP agent config exists in manifest
-        assert "claude_orchestrator" in pool.manifest.agents
-        assert isinstance(pool.manifest.agents["claude_orchestrator"], ACPAgentConfig)
 
 
 async def test_claude_acp_tool_bridge_mcp_config(claude_config_with_subagent: ACPAgentConfig):

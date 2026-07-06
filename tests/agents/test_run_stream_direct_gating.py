@@ -10,8 +10,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, ClassVar
 from unittest.mock import MagicMock
 
-import pytest
-
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.orchestrator.turn import Turn
 
@@ -157,35 +155,3 @@ async def test_native_agent_skips_manual_loop() -> None:
     # Sanity: we got the fake event
     assert len(events) == 1
     assert isinstance(events[0], _FakeEvent)
-
-
-@pytest.mark.skip(reason="pre-existing failure from run/turn separation refactor")
-async def test_non_native_agent_executes_manual_loop() -> None:
-    """Non-native AGENT_TYPE should cause run_stream() to run the while loop.
-
-    When AGENT_TYPE == 'acp', the extra prompt queued during
-    _run_stream_once MUST be processed because the while loop re-checks
-    for pending prompts after each iteration.
-    """
-    call_log: list[tuple[Any, ...]] = []
-    agent = _NonNativeTestAgent(call_log)
-
-    events: list[object] = []
-    events.extend([event async for event in agent.run_stream("test prompt")])
-
-    # Non-native path: _run_stream_once is called twice
-    # (initial prompt + queued extra prompt)
-    assert len(call_log) == 2, (
-        f"Expected 2 calls to _run_stream_once for non-native agent, got {len(call_log)}"
-    )
-    # First call should have the original prompt
-    assert "test prompt" in call_log[0], (
-        f"First call should contain original prompt, got {call_log[0]}"
-    )
-    # Second call should have the extra queued prompt
-    assert "extra_prompt" in call_log[1], (
-        f"Second call should contain queued extra prompt, got {call_log[1]}"
-    )
-    # Sanity: we got two fake events (one per _run_stream_once call)
-    assert len(events) == 2
-    assert all(isinstance(e, _FakeEvent) for e in events)

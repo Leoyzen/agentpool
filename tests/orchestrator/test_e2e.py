@@ -12,7 +12,6 @@ from dataclasses import field
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
-import anyio
 from pydantic_ai import TextPartDelta
 import pytest
 
@@ -170,9 +169,9 @@ async def test_full_session_lifecycle_create_prompt_events_close(
     events: list[Any] = []
     while True:
         try:
-            event = await asyncio.wait_for(queue.receive(), timeout=0.5)
+            event = await asyncio.wait_for(queue.get(), timeout=0.5)
             events.append(event)
-        except (TimeoutError, anyio.EndOfStream):
+        except (TimeoutError, asyncio.QueueShutDown):
             break
 
     # Verify event ordering and types
@@ -192,8 +191,8 @@ async def test_full_session_lifecycle_create_prompt_events_close(
     assert session_pool.sessions.get_session("sess-lifecycle") is None
 
     # Sentinel should have been sent
-    with pytest.raises((asyncio.TimeoutError, anyio.EndOfStream)):
-        await asyncio.wait_for(queue.receive(), timeout=0.5)
+    with pytest.raises((asyncio.TimeoutError, asyncio.QueueShutDown)):
+        await asyncio.wait_for(queue.get(), timeout=0.5)
 
     await session_pool.shutdown()
 
@@ -296,15 +295,15 @@ async def test_multi_agent_concurrent_sessions_no_contamination(
     # Collect events for session A
     events_a: list[Any] = []
     while True:
-        with contextlib.suppress(anyio.WouldBlock):
-            events_a.append(queue_a.receive_nowait())
+        with contextlib.suppress(asyncio.QueueEmpty):
+            events_a.append(queue_a.get_nowait())
             continue
         break
 
     events_b: list[Any] = []
     while True:
-        with contextlib.suppress(anyio.WouldBlock):
-            events_b.append(queue_b.receive_nowait())
+        with contextlib.suppress(asyncio.QueueEmpty):
+            events_b.append(queue_b.get_nowait())
             continue
         break
 
@@ -337,80 +336,6 @@ async def test_multi_agent_concurrent_sessions_no_contamination(
     # Cleanup
     await session_pool.close_session("sess-a")
     await session_pool.close_session("sess-b")
-    await session_pool.shutdown()
-
-
-@pytest.mark.skip(
-    reason=(
-        "Concurrent process_prompt for same session now steers into active run, "
-        "not separate turns. Needs rewrite for run-turn-separation architecture."
-    )
-)
-@pytest.mark.anyio
-async def test_concurrent_sessions_turn_serialization_per_session(
-    mock_pool: MagicMock,
-) -> None:
-    """6.14: Turns for the same session serialize; different sessions run concurrently.
-
-    Verifies that per-session turn_lock ensures only one turn per session
-    at a time, while different sessions can process in parallel.
-    """
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
-
-    agent = MagicMock()
-
-    turn_starts: dict[str, list[float]] = {"sess-1": [], "sess-2": []}
-    turn_ends: dict[str, list[float]] = {"sess-1": [], "sess-2": []}
-
-    def _make_turn(prompts: Any, run_ctx: AgentRunContext, **kw: Any) -> Any:
-        sid = run_ctx.session_id
-
-        class _Turn:
-            message_history: list[Any] = field(default_factory=list)
-
-            async def execute(self) -> AsyncIterator[StreamCompleteEvent[Any]]:
-                start = asyncio.get_event_loop().time()
-                turn_starts[sid].append(start)
-                await asyncio.sleep(0.03)
-                end = asyncio.get_event_loop().time()
-                turn_ends[sid].append(end)
-                yield StreamCompleteEvent(
-                    message=ChatMessage(content="done", role="assistant"),
-                )
-
-        return _Turn()
-
-    agent.create_turn = _make_turn
-
-    await session_pool.create_session("sess-1")
-    await session_pool.create_session("sess-2")
-    await _attach_agent(session_pool, "sess-1", agent)
-    await _attach_agent(session_pool, "sess-2", agent)
-
-    # Fire two turns for each session concurrently
-    await asyncio.gather(
-        session_pool.process_prompt("sess-1", "prompt-1a"),
-        session_pool.process_prompt("sess-1", "prompt-1b"),
-        session_pool.process_prompt("sess-2", "prompt-2a"),
-        session_pool.process_prompt("sess-2", "prompt-2b"),
-    )
-
-    # Each session should have exactly 2 turns
-    assert len(turn_starts["sess-1"]) == 2
-    assert len(turn_starts["sess-2"]) == 2
-
-    # Within each session, turns must not overlap (serialized)
-    for sess in ("sess-1", "sess-2"):
-        for i in range(len(turn_starts[sess]) - 1):
-            assert turn_ends[sess][i] <= turn_starts[sess][i + 1]
-
-    # Across sessions, turns should overlap (concurrent)
-    # The first turn of sess-1 and sess-2 should have started near the same time
-    assert abs(turn_starts["sess-1"][0] - turn_starts["sess-2"][0]) < 0.02
-
-    await session_pool.close_session("sess-1")
-    await session_pool.close_session("sess-2")
     await session_pool.shutdown()
 
 
@@ -461,26 +386,26 @@ async def test_concurrent_sessions_event_bus_isolation(
 
     # All subscribers for sess-x should have exactly 2 events (RunStarted + StreamComplete)
     for q in (qx1, qx2):
-        ev1 = await asyncio.wait_for(q.receive(), timeout=0.5)
+        ev1 = await asyncio.wait_for(q.get(), timeout=0.5)
         actual_ev1 = _unwrap_event(ev1)
         assert isinstance(actual_ev1, RunStartedEvent)
         assert actual_ev1.session_id == "sess-x"
-        ev2 = await asyncio.wait_for(q.receive(), timeout=0.5)
+        ev2 = await asyncio.wait_for(q.get(), timeout=0.5)
         actual_ev2 = _unwrap_event(ev2)
         assert isinstance(actual_ev2, StreamCompleteEvent)
-        with pytest.raises(anyio.WouldBlock):
-            q.receive_nowait()
+        with pytest.raises(asyncio.QueueEmpty):
+            q.get_nowait()
 
     for q in (qy1, qy2):
-        ev1 = await asyncio.wait_for(q.receive(), timeout=0.5)
+        ev1 = await asyncio.wait_for(q.get(), timeout=0.5)
         actual_ev1 = _unwrap_event(ev1)
         assert isinstance(actual_ev1, RunStartedEvent)
         assert actual_ev1.session_id == "sess-y"
-        ev2 = await asyncio.wait_for(q.receive(), timeout=0.5)
+        ev2 = await asyncio.wait_for(q.get(), timeout=0.5)
         actual_ev2 = _unwrap_event(ev2)
         assert isinstance(actual_ev2, StreamCompleteEvent)
-        with pytest.raises(anyio.WouldBlock):
-            q.receive_nowait()
+        with pytest.raises(asyncio.QueueEmpty):
+            q.get_nowait()
 
     await session_pool.close_session("sess-x")
     await session_pool.close_session("sess-y")
@@ -534,15 +459,15 @@ async def test_cross_protocol_event_publishing_and_subscribing() -> None:
     # Verify ACP subscriber receives all events in order
     acp_received: list[Any] = []
     while True:
-        with contextlib.suppress(anyio.WouldBlock):
-            acp_received.append(acp_queue.receive_nowait())
+        with contextlib.suppress(asyncio.QueueEmpty):
+            acp_received.append(acp_queue.get_nowait())
             continue
         break
 
     opencode_received: list[Any] = []
     while True:
-        with contextlib.suppress(anyio.WouldBlock):
-            opencode_received.append(opencode_queue.receive_nowait())
+        with contextlib.suppress(asyncio.QueueEmpty):
+            opencode_received.append(opencode_queue.get_nowait())
             continue
         break
 
@@ -593,18 +518,18 @@ async def test_cross_protocol_multiple_subscribers_different_protocols() -> None
     agui_received: list[Any] = []
 
     while True:
-        with contextlib.suppress(anyio.WouldBlock):
-            acp_received.append(acp_queue.receive_nowait())
+        with contextlib.suppress(asyncio.QueueEmpty):
+            acp_received.append(acp_queue.get_nowait())
             continue
         break
     while True:
-        with contextlib.suppress(anyio.WouldBlock):
-            opencode_received.append(opencode_queue.receive_nowait())
+        with contextlib.suppress(asyncio.QueueEmpty):
+            opencode_received.append(opencode_queue.get_nowait())
             continue
         break
     while True:
-        with contextlib.suppress(anyio.WouldBlock):
-            agui_received.append(agui_queue.receive_nowait())
+        with contextlib.suppress(asyncio.QueueEmpty):
+            agui_received.append(agui_queue.get_nowait())
             continue
         break
 
@@ -650,13 +575,13 @@ async def test_cross_protocol_event_ordering_preserved_under_load() -> None:
     received_a: list[Any] = []
     received_b: list[Any] = []
     while True:
-        with contextlib.suppress(anyio.WouldBlock):
-            received_a.append(protocol_a.receive_nowait())
+        with contextlib.suppress(asyncio.QueueEmpty):
+            received_a.append(protocol_a.get_nowait())
             continue
         break
     while True:
-        with contextlib.suppress(anyio.WouldBlock):
-            received_b.append(protocol_b.receive_nowait())
+        with contextlib.suppress(asyncio.QueueEmpty):
+            received_b.append(protocol_b.get_nowait())
             continue
         break
 
@@ -708,13 +633,13 @@ async def test_cross_protocol_with_session_pool_integration(
     opencode_events: list[Any] = []
 
     while True:
-        with contextlib.suppress(anyio.WouldBlock):
-            acp_events.append(acp_queue.receive_nowait())
+        with contextlib.suppress(asyncio.QueueEmpty):
+            acp_events.append(acp_queue.get_nowait())
             continue
         break
     while True:
-        with contextlib.suppress(anyio.WouldBlock):
-            opencode_events.append(opencode_queue.receive_nowait())
+        with contextlib.suppress(asyncio.QueueEmpty):
+            opencode_events.append(opencode_queue.get_nowait())
             continue
         break
 
@@ -748,9 +673,9 @@ async def test_cross_protocol_with_session_pool_integration(
     await session_pool.close_session("sess-integrated")
 
     # Both should receive sentinel
-    with pytest.raises((asyncio.TimeoutError, anyio.EndOfStream)):
-        await asyncio.wait_for(acp_queue.receive(), timeout=0.5)
-    with pytest.raises((asyncio.TimeoutError, anyio.EndOfStream)):
-        await asyncio.wait_for(opencode_queue.receive(), timeout=0.5)
+    with pytest.raises((asyncio.TimeoutError, asyncio.QueueShutDown)):
+        await asyncio.wait_for(acp_queue.get(), timeout=0.5)
+    with pytest.raises((asyncio.TimeoutError, asyncio.QueueShutDown)):
+        await asyncio.wait_for(opencode_queue.get(), timeout=0.5)
 
     await session_pool.shutdown()

@@ -5,7 +5,11 @@ from __future__ import annotations
 import pytest
 
 from agentpool import AgentsManifest, NativeAgentConfig
-from agentpool_config.capabilities import CapabilityConfig
+from agentpool_config.capabilities import (
+    GenericCapabilityConfig,
+    LoopDetectionCapabilityConfig,
+    TokenBudgetCapabilityConfig,
+)
 
 
 YAML_WITH_CAPABILITIES = """\
@@ -48,6 +52,16 @@ agents:
     model: openai:gpt-4o-mini
 """
 
+_CAPABILITY_CONFIG_TYPES = (
+    LoopDetectionCapabilityConfig,
+    TokenBudgetCapabilityConfig,
+    GenericCapabilityConfig,
+)
+
+
+def _is_capability_config(obj: object) -> bool:
+    return isinstance(obj, _CAPABILITY_CONFIG_TYPES)
+
 
 def test_yaml_capabilities_parsing():
     """Test that YAML capabilities list parses into CapabilityConfig objects."""
@@ -57,7 +71,7 @@ def test_yaml_capabilities_parsing():
 
     assert len(agent.capabilities) == 1
     cap = agent.capabilities[0]
-    assert isinstance(cap, CapabilityConfig)
+    assert _is_capability_config(cap)
     assert cap.type == "pydantic_ai.capabilities.Instrumentation"
     assert cap.args == {"service_name": "test"}
 
@@ -69,11 +83,11 @@ def test_yaml_multiple_capabilities_parsing():
     assert isinstance(agent, NativeAgentConfig)
 
     assert len(agent.capabilities) == 2
-    assert isinstance(agent.capabilities[0], CapabilityConfig)
+    assert _is_capability_config(agent.capabilities[0])
     assert agent.capabilities[0].type == "pydantic_ai.capabilities.Instrumentation"
     assert agent.capabilities[0].args == {"service_name": "test"}
 
-    assert isinstance(agent.capabilities[1], CapabilityConfig)
+    assert _is_capability_config(agent.capabilities[1])
     assert agent.capabilities[1].type == "pydantic_ai.capabilities.RetryStrategy"
     assert agent.capabilities[1].args == {"max_retries": 3}
 

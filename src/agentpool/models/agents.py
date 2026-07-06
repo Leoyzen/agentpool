@@ -21,7 +21,6 @@ from agentpool.prompts.prompts import PromptMessage, StaticPrompt
 from agentpool.resource_providers import StaticResourceProvider
 from agentpool_config import BaseToolConfig, NativeAgentToolConfig
 from agentpool_config.builtin_tools import BaseBuiltinToolConfig
-from agentpool_config.capabilities import CapabilityConfig
 from agentpool_config.knowledge import Knowledge  # noqa: TC001
 from agentpool_config.nodes import BaseAgentConfig
 from agentpool_config.session import MemoryConfig, SessionQuery
@@ -252,12 +251,30 @@ class NativeAgentConfig(BaseAgentConfig):
     @model_validator(mode="before")
     @classmethod
     def handle_capabilities(cls, data: dict[str, Any]) -> dict[str, Any]:
-        """Convert capability dicts to CapabilityConfig objects."""
+        """Convert capability dicts to appropriate config models.
+
+        If a dict has a known short-name ``type`` (e.g. ``"loop_detection"``),
+        it is validated against the typed built-in config model. Otherwise it
+        falls back to ``GenericCapabilityConfig`` (import-path based).
+        """
+        from pydantic import TypeAdapter
+
+        from agentpool_config.capabilities import (
+            CapabilityConfig,
+            GenericCapabilityConfig,
+            is_known_capability_type,
+        )
+
         if capabilities := data.get("capabilities"):
             resolved: list[Any] = []
+            _adapter: TypeAdapter[CapabilityConfig] = TypeAdapter(CapabilityConfig)
             for cap in capabilities:
                 if isinstance(cap, dict):
-                    resolved.append(CapabilityConfig(**cap))
+                    raw_type = cap.get("type", "")
+                    if is_known_capability_type(raw_type):
+                        resolved.append(_adapter.validate_python(cap))
+                    else:
+                        resolved.append(GenericCapabilityConfig(**cap))
                 else:
                     resolved.append(cap)
             data["capabilities"] = resolved

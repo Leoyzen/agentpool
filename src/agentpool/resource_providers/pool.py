@@ -194,8 +194,8 @@ class PoolResourceProvider(ResourceProvider):
         """Create a delegation tool for a team from its config.
 
         On invocation, creates session-level agents for each team member,
-        assembles them into a ``Team`` / ``TeamRun``, and runs the team
-        with the provided prompt.
+        assembles them into a ``BaseTeam``, and runs the team with the
+        provided prompt.
 
         Args:
             team_name: Name of the team in the manifest.
@@ -231,7 +231,9 @@ class PoolResourceProvider(ResourceProvider):
                 member_nodes.append(member_agent)
 
             # Build and run the team
-            team = team_config.get_team(member_nodes, team_name)
+            from agentpool.orchestrator.session_pool import _build_team_from_config
+
+            team = _build_team_from_config(team_name, team_config, member_nodes)
             result = await team.run(prompt)
             return result.content
 

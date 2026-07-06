@@ -8,8 +8,8 @@ Consolidated from:
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
-import anyio
 import pytest
 
 from agentpool import Agent
@@ -18,16 +18,9 @@ from agentpool.agents.events import RunStartedEvent, StreamEventEmitter
 from agentpool.orchestrator.core import EventBus
 
 
-def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
-    """Check if a memory receive stream has no buffered items."""
-    try:
-        stream.receive_nowait()
-    except anyio.WouldBlock:
-        return True
-    except anyio.EndOfStream:
-        return True
-    else:
-        return False
+def _stream_empty(queue: asyncio.Queue[Any]) -> bool:
+    """Check if a subscriber queue has no buffered items."""
+    return queue.empty()
 
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
@@ -56,7 +49,7 @@ async def test_descendant_scope_receives_child_event() -> None:
     await event_bus.publish(child_id, event)
 
     # Subscriber should receive the event
-    received = await asyncio.wait_for(queue.receive(), timeout=0.5)
+    received = await asyncio.wait_for(queue.get(), timeout=0.5)
     assert received is not None
     assert isinstance(received.event, RunStartedEvent)
     assert received.event.run_id == "run-child-1"
@@ -77,7 +70,7 @@ async def test_descendant_scope_receives_own_event() -> None:
     event = RunStartedEvent(session_id=parent_id, run_id="run-parent-1")
     await event_bus.publish(parent_id, event)
 
-    received = await asyncio.wait_for(queue.receive(), timeout=0.5)
+    received = await asyncio.wait_for(queue.get(), timeout=0.5)
     assert received is not None
     assert isinstance(received.event, RunStartedEvent)
     assert received.event.run_id == "run-parent-1"
@@ -121,7 +114,7 @@ async def test_descendant_scope_receives_grandchild_event() -> None:
     event = RunStartedEvent(session_id=grandchild_id, run_id="run-grandchild-1")
     await event_bus.publish(grandchild_id, event)
 
-    received = await asyncio.wait_for(queue.receive(), timeout=0.5)
+    received = await asyncio.wait_for(queue.get(), timeout=0.5)
     assert received is not None
     assert isinstance(received.event, RunStartedEvent)
     assert received.event.run_id == "run-grandchild-1"
@@ -174,7 +167,7 @@ async def test_descendant_scope_with_session_controller() -> None:
         event = RunStartedEvent(session_id=child_id, run_id="run-child-1")
         await event_bus.publish(child_id, event)
 
-        received = await asyncio.wait_for(queue.receive(), timeout=0.5)
+        received = await asyncio.wait_for(queue.get(), timeout=0.5)
         assert received is not None
         assert isinstance(received.event, RunStartedEvent)
         assert received.event.run_id == "run-child-1"
@@ -209,7 +202,7 @@ async def test_emit_publishes_exactly_once_to_event_bus() -> None:
     await emitter.emit_event(event)
 
     # EventBus subscriber should receive exactly one event
-    received = await asyncio.wait_for(queue.receive(), timeout=0.5)
+    received = await asyncio.wait_for(queue.get(), timeout=0.5)
     assert received is not None
     assert isinstance(received.event, RunStartedEvent)
     assert received.event.run_id == "run-1"
@@ -240,9 +233,9 @@ async def test_emit_multiple_events_each_published_once() -> None:
     received: list[RunStartedEvent] = []
     while True:
         try:
-            ev = queue.receive_nowait()
-            received.append(ev)
-        except (anyio.WouldBlock, anyio.EndOfStream):
+            ev = queue.get_nowait()
+            received.append(ev)  # type: ignore[arg-type]
+        except (asyncio.QueueEmpty, asyncio.QueueShutDown):
             break
 
     assert len(received) == 3

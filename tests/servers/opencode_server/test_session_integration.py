@@ -17,11 +17,14 @@ Coverage:
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, Mock
 
-import anyio
 import pytest
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 from agentpool.orchestrator.core import RunHandle, SessionPool
 from agentpool.orchestrator.run import RunStatus
@@ -35,16 +38,9 @@ from agentpool_server.opencode_server.state import ServerState
 # =============================================================================
 
 
-def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
-    """Check if a memory receive stream has no buffered items."""
-    try:
-        stream.receive_nowait()
-    except anyio.WouldBlock:
-        return True
-    except anyio.EndOfStream:
-        return True
-    else:
-        return False
+def _stream_empty(queue: asyncio.Queue[Any]) -> bool:
+    """Check if a subscriber queue has no buffered items."""
+    return queue.empty()
 
 
 @pytest.fixture
@@ -92,7 +88,7 @@ def mock_agent_pool() -> Mock:
 
     mock_turn = Mock()
     mock_turn.execute = _mock_execute
-    mock_turn.message_history: list[Any] = []
+    mock_turn.message_history = []  # type: ignore[misc]
     mock_agent.create_turn = Mock(return_value=mock_turn)
 
     # Use a mock config that returns our mock agent from get_agent().
@@ -120,7 +116,9 @@ def mock_session_store() -> Mock:
 
 
 @pytest.fixture
-async def session_pool(mock_agent_pool: Mock, mock_session_store: Mock) -> SessionPool:
+async def session_pool(
+    mock_agent_pool: Mock, mock_session_store: Mock
+) -> AsyncIterator[SessionPool]:  # type: ignore[misc]
     """Create a real SessionPool with mocked dependencies."""
     sp = SessionPool(
         pool=mock_agent_pool,
@@ -414,8 +412,8 @@ class TestMessageRouting:
         events = []
         while True:
             try:
-                event = queue.receive_nowait()
-            except (anyio.WouldBlock, anyio.EndOfStream):
+                event = queue.get_nowait()
+            except (asyncio.QueueEmpty, asyncio.QueueShutDown):
                 break
             if event is not None:
                 events.append(event)
@@ -576,7 +574,7 @@ class TestSessionAbort:
 
         # Override create_turn to simulate a long-running turn that
         # blocks until the run_ctx is cancelled.
-        mock_agent = session_pool.pool.get_agent("test-agent")
+        mock_agent = session_pool.pool.get_agent("test-agent")  # type: ignore[attr-defined]
         captured_ctx: list[Any] = []
 
         async def _blocking_execute() -> Any:
@@ -591,7 +589,7 @@ class TestSessionAbort:
 
         blocking_turn = Mock()
         blocking_turn.execute = _blocking_execute
-        blocking_turn.message_history: list[Any] = []
+        blocking_turn.message_history = []  # type: ignore[misc]
 
         def _create_turn_with_ctx(prompts: Any, run_ctx: Any, message_history: Any) -> Any:
             captured_ctx.append(run_ctx)
@@ -932,7 +930,7 @@ class TestInputProviderFlow:
         assert state_a.input_provider is not state_b.input_provider
 
         # The shared agent must NOT be mutated
-        shared_agent = session_pool.pool.get_agent("test-agent")
+        shared_agent = session_pool.pool.get_agent("test-agent")  # type: ignore[attr-defined]
         assert shared_agent._input_provider is None
 
 

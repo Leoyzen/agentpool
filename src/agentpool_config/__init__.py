@@ -14,7 +14,7 @@ from agentpool_config.capabilities import CapabilityConfig
 from agentpool_config.forward_targets import ForwardingTarget
 from agentpool_config.session import SessionQuery
 from agentpool_config.session_pool import ACPConfig, OpenCodeConfig, SessionPoolConfig
-from agentpool_config.teams import TeamConfig
+from agentpool_config.teams import TeamConfig, TeamMemberConfig
 from agentpool_config.durable import CheckpointConfig, DeferredToolConfig
 from agentpool_config.mcp_server import (
     BaseMCPServerConfig,
@@ -37,6 +37,19 @@ from agentpool_config.hooks import (
     HookConfig,
     HooksConfig,
     PromptHookConfig,
+)
+from agentpool_config.graph_config import (
+    GraphConfig,
+    GraphEdgeConfig,
+    GraphJoinConfig,
+    GraphStepConfig,
+)
+from agentpool_config.graph_translation import (
+    build_steps_from_agents,
+    translate_config_to_graph,
+    translate_connections_to_edges,
+    translate_team_to_graph,
+    translate_teams_to_graphs,
 )
 from agentpool_config.toolsets import ToolsetConfig
 from agentpool_config.skills import SkillsConfig, DEFAULT_SKILLS_PATHS
@@ -86,6 +99,10 @@ __all__ = [
     "DeferredToolConfig",
     "EventHandlerConfig",
     "ForwardingTarget",
+    "GraphConfig",
+    "GraphEdgeConfig",
+    "GraphJoinConfig",
+    "GraphStepConfig",
     "HookConfig",
     "HooksConfig",
     "MCPServerConfig",
@@ -103,12 +120,18 @@ __all__ = [
     "StdoutEventHandlerConfig",
     "StreamableHTTPMCPServerConfig",
     "TeamConfig",
+    "TeamMemberConfig",
     "ToolConfig",
     "ToolsetConfig",
+    "build_steps_from_agents",
     "find_project_config",
     "get_global_config_dir",
     "get_global_config_path",
     "resolve_config",
     "resolve_config_for_server",
     "resolve_handler_configs",
+    "translate_config_to_graph",
+    "translate_connections_to_edges",
+    "translate_team_to_graph",
+    "translate_teams_to_graphs",
 ]

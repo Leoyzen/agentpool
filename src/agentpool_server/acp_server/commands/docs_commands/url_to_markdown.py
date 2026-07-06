@@ -9,9 +9,9 @@ import anyenv
 from pydantic_ai import UserPromptPart
 from slashed import CommandContext  # noqa: TC002
 
+from agentpool.commands.base import NodeCommand
 from agentpool.log import get_logger
 from agentpool.messaging.context import NodeContext  # noqa: TC001
-from agentpool_commands.base import NodeCommand
 from agentpool_server.acp_server.session import ACPSession  # noqa: TC001
 
 
