@@ -136,6 +136,17 @@ class ElicitationFutureRegistry:
                 )
         self._futures.clear()
 
+    def remove(self, deferred_handle: str) -> None:
+        """Remove a future from the registry without resolving it.
+
+        Called in ``finally`` blocks to ensure cleanup on timeout or
+        cancellation. If the handle is not in the registry, this is a no-op.
+
+        Args:
+            deferred_handle: Identifier matching the registered future.
+        """
+        self._futures.pop(deferred_handle, None)
+
 
 def _extract_elicitation_params(
     call_meta: dict[str, Any],

@@ -2387,10 +2387,10 @@ class SessionPool:
             if call.deferred_kind == "elicitation":
                 elicitation_call_ids.add(call.tool_call_id)
 
-        # Filter deferred_tool_results to exclude elicitation calls.
-        # Elicitation calls are resolved through re-execution, not direct
-        # result injection. The results dict from the caller contains only
-        # non-elicitation results (elicitation payloads come separately).
+        # No filtering needed — the caller (resume_session) separates
+        # elicitation payloads from deferred tool results at the API level.
+        # Elicitation calls are resolved through re-execution or future
+        # resolution, not direct result injection.
         non_elicitation_results = results
 
         try:
@@ -2681,6 +2681,13 @@ class SessionPool:
                             count=total_resolved,
                         )
                         return
+
+                    # In-process resolution failed (race condition: future
+                    # was already removed). If the run is still active, we
+                    # cannot start crash recovery — that would create a
+                    # concurrent run. Raise SessionBusyError instead.
+                    if session is not None and session.current_run_id is not None:
+                        raise SessionBusyError(session_id, session.current_run_id)  # noqa: TRY301
 
                 # Load checkpoint data
                 checkpoint = await self._load_checkpoint_data(session_id)

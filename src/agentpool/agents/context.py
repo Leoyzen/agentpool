@@ -379,6 +379,10 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             from agentpool.tasks.exceptions import RunAbortedError
 
             raise RunAbortedError("Elicitation timed out after 300s") from None
+        finally:
+            # Ensure the future is removed from the registry even on
+            # timeout or CancelledError, so retries don't hit ValueError.
+            registry.remove(handle)
 
         # Convert ElicitationResumePayload to ElicitResult.
         from mcp.types import ElicitResult as MCPElicitResult

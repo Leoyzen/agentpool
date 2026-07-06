@@ -363,11 +363,8 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                 requested_schema=event.requested_schema or {"type": "object"},
             )
         except asyncio.CancelledError:
-            logger.debug("Elicitation cancelled by user", session_id=session_id)
-            payload = ElicitationResumePayload(
-                deferred_handle=event.deferred_handle,
-                action="cancel",
-            )
+            logger.debug("Elicitation background task cancelled", session_id=session_id)
+            raise
         except Exception:
             logger.exception(
                 "Failed to send elicitation/create to ACP client",
