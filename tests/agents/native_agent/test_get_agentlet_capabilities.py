@@ -603,3 +603,54 @@ async def test_capability_config_build_called(mock_agent: Agent[Any]) -> None:
             await mock_agent.get_agentlet(None, None, None)
 
         mock_build.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Test: Capabilities from from_config() are not duplicated in get_agentlet()
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_from_config_capabilities_not_duplicated() -> None:
+    """Capabilities built in from_config() must not be re-built in get_agentlet().
+
+    from_config() pre-builds capabilities from config.capabilities and stores
+    them in _extra_capabilities. get_agentlet() also iterates config.capabilities
+    and builds them. This causes duplicate capability instances, which leads to
+    tool name conflicts (e.g. two 'task' tools from two BackgroundTaskCapability
+    instances).
+
+    This test calls from_config() with a config containing a capability, then
+    calls get_agentlet() and verifies the capability appears exactly once.
+    """
+    from pydantic_ai.capabilities import Instrumentation
+
+    from agentpool_config.capabilities import GenericCapabilityConfig
+    from agentpool.models.agents import NativeAgentConfig
+
+    cap_config = GenericCapabilityConfig(
+        type="pydantic_ai.capabilities.Instrumentation",
+        args={},
+    )
+    config = NativeAgentConfig(
+        name="test_dedup_agent",
+        model="openai:gpt-4o-mini",
+        system_prompt=["Be helpful."],
+        capabilities=[cap_config],
+    )
+
+    agent = Agent.from_config(config)
+
+    with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
+        mock_pydantic_agent.return_value = MagicMock()
+        await agent.get_agentlet(None, None, None)
+
+        call_kwargs = mock_pydantic_agent.call_args.kwargs
+        capabilities = call_kwargs.get("capabilities", []) or []
+
+        # Count Instrumentation instances — should be exactly 1, not 2
+        instrumentation_caps = [c for c in capabilities if isinstance(c, Instrumentation)]
+        assert len(instrumentation_caps) == 1, (
+            f"Expected exactly 1 Instrumentation capability, found {len(instrumentation_caps)}. "
+            f"Capabilities are being duplicated between _extra_capabilities and config.capabilities."
+        )

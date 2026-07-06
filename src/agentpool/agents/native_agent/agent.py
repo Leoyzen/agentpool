@@ -601,7 +601,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             usage_limits=config.usage_limits,
             providers=config.model_providers,
             metadata=getattr(config, "metadata", None),
-            capabilities=[_build_capability_from_config(c) for c in config.capabilities] or None,
+            capabilities=None,  # Built lazily in get_agentlet() from self.config.capabilities
         )
 
     async def __aenter__(self) -> Self:
