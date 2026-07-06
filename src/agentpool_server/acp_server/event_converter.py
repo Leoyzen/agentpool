@@ -778,12 +778,12 @@ class ACPEventConverter:
                 resolved_call_count=call_count,
                 source=resume_source,
             ):
-                # Signal session resumption to the client
-                yield AgentMessageChunk.text(
-                    f"\n\n🔄 **Session resumed** ({call_count} deferred call(s) resolved"
-                    + (f" from {resume_source}" if resume_source else "")
-                    + ").\n\n",
-                    message_id=self._current_message_id,
+                # Backend-only log — no ACP notification needed for resume.
+                logger.info(
+                    "Session resumed",
+                    session_id=_sess_id,
+                    resolved_call_count=call_count,
+                    source=resume_source,
                 )
 
             case CustomEvent(event_type=ev_type, source=ev_source):
