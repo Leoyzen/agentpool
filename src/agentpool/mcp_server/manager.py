@@ -518,18 +518,17 @@ class MCPManager:
                 capabilities.append(_make_capability(server, transport, toolset_cache))
 
         if session_id is not None:
-            # GAP-11: The session context may have been popped by concurrent
-            # cleanup_session() between get_or_create_session() and the dict
-            # lookup.  Catch KeyError and fall back to global-only caps.
-            try:
-                ctx = self.get_or_create_session(session_id)
-            except KeyError:
+            # Use .get() instead of get_or_create_session() to avoid
+            # recreating a cleaned-up context (memory leak). If the context
+            # was already popped by cleanup_session(), fall back to
+            # global-only capabilities.
+            ctx = self._session_contexts.get(session_id)
+            if ctx is None:
                 logger.warning(
                     "Session %s context was removed during as_capability(); "
                     "falling back to global-only MCP capabilities.",
                     session_id,
                 )
-                ctx = None
 
             if ctx is not None and ctx.snapshot is not None:
                 # Global configs use the global toolset cache.
@@ -549,8 +548,7 @@ class MCPManager:
                         continue
                     transport = await self._global_pool.get_transport(server)
                     capabilities.append(_make_capability(server, transport, self._toolset_cache))
-            # If ctx is None (KeyError fallback), we've already logged the
-            # warning — return global-only capabilities from self.servers.
+            # If ctx is None (session cleaned up), return global-only caps.
             else:
                 for server in self.servers:
                     if not server.enabled or isinstance(server, AcpMCPServerConfig):
@@ -634,7 +632,9 @@ class MCPManager:
         Args:
             session_id: Unique identifier for the session to clean up.
         """
-        ctx = self.get_or_create_session(session_id)
+        ctx = self._session_contexts.get(session_id)
+        if ctx is None:
+            return
         async with ctx._cleanup_lock:
             try:
                 ctx.toolset_cache.clear()

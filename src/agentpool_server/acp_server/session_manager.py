@@ -262,6 +262,14 @@ class ACPSessionManager:
                 "Closing existing session before resume",
                 session_id=session_id,
             )
+            # Remove session_id from all connection mappings to prevent
+            # the old connection's disconnect handler from closing the
+            # newly resumed session.
+            for conn_id, sessions in list(self._connection_sessions.items()):
+                if session_id in sessions:
+                    sessions.discard(session_id)
+                    if not sessions:
+                        self._connection_sessions.pop(conn_id, None)
             # SessionController handles RunHandle lifecycle (10s timeout + cancel),
             # agent.mcp.cleanup_session(), and agent.__aexit__().
             controller = self._session_controller
