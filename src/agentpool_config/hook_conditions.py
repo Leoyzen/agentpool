@@ -116,7 +116,7 @@ class Jinja2HookCondition(BaseHookCondition):
     - tool_output: Tool result (post_tool_use only)
     - duration_ms: Execution time in ms (post_tool_use only)
     - prompt: User prompt (run hooks)
-    - result: Run result (post_run only)
+    - result: Run result (post_turn only)
     - agent_name: Name of the agent
     - event: Hook event name
     """
@@ -202,7 +202,7 @@ class OutputSizeCondition(BaseHookCondition):
 
 
 class PromptCondition(BaseHookCondition):
-    """Check prompt content (pre_run/post_run)."""
+    """Check prompt content (pre_turn/post_turn)."""
 
     model_config = ConfigDict(json_schema_extra={"title": "Prompt Condition"})
 
@@ -302,7 +302,7 @@ PostToolCondition = Annotated[
     Field(discriminator="type"),
 ]
 
-# Conditions valid for pre_run/post_run
+# Conditions valid for pre_turn/post_turn
 RunCondition = Annotated[
     PromptCondition | Jinja2HookCondition | AndHookCondition | OrHookCondition | NotHookCondition,
     Field(discriminator="type"),

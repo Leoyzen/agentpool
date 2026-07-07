@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-HookEvent = Literal["pre_run", "post_run", "pre_tool_use", "post_tool_use"]
+HookEvent = Literal["pre_turn", "post_turn", "pre_tool_use", "post_tool_use"]
 
 
 class HookInput(TypedDict, total=False):
@@ -31,7 +31,7 @@ class HookInput(TypedDict, total=False):
     tool_output: Any
     duration_ms: float
 
-    # Run-related fields (pre_run, post_run)
+    # Run-related fields (pre_turn, post_turn)
     prompt: str
     result: Any
 

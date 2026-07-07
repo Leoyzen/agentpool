@@ -46,8 +46,8 @@ def test_agent_hooks_still_works() -> None:
     """AgentHooks with _warn=False initializes and accepts hooks."""
     ah = AgentHooks(_warn=False)
     assert ah.has_hooks() is False
-    assert ah.pre_run == []
-    assert ah.post_run == []
+    assert ah.pre_turn == []
+    assert ah.post_turn == []
     assert ah.pre_tool_use == []
     assert ah.post_tool_use == []
 

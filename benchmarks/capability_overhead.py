@@ -76,14 +76,14 @@ def _make_hooks() -> AgentHooks:
         """No-op hook for benchmarking."""
 
         def __init__(self) -> None:
-            super().__init__(event="pre_run")
+            super().__init__(event="pre_turn")
 
         async def execute(self, input_data: HookInput, env: Any = None) -> HookResult:
             return HookResult(decision="allow")
 
     return AgentHooks(
-        pre_run=[NoOpHook()],
-        post_run=[NoOpHook()],
+        pre_turn=[NoOpHook()],
+        post_turn=[NoOpHook()],
         pre_tool_use=[NoOpHook()],
         post_tool_use=[NoOpHook()],
         _warn=False,
@@ -164,7 +164,7 @@ async def benchmark_agenthooks_vs_capability() -> dict[str, Any]:
         _ = hooks.as_capability()
 
     # Old approach: just instantiate / check hooks (the old code would call
-    # run_pre_run_hooks etc. directly; we measure the lightweight access)
+    # run_pre_turn_hooks etc. directly; we measure the lightweight access)
     old_times: list[float] = []
     for _ in range(ITERATIONS):
         start = time.perf_counter()

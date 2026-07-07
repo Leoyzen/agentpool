@@ -12,18 +12,18 @@ Hook Migration Audit (Phase 6)
 This module documents the migration status of legacy ``AgentHooks``
 (from ``hooks/agent_hooks.py``) to pydantic-ai ``Capability`` hooks.
 
-**pre_run** -> ``Hooks.before_run``:
+**pre_turn** -> ``Hooks.before_run``:
     Documented only. ``AgentHooks.as_capability()`` returns ``Hooks``
     with ``before_run`` registered. However,
     ``NativeAgentHookManager.as_capability()`` **strips** all ``Hooks``
     hooks (lines 429-433) to prevent double-firing with the old
-    ``run_pre_run_hooks()`` delegate. When ``ResourceProvider`` is
+    ``run_pre_turn_hooks()`` delegate. When ``ResourceProvider`` is
     fully removed (Phase 5 complete) and all callers migrate to
     Capabilities, ``before_run`` can be unstripped.
 
-**post_run** -> ``Hooks.after_run``:
-    Same status as ``pre_run``. Stripped in ``as_capability()``.
-    Old ``run_post_run_hooks()`` delegate remains for backward compat.
+**post_turn** -> ``Hooks.after_run``:
+    Same status as ``pre_turn``. Stripped in ``as_capability()``.
+    Old ``run_post_turn_hooks()`` delegate remains for backward compat.
 
 **pre_tool_use** -> ``before_tool_execute`` (on
 ``_ToolInterceptCapability``):
@@ -50,12 +50,12 @@ Hooks that remain distinct:
   concern (error boundary).
 
 Migration Plan:
-1. When all callers of ``run_pre_run_hooks()`` /
-   ``run_post_run_hooks()`` are migrated to Capabilities, remove the
+1. When all callers of ``run_pre_turn_hooks()`` /
+   ``run_post_turn_hooks()`` are migrated to Capabilities, remove the
    ``base_hooks._registry[...] = []`` stripping in
    ``as_capability()`` (lines 429-432).
-2. Remove the legacy ``run_pre_run_hooks()`` /
-   ``run_post_run_hooks()`` methods from this class.
+2. Remove the legacy ``run_pre_turn_hooks()`` /
+   ``run_post_turn_hooks()`` methods from this class.
 3. Remove ``NativeAgentHookManager._agent`` and ``agent_hooks``
    parameters.
 """
@@ -64,6 +64,7 @@ from __future__ import annotations
 
 from dataclasses import KW_ONLY, dataclass
 from typing import TYPE_CHECKING, Any
+import warnings
 
 from pydantic_ai.capabilities.abstract import AbstractCapability
 
@@ -494,7 +495,7 @@ class NativeAgentHookManager:
             ]
         )
 
-    async def run_pre_run_hooks(
+    async def run_pre_turn_hooks(
         self,
         *,
         agent_name: str,
@@ -502,7 +503,7 @@ class NativeAgentHookManager:
         session_id: str | None = None,
         env: ExecutionEnvironment | None = None,
     ) -> HookResult:
-        """Execute pre-run hooks.
+        """Execute pre-turn hooks.
 
         Args:
             agent_name: Name of the agent.
@@ -514,13 +515,72 @@ class NativeAgentHookManager:
             Hook result. If decision is "deny", the run should be blocked.
         """
         if self.agent_hooks:
-            return await self.agent_hooks.run_pre_run_hooks(
+            return await self.agent_hooks.run_pre_turn_hooks(
                 agent_name=agent_name,
                 prompt=prompt,
                 session_id=session_id,
                 env=env,
             )
         return HookResult(decision="allow")
+
+    async def run_post_turn_hooks(
+        self,
+        *,
+        agent_name: str,
+        prompt: str,
+        result: Any,
+        session_id: str | None = None,
+        env: ExecutionEnvironment | None = None,
+        duration_ms: float = 0.0,
+    ) -> HookResult:
+        """Execute post-turn hooks.
+
+        Args:
+            agent_name: Name of the agent.
+            prompt: The prompt that was processed.
+            result: The result from the run.
+            session_id: Optional conversation identifier.
+            env: Agent's execution environment, passed to command hooks.
+            duration_ms: How long the turn took to execute in milliseconds.
+
+        Returns:
+            Hook result.
+        """
+        if self.agent_hooks:
+            return await self.agent_hooks.run_post_turn_hooks(
+                agent_name=agent_name,
+                prompt=prompt,
+                result=result,
+                session_id=session_id,
+                env=env,
+                duration_ms=duration_ms,
+            )
+        return HookResult(decision="allow")
+
+    async def run_pre_run_hooks(
+        self,
+        *,
+        agent_name: str,
+        prompt: str,
+        session_id: str | None = None,
+        env: ExecutionEnvironment | None = None,
+    ) -> HookResult:
+        """Deprecated alias for :meth:`run_pre_turn_hooks`.
+
+        .. deprecated::
+            Use :meth:`run_pre_turn_hooks` instead.
+        """
+        warnings.warn(
+            "run_pre_run_hooks() is deprecated, use run_pre_turn_hooks() instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return await self.run_pre_turn_hooks(
+            agent_name=agent_name,
+            prompt=prompt,
+            session_id=session_id,
+            env=env,
+        )
 
     async def run_post_run_hooks(
         self,
@@ -531,27 +591,23 @@ class NativeAgentHookManager:
         session_id: str | None = None,
         env: ExecutionEnvironment | None = None,
     ) -> HookResult:
-        """Execute post-run hooks.
+        """Deprecated alias for :meth:`run_post_turn_hooks`.
 
-        Args:
-            agent_name: Name of the agent.
-            prompt: The prompt that was processed.
-            result: The result from the run.
-            session_id: Optional conversation identifier.
-            env: Agent's execution environment, passed to command hooks.
-
-        Returns:
-            Hook result.
+        .. deprecated::
+            Use :meth:`run_post_turn_hooks` instead.
         """
-        if self.agent_hooks:
-            return await self.agent_hooks.run_post_run_hooks(
-                agent_name=agent_name,
-                prompt=prompt,
-                result=result,
-                session_id=session_id,
-                env=env,
-            )
-        return HookResult(decision="allow")
+        warnings.warn(
+            "run_post_run_hooks() is deprecated, use run_post_turn_hooks() instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return await self.run_post_turn_hooks(
+            agent_name=agent_name,
+            prompt=prompt,
+            result=result,
+            session_id=session_id,
+            env=env,
+        )
 
     async def run_pre_tool_hooks(
         self,

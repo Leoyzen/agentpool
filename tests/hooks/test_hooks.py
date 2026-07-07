@@ -51,29 +51,29 @@ def modify_input_hook(**kwargs) -> HookResult:
     return {"decision": "allow", "modified_input": {"modified": True}}
 
 
-# Tests for pre_run hooks
+# Tests for pre_turn hooks
 
 
-async def test_pre_run_hook_allow():
+async def test_pre_turn_hook_allow():
     """Test pre-run hook that allows execution."""
     reset_hook_state()
 
-    hooks = AgentHooks(pre_run=[CallableHook(event="pre_run", fn=allow_hook)])
+    hooks = AgentHooks(pre_turn=[CallableHook(event="pre_turn", fn=allow_hook)])
     agent = Agent(model="test", hooks=hooks)
 
     async with agent:
         result = await agent.run("Hello")
 
     assert len(hook_state["calls"]) == 1
-    assert hook_state["calls"][0] == ("allow", "pre_run")
+    assert hook_state["calls"][0] == ("allow", "pre_turn")
     assert result.content is not None  # Test model returns some output
 
 
-async def test_pre_run_hook_deny():
+async def test_pre_turn_hook_deny():
     """Test pre-run hook that blocks execution gracefully."""
     reset_hook_state()
 
-    hooks = AgentHooks(pre_run=[CallableHook(event="pre_run", fn=deny_hook)])
+    hooks = AgentHooks(pre_turn=[CallableHook(event="pre_turn", fn=deny_hook)])
     agent = Agent(model="test", hooks=hooks)
 
     async with agent:
@@ -81,17 +81,17 @@ async def test_pre_run_hook_deny():
 
     assert result is not None  # graceful return, not exception
     assert len(hook_state["calls"]) == 1
-    assert hook_state["calls"][0] == ("deny", "pre_run")
+    assert hook_state["calls"][0] == ("deny", "pre_turn")
 
 
-# Tests for post_run hooks
+# Tests for post_turn hooks
 
 
-async def test_post_run_hook():
+async def test_post_turn_hook():
     """Test post-run hook receives result."""
     reset_hook_state()
 
-    hooks = AgentHooks(post_run=[CallableHook(event="post_run", fn=record_result_hook)])
+    hooks = AgentHooks(post_turn=[CallableHook(event="post_turn", fn=record_result_hook)])
     agent = Agent(model="test", hooks=hooks)
 
     async with agent:
@@ -100,7 +100,7 @@ async def test_post_run_hook():
     assert len(hook_state["results"]) == 1
     assert "Hello" in str(hook_state["results"][0]["prompt"])
     assert hook_state["results"][0]["result"] is not None
-    assert hook_state["results"][0]["event"] == "post_run"
+    assert hook_state["results"][0]["event"] == "post_turn"
 
 
 # Tests for pre_tool_use hooks
@@ -156,8 +156,8 @@ def test_agent_hooks_has_hooks():
     """Test has_hooks method."""
     empty = AgentHooks()
     assert not empty.has_hooks()
-    with_pre_run = AgentHooks(pre_run=[CallableHook(event="pre_run", fn=allow_hook)])
-    assert with_pre_run.has_hooks()
+    with_pre_turn = AgentHooks(pre_turn=[CallableHook(event="pre_turn", fn=allow_hook)])
+    assert with_pre_turn.has_hooks()
 
 
 def test_agent_hooks_repr():
@@ -166,10 +166,10 @@ def test_agent_hooks_repr():
     assert repr(empty) == "AgentHooks(empty)"
 
     with_hooks = AgentHooks(
-        pre_run=[CallableHook(event="pre_run", fn=allow_hook)],
+        pre_turn=[CallableHook(event="pre_turn", fn=allow_hook)],
         post_tool_use=[CallableHook(event="post_tool_use", fn=allow_hook)],
     )
-    assert "pre_run=1" in repr(with_hooks)
+    assert "pre_turn=1" in repr(with_hooks)
     assert "post_tool_use=1" in repr(with_hooks)
 
 
@@ -181,9 +181,9 @@ async def test_multiple_hooks_all_allow():
     reset_hook_state()
 
     hooks = AgentHooks(
-        pre_run=[
-            CallableHook(event="pre_run", fn=allow_hook),
-            CallableHook(event="pre_run", fn=allow_hook),
+        pre_turn=[
+            CallableHook(event="pre_turn", fn=allow_hook),
+            CallableHook(event="pre_turn", fn=allow_hook),
         ]
     )
     async with Agent(model="test", hooks=hooks) as agent:
@@ -198,9 +198,9 @@ async def test_multiple_hooks_one_denies():
     reset_hook_state()
 
     hooks = AgentHooks(
-        pre_run=[
-            CallableHook(event="pre_run", fn=allow_hook),
-            CallableHook(event="pre_run", fn=deny_hook),
+        pre_turn=[
+            CallableHook(event="pre_turn", fn=allow_hook),
+            CallableHook(event="pre_turn", fn=deny_hook),
         ]
     )
     async with Agent(model="test", hooks=hooks) as agent:

@@ -84,7 +84,7 @@ def modify_input_hook(**kwargs) -> HookResult:
 
 def test_as_capability_returns_hooks_instance():
     """Test that as_capability returns a pydantic-ai Hooks instance."""
-    hooks = AgentHooks(pre_run=[CallableHook(event="pre_run", fn=allow_hook)])
+    hooks = AgentHooks(pre_turn=[CallableHook(event="pre_turn", fn=allow_hook)])
     capability = hooks.as_capability()
     assert isinstance(capability, Hooks)
 
@@ -99,20 +99,20 @@ def test_empty_hooks_returns_empty_hooks():
 
 def test_has_hooks_with_capability():
     """Test has_hooks is True when hooks configured."""
-    hooks = AgentHooks(pre_run=[CallableHook(event="pre_run", fn=allow_hook)])
+    hooks = AgentHooks(pre_turn=[CallableHook(event="pre_turn", fn=allow_hook)])
     assert hooks.has_hooks()
     capability = hooks.as_capability()
     assert "before_run" in capability._registry
 
 
-# Tests for before_run / pre_run mapping
+# Tests for before_run / pre_turn mapping
 
 
-async def test_before_run_adapter_calls_pre_run_hooks():
-    """Test before_run adapter invokes pre_run hooks."""
+async def test_before_run_adapter_calls_pre_turn_hooks():
+    """Test before_run adapter invokes pre_turn hooks."""
     reset_hook_state()
 
-    agent_hooks = AgentHooks(pre_run=[CallableHook(event="pre_run", fn=record_hook)])
+    agent_hooks = AgentHooks(pre_turn=[CallableHook(event="pre_turn", fn=record_hook)])
     capability = agent_hooks.as_capability()
     ctx = make_run_context()
 
@@ -121,14 +121,14 @@ async def test_before_run_adapter_calls_pre_run_hooks():
     assert len(hook_calls) == 1
     event_type, data = hook_calls[0]
     assert event_type == "record"
-    assert data["event"] == "pre_run"
+    assert data["event"] == "pre_turn"
 
 
 async def test_before_run_adapter_with_session_id():
     """Test before_run adapter passes session_id from deps."""
     reset_hook_state()
 
-    agent_hooks = AgentHooks(pre_run=[CallableHook(event="pre_run", fn=record_hook)])
+    agent_hooks = AgentHooks(pre_turn=[CallableHook(event="pre_turn", fn=record_hook)])
     capability = agent_hooks.as_capability()
     ctx = make_run_context(deps=MockDeps(session_id="sess-123"))
 
@@ -143,7 +143,7 @@ async def test_before_run_adapter_deny_sets_cancelled():
     """Test before_run adapter sets cancelled flag on deny instead of raising."""
     reset_hook_state()
 
-    agent_hooks = AgentHooks(pre_run=[CallableHook(event="pre_run", fn=deny_hook)])
+    agent_hooks = AgentHooks(pre_turn=[CallableHook(event="pre_turn", fn=deny_hook)])
     capability = agent_hooks.as_capability()
     mock_deps = MockDeps(session_id="test-session")
     ctx = make_run_context(deps=mock_deps)
@@ -156,20 +156,20 @@ async def test_before_run_adapter_deny_sets_cancelled():
 
 
 async def test_before_run_adapter_no_hooks():
-    """Test that AgentHooks without pre_run doesn't register before_run."""
-    agent_hooks = AgentHooks(post_run=[CallableHook(event="post_run", fn=allow_hook)])
+    """Test that AgentHooks without pre_turn doesn't register before_run."""
+    agent_hooks = AgentHooks(post_turn=[CallableHook(event="post_turn", fn=allow_hook)])
     capability = agent_hooks.as_capability()
     assert "before_run" not in capability._registry
 
 
-# Tests for after_run / post_run mapping
+# Tests for after_run / post_turn mapping
 
 
-async def test_after_run_adapter_calls_post_run_hooks():
-    """Test after_run adapter invokes post_run hooks."""
+async def test_after_run_adapter_calls_post_turn_hooks():
+    """Test after_run adapter invokes post_turn hooks."""
     reset_hook_state()
 
-    agent_hooks = AgentHooks(post_run=[CallableHook(event="post_run", fn=record_hook)])
+    agent_hooks = AgentHooks(post_turn=[CallableHook(event="post_turn", fn=record_hook)])
     capability = agent_hooks.as_capability()
     ctx = make_run_context()
     result = AgentRunResult(output="test-output")
@@ -180,7 +180,7 @@ async def test_after_run_adapter_calls_post_run_hooks():
     assert len(hook_calls) == 1
     event_type, data = hook_calls[0]
     assert event_type == "record"
-    assert data["event"] == "post_run"
+    assert data["event"] == "post_turn"
     assert data["result"] is result
 
 
@@ -188,7 +188,7 @@ async def test_after_run_adapter_passes_agent_name():
     """Test after_run adapter passes agent_name from deps."""
     reset_hook_state()
 
-    agent_hooks = AgentHooks(post_run=[CallableHook(event="post_run", fn=record_hook)])
+    agent_hooks = AgentHooks(post_turn=[CallableHook(event="post_turn", fn=record_hook)])
     capability = agent_hooks.as_capability()
     ctx = make_run_context(deps=MockDeps(node_name="my-agent"))
     result = AgentRunResult(output="test")
@@ -318,8 +318,8 @@ async def test_all_hook_types_combined():
     reset_hook_state()
 
     agent_hooks = AgentHooks(
-        pre_run=[CallableHook(event="pre_run", fn=allow_hook)],
-        post_run=[CallableHook(event="post_run", fn=allow_hook)],
+        pre_turn=[CallableHook(event="pre_turn", fn=allow_hook)],
+        post_turn=[CallableHook(event="post_turn", fn=allow_hook)],
         pre_tool_use=[CallableHook(event="pre_tool_use", fn=allow_hook)],
         post_tool_use=[CallableHook(event="post_tool_use", fn=allow_hook)],
     )
@@ -349,9 +349,9 @@ async def test_multiple_hooks_same_event():
     reset_hook_state()
 
     agent_hooks = AgentHooks(
-        pre_run=[
-            CallableHook(event="pre_run", fn=allow_hook),
-            CallableHook(event="pre_run", fn=allow_hook),
+        pre_turn=[
+            CallableHook(event="pre_turn", fn=allow_hook),
+            CallableHook(event="pre_turn", fn=allow_hook),
         ]
     )
     capability = agent_hooks.as_capability()
@@ -368,7 +368,7 @@ async def test_missing_deps_defaults():
     """Test adapter handles missing deps gracefully."""
     reset_hook_state()
 
-    agent_hooks = AgentHooks(pre_run=[CallableHook(event="pre_run", fn=record_hook)])
+    agent_hooks = AgentHooks(pre_turn=[CallableHook(event="pre_turn", fn=record_hook)])
     capability = agent_hooks.as_capability()
     ctx = make_run_context(deps=None)
 
