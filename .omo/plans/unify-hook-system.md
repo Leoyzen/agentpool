@@ -326,7 +326,7 @@ Wave 5 (Docs + Final): Todos 13-14
     - Evidence: `.omo/evidence/task-11-unify-hook-system.txt`
   Commit: Y | cleanup(hooks): remove dead code after NativeAgentHookManager slimming
 
-- [ ] 12. Remove deprecated APIs entirely (v0.5.0 breaking)
+- [x] 12. Remove deprecated APIs entirely (v0.5.0 breaking)
   What to do / Must NOT do: This is the breaking change phase:
     - Remove `as_capability()` method from `AgentHooks` in `src/agentpool/hooks/agent_hooks.py:307-335`
     - Remove `as_capability()` method from `NativeAgentHookManager` in `src/agentpool/agents/native_agent/hook_manager.py`

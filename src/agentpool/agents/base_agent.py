@@ -1329,7 +1329,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
         try:
             # Execute pre-turn hooks (guarded against double-firing with HookAwareTurn)
-            if self.hooks and "pre_turn" not in run_ctx.hooks_fired:
+            # Native agents fire hooks via HookAwareTurn in NativeTurn.execute();
+            # only ACP standalone path still uses this old hook firing.
+            if (
+                self.AGENT_TYPE != "native"
+                and self.hooks
+                and "pre_turn" not in run_ctx.hooks_fired
+            ):
                 run_ctx.hooks_fired.add("pre_turn")
                 pre_turn_result = await self.hooks.run_pre_turn_hooks(
                     agent_name=self.name,
@@ -1388,7 +1394,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         if final_message is not None:
             with anyio.CancelScope(shield=True):
                 # Execute post-turn hooks (guarded against double-firing with HookAwareTurn)
-                if self.hooks and "post_turn" not in run_ctx.hooks_fired:
+                # Native agents fire hooks via HookAwareTurn in NativeTurn.execute();
+                # only ACP standalone path still uses this old hook firing.
+                if (
+                    self.AGENT_TYPE != "native"
+                    and self.hooks
+                    and "post_turn" not in run_ctx.hooks_fired
+                ):
                     run_ctx.hooks_fired.add("post_turn")
                     prompt_str = (
                         user_msg.content

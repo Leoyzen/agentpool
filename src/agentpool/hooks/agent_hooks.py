@@ -5,9 +5,6 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
-import warnings
-
-from pydantic_ai.capabilities import Hooks
 
 from agentpool.hooks.base import HookInput, HookResult
 from agentpool.log import get_logger
@@ -17,10 +14,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from exxec import ExecutionEnvironment
-    from pydantic_ai import AgentRunResult
-    from pydantic_ai.capabilities.abstract import ValidatedToolArgs
-    from pydantic_ai.messages import ToolCallPart
-    from pydantic_ai.tools import RunContext, ToolDefinition
 
     from agentpool.hooks.base import Hook
 
@@ -34,10 +27,6 @@ class AgentHooks:
 
     Holds instantiated hooks organized by event type and provides
     methods to execute them with proper input/output handling.
-
-    .. deprecated::
-        This class is deprecated and will be removed in v0.5.0.
-        Use :meth:`as_capability()` instead.
 
     Attributes:
         pre_turn: Hooks executed before agent.run() processes a prompt.
@@ -115,58 +104,6 @@ class AgentHooks:
             duration_ms=duration_ms,
         )
         return await self._run_hooks(self.post_turn, input_data, env=env)
-
-    async def run_pre_run_hooks(
-        self,
-        *,
-        agent_name: str,
-        prompt: str,
-        session_id: str | None = None,
-        env: ExecutionEnvironment | None = None,
-    ) -> HookResult:
-        """Deprecated alias for :meth:`run_pre_turn_hooks`.
-
-        .. deprecated::
-            Use :meth:`run_pre_turn_hooks` instead.
-        """
-        warnings.warn(
-            "run_pre_run_hooks() is deprecated, use run_pre_turn_hooks() instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return await self.run_pre_turn_hooks(
-            agent_name=agent_name,
-            prompt=prompt,
-            session_id=session_id,
-            env=env,
-        )
-
-    async def run_post_run_hooks(
-        self,
-        *,
-        agent_name: str,
-        prompt: str,
-        result: Any,
-        session_id: str | None = None,
-        env: ExecutionEnvironment | None = None,
-    ) -> HookResult:
-        """Deprecated alias for :meth:`run_post_turn_hooks`.
-
-        .. deprecated::
-            Use :meth:`run_post_turn_hooks` instead.
-        """
-        warnings.warn(
-            "run_post_run_hooks() is deprecated, use run_post_turn_hooks() instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return await self.run_post_turn_hooks(
-            agent_name=agent_name,
-            prompt=prompt,
-            result=result,
-            session_id=session_id,
-            env=env,
-        )
 
     async def run_pre_tool_hooks(
         self,
@@ -359,145 +296,6 @@ class AgentHooks:
             combined["additional_context"] = "\n".join(contexts)
 
         return combined
-
-    def as_capability(self) -> Hooks:
-        """Return a pydantic-ai Hooks capability with all configured hooks registered.
-
-        Maps AgentPool hook types to pydantic-ai hook callbacks:
-        - pre_turn -> before_run
-        - post_turn -> after_run
-        - pre_tool_use -> before_tool_execute
-        - post_tool_use -> after_tool_execute
-
-        AgentPool hooks receive :class:`HookInput` and return :class:`HookResult`.
-        Adapter functions bridge the signature differences and handle decision
-        mapping (e.g. ``deny`` raises :exc:`RuntimeError` since pydantic-ai
-        hooks don't support blocking returns).
-
-        .. deprecated:: 0.5.0
-            Use :meth:`HookAwareTurn.execute` instead.
-
-        Returns:
-            A pydantic-ai Hooks instance with adapter callbacks.
-        """
-        warnings.warn(
-            "as_capability() is deprecated; hooks now fire via"
-            " HookAwareTurn in Turn.execute(). Will be removed in v0.5.0.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        kwargs: dict[str, Any] = {}
-
-        if self.pre_turn:
-            kwargs["before_run"] = self._wrap_before_run()
-        if self.post_turn:
-            kwargs["after_run"] = self._wrap_after_run()
-        if self.pre_tool_use:
-            kwargs["before_tool_execute"] = self._wrap_before_tool_execute()
-        if self.post_tool_use:
-            kwargs["after_tool_execute"] = self._wrap_after_tool_execute()
-
-        return Hooks(**kwargs)
-
-    def _wrap_before_run(self) -> Any:
-        """Wrap pre_turn hooks as a pydantic-ai before_run callback."""
-
-        async def wrapped(ctx: RunContext[Any]) -> None:
-            agent_ctx = ctx.deps
-            input_data = HookInput(
-                event="pre_turn",
-                agent_name=agent_ctx.node_name if agent_ctx else "",
-                session_id=agent_ctx.run_ctx.session_id
-                if agent_ctx and agent_ctx.run_ctx
-                else None,
-            )
-            result = await self._run_hooks(self.pre_turn, input_data)
-            if result.get("decision") == "deny":
-                if agent_ctx and agent_ctx.run_ctx:
-                    agent_ctx.run_ctx.cancelled = True
-                else:
-                    msg = f"Run blocked: {result.get('reason', 'pre_turn hook denied')}"
-                    raise RuntimeError(msg)
-
-        return wrapped
-
-    def _wrap_after_run(self) -> Any:
-        """Wrap post_turn hooks as a pydantic-ai after_run callback."""
-
-        async def wrapped(
-            ctx: RunContext[Any], *, result: AgentRunResult[Any]
-        ) -> AgentRunResult[Any]:
-            agent_ctx = ctx.deps
-            input_data = HookInput(
-                event="post_turn",
-                agent_name=agent_ctx.node_name if agent_ctx else "",
-                result=result,
-                session_id=agent_ctx.run_ctx.session_id
-                if agent_ctx and agent_ctx.run_ctx
-                else None,
-            )
-            await self._run_hooks(self.post_turn, input_data)
-            return result
-
-        return wrapped
-
-    def _wrap_before_tool_execute(self) -> Any:
-        """Wrap pre_tool_use hooks as a pydantic-ai before_tool_execute callback."""
-
-        async def wrapped(
-            ctx: RunContext[Any],
-            *,
-            call: ToolCallPart,
-            tool_def: ToolDefinition,
-            args: ValidatedToolArgs,
-        ) -> ValidatedToolArgs:
-            agent_ctx = ctx.deps
-            input_data = HookInput(
-                event="pre_tool_use",
-                agent_name=agent_ctx.node_name if agent_ctx else "",
-                tool_name=call.tool_name,
-                tool_input=dict(args),
-                session_id=agent_ctx.run_ctx.session_id
-                if agent_ctx and agent_ctx.run_ctx
-                else None,
-            )
-            result = await self._run_hooks(self.pre_tool_use, input_data)
-            if result.get("decision") == "deny":
-                msg = f"Tool execution blocked: {result.get('reason', 'pre_tool_use hook denied')}"
-                raise RuntimeError(msg)
-            if modified := result.get("modified_input"):
-                return {**dict(args), **modified}
-            return args
-
-        return wrapped
-
-    def _wrap_after_tool_execute(self) -> Any:
-        """Wrap post_tool_use hooks as a pydantic-ai after_tool_execute callback."""
-
-        async def wrapped(
-            ctx: RunContext[Any],
-            *,
-            call: ToolCallPart,
-            tool_def: ToolDefinition,
-            args: ValidatedToolArgs,
-            result: Any,
-        ) -> Any:
-            agent_ctx = ctx.deps
-            input_data = HookInput(
-                event="post_tool_use",
-                agent_name=agent_ctx.node_name if agent_ctx else "",
-                tool_name=call.tool_name,
-                tool_input=dict(args),
-                tool_output=result,
-                duration_ms=0.0,
-                session_id=agent_ctx.run_ctx.session_id
-                if agent_ctx and agent_ctx.run_ctx
-                else None,
-            )
-            await self._run_hooks(self.post_tool_use, input_data)
-            return result
-
-        return wrapped
 
     def __repr__(self) -> str:
         counts = {

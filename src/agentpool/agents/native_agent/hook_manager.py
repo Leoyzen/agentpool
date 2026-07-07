@@ -9,18 +9,11 @@ Tool interception (confirmation, error wrapping, pre/post tool hooks) is
 handled by :class:`ToolInterceptCapability` in ``tool_intercept.py``, which
 is still required because ``NativeTurn.execute()`` does not call
 ``HookAwareTurn._fire_pre_tool_hooks()`` / ``_fire_post_tool_hooks()``.
-
-.. deprecated::
-    ``as_capability()`` and the delegate methods are deprecated. Hook firing
-    is migrating to ``HookAwareTurn`` in ``Turn.execute()``. Once
-    ``NativeTurn`` fires tool hooks directly via the mixin,
-    ``ToolInterceptCapability`` and these methods can be removed.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-import warnings
 
 from agentpool.hooks.base import HookResult
 from agentpool.log import get_logger
@@ -28,7 +21,6 @@ from agentpool.log import get_logger
 
 if TYPE_CHECKING:
     from exxec import ExecutionEnvironment
-    from pydantic_ai.capabilities.abstract import AbstractCapability
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.hooks import AgentHooks
@@ -42,7 +34,7 @@ class NativeAgentHookManager:
     Responsibilities:
     - Wraps AgentHooks and delegates pre/post tool hooks to it
     - Consumes injections from PromptInjectionManager (via agent's run context)
-    - Provides ``as_capability()`` returning ``ToolInterceptCapability``
+    - Combined hook result handling
     """
 
     def __init__(
@@ -64,27 +56,6 @@ class NativeAgentHookManager:
     def has_hooks(self) -> bool:
         """Check if any hooks are configured."""
         return bool(self.agent_hooks and self.agent_hooks.has_hooks())
-
-    def as_capability(self) -> AbstractCapability[Any]:
-        """Return the tool interception capability.
-
-        .. deprecated:: 0.5.0
-            Hooks now fire via ``HookAwareTurn`` in ``Turn.execute()``.
-            ``ToolInterceptCapability`` remains until ``NativeTurn`` fires
-            tool hooks directly.
-
-        Returns:
-            A ``ToolInterceptCapability`` instance.
-        """
-        warnings.warn(
-            "as_capability() is deprecated; hooks now fire via"
-            " HookAwareTurn in Turn.execute(). Will be removed in v0.5.0.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        from agentpool.agents.native_agent.tool_intercept import ToolInterceptCapability
-
-        return ToolInterceptCapability(hook_manager=self)
 
     async def run_pre_tool_hooks(
         self,

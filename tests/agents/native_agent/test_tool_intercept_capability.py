@@ -431,7 +431,7 @@ async def test_hooks_fire_for_mcp_tools(mock_agent: Agent[Any]) -> None:
 
     mock_agent._hook_manager.agent_hooks = agent_hooks
 
-    capability = mock_agent._hook_manager.as_capability()
+    capability = ToolInterceptCapability(hook_manager=mock_agent._hook_manager)
 
     # Simulate an MCP tool call through the capability chain
     ctx = make_run_context(deps=MockDeps(agent=mock_agent))
@@ -439,7 +439,7 @@ async def test_hooks_fire_for_mcp_tools(mock_agent: Agent[Any]) -> None:
     tool_def = make_tool_def("mcp_filesystem_read")
     args: dict[str, Any] = {"path": "/test"}
 
-    # as_capability() now returns ToolInterceptCapability directly
+    # ToolInterceptCapability handles tool interception directly
     tool_intercept_cap = capability
 
     # Mock the hook manager's methods to track calls
@@ -492,8 +492,7 @@ async def test_confirmation_works_for_mcp_tools_mode_always(
     mock_agent._hook_manager.agent_name = "test-agent"
     mock_agent._hook_manager._agent = mock_agent
 
-    capability = mock_agent._hook_manager.as_capability()
-    # as_capability() now returns ToolInterceptCapability directly
+    capability = ToolInterceptCapability(hook_manager=mock_agent._hook_manager)
     tool_intercept_cap = capability
 
     # Mock _get_confirmation_mode to return "always"
@@ -549,12 +548,12 @@ async def test_no_double_firing_when_old_agenthooks_active(
     mock_agent._hook_manager.agent_name = "test-agent"
     mock_agent._hook_manager._agent = mock_agent
 
-    capability = mock_agent._hook_manager.as_capability()
+    capability = ToolInterceptCapability(hook_manager=mock_agent._hook_manager)
 
-    # as_capability() now returns ToolInterceptCapability directly,
-    # not a CombinedCapability. This prevents double-firing because
-    # the legacy Hooks (from AgentHooks.as_capability()) are never
-    # added to the capability chain.
+    # ToolInterceptCapability handles tool interception directly,
+    # preventing double-firing because only ToolInterceptCapability fires
+    # tool hooks, delegating to AgentHooks.run_pre_tool_hooks() /
+    # run_post_tool_hooks().
     assert isinstance(capability, ToolInterceptCapability)
     assert hasattr(capability, "before_tool_execute")
     assert hasattr(capability, "after_tool_execute")

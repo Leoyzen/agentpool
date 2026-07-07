@@ -161,8 +161,8 @@ async def test_post_turn_fires_even_when_pre_turn_denies() -> None:
 async def test_tool_hooks_not_fired_by_hook_aware_turn_for_native() -> None:
     """Given a NativeTurn with tool hooks, HookAwareTurn does not fire them.
 
-    Native agents handle tool hooks via the pydantic-ai Hooks capability
-    (registered via ``AgentHooks.as_capability()``), not via HookAwareTurn's
+    Native agents handle tool hooks via ``ToolInterceptCapability``
+    (registered in ``get_agentlet()``), not via HookAwareTurn's
     ``_fire_pre_tool_hooks`` / ``_fire_post_tool_hooks`` methods. The mixin
     methods are never called by ``NativeTurn.execute()``.
 
