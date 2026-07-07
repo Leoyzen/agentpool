@@ -351,7 +351,7 @@ Wave 5 (Docs + Final): Todos 13-14
     - Evidence: `.omo/evidence/task-12-unify-hook-system.txt`
   Commit: Y | breaking(hooks): remove deprecated as_capability(), old field aliases, and old hook firing path
 
-- [ ] 13. Update openspec tasks.md and migration documentation
+- [x] 13. Update openspec tasks.md and migration documentation
   What to do / Must NOT do: 
     (a) Update `openspec/changes/unify-hook-system/tasks.md` to mark all completed tasks as `[x]`. Add any new tasks discovered during implementation. Update the change status in `.openspec.yaml` if all tasks are complete.
     (b) **CRITICAL (Momus M11 — migration docs)**: Update `AGENTS.md` Hooks & Events System section to reflect the rename (pre_run→pre_turn, post_run→post_turn) and HookAwareTurn architecture. Add a migration guide section documenting: (1) YAML config rename `pre_run:`→`pre_turn:`, (2) `as_capability()` removed — hooks now fire via HookAwareTurn, (3) v0.5.0 breaking changes. Add v0.5.0 release notes draft.
