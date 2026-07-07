@@ -240,13 +240,36 @@ class ACPSessionManager:
         Returns:
             Resumed ACPSession if found, None otherwise
         """
-        # Check if already active
-        if session_id in self._acp_sessions:
+        # Close existing session if active, then recreate fresh.
+        # This prevents stale MCP connections, toolset caches, and agent state
+        # from leaking across session resume cycles.
+        existing_session = self._acp_sessions.pop(session_id, None)
+        if existing_session is not None:
             logger.info(
-                "Session already active, ignoring session/load mcpServers",
+                "Closing existing session before resume",
                 session_id=session_id,
             )
-            return self._acp_sessions[session_id]
+            # SessionController handles RunHandle lifecycle (10s timeout + cancel),
+            # agent.mcp.cleanup_session(), and agent.__aexit__().
+            controller = self._session_controller
+            if controller is not None:
+                try:
+                    await controller.close_session(session_id)
+                except Exception:
+                    logger.exception(
+                        "Failed to close session via SessionController",
+                        session_id=session_id,
+                    )
+            # ACPSession.close() handles ACP-specific cleanup:
+            # acp_env, signals, prompts. Also calls cleanup_session() via T15,
+            # but idempotent via per-session asyncio.Lock.
+            try:
+                await existing_session.close()
+            except Exception:
+                logger.exception(
+                    "Failed to close ACPSession",
+                    session_id=session_id,
+                )
         # Try to load from pool's session store
         data = await self.session_store.load(session_id) if self.session_store else None
         if data is None:
