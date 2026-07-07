@@ -74,29 +74,29 @@ This change is Phase 1 of a 2-phase MCP lifecycle redesign. Phase 1 fixes the li
 
 **Alternative considered**: Change `_session_streams` keys from `int` to `str` (session_id). Rejected because it touches `AcpMcpTransport.connect_session()` and `AcpMcpConnection` internals — more invasive than a manager-level index.
 
-### D6: `resume_session()` close-then-recreate via SessionController
+### D6: `resume_session()` close-then-recreate via SessionController + ACPSession
 
-**Decision**: Remove the early-return in `resume_session()`. On resume, if a session exists, close it via `SessionController.close_session()` (which handles RunHandle lifecycle with timeout + cancel fallback), remove from `_acp_sessions`, then create a fresh session with new MCP resources.
+**Decision**: Remove the early-return in `resume_session()`. On resume, if a session exists, close it via a two-layer cleanup: (1) `SessionController.close_session()` (handles RunHandle lifecycle with timeout + cancel, calls `agent.mcp.cleanup_session()` via task 4.2, calls `agent.__aexit__()`), then (2) `ACPSession.close()` (cleans ACP-specific state: `acp_env`, `state_updated` signal, `sys_prompts`, skill command callback). Remove from `_acp_sessions`, then create a fresh session.
 
-**Rationale**: The early-return was returning stale sessions with zombie connections. Close-then-recreate is deterministic and ensures fresh MCP state. Using `SessionController.close_session()` (not raw `ACPSession.close()`) ensures active runs are properly cancelled with timeout before cleanup — preventing corrupted agent state when a WebSocket drops mid-turn.
+**Two-layer cleanup rationale**: `SessionController.close_session()` handles the orchestrator layer (RunHandle, agent context, MCP cleanup) but has no knowledge of `ACPSession` (a server/transport-specific class). `ACPSession.close()` handles the ACP layer (env, signals, prompts) but doesn't handle RunHandle lifecycle. Both must be called for complete cleanup. MCP cleanup is idempotent via D8's per-session lock — calling `cleanup_session()` twice (once from each layer) is safe.
 
-**Fallback**: In contexts where `SessionController` is not available (e.g., tests), fall back to `ACPSession.close()` directly.
+**Fallback**: In contexts where `SessionController` is not available (e.g., tests), fall back to `ACPSession.close()` only.
 
-**Revised from initial design**: Initial design called `ACPSession.close()` directly, which does NOT wait for active runs. Oracle review identified this as insufficient — a mid-turn WebSocket drop would leave the agent in a corrupted state. `SessionController.close_session()` handles the RunHandle lifecycle (10s timeout + cancel) before calling `agent.__aexit__()`.
+**Revised from initial design**: Initial design called `ACPSession.close()` directly, which does NOT wait for active runs. Oracle review (round 1) identified this as insufficient. Round 2 revision used `SessionController.close_session()` only, but Gemini Code Assist review identified that this leaks ACP-specific resources. This round 3 revision calls both layers.
 
 ### D7: WebSocket disconnect hook via on_disconnect callback
 
-**Decision**: Add an `on_disconnect: Callable[[AgentSideConnection], Awaitable[None]] | None` parameter to `_handle_websocket_client()`. When `ConnectionClosed` is caught, call `on_disconnect(conn)` before `conn.close()`. The callback delegates to `ACPSessionManager.close_all_sessions_for_connection()`, which in turn calls `SessionController.close_session()` for each session.
+**Decision**: Add an `on_disconnect: Callable[[AgentSideConnection], Awaitable[None]] | None` parameter to `_handle_websocket_client()`. When `ConnectionClosed` is caught, call `on_disconnect(conn)` before `conn.close()`. The callback delegates to `ACPSessionManager.close_all_sessions_for_connection()`, which performs two-layer cleanup for each session: (1) `SessionController.close_session()` (RunHandle lifecycle), then (2) `ACPSession.close()` (ACP-specific cleanup).
 
-**Rationale**: Currently WebSocket disconnect only closes the transport — sessions remain in `_acp_sessions` with stale agents. The hook ensures all sessions for the disconnected client are properly closed through the full `SessionController.close_session()` path (including RunHandle lifecycle and MCP cleanup).
+**Two-layer cleanup**: Same rationale as D6 — `SessionController` handles the orchestrator layer, `ACPSession.close()` handles the ACP layer. Both must be called for complete cleanup on WebSocket disconnect.
 
 **Wiring**:
 1. `_handle_websocket_client()` gains `on_disconnect` callback parameter
 2. `ACPWebSocketTransport` (or the server that creates it) passes a callback that calls `ACPSessionManager.close_all_sessions_for_connection()`
 3. `ACPSessionManager` gains `_connection_sessions: dict[str, set[str]]` (connection_id → session_ids) reverse mapping to track which sessions belong to which WebSocket connection
-4. `close_all_sessions_for_connection()` iterates sessions and calls `SessionController.close_session()` for each (not raw `ACPSession.close()`)
+4. `close_all_sessions_for_connection()` iterates sessions and calls both `SessionController.close_session()` and `ACPSession.close()` for each
 
-**Revised from initial design**: Initial design called `ACPSessionManager.close_all_sessions_for_connection()` directly in the `ConnectionClosed` handler. Oracle review identified two issues: (1) `_handle_websocket_client()` has no reference to `ACPSessionManager`, and (2) sessions must be closed through `SessionController.close_session()` to handle active runs safely. The callback approach decouples the transport layer from the session manager.
+**Revised from initial design**: Initial design called `ACPSessionManager.close_all_sessions_for_connection()` directly in the `ConnectionClosed` handler. Oracle review (round 1) identified that `_handle_websocket_client()` has no reference to `ACPSessionManager` and that sessions must be closed through `SessionController.close_session()` to handle active runs. The callback approach decouples the transport layer from the session manager. Gemini Code Assist review (round 2) identified that `SessionController.close_session()` alone leaks ACP-specific resources — this round 3 revision calls both layers.
 
 ### D8: Concurrency protection for cleanup_session()
 
