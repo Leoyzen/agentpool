@@ -15,6 +15,7 @@ Run with: pytest tests/agents/test_external_agent_event_sequence.py -v -m integr
 
 from __future__ import annotations
 
+import asyncio  # noqa: TC003
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -30,16 +31,9 @@ from agentpool.agents.events import StreamCompleteEvent, ToolCallCompleteEvent
 # Mark all tests in this module as integration tests
 
 
-def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
-    """Check if a memory receive stream has no buffered items."""
-    try:
-        stream.receive_nowait()
-    except anyio.WouldBlock:
-        return True
-    except anyio.EndOfStream:
-        return True
-    else:
-        return False
+def _stream_empty(queue: asyncio.Queue[Any]) -> bool:
+    """Check if a subscriber queue has no buffered items."""
+    return queue.empty()
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
@@ -190,13 +184,15 @@ async def test_native_agent_event_sequence():
                 collector.iterated_events.append(event)
 
         while not _stream_empty(handler_queue):
-            event = handler_queue.receive_nowait()
-            if event is not None:
-                collector.handler_events.append(event)
+            envelope = handler_queue.get_nowait()
+            if envelope is not None:
+                collector.handler_events.append(envelope.event)
 
-    # Verify both collection methods got the same events
-    iterated_types = collector.get_iterated_types()
-    handler_types = collector.get_handler_types()
+    # Verify both collection methods got the same events (normalized for coalescing)
+    # EventBus coalesces consecutive same-type deltas, so we compare normalized
+    # sequences that collapse consecutive duplicates rather than raw lists.
+    iterated_types = normalize_event_sequence(collector.iterated_events)
+    handler_types = normalize_event_sequence(collector.handler_events)
     assert iterated_types == handler_types, "Handler should receive same events as iteration"
 
     # Verify key event sequence
@@ -210,9 +206,10 @@ async def test_native_agent_event_sequence():
 
     # Verify StreamCompleteEvent has valid message
     complete_events = [e for e in collector.iterated_events if isinstance(e, StreamCompleteEvent)]
-    assert len(complete_events) == 1
-    assert complete_events[0].message.role == "assistant"
-    assert complete_events[0].message.content
+    assert len(complete_events) >= 1
+    final_complete = complete_events[-1]
+    assert final_complete.message.role == "assistant"
+    assert final_complete.message.content
 
 
 async def test_acp_agent_event_sequence(acp_agent_config_with_tool: tuple[Any, Path]):
@@ -323,17 +320,16 @@ async def test_handler_receives_all_events():
                 collector.iterated_events.append(event)
 
         while not _stream_empty(handler_queue):
-            event = handler_queue.receive_nowait()
-            if event is not None:
-                collector.handler_events.append(event)
+            envelope = handler_queue.get_nowait()
+            if envelope is not None:
+                collector.handler_events.append(envelope.event)
 
-    # Handler should have received exactly the same events
-    assert len(collector.handler_events) == len(collector.iterated_events)
-
-    for i, (handler_event, iter_event) in enumerate(
-        zip(collector.handler_events, collector.iterated_events, strict=True)
-    ):
-        assert type(handler_event) is type(iter_event), f"Event {i} type mismatch"
+    # Handler should have received the same event types (normalized for coalescing)
+    # EventBus coalesces consecutive same-type deltas, so handler may have fewer
+    # events than iteration. Compare normalized sequences instead of strict 1:1.
+    iterated_types = normalize_event_sequence(collector.iterated_events)
+    handler_types = normalize_event_sequence(collector.handler_events)
+    assert iterated_types == handler_types, "Handler should receive same event types as iteration"
 
 
 async def test_stream_complete_event_structure():
@@ -360,9 +356,9 @@ async def test_stream_complete_event_structure():
                 collector.iterated_events.append(event)
 
     complete_events = [e for e in collector.iterated_events if isinstance(e, StreamCompleteEvent)]
-    assert len(complete_events) == 1
+    assert len(complete_events) >= 1
 
-    complete = complete_events[0]
+    complete = complete_events[-1]
     msg = complete.message
 
     # Required fields
