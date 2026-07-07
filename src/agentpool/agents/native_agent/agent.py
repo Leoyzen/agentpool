@@ -1222,6 +1222,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             prompts=prompts,  # type: ignore[arg-type]
             run_ctx=run_ctx,
             message_history=message_history,
+            hooks=self.hooks,
         )
 
     async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:

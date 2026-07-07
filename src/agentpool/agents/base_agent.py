@@ -1328,8 +1328,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             conversation.add_chat_messages([user_msg])
 
         try:
-            # Execute pre-turn hooks
-            if self.hooks:
+            # Execute pre-turn hooks (guarded against double-firing with HookAwareTurn)
+            if self.hooks and "pre_turn" not in run_ctx.hooks_fired:
+                run_ctx.hooks_fired.add("pre_turn")
                 pre_turn_result = await self.hooks.run_pre_turn_hooks(
                     agent_name=self.name,
                     prompt=user_msg.content
@@ -1386,8 +1387,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # TaskGroup cancellation from interrupting hooks/routing/persistence
         if final_message is not None:
             with anyio.CancelScope(shield=True):
-                # Execute post-turn hooks
-                if self.hooks:
+                # Execute post-turn hooks (guarded against double-firing with HookAwareTurn)
+                if self.hooks and "post_turn" not in run_ctx.hooks_fired:
+                    run_ctx.hooks_fired.add("post_turn")
                     prompt_str = (
                         user_msg.content
                         if isinstance(user_msg.content, str)

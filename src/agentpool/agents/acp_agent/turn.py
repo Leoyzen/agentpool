@@ -16,7 +16,7 @@ from agentpool.agents.events import (
     RunErrorEvent,
     StreamCompleteEvent,
 )
-from agentpool.orchestrator.turn import Turn
+from agentpool.orchestrator.turn import HookAwareTurn, Turn
 
 
 if TYPE_CHECKING:
@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from acp.schema import ContentBlock, PromptResponse, SessionUpdate
     from agentpool.agents.context import AgentRunContext
     from agentpool.agents.events import RichAgentStreamEvent
+    from agentpool.hooks import AgentHooks
     from agentpool.messaging import ChatMessage
 
 
@@ -89,7 +90,7 @@ def _convert_updates_to_model_messages(
     return model_messages, final_msg
 
 
-class ACPTurn(Turn):
+class ACPTurn(HookAwareTurn, Turn):
     """Single reactive turn wrapping an ACP session/prompt stream.
 
     Encapsulates one complete ACP interaction cycle: sending a prompt to the
@@ -105,6 +106,8 @@ class ACPTurn(Turn):
         message_history: list[ModelMessage],
         session_id: str,
         agent_name: str | None = None,
+        hooks: AgentHooks | None = None,
+        env: Any | None = None,
     ) -> None:
         super().__init__()
         self._acp_client = acp_client
@@ -112,8 +115,25 @@ class ACPTurn(Turn):
         self._run_ctx = run_ctx
         self._session_id = session_id
         self._agent_name = agent_name
+        self._hooks = hooks
+        self._agent_env = env
 
-    async def execute(self) -> AsyncGenerator[RichAgentStreamEvent[Any]]:
+    @property
+    def _hook_env(self) -> Any | None:
+        """Execution environment for command hooks."""
+        return self._agent_env
+
+    @property
+    def _hook_agent_name(self) -> str:
+        """Agent name passed to hook invocations."""
+        return self._agent_name or ""
+
+    @property
+    def _hook_prompt(self) -> str:
+        """The user prompt for this turn."""
+        return str(self._prompts)
+
+    async def execute(self) -> AsyncGenerator[RichAgentStreamEvent[Any]]:  # noqa: PLR0915
         """Execute one ACP prompt → stream → complete cycle.
 
         Yields:
@@ -126,64 +146,14 @@ class ACPTurn(Turn):
             acp_to_native_event,
             convert_to_acp_content,
         )
+        from agentpool.agents.events import ToolCallCompleteEvent, ToolCallStartEvent
 
         run_id = self._run_ctx.run_id
 
-        # Convert all user prompts to ACP ContentBlock list.
-        # Join all prompts instead of taking only the last one.
-        full_prompt = "\n\n".join(self._prompts) if self._prompts else ""
-        content = convert_to_acp_content([full_prompt])
-
-        # --- Phase 1: Send prompt ---
-        try:
-            response = await self._acp_client.prompt(self._session_id, content)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            yield RunErrorEvent(
-                message=str(exc),
-                run_id=run_id,
-                agent_name=self._agent_name,
-            )
-            return
-
-        # --- Phase 2: Stream events ---
-        try:
-            async for update in self._acp_client.stream_events(response):
-                if native_event := acp_to_native_event(update):
-                    yield native_event
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            yield RunErrorEvent(
-                message=str(exc),
-                run_id=run_id,
-                agent_name=self._agent_name,
-            )
-            return
-
-        # --- Phase 3: Collect message history ---
-        try:
-            raw_updates = await self._acp_client.get_messages(self._session_id)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            yield RunErrorEvent(
-                message=str(exc),
-                run_id=run_id,
-                agent_name=self._agent_name,
-            )
-            return
-
-        model_messages, final_msg = _convert_updates_to_model_messages(
-            raw_updates,
-            session_id=self._session_id,
-        )
-        self._message_history = model_messages
-
-        if final_msg is not None:
-            self._final_message = final_msg
-        else:
+        # --- Phase 0: Fire pre_turn hooks ---
+        pre_turn_result = await self._fire_pre_turn_hooks()
+        if pre_turn_result is not None and pre_turn_result.get("decision") == "deny":
+            self._run_ctx.cancelled = True
             from agentpool.messaging import ChatMessage
 
             self._final_message = ChatMessage[str](
@@ -192,5 +162,96 @@ class ACPTurn(Turn):
                 message_id=str(uuid4()),
                 session_id=self._session_id,
             )
+            yield StreamCompleteEvent(cancelled=True, message=self._final_message)
+            return
 
-        yield StreamCompleteEvent(message=self._final_message)
+        try:
+            # Convert all user prompts to ACP ContentBlock list.
+            # Join all prompts instead of taking only the last one.
+            full_prompt = "\n\n".join(self._prompts) if self._prompts else ""
+            content = convert_to_acp_content([full_prompt])
+
+            # --- Phase 1: Send prompt ---
+            try:
+                response = await self._acp_client.prompt(self._session_id, content)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                yield RunErrorEvent(
+                    message=str(exc),
+                    run_id=run_id,
+                    agent_name=self._agent_name,
+                )
+                return
+
+            # --- Phase 2: Stream events ---
+            try:
+                async for update in self._acp_client.stream_events(response):
+                    native_event = acp_to_native_event(update)
+                    if native_event is not None:
+                        # Fire advisory tool hooks for tool-related events.
+                        # These are advisory — they log and augment but cannot
+                        # prevent the external agent from calling tools.
+                        match native_event:
+                            case ToolCallStartEvent(
+                                tool_name=tn,
+                                raw_input=ti,
+                                tool_call_id=tcid,
+                            ):
+                                await self._fire_pre_tool_hooks(tn, ti, tcid)
+                            case ToolCallCompleteEvent(
+                                tool_name=tn,
+                                tool_input=ti,
+                                tool_result=tr,
+                                tool_call_id=tcid,
+                            ):
+                                await self._fire_post_tool_hooks(
+                                    tn, ti, tr, 0.0, tcid,
+                                )
+                            case _:
+                                pass
+                        yield native_event
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                yield RunErrorEvent(
+                    message=str(exc),
+                    run_id=run_id,
+                    agent_name=self._agent_name,
+                )
+                return
+
+            # --- Phase 3: Collect message history ---
+            try:
+                raw_updates = await self._acp_client.get_messages(self._session_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                yield RunErrorEvent(
+                    message=str(exc),
+                    run_id=run_id,
+                    agent_name=self._agent_name,
+                )
+                return
+
+            model_messages, final_msg = _convert_updates_to_model_messages(
+                raw_updates,
+                session_id=self._session_id,
+            )
+            self._message_history = model_messages
+
+            if final_msg is not None:
+                self._final_message = final_msg
+            else:
+                from agentpool.messaging import ChatMessage
+
+                self._final_message = ChatMessage[str](
+                    content="",
+                    role="assistant",
+                    message_id=str(uuid4()),
+                    session_id=self._session_id,
+                )
+
+            yield StreamCompleteEvent(message=self._final_message)
+        finally:
+            await self._fire_post_turn_hooks(self._final_message)
