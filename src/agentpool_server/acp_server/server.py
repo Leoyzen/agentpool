@@ -19,6 +19,7 @@ from agentpool_config.context import ConfigContextManager
 from agentpool_config.pool_server import ACPPoolServerConfig
 from agentpool_server import BaseServer
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 
 if TYPE_CHECKING:
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from upathtools import JoinablePathLike
 
     from acp import Transport
+    from acp.agent.connection import AgentSideConnection
     from agentpool.agents.base_agent import BaseAgent
 
 
@@ -286,6 +288,9 @@ class ACPServer(BaseServer):
         # Resolve agent instance from name
         default_agent = await self._resolve_default_agent()
         self.log.info("Using default agent", agent=default_agent.name)
+        # Create a shared session manager so WebSocket disconnects can clean up
+        # all sessions for the dropped connection via close_all_sessions_for_connection().
+        session_manager = ACPSessionManager(pool=self.pool)
         create_acp_agent = functools.partial(
             AgentPoolACPAgent,
             default_agent=default_agent,
@@ -294,7 +299,14 @@ class ACPServer(BaseServer):
             server=self,
             subagent_display_mode=self.subagent_display_mode,
             raw_input_mode=self.raw_input_mode,
+            session_manager=session_manager,
         )
+
+        async def on_disconnect(conn: AgentSideConnection) -> None:
+            """Clean up sessions when a WebSocket client disconnects."""
+            connection_id: str = conn.connection_id  # type: ignore[attr-defined]
+            await session_manager.close_all_sessions_for_connection(connection_id)
+
         debug_file = self.debug_file if self.debug_messages else None
         observers = None
         if self.show_events or self.show_events_detailed:
@@ -306,6 +318,7 @@ class ACPServer(BaseServer):
                 transport=self.transport,
                 shutdown_event=self._shutdown_event,
                 debug_file=debug_file,
+                on_disconnect=on_disconnect,
                 observers=observers,
             )
         except asyncio.CancelledError:

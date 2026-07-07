@@ -232,6 +232,15 @@ class AgentPoolACPAgent(ACPAgent):
     raw_input_mode: Literal["dict", "skip", "json_str"] = "dict"
     """How to emit tool call raw_input ("dict", "skip", or "json_str")."""
 
+    session_manager: ACPSessionManager | None = field(default=None)
+    """Shared session manager for tracking ACP sessions across connections.
+
+    If None, a new ``ACPSessionManager`` is created per agent instance.
+    When provided (e.g., from ``ACPServer``), enables cross-connection
+    session tracking and WebSocket disconnect cleanup via
+    ``close_all_sessions_for_connection()``.
+    """
+
     _skill_bridge: ACPSkillBridge | None = field(init=False, default=None)
     """Bridge for exposing skill commands as ACP slash commands."""
 
@@ -249,7 +258,8 @@ class AgentPoolACPAgent(ACPAgent):
         if pool is None:
             msg = "Default agent has no associated pool"
             raise RuntimeError(msg)
-        self.session_manager = ACPSessionManager(pool=pool)
+        if self.session_manager is None:
+            self.session_manager = ACPSessionManager(pool=pool)
         self.tasks = TaskManager()
         self._initialized = False
         self._sessions_cache: ListSessionsResponse | None = None
