@@ -75,12 +75,14 @@ class AcpMcpConnection:
         self._session_streams.clear()
         logger.info("MCP-over-ACP connection closed", connection_id=self.connection_id)
 
-    def register_session(self) -> SessionStreamPair:
+    def register_session(self) -> tuple[SessionStreamPair, int]:
         """Create and register a per-session stream pair.
 
-        Returns a ``SessionStreamPair`` with independent streams for
-        this session's ClientSession to read/write. The caller is
-        responsible for calling ``unregister_session()`` when done.
+        Returns a ``(SessionStreamPair, int)`` tuple where the pair
+        has independent streams for this session's ClientSession to
+        read/write, and the int is the internal key used to store
+        the pair in ``_session_streams``. The caller is responsible
+        for calling ``unregister_session()`` when done.
         """
         key = self._next_session_key
         self._next_session_key += 1
@@ -93,7 +95,7 @@ class AcpMcpConnection:
             from_session_receive=from_recv,
         )
         self._session_streams[key] = pair
-        return pair
+        return pair, key
 
     def unregister_session(self, pair: SessionStreamPair) -> None:
         """Remove a per-session stream pair from the connection."""
@@ -101,6 +103,10 @@ class AcpMcpConnection:
             if val is pair:
                 del self._session_streams[key]
                 break
+
+    def has_active_sessions(self) -> bool:
+        """Return whether any per-session stream pairs are active."""
+        return len(self._session_streams) > 0
 
     async def send_to_acp(
         self,
@@ -261,6 +267,7 @@ class AcpMcpConnectionManager:
         self._connections: dict[str, AcpMcpConnection] = {}
         self._session_connections: dict[str, set[tuple[str, int]]] = {}
         self._lock = asyncio.Lock()
+        self._cleanup_lock = asyncio.Lock()
 
     def register_session_connection(
         self,
@@ -282,6 +289,55 @@ class AcpMcpConnectionManager:
         self._session_connections.setdefault(session_id, set()).add(
             (connection_id, session_key),
         )
+
+    async def cleanup_session(self, session_id: str) -> None:
+        """Clean up all MCP connections associated with a session.
+
+        Pops the session's ``(connection_id, session_key)`` pairs from
+        the reverse index, unregisters each pair from its
+        ``AcpMcpConnection``, and removes connections that have no
+        remaining active sessions.
+
+        This method is idempotent — calling it for a session that was
+        already cleaned up (or never registered) is a no-op.
+
+        Args:
+            session_id: The ACP session ID to clean up.
+        """
+        async with self._cleanup_lock:
+            entries = self._session_connections.pop(session_id, None)
+            if entries is None:
+                return
+
+            # Group entries by connection_id to batch cleanup per connection.
+            connections_to_check: set[str] = set()
+            for connection_id, session_key in entries:
+                conn = self._connections.get(connection_id)
+                if conn is None:
+                    continue
+                pair = conn._session_streams.get(session_key)
+                if pair is not None:
+                    try:
+                        conn.unregister_session(pair)
+                    except Exception:
+                        logger.exception(
+                            "Failed to unregister session stream pair",
+                            connection_id=connection_id,
+                            session_key=session_key,
+                        )
+                connections_to_check.add(connection_id)
+
+            # Remove connections with no remaining active sessions.
+            for connection_id in connections_to_check:
+                conn = self._connections.get(connection_id)
+                if conn is not None and not conn.has_active_sessions():
+                    try:
+                        await self.remove_connection(connection_id)
+                    except Exception:
+                        logger.exception(
+                            "Failed to remove idle MCP connection",
+                            connection_id=connection_id,
+                        )
 
     async def create_connection(
         self,

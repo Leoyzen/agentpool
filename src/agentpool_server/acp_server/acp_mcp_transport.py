@@ -68,7 +68,7 @@ class AcpMcpTransport(ClientTransport):
         Yields:
             A connected fastmcp ClientSession.
         """
-        pair = self._connection.register_session()
+        pair, _session_key = self._connection.register_session()
 
         async def _forward_to_client() -> None:
             """Forward MCP requests from ClientSession to ACP client."""

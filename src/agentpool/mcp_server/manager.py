@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from types import TracebackType
 
+    from fastmcp.client import ClientTransport
     from mcp import types
     from mcp.shared.context import RequestContext
     from mcp.types import ElicitRequestParams, SamplingMessage
@@ -180,6 +181,48 @@ class MCPManager:
         """Add a new MCP server to the manager."""
         resolved = BaseMCPServerConfig.from_string(cfg) if isinstance(cfg, str) else cfg
         self.servers.append(resolved)
+
+    def get_or_create_session(self, session_id: str) -> _SessionContext:
+        """Get or create the per-session MCP context for ``session_id``.
+
+        If no context exists for ``session_id``, a new ``_SessionContext``
+        is created with a fresh ``SessionConnectionPool``, empty toolset
+        cache, no snapshot, and an empty ACP connection list.  Subsequent
+        calls with the same ``session_id`` return the same object.
+
+        Args:
+            session_id: Unique identifier for the session.
+
+        Returns:
+            The ``_SessionContext`` for this session.
+        """
+        from agentpool.mcp_server.session_pool import SessionConnectionPool
+
+        ctx = self._session_contexts.get(session_id)
+        if ctx is None:
+            ctx = _SessionContext(
+                connection_pool=SessionConnectionPool(session_id=session_id),
+            )
+            self._session_contexts[session_id] = ctx
+        return ctx
+
+    def update_session_snapshot(
+        self,
+        session_id: str,
+        snapshot: McpConfigSnapshot,
+    ) -> None:
+        """Update the config snapshot for a session.
+
+        Ensures the session context exists (creating it if necessary),
+        then sets ``ctx.snapshot`` to the provided snapshot.  Safe to call
+        on an already-existing session — only the snapshot is replaced.
+
+        Args:
+            session_id: Unique identifier for the session.
+            snapshot: Immutable MCP config snapshot to store.
+        """
+        ctx = self.get_or_create_session(session_id)
+        ctx.snapshot = snapshot
 
     def __repr__(self) -> str:
         return f"MCPManager(name={self.name!r}, servers={len(self.servers)})"
@@ -481,3 +524,35 @@ class MCPManager:
             msg = "Error during MCP manager cleanup"
             logger.exception(msg, exc_info=e)
             raise RuntimeError(msg) from e
+
+    async def add_acp_transport(
+        self,
+        session_id: str,
+        client_id: str,
+        transport: ClientTransport,
+        connection_id: str,
+        session_key: int,
+    ) -> None:
+        """Register an ACP MCP transport for a session.
+
+        Adds a pre-created transport (e.g. ``AcpMcpTransport``) to the
+        session's connection pool and tracks the ACP connection for
+        cleanup.
+
+        Idempotent: calling twice with the same ``connection_id`` and
+        ``session_key`` does not create duplicate tracking entries.
+
+        Args:
+            session_id: Unique identifier for the session.
+            client_id: Client identifier for the MCP server.
+            transport: Pre-created fastmcp ``ClientTransport``.
+            connection_id: ACP connection identifier.
+            session_key: ACP session key for the connection.
+        """
+        ctx = self.get_or_create_session(session_id)
+        pool = ctx.connection_pool
+        if pool is not None:
+            await pool.add_transport(client_id, transport)
+        entry = (connection_id, session_key)
+        if entry not in ctx.acp_connection_ids:
+            ctx.acp_connection_ids.append(entry)

@@ -162,7 +162,7 @@ async def test_ext_method_routes_message(
     # Register a session pair before sending the message
     conn = acp_agent._mcp_manager.get_connection("conn-789")
     assert conn is not None
-    pair = conn.register_session()
+    pair, _ = conn.register_session()
 
     await acp_agent.ext_method(
         "mcp/message", {"connectionId": "conn-789", "method": "tools/list", "id": 1}
@@ -214,8 +214,8 @@ async def test_ext_method_concurrent_messages(
     assert conn_a is not None
     assert conn_b is not None
 
-    pair_a = conn_a.register_session()
-    pair_b = conn_b.register_session()
+    pair_a, _ = conn_a.register_session()
+    pair_b, _ = conn_b.register_session()
 
     await asyncio.gather(
         acp_agent.ext_method(

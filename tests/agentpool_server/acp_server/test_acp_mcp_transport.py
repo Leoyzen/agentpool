@@ -51,7 +51,7 @@ class TestAcpMcpTransportMessageForwarding:
     async def test_message_forwarding_from_session_to_client(self, connection):
         """Messages sent via send_to_acp should be forwarded to the client."""
         AcpMcpTransport(connection)
-        pair = connection.register_session()
+        pair, _ = connection.register_session()
         msg = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -73,7 +73,7 @@ class TestAcpMcpTransportMessageForwarding:
     async def test_multiple_messages_forwarded(self, connection):
         """Multiple messages should be forwarded in order."""
         AcpMcpTransport(connection)
-        pair = connection.register_session()
+        pair, _ = connection.register_session()
         messages = [
             {"jsonrpc": "2.0", "id": i, "method": f"method_{i}", "params": {"data": i}}
             for i in range(3)
@@ -110,7 +110,7 @@ class TestAcpMcpTransportReusability:
     async def test_transport_reusable_across_sessions(self, connection):
         """Transport should support multiple connect_session calls."""
         transport = AcpMcpTransport(connection)
-        pair = connection.register_session()
+        pair, _ = connection.register_session()
 
         msg1 = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
         with patch("mcp.client.session.ClientSession.initialize", new_callable=AsyncMock):
@@ -135,7 +135,7 @@ class TestAcpMcpTransportReusability:
     async def test_each_session_has_isolated_forwarder(self, connection):
         """Each session should get its own forwarder task."""
         transport = AcpMcpTransport(connection)
-        pair = connection.register_session()
+        pair, _ = connection.register_session()
 
         msg1 = {
             "jsonrpc": "2.0",
@@ -168,7 +168,7 @@ class TestAcpMcpTransportErrorHandling:
     async def test_message_after_forwarder_cancelled_not_delivered(self, connection):
         """Messages after forwarder cancellation are not delivered to client."""
         transport = AcpMcpTransport(connection)
-        pair = connection.register_session()
+        pair, _ = connection.register_session()
 
         with patch("mcp.client.session.ClientSession.initialize", new_callable=AsyncMock):
             async with transport.connect_session():
