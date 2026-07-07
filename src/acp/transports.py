@@ -362,8 +362,25 @@ async def _handle_websocket_client(
     pong_timeout: float,
     max_missed_pongs: int,
     kwargs: dict[str, Any],
+    on_disconnect: Callable[[AgentSideConnection], Awaitable[None]] | None = None,
 ) -> None:
-    """Handle a single WebSocket client connection lifecycle."""
+    """Handle a single WebSocket client connection lifecycle.
+
+    Args:
+        websocket: The WebSocket server connection for this client.
+        agent_factory: Factory that creates an Agent from an AgentSideConnection.
+        shutdown: Event signalling server-wide shutdown.
+        connections: List tracking all active connections for cleanup.
+        debug_file: Optional path for debug message logging.
+        ping_interval: Seconds between heartbeat pings, or None to disable.
+        pong_timeout: Seconds to wait for each pong response.
+        max_missed_pongs: Consecutive missed pongs before closing.
+        kwargs: Additional keyword arguments passed to AgentSideConnection.
+        on_disconnect: Optional callback invoked when the client disconnects
+            unexpectedly (ConnectionClosed). Receives the AgentSideConnection
+            so the caller can read ``connection_id`` and perform session cleanup.
+            Called BEFORE ``conn.close()`` in the finally block.
+    """
     import websockets
 
     from acp.agent.connection import AgentSideConnection
@@ -374,6 +391,7 @@ async def _handle_websocket_client(
     ws_writer = _WebSocketWriteStream(websocket)
 
     conn = AgentSideConnection(agent_factory, ws_writer, ws_reader, debug_file=debug_file, **kwargs)
+    conn.connection_id = uuid.uuid4().hex  # type: ignore[attr-defined]
     connections.append(conn)
 
     heartbeat_task: asyncio.Task[None] | None = None
@@ -411,6 +429,8 @@ async def _handle_websocket_client(
                     await w
     except websockets.exceptions.ConnectionClosed:
         logger.info("WebSocket client disconnected")
+        if on_disconnect is not None:
+            await on_disconnect(conn)
     finally:
         if heartbeat_task is not None and not heartbeat_task.done():
             heartbeat_task.cancel()
