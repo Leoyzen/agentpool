@@ -62,7 +62,7 @@ Migration Plan:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai.capabilities.abstract import AbstractCapability
@@ -102,6 +102,7 @@ class _ToolInterceptCapability(AbstractCapability[Any]):
     - ``after_tool_execute``: post-tool hooks + result modification + injection
     """
 
+    _: KW_ONLY
     hook_manager: NativeAgentHookManager
     id: str | None = None
     description: str | None = None
