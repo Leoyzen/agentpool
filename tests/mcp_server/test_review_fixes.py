@@ -1,14 +1,23 @@
 """TDD tests for code-review bugs in MCP session lifecycle.
 
-These tests are written BEFORE the fixes are applied (RED phase).
-All three must FAIL against the current (buggy) code.
+Round 1 tests (Fixes #1/#2/#3) are GREEN — already fixed in df377db9b.
+Round 2 tests (Fixes #4/#5/#6) are written BEFORE the fixes (RED phase).
 
 Bugs covered:
-- Fix #2: as_capability(session_id) recreates a cleaned-up session context
-- Fix #3: cleanup_session() calls get_or_create_session() on non-existent sessions
-- Fix #1: resume_session() doesn't remove session_id from old connection's
+- Fix #2 (DONE): as_capability(session_id) recreates a cleaned-up session context
+- Fix #3 (DONE): cleanup_session() calls get_or_create_session() on non-existent sessions
+- Fix #1 (DONE): resume_session() doesn't remove session_id from old connection's
   _connection_sessions, causing close_all_sessions_for_connection() to close
   the NEW session when the old connection disconnects.
+
+Round 2:
+- Fix #4: _acp_mcp_manager never wired — cleanup_session() never delegates
+  to AcpMcpConnectionManager.cleanup_session(), leaking per-session ACP
+  stream pairs and reverse-index entries.
+- Fix #5: cleanup_session() lacks identity check after acquiring lock —
+  concurrent callers may do redundant work (all ops are idempotent, but
+  the check is a defensive optimization).
+- Fix #6: as_capability() has 3 identical fallback loops — pure duplication.
 """
 
 from __future__ import annotations
@@ -231,3 +240,144 @@ async def test_resume_session_cleans_connection_sessions() -> None:
         f"resume_session() did not register session_id {session_id!r} "
         f"in new connection conn-2's _connection_sessions set."
     )
+
+
+# ============================================================================
+# Fix #4: _acp_mcp_manager never wired in production
+# ============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cleanup_session_delegates_to_acp_mcp_manager() -> None:
+    """cleanup_session() must delegate to _acp_mcp_manager when wired.
+
+    Bug: ``MCPManager._acp_mcp_manager`` is initialized to ``None`` and
+    never set in production. ``cleanup_session()`` checks
+    ``if self._acp_mcp_manager is not None:`` but it's always ``False``,
+    so ``AcpMcpConnectionManager.cleanup_session()`` never runs, leaking
+    per-session ACP stream pairs and reverse-index entries.
+
+    This test validates the delegation path by manually wiring a mock
+    and verifying cleanup_session() calls it.
+    """
+    manager = MCPManager(name="test")
+    try:
+        # Manually wire a mock ACP MCP manager
+        mock_acp_manager: AsyncMock = AsyncMock()
+        manager._acp_mcp_manager = mock_acp_manager
+
+        # Create a session context
+        manager.get_or_create_session("test-acp-delegate")
+
+        # Clean up the session
+        await manager.cleanup_session("test-acp-delegate")
+
+        # Verify delegation occurred
+        mock_acp_manager.cleanup_session.assert_called_once_with("test-acp-delegate")
+    finally:
+        await manager.cleanup()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_acp_session_wires_acp_mcp_manager() -> None:
+    """ACPSession.__post_init__ must wire agent.mcp._acp_mcp_manager.
+
+    Bug: ``ACPSession.__post_init__`` never sets
+    ``agent.mcp._acp_mcp_manager = acp_agent._mcp_manager``.
+    This means cleanup_session() on the agent's MCPManager can never
+    delegate to AcpMcpConnectionManager, leaking ACP connections.
+
+    Fix: In ``__post_init__``, after ``self.agent.env = self.acp_env``,
+    wire the manager for native agents.
+    """
+    from agentpool import Agent
+    from agentpool.delegation import AgentPool
+    from agentpool.models.agents import NativeAgentConfig
+    from agentpool.models.manifest import AgentsManifest
+    from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+    from agentpool_server.acp_server.session import ACPSession
+
+    def simple_callback(message: str) -> str:
+        return f"Test: {message}"
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+    pool = AgentPool(manifest)
+    agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
+    acp_agent = AgentPoolACPAgent(client=MagicMock(), default_agent=agent)
+
+    # Create ACPSession with minimal required fields
+    ACPSession(
+        session_id="test-wire",
+        agent=agent,
+        cwd="/tmp",
+        client=MagicMock(),
+        acp_agent=acp_agent,
+    )
+
+    # Verify wiring
+    assert agent.mcp._acp_mcp_manager is acp_agent._mcp_manager, (
+        "ACPSession.__post_init__ must wire agent.mcp._acp_mcp_manager "
+        "to acp_agent._mcp_manager for cleanup delegation to work"
+    )
+
+
+# ============================================================================
+# Fix #5: Identity check after acquiring cleanup lock
+# ============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cleanup_session_identity_check_prevents_redundant_work() -> None:
+    """cleanup_session() must check context identity after acquiring lock.
+
+    Bug: When two concurrent cleanup_session() calls race for the same
+    session, the first caller pops the context in the ``finally`` block.
+    The second caller, already past the ``ctx is None`` check, acquires
+    the lock and runs cleanup on an already-popped context. All ops are
+    idempotent, but the redundant work is wasteful.
+
+    Fix: After ``async with ctx._cleanup_lock:``, check
+    ``if self._session_contexts.get(session_id) is not ctx: return``.
+
+    This test creates a session, then fires two concurrent
+    cleanup_session() calls. With the fix, connection_pool.cleanup() is
+    called only once. Without the fix, it may be called twice.
+    """
+    manager = MCPManager(name="test")
+    try:
+        # Create a session context
+        ctx = manager.get_or_create_session("test-identity")
+
+        # Replace connection_pool with a mock that counts cleanup calls.
+        # The asyncio.sleep(0) forces a context switch so both tasks
+        # actually race for the lock (without it, the first task runs
+        # to completion synchronously without yielding).
+        cleanup_call_count = 0
+
+        class CountingPool:
+            async def cleanup(self, timeout: float = 5.0) -> None:
+                nonlocal cleanup_call_count
+                await asyncio.sleep(0)  # Force context switch
+                cleanup_call_count += 1
+
+        ctx.connection_pool = CountingPool()
+
+        # Fire two concurrent cleanup calls
+        import asyncio
+
+        await asyncio.gather(
+            manager.cleanup_session("test-identity"),
+            manager.cleanup_session("test-identity"),
+        )
+
+        # With the identity check, cleanup should be called exactly once.
+        assert cleanup_call_count == 1, (
+            f"connection_pool.cleanup() was called {cleanup_call_count} times, "
+            f"expected 1. The identity check after acquiring the lock should "
+            f"prevent redundant cleanup work."
+        )
+    finally:
+        await manager.cleanup()

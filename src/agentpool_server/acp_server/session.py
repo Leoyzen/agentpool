@@ -245,6 +245,11 @@ class ACPSession:
         self.agent._input_provider = self.input_provider
         if isinstance(self.agent, Agent):
             self.agent.sys_prompts.prompts.append(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            # Wire ACP MCP connection manager for per-session cleanup tracking.
+            # Without this, MCPManager.cleanup_session() can never delegate
+            # to AcpMcpConnectionManager.cleanup_session(), leaking per-session
+            # ACP stream pairs and reverse-index entries.
+            self.agent.mcp._acp_mcp_manager = self.acp_agent._mcp_manager
         if isinstance(self.agent, ACPAgent):
 
             async def permission_callback(

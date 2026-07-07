@@ -517,45 +517,23 @@ class MCPManager:
                     transport = await connection_pool.get_transport(server, entry.skill_name)
                 capabilities.append(_make_capability(server, transport, toolset_cache))
 
-        if session_id is not None:
-            # Use .get() instead of get_or_create_session() to avoid
-            # recreating a cleaned-up context (memory leak). If the context
-            # was already popped by cleanup_session(), fall back to
-            # global-only capabilities.
-            ctx = self._session_contexts.get(session_id)
-            if ctx is None:
+        ctx = self._session_contexts.get(session_id) if session_id is not None else None
+
+        if ctx is not None and ctx.snapshot is not None:
+            await _process_global_configs(ctx.snapshot, self._toolset_cache)
+            if ctx.connection_pool is not None:
+                await _process_session_configs(
+                    ctx.snapshot,
+                    ctx.toolset_cache,
+                    ctx.connection_pool,
+                )
+        else:
+            if session_id is not None and ctx is None:
                 logger.warning(
                     "Session %s context was removed during as_capability(); "
                     "falling back to global-only MCP capabilities.",
                     session_id,
                 )
-
-            if ctx is not None and ctx.snapshot is not None:
-                # Global configs use the global toolset cache.
-                await _process_global_configs(ctx.snapshot, self._toolset_cache)
-                # Session-scoped configs use the session's toolset cache and
-                # connection pool.
-                if ctx.connection_pool is not None:
-                    await _process_session_configs(
-                        ctx.snapshot,
-                        ctx.toolset_cache,
-                        ctx.connection_pool,
-                    )
-            elif ctx is not None and ctx.snapshot is None:
-                # Session exists but no snapshot — fall back to legacy path.
-                for server in self.servers:
-                    if not server.enabled or isinstance(server, AcpMCPServerConfig):
-                        continue
-                    transport = await self._global_pool.get_transport(server)
-                    capabilities.append(_make_capability(server, transport, self._toolset_cache))
-            # If ctx is None (session cleaned up), return global-only caps.
-            else:
-                for server in self.servers:
-                    if not server.enabled or isinstance(server, AcpMCPServerConfig):
-                        continue
-                    transport = await self._global_pool.get_transport(server)
-                    capabilities.append(_make_capability(server, transport, self._toolset_cache))
-        else:
             for server in self.servers:
                 if not server.enabled or isinstance(server, AcpMCPServerConfig):
                     continue
@@ -636,6 +614,10 @@ class MCPManager:
         if ctx is None:
             return
         async with ctx._cleanup_lock:
+            # Identity check: if the context in _session_contexts is no
+            # longer this ctx, another caller already cleaned it up.
+            if self._session_contexts.get(session_id) is not ctx:
+                return
             try:
                 ctx.toolset_cache.clear()
 
