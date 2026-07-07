@@ -216,7 +216,7 @@ async def test_cancel_session_no_children_only_cancels_parent(
 
     cancelled_sids: list[str] = []
     mock_pool.session_pool.sessions.cancel_run_for_session = MagicMock(
-        side_effect=lambda sid: cancelled_sids.append(sid)
+        side_effect=cancelled_sids.append
     )
 
     await acp_handler.cancel_session(session_id)
