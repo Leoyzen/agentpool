@@ -2,27 +2,36 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 import time
 from typing import TYPE_CHECKING, Any, Literal
 import uuid
 
 import anyio
+from mcp.types import (
+    ElicitRequestFormParams,
+    ElicitRequestParams,
+    ElicitRequestURLParams,
+    ElicitResult,
+    ErrorData,
+)
 
 from agentpool.agents.prompt_injection import PromptInjectionManager
 from agentpool.log import get_logger
 from agentpool.messaging.context import NodeContext
+from agentpool.tools import CallDeferred
 
 
 if TYPE_CHECKING:
-    import asyncio
     from collections.abc import Awaitable, Callable
 
-    from mcp.types import ElicitRequestParams, ElicitResult, ErrorData
     from upathtools.filesystems import IsolatedMemoryFileSystem, OverlayFileSystem
 
     from agentpool import Agent
     from agentpool.agents.events import StreamEventEmitter
+    from agentpool.agents.native_agent.checkpoint import CheckpointManager
+    from agentpool.agents.native_agent.elicitation_bridge import ElicitationFutureRegistry
     from agentpool.orchestrator.core import EventBus
     from agentpool.orchestrator.run import RunHandle
     from agentpool.tools.base import Tool
@@ -121,6 +130,50 @@ class AgentRunContext:
     checkpointed: bool = False
     """Whether the run has been checkpointed (deferred tools pending)."""
 
+    elicitation_registry: ElicitationFutureRegistry | None = None
+    """Per-session registry of pending elicitation futures.
+
+    Set by ``get_agentlet()`` when the elicitation bridge capability is
+    created. Used by ``resume_session()`` to resolve futures for in-process
+    resume (the agent run is still alive but paused on elicitation).
+    """
+
+    cached_elicitation_responses: dict[str, ElicitResult] = field(default_factory=dict)
+    """Cached elicitation responses for crash recovery.
+
+    Maps ``tool_call_id`` to a pre-built ``ElicitResult``. When
+    ``handle_elicitation()`` is called during re-execution, it checks
+    this dict first and returns the cached response instead of deferring
+    again. Populated by ``_resume_native_agent()`` from
+    ``ElicitationResumePayload`` data.
+    """
+
+    checkpoint_manager: CheckpointManager | None = None
+    """Checkpoint manager for durable elicitation.
+
+    Set by ``get_agentlet()`` when the elicitation bridge capability is
+    created. Used by ``handle_elicitation()`` to checkpoint the session
+    before awaiting an elicitation future, enabling crash recovery.
+    """
+
+    elicitation_timeout: float | None = 300.0
+    """Timeout in seconds for elicitation responses.
+
+    Set from agent config (``BaseAgentConfig.elicitation_timeout``) by
+    ``get_agentlet()``. ``None`` means no timeout (infinite wait). Used
+    by ``handle_elicitation()`` for ``asyncio.wait_for()``.
+    """
+
+    current_messages: list[Any] | None = None
+    """Current pydantic-ai message history snapshot.
+
+    Set by the tool wrapping layer (``wrap_tool``) before each tool call
+    from ``ctx.messages``. Used by ``handle_elicitation()`` to pass real
+    message history to ``CheckpointManager.checkpoint()`` for crash
+    recovery. Without this, crash recovery would re-execute all prior
+    tool calls, causing duplicate side effects.
+    """
+
     _run_handle: RunHandle | None = None
     """Run handle for this execution, set by RunHandle lifecycle."""
 
@@ -180,6 +233,27 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
     run_ctx: AgentRunContext | None = None
     """Reference to the per-run context for accessing run-isolated state."""
 
+    _pending_elicitation_deferral: dict[str, Any] | None = None
+    """Side-channel for durable elicitation (MCP tools only).
+
+    When ``handle_elicitation`` is called inside an MCP callback and
+    raises ``CallDeferred``, the MCP ``elicitation_handler`` catches it
+    and stores the elicitation params here. ``MCPClient.call_tool``
+    checks this attribute after the MCP call returns and re-raises
+    ``CallDeferred`` so the run can be checkpointed and resumed.
+    """
+
+    in_mcp_callback: bool = False
+    """Whether this context is inside an MCP callback.
+
+    Set to ``True`` by ``MCPClient.call_tool()`` before invoking the
+    MCP tool. When ``True``, ``handle_elicitation()`` raises
+    ``CallDeferred`` (FastMCP callback wrapper catches exceptions,
+    so awaiting a future is not possible). When ``False``,
+    ``handle_elicitation()`` awaits a future directly (local tools
+    can suspend without ending the agent run).
+    """
+
     @property
     def native_agent(self) -> Agent[TDeps, Any]:
         """Current agent, type-narrowed to native pydantic-ai Agent."""
@@ -188,10 +262,191 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         assert isinstance(self.node, Agent)
         return self.node  # ty: ignore[invalid-return-type]
 
-    async def handle_elicitation(self, params: ElicitRequestParams) -> ElicitResult | ErrorData:
-        """Handle elicitation request for additional information."""
+    async def handle_elicitation(self, params: ElicitRequestParams) -> ElicitResult | ErrorData:  # noqa: PLR0911, PLR0915
+        """Handle elicitation request for additional information.
+
+        Three paths based on context:
+
+        1. **Crash recovery**: If ``run_ctx.cached_elicitation_responses``
+           has a cached response for this ``tool_call_id``, return it
+           immediately. This allows re-executed tools to complete without
+           deferring again.
+
+        2. **MCP tools** (``in_mcp_callback=True``): Raises
+           ``CallDeferred`` directly. FastMCP's callback wrapper catches
+           exceptions, so the MCP ``elicitation_handler`` in
+           ``MCPClient.call_tool()`` catches this and converts to a
+           side-channel + sentinel. ``call_tool()`` then re-raises
+           ``CallDeferred`` after the MCP call returns. The run ends
+           with ``DeferredToolRequests`` and resumes via crash recovery.
+
+        3. **Local tools** (``in_mcp_callback=False``): Checkpoints the
+           session, emits ``ElicitationDeferredEvent``, registers a future
+           in ``ElicitationFutureRegistry``, and **awaits the future**.
+           The agent run suspends (not ends) at the ``await`` point.
+           When the user responds, ``resume_session()`` resolves the
+           future, ``handle_elicitation()`` returns the response, the
+           tool function continues naturally, and the agent run resumes.
+           No re-execution, no ``CallDeferred``, no ``DeferredToolRequests``.
+
+        When durability is not supported, the provider's ``get_elicitation``
+        is called directly (existing behavior).
+        """
+        # Path 1: Crash recovery — return cached response.
+        if (
+            self.run_ctx is not None
+            and self.tool_call_id is not None
+            and self.tool_call_id in self.run_ctx.cached_elicitation_responses
+        ):
+            return self.run_ctx.cached_elicitation_responses[self.tool_call_id]
+
         provider = self.get_input_provider()
-        return await provider.get_elicitation(params)
+        if not provider.supports_durable_elicitation:
+            return await provider.get_elicitation(params)
+
+        # Build elicitation params dict (used in both MCP and local paths).
+        match params:
+            case ElicitRequestFormParams():
+                elicitation_params: dict[str, Any] = {
+                    "message": params.message,
+                    "requestedSchema": params.requestedSchema,
+                    "mode": params.mode,
+                }
+            case ElicitRequestURLParams():
+                elicitation_params = {
+                    "message": params.message,
+                    "url": params.url,
+                    "elicitationId": params.elicitationId,
+                    "mode": params.mode,
+                }
+            case _:
+                elicitation_params = {
+                    "message": str(params),
+                    "mode": None,
+                }
+
+        # Path 2: MCP tools — raise CallDeferred (FastMCP can't await).
+        if self.in_mcp_callback:
+            raise CallDeferred(
+                metadata={
+                    "elicitation": elicitation_params,
+                    "deferred_kind": "elicitation",
+                }
+            )
+
+        # Path 3: Local tools — checkpoint, emit event, await future.
+        # The agent run suspends here without ending. When the future
+        # resolves, handle_elicitation() returns and the tool continues.
+        run_ctx = self.run_ctx
+        if run_ctx is None:
+            # No run context — fall back to synchronous path.
+            return await provider.get_elicitation(params)
+
+        registry = run_ctx.elicitation_registry
+        if registry is None:
+            # No registry — fall back to synchronous path.
+            return await provider.get_elicitation(params)
+
+        handle = self.tool_call_id or run_ctx.run_id
+
+        # Checkpoint the session for crash recovery.
+        if run_ctx.checkpoint_manager is not None:
+            try:
+                from agentpool.agents.events.events import ElicitationDeferredEvent
+                from agentpool.sessions.models import PendingDeferredCall
+
+                pending_call = PendingDeferredCall(
+                    tool_call_id=handle,
+                    tool_name=self.tool_name or "",
+                    deferred_kind="elicitation",
+                    deferred_strategy="block",
+                    elicitation_message=elicitation_params.get("message"),
+                    elicitation_schema=elicitation_params.get("requestedSchema"),
+                    elicitation_mode=elicitation_params.get("mode"),
+                )
+                # Emit event to EventBus for protocol converters.
+                if run_ctx.event_bus is not None:
+                    event = ElicitationDeferredEvent(
+                        deferred_handle=handle,
+                        message=elicitation_params.get("message", ""),
+                        requested_schema=elicitation_params.get("requestedSchema", {}),
+                        mode=elicitation_params.get("mode", "form"),
+                        session_id=run_ctx.session_id,
+                        timeout_seconds=run_ctx.elicitation_timeout,
+                    )
+                    await run_ctx.event_bus.publish(run_ctx.session_id, event)
+                await run_ctx.checkpoint_manager.checkpoint(
+                    session_id=run_ctx.session_id,
+                    message_history=run_ctx.current_messages or [],
+                    pending_calls=[pending_call],
+                    agent_config_hash="",
+                )
+                run_ctx.checkpointed = True
+                # Update session store status to "checkpointed" so
+                # resume_session() can find it without relying on the
+                # allow_active_run workaround.
+                pool = self.node.agent_pool
+                if pool is not None and pool.session_pool is not None:
+                    store = pool.session_pool.sessions.store
+                    if store is not None:
+                        try:
+                            data = await store.load(run_ctx.session_id)
+                            if data is not None and data.status == "active":
+                                data = data.model_copy(update={"status": "checkpointed"})
+                                data.touch()
+                                await store.save(data)
+                        except Exception:  # noqa: BLE001
+                            logger.debug(
+                                "Failed to update session status to checkpointed",
+                                session_id=run_ctx.session_id,
+                                exc_info=True,
+                            )
+            except Exception:  # noqa: BLE001
+                # Checkpoint failed — the in-process future await still
+                # works, but crash recovery won't be available for this
+                # elicitation. Log prominently so operators know durability
+                # is degraded.
+                logger.warning(
+                    "Checkpoint failed for durable elicitation — "
+                    "crash recovery unavailable for this call",
+                    session_id=run_ctx.session_id,
+                    tool_call_id=handle,
+                    exc_info=True,
+                )
+
+        # Register future and await — agent run suspends here.
+        timeout = run_ctx.elicitation_timeout
+        future = registry.register(handle)
+        try:
+            if timeout is not None:
+                payload = await asyncio.wait_for(future, timeout=timeout)
+            else:
+                payload = await future
+        except TimeoutError:
+            from agentpool.tasks.exceptions import RunAbortedError
+
+            raise RunAbortedError(
+                f"Elicitation timed out after {timeout}s"
+                if timeout is not None
+                else "Elicitation timed out"
+            ) from None
+        finally:
+            # Ensure the future is removed from the registry even on
+            # timeout or CancelledError, so retries don't hit ValueError.
+            registry.remove(handle)
+
+        # Convert ElicitationResumePayload to ElicitResult.
+        from mcp.types import ElicitResult as MCPElicitResult
+
+        match payload.action:
+            case "accept":
+                return MCPElicitResult(action="accept", content=payload.content)
+            case "decline":
+                return MCPElicitResult(action="decline")
+            case "cancel":
+                return MCPElicitResult(action="cancel")
+            case _:
+                return MCPElicitResult(action="decline")
 
     def get_session_state(self) -> Any | None:
         """Get the SessionState for the current run if available.

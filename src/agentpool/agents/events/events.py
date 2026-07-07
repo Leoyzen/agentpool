@@ -773,6 +773,40 @@ class ToolCallDeferredEvent:
 
 
 @dataclass(kw_only=True)
+class ElicitationDeferredEvent:
+    """Event indicating an elicitation request has been deferred for user response.
+
+    Emitted when an MCP server's elicitation request cannot be resolved immediately
+    and must be persisted for later resumption. The deferred_handle identifies
+    the pending call that will be resolved when the user responds.
+    """
+
+    deferred_handle: str
+    """Opaque handle for resolving the deferred elicitation call."""
+
+    message: str
+    """Human-readable message describing what is being elicited."""
+
+    requested_schema: dict[str, Any]
+    """JSON schema describing the expected response structure."""
+
+    mode: str
+    """Elicitation mode hint (e.g., 'form', 'inline') for client rendering."""
+
+    session_id: str = ""
+    """ID of the session that emitted this event."""
+    event_kind: Literal["elicitation_deferred"] = "elicitation_deferred"
+    """Event type identifier."""
+
+    timeout_seconds: float | None = None
+    """Elicitation timeout in seconds, for frontend countdown display.
+
+    ``None`` means no timeout (infinite wait). Set from
+    ``AgentRunContext.elicitation_timeout`` when the event is published.
+    """
+
+
+@dataclass(kw_only=True)
 class SessionResumeEvent:
     """Event indicating a session has been resumed from a checkpoint.
 
@@ -800,6 +834,7 @@ type RichAgentStreamEvent[OutputDataT] = (
     | ToolCallProgressEvent
     | ToolCallCompleteEvent
     | ToolCallDeferredEvent
+    | ElicitationDeferredEvent
     | SessionResumeEvent
     | PlanUpdateEvent
     | CompactionEvent

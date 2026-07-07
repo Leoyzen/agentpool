@@ -203,6 +203,14 @@ class ACPSession:
     - 'json_str': Emit raw_input as a JSON string
     """
 
+    checkpoint_enabled: bool = False
+    """Whether durable elicitation checkpointing is enabled for this session.
+
+    When True, the ACPInputProvider.supports_durable_elicitation property
+    returns True, enabling the two-level interception path that checkpoints
+    elicitation requests for crash recovery.
+    """
+
     def __post_init__(self) -> None:
         """Initialize session state and set up providers."""
         self.mcp_servers = self.mcp_servers or []

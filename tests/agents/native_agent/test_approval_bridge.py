@@ -320,7 +320,7 @@ class TestGetAgentletIntegration:
             capabilities = call_kwargs.get("capabilities", []) or []
 
             bridge_caps = [cap for cap in capabilities if isinstance(cap, HandleDeferredToolCalls)]
-            assert len(bridge_caps) == 2, (
-                "Expected two HandleDeferredToolCalls capabilities "
-                "(DeferredToolBridge + ApprovalBridge)"
+            assert len(bridge_caps) == 3, (
+                "Expected three HandleDeferredToolCalls capabilities "
+                "(DeferredToolBridge + ElicitationBridge + ApprovalBridge)"
             )

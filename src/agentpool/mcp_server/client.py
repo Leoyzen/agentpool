@@ -24,6 +24,7 @@ from agentpool.log import get_logger
 from agentpool.mcp_server.constants import MCP_TO_LOGGING
 from agentpool.mcp_server.helpers import extract_text_content, mcp_tool_to_fn_schema
 from agentpool.mcp_server.message_handler import MCPMessageHandler
+from agentpool.tools import CallDeferred
 from agentpool.tools.base import FunctionTool
 from agentpool.utils.signatures import create_modified_signature
 from agentpool_config.mcp_server import (
@@ -421,7 +422,7 @@ class MCPClient:
             schema_override=schema,  # type: ignore[arg-type]
         )
 
-    async def call_tool(
+    async def call_tool(  # noqa: PLR0915
         self,
         name: str,
         run_context: RunContext,
@@ -457,7 +458,18 @@ class MCPClient:
                 from fastmcp.client.elicitation import ElicitResult
                 from mcp.types import ElicitResult as MCPElicitResult, ErrorData
 
-                result = await agent_ctx.handle_elicitation(params)
+                try:
+                    result = await agent_ctx.handle_elicitation(params)
+                except CallDeferred as exc:
+                    # FastMCP's callback wrapper catches exceptions, so
+                    # CallDeferred cannot propagate from here. Store the
+                    # elicitation params in the side-channel and return a
+                    # sentinel "decline" so FastMCP sees a normal decline.
+                    # MCPClient.call_tool() will check the side-channel
+                    # after the MCP call returns and re-raise CallDeferred.
+                    metadata = exc.metadata or {}
+                    agent_ctx._pending_elicitation_deferral = metadata.get("elicitation")
+                    return ElicitResult(action="decline")
                 match result:
                     case MCPElicitResult(action="accept", content=content):
                         return content
@@ -482,9 +494,24 @@ class MCPClient:
                 meta = {"claudecode/toolUseId": tool_call_id}
 
         try:
+            # Mark that we're inside an MCP callback so handle_elicitation()
+            # knows to raise CallDeferred (FastMCP callbacks can't await
+            # futures for long periods).
+            if agent_ctx:
+                agent_ctx.in_mcp_callback = True
             result = await self._client.call_tool(
                 name, arguments, progress_handler=progress_handler, meta=meta, raise_on_error=False
             )
+            # Check side-channel for durable elicitation deferral
+            if agent_ctx and agent_ctx._pending_elicitation_deferral is not None:
+                deferred_params = agent_ctx._pending_elicitation_deferral
+                agent_ctx._pending_elicitation_deferral = None
+                raise CallDeferred(  # noqa: TRY301
+                    metadata={
+                        "elicitation": deferred_params,
+                        "deferred_kind": "elicitation",
+                    }
+                )
             if result.is_error:
                 # MCP tool returned an error - return it as content so LLM can see it
                 error_text = extract_text_content(result.content)
@@ -505,11 +532,15 @@ class MCPClient:
                     return extract_text_content(result.content)
                 case _:  # Handle unexpected cases
                     raise ValueError(f"Unexpected MCP content: {result.content}")  # noqa: TRY301
+        except CallDeferred:
+            raise
         except Exception as e:
             raise RuntimeError(f"MCP tool call failed: {e}") from e
         finally:
-            # Clear per-call handler
+            # Clear per-call handler and MCP callback flag
             self._current_elicitation_handler = None
+            if agent_ctx:
+                agent_ctx.in_mcp_callback = False
 
 
 def _mcp_content_return_value(

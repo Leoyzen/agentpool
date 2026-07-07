@@ -62,6 +62,21 @@ class OpenCodeInputProvider(InputProvider):
         self._id_counter = 0
 
     @property
+    def supports_durable_elicitation(self) -> bool:
+        """Whether this provider supports durable (checkpointable) elicitation.
+
+        Checks the session's checkpoint configuration at runtime via the
+        session controller. Returns False when the session controller is
+        not available, the session does not exist, or checkpointing is
+        not enabled for the session.
+        """
+        if self.state.session_controller is not None:
+            session = self.state.session_controller.get_session(self.session_id)
+            if session is not None:
+                return session.checkpoint_enabled
+        return False
+
+    @property
     def _pending_questions_dict(self) -> dict[str, Any]:
         """Get the pending questions dict for this session.
 

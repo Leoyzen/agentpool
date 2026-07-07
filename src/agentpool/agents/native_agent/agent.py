@@ -8,7 +8,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import timedelta
 import inspect
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Self, TypedDict, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Self, TypedDict, TypeVar, overload
 import warnings
 
 import logfire
@@ -860,6 +860,36 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             logger.exception("Failed to collect deferred tools — using empty dict")
 
         tool_capabilities.append(create_deferred_bridge_capability(deferred_tools))
+        # 3b. Elicitation bridge: intercepts deferred elicitation calls (from
+        #     MCP servers) before approval_bridge. Checkpoints the session,
+        #     emits ElicitationDeferredEvent, and registers a future for
+        #     later resolution when the user responds.
+        from agentpool.agents.native_agent.checkpoint import CheckpointManager
+        from agentpool.agents.native_agent.elicitation_bridge import (
+            ElicitationFutureRegistry,
+            create_elicitation_bridge_capability,
+        )
+
+        elicitation_registry = ElicitationFutureRegistry()
+        if run_ctx is not None:
+            run_ctx.elicitation_registry = elicitation_registry
+            # Set configurable elicitation timeout from agent config.
+            if self.config is not None:
+                td = self.config.elicitation_timeout
+                run_ctx.elicitation_timeout = td.total_seconds() if td is not None else None
+        checkpoint_mgr: CheckpointManager | None = None
+        if self.agent_pool is not None:
+            checkpoint_mgr = CheckpointManager(
+                storage_manager=self.agent_pool.storage,
+            )
+        if run_ctx is not None:
+            run_ctx.checkpoint_manager = checkpoint_mgr
+        tool_capabilities.append(
+            create_elicitation_bridge_capability(
+                registry=elicitation_registry,
+                checkpoint_manager=checkpoint_mgr,
+            )
+        )
         # 4. Approval bridge: routes pydantic-ai deferred approvals to InputProvider
         from agentpool.agents.native_agent.approval_bridge import (
             create_approval_bridge_capability,
@@ -981,6 +1011,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         else:
             retries_param = self._retries
 
+        # When HandleDeferredToolCalls capabilities are present, add
+        # DeferredToolRequests to output_type so pydantic-ai can return
+        # deferred tool requests as agent output (required for checkpoint/resume).
+        from pydantic_ai.tools import DeferredToolRequests
+
+        if tool_capabilities:
+            final_output_type: Any = [final_type, DeferredToolRequests]
+        else:
+            final_output_type = final_type
+
         agent_kwargs: dict[str, Any] = {
             "name": self.name,
             "model": model_,
@@ -989,7 +1029,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             "retries": retries_param,
             "end_strategy": self._end_strategy,
             "deps_type": AgentContext[TDeps],
-            "output_type": cast(Any, final_type),
+            "output_type": final_output_type,
             "tools": list(direct_tools),
             "capabilities": tool_capabilities if tool_capabilities else None,
         }

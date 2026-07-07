@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import timedelta
 from typing import TYPE_CHECKING, Annotated, Any, Literal, assert_never
 
 from evented_config import EventConfig, FileWatchConfig, TimeEventConfig
 from exxec_config import E2bExecutionEnvironmentConfig, ExecutionEnvironmentConfig
-from pydantic import ConfigDict, Field, HttpUrl, ImportString
+from pydantic import ConfigDict, Field, HttpUrl, ImportString, field_validator
 from schemez import Schema
 
 from agentpool_config.capabilities import CapabilityConfig
@@ -260,6 +261,73 @@ class BaseAgentConfig(NodeConfig):
             max_tokens: 100000
         ```
     """
+
+    elicitation_timeout: timedelta | None = Field(
+        default=timedelta(seconds=300),
+        title="Elicitation timeout",
+        examples=["300s", "5m", "10m"],
+    )
+    """How long to wait for user elicitation responses before aborting the run.
+
+    Accepts time strings (``"5m"``, ``"300s"``), numbers (seconds), or
+    ``timedelta``. Set to ``null`` for no timeout (infinite wait).
+
+    Example:
+        ```yaml
+        agents:
+          my_agent:
+            elicitation_timeout: 600s
+        ```
+    """
+
+    @field_validator("elicitation_timeout", mode="before")
+    @classmethod
+    def parse_elicitation_timeout(cls, v: str | timedelta | float | None) -> timedelta | None:
+        """Parse string/number timeout to timedelta.
+
+        Args:
+            v: Raw value from YAML — string (``"5m"``), number (seconds),
+                timedelta, or None.
+
+        Returns:
+            Parsed timedelta, or None for infinite wait.
+        """
+        if v is None:
+            return None
+        if isinstance(v, timedelta):
+            return v
+        if isinstance(v, int | float):
+            return timedelta(seconds=v)
+        # Parse string like "5m", "1h", "300s" — simple inline parser
+        # to avoid importing from agentpool (layer separation).
+        import re
+
+        pattern = re.compile(
+            r"\s*(?P<weeks>[\d.]+)\s*w(?:ks?|eeks?)?"
+            r"|(?P<days>[\d.]+)\s*d(?:ys?|ays?)?"
+            r"|(?P<hours>[\d.]+)\s*h(?:rs?|ours?)?"
+            r"|(?P<mins>[\d.]+)\s*m(?:ins?|inutes?)?"
+            r"|(?P<secs>[\d.]+)\s*s(?:ecs?|econds?)?",
+            re.IGNORECASE,
+        )
+        matches = pattern.findall(v)
+        if not matches:
+            raise ValueError(f"Invalid time format: {v}")
+        multipliers = {
+            "weeks": 60 * 60 * 24 * 7,
+            "days": 60 * 60 * 24,
+            "hours": 60 * 60,
+            "mins": 60,
+            "secs": 1,
+        }
+        total = 0.0
+        for match in matches:
+            for unit, val in zip(multipliers, match, strict=False):
+                if val:
+                    total += multipliers[unit] * float(val)
+        if total <= 0:
+            raise ValueError(f"Invalid time format: {v}")
+        return timedelta(seconds=total)
 
     def get_execution_environment(self) -> ExecutionEnvironment:
         """Get the execution environment for this agent."""

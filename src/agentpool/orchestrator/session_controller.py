@@ -67,6 +67,27 @@ class SessionBusyError(Exception):
         self.run_id = run_id
 
 
+class SessionClosedError(Exception):
+    """Raised when rejecting pending elicitation futures on session close.
+
+    This exception is set on pending ``asyncio.Future`` instances in
+    ``ElicitationFutureRegistry`` when a session is closed, ensuring
+    any suspended ``handle_elicitation()`` calls unblock immediately.
+
+    Attributes:
+        session_id: The session that was closed.
+    """
+
+    def __init__(self, session_id: str) -> None:
+        """Initialize with the closed session ID.
+
+        Args:
+            session_id: The session that was closed.
+        """
+        self.session_id = session_id
+        super().__init__(f"Session closed: {session_id}")
+
+
 class CheckpointMismatchError(Exception):
     """Raised when deferred_tool_results don't cover all pending_deferred_calls."""
 
@@ -158,6 +179,8 @@ class SessionState:
     input_provider: Any | None = None
     pending_questions: dict[str, Any] = field(default_factory=dict)
     """Pending questions stored on SessionState for per-session isolation."""
+    checkpoint_enabled: bool = False
+    """Whether durable elicitation/checkpointing is enabled for this session."""
 
     @property
     def closing(self) -> bool:
@@ -323,6 +346,7 @@ class SessionController:
             parent_session_id=parent_session_id,
             lifecycle_policy=effective_policy,
             metadata=metadata,
+            checkpoint_enabled=self.store is not None,
         )
         self._sessions[session_id] = state
 

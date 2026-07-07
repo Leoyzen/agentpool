@@ -201,6 +201,15 @@ class ACPInputProvider(InputProvider):
         self.session = session
         self._tool_approvals: dict[str, Literal["allow_always", "reject_always"]] = {}
 
+    @property
+    def supports_durable_elicitation(self) -> bool:
+        """Whether this provider supports durable (checkpointable) elicitation.
+
+        Checks the session's ``checkpoint_enabled`` flag at runtime.
+        Returns False when checkpointing is not enabled for this session.
+        """
+        return self.session.checkpoint_enabled
+
     async def get_tool_confirmation(
         self,
         context: AgentContext[Any],

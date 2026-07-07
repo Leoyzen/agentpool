@@ -100,6 +100,11 @@ def wrap_tool[TReturn](
             if agent_ctx.data is None:
                 agent_ctx.data = ctx.deps
 
+            # Store current message history on run_ctx so handle_elicitation()
+            # can pass real messages to CheckpointManager for crash recovery.
+            if ctx.deps is not None and ctx.deps.run_ctx is not None:
+                ctx.deps.run_ctx.current_messages = list(ctx.messages)
+
             if agent_ctx_key:
                 model_name = f"{ctx.model.system}:{ctx.model.model_name}" if ctx.model else None
                 call_ctx = _replace_agent_ctx(

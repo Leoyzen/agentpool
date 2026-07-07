@@ -24,6 +24,7 @@ from agentpool.orchestrator.run import RunHandle, RunStatus
 from agentpool.orchestrator.session_controller import (
     CheckpointMismatchError,
     SessionBusyError,
+    SessionClosedError,
     SessionController,
     SessionNotFoundError,
     SessionState,
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
     from agentpool.delegation.base_team import BaseTeam
     from agentpool.messaging import ChatMessage
     from agentpool.messaging.messagenode import MessageNode
-    from agentpool.sessions.models import SessionData
+    from agentpool.sessions.models import ElicitationResumePayload, SessionData
     from agentpool.sessions.store import SessionStore
     from agentpool_config.teams import TeamConfig
 
@@ -121,6 +122,7 @@ class SessionPool:
         self._resume_locks: dict[str, asyncio.Lock] = {}
         self._resume_locks_lock = asyncio.Lock()
         self._message_cache: dict[str, list[ChatMessage[Any]]] = {}
+        self._elicitation_registries: dict[str, Any] = {}
 
     async def start(self) -> None:
         """Start the session pool and background tasks."""
@@ -247,7 +249,9 @@ class SessionPool:
             return lock
 
     @contextlib.asynccontextmanager
-    async def _with_resume_lock(self, session_id: str) -> AsyncIterator[SessionState | None]:
+    async def _with_resume_lock(
+        self, session_id: str, *, allow_active_run: bool = False
+    ) -> AsyncIterator[SessionState | None]:
         """Acquire per-session resume lock with state validation.
 
         Ensures only one resume runs per session at a time and that
@@ -256,6 +260,9 @@ class SessionPool:
 
         Args:
             session_id: Session to lock.
+            allow_active_run: When True, skip the ``current_run_id`` check.
+                Used for in-process elicitation resume where the agent run
+                is intentionally still alive.
 
         Yields:
             The live ``SessionState``, or ``None`` if no live session exists.
@@ -267,12 +274,21 @@ class SessionPool:
         resume_lock = await self._get_resume_lock(session_id)
         async with resume_lock:
             session = self.sessions.get_session(session_id)
-            if session is not None and session.current_run_id is not None:
+            if not allow_active_run and session is not None and session.current_run_id is not None:
                 raise SessionBusyError(session_id, session.current_run_id)
 
             if self.sessions.store is not None:
                 current_data = await self.sessions.store.load(session_id)
-                if current_data is not None and current_data.status != "checkpointed":
+                # When allow_active_run is True (in-process elicitation
+                # resume), the persisted status may still be "active"
+                # because the elicitation bridge checkpoint saves
+                # checkpoint data but doesn't update the session store
+                # status. Allow "active" in that case.
+                if (
+                    current_data is not None
+                    and current_data.status != "checkpointed"
+                    and (not allow_active_run or current_data.status != "active")
+                ):
                     raise SessionBusyError(session_id, current_data.status)
 
             yield session
@@ -402,17 +418,26 @@ class SessionPool:
         session_data: SessionData,
         checkpoint: CheckpointData,
         results: Any,
+        elicitation_payloads: list[ElicitationResumePayload] | None = None,
     ) -> None:
         """Resume a native agent from checkpoint with deferred results.
 
         Loads message_history from checkpoint, reconstructs the agent from its
-        original config, and calls agent.run() with the restored history and
-        deferred results.
+        original config, and calls agent.run_stream() with the restored history
+        and deferred results.
+
+        For elicitation deferred calls (``deferred_kind="elicitation"``), the
+        elicitation responses are pre-populated into
+        ``AgentRunContext.cached_elicitation_responses`` so that
+        ``handle_elicitation()`` returns the cached response during tool
+        re-execution instead of deferring again.
 
         Args:
             session_data: Persisted session data.
             checkpoint: Checkpoint data with message_history and pending_calls.
             results: DeferredToolResults for resolving pending deferred calls.
+            elicitation_payloads: Optional elicitation responses for crash
+                recovery resume of elicitation deferred calls.
 
         Raises:
             SessionNotFoundError: If agent config is not found.
@@ -448,16 +473,50 @@ class SessionPool:
                     exc_info=True,
                 )
 
+        # Build cached elicitation responses for crash recovery.
+        cached_elicitation: dict[str, Any] = {}
+        if elicitation_payloads:
+            from mcp.types import ElicitResult as MCPElicitResult
+
+            for payload in elicitation_payloads:
+                match payload.action:
+                    case "accept":
+                        cached_elicitation[payload.deferred_handle] = MCPElicitResult(
+                            action="accept",
+                            content=payload.content,
+                        )
+                    case "decline":
+                        cached_elicitation[payload.deferred_handle] = MCPElicitResult(
+                            action="decline",
+                        )
+                    case "cancel":
+                        cached_elicitation[payload.deferred_handle] = MCPElicitResult(
+                            action="cancel",
+                        )
+
         try:
             message_history: list[Any] = list(checkpoint.message_history)
-            # deferred_tool_results is forwarded to pydantic-ai Agent.run()
-            # which accepts it natively; cast to Any since BaseAgent.run()
-            # doesn't declare this kwarg in its signature.
-            run_fn: Any = agent.run
-            await run_fn(
+
+            # Set up run context with cached elicitation responses for
+            # crash recovery.
+            run_ctx = AgentRunContext(
+                session_id=session_data.session_id,
+                event_bus=self._event_bus,
+            )
+            if cached_elicitation:
+                run_ctx.cached_elicitation_responses = cached_elicitation
+
+            # Call run_stream() directly so we can pass _run_ctx with
+            # cached elicitation responses. Cast to Any since
+            # BaseAgent.run_stream() doesn't declare deferred_tool_results
+            # in its signature — pydantic-ai picks it up via **kwargs.
+            stream_fn: Any = agent.run_stream
+            async for _ in stream_fn(
                 message_history=message_history,
                 deferred_tool_results=results,
-            )
+                _run_ctx=run_ctx,
+            ):
+                pass
         finally:
             await agent.__aexit__(None, None, None)
 
@@ -490,31 +549,86 @@ class SessionPool:
             if hasattr(agent, "__aexit__"):
                 await agent.__aexit__(None, None, None)
 
-    async def resume_session(
+    async def _try_in_process_elicitation_resume(
+        self,
+        session_id: str,
+        elicitation_payloads: list[ElicitationResumePayload],
+    ) -> bool:
+        """Attempt in-process elicitation resume by resolving futures.
+
+        Checks if the agent run is still alive (in-process) and has an
+        ``ElicitationFutureRegistry`` with pending futures for the given
+        elicitation payloads. If so, resolves each future with the
+        corresponding payload.
+
+        Args:
+            session_id: The session to check.
+            elicitation_payloads: Elicitation responses to resolve.
+
+        Returns:
+            True if ALL payloads were resolved in-process, False otherwise.
+        """
+        run_handle = self._get_active_run_handle(session_id)
+        if run_handle is None or run_handle.run_ctx is None:
+            return False
+
+        registry = run_handle.run_ctx.elicitation_registry
+        if registry is None:
+            return False
+
+        all_resolved = True
+        for payload in elicitation_payloads:
+            if payload.deferred_handle not in registry:
+                all_resolved = False
+                continue
+            registry.resolve(payload.deferred_handle, payload)
+
+        if all_resolved:
+            logger.debug(
+                "In-process elicitation resume — all futures resolved",
+                session_id=session_id,
+                count=len(elicitation_payloads),
+            )
+        else:
+            logger.debug(
+                "In-process elicitation resume — some futures not found, "
+                "falling back to crash recovery",
+                session_id=session_id,
+            )
+
+        return all_resolved
+
+    async def resume_session(  # noqa: PLR0915
         self,
         session_id: str,
         deferred_tool_results: Any,
         *,
         source: str = "resume_prompt",
+        elicitation_payloads: list[ElicitationResumePayload] | None = None,
     ) -> None:
         """Resume a paused session with resolved deferred tool results.
 
         Loads the persisted SessionData, validates that deferred_tool_results
         cover all pending_deferred_calls (raising CheckpointMismatchError if not),
         and resumes execution via the appropriate path:
-        - Native agent: load checkpoint → reconstruct agent from config →
-          agent.run(message_history=restored, deferred_tool_results=results)
-        - ACP agent: load session data → reopen subprocess →
-          agent.run(message_history=restored, deferred_tool_results=results)
 
-        Per-session resume_lock ensures only one resume at a time.
-        Emits SessionResumeEvent on success.
+        - **In-process elicitation resume**: If ``elicitation_payloads`` are
+          provided and the elicitation future still exists in the
+          ``ElicitationFutureRegistry`` (agent run is still alive), the future
+          is resolved directly.
+        - **Crash recovery elicitation resume**: If ``elicitation_payloads``
+          are provided but the future does NOT exist, the elicitation responses
+          are pre-populated into ``AgentRunContext.cached_elicitation_responses``
+          and the agent run is re-executed.
+        - **Non-elicitation resume**: Native agent: load checkpoint →
+          reconstruct agent → ``agent.run_stream()`` with deferred results.
 
         Args:
             session_id: Session to resume.
-            deferred_tool_results: Results for pending deferred tool calls
-                (DeferredToolResults-compatible object with .calls dict).
+            deferred_tool_results: Results for pending deferred tool calls.
             source: Identifier for the entity triggering the resume.
+            elicitation_payloads: Optional elicitation responses for resuming
+                deferred elicitation calls.
 
         Raises:
             SessionNotFoundError: If the session does not exist in storage.
@@ -530,34 +644,121 @@ class SessionPool:
         if data is None:
             raise SessionNotFoundError(session_id)
 
-        # Fast-path: check for active run in live sessions (before lock).
-        # The authoritative check is inside _with_resume_lock, but this
-        # early check avoids unnecessary store operations for busy sessions.
-        session = self.sessions.get_session(session_id)
-        if session is not None and session.current_run_id is not None:
-            raise SessionBusyError(session_id, session.current_run_id)
+        # Separate elicitation and non-elicitation pending call IDs.
+        # Must be done before the SessionBusyError check so we can detect
+        # in-process elicitation resume (where the agent run is still alive).
+        elicitation_call_ids: set[str] = {
+            call.tool_call_id
+            for call in data.pending_deferred_calls
+            if call.deferred_kind == "elicitation"
+        }
+        non_elicitation_pending_ids: set[str] = {
+            call.tool_call_id for call in data.pending_deferred_calls
+        } - elicitation_call_ids
 
-        # Validate deferred_tool_results cover all pending_deferred_calls
-        pending_call_ids: set[str] = {call.tool_call_id for call in data.pending_deferred_calls}
+        # Fast-path: check for active run in live sessions (before lock).
+        # EXCEPTION: in-process elicitation resume — the agent run is
+        # intentionally still alive, paused on elicitation futures.
+        session = self.sessions.get_session(session_id)
+        has_in_process_elicitation = False
+        if session is not None and session.current_run_id is not None:
+            if elicitation_payloads is not None:
+                run_handle = self._get_active_run_handle(session_id)
+                if (
+                    run_handle is not None
+                    and run_handle.run_ctx is not None
+                    and run_handle.run_ctx.elicitation_registry is not None
+                    and len(run_handle.run_ctx.elicitation_registry) > 0
+                    and all(
+                        p.deferred_handle in run_handle.run_ctx.elicitation_registry
+                        for p in elicitation_payloads
+                    )
+                ):
+                    has_in_process_elicitation = True
+
+            if not has_in_process_elicitation:
+                raise SessionBusyError(session_id, session.current_run_id)
+
         provided_call_ids: set[str] = set(getattr(deferred_tool_results, "calls", {}).keys())
 
-        missing = pending_call_ids - provided_call_ids
-        extra = provided_call_ids - pending_call_ids
+        missing = non_elicitation_pending_ids - provided_call_ids
+        extra = provided_call_ids - non_elicitation_pending_ids - elicitation_call_ids
         if missing or extra:
             raise CheckpointMismatchError(
                 session_id=session_id,
-                expected=pending_call_ids,
+                expected=non_elicitation_pending_ids,
                 provided=provided_call_ids,
                 missing=missing,
                 extra=extra,
             )
 
+        # Validate elicitation_payloads cover all elicitation deferred calls.
+        if elicitation_call_ids:
+            provided_elicitation_ids: set[str] = {
+                p.deferred_handle for p in (elicitation_payloads or [])
+            }
+            missing_elicitation = elicitation_call_ids - provided_elicitation_ids
+            if missing_elicitation:
+                raise CheckpointMismatchError(
+                    session_id=session_id,
+                    expected=elicitation_call_ids,
+                    provided=provided_elicitation_ids,
+                    missing=missing_elicitation,
+                    extra=set(),
+                )
+
         # Determine agent type
         agent_type = data.metadata.get("agent_type", "native")
 
-        # Per-session resume lock with state validation (Decision 8, Task 19)
-        async with self._with_resume_lock(session_id) as session:
+        # Per-session resume lock with state validation.
+        # For in-process elicitation resume, allow the active run to persist.
+        async with self._with_resume_lock(
+            session_id, allow_active_run=has_in_process_elicitation
+        ) as session:
             try:
+                # In-process elicitation resume: resolve futures so the
+                # suspended agent run can continue naturally.
+                if elicitation_payloads:
+                    resolved = await self._try_in_process_elicitation_resume(
+                        session_id, elicitation_payloads
+                    )
+                    if resolved:
+                        # All futures resolved — agent run will continue.
+                        data = data.model_copy(
+                            update={
+                                "status": "active",
+                                "pending_deferred_calls": [],
+                            }
+                        )
+                        data.touch()
+                        await store.save(data)
+
+                        if session is not None:
+                            session.last_active_at = time.monotonic()
+
+                        total_resolved = len(elicitation_call_ids)
+                        await self.event_bus.publish(
+                            session_id,
+                            SessionResumeEvent(
+                                session_id=session_id,
+                                resolved_call_count=total_resolved,
+                                source=source,
+                            ),
+                        )
+
+                        logger.info(
+                            "In-process elicitation resume — futures resolved",
+                            session_id=session_id,
+                            count=total_resolved,
+                        )
+                        return
+
+                    # In-process resolution failed (race condition).
+                    # If the run is still active, we cannot start crash
+                    # recovery — that would create a concurrent run.
+                    if session is not None and session.current_run_id is not None:
+                        raise SessionBusyError(session_id, session.current_run_id)  # noqa: TRY301
+
                 # Load checkpoint data
                 checkpoint = await self._load_checkpoint_data(session_id)
 
@@ -569,9 +770,14 @@ class SessionPool:
                 if agent_type == "acp":
                     await self._resume_acp_agent(data, checkpoint, deferred_tool_results)
                 else:
-                    await self._resume_native_agent(data, checkpoint, deferred_tool_results)
+                    await self._resume_native_agent(
+                        data,
+                        checkpoint,
+                        deferred_tool_results,
+                        elicitation_payloads=elicitation_payloads,
+                    )
 
-                # Clear pending_deferred_calls ONLY after agent.run() succeeds (Decision 8)
+                # Clear pending_deferred_calls ONLY after agent.run() succeeds
                 data = data.model_copy(
                     update={
                         "status": "active",
@@ -586,11 +792,12 @@ class SessionPool:
                     session.last_active_at = time.monotonic()
 
                 # Emit SessionResumeEvent
+                total_resolved = len(non_elicitation_pending_ids) + len(elicitation_call_ids)
                 await self.event_bus.publish(
                     session_id,
                     SessionResumeEvent(
                         session_id=session_id,
-                        resolved_call_count=len(pending_call_ids),
+                        resolved_call_count=total_resolved,
                         source=source,
                     ),
                 )
@@ -599,7 +806,7 @@ class SessionPool:
                     "Session resumed successfully",
                     session_id=session_id,
                     agent_type=agent_type,
-                    resolved_calls=len(pending_call_ids),
+                    resolved_calls=total_resolved,
                 )
 
             except Exception:
@@ -613,7 +820,8 @@ class SessionPool:
         """Close a session.
 
         Waits for any active run to complete before proceeding.
-        Order: wait for run, session cleanup, event bus, then turn state.
+        Order: wait for run, reject elicitation futures, session cleanup,
+        event bus, then turn state.
 
         Args:
             session_id: The session to close.
@@ -630,8 +838,6 @@ class SessionPool:
             if run_handle is not None:
                 # Signal the RunHandle to stop its idle/wake loop so that
                 # start()'s finally block can set complete_event promptly.
-                # Without this, a handle stuck in _idle_event.wait() will
-                # never exit, causing close_session to hang until timeout.
                 run_handle.close()
                 # Unblock any background-task wait loop inside the run so
                 # complete_event can be set promptly instead of waiting.
@@ -647,6 +853,13 @@ class SessionPool:
                     self.cancel_run(run_handle.run_id)
                     await asyncio.sleep(0.1)
 
+        # Reject all pending elicitation futures so blocked MCP tool calls
+        # unblock immediately instead of hanging on a closed session.
+        if run_handle is not None and run_handle.run_ctx is not None:
+            registry = run_handle.run_ctx.elicitation_registry
+            if registry is not None:
+                registry.reject_all(SessionClosedError(session_id))
+
         try:
             await self.sessions.close_session(session_id)
         except Exception:
@@ -656,10 +869,8 @@ class SessionPool:
             )
         finally:
             # EventBus and message cache cleanup may be interrupted by
-            # CancelledError from garbage-collected async generator cleanup
-            # (e.g., when a consumer broke from run_stream without closing
-            # the generator). Suppress these spurious cancellations so
-            # shutdown proceeds.
+            # CancelledError from garbage-collected async generator cleanup.
+            # Suppress these spurious cancellations so shutdown proceeds.
             try:
                 await self.event_bus.close_session(session_id)
             except asyncio.CancelledError:
