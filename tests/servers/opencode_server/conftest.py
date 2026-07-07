@@ -18,7 +18,6 @@ import tempfile
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, Mock
 
-import anyio
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
@@ -45,53 +44,43 @@ if TYPE_CHECKING:
 
 
 def _make_functional_event_bus() -> Mock:
-    """Create a Mock EventBus that properly routes publish to subscribe streams.
+    """Create a Mock EventBus that properly routes publish to subscribe queues.
 
-    The real EventBus routes events from publish() to subscribe() via anyio
-    memory object streams. A plain Mock would silently absorb publish() calls,
+    The real EventBus routes events from publish() to subscribe() via
+    asyncio.Queue. A plain Mock would silently absorb publish() calls,
     causing SSE integration tests to time out waiting for events that never arrive.
 
-    Uses anyio memory object streams (matching the real EventBus) instead of
-    asyncio.Queue so subscribers receive objects with .receive()/.receive_nowait()
-    instead of .get()/.get_nowait().
+    Uses asyncio.Queue (matching the real EventBus) so subscribers receive
+    objects with .get()/.get_nowait() instead of .receive()/.receive_nowait().
 
     Supports scope="all" subscriptions which receive events from any session_id,
     matching the real EventBus._should_receive behavior.
     """
     _stream_buffer_size: int = 1024
     bus = Mock()
-    _streams: dict[str, list[tuple[anyio.abc.ObjectSendStream[Any], str]]] = {}
-    _stream_pairs: dict[int, anyio.abc.ObjectSendStream[Any]] = {}
+    _subscribers: dict[str, list[tuple[asyncio.Queue[Any], str]]] = {}
 
-    async def _subscribe(
-        session_id: str, scope: str = "session"
-    ) -> anyio.abc.ObjectReceiveStream[Any]:
-        send_stream, receive_stream = anyio.create_memory_object_stream(
-            max_buffer_size=_stream_buffer_size
-        )
-        _streams.setdefault(session_id, []).append((send_stream, scope))
-        _stream_pairs[id(receive_stream)] = send_stream
-        return receive_stream
+    async def _subscribe(session_id: str, scope: str = "session") -> asyncio.Queue[Any]:
+        queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=_stream_buffer_size)
+        _subscribers.setdefault(session_id, []).append((queue, scope))
+        return queue
 
-    async def _unsubscribe(
-        session_id: str, receive_stream: anyio.abc.ObjectReceiveStream[Any]
-    ) -> None:
-        send_to_close = _stream_pairs.pop(id(receive_stream), None)
-        if send_to_close is not None and session_id in _streams:
-            _streams[session_id] = [
-                (s, sc) for s, sc in _streams[session_id] if s is not send_to_close
+    async def _unsubscribe(session_id: str, queue: asyncio.Queue[Any]) -> None:
+        if session_id in _subscribers:
+            _subscribers[session_id] = [
+                (q, sc) for q, sc in _subscribers[session_id] if q is not queue
             ]
-            if not _streams[session_id]:
-                del _streams[session_id]
-        if send_to_close is not None:
-            await send_to_close.aclose()
+            if not _subscribers[session_id]:
+                del _subscribers[session_id]
+        with contextlib.suppress(asyncio.QueueShutDown):
+            queue.shutdown()
 
     async def _publish(session_id: str, event: Any) -> None:
-        for subscriber_sid, subscribers in _streams.items():
-            for send_stream, scope in subscribers:
+        for subscriber_sid, subscribers in _subscribers.items():
+            for queue, scope in subscribers:
                 if scope == "all" or subscriber_sid == session_id:
-                    with contextlib.suppress(anyio.WouldBlock):
-                        send_stream.send_nowait(event)
+                    with contextlib.suppress(asyncio.QueueFull):
+                        queue.put_nowait(event)
 
     bus.subscribe = AsyncMock(side_effect=_subscribe)
     bus.unsubscribe = AsyncMock(side_effect=_unsubscribe)

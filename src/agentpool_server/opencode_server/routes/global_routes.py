@@ -240,7 +240,7 @@ async def _event_generator(  # noqa: PLR0915
         state.create_background_task(state.on_first_subscriber(), name="on_first_subscriber")
 
     # Subscribe to EventBus for global SSE events
-    event_bus_stream: anyio.abc.ObjectReceiveStream[Any] | None = None
+    event_bus_stream: asyncio.Queue[Any] | None = None
     session_controller = getattr(state, "session_controller", None)
     if session_controller is not None:
         session_pool = getattr(state.pool, "session_pool", None)
@@ -267,13 +267,13 @@ async def _event_generator(  # noqa: PLR0915
             while True:
                 try:
                     with anyio.fail_after(10.0):
-                        raw_event = await event_bus_stream.receive()
+                        raw_event = await event_bus_stream.get()
                 except TimeoutError:
                     heartbeat = ServerHeartbeatEvent()
                     data = _serialize_event(heartbeat, wrap_payload=wrap_payload)
                     yield {"data": data}
                     continue
-                except anyio.EndOfStream:
+                except asyncio.QueueShutDown:
                     break
 
                 from agentpool.orchestrator.core import EventEnvelope

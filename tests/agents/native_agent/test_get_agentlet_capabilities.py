@@ -625,8 +625,8 @@ async def test_from_config_capabilities_not_duplicated() -> None:
     """
     from pydantic_ai.capabilities import Instrumentation
 
-    from agentpool_config.capabilities import GenericCapabilityConfig
     from agentpool.models.agents import NativeAgentConfig
+    from agentpool_config.capabilities import GenericCapabilityConfig
 
     cap_config = GenericCapabilityConfig(
         type="pydantic_ai.capabilities.Instrumentation",
@@ -652,5 +652,5 @@ async def test_from_config_capabilities_not_duplicated() -> None:
         instrumentation_caps = [c for c in capabilities if isinstance(c, Instrumentation)]
         assert len(instrumentation_caps) == 1, (
             f"Expected exactly 1 Instrumentation capability, found {len(instrumentation_caps)}. "
-            f"Capabilities are being duplicated between _extra_capabilities and config.capabilities."
+            "Capabilities are being duplicated between _extra_capabilities and config.capabilities."
         )
