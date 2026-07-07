@@ -387,10 +387,10 @@ Wave 5 (Docs + Final): Todos 13-14
 
 ## Final verification wave
 > Runs in parallel after ALL todos. ALL must APPROVE. Surface results and wait for the user's explicit okay before declaring complete.
-- [ ] F1. Plan compliance audit — verify all openspec requirements met: read `openspec/changes/unify-hook-system/specs/` and confirm each requirement has a passing test
-- [ ] F2. Code quality review — `uv run ruff check src/` + `uv run mypy src/` pass clean, no dead code, no TODOs left
-- [ ] F3. Real manual QA — `uv run pytest -m unit,integration -vv` passes, no warnings from hook code, hooks fire in SessionPool path
-- [ ] F4. Scope fidelity — no changes outside scope; Hook ABC, _run_hooks, HookInput/HookResult, EventBus, graph architecture unchanged
+- [x] F1. Plan compliance audit — verify all openspec requirements met: read `openspec/changes/unify-hook-system/specs/` and confirm each requirement has a passing test
+- [x] F2. Code quality review — `uv run ruff check src/` + `uv run mypy src/` pass clean, no dead code, no TODOs left
+- [x] F3. Real manual QA — `uv run pytest -m unit,integration -vv` passes, no warnings from hook code, hooks fire in SessionPool path
+- [x] F4. Scope fidelity — no changes outside scope; Hook ABC, _run_hooks, HookInput/HookResult, EventBus, graph architecture unchanged
 
 ## Commit strategy
 - One commit per todo (12 implementation commits + 1 docs commit + 1 validation)
