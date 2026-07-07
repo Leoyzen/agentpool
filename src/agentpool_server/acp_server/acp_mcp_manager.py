@@ -259,7 +259,29 @@ class AcpMcpConnectionManager:
     def __init__(self) -> None:
         """Initialize the connection manager."""
         self._connections: dict[str, AcpMcpConnection] = {}
+        self._session_connections: dict[str, set[tuple[str, int]]] = {}
         self._lock = asyncio.Lock()
+
+    def register_session_connection(
+        self,
+        session_id: str,
+        connection_id: str,
+        session_key: int,
+    ) -> None:
+        """Register that a session has an active MCP connection.
+
+        Tracks the (connection_id, session_key) tuple for the given
+        session so that cleanup can find all connections belonging to
+        a session. Uses a set for deduplication.
+
+        Args:
+            session_id: The ACP session ID.
+            connection_id: The MCP connection ID.
+            session_key: The int key used in AcpMcpConnection._session_streams.
+        """
+        self._session_connections.setdefault(session_id, set()).add(
+            (connection_id, session_key),
+        )
 
     async def create_connection(
         self,

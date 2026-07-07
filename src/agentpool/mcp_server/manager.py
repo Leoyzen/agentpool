@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self, cast
 import warnings
 
@@ -112,6 +113,34 @@ def _make_timeout_logger(
     return _process_tool_call
 
 
+@dataclass
+class _SessionContext:
+    """Per-session MCP state container for the :class:`MCPManager`.
+
+    Holds all session-scoped MCP resources so that each session has its own
+    connection pool, toolset cache, config snapshot, and ACP connection
+    tracking — isolated from other sessions.
+
+    Attributes:
+        connection_pool: Per-session transport pool; created lazily by
+            ``get_or_create_session()`` (T2).
+        toolset_cache: Session-scoped ``MCPToolset`` cache keyed by
+            ``client_id``, mirroring the global ``_toolset_cache``.
+        snapshot: Immutable MCP config snapshot for this session, or
+            ``None`` if no snapshot has been built yet.
+        acp_connection_ids: List of ``(client_id, connection_id)`` tuples
+            for ACP MCP connections opened during this session, used for
+            cleanup tracking.
+        _cleanup_lock: Serializes concurrent cleanup calls for this session.
+    """
+
+    connection_pool: SessionConnectionPool | None = None
+    toolset_cache: dict[str, Any] = field(default_factory=dict)
+    snapshot: McpConfigSnapshot | None = None
+    acp_connection_ids: list[tuple[str, int]] = field(default_factory=list)
+    _cleanup_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
 class MCPManager:
     """Manages MCP server connections and distributes resource providers.
 
@@ -145,6 +174,7 @@ class MCPManager:
         self._accessible_roots = accessible_roots
         self._global_pool = GlobalConnectionPool()
         self._toolset_cache: dict[str, Any] = {}
+        self._session_contexts: dict[str, _SessionContext] = {}
 
     def add_server_config(self, cfg: MCPServerConfig | str) -> None:
         """Add a new MCP server to the manager."""
