@@ -475,7 +475,9 @@ class ACPSession:
                             "Connecting ACP MCP server via mcp/connect",
                             server_name=server.name,
                         )
-                        connection_id = await self.acp_agent.connect_acp_mcp_server(server)
+                        connection_id, session_key = await self.acp_agent.connect_acp_mcp_server(
+                            server, self.session_id
+                        )
                         conn = self.acp_agent._mcp_manager.get_connection(connection_id)
                         if conn is None:
                             raise RuntimeError(  # noqa: TRY301
@@ -495,6 +497,15 @@ class ACPSession:
                         ):
                             await self.agent._session_connection_pool.add_transport(
                                 cfg.client_id, transport
+                            )
+                            # Register the ACP transport on the MCPManager's
+                            # session context for cleanup tracking.
+                            await self.agent.mcp.add_acp_transport(
+                                self.session_id,
+                                cfg.client_id,
+                                transport,
+                                connection_id,
+                                session_key,
                             )
                         self.log.info(
                             "Added session ACP MCP server",

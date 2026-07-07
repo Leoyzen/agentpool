@@ -787,17 +787,27 @@ class AgentPoolACPAgent(ACPAgent):
             case _:
                 return {}
 
-    async def connect_acp_mcp_server(self, server: AcpMcpServer) -> str:
+    async def connect_acp_mcp_server(
+        self,
+        server: AcpMcpServer,
+        session_id: str,
+    ) -> tuple[str, int]:
         """Connect to an ACP-transport MCP server by requesting connection from client.
 
         Initiates mcp/connect to the client per ACP spec. The client returns a
         connectionId which is used to establish the local AcpMcpConnection.
+        A per-session stream pair is registered on the connection, and the
+        session-to-connection mapping is recorded in the connection manager's
+        reverse index for cleanup tracking.
 
         Args:
             server: The ACP MCP server configuration.
+            session_id: The ACP session ID requesting the connection.
 
         Returns:
-            The connectionId returned by the client.
+            A tuple of ``(connection_id, session_key)`` where connection_id is
+            the string returned by the client and session_key is the int key
+            for the per-session stream pair registered on the AcpMcpConnection.
 
         Raises:
             ValueError: If the client does not return a connectionId.
@@ -820,13 +830,17 @@ class AgentPoolACPAgent(ACPAgent):
             with anyio.fail_after(300):
                 return await self.client.send_request("mcp/message", message)
 
-        await self._mcp_manager.create_connection(connection_id, server, send_to_client)
+        conn = await self._mcp_manager.create_connection(connection_id, server, send_to_client)
+        _pair, session_key = conn.register_session()
+        self._mcp_manager.register_session_connection(session_id, connection_id, session_key)
         logger.info(
             "ACP MCP server connected",
             server_name=server.name,
             connection_id=connection_id,
+            session_id=session_id,
+            session_key=session_key,
         )
-        return connection_id
+        return connection_id, session_key
 
     async def disconnect_acp_mcp_server(self, connection_id: str) -> None:
         """Disconnect from an ACP-transport MCP server.

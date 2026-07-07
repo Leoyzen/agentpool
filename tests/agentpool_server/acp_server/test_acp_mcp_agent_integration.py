@@ -73,7 +73,7 @@ async def test_connect_acp_mcp_server_success(
     send_request_mock = AsyncMock(return_value={"connectionId": "conn-123"})
     acp_agent.client.send_request = send_request_mock  # type: ignore[method-assign]
 
-    result = await acp_agent.connect_acp_mcp_server(server_config)
+    result, _session_key = await acp_agent.connect_acp_mcp_server(server_config, "test-session-1")
 
     assert result == "conn-123"
     assert acp_agent._mcp_manager.get_connection("conn-123") is not None
@@ -99,7 +99,7 @@ async def test_connect_acp_mcp_server_missing_connection_id(
     acp_agent.client.send_request = send_request_mock  # type: ignore[method-assign]
 
     with pytest.raises(ValueError, match="connectionId"):
-        await acp_agent.connect_acp_mcp_server(server_config)
+        await acp_agent.connect_acp_mcp_server(server_config, "test-session-1")
 
 
 # Test 3: connect_acp_mcp_server raises TimeoutError when client hangs
@@ -119,7 +119,7 @@ async def test_connect_acp_mcp_server_timeout(
     # Wrap with short timeout to override the 300s internal anyio.fail_after
     with pytest.raises(TimeoutError):
         with anyio.fail_after(2):
-            await acp_agent.connect_acp_mcp_server(server_config)
+            await acp_agent.connect_acp_mcp_server(server_config, "test-session-1")
 
 
 # Test 4: disconnect_acp_mcp_server sends mcp/disconnect and removes connection
@@ -133,7 +133,7 @@ async def test_disconnect_acp_mcp_server(
     # Setup: connect first
     connect_mock = AsyncMock(return_value={"connectionId": "conn-456"})
     acp_agent.client.send_request = connect_mock  # type: ignore[method-assign]
-    await acp_agent.connect_acp_mcp_server(server_config)
+    await acp_agent.connect_acp_mcp_server(server_config, "test-session-1")
     assert acp_agent._mcp_manager.get_connection("conn-456") is not None
 
     # Reset mock to track disconnect call
@@ -157,12 +157,12 @@ async def test_ext_method_routes_message(
     """Verify ext_method("mcp/message", ...) routes to the correct connection."""
     send_request_mock = AsyncMock(return_value={"connectionId": "conn-789"})
     acp_agent.client.send_request = send_request_mock  # type: ignore[method-assign]
-    await acp_agent.connect_acp_mcp_server(server_config)
+    _, session_key = await acp_agent.connect_acp_mcp_server(server_config, "test-session-1")
 
-    # Register a session pair before sending the message
+    # Use the pre-registered session pair (connect_acp_mcp_server already called register_session)
     conn = acp_agent._mcp_manager.get_connection("conn-789")
     assert conn is not None
-    pair, _ = conn.register_session()
+    pair = conn._session_streams[session_key]
 
     await acp_agent.ext_method(
         "mcp/message", {"connectionId": "conn-789", "method": "tools/list", "id": 1}
@@ -206,16 +206,19 @@ async def test_ext_method_concurrent_messages(
     send_request_mock = AsyncMock(side_effect=side_effect)
     acp_agent.client.send_request = send_request_mock  # type: ignore[method-assign]
 
-    await acp_agent.connect_acp_mcp_server(server_config)
-    await acp_agent.connect_acp_mcp_server(AcpMcpServer(name="test-server-2", id="test-id-2"))
+    _, key_a = await acp_agent.connect_acp_mcp_server(server_config, "test-session-1")
+    _, key_b = await acp_agent.connect_acp_mcp_server(
+        AcpMcpServer(name="test-server-2", id="test-id-2"), "test-session-1"
+    )
 
     conn_a = acp_agent._mcp_manager.get_connection("conn-a")
     conn_b = acp_agent._mcp_manager.get_connection("conn-b")
     assert conn_a is not None
     assert conn_b is not None
 
-    pair_a, _ = conn_a.register_session()
-    pair_b, _ = conn_b.register_session()
+    # Use pre-registered pairs (connect_acp_mcp_server already called register_session)
+    pair_a = conn_a._session_streams[key_a]
+    pair_b = conn_b._session_streams[key_b]
 
     await asyncio.gather(
         acp_agent.ext_method(
@@ -253,9 +256,9 @@ async def test_close_disconnects_all_servers(
     connect_mock = AsyncMock(side_effect=side_effect)
     acp_agent.client.send_request = connect_mock  # type: ignore[method-assign]
 
-    await acp_agent.connect_acp_mcp_server(server_config)
-    await acp_agent.connect_acp_mcp_server(AcpMcpServer(name="srv-2", id="id-2"))
-    await acp_agent.connect_acp_mcp_server(AcpMcpServer(name="srv-3", id="id-3"))
+    await acp_agent.connect_acp_mcp_server(server_config, "test-session-1")
+    await acp_agent.connect_acp_mcp_server(AcpMcpServer(name="srv-2", id="id-2"), "test-session-1")
+    await acp_agent.connect_acp_mcp_server(AcpMcpServer(name="srv-3", id="id-3"), "test-session-1")
 
     assert len(acp_agent._mcp_manager) == 3
 
@@ -319,7 +322,9 @@ async def test_session_initialize_triggers_mcp_message(
 
     acp_agent.client.send_request = mock_send_request  # type: ignore[method-assign]
 
-    connection_id = await acp_agent.connect_acp_mcp_server(server_config)
+    connection_id, _session_key = await acp_agent.connect_acp_mcp_server(
+        server_config, "test-session-1"
+    )
     assert connection_id == "test-conn-init"
 
     conn = acp_agent._mcp_manager.get_connection(connection_id)
@@ -403,7 +408,9 @@ async def test_get_tools_sends_tools_list_via_acp(
 
     acp_agent.client.send_request = mock_send_request  # type: ignore[method-assign]
 
-    connection_id = await acp_agent.connect_acp_mcp_server(server_config)
+    connection_id, _session_key = await acp_agent.connect_acp_mcp_server(
+        server_config, "test-session-1"
+    )
     assert connection_id == "test-conn-tools"
 
     conn = acp_agent._mcp_manager.get_connection(connection_id)

@@ -86,7 +86,9 @@ async def test_no_double_wrap_on_mcp_message_forwarding(
     acp_agent.client.send_request = send_request_mock  # type: ignore[method-assign]
 
     # Step 1: Establish connection (this creates the callback)
-    connection_id = await acp_agent.connect_acp_mcp_server(server_config)
+    connection_id, _session_key = await acp_agent.connect_acp_mcp_server(
+        server_config, "test-session-1"
+    )
     assert connection_id == "conn-redflag-1"
 
     conn = acp_agent._mcp_manager.get_connection(connection_id)

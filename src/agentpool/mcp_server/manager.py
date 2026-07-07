@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from agentpool.mcp_server.session_pool import SessionConnectionPool
     from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig
+    from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnectionManager
 
 
 logger = get_logger(__name__)
@@ -176,6 +177,7 @@ class MCPManager:
         self._global_pool = GlobalConnectionPool()
         self._toolset_cache: dict[str, Any] = {}
         self._session_contexts: dict[str, _SessionContext] = {}
+        self._acp_mcp_manager: AcpMcpConnectionManager | None = None
 
     def add_server_config(self, cfg: MCPServerConfig | str) -> None:
         """Add a new MCP server to the manager."""
@@ -556,3 +558,47 @@ class MCPManager:
         entry = (connection_id, session_key)
         if entry not in ctx.acp_connection_ids:
             ctx.acp_connection_ids.append(entry)
+
+    async def cleanup_session(self, session_id: str) -> None:
+        """Clean up all MCP resources for a single session.
+
+        Clears the session-scoped toolset cache, shuts down the
+        per-session connection pool, delegates ACP connection cleanup
+        to :class:`AcpMcpConnectionManager` (if wired), and removes
+        the session context from the registry.
+
+        The per-session ``_cleanup_lock`` serializes concurrent calls
+        for the same ``session_id``, making cleanup idempotent: a
+        second caller blocks on the lock, then finds the context
+        already popped in the ``finally`` block.
+
+        Intermediate cleanup errors are logged but never re-raised
+        so that the context is always removed.
+
+        Args:
+            session_id: Unique identifier for the session to clean up.
+        """
+        ctx = self.get_or_create_session(session_id)
+        async with ctx._cleanup_lock:
+            try:
+                ctx.toolset_cache.clear()
+
+                if ctx.connection_pool is not None:
+                    try:
+                        await ctx.connection_pool.cleanup()
+                    except Exception:
+                        logger.exception(
+                            "Error cleaning up session connection pool",
+                            session_id=session_id,
+                        )
+
+                if self._acp_mcp_manager is not None:
+                    try:
+                        await self._acp_mcp_manager.cleanup_session(session_id)
+                    except Exception:
+                        logger.exception(
+                            "Error cleaning up ACP MCP connections",
+                            session_id=session_id,
+                        )
+            finally:
+                self._session_contexts.pop(session_id, None)
