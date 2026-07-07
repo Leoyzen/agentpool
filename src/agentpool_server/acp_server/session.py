@@ -812,9 +812,7 @@ class ACPSession:
             try:
                 await self.agent.mcp.cleanup_session(self.session_id)
             except Exception:
-                self.log.exception(
-                    "Failed to cleanup MCP session", session_id=self.session_id
-                )
+                self.log.exception("Failed to cleanup MCP session", session_id=self.session_id)
 
             await self.acp_env.__aexit__(None, None, None)
 

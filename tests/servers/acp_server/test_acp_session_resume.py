@@ -407,7 +407,7 @@ async def test_resume_session_does_not_call_load_session():
 
 @pytest.mark.unit
 async def test_resume_session_closes_old_and_recreates():
-    """Test that calling resume_session twice with the same session_id closes the old session and creates a fresh one."""
+    """Test resume_session closes old session and creates a fresh one."""
     from agentpool.models.agents import NativeAgentConfig
     from agentpool.models.manifest import AgentsManifest
 

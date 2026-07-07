@@ -950,9 +950,7 @@ class SessionController:
             try:
                 await agent.mcp.cleanup_session(session_id)
             except Exception:
-                logger.exception(
-                    "Failed to cleanup MCP session", session_id=session_id
-                )
+                logger.exception("Failed to cleanup MCP session", session_id=session_id)
 
         if agent is not None and session.is_per_session_agent:
             try:

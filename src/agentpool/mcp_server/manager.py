@@ -548,9 +548,7 @@ class MCPManager:
                     if not server.enabled or isinstance(server, AcpMCPServerConfig):
                         continue
                     transport = await self._global_pool.get_transport(server)
-                    capabilities.append(
-                        _make_capability(server, transport, self._toolset_cache)
-                    )
+                    capabilities.append(_make_capability(server, transport, self._toolset_cache))
             # If ctx is None (KeyError fallback), we've already logged the
             # warning — return global-only capabilities from self.servers.
             else:
@@ -558,9 +556,7 @@ class MCPManager:
                     if not server.enabled or isinstance(server, AcpMCPServerConfig):
                         continue
                     transport = await self._global_pool.get_transport(server)
-                    capabilities.append(
-                        _make_capability(server, transport, self._toolset_cache)
-                    )
+                    capabilities.append(_make_capability(server, transport, self._toolset_cache))
         else:
             for server in self.servers:
                 if not server.enabled or isinstance(server, AcpMCPServerConfig):

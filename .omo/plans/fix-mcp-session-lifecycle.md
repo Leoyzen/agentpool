@@ -299,7 +299,7 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
 
 ### Wave 6: P1f — WebSocket Disconnect Hook (depends on Waves 4+2)
 
-- [ ] 24. Add `on_disconnect` parameter to `_handle_websocket_client()` and call in `ConnectionClosed` handler
+- [x] 24. Add `on_disconnect` parameter to `_handle_websocket_client()` and call in `ConnectionClosed` handler
   What to do / Must NOT do: Add `on_disconnect: Callable[[AgentSideConnection], Awaitable[None]] | None = None` parameter to `_handle_websocket_client()` at `transports.py:355`. **Metis GAP-3 resolution**: Generate a UUID4 string for each WebSocket connection at accept time, store it as `conn.connection_id: str` attribute on the `AgentSideConnection` instance (set right after creation at line 376). In the `ConnectionClosed` exception handler (line 412), call `await on_disconnect(conn)` BEFORE `conn.close()` in the finally block (line 414). The callback reads `conn.connection_id` to look up sessions. If `on_disconnect` is None, skip the call (backward compat). Must NOT make `on_disconnect` a required parameter. Must NOT call `on_disconnect` after `conn.close()`.
   Parallelization: Wave 6 | Blocked by: T15 | Blocks: T25, T26, T27
   References: `src/acp/transports.py:355-428` (_handle_websocket_client), `transports.py:412` (ConnectionClosed catch), `transports.py:414-428` (finally block)
@@ -307,7 +307,7 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
   QA scenarios: (happy) Disconnect triggers `on_disconnect` callback with connection object. (failure) `on_disconnect=None`, verify no callback called and existing behavior unchanged. Evidence: `.omo/evidence/task-24-fix-mcp-session-lifecycle.txt`
   Commit: Y | feat(acp): add on_disconnect callback to websocket handler
 
-- [ ] 25. Add `_connection_sessions` to ACPSessionManager and implement `close_all_sessions_for_connection()`
+- [x] 25. Add `_connection_sessions` to ACPSessionManager and implement `close_all_sessions_for_connection()`
   What to do / Must NOT do: (1) Add `_connection_sessions: dict[str, set[str]]` (connection_id → session_ids) to `ACPSessionManager.__init__` (after `_acp_sessions` at line 45). **Metis GAP-3 resolution**: The `connection_id` is the UUID4 string generated and stored on `AgentSideConnection.connection_id` (from T24). Populate `_connection_sessions` when sessions are created/resumed — add `session_id` to `_connection_sessions[connection_id]` set. The `connection_id` must be passed from the `Client` object or from the `AgentSideConnection` when creating the session. Check `ACPSessionManager.create_session()` to see how `client: Client` is received and how to access the underlying connection's `connection_id`. (2) Implement `async close_all_sessions_for_connection(self, connection_id: str) -> None` — iterates sessions for the connection. For each session: call `SessionController.close_session(session_id)` first (RunHandle lifecycle with timeout + cancel), then call `ACPSession.close()` for ACP-specific cleanup. Both must be called — SessionController handles RunHandle + agent lifecycle, ACPSession.close() handles ACP-specific state. Remove the connection entry from `_connection_sessions` after all sessions are closed. Must NOT skip SessionController.close_session() when available. Must NOT skip ACPSession.close().
   Parallelization: Wave 6 | Blocked by: T15, T24 | Blocks: T26, T28
   References: `src/agentpool_server/acp_server/session_manager.py:45` (_acp_sessions), `session_manager.py:371-391` (close_all_sessions pattern), `src/agentpool/orchestrator/session_controller.py:951-966` (close_session)
@@ -315,7 +315,7 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
   QA scenarios: (happy) Disconnect connection, all sessions for that connection are closed. (failure) Disconnect, verify sessions on other connections are NOT affected. Evidence: `.omo/evidence/task-25-fix-mcp-session-lifecycle.txt`
   Commit: Y | feat(acp): implement close_all_sessions_for_connection
 
-- [ ] 26. Wire `on_disconnect` callback in server setup
+- [x] 26. Wire `on_disconnect` callback in server setup
   What to do / Must NOT do: In the server setup that creates `_handle_websocket_client()` call (search for where `_handle_websocket_client` is called — likely in `ACPWebSocketTransport` or a server module), pass a callback that calls `ACPSessionManager.close_all_sessions_for_connection(connection_id)`. The callback needs access to the `ACPSessionManager` instance and the `connection_id` — check how the connection_id is determined at the call site. Must NOT create a circular dependency between transports.py and session_manager.py — use a callback, not a direct import.
   Parallelization: Wave 6 | Blocked by: T24, T25 | Blocks: T27, T28
   References: Search for `_handle_websocket_client` call sites in `src/acp/` and `src/agentpool_server/acp_server/`. Check `src/acp/transports.py` for `ACPWebSocketTransport` class.
@@ -323,7 +323,7 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
   QA scenarios: (happy) WebSocket disconnect triggers `close_all_sessions_for_connection()`. (failure) Callback not wired, verify disconnect doesn't close sessions. Evidence: `.omo/evidence/task-26-fix-mcp-session-lifecycle.txt`
   Commit: Y | feat(acp): wire on_disconnect to close_all_sessions_for_connection
 
-- [ ] 27. Tests: WebSocket disconnect closes sessions + other connections unaffected
+- [x] 27. Tests: WebSocket disconnect closes sessions + other connections unaffected
   What to do / Must NOT do: Create tests: (1) `test_websocket_disconnect_closes_all_sessions` — create 2 sessions on same connection, disconnect, verify both closed via `cleanup_session()`, (2) `test_websocket_disconnect_preserves_other_connections` — create sessions on 2 connections, disconnect one, verify only that connection's sessions are closed. Use `@pytest.mark.integration`. Must NOT use real WebSocket — mock connection/disconnect.
   Parallelization: Wave 6 | Blocked by: T25, T26 | Blocks: —
   References: `tests/agentpool_server/acp_server/test_acp_mcp_agent_integration.py`
@@ -331,7 +331,7 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
   QA scenarios: (happy) Disconnect closes all sessions for that connection. (failure) Don't wire callback, verify sessions remain open. Evidence: `.omo/evidence/task-27-fix-mcp-session-lifecycle.txt`
   Commit: Y | test(acp): websocket disconnect closes sessions and preserves others
 
-- [ ] 28. Test: WebSocket disconnect during active run → RunHandle cancelled with timeout
+- [x] 28. Test: WebSocket disconnect during active run → RunHandle cancelled with timeout
   What to do / Must NOT do: Create test: create session, start long-running turn, simulate WebSocket disconnect, verify RunHandle is cancelled with timeout before cleanup proceeds. Use `@pytest.mark.integration`. Must NOT block forever — use `asyncio.wait_for` in test with 30s timeout.
   Parallelization: Wave 6 | Blocked by: T25, T26 | Blocks: —
   References: `src/agentpool/orchestrator/session_controller.py:835-949` (_close_session_run_turn with 10s timeout)
@@ -341,7 +341,7 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
 
 ### Wave 7: End-to-End Verification
 
-- [ ] 29. Run full test suite for MCP and ACP server
+- [x] 29. Run full test suite for MCP and ACP server
   What to do / Must NOT do: Run `uv run pytest tests/mcp_server/ tests/agentpool_server/acp_server/ -v` and verify all tests pass. Capture full output. Must NOT mark any test as `xfail` or `skip` to make it pass.
   Parallelization: Wave 7 | Blocked by: ALL | Blocks: —
   References: All test files mentioned in previous todos
@@ -349,7 +349,7 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
   QA scenarios: (happy) All tests pass. (failure) Any test fails — fix before proceeding. Evidence: `.omo/evidence/task-29-fix-mcp-session-lifecycle.txt`
   Commit: N
 
-- [ ] 30. Run unit test suite
+- [x] 30. Run unit test suite
   What to do / Must NOT do: Run `uv run pytest -m unit` and verify all unit tests pass. Must NOT include slow or integration tests.
   Parallelization: Wave 7 | Blocked by: ALL | Blocks: —
   References: All test files
@@ -357,7 +357,7 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
   QA scenarios: (happy) All unit tests pass. (failure) Any unit test fails — fix before proceeding. Evidence: `.omo/evidence/task-30-fix-mcp-session-lifecycle.txt`
   Commit: N
 
-- [ ] 31. Ruff lint check
+- [x] 31. Ruff lint check
   What to do / Must NOT do: Run `uv run ruff check src/` and verify zero errors. Must NOT add `# noqa` comments to suppress errors.
   Parallelization: Wave 7 | Blocked by: ALL | Blocks: —
   References: All changed source files
@@ -365,7 +365,7 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
   QA scenarios: (happy) Zero lint errors. (failure) Any lint error — fix before proceeding. Evidence: `.omo/evidence/task-31-fix-mcp-session-lifecycle.txt`
   Commit: N
 
-- [ ] 32. Mypy type check
+- [x] 32. Mypy type check
   What to do / Must NOT do: Run `uv run --no-group docs mypy src/` and verify zero errors on changed files. Must NOT use `# type: ignore` to suppress errors (use proper type annotations).
   Parallelization: Wave 7 | Blocked by: ALL | Blocks: —
   References: All changed source files
@@ -373,7 +373,7 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
   QA scenarios: (happy) Zero type errors. (failure) Any type error — fix before proceeding. Evidence: `.omo/evidence/task-32-fix-mcp-session-lifecycle.txt`
   Commit: N
 
-- [ ] 33. Automated end-to-end ACP test (replaces manual test per Metis GAP-15)
+- [x] 33. Automated end-to-end ACP test (replaces manual test per Metis GAP-15)
   What to do / Must NOT do: Create automated integration test in `tests/agentpool_server/acp_server/test_e2e_session_lifecycle.py`: (1) Start ACP server in-process with a config that has MCP servers (use TestModel), (2) Create a mock WebSocket client that connects, (3) Create session, (4) Use MCP tool (mock), (5) Simulate WebSocket disconnect (close the mock connection), (6) Reconnect with new mock client, (7) Resume session, (8) Verify MCP tools work with fresh connections (assert toolset objects are different from pre-disconnect). Use `@pytest.mark.integration` and `@pytest.mark.slow`. Must NOT require a real ACP client or real model API key.
   Parallelization: Wave 7 | Blocked by: ALL | Blocks: —
   References: `agentpool serve-acp config.yml` command, example configs in `site/examples/*/config.yml`
@@ -383,10 +383,10 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
 
 ## Final verification wave
 > Runs in parallel after ALL todos. ALL must APPROVE. Surface results and wait for the user's explicit okay before declaring complete.
-- [ ] F1. Plan compliance audit — verify every task in `openspec/changes/fix-mcp-session-lifecycle/tasks.md` is implemented and checked off. Compare task-by-task.
-- [ ] F2. Code quality review — `uv run ruff check src/` and `uv run --no-group docs mypy src/` both pass with zero errors. Review changed code for `getattr`/`hasattr` usage (forbidden), missing type annotations, TODOs left in code.
-- [ ] F3. Real manual QA — run the manual ACP test from T33: connect → session → MCP tool → disconnect → reconnect → resume → verify MCP tools work. Capture output as evidence.
-- [ ] F4. Scope fidelity — verify NO changes to `MessageNode`, `AgentPool` registry, `MCPResourceProvider` model, or config API. Verify NO Phase 2 features were introduced. Verify all 5 stale-mcp tests are now fix-verifying (not bug-documenting).
+- [x] F1. Plan compliance audit — verify every task in `openspec/changes/fix-mcp-session-lifecycle/tasks.md` is implemented and checked off. Compare task-by-task.
+- [x] F2. Code quality review — `uv run ruff check src/` and `uv run --no-group docs mypy src/` both pass with zero errors. Review changed code for `getattr`/`hasattr` usage (forbidden), missing type annotations, TODOs left in code.
+- [x] F3. Real manual QA — run the manual ACP test from T33: connect → session → MCP tool → disconnect → reconnect → resume → verify MCP tools work. Capture output as evidence.
+- [x] F4. Scope fidelity — verify NO changes to `MessageNode`, `AgentPool` registry, `MCPResourceProvider` model, or config API. Verify NO Phase 2 features were introduced. Verify all 5 stale-mcp tests are now fix-verifying (not bug-documenting).
 
 ## Commit strategy
 - One commit per todo that has `Commit: Y` (28 commits)

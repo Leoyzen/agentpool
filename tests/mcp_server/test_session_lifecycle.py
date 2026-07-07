@@ -186,9 +186,7 @@ async def test_concurrent_cleanup_session_no_error(
     )
 
     for result in results:
-        assert not isinstance(result, Exception), (
-            f"Concurrent cleanup raised: {result!r}"
-        )
+        assert not isinstance(result, Exception), f"Concurrent cleanup raised: {result!r}"
 
     assert "sess-concurrent" not in manager._session_contexts
 

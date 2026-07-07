@@ -111,9 +111,7 @@ async def test_session_resume_returns_fresh_toolset() -> None:
         await ctx1.connection_pool.add_transport(client_id, cast(Any, transport_a))
 
         snapshot1 = McpConfigSnapshot(
-            session_configs=(
-                McpConfigEntry(server_config=acp_config, source="session"),
-            ),
+            session_configs=(McpConfigEntry(server_config=acp_config, source="session"),),
         )
         manager.update_session_snapshot("s1", snapshot1)
 
@@ -139,9 +137,7 @@ async def test_session_resume_returns_fresh_toolset() -> None:
         await ctx2.connection_pool.add_transport(client_id, cast(Any, transport_b))
 
         snapshot2 = McpConfigSnapshot(
-            session_configs=(
-                McpConfigEntry(server_config=acp_config, source="session"),
-            ),
+            session_configs=(McpConfigEntry(server_config=acp_config, source="session"),),
         )
         manager.update_session_snapshot("s2", snapshot2)
 
@@ -311,8 +307,7 @@ async def test_multiple_acp_servers_get_fresh_toolsets() -> None:
                 f"expected one of session-2 transports"
             )
             assert toolset_client not in stale_transports, (
-                f"Toolset should NOT hold session-1 transport "
-                f"{toolset_client.label}"
+                f"Toolset should NOT hold session-1 transport {toolset_client.label}"
             )
     finally:
         await manager.cleanup()
@@ -347,9 +342,7 @@ async def test_cleanup_session_clears_per_session_cache() -> None:
         await ctx.connection_pool.add_transport(client_id, cast(Any, t1))
 
         snapshot = McpConfigSnapshot(
-            session_configs=(
-                McpConfigEntry(server_config=acp_config, source="session"),
-            ),
+            session_configs=(McpConfigEntry(server_config=acp_config, source="session"),),
         )
         manager.update_session_snapshot("s1", snapshot)
 
