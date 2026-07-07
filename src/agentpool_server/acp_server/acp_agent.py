@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import KW_ONLY, dataclass, field
 from importlib.metadata import version as _version
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast as _cast
 
 import anyio
 
@@ -232,7 +232,7 @@ class AgentPoolACPAgent(ACPAgent):
     raw_input_mode: Literal["dict", "skip", "json_str"] = "dict"
     """How to emit tool call raw_input ("dict", "skip", or "json_str")."""
 
-    session_manager: ACPSessionManager | None = field(default=None)
+    session_manager: ACPSessionManager = field(default=_cast(ACPSessionManager, None))
     """Shared session manager for tracking ACP sessions across connections.
 
     If None, a new ``ACPSessionManager`` is created per agent instance.
