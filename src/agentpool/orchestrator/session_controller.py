@@ -477,19 +477,21 @@ class SessionController:
                     # any session-scoped injections. agent_configs come from
                     # the child's own YAML. skill_configs are empty at
                     # creation time (populated later by skill loading).
+                    from agentpool.agents.native_agent import Agent as _NativeAgent
                     from agentpool.mcp_server.config_snapshot import (
                         McpConfigSnapshot as _McpConfigSnapshot,
                     )
-                    from agentpool.mcp_server.session_pool import (
-                        SessionConnectionPool as _SessionConnectionPool,
-                    )
 
                     parent_snapshot: McpConfigSnapshot | None = None
-                    if parent_agent is not None:
-                        from agentpool.agents.native_agent import Agent as _NativeAgent
-
-                        if isinstance(parent_agent, _NativeAgent):
-                            parent_snapshot = parent_agent._mcp_snapshot
+                    if (
+                        parent_agent is not None
+                        and isinstance(parent_agent, _NativeAgent)
+                        and session.parent_session_id
+                    ):
+                        parent_ctx = parent_agent.mcp.get_or_create_session(
+                            session.parent_session_id
+                        )
+                        parent_snapshot = parent_ctx.snapshot
 
                     snapshot = _McpConfigSnapshot(
                         pool_configs=(
@@ -501,8 +503,9 @@ class SessionController:
                         ),
                         skill_configs=(),
                     )
-                    agent._mcp_snapshot = snapshot
-                    agent._session_connection_pool = _SessionConnectionPool(session_id)
+                    child_ctx = agent.mcp.get_or_create_session(session_id)
+                    if snapshot is not None:
+                        agent.mcp.update_session_snapshot(session_id, snapshot)
 
                     # Share pre-created ACP transports from parent.
                     # AcpMcpTransport now supports concurrent connect_session()
@@ -511,11 +514,16 @@ class SessionController:
                     if (
                         parent_agent is not None
                         and isinstance(parent_agent, _NativeAgent)
-                        and parent_agent._session_connection_pool is not None
+                        and session.parent_session_id
+                        and child_ctx.connection_pool is not None
                     ):
-                        await agent._session_connection_pool.copy_pre_created_transports(
-                            parent_agent._session_connection_pool
+                        parent_ctx = parent_agent.mcp.get_or_create_session(
+                            session.parent_session_id
                         )
+                        if parent_ctx.connection_pool is not None:
+                            await child_ctx.connection_pool.copy_pre_created_transports(
+                                parent_ctx.connection_pool
+                            )
 
                     # Add non-MCP pool-level providers (skills instruction
                     # and skills tools). MCP no longer goes through providers —
@@ -573,9 +581,6 @@ class SessionController:
                 from agentpool.mcp_server.config_snapshot import (
                     McpConfigSnapshot as _McpConfigSnapshot,
                 )
-                from agentpool.mcp_server.session_pool import (
-                    SessionConnectionPool as _SessionConnectionPool,
-                )
 
                 snapshot = _McpConfigSnapshot(
                     pool_configs=agent._build_pool_configs(),
@@ -583,8 +588,9 @@ class SessionController:
                     session_configs=(),
                     skill_configs=(),
                 )
-                agent._mcp_snapshot = snapshot
-                agent._session_connection_pool = _SessionConnectionPool(session_id)
+                agent.mcp.get_or_create_session(session_id)
+                if snapshot is not None:
+                    agent.mcp.update_session_snapshot(session_id, snapshot)
 
                 # Add non-MCP pool-level providers (skills instruction
                 # and skills tools). MCP no longer goes through providers.
@@ -622,9 +628,6 @@ class SessionController:
                     McpConfigEntry as _McpConfigEntry,
                     McpConfigSnapshot as _McpConfigSnapshot,
                 )
-                from agentpool.mcp_server.session_pool import (
-                    SessionConnectionPool as _SessionConnectionPool,
-                )
 
                 pool_configs: tuple[McpConfigEntry, ...] = ()
                 if self.pool is not None:
@@ -644,8 +647,9 @@ class SessionController:
                     session_configs=(),
                     skill_configs=(),
                 )
-                agent._mcp_snapshot = snapshot  # type: ignore[attr-defined]
-                agent._session_connection_pool = _SessionConnectionPool(session_id)  # type: ignore[attr-defined]
+                agent.mcp.get_or_create_session(session_id)
+                if snapshot is not None:
+                    agent.mcp.update_session_snapshot(session_id, snapshot)
 
                 # Add non-MCP pool-level providers (skills instruction
                 # and skills tools). MCP no longer goes through providers.
