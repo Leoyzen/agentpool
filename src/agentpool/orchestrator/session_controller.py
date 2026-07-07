@@ -938,6 +938,18 @@ class SessionController:
                     cid for cid in self._children[session.parent_session_id] if cid != session_id
                 ]
 
+        # Cleanup MCP session-scoped resources (toolset cache, connection pool,
+        # ACP connection manager) BEFORE agent.__aexit__ so the agent context
+        # is still live. Runs for ALL agents, not just per-session agents,
+        # because shared MCPManager also has session-scoped contexts.
+        if agent is not None:
+            try:
+                await agent.mcp.cleanup_session(session_id)
+            except Exception:
+                logger.exception(
+                    "Failed to cleanup MCP session", session_id=session_id
+                )
+
         if agent is not None and session.is_per_session_agent:
             try:
                 await agent.__aexit__(None, None, None)

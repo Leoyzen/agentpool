@@ -806,6 +806,16 @@ class ACPSession:
     async def close(self) -> None:
         """Close the session and cleanup resources."""
         try:
+            # Cleanup MCP session-scoped resources (toolset cache, connection
+            # pool, ACP connection manager) before tearing down the agent env.
+            # Must run BEFORE acp_env.__aexit__ so the agent context is still live.
+            try:
+                await self.agent.mcp.cleanup_session(self.session_id)
+            except Exception:
+                self.log.exception(
+                    "Failed to cleanup MCP session", session_id=self.session_id
+                )
+
             await self.acp_env.__aexit__(None, None, None)
 
             # Disconnect state_updated signal to prevent stale callbacks
