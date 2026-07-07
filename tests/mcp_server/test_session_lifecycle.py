@@ -191,3 +191,54 @@ async def test_concurrent_cleanup_session_no_error(
         )
 
     assert "sess-concurrent" not in manager._session_contexts
+
+
+# ---------------------------------------------------------------------------
+# 8. concurrent cleanup from two paths (WebSocket disconnect + SessionController)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_concurrent_cleanup_from_two_paths(
+    manager: MCPManager,
+) -> None:
+    """Two concurrent cleanup_session calls with active resources complete safely.
+
+    Simulates WebSocket disconnect and SessionController.close_session firing
+    cleanup_session() simultaneously on a session that has a snapshot, a
+    transport in the connection pool, and recorded ACP connection IDs.
+    """
+    session_id = "test-two-paths"
+    manager.get_or_create_session(session_id)
+
+    # Populate session context with resources as if a real session ran
+    snapshot = McpConfigSnapshot()
+    manager.update_session_snapshot(session_id, snapshot)
+
+    transport: Any = _FakeTransport("acp-two-paths")
+    await manager.add_acp_transport(
+        session_id=session_id,
+        client_id="client-two-paths",
+        transport=transport,
+        connection_id="conn-two-paths",
+        session_key=1,
+    )
+
+    ctx = manager.get_or_create_session(session_id)
+    assert ctx.snapshot is snapshot
+    assert len(ctx.acp_connection_ids) == 1
+
+    # Simulate both WebSocket disconnect and SessionController firing
+    # cleanup_session() at the same time.
+    results = await asyncio.gather(
+        manager.cleanup_session(session_id),
+        manager.cleanup_session(session_id),
+        return_exceptions=True,
+    )
+
+    for result in results:
+        assert not isinstance(result, Exception), (
+            f"Concurrent cleanup from two paths raised: {result!r}"
+        )
+
+    assert session_id not in manager._session_contexts

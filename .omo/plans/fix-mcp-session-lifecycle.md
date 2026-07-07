@@ -239,7 +239,7 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
   QA scenarios: (happy) Create session agent, verify `_session_id` is set and `_session_contexts` has the session. (failure) Create agent without session_id, verify `as_capability(session_id=None)` works. Evidence: `.omo/evidence/task-16-fix-mcp-session-lifecycle.txt`
   Commit: Y | feat(agent): add _session_id and wire get_or_create_session in SessionController
 
-- [ ] 17. Integration test: create session → run turn → close → verify empty contexts
+- [x] 17. Integration test: create session → run turn → close → verify empty contexts
   What to do / Must NOT do: Create integration test in `tests/mcp_server/test_session_lifecycle.py` (or a new `tests/integration/test_session_cleanup.py`): create an AgentPool with a native agent that has MCP servers, create a session, run a turn (use TestModel), close the session, verify `agent.mcp._session_contexts` is empty and `agent.mcp._toolset_cache` has no session-scoped entries. Use `@pytest.mark.integration`. Must NOT use real model calls — use TestModel from pydantic-ai.
   Parallelization: Wave 4 | Blocked by: T15, T16 | Blocks: —
   References: `tests/conftest.py` (TestModel setup, observability disabled), `tests/mcp_server/test_mcp_provider_lifecycle.py` (integration test patterns)
@@ -247,7 +247,7 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
   QA scenarios: (happy) After close, `_session_contexts` is empty. (failure) Remove cleanup call from close path, verify test fails (context still present). Evidence: `.omo/evidence/task-17-fix-mcp-session-lifecycle.txt`
   Commit: Y | test(mcp): integration test for session create→run→close lifecycle
 
-- [ ] 18. Integration test: close → recreate same ID → verify fresh MCP resources
+- [x] 18. Integration test: close → recreate same ID → verify fresh MCP resources
   What to do / Must NOT do: Create integration test: create session "s1", run turn, close session, create new session "s1" (same ID), verify the new session has fresh MCP resources (different toolset objects, fresh connection pool). Use `@pytest.mark.integration`. Must NOT reuse the old session object.
   Parallelization: Wave 4 | Blocked by: T15, T16 | Blocks: —
   References: Same as T17
@@ -255,7 +255,7 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
   QA scenarios: (happy) New session "s1" has fresh resources, different from old session "s1". (failure) Remove cleanup, verify old resources leak into new session. Evidence: `.omo/evidence/task-18-fix-mcp-session-lifecycle.txt`
   Commit: Y | test(mcp): integration test for session close→recreate freshness
 
-- [ ] 19. Test: concurrent `cleanup_session()` calls (WebSocket disconnect + SessionController)
+- [x] 19. Test: concurrent `cleanup_session()` calls (WebSocket disconnect + SessionController)
   What to do / Must NOT do: Create test that simulates concurrent cleanup: spawn `asyncio.gather(agent.mcp.cleanup_session("s1"), agent.mcp.cleanup_session("s1"))`. Verify no errors, no double-cleanup, `_session_contexts` is empty. Use `@pytest.mark.unit`. Must NOT use real WebSocket connections — mock the disconnect trigger.
   Parallelization: Wave 4 | Blocked by: T4, T15 | Blocks: T22
   References: `tests/mcp_server/test_session_lifecycle.py` (existing test patterns from T5)
