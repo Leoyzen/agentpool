@@ -366,7 +366,7 @@ Wave 5 (Docs + Final): Todos 13-14
     - Evidence: `.omo/evidence/task-13-unify-hook-system.txt`
   Commit: Y | docs(hooks): update openspec tasks.md marking completed tasks
 
-- [ ] 14. Full test suite + lint + mypy validation
+- [x] 14. Full test suite + lint + mypy validation
   What to do / Must NOT do: Run the complete validation suite:
     - `uv run pytest -vv` (all tests pass)
     - `uv run pytest -m unit,integration -vv` (unit and integration tests pass)
