@@ -616,11 +616,13 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         return self._prompt_response(stop_reason)
 
     async def cancel_session(self, session_id: str) -> None:
-        """Cancel the active run for a session via SessionPool.
+        """Cancel the active run for a session and all its subagents.
 
         Delegates to ``SessionController.cancel_run_for_session()``, which
         cancels the per-session agent's background iteration task — the one
-        actually driving the LLM API call.
+        actually driving the LLM API call.  All child (subagent) sessions
+        are recursively cancelled first so that in-flight subagent runs
+        stop immediately.
 
         According to ACP protocol spec, session/cancel is a notification
         (no response expected). The agent must respond to the ORIGINAL
@@ -643,6 +645,14 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             logger.warning("SessionPool not available for cancel", session_id=session_id)
             return
 
+        # Cancel all child (subagent) sessions first, depth-first.
+        # Unlike _cancel_subagents() (used by close_session), this does NOT
+        # pop _parent_of entries or stop event consumers — it only cancels
+        # the RunHandle for each child so the session stays alive for
+        # follow-up interaction.
+        await self._cancel_subagent_runs(session_id)
+
+        # Cancel the parent session's run last.
         session_pool.sessions.cancel_run_for_session(session_id)
 
         # The start() loop detects the cancelled flag, publishes
@@ -655,6 +665,26 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         # Note: Event consumer is NOT stopped here. It will continue running
         # until the RunFailedEvent is processed, which emits the appropriate
         # session/update (turn_complete with stop_reason="cancelled").
+
+    async def _cancel_subagent_runs(self, parent_sid: str) -> None:
+        """Recursively cancel runs for all child sessions of parent_sid.
+
+        Walks the ``_parent_of`` tree depth-first and calls
+        ``cancel_run_for_session()`` for each child.  Unlike
+        :meth:`_cancel_subagents`, this does NOT modify ``_parent_of``
+        or stop event consumers — it only cancels the active
+        :class:`RunHandle` for each child session.
+
+        Args:
+            parent_sid: The session whose child runs should be cancelled.
+        """
+        session_pool = self.agent_pool.session_pool
+        if session_pool is None:
+            return
+        children = [child for child, parent in self._parent_of.items() if parent == parent_sid]
+        for child_sid in children:
+            await self._cancel_subagent_runs(child_sid)
+            session_pool.sessions.cancel_run_for_session(child_sid)
 
     async def _cancel_subagents(self, parent_sid: str) -> None:
         """Recursively cancel all child sessions of parent_sid.
