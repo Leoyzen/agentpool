@@ -43,6 +43,7 @@ class ACPSessionManager:
         """
         self._pool = pool
         self._acp_sessions: dict[str, ACPSession] = {}
+        self._connection_sessions: dict[str, set[str]] = {}
         self._command_update_task: asyncio.Task[None] | None = None
         logger.info("Initialized ACP session manager")
 
@@ -78,6 +79,7 @@ class ACPSessionManager:
         subagent_display_mode: Literal["legacy", "zed", "qwen"] = "legacy",
         raw_input_mode: Literal["dict", "skip", "json_str"] = "dict",
         parent_session_id: str | None = None,
+        connection_id: str | None = None,
     ) -> str:
         """Create a new ACP session.
 
@@ -95,6 +97,10 @@ class ACPSessionManager:
             parent_session_id: Optional parent session ID for child sessions.
                 When provided, creates a child session that inherits
                 project_id/cwd from the parent via SessionManager.
+            connection_id: Optional WebSocket connection ID for tracking
+                sessions per connection. When provided, the session is
+                registered in ``_connection_sessions`` for cleanup on
+                disconnect.
 
         Returns:
             Session ID for the created session
@@ -200,6 +206,8 @@ class ACPSessionManager:
         await session.initialize()
         await session.initialize_mcp_servers()
         self._acp_sessions[session_id] = session
+        if connection_id is not None:
+            self._connection_sessions.setdefault(connection_id, set()).add(session_id)
         logger.info("Created ACP session", session_id=session_id, agent=session_agent.name)
         return session_id
 
@@ -224,6 +232,7 @@ class ACPSessionManager:
         subagent_display_mode: Literal["legacy", "zed", "qwen"] = "legacy",
         raw_input_mode: Literal["dict", "skip", "json_str"] = "dict",
         mcp_servers: Sequence[McpServer] | None = None,
+        connection_id: str | None = None,
     ) -> ACPSession | None:
         """Resume a session from storage.
 
@@ -236,6 +245,10 @@ class ACPSessionManager:
             subagent_display_mode: Display mode for subagent outputs
             raw_input_mode: How to emit tool call raw_input
             mcp_servers: MCP server configurations to (re-)initialize
+            connection_id: Optional WebSocket connection ID for tracking
+                sessions per connection. When provided, the session is
+                registered in ``_connection_sessions`` for cleanup on
+                disconnect.
 
         Returns:
             Resumed ACPSession if found, None otherwise
@@ -308,6 +321,8 @@ class ACPSessionManager:
         await session.initialize()
         await session.initialize_mcp_servers()
         self._acp_sessions[session_id] = session
+        if connection_id is not None:
+            self._connection_sessions.setdefault(connection_id, set()).add(session_id)
         logger.info("Resumed ACP session", session_id=session_id)
 
         # Conversation history is loaded by SessionPool's get_or_create_session_agent()
@@ -412,6 +427,52 @@ class ACPSessionManager:
                 logger.exception("Error closing session", session=session.session_id)
         logger.info("Closed all sessions.", count=closed_count)
         return closed_count
+
+    async def close_all_sessions_for_connection(self, connection_id: str) -> None:
+        """Close all sessions associated with a WebSocket connection.
+
+        Called when a WebSocket connection is lost unexpectedly. Iterates
+        all sessions tracked for this connection and closes each one via
+        ``SessionController.close_session()`` (RunHandle lifecycle with
+        timeout + cancel) and ``ACPSession.close()`` (ACP-specific cleanup).
+
+        Idempotent: if ``connection_id`` is not in ``_connection_sessions``,
+        returns immediately without error.
+
+        Args:
+            connection_id: The WebSocket connection ID (UUID4 hex string
+                set on ``AgentSideConnection`` at accept time).
+        """
+        session_ids = self._connection_sessions.pop(connection_id, None)
+        if session_ids is None:
+            return
+
+        controller = self._session_controller
+        for session_id in session_ids:
+            if controller is not None:
+                try:
+                    await controller.close_session(session_id)
+                except Exception:
+                    logger.exception(
+                        "Failed to close session via SessionController",
+                        session_id=session_id,
+                        connection_id=connection_id,
+                    )
+            session = self._acp_sessions.pop(session_id, None)
+            if session is not None:
+                try:
+                    await session.close()
+                except Exception:
+                    logger.exception(
+                        "Failed to close ACPSession",
+                        session_id=session_id,
+                        connection_id=connection_id,
+                    )
+        logger.info(
+            "Closed sessions for connection",
+            connection_id=connection_id,
+            session_count=len(session_ids),
+        )
 
     async def __aenter__(self) -> Self:
         """Async context manager entry."""
