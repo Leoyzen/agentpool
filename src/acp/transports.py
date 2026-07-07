@@ -400,7 +400,7 @@ async def _handle_websocket_client(
     ws_writer = _WebSocketWriteStream(websocket)
 
     conn = AgentSideConnection(agent_factory, ws_writer, ws_reader, debug_file=debug_file, **kwargs)
-    conn.connection_id = uuid.uuid4().hex  # type: ignore[attr-defined]
+    conn.connection_id = uuid.uuid4().hex
     connections.append(conn)
 
     heartbeat_task: asyncio.Task[None] | None = None
@@ -547,7 +547,7 @@ async def _serve_streamable_http(  # noqa: PLR0915
         conn = AgentSideConnection(
             agent_factory, ws_writer, ws_reader, debug_file=debug_file, **kwargs
         )
-        conn.connection_id = connection_id  # type: ignore[attr-defined]
+        conn.connection_id = connection_id
         active_connections.add(conn)
 
         client_disconnected = False

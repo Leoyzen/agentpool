@@ -396,9 +396,11 @@ class MCPManager:
           toolset caching.
 
         GAP-11: If the session context was popped by concurrent
-        ``cleanup_session()`` between the ``get_or_create_session()`` call
-        and the dict lookup, a ``KeyError`` is caught and the method falls
-        back to global-only capabilities (with a warning).
+        ``cleanup_session()`` between the initial state check and
+        subsequent access, the ``.get()`` call returns ``None`` and
+        the method falls back to global-only capabilities (with a
+        warning).  This is a benign race: ``dict.get()`` is atomic,
+        so no ``KeyError`` can occur.
 
         When ``session_id`` is None, the legacy path uses ``self.servers``
         with ``self._global_pool`` for transports and ``self._toolset_cache``

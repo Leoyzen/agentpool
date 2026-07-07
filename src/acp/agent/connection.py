@@ -118,6 +118,7 @@ class AgentSideConnection(Client):
             debug_file: path to a file to write debug information to
         """
         agent = to_agent(self) if callable(to_agent) else to_agent  # ty: ignore[call-top-callable]
+        self.connection_id: str | None = None
         self._initialized = False
 
         async def _handler(

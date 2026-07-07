@@ -319,6 +319,18 @@ class AgentPoolACPAgent(ACPAgent):
     provider_router: ProviderRouter = field(init=False)
     """Router for LLM provider metadata and override tracking."""
 
+    def _get_connection_id(self) -> str | None:
+        """Get the WebSocket connection ID for session tracking.
+
+        Returns:
+            The connection_id if the client is an AgentSideConnection, else None.
+        """
+        from acp.agent.connection import AgentSideConnection
+
+        if isinstance(self.client, AgentSideConnection):
+            return self.client.connection_id
+        return None
+
     def _setup_skill_bridge(self) -> None:
         """Initialize skill command bridge and subscribe to registry changes.
 
@@ -439,6 +451,7 @@ class AgentPoolACPAgent(ACPAgent):
                 client_info=self.client_info,
                 subagent_display_mode=self.subagent_display_mode,
                 raw_input_mode=self.raw_input_mode,
+                connection_id=self._get_connection_id(),
             )
             state: SessionModeState | None = None
             models: SessionModelState | None = None
@@ -517,6 +530,7 @@ class AgentPoolACPAgent(ACPAgent):
                     client_capabilities=self.client_capabilities,
                     client_info=self.client_info,
                     subagent_display_mode=self.subagent_display_mode,
+                    connection_id=self._get_connection_id(),
                 )
 
             if not session:
@@ -611,6 +625,7 @@ class AgentPoolACPAgent(ACPAgent):
             client_info=self.client_info,
             subagent_display_mode=self.subagent_display_mode,
             raw_input_mode=self.raw_input_mode,
+            connection_id=self._get_connection_id(),
         )
         return ForkSessionResponse(session_id=session_id)
 
@@ -638,6 +653,7 @@ class AgentPoolACPAgent(ACPAgent):
                     client_capabilities=self.client_capabilities,
                     client_info=self.client_info,
                     subagent_display_mode=self.subagent_display_mode,
+                    connection_id=self._get_connection_id(),
                 )
 
             if not session:
