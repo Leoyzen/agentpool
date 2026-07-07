@@ -188,9 +188,9 @@ async def test_native_agent_event_sequence():
             if envelope is not None:
                 collector.handler_events.append(envelope.event)
 
-    # Verify both collection methods got the same events (normalized for coalescing)
-    # EventBus coalesces consecutive same-type deltas, so we compare normalized
-    # sequences that collapse consecutive duplicates rather than raw lists.
+    # Verify both collection methods got the same events (normalized to collapse duplicates)
+    # Iteration yields some events twice (once from the queue and once from the generator),
+    # so we compare normalized sequences that collapse consecutive duplicates.
     iterated_types = normalize_event_sequence(collector.iterated_events)
     handler_types = normalize_event_sequence(collector.handler_events)
     assert iterated_types == handler_types, "Handler should receive same events as iteration"
@@ -324,9 +324,9 @@ async def test_handler_receives_all_events():
             if envelope is not None:
                 collector.handler_events.append(envelope.event)
 
-    # Handler should have received the same event types (normalized for coalescing)
-    # EventBus coalesces consecutive same-type deltas, so handler may have fewer
-    # events than iteration. Compare normalized sequences instead of strict 1:1.
+    # Handler should have received the same event types (normalized to collapse duplicates)
+    # Iteration yields some events twice (once from the queue and once from the generator),
+    # so we compare normalized sequences that collapse consecutive duplicates.
     iterated_types = normalize_event_sequence(collector.iterated_events)
     handler_types = normalize_event_sequence(collector.handler_events)
     assert iterated_types == handler_types, "Handler should receive same event types as iteration"
