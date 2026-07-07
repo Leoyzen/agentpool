@@ -50,6 +50,8 @@ When the ACP subprocess sends a `session/request_permission` for a tool call, `A
 - If `decision="deny"`, the permission response SHALL be `allowed=False` with the hook's `reason`
 - If `decision="allow"`, the permission response SHALL be `allowed=True`
 - If `decision="ask"`, the default permission behavior SHALL apply (forward to user)
+- After firing hooks in `request_permission()`, the guard key `f"pre_tool_use:{tool_call_id}"` SHALL be added to `run_ctx.hooks_fired`
+- When `ACPTurn.execute()` encounters a `ToolCallStart` event, it SHALL check if `f"pre_tool_use:{tool_call_id}"` is in `hooks_fired` and skip advisory firing if present (blocking path already handled it)
 
 #### Scenario: Hook denies ACP tool via permission request
 - **WHEN** the ACP subprocess sends a session/request_permission for tool "bash"
@@ -63,6 +65,14 @@ When the ACP subprocess sends a `session/request_permission` for a tool call, `A
 - **AND** a pre_tool_use hook returns `decision="allow"`
 - **THEN** the permission response SHALL be `allowed=True`
 - **AND** the subprocess executes the tool
+
+#### Scenario: Advisory pre_tool_use skipped when permission already fired
+- **WHEN** the ACP subprocess sends a session/request_permission for tool "bash"
+- **AND** pre_tool_use hooks fire in `request_permission()` (blocking, allow)
+- **AND** the guard key `f"pre_tool_use:{tool_call_id}"` is added to `hooks_fired`
+- **THEN** when `ToolCallStart` event arrives in `ACPTurn.execute()`
+- **AND** the advisory `pre_tool_use` SHALL be skipped (guard key present)
+- **AND** no duplicate hook firing occurs
 
 ### Requirement: HookAwareTurn disables when HookProxy is active
 

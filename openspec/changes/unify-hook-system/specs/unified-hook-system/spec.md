@@ -10,8 +10,10 @@
 - `pre_tool_use` hooks SHALL fire before each tool execution within the turn
 - `post_tool_use` hooks SHALL fire after each tool execution within the turn
 - HookInput for `pre_turn` SHALL be constructed using `AgentHooks.run_pre_turn_hooks()` keyword parameters (`agent_name`, `prompt`, `session_id`). No new `HookInput` dataclass is needed — the existing parameter pattern is used.
-- HookInput for `post_turn` SHALL include `agent_name`, `session_id`, `result`, and `duration_ms` via `AgentHooks.run_post_turn_hooks()` keyword parameters.
+- HookInput for `post_turn` SHALL include `agent_name`, `session_id`, `result`, and `duration_ms` via `AgentHooks.run_post_turn_hooks()` keyword parameters. The `run_post_turn_hooks()` method signature SHALL accept `duration_ms: float = 0.0` (currently `duration_ms` is a tool-only field in `HookInput`; this extends it to turn-level usage).
 - A double-firing guard using `run_ctx.hooks_fired: set[str]` SHALL prevent hooks from firing twice during the migration period when both old and new firing paths coexist
+- The `hooks_fired` set SHALL be cleared at the start of each turn to support multi-turn runs (in `RunHandle.start()` turn loop for Path A, in `_run_stream_once()` for Path B)
+- **Guard direction**: In Path B (standalone), the old path (`_run_stream_once()`) fires FIRST and adds keys to `hooks_fired`. The new path (`Turn.execute()`) checks `hooks_fired` and skips if the key is present. In Path A (SessionPool), `Turn.execute()` is the only path, so the guard is empty and hooks fire normally.
 - `RunHandle.start()` SHALL NOT fire any hooks — it only manages the turn loop
 
 #### Scenario: pre_turn fires in SessionPool mode
@@ -35,10 +37,15 @@
 - **AND** `post_turn` hooks fire 3 times (once per turn)
 
 #### Scenario: Double-firing guard prevents duplicate hooks
-- **WHEN** the old firing path (BaseAgent._run_stream_once) and new path (Turn.execute) both exist
-- **AND** `pre_turn` was already fired by Turn.execute()
-- **THEN** the old path in `_run_stream_once()` SHALL skip firing
+- **WHEN** the old firing path (BaseAgent._run_stream_once) and new path (Turn.execute) both exist (Path B standalone)
+- **AND** `pre_turn` was already fired by the old path in `_run_stream_once()`
+- **THEN** `Turn.execute()` SHALL check `run_ctx.hooks_fired` and skip firing `pre_turn`
 - **AND** `run_ctx.hooks_fired` contains `"pre_turn"` indicating it was already fired
+
+#### Scenario: hooks_fired cleared per turn in multi-turn run
+- **WHEN** a run has 3 turns (initial prompt + 2 followups)
+- **THEN** `hooks_fired` SHALL be cleared at the start of each turn
+- **AND** hooks fire correctly in all 3 turns (not just the first)
 
 ### Requirement: pre_run/post_run renamed to pre_turn/post_turn
 
@@ -64,7 +71,7 @@ The hook event names `pre_run`/`post_run` SHALL be renamed to `pre_turn`/`post_t
 
 The system SHALL provide a `HookAwareTurn` mixin class in `orchestrator/turn.py` (alongside the existing `Turn` ABC at line 19) that Turn implementations can inherit to get hook firing helpers for ALL 4 hook types.
 
-- `HookAwareTurn` SHALL expose a `_hooks` property returning `AgentHooks | None`
+- `HookAwareTurn` SHALL expose `_hooks: AgentHooks | None = None` and `_run_ctx: AgentRunContext | None = None` as class variable annotations (NOT properties — properties prevent subclass `__init__` from setting via simple assignment). Subclasses (`NativeTurn`, `ACPTurn`) set these in `__init__`. Mock/test turns inherit the `None` default (guard is skipped, hooks always fire).
 - `fire_pre_turn_hooks(prompt, **extra) -> HookResult | None` SHALL construct HookInput and call `_hooks.run_pre_turn_hooks()`
 - `fire_post_turn_hooks(result, **extra) -> HookResult | None` SHALL construct HookInput and call `_hooks.run_post_turn_hooks()`
 - `fire_pre_tool_hooks(tool_name, tool_input, **extra) -> HookResult | None` SHALL construct HookInput and call `_hooks.run_pre_tool_hooks()`

@@ -6,28 +6,31 @@
 - [ ] 1.4 Rename config fields in `agentpool_config/hooks.py`: `pre_run` → `pre_turn`, `post_run` → `post_turn`; add deprecated aliases that map old names to new + emit warning
 - [ ] 1.5 Update all internal references from `pre_run`/`post_run` to `pre_turn`/`post_turn` across source code
 - [ ] 1.6 Add `hooks_fired: set[str]` field to `AgentRunContext` dataclass in `agents/context.py` (line 76) for double-firing guard
+- [ ] 1.7 In `RunHandle.start()` turn loop: clear `run_ctx.hooks_fired` at the start of each turn (supports multi-turn runs)
+- [ ] 1.8 In `BaseAgent._run_stream_once()`: clear `run_ctx.hooks_fired` at the start of each turn (Path B standalone)
 
 ## 2. Phase 1: HookAwareTurn Mixin with ALL 4 Hook Types (non-breaking)
 
-- [ ] 2.1 Create `HookAwareTurn` mixin class in `orchestrator/turn.py` (alongside existing `Turn` ABC at line 19) with abstract `_hooks` property returning `AgentHooks | None`
-- [ ] 2.2 Implement `fire_pre_turn_hooks(prompt, **extra) -> HookResult | None` — constructs HookInput, calls `_hooks.run_pre_turn_hooks()`, returns None if no hooks; checks `hooks_fired` guard
-- [ ] 2.3 Implement `fire_post_turn_hooks(result, **extra) -> HookResult | None` — constructs HookInput, calls `_hooks.run_post_turn_hooks()`, returns None if no hooks; checks `hooks_fired` guard
+- [ ] 2.1 Create `HookAwareTurn` mixin class in `orchestrator/turn.py` (alongside existing `Turn` ABC at line 19) with class variable annotations `_hooks: AgentHooks | None = None` and `_run_ctx: AgentRunContext | None = None` (NOT properties — properties prevent subclass `__init__` from setting via simple assignment)
+- [ ] 2.2 Implement `fire_pre_turn_hooks(prompt, **extra) -> HookResult | None` — constructs HookInput, calls `_hooks.run_pre_turn_hooks()`, returns None if no hooks; checks `hooks_fired` guard (skips if key present and `_run_ctx` is not None)
+- [ ] 2.3 Implement `fire_post_turn_hooks(result, duration_ms=0.0, **extra) -> HookResult | None` — constructs HookInput with `duration_ms`, calls `_hooks.run_post_turn_hooks(duration_ms=duration_ms)`, returns None if no hooks; checks `hooks_fired` guard
 - [ ] 2.4 Implement `fire_pre_tool_hooks(tool_name, tool_input, **extra) -> HookResult | None` — constructs HookInput, calls `_hooks.run_pre_tool_hooks()`, returns None if no hooks
 - [ ] 2.5 Implement `fire_post_tool_hooks(tool_name, tool_output, **extra) -> HookResult | None` — constructs HookInput, calls `_hooks.run_post_tool_hooks()`, returns None if no hooks
 - [ ] 2.6 Write core unit tests for `HookAwareTurn` mixin with mock AgentHooks (all 4 methods)
+- [ ] 2.7 Add `duration_ms: float = 0.0` parameter to renamed `run_post_turn_hooks()` in `hooks/agent_hooks.py`; include it in HookInput construction (currently `duration_ms` is tool-only)
 
 ## 3. Phase 1: Integrate HookAwareTurn into NativeTurn and ACPTurn (non-breaking)
 
-- [ ] 3.1 Make `NativeTurn` (in `agents/native_agent/turn.py`) inherit from `HookAwareTurn`; implement `_hooks` property
-- [ ] 3.2 In `NativeTurn.execute()`: call `fire_pre_turn_hooks()` before LLM call, `fire_post_turn_hooks()` in `finally` block after response
+- [ ] 3.1 Make `NativeTurn` (in `agents/native_agent/turn.py`) inherit from `HookAwareTurn`; set `self._hooks` and `self._run_ctx` in `__init__` (already stored as instance attributes)
+- [ ] 3.2 In `NativeTurn.execute()`: call `fire_pre_turn_hooks()` before LLM call, `fire_post_turn_hooks(result, duration_ms=turn_duration)` in `finally` block after response
 - [ ] 3.3 Verify `NativeTurn` tool hooks still work via `_ToolInterceptCapability` (no change needed — already handles pre/post_tool_use)
-- [ ] 3.4 Make `ACPTurn` (in `agents/acp_agent/turn.py`) inherit from `HookAwareTurn`; implement `_hooks` property
-- [ ] 3.5 In `ACPTurn.execute()` (line 152): call `fire_pre_turn_hooks()` before ACP prompt, `fire_post_turn_hooks()` in `finally` block
-- [ ] 3.6 In `ACPTurn.execute()`: add advisory `pre_tool_use` firing on `ToolCallStart` event — call `fire_pre_tool_hooks()`, log warning if `decision="deny"` (cannot block)
+- [ ] 3.4 Make `ACPTurn` (in `agents/acp_agent/turn.py`) inherit from `HookAwareTurn`; set `self._hooks` and `self._run_ctx` in `__init__` (already stored as instance attributes)
+- [ ] 3.5 In `ACPTurn.execute()` (line 152): call `fire_pre_turn_hooks()` before ACP prompt, `fire_post_turn_hooks(result, duration_ms=turn_duration)` in `finally` block
+- [ ] 3.6 In `ACPTurn.execute()`: add advisory `pre_tool_use` firing on `ToolCallStart` event — first check if `f"pre_tool_use:{tool_call_id}"` is in `run_ctx.hooks_fired` (skip if present, blocking path already fired); if not present, call `fire_pre_tool_hooks()`, log warning if `decision="deny"` (cannot block)
 - [ ] 3.7 In `ACPTurn.execute()`: add `post_tool_use` firing on `ToolCallComplete` event — intercept event after `acp_to_native_event()` conversion and before yielding; call `fire_post_tool_hooks()`, replace `modified_output` in the event if returned
 - [ ] 3.8 Pass `AgentHooks` from `ACPAgent` to `ACPTurn` during turn creation (ACPAgent already accepts `hooks` param at line 159)
-- [ ] 3.9 Add blocking `pre_tool_use` in `ACPClientHandler.request_permission()` (line 208) — fire hooks **before** `auto_approve` check (line 217); return `allowed=False` if deny, `allowed=True` if allow, default behavior if ask
-- [ ] 3.10 Add guard in `BaseAgent._run_stream_once()`: skip `pre_run`/`post_run` firing if already in `run_ctx.hooks_fired` (protects standalone mode during transition)
+- [ ] 3.9 Add blocking `pre_tool_use` in `ACPClientHandler.request_permission()` (line 208) — fire hooks **before** `auto_approve` check (line 217); return `allowed=False` if deny, `allowed=True` if allow, default behavior if ask. After firing, add `f"pre_tool_use:{tool_call_id}"` to `run_ctx.hooks_fired` to prevent advisory double-firing
+- [ ] 3.10 Fix guard direction in `BaseAgent._run_stream_once()`: old path fires FIRST and adds keys to `hooks_fired`; `Turn.execute()` (called via `_stream_events()`) checks `hooks_fired` and skips if key present. This is the reverse of what the original design described — the old path cannot check a guard set by the new path because the old path runs first.
 
 ## 4. Core (Unit) Tests
 
@@ -36,12 +39,15 @@
 - [ ] 4.3 Test `HookAwareTurn.fire_pre_tool_hooks()` constructs correct HookInput (tool_name, tool_input)
 - [ ] 4.4 Test `HookAwareTurn.fire_post_tool_hooks()` constructs correct HookInput and applies modified_output
 - [ ] 4.5 Test `HookAwareTurn` returns None when no hooks configured (no crash) for all 4 methods
-- [ ] 4.6 Test double-firing guard: `run_ctx.hooks_fired` prevents duplicate pre_turn invocation
-- [ ] 4.7 Test `AgentHooks._run_hooks()` deny>ask>allow priority combination with 3 hooks returning different decisions
-- [ ] 4.8 Test `AgentHooks._run_hooks()` parallel execution with `asyncio.gather(return_exceptions=True)`
-- [ ] 4.9 Test advisory deny is logged but not enforced (HookResult.decision="deny" in advisory mode → warning log, execution continues)
-- [ ] 4.10 Test blocking deny raises ModelRetry (native pre_tool_use) or returns denied response (ACP permission)
-- [ ] 4.11 Test deprecated `pre_run`/`post_run` aliases emit `DeprecationWarning` and delegate to `pre_turn`/`post_turn`
+- [ ] 4.6 Test double-firing guard: old path fires first, adds to `hooks_fired`; `Turn.execute()` checks and skips if key present (correct guard direction for Path B)
+- [ ] 4.7 Test `hooks_fired` is cleared per turn: in a 3-turn run, hooks fire in all 3 turns (guard from turn 1 doesn't block turn 2)
+- [ ] 4.8 Test ACP tool-call-ID guard: `request_permission` fires + adds `f"pre_tool_use:{tool_call_id}"`; `ToolCallStart` advisory skips for same tool_call_id but fires for different tool_call_id
+- [ ] 4.9 Test `AgentHooks._run_hooks()` deny>ask>allow priority combination with 3 hooks returning different decisions
+- [ ] 4.10 Test `AgentHooks._run_hooks()` parallel execution with `asyncio.gather(return_exceptions=True)`
+- [ ] 4.11 Test advisory deny is logged but not enforced (HookResult.decision="deny" in advisory mode → warning log, execution continues)
+- [ ] 4.12 Test blocking deny raises ModelRetry (native pre_tool_use) or returns denied response (ACP permission)
+- [ ] 4.13 Test deprecated `pre_run`/`post_run` aliases emit `DeprecationWarning` and delegate to `pre_turn`/`post_turn`
+- [ ] 4.14 Test `run_post_turn_hooks()` accepts `duration_ms` parameter and includes it in HookInput
 
 ## 5. Smoke Tests (Hook Coverage Verification)
 

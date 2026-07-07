@@ -88,6 +88,8 @@ This fixes the root cause directly: hooks were in `_run_stream_once()` which is 
 
 **Permission hook priority**: In `ACPClientHandler.request_permission()` (line 208, `client_handler.py`), hooks SHALL fire **before** the `auto_approve` check (line 217). Priority chain: hooks → auto_approve → callback → input_provider. Hooks represent explicit security policy that should override convenience settings.
 
+**Double-firing guard for ACP tool hooks**: When a tool triggers `request_permission`, `pre_tool_use` hooks fire in the blocking path. Later, when the `ToolCallStart` event arrives during streaming, `ACPTurn.execute()` would fire `pre_tool_use` again (advisory). To prevent this double-firing, the blocking path SHALL add `f"pre_tool_use:{tool_call_id}"` to `run_ctx.hooks_fired` after firing. The advisory path (`ToolCallStart` in `ACPTurn.execute()`) SHALL check this guard and skip if the key is present. Tools that don't trigger `request_permission` have no entry in `hooks_fired`, so advisory hooks fire normally.
+
 **ACP output modification**: In `ACPTurn.execute()` (line 152, `turn.py`), events from `acp_to_native_event(update)` are intercepted before yielding. If `post_tool_use` hooks return `modified_output`, the `ToolCallCompleteEvent`'s output field is replaced before the event is yielded to the consumer. This modifies the event stream, not the subprocess's internal state.
 
 **Rationale**: ACP tool execution is a black box. By the time `ToolCallStart` is emitted, the subprocess has already started executing the tool. The only pre-execution interception point is `request_permission`, which the ACP agent emits before running certain tools.
@@ -119,6 +121,8 @@ This fixes the root cause directly: hooks were in `_run_stream_once()` which is 
 
 Both `NativeTurn` and `ACPTurn` inherit from `HookAwareTurn`. `NativeTurn` delegates tool hooks to `_ToolInterceptCapability` (which already handles them via pydantic-ai capability). `ACPTurn` implements tool hooks directly (advisory on ToolCallStart, modifying on ToolCallComplete).
 
+**Context access**: `HookAwareTurn` declares `_hooks: AgentHooks | None = None` and `_run_ctx: AgentRunContext | None = None` as class variable annotations (NOT properties — properties would prevent subclass `__init__` from setting `self._run_ctx = run_ctx` without a setter). Both `NativeTurn` and `ACPTurn` already set `self._run_ctx` in `__init__`, shadowing the class default. Mock/test turns inherit the `None` default, causing the guard to be skipped (hooks always fire in tests, which is correct).
+
 **Rationale**: `Turn.execute()` is the single convergence point. Having all 4 hook types in one mixin ensures:
 1. Consistent firing across agent types
 2. No hooks lost when switching execution modes
@@ -139,7 +143,7 @@ Both `NativeTurn` and `ACPTurn` inherit from `HookAwareTurn`. `NativeTurn` deleg
 **Affected names**:
 - `HookInput.event`: `"pre_run"` → `"pre_turn"`, `"post_run"` → `"post_turn"`
 - `AgentHooks.run_pre_run_hooks()` → `run_pre_turn_hooks()`
-- `AgentHooks.run_post_run_hooks()` → `run_post_turn_hooks()`
+- `AgentHooks.run_post_run_hooks()` → `run_post_turn_hooks()` — also add `duration_ms: float = 0.0` parameter (currently tool-only field, now also used for turn duration)
 - `HooksConfig.pre_run` → `pre_turn`, `post_run` → `post_turn` (YAML config)
 - All spec/doc references
 
@@ -198,7 +202,15 @@ Each cell is a single test that asserts the hook callback was invoked. If any ce
 
 ## Risks / Trade-offs
 
-**[Double-firing during migration]** → Guard with `run_ctx.hooks_fired: set[str]` field on `AgentRunContext` (line 76, `agents/context.py`). During transition, if a hook point was already fired in the new path (Turn), skip it in the old path (`_run_stream_once()`). Remove the guard when old path is removed.
+**[Double-firing during migration]** → Guard with `run_ctx.hooks_fired: set[str]` field on `AgentRunContext` (line 76, `agents/context.py`). 
+
+**Guard direction**: In Path B (standalone), the OLD path (`_run_stream_once()`) fires FIRST, then `Turn.execute()` fires. So the guard works as: old path fires hooks → adds keys to `hooks_fired` → `Turn.execute()` checks `hooks_fired` → skips if key present. In Path A (SessionPool), `Turn.execute()` is the only path (no old path), so the guard is empty and hooks fire normally.
+
+**Per-turn clearing**: `hooks_fired` SHALL be cleared at the start of each turn to support multi-turn runs. In Path A, `RunHandle.start()` clears `hooks_fired` in the turn loop before calling `turn.execute()`. In Path B, `_run_stream_once()` clears `hooks_fired` at the start before firing old-path hooks. Without clearing, keys from turn 1 would prevent firing in turn 2+.
+
+**Tool-call-ID-scoped keys**: For ACP tool hooks, the guard uses `f"pre_tool_use:{tool_call_id}"` (not just `"pre_tool_use"`) to track per-tool-call firing. This prevents double-firing between `request_permission()` (blocking) and `ACPTurn.execute()` (advisory) for the same tool call, while allowing different tool calls to fire independently.
+
+Remove the guard entirely when the old path is removed (Phase 3 for native, future work for ACP).
 
 **[ACP advisory hooks confuse users]** → Document prominently that ACP `pre_tool_use` is advisory. Log a warning when a deny result is returned but cannot be enforced.
 

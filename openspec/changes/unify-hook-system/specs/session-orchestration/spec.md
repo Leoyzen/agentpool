@@ -31,6 +31,11 @@
 - **THEN** RunHandle.start() SHALL NOT call any hook firing methods
 - **AND** hooks are fired by Turn.execute() which RunHandle.start() calls
 
+#### Scenario: hooks_fired cleared per turn in multi-turn run
+- **WHEN** a run has 3 turns (initial prompt + 2 followups)
+- **THEN** `run_ctx.hooks_fired` SHALL be cleared at the start of each turn in the `RunHandle.start()` turn loop
+- **AND** hooks fire correctly in all 3 turns (guard from turn 1 does not block turn 2)
+
 ### Requirement: Dead pre_run/post_run code removed from _run_stream_once() for native agents
 
 After the migration period, `BaseAgent._run_stream_once()` SHALL NOT contain `pre_run`/`post_run` (now `pre_turn`/`post_turn`) hook firing logic **for native agents**. This code is dead because `NativeTurn.execute()` handles firing (verified: `native_agent/agent.py:1154-1163` creates `NativeTurn` and calls `execute()`).
