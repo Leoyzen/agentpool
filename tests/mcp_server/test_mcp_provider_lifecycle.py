@@ -6,12 +6,12 @@ toolset materialization, covering:
 1. Snapshot inheritance (parent → child agent)
 2. Pool-level configs visible to child agents
 3. Agent-level configs NOT inherited by children
-4. ``as_capability()`` with snapshot parameter
-5. ``as_capability()`` with session_pool for session-scoped configs
-6. Legacy fallback: ``as_capability(snapshot=None)``
+4. ``as_capability(session_id=...)`` with snapshot stored on session context
+5. ``as_capability(session_id=...)`` for session-scoped configs via session context
+6. Legacy fallback: ``as_capability()`` with no session_id
 7. Skill configs in snapshot via ``with_skill_configs()``
-8. Full lifecycle: snapshot → ``as_capability()`` → MCPToolset created
-9. Real tool calls through the snapshot path (in-process FastMCP)
+8. Full lifecycle: snapshot → ``as_capability(session_id=...)`` → MCPToolset created
+9. Real tool calls through the session_id path (in-process FastMCP)
 """
 
 from __future__ import annotations
@@ -232,7 +232,7 @@ class TestAgentConfigsNotInherited:
 
 
 class TestAsCapabilityWithSnapshot:
-    """Verify MCPManager.as_capability() works with a snapshot."""
+    """Verify MCPManager.as_capability(session_id=...) works with a snapshot."""
 
     async def test_snapshot_global_configs_produce_capabilities(self):
         """Global configs in snapshot produce MCP capabilities."""
@@ -249,11 +249,15 @@ class TestAsCapabilityWithSnapshot:
             pool_configs=(pool_entry,),
             agent_configs=(agent_entry,),
         )
-        caps = await manager.as_capability(snapshot=snapshot)
+        session_id = "test-snapshot-global"
+        manager.get_or_create_session(session_id)
+        manager.update_session_snapshot(session_id, snapshot)
+        caps = await manager.as_capability(session_id=session_id)
         assert len(caps) == 2
         ids = {c.id for c in caps}
         assert "pool_srv" in ids
         assert "agent_srv" in ids
+        await manager.cleanup_session(session_id)
         await manager.cleanup()
 
     async def test_snapshot_skips_disabled_servers(self):
@@ -269,9 +273,13 @@ class TestAsCapabilityWithSnapshot:
         snapshot = McpConfigSnapshot(
             pool_configs=(enabled_entry, disabled_entry),
         )
-        caps = await manager.as_capability(snapshot=snapshot)
+        session_id = "test-snapshot-disabled"
+        manager.get_or_create_session(session_id)
+        manager.update_session_snapshot(session_id, snapshot)
+        caps = await manager.as_capability(session_id=session_id)
         assert len(caps) == 1
         assert caps[0].id == "enabled"
+        await manager.cleanup_session(session_id)
         await manager.cleanup()
 
     async def test_snapshot_skips_acp_in_global_configs(self):
@@ -288,17 +296,25 @@ class TestAsCapabilityWithSnapshot:
         snapshot = McpConfigSnapshot(
             pool_configs=(stdio_entry, acp_entry),
         )
-        caps = await manager.as_capability(snapshot=snapshot)
+        session_id = "test-snapshot-acp"
+        manager.get_or_create_session(session_id)
+        manager.update_session_snapshot(session_id, snapshot)
+        caps = await manager.as_capability(session_id=session_id)
         assert len(caps) == 1
         assert caps[0].id == "native"
+        await manager.cleanup_session(session_id)
         await manager.cleanup()
 
     async def test_snapshot_empty_global_configs(self):
         """Empty snapshot produces no global capabilities."""
         manager = MCPManager(name="test")
         snapshot = McpConfigSnapshot()
-        caps = await manager.as_capability(snapshot=snapshot)
+        session_id = "test-snapshot-empty"
+        manager.get_or_create_session(session_id)
+        manager.update_session_snapshot(session_id, snapshot)
+        caps = await manager.as_capability(session_id=session_id)
         assert len(caps) == 0
+        await manager.cleanup_session(session_id)
         await manager.cleanup()
 
 
@@ -308,12 +324,12 @@ class TestAsCapabilityWithSnapshot:
 
 
 class TestAsCapabilityWithSessionPool:
-    """Verify as_capability() uses session_pool for session-scoped configs."""
+    """Verify as_capability(session_id=...) uses session context for session-scoped configs."""
 
     async def test_session_scoped_configs_use_session_pool(self):
-        """Session-scoped configs get transports from SessionConnectionPool."""
+        """Session-scoped configs get transports from the session's connection pool."""
         manager = MCPManager(name="test")
-        session_pool = SessionConnectionPool("test-session")
+        session_id = "test-session-scoped"
 
         session_entry = McpConfigEntry(
             server_config=_http_cfg("session_srv", "http://localhost:8888/mcp"),
@@ -328,12 +344,14 @@ class TestAsCapabilityWithSessionPool:
             session_configs=(session_entry,),
             skill_configs=(skill_entry,),
         )
-        caps = await manager.as_capability(snapshot=snapshot, session_pool=session_pool)
+        manager.get_or_create_session(session_id)
+        manager.update_session_snapshot(session_id, snapshot)
+        caps = await manager.as_capability(session_id=session_id)
         assert len(caps) == 2
         ids = {c.id for c in caps}
         assert "session_srv" in ids
         assert "skill_srv" in ids
-        await session_pool.cleanup()
+        await manager.cleanup_session(session_id)
         await manager.cleanup()
 
     async def test_session_pool_caches_transports(self):
@@ -356,8 +374,12 @@ class TestAsCapabilityWithSessionPool:
         assert t1 is not t2
         await session_pool.cleanup()
 
-    async def test_session_scoped_configs_without_session_pool(self):
-        """Session-scoped configs without session_pool produce no capabilities."""
+    async def test_session_scoped_configs_require_session_id(self):
+        """Session-scoped configs in a snapshot are not processed without session_id.
+
+        Without a session_id, as_capability() uses the legacy path
+        (self.servers only) and does not consult any snapshot.
+        """
         manager = MCPManager(name="test")
         session_entry = McpConfigEntry(
             server_config=_http_cfg("session_srv"),
@@ -366,9 +388,16 @@ class TestAsCapabilityWithSessionPool:
         snapshot = McpConfigSnapshot(
             session_configs=(session_entry,),
         )
-        # No session_pool provided — session-scoped configs are skipped
-        caps = await manager.as_capability(snapshot=snapshot)
+        # Store snapshot on a session context, but call as_capability()
+        # without session_id — the snapshot should not be consulted.
+        session_id = "test-no-session-id"
+        manager.get_or_create_session(session_id)
+        manager.update_session_snapshot(session_id, snapshot)
+
+        # Without session_id, only self.servers is processed (empty here)
+        caps = await manager.as_capability()
         assert len(caps) == 0
+        await manager.cleanup_session(session_id)
         await manager.cleanup()
 
     async def test_add_transport_stores_pre_created(self):
@@ -531,7 +560,7 @@ class TestSkillConfigsInSnapshot:
 
 
 class TestFullLifecycle:
-    """End-to-end: create snapshot → as_capability() → MCPToolset materialized."""
+    """End-to-end: create snapshot → as_capability(session_id=...) → MCPToolset materialized."""
 
     async def test_full_lifecycle_global_configs(self):
         """Pool + agent configs flow through snapshot to MCPToolset."""
@@ -548,19 +577,23 @@ class TestFullLifecycle:
             pool_configs=(pool_entry,),
             agent_configs=(agent_entry,),
         )
-        caps = await manager.as_capability(snapshot=snapshot)
+        session_id = "test-lifecycle-global"
+        manager.get_or_create_session(session_id)
+        manager.update_session_snapshot(session_id, snapshot)
+        caps = await manager.as_capability(session_id=session_id)
 
         assert len(caps) == 2
         for cap in caps:
             assert isinstance(cap.local, MCPToolset)
             assert cap.id is not None
 
+        await manager.cleanup_session(session_id)
         await manager.cleanup()
 
     async def test_full_lifecycle_with_session_pool(self):
-        """Full lifecycle with session-scoped configs via SessionConnectionPool."""
+        """Full lifecycle with session-scoped configs via session context."""
         manager = MCPManager(name="test")
-        session_pool = SessionConnectionPool("test-session")
+        session_id = "test-lifecycle-session"
 
         pool_entry = McpConfigEntry(
             server_config=_stdio_cfg("pool_srv", command="python", args=["s.py"]),
@@ -574,20 +607,22 @@ class TestFullLifecycle:
             pool_configs=(pool_entry,),
             session_configs=(session_entry,),
         )
-        caps = await manager.as_capability(snapshot=snapshot, session_pool=session_pool)
+        manager.get_or_create_session(session_id)
+        manager.update_session_snapshot(session_id, snapshot)
+        caps = await manager.as_capability(session_id=session_id)
 
         # 1 global + 1 session-scoped
         assert len(caps) == 2
         for cap in caps:
             assert isinstance(cap.local, MCPToolset)
 
-        await session_pool.cleanup()
+        await manager.cleanup_session(session_id)
         await manager.cleanup()
 
     async def test_full_lifecycle_snapshot_then_skill_update(self):
         """Snapshot can be updated with skill configs after initial creation."""
         manager = MCPManager(name="test")
-        session_pool = SessionConnectionPool("test-session")
+        session_id = "test-lifecycle-skill-update"
 
         pool_entry = McpConfigEntry(
             server_config=_stdio_cfg("pool_srv", command="python", args=["s.py"]),
@@ -595,8 +630,11 @@ class TestFullLifecycle:
         )
         snapshot = McpConfigSnapshot(pool_configs=(pool_entry,))
 
+        manager.get_or_create_session(session_id)
+        manager.update_session_snapshot(session_id, snapshot)
+
         # First call without skill configs
-        caps1 = await manager.as_capability(snapshot=snapshot, session_pool=session_pool)
+        caps1 = await manager.as_capability(session_id=session_id)
         assert len(caps1) == 1
 
         # Update snapshot with skill configs
@@ -606,18 +644,19 @@ class TestFullLifecycle:
             skill_name="my_skill",
         )
         updated_snapshot = snapshot.with_skill_configs((skill_entry,))
+        manager.update_session_snapshot(session_id, updated_snapshot)
 
         # Second call with skill configs
-        caps2 = await manager.as_capability(snapshot=updated_snapshot, session_pool=session_pool)
+        caps2 = await manager.as_capability(session_id=session_id)
         assert len(caps2) == 2  # 1 global + 1 session-scoped
 
-        await session_pool.cleanup()
+        await manager.cleanup_session(session_id)
         await manager.cleanup()
 
     async def test_full_lifecycle_mixed_sources(self):
         """Snapshot with all four source types produces correct capabilities."""
         manager = MCPManager(name="test")
-        session_pool = SessionConnectionPool("test-session")
+        session_id = "test-lifecycle-mixed"
 
         pool_entry = McpConfigEntry(
             server_config=_stdio_cfg("pool_srv", command="python", args=["s.py"]),
@@ -642,14 +681,16 @@ class TestFullLifecycle:
             session_configs=(session_entry,),
             skill_configs=(skill_entry,),
         )
-        caps = await manager.as_capability(snapshot=snapshot, session_pool=session_pool)
+        manager.get_or_create_session(session_id)
+        manager.update_session_snapshot(session_id, snapshot)
+        caps = await manager.as_capability(session_id=session_id)
 
         # 2 global (pool + agent) + 2 session-scoped (session + skill) = 4
         assert len(caps) == 4
         ids = {c.id for c in caps}
         assert {"pool_srv", "agent_srv", "session_srv", "skill_srv"} == ids
 
-        await session_pool.cleanup()
+        await manager.cleanup_session(session_id)
         await manager.cleanup()
 
     async def test_capability_has_correct_url(self):
@@ -666,7 +707,10 @@ class TestFullLifecycle:
         snapshot = McpConfigSnapshot(
             pool_configs=(stdio_entry, http_entry),
         )
-        caps = await manager.as_capability(snapshot=snapshot)
+        session_id = "test-url"
+        manager.get_or_create_session(session_id)
+        manager.update_session_snapshot(session_id, snapshot)
+        caps = await manager.as_capability(session_id=session_id)
 
         cap_by_id = {c.id: c for c in caps}
         # stdio produces mcp://stdio/... URL
@@ -674,6 +718,7 @@ class TestFullLifecycle:
         # HTTP produces the actual URL
         assert "localhost:8080" in cap_by_id["http_srv"].url
 
+        await manager.cleanup_session(session_id)
         await manager.cleanup()
 
 
@@ -683,17 +728,17 @@ class TestFullLifecycle:
 
 
 class TestRealToolCallsViaSnapshot:
-    """Exercise real tool calls through the snapshot-based capability path.
+    """Exercise real tool calls through the session_id-based capability path.
 
     Uses in-process FastMCP servers (no external processes) to verify
-    that MCPToolset instances created via as_capability(snapshot=...)
+    that MCPToolset instances created via as_capability(session_id=...)
     can actually list and call tools.
     """
 
     async def test_snapshot_capability_can_call_tools(
         self, fastmcp_server: Any, run_context: RunContext[Any]
     ):
-        """MCPToolset from snapshot path can list and call tools."""
+        """MCPToolset from session_id path can list and call tools."""
         # Build a snapshot with a single global config
         # We use the in-process server directly as the "transport"
         manager = MCPManager(name="test")
@@ -704,6 +749,10 @@ class TestRealToolCallsViaSnapshot:
         entry = McpConfigEntry(server_config=cfg, source="pool")
         snapshot = McpConfigSnapshot(pool_configs=(entry,))
 
+        session_id = "test-real-tools"
+        manager.get_or_create_session(session_id)
+        manager.update_session_snapshot(session_id, snapshot)
+
         # Patch the global pool to return our in-process server
         original_get_transport = GlobalConnectionPool.get_transport
 
@@ -712,7 +761,7 @@ class TestRealToolCallsViaSnapshot:
 
         GlobalConnectionPool.get_transport = _mock_get_transport  # type: ignore[method-assign]
         try:
-            caps = await manager.as_capability(snapshot=snapshot)
+            caps = await manager.as_capability(session_id=session_id)
             assert len(caps) == 1
             cap = caps[0]
             assert isinstance(cap.local, MCPToolset)
@@ -733,16 +782,21 @@ class TestRealToolCallsViaSnapshot:
                 assert result == {"sum": 30}
         finally:
             GlobalConnectionPool.get_transport = original_get_transport  # type: ignore[method-assign]
+            await manager.cleanup_session(session_id)
             await manager.cleanup()
 
     async def test_two_snapshots_produce_independent_toolsets(
         self, fastmcp_server: Any, run_context: RunContext[Any]
     ):
-        """Two as_capability() calls with the same snapshot share a cached MCPToolset."""
+        """Two as_capability() calls with the same session share a cached MCPToolset."""
         manager = MCPManager(name="test")
         cfg = _http_cfg("shared_server", "http://localhost:0/mcp")
         entry = McpConfigEntry(server_config=cfg, source="pool")
         snapshot = McpConfigSnapshot(pool_configs=(entry,))
+
+        session_id = "test-two-snapshots"
+        manager.get_or_create_session(session_id)
+        manager.update_session_snapshot(session_id, snapshot)
 
         original_get_transport = GlobalConnectionPool.get_transport
 
@@ -751,8 +805,8 @@ class TestRealToolCallsViaSnapshot:
 
         GlobalConnectionPool.get_transport = _mock_get_transport  # type: ignore[method-assign]
         try:
-            caps1 = await manager.as_capability(snapshot=snapshot)
-            caps2 = await manager.as_capability(snapshot=snapshot)
+            caps1 = await manager.as_capability(session_id=session_id)
+            caps2 = await manager.as_capability(session_id=session_id)
 
             # MCP wrappers are distinct but share the cached MCPToolset
             assert caps1[0] is not caps2[0]
@@ -764,23 +818,29 @@ class TestRealToolCallsViaSnapshot:
                 assert r1 == "Hello, first!"
         finally:
             GlobalConnectionPool.get_transport = original_get_transport  # type: ignore[method-assign]
+            await manager.cleanup_session(session_id)
             await manager.cleanup()
 
     async def test_session_scoped_toolset_works(
         self, fastmcp_server: Any, run_context: RunContext[Any]
     ):
-        """Session-scoped config via SessionConnectionPool produces working toolset."""
+        """Session-scoped config via session context produces working toolset."""
         manager = MCPManager(name="test")
-        session_pool = SessionConnectionPool("test-session")
+        session_id = "test-session-scoped-tools"
 
         cfg = _http_cfg("session_srv", "http://localhost:0/mcp")
         entry = McpConfigEntry(server_config=cfg, source="session")
         snapshot = McpConfigSnapshot(session_configs=(entry,))
 
-        # Add the in-process server as a pre-created transport
-        await session_pool.add_transport(cfg.client_id, fastmcp_server)
+        ctx = manager.get_or_create_session(session_id)
+        manager.update_session_snapshot(session_id, snapshot)
 
-        caps = await manager.as_capability(snapshot=snapshot, session_pool=session_pool)
+        # Add the in-process server as a pre-created transport in the
+        # session's connection pool
+        if ctx.connection_pool is not None:
+            await ctx.connection_pool.add_transport(cfg.client_id, fastmcp_server)
+
+        caps = await manager.as_capability(session_id=session_id)
         assert len(caps) == 1
         cap = caps[0]
         assert isinstance(cap.local, MCPToolset)
@@ -794,7 +854,7 @@ class TestRealToolCallsViaSnapshot:
             )
             assert result == "Hello, Session!"
 
-        await session_pool.cleanup()
+        await manager.cleanup_session(session_id)
         await manager.cleanup()
 
 
@@ -971,7 +1031,7 @@ class TestOrchestratorSnapshotPattern:
 
 
 class TestGlobalPoolIntegration:
-    """Verify GlobalConnectionPool works correctly with as_capability()."""
+    """Verify GlobalConnectionPool works correctly with as_capability(session_id=...)."""
 
     async def test_global_pool_caches_stdio_transports(self):
         """GlobalConnectionPool caches stdio transports across as_capability() calls."""
@@ -980,13 +1040,18 @@ class TestGlobalPoolIntegration:
         entry = McpConfigEntry(server_config=cfg, source="pool")
         snapshot = McpConfigSnapshot(pool_configs=(entry,))
 
-        caps1 = await manager.as_capability(snapshot=snapshot)
-        caps2 = await manager.as_capability(snapshot=snapshot)
+        session_id = "test-global-cache"
+        manager.get_or_create_session(session_id)
+        manager.update_session_snapshot(session_id, snapshot)
+
+        caps1 = await manager.as_capability(session_id=session_id)
+        caps2 = await manager.as_capability(session_id=session_id)
 
         # MCP wrappers are distinct
         assert caps1[0] is not caps2[0]
         # MCPToolset is cached by client_id (shared)
         assert caps1[0].local is caps2[0].local
+        await manager.cleanup_session(session_id)
         await manager.cleanup()
 
     async def test_global_pool_skips_acp(self):
