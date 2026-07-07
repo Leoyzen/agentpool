@@ -468,9 +468,18 @@ class NativeAgentHookManager:
         ``_ToolInterceptCapability`` runs innermost (runs hooks, applies
         results, consumes injections).
 
+        .. deprecated:: 0.5.0
+            Use :meth:`HookAwareTurn.execute` instead.
+
         Returns:
             A pydantic-ai ``CombinedCapability`` instance.
         """
+        warnings.warn(
+            "as_capability() is deprecated; hooks now fire via"
+            " HookAwareTurn in Turn.execute(). Will be removed in v0.5.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from pydantic_ai.capabilities import CombinedCapability, Hooks
 
         # Start with AgentHooks capability if available

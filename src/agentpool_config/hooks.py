@@ -265,14 +265,22 @@ class HooksConfig(Schema):
         title="Pre-turn hooks",
         validation_alias=AliasChoices("pre_turn", "pre_run"),
     )
-    """Hooks executed before agent.run() processes a prompt."""
+    """Hooks executed before agent.run() processes a prompt.
+
+    .. deprecated:: 0.5.0
+        The ``pre_run`` YAML alias is deprecated. Use ``pre_turn`` instead.
+    """
 
     post_turn: list[HookConfig] = Field(
         default_factory=list,
         title="Post-turn hooks",
         validation_alias=AliasChoices("post_turn", "post_run"),
     )
-    """Hooks executed after agent.run() completes."""
+    """Hooks executed after agent.run() completes.
+
+    .. deprecated:: 0.5.0
+        The ``post_run`` YAML alias is deprecated. Use ``post_turn`` instead.
+    """
 
     # Tool execution events
     pre_tool_use: list[HookConfig] = Field(

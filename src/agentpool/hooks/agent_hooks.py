@@ -374,9 +374,18 @@ class AgentHooks:
         mapping (e.g. ``deny`` raises :exc:`RuntimeError` since pydantic-ai
         hooks don't support blocking returns).
 
+        .. deprecated:: 0.5.0
+            Use :meth:`HookAwareTurn.execute` instead.
+
         Returns:
             A pydantic-ai Hooks instance with adapter callbacks.
         """
+        warnings.warn(
+            "as_capability() is deprecated; hooks now fire via"
+            " HookAwareTurn in Turn.execute(). Will be removed in v0.5.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         kwargs: dict[str, Any] = {}
 
         if self.pre_turn:
