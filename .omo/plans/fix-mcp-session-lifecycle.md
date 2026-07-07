@@ -265,7 +265,7 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
 
 ### Wave 5: P1e — Fix resume_session Early-Return (depends on Wave 4)
 
-- [ ] 20. Remove early-return and implement close-then-recreate in `resume_session()`
+- [x] 20. Remove early-return and implement close-then-recreate in `resume_session()`
   What to do / Must NOT do: In `session_manager.py:243-249`, remove the early-return that returns stale session when `session_id in self._acp_sessions`. Replace with: (1) if session exists, call `SessionController.close_session(session_id)` first (handles RunHandle lifecycle with 10s timeout + cancel, calls `agent.mcp.cleanup_session()` via T15, calls `agent.__aexit__()`), (2) then call `ACPSession.close()` for ACP-specific cleanup (acp_env, signals, prompts — also calls `cleanup_session()` via T15, but idempotent via D8 lock), (3) remove from `_acp_sessions`, (4) proceed to create fresh session. Fallback: if `SessionController` is unavailable (tests), call `ACPSession.close()` only. Must NOT skip the `SessionController.close_session()` call when it's available — it handles active runs. Must NOT skip `ACPSession.close()` — it handles ACP-specific state.
   Parallelization: Wave 5 | Blocked by: T15, T16 | Blocks: T21, T22, T23
   References: `src/agentpool_server/acp_server/session_manager.py:243-249` (early-return to remove), `session_manager.py:45` (_acp_sessions dict), `session_manager.py:371-391` (close_all_sessions pattern), `src/agentpool/orchestrator/session_controller.py:951-966` (close_session one-liner)
@@ -273,7 +273,7 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
   QA scenarios: (happy) Resume existing session, verify old session is closed and new session has fresh resources. (failure) Resume with active run, verify RunHandle is cancelled with timeout. Evidence: `.omo/evidence/task-20-fix-mcp-session-lifecycle.txt`
   Commit: Y | fix(acp): resume_session close-then-recreate instead of early-return
 
-- [ ] 21. Test: resume → verify old session closed → fresh MCP resources
+- [x] 21. Test: resume → verify old session closed → fresh MCP resources
   What to do / Must NOT do: Create test: create session, run turn, resume same session, verify old session was closed (check `_acp_sessions` had old entry removed and re-added), verify new session has fresh MCP resources (different toolset objects). Use `@pytest.mark.integration`.
   Parallelization: Wave 5 | Blocked by: T20 | Blocks: —
   References: `tests/agentpool_server/acp_server/test_acp_mcp_agent_integration.py` (integration test patterns)
@@ -281,7 +281,7 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
   QA scenarios: (happy) Resumed session has fresh MCP resources. (failure) Revert early-return, verify test fails (stale resources). Evidence: `.omo/evidence/task-21-fix-mcp-session-lifecycle.txt`
   Commit: Y | test(acp): resume_session closes old and creates fresh
 
-- [ ] 22. Test: resume after WebSocket reconnect → fresh ACP connections
+- [x] 22. Test: resume after WebSocket reconnect → fresh ACP connections
   What to do / Must NOT do: Create test: create session with ACP MCP server, simulate WebSocket disconnect, reconnect, resume session, verify fresh ACP connections are created and no stale connection references remain. Use `@pytest.mark.integration`. Must NOT use real WebSocket — mock the connection/disconnect.
   Parallelization: Wave 5 | Blocked by: T15, T19, T20 | Blocks: —
   References: `tests/agentpool_server/acp_server/test_acp_mcp_agent_integration.py`
@@ -289,7 +289,7 @@ Your next move: approve to start work, or run a high-accuracy review first. Full
   QA scenarios: (happy) After reconnect+resume, ACP connections are fresh. (failure) Don't close old session on resume, verify stale connections persist. Evidence: `.omo/evidence/task-22-fix-mcp-session-lifecycle.txt`
   Commit: Y | test(acp): resume after WebSocket reconnect creates fresh connections
 
-- [ ] 23. Test: resume with active run → RunHandle cancelled with timeout
+- [x] 23. Test: resume with active run → RunHandle cancelled with timeout
   What to do / Must NOT do: Create test: create session, start a long-running turn, resume same session while run is active, verify RunHandle is cancelled with timeout before cleanup proceeds. Use `@pytest.mark.integration`. Must NOT block forever — use `asyncio.wait_for` in test with 30s timeout.
   Parallelization: Wave 5 | Blocked by: T20 | Blocks: —
   References: `src/agentpool/orchestrator/session_controller.py:835-949` (_close_session_run_turn with 10s timeout)
