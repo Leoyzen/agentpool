@@ -1,14 +1,18 @@
-"""Reproduction tests for stale MCP connection bug on session resume.
+"""Fix-verification tests for stale MCP connection bug on session resume.
 
-When an agent shares the pool's MCPManager (``_mcp_shared = True``), the
-``_toolset_cache`` on that shared manager is never invalidated between
-sessions.  On session resume, a new ``SessionConnectionPool`` is created
-with fresh transports, but ``as_capability()`` returns the OLD cached
-``MCPToolset`` (which holds the dead transport from the previous
-WebSocket session).  The agentlet then tries to initialize MCP via the
-dead transport, causing a 300-second timeout and silent run failure.
+Previously, when an agent shared the pool's MCPManager (``_mcp_shared =
+True``), the ``_toolset_cache`` on that shared manager was never
+invalidated between sessions.  On session resume, a new
+``SessionConnectionPool`` was created with fresh transports, but
+``as_capability()`` returned the OLD cached ``MCPToolset`` (which held
+the dead transport from the previous WebSocket session).
 
-These tests reproduce the issue at the MCPManager level without requiring
+After T10-T12, ``as_capability()`` accepts ``session_id`` and routes
+session-scoped configs through per-session ``_SessionContext`` objects
+with their own ``toolset_cache``.  ``cleanup_session()`` clears the
+per-session cache, ensuring the next session gets a fresh toolset.
+
+These tests verify the fix at the MCPManager level without requiring
 real ACP connections or WebSocket infrastructure.
 """
 
@@ -21,7 +25,6 @@ import pytest
 
 from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
 from agentpool.mcp_server.manager import MCPManager
-from agentpool.mcp_server.session_pool import SessionConnectionPool
 from agentpool_config.mcp_server import AcpMCPServerConfig
 
 
@@ -69,100 +72,105 @@ class _FakeTransport:
 
 
 # ---------------------------------------------------------------------------
-# Test: stale toolset returned after session resume
+# Test: fresh toolset returned after session resume (was: stale toolset)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-async def test_session_resume_returns_stale_toolset_from_cache() -> None:
-    """as_capability() returns stale toolset after session resume.
+async def test_session_resume_returns_fresh_toolset() -> None:
+    """as_capability() returns a fresh toolset after session cleanup+recreate.
 
-    This test reproduces the root cause: when a shared MCPManager caches
-    a toolset for an ACP MCP server during session 1, and session 2
-    (resume) provides a fresh transport via a new SessionConnectionPool,
-    ``as_capability()`` still returns the OLD cached toolset with the
-    OLD (dead) transport.
+    After T10-T12, session-scoped toolsets are cached on the per-session
+    ``_SessionContext.toolset_cache`` rather than the global
+    ``MCPManager._toolset_cache``.  When ``cleanup_session()`` is called
+    between sessions, the per-session context (including its toolset
+    cache) is removed, so the next session gets a brand-new toolset with
+    the correct fresh transport.
 
     Steps:
     1. Create a shared MCPManager (simulating pool-level manager).
-    2. Session 1: create SessionConnectionPool, add transport A, build
-       snapshot, call ``as_capability()`` -> toolset cached with transport A.
-    3. Session 2 (resume): create NEW SessionConnectionPool, add transport B,
-       build NEW snapshot, call ``as_capability()``.
-    4. Assert: the returned toolset still holds transport A (stale),
-       NOT transport B (fresh).
+    2. Session 1: register session, add transport A, build snapshot,
+       call ``as_capability(session_id="s1")`` -> toolset cached with
+       transport A on the session context.
+    3. Call ``cleanup_session("s1")`` to tear down session 1.
+    4. Session 2 (resume): register a new session, add transport B,
+       build a new snapshot, call ``as_capability(session_id="s2")``.
+    5. Assert: the returned toolset holds transport B (fresh), NOT
+       transport A (stale), and is a different object than toolset1.
     """
-    # Shared pool-level MCPManager (agent has _mcp_shared = True)
     manager = MCPManager(name="pool_mcp")
 
-    # ACP MCP server config — deterministic client_id across sessions
     acp_config = AcpMCPServerConfig(name="scratchpad", acp_id="acp-server-1")
     client_id = acp_config.client_id  # "acp_acp-server-1"
 
-    # --- Session 1 ---
-    session1_pool = SessionConnectionPool(session_id="session-1")
-    transport_a = _FakeTransport("session-1-transport")
-    await session1_pool.add_transport(client_id, cast(Any, transport_a))
+    try:
+        # --- Session 1 ---
+        ctx1 = manager.get_or_create_session("s1")
+        assert ctx1.connection_pool is not None
+        transport_a = _FakeTransport("session-1-transport")
+        await ctx1.connection_pool.add_transport(client_id, cast(Any, transport_a))
 
-    snapshot1 = McpConfigSnapshot(
-        session_configs=(
-            McpConfigEntry(server_config=acp_config, source="session"),
-        ),
-    )
-
-    with (
-        patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
-        patch("pydantic_ai.capabilities.MCP", _FakeMCP),
-    ):
-        caps1 = await manager.as_capability(
-            snapshot=snapshot1, session_pool=session1_pool
+        snapshot1 = McpConfigSnapshot(
+            session_configs=(
+                McpConfigEntry(server_config=acp_config, source="session"),
+            ),
         )
+        manager.update_session_snapshot("s1", snapshot1)
 
-    assert len(caps1) == 1
-    toolset1 = cast(_FakeToolset, caps1[0].local)
-    assert toolset1.client is transport_a  # toolset holds session 1 transport
-    assert client_id in manager._toolset_cache  # cached
+        with (
+            patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
+            patch("pydantic_ai.capabilities.MCP", _FakeMCP),
+        ):
+            caps1 = await manager.as_capability(session_id="s1")
 
-    # --- Session 2 (resume) ---
-    session2_pool = SessionConnectionPool(session_id="session-2")
-    transport_b = _FakeTransport("session-2-transport")
-    await session2_pool.add_transport(client_id, cast(Any, transport_b))
+        assert len(caps1) == 1
+        toolset1 = cast(_FakeToolset, caps1[0].local)
+        assert toolset1.client is transport_a  # toolset holds session 1 transport
+        assert client_id in ctx1.toolset_cache  # cached on session context
 
-    snapshot2 = McpConfigSnapshot(
-        session_configs=(
-            McpConfigEntry(server_config=acp_config, source="session"),
-        ),
-    )
+        # --- Clean up session 1 ---
+        await manager.cleanup_session("s1")
+        assert "s1" not in manager._session_contexts
 
-    with (
-        patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
-        patch("pydantic_ai.capabilities.MCP", _FakeMCP),
-    ):
-        caps2 = await manager.as_capability(
-            snapshot=snapshot2, session_pool=session2_pool
+        # --- Session 2 (resume) ---
+        ctx2 = manager.get_or_create_session("s2")
+        assert ctx2.connection_pool is not None
+        transport_b = _FakeTransport("session-2-transport")
+        await ctx2.connection_pool.add_transport(client_id, cast(Any, transport_b))
+
+        snapshot2 = McpConfigSnapshot(
+            session_configs=(
+                McpConfigEntry(server_config=acp_config, source="session"),
+            ),
         )
+        manager.update_session_snapshot("s2", snapshot2)
 
-    assert len(caps2) == 1
-    toolset2 = cast(_FakeToolset, caps2[0].local)
+        with (
+            patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
+            patch("pydantic_ai.capabilities.MCP", _FakeMCP),
+        ):
+            caps2 = await manager.as_capability(session_id="s2")
 
-    # BUG: toolset2 is the SAME cached object as toolset1
-    assert toolset2 is toolset1
+        assert len(caps2) == 1
+        toolset2 = cast(_FakeToolset, caps2[0].local)
 
-    # BUG: toolset2 still holds transport_a (dead), not transport_b (fresh)
-    assert toolset2.client is transport_a
-    assert toolset2.client is not transport_b
+        # FIX: toolset2 is a DIFFERENT object than toolset1 (not stale)
+        assert toolset2 is not toolset1
 
-    # The session2_pool has the correct new transport, but it's unused
-    fresh_transport = await session2_pool.get_transport(acp_config)
-    assert fresh_transport is cast(Any, transport_b)
+        # FIX: toolset2 holds transport_b (fresh), not transport_a (stale)
+        assert toolset2.client is transport_b
+        assert toolset2.client is not transport_a
 
-    await manager.cleanup()
-    await session1_pool.cleanup()
-    await session2_pool.cleanup()
+        # Session 2's toolset cache has the fresh toolset
+        assert client_id in ctx2.toolset_cache
+    finally:
+        await manager.cleanup()
+        if "s2" in manager._session_contexts:
+            await manager.cleanup_session("s2")
 
 
 # ---------------------------------------------------------------------------
-# Test: cache key is deterministic across sessions (explains why bug occurs)
+# Test: cache key is deterministic across sessions (explains why bug occurred)
 # ---------------------------------------------------------------------------
 
 
@@ -171,9 +179,9 @@ def test_acp_client_id_is_deterministic_across_sessions() -> None:
     """AcpMCPServerConfig.client_id is deterministic.
 
     The ``client_id`` for ACP configs is ``f"acp_{acp_id}"``, which means
-    the same ACP server always maps to the same ``_toolset_cache`` key.
-    This is why the cache hit occurs on session resume — the key doesn't
-    change even though the transport does.
+    the same ACP server always maps to the same cache key.  This is why
+    per-session isolation is necessary — without it, the cache key
+    doesn't change even though the transport does.
     """
     config1 = AcpMCPServerConfig(name="server", acp_id="my-acp-1")
     config2 = AcpMCPServerConfig(name="server", acp_id="my-acp-1")
@@ -191,10 +199,12 @@ def test_acp_client_id_is_deterministic_across_sessions() -> None:
 async def test_session_pool_provides_fresh_transport_on_resume() -> None:
     """SessionConnectionPool correctly returns the new transport.
 
-    This test confirms that SessionConnectionPool is NOT the source of
-    the bug — it properly stores and returns the fresh transport. The
-    bug is in MCPManager._toolset_cache bypassing the pool.
+    This test confirms that SessionConnectionPool properly stores and
+    returns the fresh transport.  With per-session contexts, each
+    session's pool is isolated from the others.
     """
+    from agentpool.mcp_server.session_pool import SessionConnectionPool
+
     acp_config = AcpMCPServerConfig(name="scratchpad", acp_id="acp-server-1")
     client_id = acp_config.client_id
 
@@ -218,136 +228,147 @@ async def test_session_pool_provides_fresh_transport_on_resume() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test: multiple ACP servers all go stale
+# Test: multiple ACP servers all get fresh toolsets (was: all go stale)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-async def test_multiple_acp_servers_all_go_stale_on_resume() -> None:
-    """When multiple ACP servers are configured, all toolsets go stale.
+async def test_multiple_acp_servers_get_fresh_toolsets() -> None:
+    """When multiple ACP servers are configured, all get fresh toolsets.
 
-    The bug affects every ACP MCP server, not just one. Each server's
-    toolset is cached by its deterministic client_id, so all of them
-    return stale transports on session resume.
+    After the fix, each session has its own ``toolset_cache``.  After
+    ``cleanup_session()`` removes the session context, the next session
+    creates fresh toolsets for every ACP MCP server, each holding the
+    correct fresh transport.
     """
     manager = MCPManager(name="pool_mcp")
 
     config_a = AcpMCPServerConfig(name="server_a", acp_id="acp-a")
     config_b = AcpMCPServerConfig(name="server_b", acp_id="acp-b")
 
-    # Session 1
-    pool1 = SessionConnectionPool(session_id="s1")
-    t_a1 = _FakeTransport("a-s1")
-    t_b1 = _FakeTransport("b-s1")
-    await pool1.add_transport(config_a.client_id, cast(Any, t_a1))
-    await pool1.add_transport(config_b.client_id, cast(Any, t_b1))
+    try:
+        # --- Session 1 ---
+        ctx1 = manager.get_or_create_session("s1")
+        assert ctx1.connection_pool is not None
+        t_a1 = _FakeTransport("a-s1")
+        t_b1 = _FakeTransport("b-s1")
+        await ctx1.connection_pool.add_transport(config_a.client_id, cast(Any, t_a1))
+        await ctx1.connection_pool.add_transport(config_b.client_id, cast(Any, t_b1))
 
-    snapshot1 = McpConfigSnapshot(
-        session_configs=(
-            McpConfigEntry(server_config=config_a, source="session"),
-            McpConfigEntry(server_config=config_b, source="session"),
-        ),
-    )
-
-    with (
-        patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
-        patch("pydantic_ai.capabilities.MCP", _FakeMCP),
-    ):
-        caps1 = await manager.as_capability(
-            snapshot=snapshot1, session_pool=pool1
+        snapshot1 = McpConfigSnapshot(
+            session_configs=(
+                McpConfigEntry(server_config=config_a, source="session"),
+                McpConfigEntry(server_config=config_b, source="session"),
+            ),
         )
+        manager.update_session_snapshot("s1", snapshot1)
 
-    assert len(caps1) == 2
+        with (
+            patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
+            patch("pydantic_ai.capabilities.MCP", _FakeMCP),
+        ):
+            caps1 = await manager.as_capability(session_id="s1")
 
-    # Session 2 (resume)
-    pool2 = SessionConnectionPool(session_id="s2")
-    t_a2 = _FakeTransport("a-s2")
-    t_b2 = _FakeTransport("b-s2")
-    await pool2.add_transport(config_a.client_id, cast(Any, t_a2))
-    await pool2.add_transport(config_b.client_id, cast(Any, t_b2))
+        assert len(caps1) == 2
 
-    snapshot2 = McpConfigSnapshot(
-        session_configs=(
-            McpConfigEntry(server_config=config_a, source="session"),
-            McpConfigEntry(server_config=config_b, source="session"),
-        ),
-    )
+        # --- Clean up session 1 ---
+        await manager.cleanup_session("s1")
+        assert "s1" not in manager._session_contexts
 
-    with (
-        patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
-        patch("pydantic_ai.capabilities.MCP", _FakeMCP),
-    ):
-        caps2 = await manager.as_capability(
-            snapshot=snapshot2, session_pool=pool2
+        # --- Session 2 (resume) ---
+        ctx2 = manager.get_or_create_session("s2")
+        assert ctx2.connection_pool is not None
+        t_a2 = _FakeTransport("a-s2")
+        t_b2 = _FakeTransport("b-s2")
+        await ctx2.connection_pool.add_transport(config_a.client_id, cast(Any, t_a2))
+        await ctx2.connection_pool.add_transport(config_b.client_id, cast(Any, t_b2))
+
+        snapshot2 = McpConfigSnapshot(
+            session_configs=(
+                McpConfigEntry(server_config=config_a, source="session"),
+                McpConfigEntry(server_config=config_b, source="session"),
+            ),
         )
+        manager.update_session_snapshot("s2", snapshot2)
 
-    assert len(caps2) == 2
+        with (
+            patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
+            patch("pydantic_ai.capabilities.MCP", _FakeMCP),
+        ):
+            caps2 = await manager.as_capability(session_id="s2")
 
-    stale_transports = {cast(Any, t_a1), cast(Any, t_b1)}
-    fresh_transports = {cast(Any, t_a2), cast(Any, t_b2)}
+        assert len(caps2) == 2
 
-    # Both toolsets are stale (hold session 1 transports)
-    for cap in caps2:
-        toolset = cast(_FakeToolset, cap.local)
-        toolset_client = cast(Any, toolset.client)
-        assert toolset_client in stale_transports, (
-            f"Toolset holds stale transport {toolset_client.label}, "
-            f"expected one of session-1 transports"
-        )
-        assert toolset_client not in fresh_transports, (
-            f"Toolset should NOT hold session-2 transport "
-            f"{toolset_client.label}"
-        )
+        fresh_transports = {cast(Any, t_a2), cast(Any, t_b2)}
+        stale_transports = {cast(Any, t_a1), cast(Any, t_b1)}
 
-    await manager.cleanup()
-    await pool1.cleanup()
-    await pool2.cleanup()
+        # All toolsets hold session-2 transports (fresh, not stale)
+        for cap in caps2:
+            toolset = cast(_FakeToolset, cap.local)
+            toolset_client = cast(Any, toolset.client)
+            assert toolset_client in fresh_transports, (
+                f"Toolset holds unexpected transport {toolset_client.label}, "
+                f"expected one of session-2 transports"
+            )
+            assert toolset_client not in stale_transports, (
+                f"Toolset should NOT hold session-1 transport "
+                f"{toolset_client.label}"
+            )
+    finally:
+        await manager.cleanup()
+        if "s2" in manager._session_contexts:
+            await manager.cleanup_session("s2")
 
 
 # ---------------------------------------------------------------------------
-# Test: disconnect_all clears cache (but is not called on session resume)
+# Test: cleanup_session clears per-session cache (was: disconnect_all)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-async def test_disconnect_all_clears_cache_but_not_called_on_resume() -> None:
-    """disconnect_all() clears _toolset_cache, but session resume doesn't call it.
+async def test_cleanup_session_clears_per_session_cache() -> None:
+    """cleanup_session() clears the per-session toolset cache.
 
-    This test documents that ``disconnect_all()`` would fix the issue if
-    called between sessions, but the session resume path does NOT call it.
-    The shared MCPManager persists its cache across session boundaries.
+    After T10-T12, ``cleanup_session()`` clears ``ctx.toolset_cache``,
+    cleans the session connection pool, and removes the session context
+    from ``_session_contexts``.  This ensures stale toolsets are not
+    reused when the session is resumed.
     """
     manager = MCPManager(name="pool_mcp")
 
     acp_config = AcpMCPServerConfig(name="scratchpad", acp_id="acp-1")
     client_id = acp_config.client_id
 
-    # Session 1 — populate cache
-    pool1 = SessionConnectionPool(session_id="s1")
-    t1 = _FakeTransport("s1")
-    await pool1.add_transport(client_id, cast(Any, t1))
+    try:
+        # Session 1 — populate per-session cache
+        ctx = manager.get_or_create_session("s1")
+        assert ctx.connection_pool is not None
+        t1 = _FakeTransport("s1")
+        await ctx.connection_pool.add_transport(client_id, cast(Any, t1))
 
-    snapshot = McpConfigSnapshot(
-        session_configs=(
-            McpConfigEntry(server_config=acp_config, source="session"),
-        ),
-    )
+        snapshot = McpConfigSnapshot(
+            session_configs=(
+                McpConfigEntry(server_config=acp_config, source="session"),
+            ),
+        )
+        manager.update_session_snapshot("s1", snapshot)
 
-    with (
-        patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
-        patch("pydantic_ai.capabilities.MCP", _FakeMCP),
-    ):
-        await manager.as_capability(snapshot=snapshot, session_pool=pool1)
+        with (
+            patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
+            patch("pydantic_ai.capabilities.MCP", _FakeMCP),
+        ):
+            await manager.as_capability(session_id="s1")
 
-    assert len(manager._toolset_cache) == 1
+        # Per-session cache is populated
+        assert len(ctx.toolset_cache) == 1
+        assert client_id in ctx.toolset_cache
 
-    # disconnect_all would clear it...
-    await manager.disconnect_all()
-    assert len(manager._toolset_cache) == 0
+        # cleanup_session clears the per-session cache and removes the context
+        await manager.cleanup_session("s1")
 
-    # ...but session resume path calls neither disconnect_all() nor
-    # any cache invalidation. In production, close_session() only calls
-    # agent.__aexit__() which calls agent.cleanup(), not pool.mcp.disconnect_all().
-    # The shared pool-level MCPManager._toolset_cache is never touched.
-
-    await pool1.cleanup()
+        # Session context is removed from the registry
+        assert "s1" not in manager._session_contexts
+    finally:
+        await manager.cleanup()
+        if "s1" in manager._session_contexts:
+            await manager.cleanup_session("s1")
