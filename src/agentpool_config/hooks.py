@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Any, Literal
+import warnings
 
 from exxec_config import ExecutionEnvironmentConfig
-from pydantic import ConfigDict, Field
+from pydantic import AliasChoices, ConfigDict, Field, model_validator
 from schemez import Schema
 
 
@@ -245,18 +246,31 @@ class HooksConfig(Schema):
     Currently supported events:
     - pre_turn / post_turn: Before/after agent.run() processes a prompt
     - pre_tool_use / post_tool_use: Before/after a tool is called
+
+    !!! warning "Deprecated aliases"
+        ``pre_run`` and ``post_run`` are deprecated aliases for ``pre_turn``
+        and ``post_turn`` respectively. They still work but emit a
+        ``DeprecationWarning``. Migrate to the new names.
     """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        use_attribute_docstrings=True,
+        populate_by_name=True,
+    )
 
     # Message flow events
     pre_turn: list[HookConfig] = Field(
         default_factory=list,
         title="Pre-turn hooks",
+        validation_alias=AliasChoices("pre_turn", "pre_run"),
     )
     """Hooks executed before agent.run() processes a prompt."""
 
     post_turn: list[HookConfig] = Field(
         default_factory=list,
         title="Post-turn hooks",
+        validation_alias=AliasChoices("post_turn", "post_run"),
     )
     """Hooks executed after agent.run() completes."""
 
@@ -272,6 +286,33 @@ class HooksConfig(Schema):
         title="Post-tool-use hooks",
     )
     """Hooks executed after a tool completes."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _warn_deprecated_aliases(cls, data: Any) -> Any:
+        """Emit DeprecationWarning when old ``pre_run``/``post_run`` aliases are used.
+
+        Args:
+            data: Raw input data (dict or other mapping).
+
+        Returns:
+            The input data unchanged.
+        """
+        if isinstance(data, dict):
+            deprecated: list[str] = []
+            if "pre_run" in data:
+                deprecated.append("pre_run")
+            if "post_run" in data:
+                deprecated.append("post_run")
+            if deprecated:
+                names = ", ".join(deprecated)
+                warnings.warn(
+                    f"HooksConfig field(s) {names} are deprecated; "
+                    "use 'pre_turn'/'post_turn' instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+        return data
 
     def get_agent_hooks(self) -> AgentHooks:
         """Create runtime AgentHooks from this configuration.

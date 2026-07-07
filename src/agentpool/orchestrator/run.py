@@ -254,6 +254,9 @@ class RunHandle:
                     self._turn_was_cancelled = False
                     if self.run_ctx.cancelled:
                         self.run_ctx.cancelled = False
+                    # Clear hooks_fired so the new turn's hooks can fire
+                    # even if the previous turn already fired them.
+                    self.run_ctx.hooks_fired.clear()
                     turn = agent.create_turn(
                         prompts=current_prompts,  # type: ignore[arg-type]
                         run_ctx=self.run_ctx,

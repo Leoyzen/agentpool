@@ -1285,6 +1285,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
         from agentpool.messaging import ChatMessage
 
+        # Clear hooks_fired so the new turn's hooks can fire
+        # even if the previous turn already fired them.
+        run_ctx.hooks_fired.clear()
+
         # Convert prompts to standard UserContent format
         converted_prompts = await convert_prompts(prompts)
         # Prepend any staged content
