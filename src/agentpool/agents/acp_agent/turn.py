@@ -150,22 +150,21 @@ class ACPTurn(HookAwareTurn, Turn):
 
         run_id = self._run_ctx.run_id
 
-        # --- Phase 0: Fire pre_turn hooks ---
-        pre_turn_result = await self._fire_pre_turn_hooks()
-        if pre_turn_result is not None and pre_turn_result.get("decision") == "deny":
-            self._run_ctx.cancelled = True
-            from agentpool.messaging import ChatMessage
-
-            self._final_message = ChatMessage[str](
-                content="",
-                role="assistant",
-                message_id=str(uuid4()),
-                session_id=self._session_id,
-            )
-            yield StreamCompleteEvent(cancelled=True, message=self._final_message)
-            return
-
         try:
+            # --- Phase 0: Fire pre_turn hooks ---
+            pre_turn_result = await self._fire_pre_turn_hooks()
+            if pre_turn_result is not None and pre_turn_result.get("decision") == "deny":
+                self._run_ctx.cancelled = True
+                from agentpool.messaging import ChatMessage
+
+                self._final_message = ChatMessage[str](
+                    content="",
+                    role="assistant",
+                    message_id=str(uuid4()),
+                    session_id=self._session_id,
+                )
+                yield StreamCompleteEvent(cancelled=True, message=self._final_message)
+                return
             # Convert all user prompts to ACP ContentBlock list.
             # Join all prompts instead of taking only the last one.
             full_prompt = "\n\n".join(self._prompts) if self._prompts else ""
@@ -206,7 +205,11 @@ class ACPTurn(HookAwareTurn, Turn):
                                 tool_call_id=tcid,
                             ):
                                 await self._fire_post_tool_hooks(
-                                    tn, ti, tr, 0.0, tcid,
+                                    tn,
+                                    ti,
+                                    tr,
+                                    0.0,
+                                    tcid,
                                 )
                             case _:
                                 pass
