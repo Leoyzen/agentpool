@@ -373,10 +373,9 @@ class MCPManager:
             name=f"{self.name}_acp_aggregated",
         )
 
-    async def as_capability(
+    async def as_capability(  # noqa: PLR0915
         self,
-        snapshot: McpConfigSnapshot | None = None,
-        session_pool: SessionConnectionPool | None = None,
+        session_id: str | None = None,
     ) -> list[MCP]:
         """Return pydantic-ai MCP capabilities for all configured servers.
 
@@ -386,21 +385,29 @@ class MCPManager:
         skipped in global configs since pydantic-ai does not support ACP
         directly. Disabled servers are also skipped.
 
-        When ``snapshot`` is provided, configs are read from the snapshot
-        and transports are obtained from the appropriate connection pool:
+        When ``session_id`` is provided, the session's ``_SessionContext`` is
+        looked up via ``get_or_create_session()``.  If a snapshot is stored
+        on the context, configs are partitioned:
 
-        - Global configs (pool + agent) use ``self._global_pool``
-        - Session-scoped configs (session + skill) use ``session_pool``
+        - Global configs (pool + agent) use ``self._global_pool`` for
+          transports and ``self._toolset_cache`` for toolset caching.
+        - Session-scoped configs (session + skill) use the session's
+          ``connection_pool`` for transports and ``ctx.toolset_cache`` for
+          toolset caching.
 
-        When ``snapshot`` is None, the legacy path uses ``self.servers``
-        with ``self._global_pool`` for transports.
+        GAP-11: If the session context was popped by concurrent
+        ``cleanup_session()`` between the ``get_or_create_session()`` call
+        and the dict lookup, a ``KeyError`` is caught and the method falls
+        back to global-only capabilities (with a warning).
+
+        When ``session_id`` is None, the legacy path uses ``self.servers``
+        with ``self._global_pool`` for transports and ``self._toolset_cache``
+        for toolset caching.
 
         Args:
-            snapshot: Optional immutable snapshot of MCP configs partitioned
-                by lifecycle scope.
-            session_pool: Optional per-session connection pool for transport
-                lifecycle isolation. Required when snapshot contains
-                session-scoped configs.
+            session_id: Optional session identifier for per-session MCP
+                config isolation. When None, only global configs from
+                ``self.servers`` are processed.
 
         Returns:
             A list of ``pydantic_ai.capabilities.MCP`` instances, one per
@@ -446,19 +453,23 @@ class MCPManager:
                 case _:
                     return f"mcp://{server.type}/{server.client_id}"
 
-        def _make_capability(server: BaseMCPServerConfig, transport: Any) -> MCP:
+        def _make_capability(
+            server: BaseMCPServerConfig,
+            transport: Any,
+            toolset_cache: dict[str, Any],
+        ) -> MCP:
             """Create or reuse an MCPToolset and wrap it in an MCP capability.
 
             On first call for a given ``client_id``, a new ``MCPToolset`` is
-            constructed and stored in ``_toolset_cache``.  Subsequent calls
+            constructed and stored in ``toolset_cache``.  Subsequent calls
             reuse the cached instance, ensuring one underlying connection per
             server config.  The ``MCP`` wrapper is always fresh.
             """
             client_id = server.client_id
-            toolset = self._toolset_cache.get(client_id)
+            toolset = toolset_cache.get(client_id)
             if toolset is None:
                 toolset = MCPToolset(client=transport, **_make_kwargs(server))
-                self._toolset_cache[client_id] = toolset
+                toolset_cache[client_id] = toolset
 
             return MCP(
                 url=_derive_url(server),
@@ -468,45 +479,94 @@ class MCPManager:
                 allowed_tools=server.enabled_tools,
             )
 
-        async def _process_snapshot(snap: McpConfigSnapshot) -> None:
-            """Process snapshot configs, appending capabilities to the list."""
+        async def _process_global_configs(
+            snap: McpConfigSnapshot,
+            toolset_cache: dict[str, Any],
+        ) -> None:
+            """Process global configs (pool + agent) from the snapshot."""
             for entry in snap.global_configs:
                 server = entry.server_config
                 if not server.enabled or isinstance(server, AcpMCPServerConfig):
                     continue
                 transport = await self._global_pool.get_transport(server)
-                capabilities.append(_make_capability(server, transport))
+                capabilities.append(_make_capability(server, transport, toolset_cache))
 
-            if session_pool is None:
-                return
+        async def _process_session_configs(
+            snap: McpConfigSnapshot,
+            toolset_cache: dict[str, Any],
+            connection_pool: SessionConnectionPool,
+        ) -> None:
+            """Process session-scoped configs (session + skill) from the snapshot.
 
-            # Session-scoped configs (session + skill) — borrow from
-            # SessionConnectionPool.  ACP entries have pre-stored transports
-            # via add_transport(); get_transport() returns them without
-            # trying to create new ones.  Inherited ACP configs (from parent
-            # session) that don't have a transport in this session's pool
-            # are skipped — they go through the ACP aggregating provider.
+            ACP entries have pre-stored transports via ``add_transport()``;
+            ``get_transport()`` returns them without trying to create new
+            ones.  Inherited ACP configs (from parent session) that don't
+            have a transport in this session's pool are skipped — they go
+            through the ACP aggregating provider.
+            """
             for entry in snap.session_scoped_configs:
                 server = entry.server_config
                 if not server.enabled:
                     continue
                 if isinstance(server, AcpMCPServerConfig):
                     try:
-                        transport = await session_pool.get_transport(server, entry.skill_name)
+                        transport = await connection_pool.get_transport(server, entry.skill_name)
                     except NotImplementedError:
                         continue
                 else:
-                    transport = await session_pool.get_transport(server, entry.skill_name)
-                capabilities.append(_make_capability(server, transport))
+                    transport = await connection_pool.get_transport(server, entry.skill_name)
+                capabilities.append(_make_capability(server, transport, toolset_cache))
 
-        if snapshot is not None:
-            await _process_snapshot(snapshot)
+        if session_id is not None:
+            # GAP-11: The session context may have been popped by concurrent
+            # cleanup_session() between get_or_create_session() and the dict
+            # lookup.  Catch KeyError and fall back to global-only caps.
+            try:
+                ctx = self.get_or_create_session(session_id)
+            except KeyError:
+                logger.warning(
+                    "Session %s context was removed during as_capability(); "
+                    "falling back to global-only MCP capabilities.",
+                    session_id,
+                )
+                ctx = None
+
+            if ctx is not None and ctx.snapshot is not None:
+                # Global configs use the global toolset cache.
+                await _process_global_configs(ctx.snapshot, self._toolset_cache)
+                # Session-scoped configs use the session's toolset cache and
+                # connection pool.
+                if ctx.connection_pool is not None:
+                    await _process_session_configs(
+                        ctx.snapshot,
+                        ctx.toolset_cache,
+                        ctx.connection_pool,
+                    )
+            elif ctx is not None and ctx.snapshot is None:
+                # Session exists but no snapshot — fall back to legacy path.
+                for server in self.servers:
+                    if not server.enabled or isinstance(server, AcpMCPServerConfig):
+                        continue
+                    transport = await self._global_pool.get_transport(server)
+                    capabilities.append(
+                        _make_capability(server, transport, self._toolset_cache)
+                    )
+            # If ctx is None (KeyError fallback), we've already logged the
+            # warning — return global-only capabilities from self.servers.
+            else:
+                for server in self.servers:
+                    if not server.enabled or isinstance(server, AcpMCPServerConfig):
+                        continue
+                    transport = await self._global_pool.get_transport(server)
+                    capabilities.append(
+                        _make_capability(server, transport, self._toolset_cache)
+                    )
         else:
             for server in self.servers:
                 if not server.enabled or isinstance(server, AcpMCPServerConfig):
                     continue
                 transport = await self._global_pool.get_transport(server)
-                capabilities.append(_make_capability(server, transport))
+                capabilities.append(_make_capability(server, transport, self._toolset_cache))
 
         return capabilities
 
