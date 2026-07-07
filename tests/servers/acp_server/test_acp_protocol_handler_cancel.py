@@ -155,3 +155,70 @@ async def test_cancel_session_does_not_call_fail_on_run_handle(
     mock_run_handle.fail.assert_not_called()
     # cancel() SHOULD be called (via cancel_run_for_session)
     mock_run_handle.cancel.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_cancel_session_cancels_child_subagent_runs(
+    acp_handler: ACPProtocolHandler,
+    mock_pool: MagicMock,
+) -> None:
+    """cancel_session must cancel runs for all child (subagent) sessions.
+
+    When a parent session is cancelled, all in-flight subagent runs must
+    also be cancelled.  This test verifies that ``cancel_run_for_session``
+    is called for each child session in the ``_parent_of`` tree, not just
+    the parent.
+    """
+    parent_sid = "parent-session"
+    child1_sid = "child-session-1"
+    child2_sid = "child-session-2"
+    grandchild_sid = "grandchild-session"
+
+    # Build a parent-child tree: parent → child1, child2; child1 → grandchild
+    acp_handler._parent_of[child1_sid] = parent_sid
+    acp_handler._parent_of[child2_sid] = parent_sid
+    acp_handler._parent_of[grandchild_sid] = child1_sid
+
+    cancelled_sids: list[str] = []
+
+    def track_cancel(sid: str) -> None:
+        cancelled_sids.append(sid)
+
+    mock_pool.session_pool.sessions.cancel_run_for_session = MagicMock(side_effect=track_cancel)
+
+    await acp_handler.cancel_session(parent_sid)
+
+    # All sessions in the subtree must be cancelled (depth-first order):
+    # grandchild, child1, child2, then parent
+    assert parent_sid in cancelled_sids, "Parent session must be cancelled"
+    assert child1_sid in cancelled_sids, "Child session 1 must be cancelled"
+    assert child2_sid in cancelled_sids, "Child session 2 must be cancelled"
+    assert grandchild_sid in cancelled_sids, "Grandchild session must be cancelled"
+
+    # Parent must be cancelled LAST (after all children)
+    assert cancelled_sids[-1] == parent_sid, (
+        f"Parent must be cancelled after all children, got order: {cancelled_sids}"
+    )
+
+    # _parent_of must NOT be modified (cancel ≠ close)
+    assert acp_handler._parent_of.get(child1_sid) == parent_sid
+    assert acp_handler._parent_of.get(child2_sid) == parent_sid
+    assert acp_handler._parent_of.get(grandchild_sid) == child1_sid
+
+
+@pytest.mark.anyio
+async def test_cancel_session_no_children_only_cancels_parent(
+    acp_handler: ACPProtocolHandler,
+    mock_pool: MagicMock,
+) -> None:
+    """cancel_session with no children should only cancel the parent."""
+    session_id = "lonely-session"
+
+    cancelled_sids: list[str] = []
+    mock_pool.session_pool.sessions.cancel_run_for_session = MagicMock(
+        side_effect=lambda sid: cancelled_sids.append(sid)
+    )
+
+    await acp_handler.cancel_session(session_id)
+
+    assert cancelled_sids == [session_id]
