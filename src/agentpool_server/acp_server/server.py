@@ -304,8 +304,9 @@ class ACPServer(BaseServer):
 
         async def on_disconnect(conn: AgentSideConnection) -> None:
             """Clean up sessions when a WebSocket client disconnects."""
-            connection_id: str = conn.connection_id  # type: ignore[attr-defined]
-            await session_manager.close_all_sessions_for_connection(connection_id)
+            connection_id = conn.connection_id
+            if connection_id is not None:
+                await session_manager.close_all_sessions_for_connection(connection_id)
 
         debug_file = self.debug_file if self.debug_messages else None
         observers = None
