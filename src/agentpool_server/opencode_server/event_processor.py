@@ -273,7 +273,7 @@ class EventProcessor:
     def _process_thinking_start(
         self,
         ctx: EventProcessorContext,
-        delta: str,
+        delta: str | None,
     ) -> Iterator[Event]:
         """Process the start of a thinking/reasoning part.
 
@@ -284,8 +284,8 @@ class EventProcessor:
         Yields:
             PartUpdatedEvent for the created reasoning part.
         """
-        # Skip empty reasoning content (but preserve whitespace-only like newlines)
-        if not delta:
+        # Skip None (no content), but preserve empty strings and whitespace
+        if delta is None:
             return
 
         reasoning_part_id = identifier.ascending("part")
@@ -314,8 +314,8 @@ class EventProcessor:
         Yields:
             PartUpdatedEvent for the updated or created reasoning part.
         """
-        # Skip empty reasoning content (but preserve whitespace-only like newlines)
-        if not delta:
+        # Skip None (no content), but preserve empty strings and whitespace
+        if delta is None:
             return
 
         if ctx.reasoning_part is not None:

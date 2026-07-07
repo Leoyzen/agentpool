@@ -88,7 +88,7 @@ async def detailed_print_handler(ctx: AgentContext[Any], event: RichAgentStreamE
             PartStartEvent(part=ThinkingPart(content=delta))
             | PartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta))
         ):
-            if delta:
+            if delta is not None:
                 print(f"\n💭 {delta}", end="", flush=True, file=sys.stderr)
 
         case ToolCallStartEvent(tool_name=tool_name, title=title, tool_call_id=call_id):

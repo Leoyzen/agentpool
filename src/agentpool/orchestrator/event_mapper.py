@@ -28,6 +28,7 @@ from pydantic_ai import (
     PartStartEvent as PyAIPartStartEvent,
     RetryPromptPart,
 )
+from pydantic_ai.messages import ThinkingPart, ThinkingPartDelta
 
 from agentpool.agents.events.events import (
     PartDeltaEvent,
@@ -85,9 +86,13 @@ class EventMapper:
                 # PartDeltaEvent / PartStartEvent bypass coalescing because
                 # ``isinstance(base, subclass)`` is False.
                 if isinstance(event, PyAIPartDeltaEvent) and not isinstance(event, PartDeltaEvent):
-                    return PartDeltaEvent(index=event.index, delta=event.delta)
+                    return _normalize_thinking_event(
+                        PartDeltaEvent(index=event.index, delta=event.delta)
+                    )
                 if isinstance(event, PyAIPartStartEvent) and not isinstance(event, PartStartEvent):
-                    return PartStartEvent(index=event.index, part=event.part)
+                    return _normalize_thinking_event(
+                        PartStartEvent(index=event.index, part=event.part)
+                    )
                 return event if self._is_rich_event(event) else None
 
     def _emit_tool_call_start(
@@ -175,3 +180,74 @@ class EventMapper:
         if dataclasses.is_dataclass(event):
             return any(f.name == "event_kind" for f in dataclasses.fields(event))
         return False
+
+
+def _extract_raw_content_text(
+    provider_details: Any,
+) -> str | None:
+    """Extract reasoning text from provider_details['raw_content'].
+
+    For raw CoT providers (vLLM, LM Studio, litellm), pydantic-ai stores
+    reasoning text in ``provider_details['raw_content']`` instead of
+    ``ThinkingPart.content``.  This function extracts the latest delta
+    text from either a dict or a callable provider_details.
+
+    Args:
+        provider_details: A dict, a callable, or None.
+
+    Returns:
+        The extracted text, or None if no text could be extracted.
+    """
+    resolved: dict[str, Any] | None = None
+    if callable(provider_details):
+        try:
+            result = provider_details(None)
+        except Exception:  # noqa: BLE001
+            return None
+        if isinstance(result, dict):
+            resolved = result
+    elif isinstance(provider_details, dict):
+        resolved = provider_details
+
+    if resolved is None:
+        return None
+
+    raw = resolved.get("raw_content")
+    if not raw or not isinstance(raw, list):
+        return None
+    text = raw[-1]
+    if not text or not isinstance(text, str):
+        return None
+    return text
+
+
+def _normalize_thinking_event(
+    event: PartStartEvent | PartDeltaEvent,
+) -> PartStartEvent | PartDeltaEvent:
+    """Normalize ThinkingPart/ThinkingPartDelta events from raw CoT providers.
+
+    When ``content``/``content_delta`` is empty/None and
+    ``provider_details`` contains ``raw_content``, populate
+    ``content``/``content_delta`` from the raw reasoning text so that
+    protocol converters can read it directly.
+
+    This handles pydantic-ai's by-design behavior where raw CoT providers
+    (vLLM, LM Studio, litellm bridge, gpt-oss via OpenRouter) store
+    reasoning in ``provider_details['raw_content']`` instead of
+    ``ThinkingPart.content``.
+
+    Events with populated ``content``/``content_delta`` are returned
+    unchanged.
+    """
+    match event:
+        case PartStartEvent(part=ThinkingPart(content="") as part):
+            text = _extract_raw_content_text(part.provider_details)
+            if text:
+                new_part = dataclasses.replace(part, content=text)
+                return dataclasses.replace(event, part=new_part)
+        case PartDeltaEvent(delta=ThinkingPartDelta(content_delta=None) as delta):
+            text = _extract_raw_content_text(delta.provider_details)
+            if text:
+                new_delta = dataclasses.replace(delta, content_delta=text)
+                return dataclasses.replace(event, delta=new_delta)
+    return event

@@ -410,7 +410,7 @@ class ACPEventConverter:
                 PartStartEvent(part=ThinkingPart(content=delta))
                 | PartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta))
             ):
-                yield AgentThoughtChunk.text(delta or "\n", message_id=self._current_message_id)
+                yield AgentThoughtChunk.text(delta, message_id=self._current_message_id)
 
             # Builtin tool call started (e.g., WebSearchTool, CodeExecutionTool)
             case PartStartEvent(part=NativeToolCallPart() as part):
