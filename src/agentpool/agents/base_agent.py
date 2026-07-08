@@ -1331,11 +1331,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             # Execute pre-turn hooks (guarded against double-firing with HookAwareTurn)
             # Native agents fire hooks via HookAwareTurn in NativeTurn.execute();
             # only ACP standalone path still uses this old hook firing.
-            if (
-                self.AGENT_TYPE != "native"
-                and self.hooks
-                and "pre_turn" not in run_ctx.hooks_fired
-            ):
+            if self.AGENT_TYPE != "native" and self.hooks and "pre_turn" not in run_ctx.hooks_fired:
                 run_ctx.hooks_fired.add("pre_turn")
                 pre_turn_result = await self.hooks.run_pre_turn_hooks(
                     agent_name=self.name,
