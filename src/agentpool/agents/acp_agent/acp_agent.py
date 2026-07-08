@@ -106,27 +106,6 @@ def get_updated_at(date_str: str | None) -> datetime:
     return updated_at
 
 
-class _TerminalConnectionAdapter:
-    """Wraps ClientSideConnection to cache init response for Conductor."""
-
-    def __init__(self, connection: ClientSideConnection, init_response: Any) -> None:
-        self._connection = connection
-        self._init_response = init_response
-
-    async def send_request(self, method: str, params: Any = None) -> Any:
-        if method == "initialize":
-            return self._init_response
-        return await self._connection.send_request(method, params)
-
-    async def send_notification(self, method: str, params: Any = None) -> None:
-        if params is None:
-            params = {}
-        await self._connection.ext_notification(method, params)
-
-    async def close(self) -> None:
-        await self._connection.close()
-
-
 class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
     """MessageNode that wraps an external ACP agent subprocess.
 

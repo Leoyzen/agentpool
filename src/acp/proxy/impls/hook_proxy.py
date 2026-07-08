@@ -12,14 +12,15 @@ Hook type mappings:
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Any
+
+from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
     from agentpool.hooks.agent_hooks import AgentHooks
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class HookProxy:

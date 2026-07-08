@@ -7,11 +7,12 @@ Currently a stub that passes messages through unchanged.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
+from agentpool.log import get_logger
 
-logger = logging.getLogger(__name__)
+
+logger = get_logger(__name__)
 
 
 class ToolProviderProxy:

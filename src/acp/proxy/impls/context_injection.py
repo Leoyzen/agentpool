@@ -6,12 +6,13 @@ Must NOT conflate with HookProxy's additional_context.
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Any
 
+from agentpool.log import get_logger
 
-logger = logging.getLogger(__name__)
+
+logger = get_logger(__name__)
 
 
 class ContextInjectionProxy:

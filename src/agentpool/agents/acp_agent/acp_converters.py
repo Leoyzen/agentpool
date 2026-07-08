@@ -189,10 +189,7 @@ def get_modes(
 def to_finish_reason(stop_reason: str | None) -> FinishReason:
     if stop_reason is None:
         return "stop"
-    for key, value in STOP_REASON_MAP.items():
-        if key == stop_reason:
-            return value
-    return "stop"
+    return STOP_REASON_MAP.get(stop_reason, "stop")  # type: ignore[call-overload,no-any-return]
 
 
 def convert_acp_locations(

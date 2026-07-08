@@ -18,14 +18,13 @@ import contextlib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self, override
 
-import structlog
-
 from acp.exceptions import RequestError
 from acp.proxy.constants import PROXY_INITIALIZE, PROXY_SUCCESSOR
+from agentpool.log import get_logger
 from agentpool.messaging.messagenode import MessageNode
 
 
-logger: structlog.stdlib.BoundLogger = structlog.get_logger(__name__)
+logger = get_logger(__name__)
 
 
 if TYPE_CHECKING:
