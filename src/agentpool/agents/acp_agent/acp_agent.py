@@ -57,6 +57,7 @@ from agentpool.agents.exceptions import (
     UnknownModeError,
 )
 from agentpool.log import get_logger
+from agentpool.messaging import ChatMessage
 from agentpool.utils.subprocess_utils import SubprocessError, run_with_process_monitor
 
 
@@ -73,6 +74,7 @@ if TYPE_CHECKING:
     from tokonomics.model_discovery.model_info import ModelInfo
 
     from acp.client.connection import ClientSideConnection
+    from acp.conductor import Conductor
     from acp.schema import Implementation, RequestPermissionRequest, RequestPermissionResponse
     from acp.schema.capabilities import AgentCapabilities
     from acp.schema.mcp import McpServer
@@ -84,7 +86,7 @@ if TYPE_CHECKING:
     from agentpool.delegation import AgentPool
     from agentpool.hooks import AgentHooks
     from agentpool.mcp_server import ToolBridge
-    from agentpool.messaging import ChatMessage, MessageHistory
+    from agentpool.messaging import MessageHistory
     from agentpool.models.acp_agents import BaseACPAgentConfig
     from agentpool.orchestrator.turn import Turn
     from agentpool.sessions import SessionData
@@ -105,7 +107,26 @@ def get_updated_at(date_str: str | None) -> datetime:
     return updated_at
 
 
-class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
+class _TerminalConnectionAdapter:
+    """Wraps ClientSideConnection to cache init response for Conductor."""
+
+    def __init__(self, connection: ClientSideConnection, init_response: Any) -> None:
+        self._connection = connection
+        self._init_response = init_response
+
+    async def send_request(self, method: str, params: Any = None) -> Any:
+        if method == "initialize":
+            return self._init_response
+        return await self._connection.send_request(method, params)
+
+    async def send_notification(self, method: str, params: Any = None) -> None:
+        await self._connection.send_notification(method, params)
+
+    async def close(self) -> None:
+        await self._connection.close()
+
+
+class ACPAgent[TDeps = None](BaseAgent[TDeps, ChatMessage[str]]):
     """MessageNode that wraps an external ACP agent subprocess.
 
     This allows integrating any ACP-compatible agent into the agentpool
@@ -146,6 +167,9 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         commands: Sequence[BaseCommand] | None = None,
         hooks: AgentHooks | None = None,
         session_id: str | None = None,
+        # Conductor
+        proxy_chain: list[Any] | None = None,
+        use_conductor: bool = True,
     ) -> None:
         super().__init__(
             name=name or command,
@@ -196,6 +220,11 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         self._tool_bridge: ToolBridge | None = None
         # Track the prompt task for cancellation
         self._prompt_task: asyncio.Task[Any] | None = None
+        # Conductor
+        self._use_conductor = use_conductor
+        self._proxy_chain = proxy_chain
+        self._conductor: Conductor | None = None
+        self._init_response: Any = None
 
     @classmethod
     def from_config(
@@ -241,6 +270,9 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             deps_type=deps_type,
             auto_approve=config.auto_approve,
             hooks=config.hooks.get_agent_hooks() if config.hooks else None,
+            # Conductor
+            use_conductor=config.use_conductor,
+            proxy_chain=config.proxy_chain,
         )
 
     @property
@@ -290,6 +322,25 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         mcp_config = HttpMcpServer(name=self._tool_bridge.resolved_server_name, url=url)
         self._extra_mcp_servers.append(mcp_config)
 
+    async def _setup_conductor(self) -> None:
+        """Set up Conductor for proxy chain execution."""
+        from acp.conductor import Conductor
+
+        if not self._connection or not self._api:
+            raise AgentNotInitializedError
+        # Terminal connection adapter caches init response for future Conductor use
+        _ = _TerminalConnectionAdapter(self._connection, self._init_response)
+        self._conductor = Conductor(
+            name=self.name,
+            command=self._command,
+            args=self._args,
+            cwd=self._cwd,
+            env=dict(self._env_vars),
+            proxy_chain=self._proxy_chain or [],
+            client_handler=self._client_handler,
+        )
+        await self._conductor.__aenter__()
+
     async def __aenter__(self) -> Self:
         """Start subprocess and initialize ACP connection."""
         await super().__aenter__()
@@ -320,6 +371,8 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         except SubprocessError as e:
             raise RuntimeError(str(e)) from e
         await anyio.sleep(0.3)
+        if self._use_conductor:
+            await self._setup_conductor()
         return self
 
     async def __aexit__(
@@ -361,6 +414,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         )
         self._api = ACPAgentAPI(self._connection)
         init_response = await self._connection.initialize(self._init_request)
+        self._init_response = init_response
         self._agent_info = init_response.agent_info
         self._caps = init_response.agent_capabilities
         self.log.info("ACP connection initialized", agent_info=self._agent_info)
@@ -394,6 +448,9 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
 
     async def _cleanup(self) -> None:
         """Clean up resources."""
+        if self._conductor is not None:
+            await self._conductor.__aexit__(None, None, None)
+            self._conductor = None
         if self._tool_bridge is not None:
             await self._tool_bridge.stop()
             self._tool_bridge = None
@@ -437,7 +494,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         deps: TDeps | None = None,
         wait_for_connections: bool | None = None,
         store_history: bool = True,
-    ) -> AsyncIterator[RichAgentStreamEvent[str]]:
+    ) -> AsyncIterator[RichAgentStreamEvent[ChatMessage[str]]]:
         """Stream events by delegating to ACPTurn.execute() via create_turn().
 
         This is a thin wrapper preserved for backward compatibility.
