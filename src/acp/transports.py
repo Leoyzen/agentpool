@@ -386,9 +386,10 @@ async def _handle_websocket_client(
         max_missed_pongs: Consecutive missed pongs before closing.
         kwargs: Additional keyword arguments passed to AgentSideConnection.
         on_disconnect: Optional callback invoked when the client disconnects
-            unexpectedly (ConnectionClosed). Receives the AgentSideConnection
-            so the caller can read ``connection_id`` and perform session cleanup.
-            Called BEFORE ``conn.close()`` in the finally block.
+            (any exception path, including ConnectionClosed and unexpected errors).
+            Receives the AgentSideConnection so the caller can read
+            ``connection_id`` and perform session cleanup.
+            Called in the ``finally`` block before ``conn.close()``.
     """
     import websockets
 
@@ -438,9 +439,12 @@ async def _handle_websocket_client(
                     await w
     except websockets.exceptions.ConnectionClosed:
         logger.info("WebSocket client disconnected")
-        if on_disconnect is not None:
-            await on_disconnect(conn)
     finally:
+        if on_disconnect is not None:
+            try:
+                await on_disconnect(conn)
+            except Exception:
+                logger.exception("Error in on_disconnect")
         if heartbeat_task is not None and not heartbeat_task.done():
             heartbeat_task.cancel()
             try:
