@@ -488,7 +488,7 @@ class SessionController:
                         and isinstance(parent_agent, _NativeAgent)
                         and session.parent_session_id
                     ):
-                        parent_ctx = parent_agent.mcp._session_contexts.get(
+                        parent_ctx = parent_agent.mcp.get_session_context(
                             session.parent_session_id
                         )
                         parent_snapshot = parent_ctx.snapshot if parent_ctx is not None else None
@@ -517,7 +517,7 @@ class SessionController:
                         and session.parent_session_id
                         and child_ctx.connection_pool is not None
                     ):
-                        parent_ctx = parent_agent.mcp._session_contexts.get(
+                        parent_ctx = parent_agent.mcp.get_session_context(
                             session.parent_session_id
                         )
                         if parent_ctx is not None and parent_ctx.connection_pool is not None:
