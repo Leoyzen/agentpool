@@ -29,10 +29,11 @@ Hook semantics are **per-turn** (as established by `unify-hook-system`): `pre_tu
 - **AND** if `HookResult.additional_context` is set, SHALL inject it into the conversation
 
 #### Scenario: HookProxy intercepts agent response as post_turn
-- **WHEN** a `HookProxy` with a `post_turn` hook receives a `session/update` message containing a final `AgentMessageChunk` update
-- **THEN** the proxy SHALL construct `HookInput(event="post_turn", result=<message_content>)`
+- **WHEN** a `HookProxy` with a `post_turn` hook receives the JSON-RPC response to the original `session/prompt` request (correlated by request ID)
+- **THEN** the proxy SHALL construct `HookInput(event="post_turn", result=<message_content>)` using the accumulated agent response from `AgentMessageChunk` updates received during the turn
 - **AND** SHALL execute the wrapped hook(s)
-- **AND** if `HookResult.modified_output` is set, SHALL replace the output content in the update before forwarding
+- **AND** if `HookResult.modified_output` is set, SHALL replace the output content in the response before forwarding
+- **AND** SHALL NOT fire `post_turn` on individual `AgentMessageChunk` updates — only on the correlated JSON-RPC response
 
 #### Scenario: HookProxy with no matching hooks for message type
 - **WHEN** a `HookProxy` receives a message type that no wrapped hook matches

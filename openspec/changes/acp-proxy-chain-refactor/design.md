@@ -50,14 +50,21 @@ The proxy chain RFD (`agent-client-protocol/docs/rfds/proxy-chains.mdx`) defines
 
 ### D3: ACPClientAdapter Design
 
-**Decision**: `ACPClientAdapter` wraps `ACPAgentAPI` to implement `ACPClientProtocol`. It:
-- `prompt()`: Launches `api.prompt()` as a background task (fire-and-forget), returns immediately
-- `stream_events()`: Returns an `asyncio.Queue` that `client_handler.session_update()` pushes to directly (no polling)
+**Decision**: `ACPClientAdapter` wraps `ACPAgentAPI` to implement a **modified** `ACPClientProtocol`. The protocol is redefined to support non-blocking semantics:
+- `prompt()`: Launches `api.prompt()` as a background task (fire-and-forget), returns `None` (not `PromptResponse`)
+- `stream_events()`: Returns an `AsyncIterator[SessionUpdate]` (no `response` parameter) that yields items from an `asyncio.Queue` as `client_handler.session_update()` pushes them. When the background prompt task completes, the adapter signals stream completion.
+- `stop_reason` property: Returns the `PromptResponse.stop_reason` after streaming completes (accessed internally when the background task finishes)
 - `get_messages()`: Calls `api.get_messages()` after prompt completes
 
-**Rationale**: This is the ~50-line adapter that was identified as missing. The key insight is that `ACPAgentAPI.prompt()` is blocking (returns `PromptResponse` after all notifications), but `ACPClientProtocol.prompt()` should be non-blocking (returns immediately, notifications arrive via `stream_events()`). The adapter bridges this by making `prompt()` fire-and-forget and routing notifications to an async queue.
+**Rationale**: The original `ACPClientProtocol` required `prompt()` to return `PromptResponse` and `stream_events()` to take a `response` parameter. This assumes synchronous completion — `prompt()` blocks until all notifications arrive, then `stream_events(response)` iterates them. But `ACPAgentAPI.prompt()` is blocking and the adapter needs to invert this: return immediately from `prompt()`, stream events as they arrive, then expose `stop_reason` after completion.
+
+The protocol change is internal to this change's scope — `ACPClientProtocol` is only implemented by `ACPClientAdapter` and consumed by `ACPTurn`. The `PromptResponse` is stored internally by the adapter when the background task completes, and `stop_reason` is exposed as a read-only property.
+
+The async queue SHALL have a `max_buffer_size` of 1000 (matching the current `anyio.create_memory_object_stream` value) to prevent unbounded memory growth if the consumer is slower than the ACP server's notification rate.
 
 **Alternative considered**: Make `ACPAgentAPI` natively async with streaming. Rejected — would require deep changes to the ACP client library; the adapter is a localized bridge.
+
+**Alternative considered**: Return a future/placeholder `PromptResponse` from `prompt()` that resolves when the background task completes. Rejected — adds complexity for callers that would need to await the future; the `stop_reason` property is simpler.
 
 ### D4: HookProxy Adapter Pattern
 
@@ -66,7 +73,7 @@ The proxy chain RFD (`agent-client-protocol/docs/rfds/proxy-chains.mdx`) defines
 - `session/prompt` → `HookInput(event="pre_turn")` — hook can inject context (`additional_context`), deny (block prompt), or modify prompt before forwarding
 - `session/update` with `ToolCallStart` → `HookInput(event="pre_tool_use")` — hook can modify tool input (`modified_input`) or deny (block tool call before it reaches terminal agent)
 - `session/update` with `ToolCallComplete` → `HookInput(event="post_tool_use")` — hook can replace tool output (`modified_output`)
-- `session/update` with `AgentMessageChunk` (final) → `HookInput(event="post_turn")` — hook can modify agent response (`modified_output`)
+- JSON-RPC response to `session/prompt` request → `HookInput(event="post_turn")` — hook can modify agent response (`modified_output`). The proxy correlates the `session/prompt` request ID with its JSON-RPC response to determine turn completion (not individual `AgentMessageChunk` updates, which arrive throughout the turn).
 
 `HookResult.decision=="deny"` → proxy stops forwarding (blocking, not advisory). `HookResult.additional_context` → prepended to prompt. `HookResult.modified_input` → replaces tool input. `HookResult.modified_output` → replaces output.
 
@@ -78,19 +85,23 @@ The proxy chain RFD (`agent-client-protocol/docs/rfds/proxy-chains.mdx`) defines
 
 ### D5: Passthrough Optimization
 
-**Decision**: When a proxy has no interception logic for a given message type, it forwards the message without deserializing/reserializing. The Conductor tracks which proxies are "transparent" for which message types and short-circuits the chain.
+**Decision**: When a proxy has no interception logic for a given message type, it forwards the message without deserializing/reserializing. Proxies declare their intercepted message types during `proxy/initialize` — the response includes a `intercepted_methods` list (e.g., `["session/prompt", "session/update"]`). The Conductor tracks this registration and short-circuits the chain for message types no proxy intercepts.
 
-**Rationale**: This solves the double conversion problem. In the current architecture, nesting ACP server + client causes ~1600 lines of ACP→native→ACP conversion. With proxy chains, a passthrough proxy forwards the raw JSON-RPC message without parsing. Only proxies that explicitly register interest in a message type pay the deserialization cost.
+**Rationale**: This solves the double conversion problem. In the current architecture, nesting ACP server + client causes ~1600 lines of ACP→native→ACP conversion. With proxy chains, a passthrough proxy forwards the raw JSON-RPC message without parsing. Only proxies that explicitly register interest in a message type during initialization pay the deserialization cost.
 
 **Alternative considered**: Always deserialize and re-serialize. Rejected — defeats the purpose of proxy chains for passthrough scenarios.
 
-### D6: Terminal Agent Interface
+**Alternative considered**: Inspect every message at every proxy. Rejected — adds latency even when no interception is needed.
 
-**Decision**: Terminal agents implement the existing `acp.Agent` protocol (no changes). The Conductor detects terminal agents by checking `proxy_initialized` capability during `initialize()` — if the agent responds to `initialize` (not `proxy/initialize`), it's a terminal agent.
+### D6: Terminal Agent Detection by Chain Position
 
-**Rationale**: This follows the RFD exactly. Terminal agents don't know about proxy chains — they just handle `session/prompt` and emit `session/update`. The Conductor manages the chain and forwards unwrapped messages to the terminal agent.
+**Decision**: Terminal agents implement the existing `acp.Agent` protocol (no changes). The Conductor determines which components are proxies vs terminal agent based on **chain position** from configuration — the last component in the chain is the terminal agent, all others are proxies. The Conductor sends `proxy/initialize` to all proxy components and `initialize` to the terminal agent (the last component). Terminal agents don't know about proxy chains — they just handle `session/prompt` and emit `session/update`.
+
+**Rationale**: This follows the RFD exactly. The RFD specifies: "The conductor MUST send `proxy/initialize` to all proxy components" and "The conductor MUST send `initialize` to the final agent component." The conductor decides which method to send based on chain position — it doesn't detect from responses. The spec's earlier framing of "checking response to initialization" was incorrect.
 
 **Alternative considered**: Create a `TerminalAgent` protocol. Rejected — the existing `Agent` protocol already defines the terminal agent interface. Adding a new protocol would be redundant.
+
+**Alternative considered**: Auto-detect by sending `proxy/initialize` first and falling back to `initialize`. Rejected — adds complexity and latency for no benefit when chain position is known from configuration.
 
 ### D7: YAML Configuration
 
@@ -153,13 +164,23 @@ When `proxy_chain` is omitted, the Conductor runs with zero proxies (direct cond
 
 **[No Python reference implementation]** → The RFD has a working Rust impl (`sacp-conductor`, `sacp-proxy`) but no Python reference. We're the first Python implementation. Mitigation: follow the RFD spec closely, use the Rust impl as reference for edge cases.
 
-**[Large refactoring scope]** → ~2-3 weeks of work across 6 phases. Mitigation: phased delivery — Phase 1 (ACPTurn fix) is independently shippable and immediately useful. Each subsequent phase builds on the previous without breaking.
+**[Two unratified RFDs dependency]** → `ToolProviderProxy` (Phase 4) depends on MCP-over-ACP transport, which is itself a separate unratified RFD. Building on two unratified specs compounds the risk. Mitigation: defer `ToolProviderProxy` to a separate change if MCP-over-ACP RFD is not ratified by Phase 4 implementation time. Mark `ToolProviderProxy` as experimental.
+
+**[Large refactoring scope]** → ~4-5 weeks of work across 6 phases (updated from initial 2-3 week estimate after architecture review). Mitigation: phased delivery — Phase 1 (ACPTurn fix) is independently shippable and immediately useful. Each subsequent phase builds on the previous without breaking.
 
 **[Backward compatibility]** → `ACPAgent._stream_events()` signature changes. `create_turn()` behavior changes (previously crashed, now works). Mitigation: these are internal methods. The public `run()`/`run_stream()` API remains stable. Users who depended on `_stream_events()` behavior are depending on a workaround.
 
-**[HookProxy message mapping complexity]** → Mapping ACP wire messages to hook lifecycle events requires understanding both systems. Mitigation: comprehensive tests for each message type → hook event mapping. The mapping is finite (4 hook events × ~6 ACP message types).
+**[HookProxy message mapping complexity]** → Mapping ACP wire messages to hook lifecycle events requires understanding both systems. The `post_turn` hook requires JSON-RPC request/response correlation (tracking `session/prompt` request IDs and matching them with responses). Mitigation: comprehensive tests for each message type → hook event mapping, including request/response correlation.
 
 **[Conductor subprocess management]** → Conductor now manages subprocess lifecycle instead of ACPAgent. If the Conductor crashes, subprocesses may orphan. Mitigation: Conductor uses task groups (anyio) for structured concurrency; subprocess cleanup runs in finally block.
+
+**[ACPSessionState deletion scope]** → `ACPSessionState` tracks more than the update deque — it holds `current_model_id`, `models`, `modes`, `config_options`, `available_commands`. Deleting the entire class (task 6.1) would break model switching, mode switching, and command population. Mitigation: Only delete the deque mechanism. Preserve model/mode/config state in a renamed `ACPState` dataclass or migrate to `ACPClientAdapter`.
+
+**[ACPClientHandler state update routing]** → The current `ACPClientHandler.session_update()` routes state updates (mode, model, config, commands) differently from stream data — it returns early for state updates and only queues stream data. The adapter design must preserve this bifurcation. Mitigation: Spec requires that `session_update()` continues to process state updates in-place and only pushes stream-data updates (text chunks, tool calls, thoughts) to the async queue.
+
+**[Unbounded queue in ACPClientAdapter]** → The async queue could grow unbounded if the consumer is slower than the ACP server's notification rate. Mitigation: The queue SHALL have a `max_buffer_size` of 1000 (matching the current `anyio.create_memory_object_stream` value).
+
+**[Proxy chain error propagation]** → If a proxy throws during `proxy/successor`, the conductor must decide how to handle it. Mitigation: Proxy exceptions produce a JSON-RPC error response forwarded back through the chain. The conductor does NOT silently skip failed proxies (a security hook proxy failing silently is dangerous).
 
 ## Migration Plan
 
@@ -173,5 +194,6 @@ When `proxy_chain` is omitted, the Conductor runs with zero proxies (direct cond
 
 ## Open Questions
 
-- Should the Conductor support hot-swapping proxies at runtime (add/remove proxy without restarting the chain)? Currently out of scope, but the design should not preclude it.
-- How should proxy chains interact with the graph-based team execution? If a team member is an ACP agent with a proxy chain, does the chain execute within the Step's `call()` method? (Answer: yes — the Conductor's `_step` property handles this.)
+- **Proxy hot-swap (out of scope)**: Should the Conductor support hot-swapping proxies at runtime (add/remove proxy without restarting the chain)? This is explicitly **out of scope** for this change. The design should not preclude it, but it will not be implemented. Future work.
+- **Concurrency: multiple concurrent prompts**: ACP sessions typically allow one active prompt at a time. If `adapter.prompt()` is called while a previous prompt is still streaming, the adapter SHALL raise a `RuntimeError("Prompt already in progress")`. This matches the current behavior where `ACPAgentAPI.prompt()` blocks until completion.
+- **Proxy chains in team composition**: How should proxy chains interact with the graph-based team execution? If a team member is an ACP agent with a proxy chain, does the chain execute within the Step's `call()` method? (Answer: yes — the Conductor's `_step` property handles this.)
