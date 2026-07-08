@@ -323,14 +323,23 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
     async def _setup_conductor(self) -> None:
         """Set up Conductor for proxy chain execution.
 
-        When proxy_chain is configured, Conductor manages the subprocess
-        and proxy chain. ACPAgent wires its own connection/api to the
-        Conductor's connection after initialization.
+        Creates ACPState + ACPClientHandler BEFORE entering Conductor
+        (solves chicken-and-egg: Conductor needs the handler to wire
+        notifications). Then enters Conductor, which spawns the subprocess
+        and creates the proxy-chained connection. Finally wires ACPAgent's
+        connection/api to Conductor's connection.
         """
         from acp.conductor import Conductor
 
-        # Create and enter Conductor — it spawns the subprocess and
-        # sets up the proxy chain.
+        # Create ACPState + ACPClientHandler before Conductor enters
+        # (Conductor wires the handler to ClientSideConnection)
+        if self._state is None:
+            self._state = ACPState(session_id="")
+        if self._client_handler is None:
+            from agentpool.agents.acp_agent.client_handler import ACPClientHandler
+
+            self._client_handler = ACPClientHandler(self, self._state, self._input_provider)
+
         self._conductor = Conductor(
             name=self.name,
             command=self._command,
@@ -344,7 +353,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         await self._conductor.__aenter__()
 
         # Wire ACPAgent's connection/api to Conductor's connection
-        # so that ACPTurn uses the proxy-chained connection.
+        # so that ACPTurn and ACPClientAdapter use the proxy-chained connection.
         if self._conductor.connection is not None:
             self._connection = self._conductor.connection
             from acp.agent.acp_agent_api import ACPAgentAPI
@@ -433,21 +442,40 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         return self._process
 
     async def _initialize(self) -> None:
-        """Initialize the ACP connection."""
+        """Initialize the ACP connection.
+
+        In conductor mode, the connection is already created by Conductor.
+        We only need to create ACPState, ACPClientHandler (if not done),
+        and call initialize on the existing connection.
+
+        In direct mode, creates a new ClientSideConnection from the
+        subprocess stdin/stdout.
+        """
         from acp.client.connection import ClientSideConnection
         from agentpool.agents.acp_agent.client_handler import ACPClientHandler
 
         if not self._process or not self._process.stdin or not self._process.stdout:
             raise RuntimeError("Process not started")
 
-        self._state = ACPState(session_id="")
-        self._client_handler = ACPClientHandler(self, self._state, self._input_provider)
-        self._connection = ClientSideConnection(
-            to_client=self._client_handler,
-            input_stream=self._process.stdin,
-            output_stream=self._process.stdout,
-        )
-        self._api = ACPAgentAPI(self._connection)
+        # Create ACPState if not already created
+        if self._state is None:
+            self._state = ACPState(session_id="")
+
+        # Create ACPClientHandler if not already created (conductor mode
+        # creates it before entering Conductor)
+        if self._client_handler is None:
+            self._client_handler = ACPClientHandler(self, self._state, self._input_provider)
+
+        # Only create new connection if not already set by Conductor
+        if self._connection is None:
+            self._connection = ClientSideConnection(
+                to_client=self._client_handler,
+                input_stream=self._process.stdin,
+                output_stream=self._process.stdout,
+            )
+            self._api = ACPAgentAPI(self._connection)
+
+        # Initialize the ACP connection (sends initialize request)
         init_response = await self._connection.initialize(self._init_request)
         self._init_response = init_response
         self._agent_info = init_response.agent_info
@@ -614,7 +642,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         assert self._client_handler is not None
         str_prompts: list[str] = [str(p) if not isinstance(p, str) else p for p in prompts]
         return ACPTurn(
-            acp_client=ACPClientAdapter(self._api, self._client_handler),
+            acp_client=ACPClientAdapter(self._api, self._client_handler, conductor=self._conductor),
             prompts=str_prompts,
             run_ctx=run_ctx,
             message_history=message_history,
