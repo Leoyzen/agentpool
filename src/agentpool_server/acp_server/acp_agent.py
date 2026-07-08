@@ -95,7 +95,7 @@ def _extract_locale(field_meta: dict[str, Any] | None) -> str | None:
     if not locale or len(locale) > _LOCALE_MAX_LENGTH:
         logger.warning("Invalid client locale ignored", locale=raw)
         return None
-    if not all(c.isalnum() or c in "-_" for c in locale):
+    if not all(c.isascii() and (c.isalnum() or c in "-_") for c in locale):
         logger.warning("Invalid client locale ignored", locale=raw)
         return None
     logger.info("Client locale", locale=locale)
