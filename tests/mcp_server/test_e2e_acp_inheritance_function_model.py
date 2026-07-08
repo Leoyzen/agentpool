@@ -14,9 +14,10 @@ Covers the two bug fixes:
 from __future__ import annotations
 
 import tempfile
-from typing import TYPE_CHECKING, Any, Self, cast
+from typing import Any, Self, cast
 from unittest.mock import MagicMock, patch
 
+from mcp.types import Implementation, InitializeResult, ServerCapabilities
 import pytest
 
 from acp.schema.mcp import AcpMcpServer
@@ -27,11 +28,6 @@ from agentpool.models.manifest import AgentsManifest
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnectionManager
 from agentpool_server.acp_server.session import ACPSession
-from mcp.types import Implementation, InitializeResult, ServerCapabilities
-
-
-if TYPE_CHECKING:
-    from agentpool.mcp_server.config_snapshot import McpConfigSnapshot
 
 
 # ---------------------------------------------------------------------------
@@ -199,8 +195,8 @@ async def test_initialize_mcp_servers_registers_transport_and_syncs_snapshot() -
 
     Also verifies ``agent._mcp_snapshot`` is set (both paths updated).
     """
-    mcp_manager, _acp_manager, agent, acp_agent, acp_session, _mock_client = (
-        _build_test_fixture("test1-session")
+    mcp_manager, _acp_manager, agent, acp_agent, acp_session, _mock_client = _build_test_fixture(
+        "test1-session"
     )
 
     try:
@@ -244,8 +240,8 @@ async def test_as_capability_finds_acp_configs_after_initialize() -> None:
     transport and a snapshot.  ``as_capability()`` should find the ACP
     config and create a toolset using the ACP transport.
     """
-    mcp_manager, _acp_manager, _agent, acp_agent, acp_session, _mock_client = (
-        _build_test_fixture("test2-session")
+    mcp_manager, _acp_manager, _agent, acp_agent, acp_session, _mock_client = _build_test_fixture(
+        "test2-session"
     )
 
     try:
@@ -286,7 +282,7 @@ async def test_child_session_inherits_acp_configs_and_transports() -> None:
     from agentpool.orchestrator.session_pool import SessionPool
     from agentpool.sessions.store import MemorySessionStore
 
-    mcp_manager, acp_manager, _base_agent, acp_agent, _acp_session, mock_client = (
+    mcp_manager, _acp_manager, _base_agent, acp_agent, _acp_session, mock_client = (
         _build_test_fixture("test3-parent")
     )
 
@@ -378,7 +374,7 @@ async def test_child_as_capability_finds_inherited_acp_configs() -> None:
     from agentpool.orchestrator.session_pool import SessionPool
     from agentpool.sessions.store import MemorySessionStore
 
-    mcp_manager, acp_manager, _base_agent, acp_agent, _acp_session, mock_client = (
+    mcp_manager, _acp_manager, _base_agent, acp_agent, _acp_session, mock_client = (
         _build_test_fixture("test4-parent")
     )
 
@@ -456,8 +452,8 @@ async def test_function_model_discovers_mcp_tools_through_acp_transport() -> Non
     from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart
     from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-    mcp_manager, _acp_manager, _agent, acp_agent, acp_session, _mock_client = (
-        _build_test_fixture("test5-session")
+    mcp_manager, _acp_manager, _agent, acp_agent, acp_session, _mock_client = _build_test_fixture(
+        "test5-session"
     )
 
     try:
@@ -480,12 +476,8 @@ async def test_function_model_discovers_mcp_tools_through_acp_transport() -> Non
             if "test_tool" in tool_names:
                 saw_test_tool = True
             if call_count == 1 and "test_tool" in tool_names:
-                return ModelResponse(
-                    parts=[ToolCallPart(tool_name="test_tool", args={})]
-                )
-            return ModelResponse(
-                parts=[TextPart(content=f"Done. Tools: {tool_names}")]
-            )
+                return ModelResponse(parts=[ToolCallPart(tool_name="test_tool", args={})])
+            return ModelResponse(parts=[TextPart(content=f"Done. Tools: {tool_names}")])
 
         model = FunctionModel(function=model_function)
         pydantic_agent = PydanticAgent(
