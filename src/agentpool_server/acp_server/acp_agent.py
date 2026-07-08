@@ -414,7 +414,7 @@ class AgentPoolACPAgent(ACPAgent):
         turn_complete = bool(client_caps.turn_complete) if client_caps is not None else False
         # Collect MCP server statuses for client visibility
         mcp_servers_meta: list[dict[str, Any]] = []
-        if pool is not None:
+        if pool is not None and pool.mcp is not None:
             for provider in pool.mcp.get_mcp_providers():
                 status = provider.get_status()
                 mcp_servers_meta.append({

@@ -564,6 +564,7 @@ root_packages = [
     "agentpool_prompts",
     "acp",
 ]
+exclude_type_checking_imports = true
 
 [[tool.importlinter.contracts]]
 name = "Server must not import from core app logic"

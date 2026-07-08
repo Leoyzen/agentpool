@@ -530,5 +530,8 @@ async def get_mcp_servers(state: StateDep) -> dict[str, MCPStatus]:
     """
     from agentpool_server.opencode_server.converters import to_mcp_status
 
+    if state.agent is None:
+        return {}
+
     server_info = await state.agent.get_mcp_server_info()
     return {name: to_mcp_status(status) for name, status in server_info.items()}
