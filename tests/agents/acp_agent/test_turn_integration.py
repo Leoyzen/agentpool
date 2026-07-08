@@ -49,16 +49,20 @@ class MockACPClient:
         self._messages = messages or []
         self._prompt_error = prompt_error
         self.prompt_calls: list[tuple[str, list[Any]]] = []
+        self._stop_reason: str | None = "end_turn"
 
-    async def prompt(self, session_id: str, content: list[Any]) -> Any:
+    async def prompt(self, session_id: str, content: list[Any]) -> None:
         self.prompt_calls.append((session_id, content))
         if self._prompt_error:
             raise self._prompt_error
-        return MagicMock(name="PromptResponse")
 
-    async def stream_events(self, response: Any) -> AsyncIterator[Any]:
+    async def stream_events(self) -> AsyncIterator[Any]:
         for update in self._updates:
             yield update
+
+    @property
+    def stop_reason(self) -> str | None:
+        return self._stop_reason
 
     async def get_messages(self, session_id: str) -> list[Any]:
         return list(self._messages)
@@ -215,9 +219,9 @@ async def test_run_handle_steer_for_acp_path() -> None:
 
 @pytest.mark.unit
 def test_acp_agent_create_turn_returns_acp_turn_with_correct_fields() -> None:
-    """Given an ACPAgent with mocked _api, create_turn() returns ACPTurn.
+    """Given an ACPAgent with mocked _api and _client_handler, create_turn() returns ACPTurn.
 
-    Verifies the returned ACPTurn has correct acp_client, prompts, run_ctx,
+    Verifies the returned ACPTurn has correct prompts, run_ctx,
     message_history, and session_id fields.
     """
     init_request = MagicMock(spec=InitializeRequest)
@@ -225,6 +229,8 @@ def test_acp_agent_create_turn_returns_acp_turn_with_correct_fields() -> None:
 
     mock_api = MagicMock(name="ACPAgentAPI")
     agent._api = mock_api
+    mock_handler = MagicMock(name="ACPClientHandler")
+    agent._client_handler = mock_handler
     agent._sdk_session_id = "acp-session-123"
 
     run_ctx = _make_run_ctx(session_id="run-ctx-session")
@@ -240,7 +246,10 @@ def test_acp_agent_create_turn_returns_acp_turn_with_correct_fields() -> None:
     assert isinstance(turn, ACPTurn)
 
     # Verify fields are correctly wired
-    assert turn._acp_client is mock_api
+    # _acp_client is now an ACPClientAdapter wrapping mock_api and mock_handler
+    from agentpool.agents.acp_agent.adapter import ACPClientAdapter
+
+    assert isinstance(turn._acp_client, ACPClientAdapter)
     assert turn._prompts == ["hello world"]
     assert turn._run_ctx is run_ctx
     # session_id should use _sdk_session_id when available

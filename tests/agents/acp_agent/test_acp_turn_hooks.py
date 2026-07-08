@@ -13,7 +13,6 @@ import pytest
 
 from acp.schema import (
     AgentMessageChunk,
-    PromptResponse,
     TextContentBlock,
     ToolCallProgress,
     ToolCallStart,
@@ -71,14 +70,18 @@ class FakeACPClient:
         self._updates = updates or []
         self._messages = messages or []
         self.prompt_calls: list[tuple[str, list[Any]]] = []
+        self._stop_reason: str | None = "end_turn"
 
-    async def prompt(self, session_id: str, content: list[Any]) -> PromptResponse:
+    async def prompt(self, session_id: str, content: list[Any]) -> None:
         self.prompt_calls.append((session_id, content))
-        return PromptResponse(stop_reason="end_turn")
 
-    async def stream_events(self, response: PromptResponse) -> Any:
+    async def stream_events(self) -> Any:
         for update in self._updates:
             yield update
+
+    @property
+    def stop_reason(self) -> str | None:
+        return self._stop_reason
 
     async def get_messages(self, session_id: str) -> list[Any]:
         return list(self._messages)

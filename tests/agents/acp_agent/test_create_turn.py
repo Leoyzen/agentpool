@@ -14,10 +14,11 @@ from agentpool.agents.context import AgentRunContext
 
 @pytest.mark.unit
 def test_acp_agent_create_turn_returns_acp_turn() -> None:
-    """Given an ACPAgent with mocked API, create_turn() returns an ACPTurn."""
+    """Given an ACPAgent with mocked API and client_handler, create_turn() returns an ACPTurn."""
     init_request = MagicMock(spec=InitializeRequest)
     agent = ACPAgent(command="test-cmd", init_request=init_request)
     agent._api = MagicMock()
+    agent._client_handler = MagicMock()
     agent._sdk_session_id = "test-session-id"
 
     run_ctx = AgentRunContext(session_id="test-run-ctx")
