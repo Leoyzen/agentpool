@@ -627,42 +627,77 @@ class Conductor(MessageNode[Any, str]):
         return {"result": params}
 
     # ------------------------------------------------------------------
-    # MessageNode abstract methods (T9, T10, T11 will implement fully)
+    # MessageNode abstract methods (T11)
     # ------------------------------------------------------------------
 
     @override
     async def get_stats(self) -> MessageStats | AggregatedMessageStats:
         """Get message statistics for this node.
 
-        !!! note "Not yet implemented"
+        Returns connection stats aggregated from all active Talk
+        connections. When the Conductor has no connections, returns an
+        empty :class:`MessageStats`.
 
-            Full implementation deferred to T11.
+        Returns:
+            Aggregated stats from all connections, or a fresh
+            :class:`MessageStats` if no connections exist.
         """
-        raise NotImplementedError(
-            "Conductor.get_stats() will be implemented in T11",
-        )
+        from agentpool.talk.stats import AggregatedMessageStats, MessageStats
+
+        talks = self.connections.get_connections()
+        if not talks:
+            return MessageStats()
+        return AggregatedMessageStats(stats=[talk.stats for talk in talks])
 
     @override
     def run_iter(self, *prompts: Any, **kwargs: Any) -> AsyncIterator[ChatMessage[Any]]:
-        """Yield messages during execution.
+        """Yield messages during sequential execution of multiple prompts.
 
-        !!! note "Not yet implemented"
+        Each prompt is routed through the proxy chain to the terminal
+        agent, and the response is yielded as a :class:`ChatMessage`.
 
-            Full implementation deferred to T11.
+        Args:
+            *prompts: Input prompts to process sequentially.
+            **kwargs: Additional execution arguments.
+
+        Yields:
+            Response :class:`ChatMessage` from the terminal agent for
+            each prompt, in order.
         """
-        raise NotImplementedError(
-            "Conductor.run_iter() will be implemented in T11",
-        )
+        return self._run_iter_impl(*prompts, **kwargs)
+
+    async def _run_iter_impl(
+        self,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[ChatMessage[Any]]:
+        """Implementation of :meth:`run_iter`.
+
+        Args:
+            *prompts: Input prompts to process sequentially.
+            **kwargs: Additional execution arguments.
+
+        Yields:
+            Response :class:`ChatMessage` from the terminal agent for
+            each prompt.
+        """
+        for prompt in prompts:
+            result = await self.run(prompt, **kwargs)
+            yield result
 
     @property
     def _step(self) -> Step:
         """Return a pydantic-graph Step wrapping the Conductor's execution.
 
-        !!! note "Minimal implementation"
+        The Step's ``call`` function receives a :class:`StepContext`
+        containing :class:`AgentPoolState` with the input prompts. It
+        routes the prompt through the proxy chain via
+        :meth:`_route_message` and returns a :class:`ChatMessage[str]`
+        with the terminal agent's response.
 
-            Full message routing through the proxy chain will be added
-            in T9 (routing) and T11 (complete ``_step``). This minimal
-            Step delegates to :meth:`_execute_step` which is a stub.
+        Returns:
+            A pydantic-graph :class:`Step` configured with the
+            Conductor's execution logic.
         """
         from pydantic_graph import Step
         from pydantic_graph.id_types import NodeID
@@ -674,16 +709,78 @@ class Conductor(MessageNode[Any, str]):
         )
 
     async def _execute_step(self, ctx: Any) -> ChatMessage[str]:
-        """Step function that runs the Conductor's execution.
+        """Step function that routes a prompt through the proxy chain.
 
-        !!! note "Not yet implemented"
+        Extracts the input prompt from the :class:`StepContext` state,
+        routes it through the proxy chain to the terminal agent via
+        :meth:`_route_message`, and returns the response as a
+        :class:`ChatMessage[str]`.
 
-            This is a minimal stub. Full implementation with proxy chain
-            routing will be added in T9/T11.
+        Args:
+            ctx: pydantic-graph :class:`StepContext` containing
+                :class:`AgentPoolState` with prompts and kwargs.
+
+        Returns:
+            A :class:`ChatMessage[str]` containing the terminal agent's
+            response.
+
+        Raises:
+            RuntimeError: If the Conductor has not been initialized
+                (``__aenter__`` not called) or the connection is not
+                established.
         """
-        raise NotImplementedError(
-            "Conductor._execute_step() will be implemented in T9/T11",
+        from agentpool.messaging import ChatMessage
+
+        state: Any = ctx.state
+        prompts: tuple[Any, ...] = state.prompts
+
+        if not self._conductor_initialized:
+            raise RuntimeError(
+                "Conductor must be entered via __aenter__ before execution",
+            )
+
+        if self._connection is None:
+            raise RuntimeError(
+                "Cannot execute step: connection not established",
+            )
+
+        # Build session/prompt params from the input prompts.
+        # The Conductor routes JSON-RPC messages; the first prompt
+        # is treated as the user's text input.
+        prompt_text: str = ""
+        if prompts:
+            first = prompts[0]
+            prompt_text = first if isinstance(first, str) else str(first)
+
+        params: dict[str, Any] = {
+            "prompt": [{"type": "text", "text": prompt_text}],
+        }
+
+        meta: dict[str, Any] = {"direction": "forward"}
+        response = await self._route_message("session/prompt", params, meta)
+
+        # Extract text content from the response.
+        result_text: str = ""
+        if "result" in response:
+            result_val = response["result"]
+            if isinstance(result_val, str):
+                result_text = result_val
+            elif isinstance(result_val, dict):
+                result_text = str(result_val.get("text", result_val))
+            else:
+                result_text = str(result_val)
+        elif "error" in response:
+            error_obj = response["error"]
+            result_text = f"Error: {error_obj.get('message', 'Unknown error')}"
+
+        # Store the result on the state for run_stream() to pick up.
+        result_message: ChatMessage[str] = ChatMessage(
+            content=result_text,
+            role="assistant",
+            name=self.name,
         )
+        state.result = result_message
+        return result_message
 
     # ------------------------------------------------------------------
     # Utility
