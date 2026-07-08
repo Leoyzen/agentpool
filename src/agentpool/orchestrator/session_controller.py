@@ -525,6 +525,15 @@ class SessionController:
                                 parent_ctx.connection_pool
                             )
 
+                    # Wire ACP MCP manager from parent so child's cleanup_session()
+                    # can delegate to AcpMcpConnectionManager.cleanup_session().
+                    if (
+                        parent_agent is not None
+                        and isinstance(parent_agent, _NativeAgent)
+                        and parent_agent.mcp._acp_mcp_manager is not None
+                    ):
+                        agent.mcp._acp_mcp_manager = parent_agent.mcp._acp_mcp_manager
+
                     # Add non-MCP pool-level providers (skills instruction
                     # and skills tools). MCP no longer goes through providers —
                     # it uses the snapshot-based capability path in

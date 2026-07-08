@@ -621,6 +621,13 @@ class MCPManager:
             if self._session_contexts.get(session_id) is not ctx:
                 return
             try:
+                # Close cached MCPToolset instances before clearing the cache.
+                # MCPToolset has no aclose() — must use __aexit__ for cleanup.
+                # Guard against toolsets that were constructed but never entered
+                # (MCPToolset.__aexit__ raises ValueError if __aenter__ wasn't called).
+                for toolset in ctx.toolset_cache.values():
+                    with contextlib.suppress(ValueError):
+                        await toolset.__aexit__(None, None, None)
                 ctx.toolset_cache.clear()
 
                 if ctx.connection_pool is not None:
