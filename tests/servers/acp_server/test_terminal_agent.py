@@ -209,9 +209,7 @@ async def test_terminal_agent_in_conductor_chain(
         """Fake proxy that intercepts session/prompt and forwards params."""
 
         def __init__(self) -> None:
-            self.successor_calls: list[
-                tuple[str, dict[str, Any], dict[str, Any]]
-            ] = []
+            self.successor_calls: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
 
         def proxy_initialize(self) -> list[str]:
             return ["session/prompt"]
@@ -246,10 +244,7 @@ async def test_terminal_agent_in_conductor_chain(
         if method == "session/prompt":
             # Build a PromptRequest from the JSON-RPC params and call the agent
             session_id = params.get("sessionId", "conductor-session")
-            prompt_blocks = [
-                TextContentBlock.model_validate(b)
-                for b in params.get("prompt", [])
-            ]
+            prompt_blocks = [TextContentBlock.model_validate(b) for b in params.get("prompt", [])]
             from acp.schema import PromptRequest
 
             request = PromptRequest(session_id=session_id, prompt=prompt_blocks)

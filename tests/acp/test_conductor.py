@@ -132,7 +132,7 @@ def _setup_initialized_conductor(
     conductor._conductor_initialized = True
 
     # Populate intercepted_methods from proxies
-    for proxy in (proxy_chain or []):
+    for proxy in proxy_chain or []:
         intercepted = proxy.proxy_initialize()
         conductor._intercepted_methods.append(intercepted)
     conductor._chain_initialized = True

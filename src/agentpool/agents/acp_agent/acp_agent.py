@@ -57,7 +57,6 @@ from agentpool.agents.exceptions import (
     UnknownModeError,
 )
 from agentpool.log import get_logger
-from agentpool.messaging import ChatMessage
 from agentpool.utils.subprocess_utils import SubprocessError, run_with_process_monitor
 
 
@@ -86,7 +85,7 @@ if TYPE_CHECKING:
     from agentpool.delegation import AgentPool
     from agentpool.hooks import AgentHooks
     from agentpool.mcp_server import ToolBridge
-    from agentpool.messaging import MessageHistory
+    from agentpool.messaging import ChatMessage, MessageHistory
     from agentpool.models.acp_agents import BaseACPAgentConfig
     from agentpool.orchestrator.turn import Turn
     from agentpool.sessions import SessionData
@@ -120,13 +119,15 @@ class _TerminalConnectionAdapter:
         return await self._connection.send_request(method, params)
 
     async def send_notification(self, method: str, params: Any = None) -> None:
-        await self._connection.send_notification(method, params)
+        if params is None:
+            params = {}
+        await self._connection.ext_notification(method, params)
 
     async def close(self) -> None:
         await self._connection.close()
 
 
-class ACPAgent[TDeps = None](BaseAgent[TDeps, ChatMessage[str]]):
+class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
     """MessageNode that wraps an external ACP agent subprocess.
 
     This allows integrating any ACP-compatible agent into the agentpool
@@ -490,7 +491,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, ChatMessage[str]]):
         deps: TDeps | None = None,
         wait_for_connections: bool | None = None,
         store_history: bool = True,
-    ) -> AsyncIterator[RichAgentStreamEvent[ChatMessage[str]]]:
+    ) -> AsyncIterator[RichAgentStreamEvent[str]]:
         """Stream events by delegating to ACPTurn.execute() via create_turn().
 
         This is a thin wrapper preserved for backward compatibility.

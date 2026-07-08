@@ -45,6 +45,17 @@ class BaseACPAgentConfig(BaseAgentConfig):
     type: Literal["acp"] = Field("acp", init=False)
     """Top-level discriminator for agent type."""
 
+    proxy_chain: list[ProxyChainConfig] | None = Field(
+        default=None,
+        title="Proxy Chain",
+        description=(
+            "Ordered list of proxy configurations that intercept and process "
+            "messages before reaching the terminal ACP agent. Each entry defines "
+            "a middleware-style transformation step in the message pipeline."
+        ),
+    )
+    """Proxy chain configuration for ACP agents."""
+
     cwd: str | None = Field(
         default=None,
         title="Working Directory",
@@ -256,16 +267,6 @@ class ACPAgentConfig(BaseACPAgentConfig):
         examples=[["--mode", "coding"], ["--debug", "--verbose"]],
     )
     """Arguments to pass to the command."""
-
-    proxy_chain: list[ProxyChainConfig] | None = Field(
-        default=None,
-        title="Proxy Chain",
-        description=(
-            "Ordered list of proxy configurations that intercept and process "
-            "messages before reaching the terminal ACP agent. Each entry defines "
-            "a middleware-style transformation step in the message pipeline."
-        ),
-    )
 
     def get_command(self) -> str:
         """Get the command to spawn the ACP server."""

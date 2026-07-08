@@ -174,16 +174,24 @@ async def test_acp_agent_aenter_creates_conductor() -> None:
     # Patch _start_process and _initialize + _create_session to avoid subprocess
     with (
         patch.object(
-            ACPAgent, "_start_process", new_callable=AsyncMock,
+            ACPAgent,
+            "_start_process",
+            new_callable=AsyncMock,
         ) as mock_start,
         patch.object(
-            ACPAgent, "_initialize", new_callable=AsyncMock,
+            ACPAgent,
+            "_initialize",
+            new_callable=AsyncMock,
         ),
         patch.object(
-            ACPAgent, "_create_session", new_callable=AsyncMock,
+            ACPAgent,
+            "_create_session",
+            new_callable=AsyncMock,
         ),
         patch.object(
-            ACPAgent, "_setup_conductor", new_callable=AsyncMock,
+            ACPAgent,
+            "_setup_conductor",
+            new_callable=AsyncMock,
         ) as mock_setup_conductor,
         patch("agentpool.agents.acp_agent.acp_agent.run_with_process_monitor"),
         patch("anyio.sleep", new_callable=AsyncMock),

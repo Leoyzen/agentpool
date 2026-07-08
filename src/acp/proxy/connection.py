@@ -46,7 +46,7 @@ class ProxySideConnection:
             return {"intercepted_methods": intercepted}
         if method == PROXY_SUCCESSOR:
             meta: dict[str, Any] = params.pop("_meta", {}) if isinstance(params, dict) else {}
-            return self._proxy.proxy_successor(
+            return await self._proxy.proxy_successor(
                 method=params.get("method", ""), params=params, meta=meta
             )
         msg = f"Unknown proxy method: {method}"

@@ -54,7 +54,7 @@ class FakeProxy:
         self.init_called = True
         return self._intercepted
 
-    def proxy_successor(
+    async def proxy_successor(
         self,
         method: str,
         params: dict[str, Any],
@@ -71,7 +71,7 @@ class FailingProxy:
         msg = "init failed"
         raise RuntimeError(msg)
 
-    def proxy_successor(
+    async def proxy_successor(
         self,
         method: str,
         params: dict[str, Any],
@@ -90,7 +90,7 @@ class SuccessorFailingProxy:
     def proxy_initialize(self) -> list[str]:
         return self._intercepted
 
-    def proxy_successor(
+    async def proxy_successor(
         self,
         method: str,
         params: dict[str, Any],
@@ -144,10 +144,10 @@ def test_fake_proxy_proxy_initialize_empty_list() -> None:
     assert result == []
 
 
-def test_fake_proxy_proxy_successor_returns_dict() -> None:
+async def test_fake_proxy_proxy_successor_returns_dict() -> None:
     """proxy_successor returns dict[str, Any] response."""
     proxy = FakeProxy(successor_response={"result": {"text": "hello"}})
-    result = proxy.proxy_successor(
+    result = await proxy.proxy_successor(
         "session/prompt",
         {"prompt": []},
         {"direction": "forward"},
@@ -156,10 +156,10 @@ def test_fake_proxy_proxy_successor_returns_dict() -> None:
     assert result == {"result": {"text": "hello"}}
 
 
-def test_fake_proxy_proxy_successor_records_calls() -> None:
+async def test_fake_proxy_proxy_successor_records_calls() -> None:
     """proxy_successor records all calls for inspection."""
     proxy = FakeProxy()
-    proxy.proxy_successor("session/prompt", {"key": "val"}, {"meta": "data"})
+    await proxy.proxy_successor("session/prompt", {"key": "val"}, {"meta": "data"})
     assert len(proxy.successor_calls) == 1
     method, params, meta = proxy.successor_calls[0]
     assert method == "session/prompt"
@@ -259,9 +259,7 @@ async def test_proxy_side_connection_send_notification_forwards(
     """send_notification forwards to wrapped connection."""
     psc = ProxySideConnection(mock_connection, fake_proxy)
     await psc.send_notification("session/update", {"key": "val"})
-    mock_connection.send_notification.assert_called_once_with(
-        "session/update", {"key": "val"}
-    )
+    mock_connection.send_notification.assert_called_once_with("session/update", {"key": "val"})
 
 
 async def test_proxy_side_connection_send_notification_default_params(

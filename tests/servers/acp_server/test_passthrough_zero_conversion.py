@@ -114,9 +114,7 @@ async def test_passthrough_converter_cancel_pending_tools_noop() -> None:
     # Now cancel — should yield nothing
     results = [update async for update in converter.cancel_pending_tools()]
 
-    assert results == [], (
-        "cancel_pending_tools should yield nothing in passthrough mode"
-    )
+    assert results == [], "cancel_pending_tools should yield nothing in passthrough mode"
 
 
 # ---------------------------------------------------------------------------
@@ -265,11 +263,6 @@ async def test_passthrough_converter_build_subagent_completed_noop() -> None:
     """PassthroughEventConverter.build_subagent_completed() yields nothing."""
     converter = PassthroughEventConverter()
 
-    results = [
-        update
-        async for update in converter.build_subagent_completed("child-session-123")
-    ]
+    results = [update async for update in converter.build_subagent_completed("child-session-123")]
 
-    assert results == [], (
-        "build_subagent_completed should yield nothing in passthrough mode"
-    )
+    assert results == [], "build_subagent_completed should yield nothing in passthrough mode"
