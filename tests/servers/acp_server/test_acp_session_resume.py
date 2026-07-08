@@ -406,8 +406,8 @@ async def test_resume_session_does_not_call_load_session():
 
 
 @pytest.mark.unit
-async def test_resume_session_is_idempotent():
-    """Test that calling resume_session twice with the same session_id returns the cached...."""
+async def test_resume_session_closes_old_and_recreates():
+    """Test resume_session closes old session and creates a fresh one."""
     from agentpool.models.agents import NativeAgentConfig
     from agentpool.models.manifest import AgentsManifest
 
@@ -444,9 +444,17 @@ async def test_resume_session_is_idempotent():
         mock_session.register_update_callback = MagicMock()
         mock_session.initialize = AsyncMock()
         mock_session.initialize_mcp_servers = AsyncMock()
+        mock_session.close = AsyncMock()
         mock_session.agent = MagicMock()
         mock_session.agent.load_session = AsyncMock(return_value=True)
-        mock_session_cls.return_value = mock_session
+        mock_session2 = MagicMock()
+        mock_session2.register_update_callback = MagicMock()
+        mock_session2.initialize = AsyncMock()
+        mock_session2.initialize_mcp_servers = AsyncMock()
+        mock_session2.close = AsyncMock()
+        mock_session2.agent = MagicMock()
+        mock_session2.agent.load_session = AsyncMock(return_value=True)
+        mock_session_cls.side_effect = [mock_session, mock_session2]
 
         result1 = await manager.resume_session(
             session_id="test-session-id",
@@ -459,8 +467,10 @@ async def test_resume_session_is_idempotent():
             acp_agent=mock_acp_agent,
         )
 
-    assert result1 is result2  # Same session object (identity check)
-    assert mock_session_cls.call_count == 1  # ACPSession only constructed once
+    # resume_session now closes old session and creates fresh one (T20)
+    assert result1 is not result2  # Different session objects (close-then-recreate)
+    assert mock_session_cls.call_count == 2  # ACPSession constructed twice (once per resume)
+    assert mock_session.close.call_count == 1  # Old session was closed on second resume
 
 
 # ──────────────────────────────────────────────────────────────
@@ -527,6 +537,7 @@ async def test_resume_passes_through_to_session_manager_correctly(
         client_capabilities=mock_acp_agent.client_capabilities,
         client_info=mock_acp_agent.client_info,
         subagent_display_mode=mock_acp_agent.subagent_display_mode,
+        connection_id=mock_acp_agent._get_connection_id(),
     )
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import KW_ONLY, dataclass, field
 from importlib.metadata import version as _version
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast as _cast
 
 import anyio
 
@@ -232,6 +232,15 @@ class AgentPoolACPAgent(ACPAgent):
     raw_input_mode: Literal["dict", "skip", "json_str"] = "dict"
     """How to emit tool call raw_input ("dict", "skip", or "json_str")."""
 
+    session_manager: ACPSessionManager = field(default=_cast(ACPSessionManager, None))
+    """Shared session manager for tracking ACP sessions across connections.
+
+    If None, a new ``ACPSessionManager`` is created per agent instance.
+    When provided (e.g., from ``ACPServer``), enables cross-connection
+    session tracking and WebSocket disconnect cleanup via
+    ``close_all_sessions_for_connection()``.
+    """
+
     _skill_bridge: ACPSkillBridge | None = field(init=False, default=None)
     """Bridge for exposing skill commands as ACP slash commands."""
 
@@ -249,7 +258,8 @@ class AgentPoolACPAgent(ACPAgent):
         if pool is None:
             msg = "Default agent has no associated pool"
             raise RuntimeError(msg)
-        self.session_manager = ACPSessionManager(pool=pool)
+        if self.session_manager is None:
+            self.session_manager = ACPSessionManager(pool=pool)
         self.tasks = TaskManager()
         self._initialized = False
         self._sessions_cache: ListSessionsResponse | None = None
@@ -308,6 +318,18 @@ class AgentPoolACPAgent(ACPAgent):
     # RFC-0034: Provider router for ACP providers/* protocol
     provider_router: ProviderRouter = field(init=False)
     """Router for LLM provider metadata and override tracking."""
+
+    def _get_connection_id(self) -> str | None:
+        """Get the WebSocket connection ID for session tracking.
+
+        Returns:
+            The connection_id if the client is an AgentSideConnection, else None.
+        """
+        from acp.agent.connection import AgentSideConnection
+
+        if isinstance(self.client, AgentSideConnection):
+            return self.client.connection_id
+        return None
 
     def _setup_skill_bridge(self) -> None:
         """Initialize skill command bridge and subscribe to registry changes.
@@ -429,6 +451,7 @@ class AgentPoolACPAgent(ACPAgent):
                 client_info=self.client_info,
                 subagent_display_mode=self.subagent_display_mode,
                 raw_input_mode=self.raw_input_mode,
+                connection_id=self._get_connection_id(),
             )
             state: SessionModeState | None = None
             models: SessionModelState | None = None
@@ -507,6 +530,7 @@ class AgentPoolACPAgent(ACPAgent):
                     client_capabilities=self.client_capabilities,
                     client_info=self.client_info,
                     subagent_display_mode=self.subagent_display_mode,
+                    connection_id=self._get_connection_id(),
                 )
 
             if not session:
@@ -601,6 +625,7 @@ class AgentPoolACPAgent(ACPAgent):
             client_info=self.client_info,
             subagent_display_mode=self.subagent_display_mode,
             raw_input_mode=self.raw_input_mode,
+            connection_id=self._get_connection_id(),
         )
         return ForkSessionResponse(session_id=session_id)
 
@@ -628,6 +653,7 @@ class AgentPoolACPAgent(ACPAgent):
                     client_capabilities=self.client_capabilities,
                     client_info=self.client_info,
                     subagent_display_mode=self.subagent_display_mode,
+                    connection_id=self._get_connection_id(),
                 )
 
             if not session:
@@ -787,17 +813,27 @@ class AgentPoolACPAgent(ACPAgent):
             case _:
                 return {}
 
-    async def connect_acp_mcp_server(self, server: AcpMcpServer) -> str:
+    async def connect_acp_mcp_server(
+        self,
+        server: AcpMcpServer,
+        session_id: str,
+    ) -> tuple[str, int]:
         """Connect to an ACP-transport MCP server by requesting connection from client.
 
         Initiates mcp/connect to the client per ACP spec. The client returns a
         connectionId which is used to establish the local AcpMcpConnection.
+        A per-session stream pair is registered on the connection, and the
+        session-to-connection mapping is recorded in the connection manager's
+        reverse index for cleanup tracking.
 
         Args:
             server: The ACP MCP server configuration.
+            session_id: The ACP session ID requesting the connection.
 
         Returns:
-            The connectionId returned by the client.
+            A tuple of ``(connection_id, session_key)`` where connection_id is
+            the string returned by the client and session_key is the int key
+            for the per-session stream pair registered on the AcpMcpConnection.
 
         Raises:
             ValueError: If the client does not return a connectionId.
@@ -820,13 +856,17 @@ class AgentPoolACPAgent(ACPAgent):
             with anyio.fail_after(300):
                 return await self.client.send_request("mcp/message", message)
 
-        await self._mcp_manager.create_connection(connection_id, server, send_to_client)
+        conn = await self._mcp_manager.create_connection(connection_id, server, send_to_client)
+        _pair, session_key = conn.register_session()
+        self._mcp_manager.register_session_connection(session_id, connection_id, session_key)
         logger.info(
             "ACP MCP server connected",
             server_name=server.name,
             connection_id=connection_id,
+            session_id=session_id,
+            session_key=session_key,
         )
-        return connection_id
+        return connection_id, session_key
 
     async def disconnect_acp_mcp_server(self, connection_id: str) -> None:
         """Disconnect from an ACP-transport MCP server.

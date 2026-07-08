@@ -245,6 +245,11 @@ class ACPSession:
         self.agent._input_provider = self.input_provider
         if isinstance(self.agent, Agent):
             self.agent.sys_prompts.prompts.append(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            # Wire ACP MCP connection manager for per-session cleanup tracking.
+            # Without this, MCPManager.cleanup_session() can never delegate
+            # to AcpMcpConnectionManager.cleanup_session(), leaking per-session
+            # ACP stream pairs and reverse-index entries.
+            self.agent.mcp._acp_mcp_manager = self.acp_agent._mcp_manager
         if isinstance(self.agent, ACPAgent):
 
             async def permission_callback(
@@ -475,7 +480,9 @@ class ACPSession:
                             "Connecting ACP MCP server via mcp/connect",
                             server_name=server.name,
                         )
-                        connection_id = await self.acp_agent.connect_acp_mcp_server(server)
+                        connection_id, session_key = await self.acp_agent.connect_acp_mcp_server(
+                            server, self.session_id
+                        )
                         conn = self.acp_agent._mcp_manager.get_connection(connection_id)
                         if conn is None:
                             raise RuntimeError(  # noqa: TRY301
@@ -495,6 +502,15 @@ class ACPSession:
                         ):
                             await self.agent._session_connection_pool.add_transport(
                                 cfg.client_id, transport
+                            )
+                            # Register the ACP transport on the MCPManager's
+                            # session context for cleanup tracking.
+                            await self.agent.mcp.add_acp_transport(
+                                self.session_id,
+                                cfg.client_id,
+                                transport,
+                                connection_id,
+                                session_key,
                             )
                         self.log.info(
                             "Added session ACP MCP server",
@@ -795,6 +811,14 @@ class ACPSession:
     async def close(self) -> None:
         """Close the session and cleanup resources."""
         try:
+            # Cleanup MCP session-scoped resources (toolset cache, connection
+            # pool, ACP connection manager) before tearing down the agent env.
+            # Must run BEFORE acp_env.__aexit__ so the agent context is still live.
+            try:
+                await self.agent.mcp.cleanup_session(self.session_id)
+            except Exception:
+                self.log.exception("Failed to cleanup MCP session", session_id=self.session_id)
+
             await self.acp_env.__aexit__(None, None, None)
 
             # Disconnect state_updated signal to prevent stale callbacks

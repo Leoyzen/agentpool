@@ -136,7 +136,7 @@ async def test_register_session_creates_streams(
     """register_session creates a per-session stream pair."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
 
-    pair = conn.register_session()
+    pair, _ = conn.register_session()
 
     assert pair.to_session_send is not None
     assert pair.to_session_receive is not None
@@ -177,7 +177,7 @@ async def test_connection_handle_client_message_routes_to_session(
 ) -> None:
     """handle_client_message broadcasts to registered session pairs."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-    pair = conn.register_session()
+    pair, _ = conn.register_session()
 
     message = {"jsonrpc": "2.0", "method": "test", "id": 1}
 
@@ -198,7 +198,7 @@ async def test_send_to_acp_formats_request(
 ) -> None:
     """send_to_acp extracts method/params and sends flattened ACP format."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-    pair = conn.register_session()
+    pair, _ = conn.register_session()
     message = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -221,7 +221,7 @@ async def test_send_to_acp_formats_notification(
 ) -> None:
     """send_to_acp sends notification without id in flattened ACP format."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-    pair = conn.register_session()
+    pair, _ = conn.register_session()
     message = {"jsonrpc": "2.0", "method": "notifications/initialized"}
 
     await conn.send_to_acp(message, pair.to_session_send)
@@ -240,7 +240,7 @@ async def test_send_to_acp_reconstructs_success_response(
         return_value={"protocolVersion": "2024-11-05", "serverInfo": {"name": "test"}}
     )
     conn = AcpMcpConnection("conn-1", server_config, send_mock)
-    pair = conn.register_session()
+    pair, _ = conn.register_session()
     message = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -267,7 +267,7 @@ async def test_send_to_acp_reconstructs_error_response(
     """send_to_acp reconstructs JSON-RPC error from inner error payload."""
     send_mock = AsyncMock(return_value={"error": {"code": -32600, "message": "Invalid Request"}})
     conn = AcpMcpConnection("conn-1", server_config, send_mock)
-    pair = conn.register_session()
+    pair, _ = conn.register_session()
     message = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
 
     async with anyio.create_task_group() as tg:
@@ -287,7 +287,7 @@ async def test_connection_handle_client_message_flattened_format(
 ) -> None:
     """handle_client_message reconstructs JSON-RPC from flattened ACP format."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-    pair = conn.register_session()
+    pair, _ = conn.register_session()
     flattened = {"connectionId": "conn-1", "method": "tools/list", "params": {}}
 
     async with anyio.create_task_group() as tg:
@@ -306,7 +306,7 @@ async def test_connection_handle_client_message_backward_compat(
 ) -> None:
     """handle_client_message still accepts raw JSON-RPC messages."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-    pair = conn.register_session()
+    pair, _ = conn.register_session()
     message = {"jsonrpc": "2.0", "method": "test", "id": 1}
 
     async with anyio.create_task_group() as tg:

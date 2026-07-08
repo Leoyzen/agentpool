@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self, cast
 import warnings
 
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from types import TracebackType
 
+    from fastmcp.client import ClientTransport
     from mcp import types
     from mcp.shared.context import RequestContext
     from mcp.types import ElicitRequestParams, SamplingMessage
@@ -31,6 +33,7 @@ if TYPE_CHECKING:
     from agentpool.mcp_server.session_pool import SessionConnectionPool
     from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig
+    from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnectionManager
 
 
 logger = get_logger(__name__)
@@ -112,6 +115,34 @@ def _make_timeout_logger(
     return _process_tool_call
 
 
+@dataclass
+class _SessionContext:
+    """Per-session MCP state container for the :class:`MCPManager`.
+
+    Holds all session-scoped MCP resources so that each session has its own
+    connection pool, toolset cache, config snapshot, and ACP connection
+    tracking — isolated from other sessions.
+
+    Attributes:
+        connection_pool: Per-session transport pool; created lazily by
+            ``get_or_create_session()`` (T2).
+        toolset_cache: Session-scoped ``MCPToolset`` cache keyed by
+            ``client_id``, mirroring the global ``_toolset_cache``.
+        snapshot: Immutable MCP config snapshot for this session, or
+            ``None`` if no snapshot has been built yet.
+        acp_connection_ids: List of ``(client_id, connection_id)`` tuples
+            for ACP MCP connections opened during this session, used for
+            cleanup tracking.
+        _cleanup_lock: Serializes concurrent cleanup calls for this session.
+    """
+
+    connection_pool: SessionConnectionPool | None = None
+    toolset_cache: dict[str, Any] = field(default_factory=dict)
+    snapshot: McpConfigSnapshot | None = None
+    acp_connection_ids: list[tuple[str, int]] = field(default_factory=list)
+    _cleanup_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
 class MCPManager:
     """Manages MCP server connections and distributes resource providers.
 
@@ -145,11 +176,55 @@ class MCPManager:
         self._accessible_roots = accessible_roots
         self._global_pool = GlobalConnectionPool()
         self._toolset_cache: dict[str, Any] = {}
+        self._session_contexts: dict[str, _SessionContext] = {}
+        self._acp_mcp_manager: AcpMcpConnectionManager | None = None
 
     def add_server_config(self, cfg: MCPServerConfig | str) -> None:
         """Add a new MCP server to the manager."""
         resolved = BaseMCPServerConfig.from_string(cfg) if isinstance(cfg, str) else cfg
         self.servers.append(resolved)
+
+    def get_or_create_session(self, session_id: str) -> _SessionContext:
+        """Get or create the per-session MCP context for ``session_id``.
+
+        If no context exists for ``session_id``, a new ``_SessionContext``
+        is created with a fresh ``SessionConnectionPool``, empty toolset
+        cache, no snapshot, and an empty ACP connection list.  Subsequent
+        calls with the same ``session_id`` return the same object.
+
+        Args:
+            session_id: Unique identifier for the session.
+
+        Returns:
+            The ``_SessionContext`` for this session.
+        """
+        from agentpool.mcp_server.session_pool import SessionConnectionPool
+
+        ctx = self._session_contexts.get(session_id)
+        if ctx is None:
+            ctx = _SessionContext(
+                connection_pool=SessionConnectionPool(session_id=session_id),
+            )
+            self._session_contexts[session_id] = ctx
+        return ctx
+
+    def update_session_snapshot(
+        self,
+        session_id: str,
+        snapshot: McpConfigSnapshot,
+    ) -> None:
+        """Update the config snapshot for a session.
+
+        Ensures the session context exists (creating it if necessary),
+        then sets ``ctx.snapshot`` to the provided snapshot.  Safe to call
+        on an already-existing session — only the snapshot is replaced.
+
+        Args:
+            session_id: Unique identifier for the session.
+            snapshot: Immutable MCP config snapshot to store.
+        """
+        ctx = self.get_or_create_session(session_id)
+        ctx.snapshot = snapshot
 
     def __repr__(self) -> str:
         return f"MCPManager(name={self.name!r}, servers={len(self.servers)})"
@@ -298,10 +373,9 @@ class MCPManager:
             name=f"{self.name}_acp_aggregated",
         )
 
-    async def as_capability(
+    async def as_capability(  # noqa: PLR0915
         self,
-        snapshot: McpConfigSnapshot | None = None,
-        session_pool: SessionConnectionPool | None = None,
+        session_id: str | None = None,
     ) -> list[MCP]:
         """Return pydantic-ai MCP capabilities for all configured servers.
 
@@ -311,21 +385,31 @@ class MCPManager:
         skipped in global configs since pydantic-ai does not support ACP
         directly. Disabled servers are also skipped.
 
-        When ``snapshot`` is provided, configs are read from the snapshot
-        and transports are obtained from the appropriate connection pool:
+        When ``session_id`` is provided, the session's ``_SessionContext`` is
+        looked up via ``get_or_create_session()``.  If a snapshot is stored
+        on the context, configs are partitioned:
 
-        - Global configs (pool + agent) use ``self._global_pool``
-        - Session-scoped configs (session + skill) use ``session_pool``
+        - Global configs (pool + agent) use ``self._global_pool`` for
+          transports and ``self._toolset_cache`` for toolset caching.
+        - Session-scoped configs (session + skill) use the session's
+          ``connection_pool`` for transports and ``ctx.toolset_cache`` for
+          toolset caching.
 
-        When ``snapshot`` is None, the legacy path uses ``self.servers``
-        with ``self._global_pool`` for transports.
+        GAP-11: If the session context was popped by concurrent
+        ``cleanup_session()`` between the initial state check and
+        subsequent access, the ``.get()`` call returns ``None`` and
+        the method falls back to global-only capabilities (with a
+        warning).  This is a benign race: ``dict.get()`` is atomic,
+        so no ``KeyError`` can occur.
+
+        When ``session_id`` is None, the legacy path uses ``self.servers``
+        with ``self._global_pool`` for transports and ``self._toolset_cache``
+        for toolset caching.
 
         Args:
-            snapshot: Optional immutable snapshot of MCP configs partitioned
-                by lifecycle scope.
-            session_pool: Optional per-session connection pool for transport
-                lifecycle isolation. Required when snapshot contains
-                session-scoped configs.
+            session_id: Optional session identifier for per-session MCP
+                config isolation. When None, only global configs from
+                ``self.servers`` are processed.
 
         Returns:
             A list of ``pydantic_ai.capabilities.MCP`` instances, one per
@@ -371,19 +455,23 @@ class MCPManager:
                 case _:
                     return f"mcp://{server.type}/{server.client_id}"
 
-        def _make_capability(server: BaseMCPServerConfig, transport: Any) -> MCP:
+        def _make_capability(
+            server: BaseMCPServerConfig,
+            transport: Any,
+            toolset_cache: dict[str, Any],
+        ) -> MCP:
             """Create or reuse an MCPToolset and wrap it in an MCP capability.
 
             On first call for a given ``client_id``, a new ``MCPToolset`` is
-            constructed and stored in ``_toolset_cache``.  Subsequent calls
+            constructed and stored in ``toolset_cache``.  Subsequent calls
             reuse the cached instance, ensuring one underlying connection per
             server config.  The ``MCP`` wrapper is always fresh.
             """
             client_id = server.client_id
-            toolset = self._toolset_cache.get(client_id)
+            toolset = toolset_cache.get(client_id)
             if toolset is None:
                 toolset = MCPToolset(client=transport, **_make_kwargs(server))
-                self._toolset_cache[client_id] = toolset
+                toolset_cache[client_id] = toolset
 
             return MCP(
                 url=_derive_url(server),
@@ -393,45 +481,66 @@ class MCPManager:
                 allowed_tools=server.enabled_tools,
             )
 
-        async def _process_snapshot(snap: McpConfigSnapshot) -> None:
-            """Process snapshot configs, appending capabilities to the list."""
+        async def _process_global_configs(
+            snap: McpConfigSnapshot,
+            toolset_cache: dict[str, Any],
+        ) -> None:
+            """Process global configs (pool + agent) from the snapshot."""
             for entry in snap.global_configs:
                 server = entry.server_config
                 if not server.enabled or isinstance(server, AcpMCPServerConfig):
                     continue
                 transport = await self._global_pool.get_transport(server)
-                capabilities.append(_make_capability(server, transport))
+                capabilities.append(_make_capability(server, transport, toolset_cache))
 
-            if session_pool is None:
-                return
+        async def _process_session_configs(
+            snap: McpConfigSnapshot,
+            toolset_cache: dict[str, Any],
+            connection_pool: SessionConnectionPool,
+        ) -> None:
+            """Process session-scoped configs (session + skill) from the snapshot.
 
-            # Session-scoped configs (session + skill) — borrow from
-            # SessionConnectionPool.  ACP entries have pre-stored transports
-            # via add_transport(); get_transport() returns them without
-            # trying to create new ones.  Inherited ACP configs (from parent
-            # session) that don't have a transport in this session's pool
-            # are skipped — they go through the ACP aggregating provider.
+            ACP entries have pre-stored transports via ``add_transport()``;
+            ``get_transport()`` returns them without trying to create new
+            ones.  Inherited ACP configs (from parent session) that don't
+            have a transport in this session's pool are skipped — they go
+            through the ACP aggregating provider.
+            """
             for entry in snap.session_scoped_configs:
                 server = entry.server_config
                 if not server.enabled:
                     continue
                 if isinstance(server, AcpMCPServerConfig):
                     try:
-                        transport = await session_pool.get_transport(server, entry.skill_name)
+                        transport = await connection_pool.get_transport(server, entry.skill_name)
                     except NotImplementedError:
                         continue
                 else:
-                    transport = await session_pool.get_transport(server, entry.skill_name)
-                capabilities.append(_make_capability(server, transport))
+                    transport = await connection_pool.get_transport(server, entry.skill_name)
+                capabilities.append(_make_capability(server, transport, toolset_cache))
 
-        if snapshot is not None:
-            await _process_snapshot(snapshot)
+        ctx = self._session_contexts.get(session_id) if session_id is not None else None
+
+        if ctx is not None and ctx.snapshot is not None:
+            await _process_global_configs(ctx.snapshot, self._toolset_cache)
+            if ctx.connection_pool is not None:
+                await _process_session_configs(
+                    ctx.snapshot,
+                    ctx.toolset_cache,
+                    ctx.connection_pool,
+                )
         else:
+            if session_id is not None and ctx is None:
+                logger.warning(
+                    "Session %s context was removed during as_capability(); "
+                    "falling back to global-only MCP capabilities.",
+                    session_id,
+                )
             for server in self.servers:
                 if not server.enabled or isinstance(server, AcpMCPServerConfig):
                     continue
                 transport = await self._global_pool.get_transport(server)
-                capabilities.append(_make_capability(server, transport))
+                capabilities.append(_make_capability(server, transport, self._toolset_cache))
 
         return capabilities
 
@@ -451,3 +560,92 @@ class MCPManager:
             msg = "Error during MCP manager cleanup"
             logger.exception(msg, exc_info=e)
             raise RuntimeError(msg) from e
+
+    async def add_acp_transport(
+        self,
+        session_id: str,
+        client_id: str,
+        transport: ClientTransport,
+        connection_id: str,
+        session_key: int,
+    ) -> None:
+        """Register an ACP MCP transport for a session.
+
+        Adds a pre-created transport (e.g. ``AcpMcpTransport``) to the
+        session's connection pool and tracks the ACP connection for
+        cleanup.
+
+        Idempotent: calling twice with the same ``connection_id`` and
+        ``session_key`` does not create duplicate tracking entries.
+
+        Args:
+            session_id: Unique identifier for the session.
+            client_id: Client identifier for the MCP server.
+            transport: Pre-created fastmcp ``ClientTransport``.
+            connection_id: ACP connection identifier.
+            session_key: ACP session key for the connection.
+        """
+        ctx = self.get_or_create_session(session_id)
+        pool = ctx.connection_pool
+        if pool is not None:
+            await pool.add_transport(client_id, transport)
+        entry = (connection_id, session_key)
+        if entry not in ctx.acp_connection_ids:
+            ctx.acp_connection_ids.append(entry)
+
+    async def cleanup_session(self, session_id: str) -> None:
+        """Clean up all MCP resources for a single session.
+
+        Clears the session-scoped toolset cache, shuts down the
+        per-session connection pool, delegates ACP connection cleanup
+        to :class:`AcpMcpConnectionManager` (if wired), and removes
+        the session context from the registry.
+
+        The per-session ``_cleanup_lock`` serializes concurrent calls
+        for the same ``session_id``, making cleanup idempotent: a
+        second caller blocks on the lock, then finds the context
+        already popped in the ``finally`` block.
+
+        Intermediate cleanup errors are logged but never re-raised
+        so that the context is always removed.
+
+        Args:
+            session_id: Unique identifier for the session to clean up.
+        """
+        ctx = self._session_contexts.get(session_id)
+        if ctx is None:
+            return
+        async with ctx._cleanup_lock:
+            # Identity check: if the context in _session_contexts is no
+            # longer this ctx, another caller already cleaned it up.
+            if self._session_contexts.get(session_id) is not ctx:
+                return
+            try:
+                # Close cached MCPToolset instances before clearing the cache.
+                # MCPToolset has no aclose() — must use __aexit__ for cleanup.
+                # Guard against toolsets that were constructed but never entered
+                # (MCPToolset.__aexit__ raises ValueError if __aenter__ wasn't called).
+                for toolset in ctx.toolset_cache.values():
+                    with contextlib.suppress(ValueError):
+                        await toolset.__aexit__(None, None, None)
+                ctx.toolset_cache.clear()
+
+                if ctx.connection_pool is not None:
+                    try:
+                        await ctx.connection_pool.cleanup()
+                    except Exception:
+                        logger.exception(
+                            "Error cleaning up session connection pool",
+                            session_id=session_id,
+                        )
+
+                if self._acp_mcp_manager is not None:
+                    try:
+                        await self._acp_mcp_manager.cleanup_session(session_id)
+                    except Exception:
+                        logger.exception(
+                            "Error cleaning up ACP MCP connections",
+                            session_id=session_id,
+                        )
+            finally:
+                self._session_contexts.pop(session_id, None)
