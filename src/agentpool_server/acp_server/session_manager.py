@@ -76,6 +76,7 @@ class ACPSessionManager:
         session_id: str | None = None,
         client_capabilities: ClientCapabilities | None = None,
         client_info: Implementation | None = None,
+        client_locale: str | None = None,
         subagent_display_mode: Literal["legacy", "zed", "qwen"] = "legacy",
         raw_input_mode: Literal["dict", "skip", "json_str"] = "dict",
         parent_session_id: str | None = None,
@@ -92,6 +93,7 @@ class ACPSessionManager:
             session_id: Optional specific session ID (generated if None)
             client_capabilities: Client capabilities for tool registration
             client_info: Client implementation info (name, version)
+            client_locale: Client locale for i18n (e.g. "en", "zh-CN")
             subagent_display_mode: Display mode for subagent outputs
             raw_input_mode: How to emit tool call raw_input
             parent_session_id: Optional parent session ID for child sessions.
@@ -198,6 +200,7 @@ class ACPSessionManager:
             acp_agent=acp_agent,
             client_capabilities=client_capabilities or ClientCapabilities(),
             client_info=client_info,
+            client_locale=client_locale,
             manager=self,
             subagent_display_mode=subagent_display_mode,
             raw_input_mode=raw_input_mode,
@@ -229,6 +232,7 @@ class ACPSessionManager:
         acp_agent: AgentPoolACPAgent,
         client_capabilities: ClientCapabilities | None = None,
         client_info: Implementation | None = None,
+        client_locale: str | None = None,
         subagent_display_mode: Literal["legacy", "zed", "qwen"] = "legacy",
         raw_input_mode: Literal["dict", "skip", "json_str"] = "dict",
         mcp_servers: Sequence[McpServer] | None = None,
@@ -242,6 +246,7 @@ class ACPSessionManager:
             acp_agent: ACP agent instance
             client_capabilities: Client capabilities
             client_info: Client implementation info (name, version)
+            client_locale: Client locale for i18n (e.g. "en", "zh-CN")
             subagent_display_mode: Display mode for subagent outputs
             raw_input_mode: How to emit tool call raw_input
             mcp_servers: MCP server configurations to (re-)initialize
@@ -321,6 +326,7 @@ class ACPSessionManager:
             acp_agent=acp_agent,
             client_capabilities=client_capabilities or ClientCapabilities(),
             client_info=client_info,
+            client_locale=client_locale,
             manager=self,
             subagent_display_mode=subagent_display_mode,
             raw_input_mode=raw_input_mode,
