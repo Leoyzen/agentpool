@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable
 
 
 @runtime_checkable
@@ -27,7 +31,7 @@ class Proxy(Protocol):
         method: str,
         params: dict[str, Any],
         meta: dict[str, Any],
-    ) -> dict[str, Any]:
+    ) -> Awaitable[dict[str, Any]]:
         """Forward a successor message to the next component in the chain.
 
         Args:
@@ -36,6 +40,6 @@ class Proxy(Protocol):
             meta: Additional metadata for routing.
 
         Returns:
-            The response from the successor.
+            An awaitable resolving to the response from the successor.
         """
         ...

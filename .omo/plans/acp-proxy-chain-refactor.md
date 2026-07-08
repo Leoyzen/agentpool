@@ -256,7 +256,7 @@ Your next move: approve to start execution, or run a high-accuracy review first.
   QA scenarios: happy — registered type returns class; unregistered raises error. failure — duplicate registration raises error. Evidence: `.omo/evidence/task-17-acp-proxy-chain-refactor.log`
   Commit: Y | feat(acp): create proxy type registry and impls package
 
-- [ ] 18. Implement HookProxy — all 4 hook type mappings
+- [x] 18. Implement HookProxy — all 4 hook type mappings
   What to do / Must NOT do: Implement `HookProxy` in `src/acp/proxy/impls/hook_proxy.py` implementing `Proxy` protocol. Wrap existing `Hook` instances. Map all 4 hooks: `session/prompt` → `pre_turn` (blocking deny, additional_context), `session/update` ToolCallStart → `pre_tool_use` (modified_input, blocking deny), `session/update` ToolCallComplete → `post_tool_use` (modified_output), JSON-RPC response to `session/prompt` → `post_turn` (correlate by request ID, NOT on individual chunks). Must NOT fire `post_turn` on individual `AgentMessageChunk`. Must NOT modify existing Hook classes. `PermissionHookProxy` from proposal is subsumed by HookProxy's `pre_tool_use` blocking.
   Parallelization: Wave 4 | Blocked by: T17 | Blocks: T19, T21 | Can parallelize with: T20
   References: `openspec/changes/acp-proxy-chain-refactor/specs/acp-proxy-impls/spec.md:3-41`; `src/agentpool/hooks/agent_hooks.py` (Hook, CallableHook, CommandHook, PromptHook, HookInput, HookResult); design.md D4; `src/agentpool/agents/acp_agent/acp_converters.py` (ACP message types); Metis finding M7 (PermissionHookProxy subsumed)
@@ -272,7 +272,7 @@ Your next move: approve to start execution, or run a high-accuracy review first.
   QA scenarios: happy — HookProxy active, HookAwareTurn disabled, request_permission disabled (no double-firing); no HookProxy, both active; auto-insert at position 0. failure — hooks double-fired; _hooks=None not set; request_permission still fires. Evidence: `.omo/evidence/task-19-acp-proxy-chain-refactor.log`
   Commit: Y | feat(acp): implement HookProxy coexistence, auto-insert, and request_permission disable
 
-- [ ] 20. Implement ContextInjectionProxy + ToolProviderProxy
+- [x] 20. Implement ContextInjectionProxy + ToolProviderProxy
   What to do / Must NOT do: Implement `ContextInjectionProxy` (`src/acp/proxy/impls/context_injection.py`) — intercept `session/prompt`, prepend AGENTS.md and skill instructions. Implement `ToolProviderProxy` (`src/acp/proxy/impls/tool_provider.py`) — reuse `AcpMcpTransport`/`AcpMcpConnectionManager` for MCP-over-ACP (experimental). Register both in registry. Must NOT conflate with HookProxy's additional_context.
   Parallelization: Wave 4 | Blocked by: T17 | Blocks: T21 | Can parallelize with: T18
   References: `openspec/changes/acp-proxy-chain-refactor/specs/acp-proxy-impls/spec.md:68-98`; `src/agentpool/skills/`; `src/agentpool_server/acp_server/acp_mcp_transport.py:30` (AcpMcpTransport); `src/agentpool_server/acp_server/acp_mcp_manager.py:253` (AcpMcpConnectionManager); design.md risk "[Two unratified RFDs]"

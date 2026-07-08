@@ -457,7 +457,7 @@ class Conductor(MessageNode[Any, str]):
             if method not in self._intercepted_methods[i]:
                 continue
             try:
-                result = proxy.proxy_successor(method, result, meta)
+                result = await proxy.proxy_successor(method, result, meta)
             except Exception as exc:
                 logger.exception(
                     "proxy_forward_failed",
