@@ -321,13 +321,16 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         self._extra_mcp_servers.append(mcp_config)
 
     async def _setup_conductor(self) -> None:
-        """Set up Conductor for proxy chain execution."""
+        """Set up Conductor for proxy chain execution.
+
+        When proxy_chain is configured, Conductor manages the subprocess
+        and proxy chain. ACPAgent wires its own connection/api to the
+        Conductor's connection after initialization.
+        """
         from acp.conductor import Conductor
 
-        if not self._connection or not self._api:
-            raise AgentNotInitializedError
-        # Terminal connection adapter caches init response for future Conductor use
-        _ = _TerminalConnectionAdapter(self._connection, self._init_response)
+        # Create and enter Conductor — it spawns the subprocess and
+        # sets up the proxy chain.
         self._conductor = Conductor(
             name=self.name,
             command=self._command,
@@ -336,40 +339,70 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             env=dict(self._env_vars),
             proxy_chain=self._proxy_chain or [],
             client_handler=self._client_handler,
+            agent_hooks=self.hooks if self.hooks else None,
         )
         await self._conductor.__aenter__()
+
+        # Wire ACPAgent's connection/api to Conductor's connection
+        # so that ACPTurn uses the proxy-chained connection.
+        if self._conductor.connection is not None:
+            self._connection = self._conductor.connection
+            from acp.agent.acp_agent_api import ACPAgentAPI
+
+            self._api = ACPAgentAPI(self._connection)
 
     async def __aenter__(self) -> Self:
         """Start subprocess and initialize ACP connection."""
         await super().__aenter__()
         await self._setup_toolsets()
-        process = await self._start_process()
-        try:
-            await run_with_process_monitor(process, self._initialize, context="ACP initialization")
-            # Load existing session or create new one
-            if session_to_load := self._sdk_session_id:
-                self._sdk_session_id = None
-                result = await run_with_process_monitor(
-                    process,
-                    lambda: self.load_session(session_to_load),
-                    context="ACP session load",
+
+        if self._proxy_chain:
+            # Proxy chain mode: Conductor manages subprocess + proxy chain.
+            # ACPAgent wires its connection/api to Conductor's connection.
+            await self._setup_conductor()
+            # Initialize and create session using Conductor's connection.
+            assert self._conductor is not None
+            assert self._conductor.process is not None
+            process = self._conductor.process
+            try:
+                await run_with_process_monitor(
+                    process, self._initialize, context="ACP initialization"
                 )
-                if result is None:
-                    self.log.warning(
-                        "Failed to load session, creating new one",
-                        session_id=session_to_load,
-                    )
-                    await run_with_process_monitor(
-                        process, self._create_session, context="ACP session creation"
-                    )
-            else:
                 await run_with_process_monitor(
                     process, self._create_session, context="ACP session creation"
                 )
-        except SubprocessError as e:
-            raise RuntimeError(str(e)) from e
+            except SubprocessError as e:
+                raise RuntimeError(str(e)) from e
+        else:
+            # Direct mode: ACPAgent manages its own subprocess.
+            process = await self._start_process()
+            try:
+                await run_with_process_monitor(
+                    process, self._initialize, context="ACP initialization"
+                )
+                # Load existing session or create new one
+                if session_to_load := self._sdk_session_id:
+                    self._sdk_session_id = None
+                    result = await run_with_process_monitor(
+                        process,
+                        lambda: self.load_session(session_to_load),
+                        context="ACP session load",
+                    )
+                    if result is None:
+                        self.log.warning(
+                            "Failed to load session, creating new one",
+                            session_id=session_to_load,
+                        )
+                        await run_with_process_monitor(
+                            process, self._create_session, context="ACP session creation"
+                        )
+                else:
+                    await run_with_process_monitor(
+                        process, self._create_session, context="ACP session creation"
+                    )
+            except SubprocessError as e:
+                raise RuntimeError(str(e)) from e
         await anyio.sleep(0.3)
-        await self._setup_conductor()
         return self
 
     async def __aexit__(

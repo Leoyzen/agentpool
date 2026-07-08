@@ -89,7 +89,9 @@ class HookProxy:
         """
         agent_name: str = meta.get("agent_name", "")
         prompt: str = ""
-        content: Any = params.get("content", [])
+        # ACP protocol uses "prompt" key for session/prompt params
+        key = "prompt" if "prompt" in params else "content"
+        content: Any = params.get(key, [])
         if isinstance(content, str):
             prompt = content
         elif isinstance(content, list) and content:
@@ -112,7 +114,7 @@ class HookProxy:
                 }
             additional_context = result.get("additional_context")
             if additional_context:
-                content_list: list[Any] = params.get("content", [])
+                content_list: list[Any] = params.get(key, [])
                 if isinstance(content_list, list):
                     content_list.insert(
                         0,

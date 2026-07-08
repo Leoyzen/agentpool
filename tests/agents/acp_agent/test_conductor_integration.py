@@ -168,7 +168,7 @@ async def test_acp_agent_aenter_creates_conductor() -> None:
     We patch _setup_conductor to avoid real subprocess, and verify
     it was called and _conductor is set afterward.
     """
-    agent = _make_acp_agent()
+    agent = _make_acp_agent(proxy_chain=[MagicMock()])
     _inject_mocks(agent)
 
     # Patch _start_process and _initialize + _create_session to avoid subprocess
@@ -197,6 +197,16 @@ async def test_acp_agent_aenter_creates_conductor() -> None:
         patch("anyio.sleep", new_callable=AsyncMock),
     ):
         mock_start.return_value = MagicMock()
+
+        # _setup_conductor mock needs to set self._conductor with process
+        mock_cond = MagicMock()
+        mock_cond.process = MagicMock()
+        mock_cond.connection = MagicMock()
+
+        async def _mock_setup() -> None:
+            agent._conductor = mock_cond
+
+        mock_setup_conductor.side_effect = _mock_setup
         await agent.__aenter__()
 
     assert mock_setup_conductor.call_count == 1

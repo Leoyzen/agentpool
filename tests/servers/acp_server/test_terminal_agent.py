@@ -271,8 +271,8 @@ async def test_terminal_agent_in_conductor_chain(
     result = await conductor._route_message("session/prompt", route_params, route_meta)
 
     # --- Assertions ---
-    # 1. The proxy should have intercepted and modified the prompt
-    assert len(fake_proxy.successor_calls) == 1
+    # 1. The proxy should have intercepted and modified the prompt (forward + reverse = 2)
+    assert len(fake_proxy.successor_calls) == 2
     intercepted_method, intercepted_params, _ = fake_proxy.successor_calls[0]
     assert intercepted_method == "session/prompt"
     assert intercepted_params["prompt"][0]["text"] == "proxied: hello"

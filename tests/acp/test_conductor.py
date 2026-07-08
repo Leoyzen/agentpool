@@ -563,12 +563,13 @@ async def test_route_to_terminal_with_interception() -> None:
 
     result = await conductor._route_to_terminal("session/prompt", {"prompt": []})
 
-    # Proxy modified params, then sent to terminal
-    assert len(proxy.successor_calls) == 1
+    # Proxy modified params (forward), then response routed back (reverse) = 2 calls
+    assert len(proxy.successor_calls) == 2
     mock_conn.send_request.assert_called_once()
     sent_params = mock_conn.send_request.call_args[0][1]
     assert sent_params == {"prompt": [{"type": "text", "text": "modified"}]}
-    assert result == {"result": "terminal_response"}
+    # Reverse routing: proxy also processes the response, returning its successor_response
+    assert result == {"prompt": [{"type": "text", "text": "modified"}]}
 
 
 async def test_route_to_terminal_proxy_error_stops_propagation() -> None:

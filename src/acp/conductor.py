@@ -218,12 +218,6 @@ class Conductor(MessageNode[Any, str]):
         self._proxy_chain.insert(0, hook_proxy)
         self._has_hook_proxy = True
 
-    def _detect_hook_proxy(self) -> None:
-        """Detect if a HookProxy is in the chain after initialization."""
-        from acp.proxy.impls.hook_proxy import HookProxy
-
-        self._has_hook_proxy = any(isinstance(proxy, HookProxy) for proxy in self._proxy_chain)
-
     @override
     @property
     def agent_type(self) -> str:
@@ -266,8 +260,10 @@ class Conductor(MessageNode[Any, str]):
         self._process = process
 
         # Wire the subprocess JSON-RPC connection to ClientSideConnection.
-        # ClientSideConnection handles notifications from the terminal agent.
-        def client_factory(agent: Any) -> NoOpClient:
+        # Use the provided client_handler if available, otherwise NoOpClient.
+        def client_factory(agent: Any) -> Any:
+            if self._client_handler is not None:
+                return self._client_handler
             return NoOpClient()
 
         self._connection = ClientSideConnection(client_factory, writer, reader)
@@ -638,9 +634,26 @@ class Conductor(MessageNode[Any, str]):
 
         # Send to terminal agent via the wire connection.
         response = await self._connection.send_request(method, params)
-        if isinstance(response, dict):
-            return response
-        return {"result": response}
+        response_dict = response if isinstance(response, dict) else {"result": response}
+
+        # Route response back through proxies in reverse order
+        # so post_turn hooks (HookProxy) and other response handlers fire.
+        if self._should_intercept(method):
+            meta["response"] = True
+            for i in reversed(range(len(self._proxy_chain))):
+                proxy = self._proxy_chain[i]
+                if i < len(self._intercepted_methods) and method in self._intercepted_methods[i]:
+                    try:
+                        response_dict = await proxy.proxy_successor(method, response_dict, meta)
+                    except Exception as exc:
+                        logger.exception(
+                            "proxy_reverse_forward_failed",
+                            proxy_index=i,
+                            method=method,
+                        )
+                        return await self._handle_proxy_error(exc, i)
+
+        return response_dict
 
     async def _route_message(
         self,

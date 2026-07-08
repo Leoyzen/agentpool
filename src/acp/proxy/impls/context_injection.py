@@ -82,13 +82,15 @@ class ContextInjectionProxy:
             return params
 
         # Prepend context to prompt content
+        # ACP protocol uses "prompt" key for session/prompt params
         context_text = "\n\n".join(context_parts)
-        content_list: Any = params.get("content", [])
+        key = "prompt" if "prompt" in params else "content"
+        content_list: Any = params.get(key, [])
         if isinstance(content_list, list):
             content_list.insert(0, {"type": "text", "text": context_text})
-            params["content"] = content_list
+            params[key] = content_list
         elif isinstance(content_list, str):
-            params["content"] = context_text + "\n\n" + content_list
+            params[key] = context_text + "\n\n" + content_list
 
         return params
 

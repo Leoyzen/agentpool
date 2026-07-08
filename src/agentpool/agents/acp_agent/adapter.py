@@ -137,13 +137,6 @@ class ACPClientAdapter:
             if prompt_task.done():
                 if get_task not in done:
                     get_task.cancel()
-                    try:
-                        item = await get_task
-                    except asyncio.CancelledError:
-                        pass
-                    else:
-                        self._collected_updates.append(item)
-                        yield item
                 break
 
         # Drain remaining items after task completion
