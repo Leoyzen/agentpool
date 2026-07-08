@@ -86,9 +86,7 @@ async def test_initialize_mcp_servers_registers_providers_on_agent() -> None:
     # EXPECT: snapshot is set and contains the session config
     ctx = session_agent.mcp.get_session_context(session_id)
     assert ctx is not None, "session context should exist after initialize_mcp_servers()"
-    assert ctx.snapshot is not None, (
-        "snapshot should be set after initialize_mcp_servers()"
-    )
+    assert ctx.snapshot is not None, "snapshot should be set after initialize_mcp_servers()"
     session_configs = ctx.snapshot.session_configs
     assert len(session_configs) >= 1, "session_configs should contain at least one entry"
     config_names = [e.server_config.name for e in session_configs]
