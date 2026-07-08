@@ -1,4 +1,4 @@
-"""Tests for _ToolInterceptCapability in hook_manager.py.
+"""Tests for ToolInterceptCapability in tool_intercept.py.
 
 Covers tasks 5.1-5.13 from the unify-tool-interception-to-pydantic-ai-capabilities change:
 
@@ -20,7 +20,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from pydantic_ai import ModelRetry
-from pydantic_ai.capabilities import CombinedCapability, Hooks
 from pydantic_ai.messages import ToolCallPart, ToolReturn
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import RunContext, ToolDefinition
@@ -28,6 +27,7 @@ from pydantic_ai.usage import RunUsage
 import pytest
 
 from agentpool import Agent
+from agentpool.agents.native_agent.tool_intercept import ToolInterceptCapability
 from agentpool.hooks import AgentHooks, CallableHook
 from agentpool.hooks.base import HookResult
 
@@ -86,10 +86,8 @@ def mock_hook_manager(mock_agent: Agent[Any]) -> MagicMock:
 
 
 def make_capability(hook_manager: MagicMock) -> Any:
-    """Create a _ToolInterceptCapability with the given hook_manager."""
-    from agentpool.agents.native_agent.hook_manager import _ToolInterceptCapability
-
-    return _ToolInterceptCapability(hook_manager=hook_manager)
+    """Create a ToolInterceptCapability with the given hook_manager."""
+    return ToolInterceptCapability(hook_manager=hook_manager)
 
 
 def make_tool_call(name: str = "test_tool", args: dict[str, Any] | None = None) -> ToolCallPart:
@@ -408,7 +406,7 @@ async def test_after_tool_execute_consumes_pending_injection(
 async def test_hooks_fire_for_mcp_tools(mock_agent: Agent[Any]) -> None:
     """Hooks fire for MCP tools (not just direct tools).
 
-    This test verifies that the _ToolInterceptCapability's before_tool_execute
+    This test verifies that the ToolInterceptCapability's before_tool_execute
     and after_tool_execute are invoked for MCP-sourced tools, not just direct
     tools registered via wrap_tool().
     """
@@ -433,7 +431,7 @@ async def test_hooks_fire_for_mcp_tools(mock_agent: Agent[Any]) -> None:
 
     mock_agent._hook_manager.agent_hooks = agent_hooks
 
-    capability = mock_agent._hook_manager.as_capability()
+    capability = ToolInterceptCapability(hook_manager=mock_agent._hook_manager)
 
     # Simulate an MCP tool call through the capability chain
     ctx = make_run_context(deps=MockDeps(agent=mock_agent))
@@ -441,10 +439,8 @@ async def test_hooks_fire_for_mcp_tools(mock_agent: Agent[Any]) -> None:
     tool_def = make_tool_def("mcp_filesystem_read")
     args: dict[str, Any] = {"path": "/test"}
 
-    # Extract the _ToolInterceptCapability from the CombinedCapability
-    # CombinedCapability stores capabilities in order: [_ToolInterceptCapability, hooks_cap]
-    inner_caps = capability.capabilities
-    tool_intercept_cap = inner_caps[0]  # _ToolInterceptCapability is first
+    # ToolInterceptCapability handles tool interception directly
+    tool_intercept_cap = capability
 
     # Mock the hook manager's methods to track calls
     with (
@@ -496,9 +492,8 @@ async def test_confirmation_works_for_mcp_tools_mode_always(
     mock_agent._hook_manager.agent_name = "test-agent"
     mock_agent._hook_manager._agent = mock_agent
 
-    capability = mock_agent._hook_manager.as_capability()
-    inner_caps = capability.capabilities
-    tool_intercept_cap = inner_caps[0]
+    capability = ToolInterceptCapability(hook_manager=mock_agent._hook_manager)
+    tool_intercept_cap = capability
 
     # Mock _get_confirmation_mode to return "always"
     mock_toolset = MagicMock()
@@ -523,8 +518,12 @@ async def test_no_double_firing_when_old_agenthooks_active(
 ) -> None:
     """No double-firing when old AgentHooks is active AND capability chain is active.
 
-    Verifies that as_capability() strips hooks_cap's after_tool_execute and
-    before_tool_execute to prevent double-firing, per Decision 2.
+    Verifies that as_capability() returns a ToolInterceptCapability directly
+    (not a CombinedCapability wrapping AgentHooks.as_capability()). This
+    prevents double-firing because the legacy Hooks callbacks are never
+    registered in the capability chain — only ToolInterceptCapability fires
+    tool hooks, delegating to AgentHooks.run_pre_tool_hooks() /
+    run_post_tool_hooks().
     """
     hook_fire_count: list[str] = []
 
@@ -549,25 +548,12 @@ async def test_no_double_firing_when_old_agenthooks_active(
     mock_agent._hook_manager.agent_name = "test-agent"
     mock_agent._hook_manager._agent = mock_agent
 
-    capability = mock_agent._hook_manager.as_capability()
+    capability = ToolInterceptCapability(hook_manager=mock_agent._hook_manager)
 
-    # Verify it's a CombinedCapability
-    assert isinstance(capability, CombinedCapability)
-
-    # The hooks_cap (second in the list) should have its
-    # before_tool_execute and after_tool_execute stripped
-    hooks_cap = capability.capabilities[1]
-    assert isinstance(hooks_cap, Hooks)
-
-    # _registry should have empty lists for tool execute callbacks
-    assert hooks_cap._registry.get("before_tool_execute", []) == []
-    assert hooks_cap._registry.get("after_tool_execute", []) == []
-    # before_run and after_run should also be stripped
-    assert hooks_cap._registry.get("before_run", []) == []
-    assert hooks_cap._registry.get("after_run", []) == []
-
-    # The _ToolInterceptCapability (first in the list) should be the sole
-    # owner of tool hook execution
-    tool_intercept_cap = capability.capabilities[0]
-    assert hasattr(tool_intercept_cap, "before_tool_execute")
-    assert hasattr(tool_intercept_cap, "after_tool_execute")
+    # ToolInterceptCapability handles tool interception directly,
+    # preventing double-firing because only ToolInterceptCapability fires
+    # tool hooks, delegating to AgentHooks.run_pre_tool_hooks() /
+    # run_post_tool_hooks().
+    assert isinstance(capability, ToolInterceptCapability)
+    assert hasattr(capability, "before_tool_execute")
+    assert hasattr(capability, "after_tool_execute")

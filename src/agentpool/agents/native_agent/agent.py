@@ -836,7 +836,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         provider=provider.name,
                     )
         # 2. Hooks capability — always registered (unified tool interception)
-        hooks_capability = self._hook_manager.as_capability()
+        from agentpool.agents.native_agent.tool_intercept import ToolInterceptCapability
+
+        hooks_capability = ToolInterceptCapability(hook_manager=self._hook_manager)
         tool_capabilities.append(hooks_capability)
         # 3. Deferred tool bridge: intercepts deferred tool calls before
         #    approval_bridge can resolve them. Block-strategy calls are
@@ -1218,6 +1220,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             prompts=prompts,  # type: ignore[arg-type]
             run_ctx=run_ctx,
             message_history=message_history,
+            hooks=self.hooks,
         )
 
     async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:

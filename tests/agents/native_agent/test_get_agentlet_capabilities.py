@@ -65,10 +65,8 @@ def mock_provider_with_instructions() -> MagicMock:
 
 @pytest.fixture
 def mock_hook_manager() -> MagicMock:
-    """Mock hook manager with hooks capability."""
+    """Mock hook manager for NativeAgentHookManager."""
     hook_mgr = MagicMock()
-    hooks_cap = MagicMock()
-    hook_mgr.as_capability.return_value = hooks_cap
     hook_mgr.has_hooks.return_value = True
     return hook_mgr
 
@@ -124,7 +122,7 @@ async def test_get_agentlet_collects_tool_provider_capabilities(
 
 
 # ---------------------------------------------------------------------------
-# Test: Hooks capability is created via hook_manager.as_capability()
+# Test: Hooks capability is created via ToolInterceptCapability
 # ---------------------------------------------------------------------------
 
 
@@ -133,18 +131,25 @@ async def test_get_agentlet_creates_hooks_capability(
     mock_agent: Agent[Any],
     mock_hook_manager: MagicMock,
 ) -> None:
-    """Hooks capability created via hook_manager.as_capability()."""
+    """Hooks capability created via ToolInterceptCapability construction."""
     mock_agent._hook_manager = mock_hook_manager
+    hooks_cap = MagicMock()
 
-    with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
+    with (
+        patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent,
+        patch(
+            "agentpool.agents.native_agent.tool_intercept.ToolInterceptCapability",
+            return_value=hooks_cap,
+        ) as mock_ti_class,
+    ):
         mock_pydantic_agent.return_value = MagicMock()
         await mock_agent.get_agentlet(None, None, None)
 
-        mock_hook_manager.as_capability.assert_called_once()
+        mock_ti_class.assert_called_once_with(hook_manager=mock_hook_manager)
 
         call_kwargs = mock_pydantic_agent.call_args.kwargs
         capabilities = call_kwargs.get("capabilities", []) or []
-        assert mock_hook_manager.as_capability.return_value in capabilities
+        assert hooks_cap in capabilities
 
 
 # ---------------------------------------------------------------------------
@@ -157,31 +162,37 @@ async def test_get_agentlet_uses_hook_manager_capability_directly(
     mock_agent: Agent[Any],
     mock_hook_manager: MagicMock,
 ) -> None:
-    """HookManager.as_capability() is used directly when event_bus is available.
+    """ToolInterceptCapability is constructed directly with the hook manager.
 
     The native agent run loop already publishes RunStartedEvent,
     ToolCallStartEvent, and ToolCallCompleteEvent, so no adapter wrapping is
     needed.
     """
     mock_agent._hook_manager = mock_hook_manager
+    hooks_cap = MagicMock()
 
     # Create run_ctx with event_bus (previously triggered adapter wrapping)
     event_bus = EventBus()
     run_ctx = AgentRunContext(session_id="test-session", event_bus=event_bus)
 
-    with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
+    with (
+        patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent,
+        patch(
+            "agentpool.agents.native_agent.tool_intercept.ToolInterceptCapability",
+            return_value=hooks_cap,
+        ) as mock_ti_class,
+    ):
         mock_pydantic_agent.return_value = MagicMock()
         await mock_agent.get_agentlet(None, None, None, run_ctx=run_ctx)
 
-        # Verify hook_manager.as_capability was called
-        mock_hook_manager.as_capability.assert_called_once()
+        # Verify ToolInterceptCapability was constructed with hook_manager
+        mock_ti_class.assert_called_once_with(hook_manager=mock_hook_manager)
 
-        # The raw hook_manager capability should be used directly (no adapter wrapping)
+        # The raw hooks capability should be used directly (no adapter wrapping)
         call_kwargs = mock_pydantic_agent.call_args.kwargs
         capabilities = call_kwargs.get("capabilities", []) or []
-        hooks_cap = mock_hook_manager.as_capability.return_value
         assert hooks_cap in capabilities, (
-            "Raw HookManager capability should be used directly (no adapter wrapping)"
+            "ToolInterceptCapability should be used directly (no adapter wrapping)"
         )
 
 
@@ -296,6 +307,7 @@ async def test_get_agentlet_passes_capabilities_to_pydantic_agent(
     mock_agent._hook_manager = mock_hook_manager
     mock_agent.mcp = mock_mcp_manager
     mock_agent._builtin_tools = [MagicMock()]
+    hooks_cap = MagicMock()
 
     with (
         patch.object(
@@ -304,6 +316,10 @@ async def test_get_agentlet_passes_capabilities_to_pydantic_agent(
             return_value=[mock_history_processor],
         ),
         patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent,
+        patch(
+            "agentpool.agents.native_agent.tool_intercept.ToolInterceptCapability",
+            return_value=hooks_cap,
+        ),
     ):
         mock_pydantic_agent.return_value = MagicMock()
         await mock_agent.get_agentlet(None, None, None)
@@ -313,7 +329,7 @@ async def test_get_agentlet_passes_capabilities_to_pydantic_agent(
 
         # Verify all capability types are present
         assert mock_provider_with_capability.as_capability.return_value in capabilities
-        assert mock_hook_manager.as_capability.return_value in capabilities
+        assert hooks_cap in capabilities
         assert any(cap in capabilities for cap in mock_mcp_manager.as_capability.return_value)
         assert any(isinstance(cap, ProcessHistory) for cap in capabilities)
         assert any(isinstance(cap, NativeTool) for cap in capabilities)

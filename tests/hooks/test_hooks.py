@@ -51,56 +51,72 @@ def modify_input_hook(**kwargs) -> HookResult:
     return {"decision": "allow", "modified_input": {"modified": True}}
 
 
-# Tests for pre_run hooks
+# Tests for pre_turn hooks
 
 
-async def test_pre_run_hook_allow():
-    """Test pre-run hook that allows execution."""
+async def test_pre_turn_hook_allow():
+    """Pre-turn hooks do not fire in standalone native mode.
+
+    Native agents fire pre_turn/post_turn hooks via HookAwareTurn in
+    NativeTurn.execute() (SessionPool path). Standalone runs (agent.run())
+    no longer fire these hooks. See test_hook_smoke_matrix.py for
+    SessionPool coverage.
+    """
     reset_hook_state()
 
-    hooks = AgentHooks(pre_run=[CallableHook(event="pre_run", fn=allow_hook)])
+    hooks = AgentHooks(pre_turn=[CallableHook(event="pre_turn", fn=allow_hook)])
     agent = Agent(model="test", hooks=hooks)
 
     async with agent:
         result = await agent.run("Hello")
 
-    assert len(hook_state["calls"]) == 1
-    assert hook_state["calls"][0] == ("allow", "pre_run")
-    assert result.content is not None  # Test model returns some output
+    # Hooks are not fired in standalone native mode
+    assert len(hook_state["calls"]) == 0
+    assert result.content is not None
 
 
-async def test_pre_run_hook_deny():
-    """Test pre-run hook that blocks execution gracefully."""
+async def test_pre_turn_hook_deny():
+    """Pre-turn deny does not block in standalone native mode.
+
+    Native agents fire pre_turn/post_turn hooks via HookAwareTurn in
+    NativeTurn.execute() (SessionPool path). Standalone runs (agent.run())
+    no longer fire these hooks. See test_hook_smoke_matrix.py for
+    SessionPool coverage.
+    """
     reset_hook_state()
 
-    hooks = AgentHooks(pre_run=[CallableHook(event="pre_run", fn=deny_hook)])
+    hooks = AgentHooks(pre_turn=[CallableHook(event="pre_turn", fn=deny_hook)])
     agent = Agent(model="test", hooks=hooks)
 
     async with agent:
         result = await agent.run("Hello")
 
-    assert result is not None  # graceful return, not exception
-    assert len(hook_state["calls"]) == 1
-    assert hook_state["calls"][0] == ("deny", "pre_run")
+    # Hooks are not fired in standalone native mode, so run proceeds
+    assert result is not None
+    assert len(hook_state["calls"]) == 0
 
 
-# Tests for post_run hooks
+# Tests for post_turn hooks
 
 
-async def test_post_run_hook():
-    """Test post-run hook receives result."""
+async def test_post_turn_hook():
+    """Post-turn hooks do not fire in standalone native mode.
+
+    Native agents fire pre_turn/post_turn hooks via HookAwareTurn in
+    NativeTurn.execute() (SessionPool path). Standalone runs (agent.run())
+    no longer fire these hooks. See test_hook_smoke_matrix.py for
+    SessionPool coverage.
+    """
     reset_hook_state()
 
-    hooks = AgentHooks(post_run=[CallableHook(event="post_run", fn=record_result_hook)])
+    hooks = AgentHooks(post_turn=[CallableHook(event="post_turn", fn=record_result_hook)])
     agent = Agent(model="test", hooks=hooks)
 
     async with agent:
         await agent.run("Hello")
 
-    assert len(hook_state["results"]) == 1
-    assert "Hello" in str(hook_state["results"][0]["prompt"])
-    assert hook_state["results"][0]["result"] is not None
-    assert hook_state["results"][0]["event"] == "post_run"
+    # Hooks are not fired in standalone native mode
+    assert len(hook_state["results"]) == 0
 
 
 # Tests for pre_tool_use hooks
@@ -156,8 +172,8 @@ def test_agent_hooks_has_hooks():
     """Test has_hooks method."""
     empty = AgentHooks()
     assert not empty.has_hooks()
-    with_pre_run = AgentHooks(pre_run=[CallableHook(event="pre_run", fn=allow_hook)])
-    assert with_pre_run.has_hooks()
+    with_pre_turn = AgentHooks(pre_turn=[CallableHook(event="pre_turn", fn=allow_hook)])
+    assert with_pre_turn.has_hooks()
 
 
 def test_agent_hooks_repr():
@@ -166,10 +182,10 @@ def test_agent_hooks_repr():
     assert repr(empty) == "AgentHooks(empty)"
 
     with_hooks = AgentHooks(
-        pre_run=[CallableHook(event="pre_run", fn=allow_hook)],
+        pre_turn=[CallableHook(event="pre_turn", fn=allow_hook)],
         post_tool_use=[CallableHook(event="post_tool_use", fn=allow_hook)],
     )
-    assert "pre_run=1" in repr(with_hooks)
+    assert "pre_turn=1" in repr(with_hooks)
     assert "post_tool_use=1" in repr(with_hooks)
 
 
@@ -177,36 +193,51 @@ def test_agent_hooks_repr():
 
 
 async def test_multiple_hooks_all_allow():
-    """Test multiple hooks all allowing."""
+    """Multiple pre_turn hooks do not fire in standalone native mode.
+
+    Native agents fire pre_turn/post_turn hooks via HookAwareTurn in
+    NativeTurn.execute() (SessionPool path). Standalone runs (agent.run())
+    no longer fire these hooks. See test_hook_smoke_matrix.py for
+    SessionPool coverage.
+    """
     reset_hook_state()
 
     hooks = AgentHooks(
-        pre_run=[
-            CallableHook(event="pre_run", fn=allow_hook),
-            CallableHook(event="pre_run", fn=allow_hook),
+        pre_turn=[
+            CallableHook(event="pre_turn", fn=allow_hook),
+            CallableHook(event="pre_turn", fn=allow_hook),
         ]
     )
     async with Agent(model="test", hooks=hooks) as agent:
         result = await agent.run("Hello")
 
-    assert len(hook_state["calls"]) == 2
+    # Hooks are not fired in standalone native mode
+    assert len(hook_state["calls"]) == 0
     assert result.content is not None
 
 
 async def test_multiple_hooks_one_denies():
-    """Test that one denying hook blocks execution gracefully."""
+    """Multiple hooks with one deny do not fire in standalone native mode.
+
+    Native agents fire pre_turn/post_turn hooks via HookAwareTurn in
+    NativeTurn.execute() (SessionPool path). Standalone runs (agent.run())
+    no longer fire these hooks. See test_hook_smoke_matrix.py for
+    SessionPool coverage.
+    """
     reset_hook_state()
 
     hooks = AgentHooks(
-        pre_run=[
-            CallableHook(event="pre_run", fn=allow_hook),
-            CallableHook(event="pre_run", fn=deny_hook),
+        pre_turn=[
+            CallableHook(event="pre_turn", fn=allow_hook),
+            CallableHook(event="pre_turn", fn=deny_hook),
         ]
     )
     async with Agent(model="test", hooks=hooks) as agent:
         result = await agent.run("Hello")
 
-    assert result is not None  # graceful return, not exception
+    # Hooks are not fired in standalone native mode, so run proceeds
+    assert result is not None
+    assert len(hook_state["calls"]) == 0
 
 
 # Tests for input_match

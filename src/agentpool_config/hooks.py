@@ -243,20 +243,25 @@ class HooksConfig(Schema):
     modify inputs, or trigger side effects.
 
     Currently supported events:
-    - pre_run / post_run: Before/after agent.run() processes a prompt
+    - pre_turn / post_turn: Before/after agent.run() processes a prompt
     - pre_tool_use / post_tool_use: Before/after a tool is called
     """
 
+    model_config = ConfigDict(
+        extra="forbid",
+        use_attribute_docstrings=True,
+    )
+
     # Message flow events
-    pre_run: list[HookConfig] = Field(
+    pre_turn: list[HookConfig] = Field(
         default_factory=list,
-        title="Pre-run hooks",
+        title="Pre-turn hooks",
     )
     """Hooks executed before agent.run() processes a prompt."""
 
-    post_run: list[HookConfig] = Field(
+    post_turn: list[HookConfig] = Field(
         default_factory=list,
-        title="Post-run hooks",
+        title="Post-turn hooks",
     )
     """Hooks executed after agent.run() completes."""
 
@@ -282,8 +287,8 @@ class HooksConfig(Schema):
         from agentpool.hooks import AgentHooks
 
         return AgentHooks(
-            pre_run=[cfg.get_hook("pre_run") for cfg in self.pre_run],
-            post_run=[cfg.get_hook("post_run") for cfg in self.post_run],
+            pre_turn=[cfg.get_hook("pre_turn") for cfg in self.pre_turn],
+            post_turn=[cfg.get_hook("post_turn") for cfg in self.post_turn],
             pre_tool_use=[cfg.get_hook("pre_tool_use") for cfg in self.pre_tool_use],
             post_tool_use=[cfg.get_hook("post_tool_use") for cfg in self.post_tool_use],
             _warn=False,

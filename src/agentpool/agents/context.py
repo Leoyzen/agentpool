@@ -94,6 +94,14 @@ class AgentRunContext:
     cancelled: bool = False
     """Whether the run has been cancelled."""
 
+    hooks_fired: set[str] = field(default_factory=set)
+    """Tracks which hook events have fired this turn to prevent double-firing.
+
+    Cleared at the start of each turn by ``RunHandle.start()`` and
+    ``_run_stream_once()``. Entries are event names like ``"pre_turn"``,
+    ``"post_turn"``, ``"pre_tool_use:{tool_call_id}"``.
+    """
+
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     """Unique identifier for this run."""
 

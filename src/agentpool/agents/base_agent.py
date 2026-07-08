@@ -1285,6 +1285,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
         from agentpool.messaging import ChatMessage
 
+        # Clear hooks_fired so the new turn's hooks can fire
+        # even if the previous turn already fired them.
+        run_ctx.hooks_fired.clear()
+
         # Convert prompts to standard UserContent format
         converted_prompts = await convert_prompts(prompts)
         # Prepend any staged content
@@ -1324,16 +1328,19 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             conversation.add_chat_messages([user_msg])
 
         try:
-            # Execute pre-run hooks
-            if self.hooks:
-                pre_run_result = await self.hooks.run_pre_run_hooks(
+            # Execute pre-turn hooks (guarded against double-firing with HookAwareTurn)
+            # Native agents fire hooks via HookAwareTurn in NativeTurn.execute();
+            # only ACP standalone path still uses this old hook firing.
+            if self.AGENT_TYPE != "native" and self.hooks and "pre_turn" not in run_ctx.hooks_fired:
+                run_ctx.hooks_fired.add("pre_turn")
+                pre_turn_result = await self.hooks.run_pre_turn_hooks(
                     agent_name=self.name,
                     prompt=user_msg.content
                     if isinstance(user_msg.content, str)
                     else str(user_msg.content),
                     session_id=session_id,
                 )
-                if pre_run_result.get("decision") == "deny":
+                if pre_turn_result.get("decision") == "deny":
                     run_ctx.cancelled = True
                     cancel_msg = ChatMessage(
                         content="",
@@ -1382,14 +1389,21 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # TaskGroup cancellation from interrupting hooks/routing/persistence
         if final_message is not None:
             with anyio.CancelScope(shield=True):
-                # Execute post-run hooks
-                if self.hooks:
+                # Execute post-turn hooks (guarded against double-firing with HookAwareTurn)
+                # Native agents fire hooks via HookAwareTurn in NativeTurn.execute();
+                # only ACP standalone path still uses this old hook firing.
+                if (
+                    self.AGENT_TYPE != "native"
+                    and self.hooks
+                    and "post_turn" not in run_ctx.hooks_fired
+                ):
+                    run_ctx.hooks_fired.add("post_turn")
                     prompt_str = (
                         user_msg.content
                         if isinstance(user_msg.content, str)
                         else str(user_msg.content)
                     )
-                    await self.hooks.run_post_run_hooks(
+                    await self.hooks.run_post_turn_hooks(
                         agent_name=self.name,
                         prompt=prompt_str,
                         result=final_message.content,
