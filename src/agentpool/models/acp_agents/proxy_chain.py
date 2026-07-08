@@ -17,7 +17,7 @@ class BaseProxyConfig(BaseModel):
         Currently rejects all types since no concrete proxy types exist yet.
         T17 will convert this to a proper discriminated union.
         """
-        known_types: frozenset[str] = frozenset()
+        known_types: frozenset[str] = frozenset({"hook", "context_injection", "tool_provider"})
         if self.type not in known_types:
             msg = f"Unknown proxy type: {self.type}"
             raise ValueError(msg)

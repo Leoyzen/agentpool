@@ -120,7 +120,7 @@ class HookProxy:
                         0,
                         {"type": "text", "text": additional_context},
                     )
-                    params["content"] = content_list
+                    params[key] = content_list
         return params
 
     async def _handle_post_turn(

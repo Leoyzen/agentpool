@@ -363,7 +363,8 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             # Initialize and create session using Conductor's connection.
             assert self._conductor is not None
             assert self._conductor.process is not None
-            process = self._conductor.process
+            self._process = self._conductor.process
+            process = self._process
             try:
                 await run_with_process_monitor(
                     process, self._initialize, context="ACP initialization"
@@ -372,7 +373,11 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                     process, self._create_session, context="ACP session creation"
                 )
             except SubprocessError as e:
+                await self._cleanup()
                 raise RuntimeError(str(e)) from e
+            except Exception:
+                await self._cleanup()
+                raise
         else:
             # Direct mode: ACPAgent manages its own subprocess.
             process = await self._start_process()

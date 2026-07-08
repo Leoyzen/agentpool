@@ -576,6 +576,7 @@ class Conductor(MessageNode[Any, str]):
         self,
         method: str,
         params: dict[str, Any],
+        caller_meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Route a message through the proxy chain to the terminal agent.
 
@@ -599,6 +600,7 @@ class Conductor(MessageNode[Any, str]):
         Args:
             method: JSON-RPC method name (e.g. ``"session/prompt"``).
             params: Method parameters.
+            caller_meta: Optional metadata from caller (agent_name, prompt, etc.).
 
         Returns:
             The response dict from the terminal agent, or an error
@@ -612,10 +614,13 @@ class Conductor(MessageNode[Any, str]):
                 "Cannot route message: connection not established",
             )
 
+        # Merge caller-provided meta with routing metadata
         meta: dict[str, Any] = {
             "method": method,
             "chain_length": len(self._proxy_chain),
         }
+        if caller_meta is not None:
+            meta.update(caller_meta)
 
         # If any proxy intercepts this method, forward through
         # the proxy chain first. Proxies may modify params or
@@ -690,7 +695,7 @@ class Conductor(MessageNode[Any, str]):
         """
         direction = meta.get("direction", "forward")
         if direction == "forward":
-            return await self._route_to_terminal(method, params)
+            return await self._route_to_terminal(method, params, meta)
         # Reverse direction: responses flowing back from terminal
         # agent through proxies to the client. Currently, responses
         # are returned directly by _route_to_terminal. Full reverse
