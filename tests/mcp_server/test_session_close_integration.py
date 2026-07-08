@@ -2,7 +2,7 @@
 
 Verifies the full lifecycle: ``get_or_create_session`` →
 ``update_session_snapshot`` → ``as_capability`` → ``cleanup_session``
-leaves ``_session_contexts`` empty.
+leaves session contexts empty.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ async def test_integration_create_run_close() -> None:
     try:
         # 1. Create session context
         manager.get_or_create_session(session_id)
-        assert session_id in manager._session_contexts
+        assert manager.get_session_context(session_id) is not None
 
         # 2. Store a snapshot (empty — no real servers needed)
         snapshot = McpConfigSnapshot()
@@ -41,13 +41,13 @@ async def test_integration_create_run_close() -> None:
         assert caps == []
 
         # Session context must still exist during the turn
-        assert session_id in manager._session_contexts
+        assert manager.get_session_context(session_id) is not None
 
         # 4. Close the session
         await manager.cleanup_session(session_id)
 
         # 5. Verify the session context has been removed
-        assert session_id not in manager._session_contexts
+        assert manager.get_session_context(session_id) is None
     finally:
         # Ensure cleanup even on assertion failure
         await manager.cleanup_session(session_id)
@@ -69,7 +69,7 @@ async def test_integration_close_recreate_fresh() -> None:
     try:
         # 1. Create initial session context
         original_ctx = manager.get_or_create_session(session_id)
-        assert session_id in manager._session_contexts
+        assert manager.get_session_context(session_id) is not None
 
         # 2. Store original resource references
         original_toolset_cache = original_ctx.toolset_cache
@@ -83,11 +83,11 @@ async def test_integration_close_recreate_fresh() -> None:
 
         # 4. Close the session
         await manager.cleanup_session(session_id)
-        assert session_id not in manager._session_contexts
+        assert manager.get_session_context(session_id) is None
 
         # 5. Recreate with the same session ID
         new_ctx = manager.get_or_create_session(session_id)
-        assert session_id in manager._session_contexts
+        assert manager.get_session_context(session_id) is not None
 
         # 6. The new _SessionContext is a different object
         assert new_ctx is not original_ctx
