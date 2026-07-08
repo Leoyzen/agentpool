@@ -21,7 +21,9 @@ from __future__ import annotations
 from dataclasses import KW_ONLY, dataclass
 from typing import TYPE_CHECKING, Any
 
+from pydantic_ai import ModelRetry
 from pydantic_ai.capabilities.abstract import AbstractCapability
+from pydantic_ai.exceptions import ApprovalRequired, CallDeferred, ToolRetryError
 
 from agentpool.log import get_logger
 
@@ -127,8 +129,23 @@ class ToolInterceptCapability(AbstractCapability[Any]):
             agent_ctx._tool_start_times = tool_start_times
         tool_start_times[call.tool_call_id] = perf_counter()
 
+        from agentpool.tasks.exceptions import RunAbortedError, ToolSkippedError
+
         try:
             result = await handler(args)
+        except (
+            # Pydantic-AI control-flow exceptions — must propagate to
+            # _run_execute_hooks and the framework's retry/defer/approval logic.
+            CallDeferred,
+            ApprovalRequired,
+            ToolRetryError,
+            ModelRetry,
+            # AgentPool control-flow exceptions — must propagate to
+            # NativeTurn.execute()'s except handlers.
+            RunAbortedError,
+            ToolSkippedError,
+        ):
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Tool execution failed",

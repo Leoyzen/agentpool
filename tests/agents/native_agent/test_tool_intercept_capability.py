@@ -211,6 +211,203 @@ async def test_wrap_tool_execute_catches_exception(
 
 
 # ============================================================================
+# 5.4.1: wrap_tool_execute() re-raises RunAbortedError (control-flow exception)
+# ============================================================================
+
+
+@pytest.mark.anyio
+async def test_wrap_tool_execute_reraises_run_aborted_error(
+    mock_hook_manager: MagicMock,
+) -> None:
+    """wrap_tool_execute() must re-raise RunAbortedError, not swallow it.
+
+    RunAbortedError is a control-flow exception raised when the user cancels
+    an elicitation/question (e.g. question_for_user cancel). It must propagate
+    up to NativeTurn.execute()'s except RunAbortedError handler to abort the
+    run. If swallowed here, the LLM receives it as a tool error and continues
+    executing.
+    """
+    from agentpool.tasks.exceptions import RunAbortedError
+
+    cap = make_capability(mock_hook_manager)
+    ctx = make_run_context()
+    call = make_tool_call("question_for_user")
+    tool_def = make_tool_def("question_for_user")
+    args: dict[str, Any] = {}
+
+    async def aborting_handler(a: dict[str, Any]) -> Any:
+        raise RunAbortedError("User cancelled the questionnaire")
+
+    with pytest.raises(RunAbortedError, match="User cancelled"):
+        await cap.wrap_tool_execute(
+            ctx, call=call, tool_def=tool_def, args=args, handler=aborting_handler
+        )
+
+
+# ============================================================================
+# 5.4.2: wrap_tool_execute() re-raises ModelRetry (pydantic-ai control-flow)
+# ============================================================================
+
+
+@pytest.mark.anyio
+async def test_wrap_tool_execute_reraises_model_retry(
+    mock_hook_manager: MagicMock,
+) -> None:
+    """wrap_tool_execute() must re-raise ModelRetry, not swallow it.
+
+    ModelRetry is pydantic-ai's mechanism to ask the LLM to retry. Tools raise
+    it for fixable errors (e.g. invalid questionnaire XML, elicitation ErrorData).
+    If swallowed, the LLM sees a tool success with error text instead of a retry
+    signal — semantically different behavior.
+    """
+    cap = make_capability(mock_hook_manager)
+    ctx = make_run_context()
+    call = make_tool_call("question_for_user")
+    tool_def = make_tool_def("question_for_user")
+    args: dict[str, Any] = {}
+
+    async def retrying_handler(a: dict[str, Any]) -> Any:
+        raise ModelRetry("Elicitation failed: server error")
+
+    with pytest.raises(ModelRetry, match="Elicitation failed"):
+        await cap.wrap_tool_execute(
+            ctx, call=call, tool_def=tool_def, args=args, handler=retrying_handler
+        )
+
+
+# ============================================================================
+# 5.4.3: wrap_tool_execute() re-raises ToolSkippedError (control-flow exception)
+# ============================================================================
+
+
+@pytest.mark.anyio
+async def test_wrap_tool_execute_reraises_tool_skipped_error(
+    mock_hook_manager: MagicMock,
+) -> None:
+    """wrap_tool_execute() must re-raise ToolSkippedError, not swallow it.
+
+    ToolSkippedError is raised when a pre-tool hook denies execution (e.g.
+    MCP tool_bridge). It signals the tool was skipped, not failed — swallowing
+    it converts a skip signal into a tool error response.
+    """
+    from agentpool.tasks.exceptions import ToolSkippedError
+
+    cap = make_capability(mock_hook_manager)
+    ctx = make_run_context()
+    call = make_tool_call("mcp_tool")
+    tool_def = make_tool_def("mcp_tool")
+    args: dict[str, Any] = {}
+
+    async def skipping_handler(a: dict[str, Any]) -> Any:
+        raise ToolSkippedError("Tool mcp_tool blocked by hook")
+
+    with pytest.raises(ToolSkippedError, match="blocked"):
+        await cap.wrap_tool_execute(
+            ctx, call=call, tool_def=tool_def, args=args, handler=skipping_handler
+        )
+
+
+# ============================================================================
+# 5.4.4: wrap_tool_execute() re-raises CallDeferred (pydantic-ai deferred execution)
+# ============================================================================
+
+
+@pytest.mark.anyio
+async def test_wrap_tool_execute_reraises_call_deferred(
+    mock_hook_manager: MagicMock,
+) -> None:
+    """wrap_tool_execute() must re-raise CallDeferred, not swallow it.
+
+    CallDeferred is raised by handle_elicitation() when an MCP tool's
+    elicitation can't be resolved synchronously. It signals pydantic-ai to
+    checkpoint the run and resume later. If swallowed, deferred execution
+    breaks — the LLM receives a tool error instead of a deferred signal.
+    """
+    from pydantic_ai.exceptions import CallDeferred
+
+    cap = make_capability(mock_hook_manager)
+    ctx = make_run_context()
+    call = make_tool_call("question_for_user")
+    tool_def = make_tool_def("question_for_user")
+    args: dict[str, Any] = {}
+
+    async def deferring_handler(a: dict[str, Any]) -> Any:
+        raise CallDeferred
+
+    with pytest.raises(CallDeferred):
+        await cap.wrap_tool_execute(
+            ctx, call=call, tool_def=tool_def, args=args, handler=deferring_handler
+        )
+
+
+# ============================================================================
+# 5.4.5: wrap_tool_execute() re-raises ApprovalRequired (human-in-the-loop)
+# ============================================================================
+
+
+@pytest.mark.anyio
+async def test_wrap_tool_execute_reraises_approval_required(
+    mock_hook_manager: MagicMock,
+) -> None:
+    """wrap_tool_execute() must re-raise ApprovalRequired, not swallow it.
+
+    ApprovalRequired is raised by ApprovalRequiredToolset when a tool requires
+    human approval before execution. It signals pydantic-ai to pause and request
+    approval. If swallowed, the approval flow breaks.
+    """
+    from pydantic_ai.exceptions import ApprovalRequired
+
+    cap = make_capability(mock_hook_manager)
+    ctx = make_run_context()
+    call = make_tool_call("dangerous_tool")
+    tool_def = make_tool_def("dangerous_tool")
+    args: dict[str, Any] = {"path": "/etc/passwd"}
+
+    async def approval_handler(a: dict[str, Any]) -> Any:
+        raise ApprovalRequired
+
+    with pytest.raises(ApprovalRequired):
+        await cap.wrap_tool_execute(
+            ctx, call=call, tool_def=tool_def, args=args, handler=approval_handler
+        )
+
+
+# ============================================================================
+# 5.4.6: wrap_tool_execute() re-raises ToolRetryError (pydantic-ai retry signal)
+# ============================================================================
+
+
+@pytest.mark.anyio
+async def test_wrap_tool_execute_reraises_tool_retry_error(
+    mock_hook_manager: MagicMock,
+) -> None:
+    """wrap_tool_execute() must re-raise ToolRetryError, not swallow it.
+
+    ToolRetryError is what ModelRetry becomes after _raw_execute converts it.
+    In the normal flow (wrap_validation_errors=True), ModelRetry from tool
+    bodies is converted to ToolRetryError before reaching wrap_tool_execute.
+    This is the actual retry signal that pydantic-ai's _run_execute_hooks
+    expects to propagate.
+    """
+    from pydantic_ai.exceptions import ToolRetryError
+    from pydantic_ai.messages import RetryPromptPart
+
+    cap = make_capability(mock_hook_manager)
+    ctx = make_run_context()
+    call = make_tool_call("question_for_user")
+    tool_def = make_tool_def("question_for_user")
+    args: dict[str, Any] = {}
+
+    async def retrying_handler(a: dict[str, Any]) -> Any:
+        raise ToolRetryError(RetryPromptPart(content="Invalid questionnaire format, please retry"))
+
+    with pytest.raises(ToolRetryError, match="Invalid questionnaire"):
+        await cap.wrap_tool_execute(
+            ctx, call=call, tool_def=tool_def, args=args, handler=retrying_handler
+        )
+
+
+# ============================================================================
 # 5.5: wrap_tool_execute() passes through successful results unchanged
 # ============================================================================
 
