@@ -144,7 +144,9 @@ class HookAwareTurn:
             env=self._hook_env,
         )
 
-    async def _fire_post_turn_hooks(self, result: ChatMessage[Any] | None) -> HookResult | None:
+    async def _fire_post_turn_hooks(
+        self, result: ChatMessage[Any] | None, duration_ms: float = 0.0
+    ) -> HookResult | None:
         """Fire post_turn hooks if not already fired this turn.
 
         Must be called in a ``finally`` block by host classes to ensure
@@ -153,6 +155,8 @@ class HookAwareTurn:
         Args:
             result: The final chat message from the turn, or ``None`` if
                 the turn failed before producing one.
+            duration_ms: Elapsed wall-clock time for this turn in
+                milliseconds. Falls back to ``0.0`` when not provided.
 
         Returns:
             Combined :class:`HookResult`, or ``None`` if hooks are not
@@ -163,7 +167,6 @@ class HookAwareTurn:
         if "post_turn" in self._run_ctx.hooks_fired:
             return None
         self._run_ctx.hooks_fired.add("post_turn")
-        duration_ms = 0.0
         return await self._hooks.run_post_turn_hooks(
             agent_name=self._hook_agent_name,
             prompt=self._hook_prompt,
@@ -192,7 +195,10 @@ class HookAwareTurn:
         """
         if self._hooks is None:
             return None
-        guard_key = f"pre_tool_use:{tool_call_id}" if tool_call_id else f"pre_tool_use:{tool_name}"
+        if tool_call_id is not None:
+            guard_key = f"pre_tool_use:{tool_call_id}"
+        else:
+            guard_key = f"pre_tool_use:{tool_name}"
         if guard_key in self._run_ctx.hooks_fired:
             return None
         self._run_ctx.hooks_fired.add(guard_key)

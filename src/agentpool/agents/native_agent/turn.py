@@ -121,6 +121,7 @@ class NativeTurn(HookAwareTurn, Turn):
         Raises:
             asyncio.CancelledError: If the turn is cancelled mid-execution.
         """
+        turn_start = time.perf_counter()
         try:
             # Fire pre_turn hooks. If denied, cancel the turn immediately.
             pre_turn_result = await self._fire_pre_turn_hooks()
@@ -376,7 +377,9 @@ class NativeTurn(HookAwareTurn, Turn):
             logger.info("Yielding StreamCompleteEvent")
             yield StreamCompleteEvent(message=self._final_message)
         finally:
-            # Fire post_turn hooks even on error/cancellation.
+            # Fire post_turn hooks even on error/cancellation, with
+            # per-turn elapsed time.
             # _final_message may be None if the turn errored before
             # producing one — pass it as-is.
-            await self._fire_post_turn_hooks(self._final_message)
+            duration_ms = (time.perf_counter() - turn_start) * 1000
+            await self._fire_post_turn_hooks(self._final_message, duration_ms=duration_ms)
