@@ -186,8 +186,13 @@ def get_modes(
     return categories
 
 
-def to_finish_reason(stop_reason: StopReason) -> FinishReason:
-    return STOP_REASON_MAP.get(stop_reason, "stop")
+def to_finish_reason(stop_reason: str | None) -> FinishReason:
+    if stop_reason is None:
+        return "stop"
+    for key, value in STOP_REASON_MAP.items():
+        if key == stop_reason:
+            return value
+    return "stop"
 
 
 def convert_acp_locations(

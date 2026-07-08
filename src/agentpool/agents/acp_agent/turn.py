@@ -249,8 +249,16 @@ class ACPTurn(HookAwareTurn, Turn):
             )
             self._message_history = model_messages
 
+            # Get stop_reason from adapter and compute finish_reason
+            stop_reason = self._acp_client.stop_reason
+            from agentpool.agents.acp_agent.acp_converters import to_finish_reason
+
+            finish_reason = to_finish_reason(stop_reason)
+
             if final_msg is not None:
-                self._final_message = final_msg
+                from dataclasses import replace as dc_replace
+
+                self._final_message = dc_replace(final_msg, finish_reason=finish_reason)
             else:
                 from agentpool.messaging import ChatMessage
 
@@ -259,6 +267,7 @@ class ACPTurn(HookAwareTurn, Turn):
                     role="assistant",
                     message_id=str(uuid4()),
                     session_id=self._session_id,
+                    finish_reason="stop",
                 )
 
             yield StreamCompleteEvent(message=self._final_message)

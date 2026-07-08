@@ -30,46 +30,34 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from dataclasses import replace
 from datetime import datetime
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 import uuid
 
 import anyio
 from pydantic import HttpUrl
 from pydantic_ai import (
-    ModelRequest,
-    ModelResponse,
-    TextPart,
-    ToolReturnPart,
     UserContent,
-    UserPromptPart,
 )
 
 from acp import InitializeRequest
 from acp.agent import ACPAgentAPI
+from agentpool.agents.acp_agent.adapter import ACPClientAdapter
 from agentpool.agents.acp_agent.session_state import ACPState
 from agentpool.agents.acp_agent.turn import ACPTurn
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.events import (
     RunStartedEvent,
-    StreamCompleteEvent,
-    ToolCallCompleteEvent,
-    ToolResultMetadataEvent,
 )
-from agentpool.agents.events.processors import event_to_part
 from agentpool.agents.exceptions import (
     AgentNotInitializedError,
     UnknownCategoryError,
     UnknownModeError,
 )
 from agentpool.log import get_logger
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventEnvelope
 from agentpool.utils.subprocess_utils import SubprocessError, run_with_process_monitor
-from agentpool.utils.token_breakdown import calculate_usage_from_parts
 
 
 if TYPE_CHECKING:
@@ -79,7 +67,7 @@ if TYPE_CHECKING:
     from anyio.abc import Process
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
-    from pydantic_ai import ThinkingPart, ToolCallPart, UserContent
+    from pydantic_ai import UserContent
     from pydantic_ai.messages import ModelMessage
     from slashed import BaseCommand
     from tokonomics.model_discovery.model_info import ModelInfo
@@ -89,14 +77,13 @@ if TYPE_CHECKING:
     from acp.schema.capabilities import AgentCapabilities
     from acp.schema.mcp import McpServer
     from agentpool.agents.acp_agent.client_handler import ACPClientHandler
-    from agentpool.agents.acp_agent.turn import ACPClientProtocol
     from agentpool.agents.context import AgentRunContext
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
     from agentpool.common_types import AnyEventHandlerType
     from agentpool.delegation import AgentPool
     from agentpool.hooks import AgentHooks
-    from agentpool.messaging import MessageHistory
+    from agentpool.messaging import ChatMessage, MessageHistory
     from agentpool.models.acp_agents import BaseACPAgentConfig
     from agentpool.orchestrator.turn import Turn
     from agentpool.resource_providers import ResourceProvider
@@ -409,7 +396,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 self.log.exception("Error terminating ACP process")
             self._process = None
 
-    async def _stream_events(  # noqa: PLR0915
+    async def _stream_events(
         self,
         run_ctx: AgentRunContext,
         prompts: list[UserContent],
@@ -426,33 +413,18 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         wait_for_connections: bool | None = None,
         store_history: bool = True,
     ) -> AsyncIterator[RichAgentStreamEvent[str]]:
-        from agentpool.agents.acp_agent.acp_converters import (
-            convert_to_acp_content,
-            to_finish_reason,
-        )
+        """Stream events by delegating to ACPTurn.execute() via create_turn().
 
-        # Update input provider if provided
+        This is a thin wrapper preserved for backward compatibility.
+        The actual execution logic lives in ACPTurn.execute().
+        """
         if input_provider is not None and self._client_handler:
             self._client_handler._input_provider = input_provider
         if not self._api or not self._sdk_session_id or not self._state:
             raise AgentNotInitializedError
 
-        run_id = str(uuid.uuid4())
-        self._state.clear()
-        model_messages: list[ModelResponse | ModelRequest] = []
-        initial_request = ModelRequest(parts=[UserPromptPart(content=prompts)])
-        model_messages.append(initial_request)
-        current_response_parts: list[TextPart | ThinkingPart | ToolCallPart] = []
-        text_chunks: list[str] = []
-
         assert session_id is not None
-        yield RunStartedEvent(
-            session_id=session_id,
-            run_id=run_id,
-            agent_name=self.name,
-            parent_session_id=parent_session_id,
-        )
-        final_blocks = convert_to_acp_content(prompts)
+
         # Handle ephemeral execution (fork session if store_history=False)
         acp_session_id = self._sdk_session_id
         if not store_history and self._sdk_session_id:
@@ -460,144 +432,31 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             fork_response = await self._api.fork_session(self._sdk_session_id, cwd)
             acp_session_id = fork_response.session_id
             self.log.debug("Forked session", parent=self._sdk_session_id, fork=acp_session_id)
-        self.log.debug("Starting streaming prompt", num_blocks=len(final_blocks))
-        prompt_task = asyncio.create_task(self._api.prompt(acp_session_id, final_blocks))
-        self._prompt_task = prompt_task
 
-        async def poll_acp_events() -> AsyncIterator[RichAgentStreamEvent[str]]:
-            """Await prompt completion. T3 routes events via async queue; T4 removes this entirely."""
-            assert self._state
-            while not prompt_task.done():
-                await anyio.sleep(0.02)
-            return
-            yield  # pragma: no cover
-
-        tool_metadata: dict[str, dict[str, Any]] = {}
-
-        try:
-            agent_ctx = self.get_context(run_ctx=run_ctx, input_provider=input_provider)
-            async with self._tool_bridge.set_run_context(agent_ctx, prompt=prompts):
-                send_stream, receive_stream = anyio.create_memory_object_stream(
-                    max_buffer_size=1000
-                )
-
-                async def _forward_acp_events() -> None:
-                    try:
-                        async for event in poll_acp_events():
-                            try:
-                                await send_stream.send(event)
-                            except (anyio.ClosedResourceError, anyio.BrokenResourceError):
-                                return
-                    finally:
-                        await send_stream.aclose()
-
-                # Do NOT subscribe to run_ctx.event_bus here: in standalone mode
-                # the producer publishes _stream_events() output back into the
-                # same local EventBus, creating a self-echo infinite loop.
-                _bg_tasks: set[asyncio.Task[Any]] = set()
-                task_a = asyncio.create_task(_forward_acp_events())
-                _bg_tasks.add(task_a)
-                task_a.add_done_callback(_bg_tasks.discard)
-
-                try:
-                    async for raw_event in receive_stream:
-                        event = (
-                            raw_event.event if isinstance(raw_event, EventEnvelope) else raw_event
-                        )
-                        if isinstance(event, ToolResultMetadataEvent):
-                            tool_metadata[event.tool_call_id] = event.metadata
-                            continue
-                        if run_ctx.cancelled:
-                            self.log.info("Stream cancelled by user")
-                            break
-                        if isinstance(event, ToolCallCompleteEvent):
-                            enriched_event = event
-                            if not enriched_event.agent_name:
-                                enriched_event = replace(enriched_event, agent_name=self.name)
-                            if (
-                                enriched_event.metadata is None
-                                and enriched_event.tool_call_id in tool_metadata
-                            ):
-                                enriched_event = replace(
-                                    enriched_event,
-                                    metadata=tool_metadata[enriched_event.tool_call_id],
-                                )
-                            output_event = enriched_event
-                        else:
-                            output_event = event
-                        part = event_to_part(output_event)
-                        if isinstance(part, TextPart):
-                            text_chunks.append(part.content)
-                        if part and not isinstance(part, ToolReturnPart):
-                            current_response_parts.append(part)
-                        yield output_event
-                finally:
-                    for t in list(_bg_tasks):
-                        t.cancel()
-                    for t in list(_bg_tasks):
-                        try:
-                            await t
-                        except asyncio.CancelledError:
-                            pass
-                        except Exception:
-                            self.log.exception("Error during background task cleanup")
-        except asyncio.CancelledError:
-            self.log.info("Stream cancelled via task cancellation")
-            run_ctx.cancelled = True
-
-        if run_ctx.cancelled:
-            message = ChatMessage[str](
-                content="".join(text_chunks),
-                role="assistant",
-                name=self.name,
-                message_id=message_id or str(uuid.uuid4()),
-                session_id=session_id,
-                parent_id=user_msg.message_id,
-                model_name=self.model_name,
-                messages=model_messages,
-                metadata={},
-                finish_reason="stop",
-            )
-            yield StreamCompleteEvent(message=message)
-            self._prompt_task = None
-            return
-
-        response = await prompt_task
-        finish_reason = to_finish_reason(response.stop_reason)
-        if current_response_parts:
-            model_messages.append(
-                ModelResponse(
-                    parts=current_response_parts,
-                    finish_reason=finish_reason,
-                    model_name=self.model_name,
-                    provider_name=self._provider_type,
-                )
-            )
-
-        text_content = "".join(text_chunks)
-        usage, cost_info = await calculate_usage_from_parts(
-            input_parts=prompts,
-            response_parts=current_response_parts,
-            text_content=text_content,
-            model_name=self.model_name,
-            provider=self._provider_type,
+        # Delegate to ACPTurn.execute() via create_turn()
+        assert self._api is not None
+        assert self._client_handler is not None
+        turn = self.create_turn(
+            prompts=prompts,
+            run_ctx=run_ctx,
+            message_history=message_history,  # type: ignore[arg-type]
         )
 
-        message = ChatMessage[str](
-            content=text_content,
-            role="assistant",
-            name=self.name,
-            message_id=message_id or str(uuid.uuid4()),
+        run_id = str(uuid.uuid4())
+        yield RunStartedEvent(
             session_id=session_id,
-            parent_id=user_msg.message_id,
-            model_name=self.model_name,
-            messages=model_messages,
-            metadata={},
-            finish_reason=finish_reason,
-            usage=usage,
-            cost_info=cost_info,
+            run_id=run_id,
+            agent_name=self.name,
+            parent_session_id=parent_session_id,
         )
-        yield StreamCompleteEvent(message=message)
+
+        async for event in turn.execute():
+            yield event
+
+        if turn._final_message is not None:
+            self._final_message = turn._final_message
+        if turn._message_history:
+            self._message_history = turn._message_history
 
     @property
     def model_name(self) -> str | None:
@@ -634,14 +493,12 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         Returns:
             An ACPTurn instance for single-cycle execution.
         """
-        # TODO: ACPAgentAPI does not implement ACPClientProtocol fully —
-        # it lacks stream_events() and get_messages(). At runtime this will raise
-        # AttributeError when ACPTurn.execute() calls those methods. An adapter
-        # wrapping ACPAgentAPI with async futures / notification registry is needed
-        # for full integration.
+        assert self._api is not None
+        assert self._client_handler is not None
+        str_prompts: list[str] = [str(p) if not isinstance(p, str) else p for p in prompts]
         return ACPTurn(
-            acp_client=cast("ACPClientProtocol", self._api),
-            prompts=prompts,  # type: ignore[arg-type]
+            acp_client=ACPClientAdapter(self._api, self._client_handler),
+            prompts=str_prompts,
             run_ctx=run_ctx,
             message_history=message_history,
             session_id=self._sdk_session_id or run_ctx.session_id,
@@ -651,7 +508,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         )
 
     async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
-        """Send CancelNotification to remote ACP server and cancel local tasks.
+        """Send CancelNotification to remote ACP server and mark run as cancelled.
 
         Args:
             run_ctx: Optional per-run context for the stream to interrupt
@@ -662,10 +519,9 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 self.log.info("Sent cancel notification to ACP server")
             except Exception:
                 self.log.exception("Failed to send cancel notification to ACP server")
-
-        if self._prompt_task and not self._prompt_task.done():
-            self._prompt_task.cancel()
-            self.log.info("Cancelled prompt task")
+        if run_ctx is not None:
+            run_ctx.cancelled = True
+            self.log.info("Marked run as cancelled")
 
     async def get_available_models(self) -> list[ModelInfo] | None:
         """Get available models from the ACP session state."""
