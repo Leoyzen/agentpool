@@ -163,7 +163,7 @@ class ACPTurn(HookAwareTurn, Turn):
                 self._run_ctx.cancelled = True
                 from agentpool.messaging import ChatMessage
 
-                self._final_message = ChatMessage[str](
+                self._final_message = ChatMessage(
                     content="",
                     role="assistant",
                     message_id=str(uuid4()),
@@ -191,6 +191,7 @@ class ACPTurn(HookAwareTurn, Turn):
 
             # --- Phase 2: Stream events ---
             try:
+                tool_start_times: dict[str, float] = {}
                 async for update in self._acp_client.stream_events():
                     native_event = acp_to_native_event(update)
                     if native_event is not None:
@@ -203,6 +204,7 @@ class ACPTurn(HookAwareTurn, Turn):
                                 raw_input=ti,
                                 tool_call_id=tcid,
                             ):
+                                tool_start_times[tcid] = time.perf_counter()
                                 await self._fire_pre_tool_hooks(tn, ti, tcid)
                             case ToolCallCompleteEvent(
                                 tool_name=tn,
@@ -210,11 +212,13 @@ class ACPTurn(HookAwareTurn, Turn):
                                 tool_result=tr,
                                 tool_call_id=tcid,
                             ):
+                                start = tool_start_times.pop(tcid, time.perf_counter())
+                                tool_duration = (time.perf_counter() - start) * 1000
                                 await self._fire_post_tool_hooks(
                                     tn,
                                     ti,
                                     tr,
-                                    0.0,
+                                    tool_duration,
                                     tcid,
                                 )
                             case _:
@@ -262,7 +266,7 @@ class ACPTurn(HookAwareTurn, Turn):
             else:
                 from agentpool.messaging import ChatMessage
 
-                self._final_message = ChatMessage[str](
+                self._final_message = ChatMessage(
                     content="",
                     role="assistant",
                     message_id=str(uuid4()),
