@@ -195,5 +195,5 @@ When `proxy_chain` is omitted, the Conductor runs with zero proxies (direct cond
 ## Open Questions
 
 - **Proxy hot-swap (out of scope)**: Should the Conductor support hot-swapping proxies at runtime (add/remove proxy without restarting the chain)? This is explicitly **out of scope** for this change. The design should not preclude it, but it will not be implemented. Future work.
-- **Concurrency: multiple concurrent prompts**: ACP sessions typically allow one active prompt at a time. If `adapter.prompt()` is called while a previous prompt is still streaming, the adapter SHALL raise a `RuntimeError("Prompt already in progress")`. This matches the current behavior where `ACPAgentAPI.prompt()` blocks until completion.
+- **Concurrency: multiple concurrent prompts** (resolved): ACP sessions typically allow one active prompt at a time. If `adapter.prompt()` is called while a previous prompt is still streaming, the adapter SHALL raise a `RuntimeError("Prompt already in progress")`. This is a formal requirement in `acp-client-adapter/spec.md`.
 - **Proxy chains in team composition**: How should proxy chains interact with the graph-based team execution? If a team member is an ACP agent with a proxy chain, does the chain execute within the Step's `call()` method? (Answer: yes — the Conductor's `_step` property handles this.)

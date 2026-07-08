@@ -67,7 +67,7 @@ When `HookProxy` is in the chain, the Conductor SHALL pass `_hooks=None` to `ACP
 
 ### Requirement: ContextInjectionProxy SHALL inject system context into prompts
 
-The `ContextInjectionProxy` SHALL intercept `session/prompt` messages and prepend configured context (AGENTS.md content, skill instructions, system prompt customizations) to the prompt text before forwarding to the successor. This is separate from `HookProxy`'s `pre_run` `additional_context` — `ContextInjectionProxy` handles declarative context sources (files, skills), while `HookProxy` handles dynamic hook-driven context injection.
+The `ContextInjectionProxy` SHALL intercept `session/prompt` messages and prepend configured context (AGENTS.md content, skill instructions, system prompt customizations) to the prompt text before forwarding to the successor. This is separate from `HookProxy`'s `pre_turn` `additional_context` — `ContextInjectionProxy` handles declarative context sources (files, skills), while `HookProxy` handles dynamic hook-driven context injection.
 
 #### Scenario: Context injection with AGENTS.md
 - **WHEN** a `ContextInjectionProxy` with `agents_md: true` receives a `session/prompt`
