@@ -1,5 +1,0 @@
-src/agentpool/agents/native_agent/agent.py:962:        if (task := self._current_stream_task) and not task.done():
-src/agentpool/agents/agui_agent/agui_agent.py:273:        if self._current_stream_task and not self._current_stream_task.done():
-src/agentpool/agents/agui_agent/agui_agent.py:274:            self._current_stream_task.cancel()
-src/agentpool/agents/acp_agent/acp_agent.py:594:        if self._current_stream_task and not self._current_stream_task.done():
-src/agentpool/agents/acp_agent/acp_agent.py:595:            self._current_stream_task.cancel()

@@ -1,9 +1,0 @@
-src/agentpool/agents/claude_code_agent/exceptions.py:17: error: Function is
-missing a type annotation for one or more parameters  [no-untyped-def]
-    def raise_if_usage_limit_reached(message) -> None:
-    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-src/agentpool_toolsets/builtin/workers.py:89: error: Incompatible types in
-assignment (expression has type "BaseTeam[Any, Any]", variable has type
-"BaseAgent[Any, Any] | None")  [assignment]
-                    worker = ctx.pool.teams[agent_name]
-                             ^~~~~~~~~~~~~~~~~~~~~~~~~~

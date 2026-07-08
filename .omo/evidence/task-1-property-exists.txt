@@ -1,2 +1,0 @@
-hasattr: True
-display_name == client_id: True
