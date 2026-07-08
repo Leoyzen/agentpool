@@ -83,11 +83,12 @@ if TYPE_CHECKING:
     from agentpool.common_types import AnyEventHandlerType
     from agentpool.delegation import AgentPool
     from agentpool.hooks import AgentHooks
+    from agentpool.mcp_server import ToolBridge
     from agentpool.messaging import ChatMessage, MessageHistory
     from agentpool.models.acp_agents import BaseACPAgentConfig
     from agentpool.orchestrator.turn import Turn
-    from agentpool.resource_providers import ResourceProvider
     from agentpool.sessions import SessionData
+    from agentpool.tools.factory import ToolsetFactory
     from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig
 
@@ -132,7 +133,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         # ACP initialization
         init_request: InitializeRequest | None = None,
         # Tools
-        tool_providers: list[ResourceProvider] | None = None,
+        tool_factories: list[ToolsetFactory] | None = None,
         mcp_servers: Sequence[str | MCPServerConfig] | None = None,
         # Runtime options
         deps_type: type[TDeps] | None = None,
@@ -146,8 +147,6 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         hooks: AgentHooks | None = None,
         session_id: str | None = None,
     ) -> None:
-        from agentpool.mcp_server.tool_bridge import ToolManagerBridge
-
         super().__init__(
             name=name or command,
             description=description,
@@ -175,7 +174,8 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         # ACP initialization
         self._init_request = init_request or InitializeRequest.create_for_package("agentpool")
         # Tools
-        self._tool_providers = tool_providers or []
+        self._tool_factories = tool_factories or []
+        self._extra_toolsets: list[Any] = []
         # Provider type for model messages
         self._provider_type = provider_type
         # ACP-specific state
@@ -192,8 +192,8 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         self._state: ACPState | None = None
         self._extra_mcp_servers: list[McpServer] = []
         self._sessions_cache: list[SessionData] | None = None
-        # ToolManagerBridge gets injection_manager from node's run context
-        self._tool_bridge = ToolManagerBridge(node=self)
+        # ToolBridge lazily created in _setup_toolsets() when tools exist
+        self._tool_bridge: ToolBridge | None = None
         # Track the prompt task for cancellation
         self._prompt_task: asyncio.Task[Any] | None = None
 
@@ -231,7 +231,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 allow_file_operations=config.allow_file_operations,
             ),
             # Tools
-            tool_providers=config.get_tool_providers(),
+            tool_factories=config.get_tool_factories(),
             mcp_servers=config.mcp_servers,
             # Runtime options
             event_handlers=merged_handlers or None,
@@ -255,12 +255,35 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
     async def _setup_toolsets(self) -> None:
         """Initialize toolsets and start bridge if needed."""
         from acp.schema import HttpMcpServer
+        from agentpool.mcp_server import create_tool_bridge
+        from agentpool.tools.base import Tool
+        from agentpool.tools.factory import StaticToolsetFactory
 
-        if not self._tool_providers:
+        if not self._tool_factories:
             return
-        # Add all tool providers to tool manager
-        for provider in self._tool_providers:
-            self.tools.add_provider(provider)
+
+        all_tools: list[Any] = []
+        self._extra_toolsets = []
+
+        for factory in self._tool_factories:
+            match factory:
+                case StaticToolsetFactory(tools=factory_tools):
+                    all_tools.extend(factory_tools)
+                case _:
+                    cap = await factory.create_capability()
+                    if cap is not None:
+                        self._extra_toolsets.append(cap)
+
+        if not all_tools:
+            return
+
+        # Register tools with the node's tool manager for bridge discovery
+        for tool in all_tools:
+            if isinstance(tool, Tool):
+                self.tools.register_tool(tool)
+
+        # Lazily create and start the tool bridge
+        self._tool_bridge = create_tool_bridge(node=self)
         await self._tool_bridge.start()
 
         url = HttpUrl(self._tool_bridge.url)
@@ -371,8 +394,10 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
 
     async def _cleanup(self) -> None:
         """Clean up resources."""
-        if self._tool_bridge._mcp is not None:
+        if self._tool_bridge is not None:
             await self._tool_bridge.stop()
+            self._tool_bridge = None
+        self._extra_toolsets.clear()
         self._extra_mcp_servers.clear()
         if self._client_handler:
             await self._client_handler.cleanup()
