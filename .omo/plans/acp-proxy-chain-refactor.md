@@ -280,7 +280,7 @@ Your next move: approve to start execution, or run a high-accuracy review first.
   QA scenarios: happy — AGENTS.md prepended; skills injected; tools available. failure — missing AGENTS.md handled; MCP failure raises error. Evidence: `.omo/evidence/task-20-acp-proxy-chain-refactor.log`
   Commit: Y | feat(acp): implement ContextInjectionProxy and ToolProviderProxy (experimental)
 
-- [ ] 21. Write Phase 4 tests — HookProxy, coexistence, ContextInjection, ToolProvider
+- [x] 21. Write Phase 4 tests — HookProxy, coexistence, ContextInjection, ToolProvider
   What to do / Must NOT do: Write unit tests for HookProxy (all 4 hooks, deny/allow/modify, blocking, JSON-RPC correlation). Write tests for coexistence (_hooks=None, no double-firing, request_permission disabled). Write tests for ContextInjectionProxy. Write tests for ToolProviderProxy. Must NOT use real subprocess.
   Parallelization: Wave 4 | Blocked by: T18, T19, T20 | Blocks: T22
   References: `openspec/changes/acp-proxy-chain-refactor/specs/acp-proxy-impls/spec.md`; `tests/agents/acp_agent/test_acp_turn_hooks.py`
