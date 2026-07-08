@@ -222,9 +222,7 @@ class Conductor(MessageNode[Any, str]):
         """Detect if a HookProxy is in the chain after initialization."""
         from acp.proxy.impls.hook_proxy import HookProxy
 
-        self._has_hook_proxy = any(
-            isinstance(proxy, HookProxy) for proxy in self._proxy_chain
-        )
+        self._has_hook_proxy = any(isinstance(proxy, HookProxy) for proxy in self._proxy_chain)
 
     @override
     @property
@@ -483,9 +481,7 @@ class Conductor(MessageNode[Any, str]):
         Returns:
             True if at least one proxy intercepts this method.
         """
-        return any(
-            method in intercepted for intercepted in self._intercepted_methods
-        )
+        return any(method in intercepted for intercepted in self._intercepted_methods)
 
     async def _forward_through_proxies(
         self,

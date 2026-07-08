@@ -304,7 +304,7 @@ Your next move: approve to start execution, or run a high-accuracy review first.
   QA scenarios: happy — terminal agent works; passthrough zero conversion (converter not called). failure — conversion still happening (converter called); terminal not responding to initialize. Evidence: `.omo/evidence/task-23-acp-proxy-chain-refactor.log`
   Commit: Y | test(acp-server): add Phase 5 integration tests with zero-conversion passthrough
 
-- [ ] 24. Delete dead code, remove feature flag, simplify converters, docs, full validation
+- [x] 24. Delete dead code, remove feature flag, simplify converters, docs, full validation
   What to do / Must NOT do: Delete `_stream_events()` method (now thin wrapper — safe to delete since use_conductor flag removed). Delete `ACPSessionState` remaining references. Delete `cast()` hack. Remove `use_conductor` feature flag (Conductor is only path). Simplify `acp_converters.py` — passthrough zero conversion. Remove `ToolManagerBridge` deprecated imports. Remove `AgentHooks` deprecation warnings (if any remain after unify-hook-system merge). Update AGENTS.md with proxy chain architecture. Add YAML config examples. Run full validation: `uv run pytest && uv run --no-group docs mypy src/ && uv run ruff check src/ && uv run ruff format --check src/`. Must NOT leave dead code or unused imports. Must NOT use `# type: ignore` without justification.
   Parallelization: Wave 6 | Blocked by: T23 | Blocks: F1-F4
   References: `openspec/changes/acp-proxy-chain-refactor/tasks.md:83-95`; `src/agentpool/agents/acp_agent/acp_agent.py`; `src/agentpool/agents/acp_agent/acp_converters.py`; `src/agentpool/hooks/agent_hooks.py`; `AGENTS.md`; `site/examples/*/config.yml`

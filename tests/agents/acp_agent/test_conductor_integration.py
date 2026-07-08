@@ -86,7 +86,6 @@ def _make_run_ctx(session_id: str = "conductor-test-session") -> AgentRunContext
 
 def _make_acp_agent(
     *,
-    use_conductor: bool = True,
     proxy_chain: list[Any] | None = None,
 ) -> ACPAgent[None]:
     """Create an ACPAgent without entering its context manager."""
@@ -96,7 +95,6 @@ def _make_acp_agent(
         args=["--flag"],
         name="test-acp-agent",
         init_request=init_request,
-        use_conductor=use_conductor,
         proxy_chain=proxy_chain,
     )
 
@@ -159,18 +157,18 @@ def _make_turn_with_client(
 
 
 # ---------------------------------------------------------------------------
-# Test 1: use_conductor=True creates Conductor
+# Test 1: __aenter__ creates Conductor
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-async def test_acp_agent_use_conductor_true_creates_conductor() -> None:
-    """Given use_conductor=True, __aenter__ calls _setup_conductor().
+async def test_acp_agent_aenter_creates_conductor() -> None:
+    """Given __aenter__, _setup_conductor() is called.
 
     We patch _setup_conductor to avoid real subprocess, and verify
     it was called and _conductor is set afterward.
     """
-    agent = _make_acp_agent(use_conductor=True)
+    agent = _make_acp_agent()
     _inject_mocks(agent)
 
     # Patch _start_process and _initialize + _create_session to avoid subprocess
@@ -198,45 +196,7 @@ async def test_acp_agent_use_conductor_true_creates_conductor() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 2: use_conductor=False → _conductor stays None
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-async def test_acp_agent_use_conductor_false_no_conductor() -> None:
-    """Given use_conductor=False, __aenter__ skips _setup_conductor().
-
-    _conductor should remain None after initialization.
-    """
-    agent = _make_acp_agent(use_conductor=False)
-    _inject_mocks(agent)
-
-    with (
-        patch.object(
-            ACPAgent, "_start_process", new_callable=AsyncMock,
-        ) as mock_start,
-        patch.object(
-            ACPAgent, "_initialize", new_callable=AsyncMock,
-        ),
-        patch.object(
-            ACPAgent, "_create_session", new_callable=AsyncMock,
-        ),
-        patch.object(
-            ACPAgent, "_setup_conductor", new_callable=AsyncMock,
-        ) as mock_setup_conductor,
-        patch("agentpool.agents.acp_agent.acp_agent.run_with_process_monitor"),
-        patch("anyio.sleep", new_callable=AsyncMock),
-    ):
-        mock_start.return_value = MagicMock()
-        await agent.__aenter__()
-
-    assert mock_setup_conductor.call_count == 0
-    assert agent._conductor is None
-    await agent.__aexit__(None, None, None)
-
-
-# ---------------------------------------------------------------------------
-# Test 3: Zero-proxy backward compat (proxy_chain=None)
+# Test 2: Zero-proxy backward compat (proxy_chain=None)
 # ---------------------------------------------------------------------------
 
 
@@ -246,7 +206,7 @@ async def test_acp_agent_zero_proxy_backward_compat() -> None:
 
     The agent should function identically to pre-Conductor behavior.
     """
-    agent = _make_acp_agent(use_conductor=True, proxy_chain=None)
+    agent = _make_acp_agent(proxy_chain=None)
     _inject_mocks(agent)
 
     # Verify create_turn works without proxy_chain
@@ -276,7 +236,7 @@ async def test_acp_agent_zero_proxy_backward_compat() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 4: proxy_chain config is passed to Conductor
+# Test 3: proxy_chain config is passed to Conductor
 # ---------------------------------------------------------------------------
 
 
@@ -287,7 +247,7 @@ async def test_acp_agent_proxy_chain_config() -> None:
     fake_proxy_2 = MagicMock(name="proxy2")
     proxy_chain = [fake_proxy_1, fake_proxy_2]
 
-    agent = _make_acp_agent(use_conductor=True, proxy_chain=proxy_chain)
+    agent = _make_acp_agent(proxy_chain=proxy_chain)
     _inject_mocks(agent)
 
     with patch("acp.conductor.Conductor") as mock_conductor_cls:
@@ -305,7 +265,7 @@ async def test_acp_agent_proxy_chain_config() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 5: Multi-turn hooks fire per turn (not double-fired)
+# Test 4: Multi-turn hooks fire per turn (not double-fired)
 # ---------------------------------------------------------------------------
 
 
@@ -342,7 +302,7 @@ async def test_multi_turn_hooks_fire_per_turn() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 6: Multi-turn events stream correctly across turns
+# Test 5: Multi-turn events stream correctly across turns
 # ---------------------------------------------------------------------------
 
 
@@ -388,58 +348,3 @@ async def test_multi_turn_events_stream_correctly() -> None:
         # Verify final_message is populated per turn
         assert turn._final_message is not None
         assert turn._final_message.content == expected_text
-
-
-# ---------------------------------------------------------------------------
-# Test 7: use_conductor=False fallback still produces correct output
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-async def test_use_conductor_false_fallback_works() -> None:
-    """Given use_conductor=False, ACPAgent.create_turn() still works.
-
-    The agent should produce ACPTurn instances that execute correctly
-    without any Conductor involvement.
-    """
-    agent = _make_acp_agent(use_conductor=False, proxy_chain=None)
-    _inject_mocks(agent)
-
-    # Verify no conductor is set
-    assert agent._conductor is None
-    assert agent._use_conductor is False
-
-    # Create a turn — should work without conductor
-    turn = agent.create_turn(
-        prompts=["fallback test"],
-        run_ctx=_make_run_ctx(),
-        message_history=[],
-    )
-    assert isinstance(turn, ACPTurn)
-    assert turn._prompts == ["fallback test"]
-    assert turn._hooks is None  # no hooks configured
-
-    # Execute the turn with a real mock client
-    client = MockACPClient(
-        updates=[_text_update("fallback output"), TurnCompleteUpdate()],
-        messages=[_text_update("fallback output")],
-    )
-    turn_with_client = _make_turn_with_client(
-        client,
-        prompts=["fallback test"],
-    )
-
-    events = [event async for event in turn_with_client.execute()]
-
-    # Verify events are produced correctly
-    delta_events = [e for e in events if isinstance(e, PartDeltaEvent)]
-    complete_events = [e for e in events if isinstance(e, StreamCompleteEvent)]
-
-    assert len(delta_events) >= 1
-    assert len(complete_events) == 1
-    assert complete_events[0].message.content == "fallback output"
-
-    # Verify final_message
-    assert turn_with_client._final_message is not None
-    assert turn_with_client._final_message.role == "assistant"
-    assert turn_with_client._final_message.content == "fallback output"

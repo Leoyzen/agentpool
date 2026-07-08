@@ -44,10 +44,7 @@ class ProxyRegistry:
             KeyError: If the type_name is not registered.
         """
         if type_name not in self._registry:
-            msg = (
-                f"Unknown proxy type: '{type_name}'. "
-                f"Registered types: {self.registered_types()}"
-            )
+            msg = f"Unknown proxy type: '{type_name}'. Registered types: {self.registered_types()}"
             raise KeyError(msg)
         return self._registry[type_name]
 

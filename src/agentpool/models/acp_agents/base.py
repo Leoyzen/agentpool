@@ -127,14 +127,6 @@ class BaseACPAgentConfig(BaseAgentConfig):
     auto_approve: bool = Field(default=False, title="Auto-approve permissions")
     """If True, automatically approve all permission requests from the remote agent."""
 
-    use_conductor: bool = Field(default=True, title="Use Conductor")
-    """Feature flag for Conductor-based proxy chain architecture.
-
-    When True, the agent will use the Conductor to manage proxy chain
-    initialization and message routing through configured proxies.
-    Setting to False preserves the original direct passthrough behavior.
-    """
-
     def get_command(self) -> str | None:
         """Get the command to spawn the ACP server.
 

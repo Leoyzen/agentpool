@@ -169,7 +169,6 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, ChatMessage[str]]):
         session_id: str | None = None,
         # Conductor
         proxy_chain: list[Any] | None = None,
-        use_conductor: bool = True,
     ) -> None:
         super().__init__(
             name=name or command,
@@ -221,7 +220,6 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, ChatMessage[str]]):
         # Track the prompt task for cancellation
         self._prompt_task: asyncio.Task[Any] | None = None
         # Conductor
-        self._use_conductor = use_conductor
         self._proxy_chain = proxy_chain
         self._conductor: Conductor | None = None
         self._init_response: Any = None
@@ -271,7 +269,6 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, ChatMessage[str]]):
             auto_approve=config.auto_approve,
             hooks=config.hooks.get_agent_hooks() if config.hooks else None,
             # Conductor
-            use_conductor=config.use_conductor,
             proxy_chain=config.proxy_chain,
         )
 
@@ -371,8 +368,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, ChatMessage[str]]):
         except SubprocessError as e:
             raise RuntimeError(str(e)) from e
         await anyio.sleep(0.3)
-        if self._use_conductor:
-            await self._setup_conductor()
+        await self._setup_conductor()
         return self
 
     async def __aexit__(

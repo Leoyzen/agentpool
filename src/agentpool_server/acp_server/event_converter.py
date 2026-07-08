@@ -195,8 +195,7 @@ def convert_plan_entries(entries: Sequence[Any]) -> AgentPlanUpdate:
         An AgentPlanUpdate with converted entries.
     """
     acp_entries = [
-        ACPPlanEntry(content=e.content, priority=e.priority, status=e.status)
-        for e in entries
+        ACPPlanEntry(content=e.content, priority=e.priority, status=e.status) for e in entries
     ]
     return AgentPlanUpdate(entries=acp_entries)
 
@@ -298,9 +297,7 @@ class EventConverterComponent(Protocol):
         """Reset converter state for a new run."""
         ...
 
-    async def convert(
-        self, event: RichAgentStreamEvent[Any]
-    ) -> AsyncIterator[ACPSessionUpdate]:
+    async def convert(self, event: RichAgentStreamEvent[Any]) -> AsyncIterator[ACPSessionUpdate]:
         """Convert an agent event to zero or more ACP session updates.
 
         Args:
@@ -1160,9 +1157,7 @@ class PassthroughEventConverter:
         """Reset converter state for a new run."""
         self.last_usage = None
 
-    async def convert(
-        self, event: RichAgentStreamEvent[Any]
-    ) -> AsyncIterator[ACPSessionUpdate]:
+    async def convert(self, event: RichAgentStreamEvent[Any]) -> AsyncIterator[ACPSessionUpdate]:
         """No-op conversion — yields nothing during passthrough.
 
         Args:
