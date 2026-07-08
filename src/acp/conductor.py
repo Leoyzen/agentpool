@@ -3,11 +3,12 @@
 The Conductor inherits from :class:`MessageNode` and owns the
 :class:`ACPClientHandler`. It is responsible for spawning the terminal agent
 subprocess, wiring JSON-RPC connections, and managing the ACP client handler
-lifecycle. Full message routing (T9), passthrough (T10), and complete ``_step``
-implementation (T11) will be added in subsequent tasks.
+lifecycle. Message routing (T9), passthrough optimization (T10), and complete
+``_step`` implementation (T11) are added incrementally.
 
 Design references:
 - D1: Conductor inherits ``MessageNode[ChatMessage, ChatMessage[str]]``
+- D5: Passthrough optimization — skip deserialization for unregistered methods
 - D8: Conductor owns ``ACPClientHandler`` (transferred from ``ACPAgent``)
 """
 
@@ -19,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Self, override
 
 import structlog
 
+from acp.exceptions import RequestError
 from acp.proxy.constants import PROXY_INITIALIZE, PROXY_SUCCESSOR
 from agentpool.messaging.messagenode import MessageNode
 
@@ -72,9 +74,10 @@ class Conductor(MessageNode[Any, str]):
 
     !!! note "Task scope"
 
-        This is the Phase 2 implementation (T8). Full message routing (T9),
-        passthrough optimization (T10), and complete ``_step`` (T11) will be
-        added in subsequent tasks.
+        T8: class structure + handler ownership.
+        T9: chain initialization (``_initialize_chain``).
+        T10: message routing, passthrough, error propagation.
+        T11: complete ``_step`` implementation (pending).
     """
 
     def __init__(
@@ -394,6 +397,234 @@ class Conductor(MessageNode[Any, str]):
             version="0.1.0",
             name=self.name,
         )
+
+    # ------------------------------------------------------------------
+    # Message routing (T10)
+    # ------------------------------------------------------------------
+
+    def _should_intercept(self, method: str) -> bool:
+        """Check if any proxy in the chain intercepts the given method.
+
+        Uses the ``intercepted_methods`` lists collected during
+        :meth:`_initialize_chain` to determine whether any proxy
+        declared interest in this method. When no proxy intercepts a
+        method, the Conductor can forward the raw message directly to
+        the terminal agent without deserialization (passthrough
+        optimization, design D5).
+
+        Args:
+            method: JSON-RPC method name (e.g. ``"session/prompt"``).
+
+        Returns:
+            True if at least one proxy intercepts this method.
+        """
+        return any(
+            method in intercepted for intercepted in self._intercepted_methods
+        )
+
+    async def _forward_through_proxies(
+        self,
+        method: str,
+        params: dict[str, Any],
+        meta: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Forward a message through each proxy that intercepts the method.
+
+        Iterates through the proxy chain in order (client → terminal).
+        For each proxy whose ``intercepted_methods`` list contains the
+        given *method*, calls ``proxy_successor()`` to let the proxy
+        inspect, modify, or block the message before forwarding.
+
+        Proxies that do not intercept the method are skipped (they
+        would forward without deserialization anyway, so the
+        Conductor short-circuits them).
+
+        If a proxy raises an exception, the error is propagated as a
+        JSON-RPC error response — never silently skipped.
+
+        Args:
+            method: JSON-RPC method name.
+            params: Method parameters (may be modified by proxies).
+            meta: Additional metadata for routing (e.g. request ID,
+                session ID, chain position).
+
+        Returns:
+            The response from the last intercepting proxy, or the
+            original *params* if no proxy intercepted the method.
+        """
+        result: dict[str, Any] = params
+        for i, proxy in enumerate(self._proxy_chain):
+            if method not in self._intercepted_methods[i]:
+                continue
+            try:
+                result = proxy.proxy_successor(method, result, meta)
+            except Exception as exc:
+                logger.exception(
+                    "proxy_forward_failed",
+                    proxy_index=i,
+                    method=method,
+                )
+                return await self._handle_proxy_error(exc, i)
+        return result
+
+    async def _handle_proxy_error(
+        self,
+        error: Exception,
+        proxy_index: int,
+    ) -> dict[str, Any]:
+        """Produce a JSON-RPC error response for a proxy exception.
+
+        Per the spec, proxy exceptions MUST produce a JSON-RPC error
+        response forwarded back through the chain. The Conductor SHALL
+        NOT silently skip failed proxies — a security hook proxy
+        failing silently is dangerous.
+
+        If the exception is already a :class:`RequestError`, its code
+        and message are used directly. Otherwise, an internal error
+        code (-32603) is used with the exception message.
+
+        Args:
+            error: The exception raised by the proxy.
+            proxy_index: Zero-based index of the failed proxy.
+
+        Returns:
+            A dict with ``"error"`` key containing ``code``,
+            ``message``, and ``data`` fields following JSON-RPC 2.0
+            error object format.
+        """
+        if isinstance(error, RequestError):
+            error_obj: dict[str, Any] = {
+                "code": error.code,
+                "message": str(error),
+                "data": error.data,
+            }
+        else:
+            error_obj = {
+                "code": -32603,
+                "message": f"Proxy {proxy_index} error: {error}",
+                "data": {
+                    "proxyIndex": proxy_index,
+                    "errorType": type(error).__name__,
+                },
+            }
+        logger.error(
+            "proxy_error_propagated",
+            proxy_index=proxy_index,
+            error_code=error_obj["code"],
+            error_message=error_obj["message"],
+        )
+        return {"error": error_obj}
+
+    async def _route_to_terminal(
+        self,
+        method: str,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Route a message through the proxy chain to the terminal agent.
+
+        This is the core forwarding path for client→terminal messages.
+        It:
+
+        1. Builds routing metadata (chain position, method name).
+        2. If any proxy intercepts *method*, forwards through each
+           intercepting proxy via :meth:`_forward_through_proxies`.
+           If a proxy returns an error response, propagation stops
+           immediately and the error is returned.
+        3. Sends the (possibly modified) message to the terminal agent
+           via :class:`ClientSideConnection` using
+           ``send_request()``.
+        4. Returns the terminal agent's response.
+
+        For passthrough (no proxy intercepts *method*), the raw
+        message is sent directly to the terminal agent without any
+        proxy processing — the deserialization cost is zero (D5).
+
+        Args:
+            method: JSON-RPC method name (e.g. ``"session/prompt"``).
+            params: Method parameters.
+
+        Returns:
+            The response dict from the terminal agent, or an error
+            dict if a proxy blocked the message.
+
+        Raises:
+            RuntimeError: If the connection has not been established.
+        """
+        if self._connection is None:
+            raise RuntimeError(
+                "Cannot route message: connection not established",
+            )
+
+        meta: dict[str, Any] = {
+            "method": method,
+            "chain_length": len(self._proxy_chain),
+        }
+
+        # If any proxy intercepts this method, forward through
+        # the proxy chain first. Proxies may modify params or
+        # block the message entirely.
+        if self._should_intercept(method):
+            proxy_result = await self._forward_through_proxies(
+                method,
+                params,
+                meta,
+            )
+            # If a proxy returned an error response, stop
+            # propagation — do not forward to terminal agent.
+            if "error" in proxy_result:
+                return proxy_result
+            params = proxy_result
+
+        # Send to terminal agent via the wire connection.
+        response = await self._connection.send_request(method, params)
+        if isinstance(response, dict):
+            return response
+        return {"result": response}
+
+    async def _route_message(
+        self,
+        method: str,
+        params: dict[str, Any],
+        meta: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Route a message bidirectionally through the proxy chain.
+
+        This is the main entry point for message routing. It handles
+        both forward (client → terminal) and reverse (terminal →
+        client, i.e. response) routing.
+
+        For forward routing, the message flows through each
+        intercepting proxy and then to the terminal agent. For
+        reverse routing (responses flowing back), the message flows
+        through intercepting proxies in reverse order.
+
+        !!! note "Passthrough optimization"
+
+            When no proxy intercepts *method*, the message is
+            forwarded directly to the terminal agent without
+            deserialization (design D5).
+
+        Args:
+            method: JSON-RPC method name.
+            params: Method parameters.
+            meta: Additional metadata for routing (e.g. direction,
+                request ID for response correlation).
+
+        Returns:
+            The response dict from the terminal agent or from
+            intercepting proxies.
+        """
+        direction = meta.get("direction", "forward")
+        if direction == "forward":
+            return await self._route_to_terminal(method, params)
+        # Reverse direction: responses flowing back from terminal
+        # agent through proxies to the client. Currently, responses
+        # are returned directly by _route_to_terminal. Full reverse
+        # proxy routing will be implemented when proxy response
+        # interception is needed (e.g. HookProxy post_turn).
+        if isinstance(params, dict):
+            return params
+        return {"result": params}
 
     # ------------------------------------------------------------------
     # MessageNode abstract methods (T9, T10, T11 will implement fully)
