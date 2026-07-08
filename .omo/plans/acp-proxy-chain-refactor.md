@@ -296,7 +296,7 @@ Your next move: approve to start execution, or run a high-accuracy review first.
   QA scenarios: happy — terminal agent in chain; prompt routes through handle_prompt; event converter as proxy. failure — legacy path not reachable; converter broken. Evidence: `.omo/evidence/task-22-acp-proxy-chain-refactor.log`
   Commit: Y | refactor(acp-server): terminal agent, remove dual path, split ACPEventConverter
 
-- [ ] 23. Write Phase 5 tests — terminal agent integration, nested passthrough zero-conversion
+- [x] 23. Write Phase 5 tests — terminal agent integration, nested passthrough zero-conversion
   What to do / Must NOT do: Write integration test: AgentPoolACPAgent as terminal agent in Conductor chain. Write integration test: nested agentpool (server+client) with ZERO conversion — mock/spy `ACPEventConverter`, assert `call_count == 0` during passthrough. Must NOT use real LLM API — use TestModel or mock.
   Parallelization: Wave 5 | Blocked by: T22 | Blocks: T24
   References: `openspec/changes/acp-proxy-chain-refactor/tasks.md:78-79`; `openspec/changes/acp-proxy-chain-refactor/specs/acp-server/spec.md`; `tests/servers/acp_server/`; Metis finding M5 (measurable zero-conversion criteria)
