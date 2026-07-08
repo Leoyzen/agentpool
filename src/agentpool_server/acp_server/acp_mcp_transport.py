@@ -18,7 +18,7 @@ from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
 
     from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnection
 
@@ -35,16 +35,25 @@ class AcpMcpTransport(ClientTransport):
     """
 
     def __init__(
-        self, connection: AcpMcpConnection, timeout: float = DEFAULT_READ_TIMEOUT_SECONDS
+        self,
+        connection: AcpMcpConnection,
+        timeout: float = DEFAULT_READ_TIMEOUT_SECONDS,
+        on_session_registered: Callable[[str, int], None] | None = None,
     ) -> None:
         """Initialize the transport with an active ACP MCP connection.
 
         Args:
             connection: An active AcpMcpConnection with open streams.
             timeout: Read timeout in seconds for MCP session operations.
+            on_session_registered: Optional callback invoked after
+                ``register_session()`` with ``(connection_id, session_key)``.
+                Used by callers to register the connection for cleanup
+                tracking via
+                ``AcpMcpConnectionManager.register_session_connection()``.
         """
         self._connection = connection
         self._timeout = timeout
+        self._on_session_registered = on_session_registered
 
     @property
     def connection_id(self) -> str:
@@ -68,7 +77,10 @@ class AcpMcpTransport(ClientTransport):
         Yields:
             A connected fastmcp ClientSession.
         """
-        pair = self._connection.register_session()
+        pair, _session_key = self._connection.register_session()
+
+        if self._on_session_registered is not None:
+            self._on_session_registered(self._connection.connection_id, _session_key)
 
         async def _forward_to_client() -> None:
             """Forward MCP requests from ClientSession to ACP client."""

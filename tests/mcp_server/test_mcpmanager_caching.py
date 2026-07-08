@@ -293,8 +293,10 @@ def test_no_dedup_hack_in_get_agentlet() -> None:
     )
 
     # Verify get_agentlet still calls as_capability() for MCP
-    assert "await self.mcp.as_capability()" in source, (
-        "get_agentlet() should call 'await self.mcp.as_capability()' to collect MCP capabilities."
+    # The call now spans multiple lines with session_id= parameter, so we
+    # check for the opening of the call rather than a closed paren.
+    assert "await self.mcp.as_capability(" in source, (
+        "get_agentlet() should call 'await self.mcp.as_capability(' to collect MCP capabilities."
     )
 
 

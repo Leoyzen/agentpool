@@ -86,14 +86,16 @@ async def test_no_double_wrap_on_mcp_message_forwarding(
     acp_agent.client.send_request = send_request_mock  # type: ignore[method-assign]
 
     # Step 1: Establish connection (this creates the callback)
-    connection_id = await acp_agent.connect_acp_mcp_server(server_config)
+    connection_id, _session_key = await acp_agent.connect_acp_mcp_server(
+        server_config, "test-session-1"
+    )
     assert connection_id == "conn-redflag-1"
 
     conn = acp_agent._mcp_manager.get_connection(connection_id)
     assert conn is not None
 
     # Step 2: Register a session pair to get per-session streams
-    pair = conn.register_session()
+    pair, _ = conn.register_session()
     raw_mcp_msg = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
 
     # Step 3: Send via send_to_acp (what the transport forwarder calls internally)
@@ -140,7 +142,7 @@ async def test_send_to_client_forwards_response_to_session() -> None:
     mock_send = AsyncMock(return_value={"tools": []})
     server_cfg = AcpMcpServer(name="test", id="test-id")
     conn = AcpMcpConnection("conn-fwd", server_cfg, mock_send)
-    pair = conn.register_session()
+    pair, _ = conn.register_session()
 
     request = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
 
@@ -186,7 +188,7 @@ async def test_send_to_client_error_forwards_error_to_session() -> None:
     mock_send = AsyncMock(side_effect=RuntimeError("Connection lost"))
     server_cfg = AcpMcpServer(name="test", id="test-id")
     conn = AcpMcpConnection("conn-err", server_cfg, mock_send)
-    pair = conn.register_session()
+    pair, _ = conn.register_session()
 
     request = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
 
@@ -225,7 +227,7 @@ async def test_send_to_client_notification_no_session_forward() -> None:
     mock_send = AsyncMock(return_value=None)
     server_cfg = AcpMcpServer(name="test", id="test-id")
     conn = AcpMcpConnection("conn-notif", server_cfg, mock_send)
-    pair = conn.register_session()
+    pair, _ = conn.register_session()
 
     notification = {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {}}
     await conn.send_to_acp(notification, pair.to_session_send)
@@ -249,7 +251,7 @@ async def test_send_to_client_non_dict_returns_none() -> None:
     mock_send = AsyncMock()
     server_cfg = AcpMcpServer(name="test", id="test-id")
     conn = AcpMcpConnection("conn-nondict", server_cfg, mock_send)
-    pair = conn.register_session()
+    pair, _ = conn.register_session()
 
     result = await conn.send_to_acp("not a valid message", pair.to_session_send)
 
@@ -268,7 +270,7 @@ async def test_send_to_client_closed_stream_handled_gracefully() -> None:
     mock_send = AsyncMock(return_value={"result": "ok"})
     server_cfg = AcpMcpServer(name="test", id="test-id")
     conn = AcpMcpConnection("conn-closed", server_cfg, mock_send)
-    pair = conn.register_session()
+    pair, _ = conn.register_session()
 
     # Close the session receive stream to simulate broken pipe
     await pair.to_session_receive.aclose()

@@ -139,7 +139,9 @@ async def test_initialize_and_get_tools_with_json_round_trip(
 
     acp_agent.client.send_request = mock_send_request  # type: ignore[method-assign]
 
-    connection_id = await acp_agent.connect_acp_mcp_server(server_config)
+    connection_id, _session_key = await acp_agent.connect_acp_mcp_server(
+        server_config, "test-session-1"
+    )
     assert connection_id == "smoke-conn-1"
 
     conn = acp_agent._mcp_manager.get_connection(connection_id)

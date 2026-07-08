@@ -507,6 +507,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                             client_info=self.acp_agent.client_info,
                             subagent_display_mode=self.acp_agent.subagent_display_mode,
                             raw_input_mode=self.acp_agent.raw_input_mode,
+                            connection_id=self.acp_agent._get_connection_id(),
                         )
                         # Re-subscribe EventBus for resumed session
                         await self._ensure_event_consumer(session_id)

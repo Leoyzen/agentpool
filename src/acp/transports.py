@@ -172,6 +172,7 @@ async def serve(
     *,
     shutdown_event: asyncio.Event | None = None,
     debug_file: str | None = None,
+    on_disconnect: Callable[[AgentSideConnection], Awaitable[None]] | None = None,
     **kwargs: Any,
 ) -> None:
     """Run an ACP agent with the specified transport.
@@ -188,6 +189,10 @@ async def serve(
         shutdown_event: Optional event to signal shutdown. If not provided,
             runs until cancelled.
         debug_file: Optional file path for debug message logging.
+        on_disconnect: Optional callback invoked when a WebSocket client
+            disconnects unexpectedly. Receives the ``AgentSideConnection``
+            so the caller can read ``connection_id`` and perform session
+            cleanup. Only called for WebSocket-based transports.
         **kwargs: Additional keyword arguments passed to AgentSideConnection.
 
     Example:
@@ -234,6 +239,7 @@ async def serve(
                 ping_interval=ping_interval,
                 pong_timeout=pong_timeout,
                 max_missed_pongs=max_missed_pongs,
+                on_disconnect=on_disconnect,
                 **kwargs,
             )
         case ACPWebSocketTransport(
@@ -252,6 +258,7 @@ async def serve(
                 ping_interval=ping_interval,
                 pong_timeout=pong_timeout,
                 max_missed_pongs=max_missed_pongs,
+                on_disconnect=on_disconnect,
                 **kwargs,
             )
         case StreamTransport(reader=reader, writer=writer):
@@ -319,6 +326,7 @@ async def _serve_websocket(
     ping_interval: float | None = DEFAULT_WEBSOCKET_PING_INTERVAL,
     pong_timeout: float = DEFAULT_WEBSOCKET_PONG_TIMEOUT,
     max_missed_pongs: int = DEFAULT_WEBSOCKET_MAX_MISSED_PONGS,
+    on_disconnect: Callable[[AgentSideConnection], Awaitable[None]] | None = None,
     **kwargs: Any,
 ) -> None:
     """Run agent as WebSocket server."""
@@ -340,6 +348,7 @@ async def _serve_websocket(
             pong_timeout,
             max_missed_pongs,
             kwargs,
+            on_disconnect=on_disconnect,
         )
 
     logger.info("Starting WebSocket server on ws://%s:%d", host, port)
@@ -362,8 +371,26 @@ async def _handle_websocket_client(
     pong_timeout: float,
     max_missed_pongs: int,
     kwargs: dict[str, Any],
+    on_disconnect: Callable[[AgentSideConnection], Awaitable[None]] | None = None,
 ) -> None:
-    """Handle a single WebSocket client connection lifecycle."""
+    """Handle a single WebSocket client connection lifecycle.
+
+    Args:
+        websocket: The WebSocket server connection for this client.
+        agent_factory: Factory that creates an Agent from an AgentSideConnection.
+        shutdown: Event signalling server-wide shutdown.
+        connections: List tracking all active connections for cleanup.
+        debug_file: Optional path for debug message logging.
+        ping_interval: Seconds between heartbeat pings, or None to disable.
+        pong_timeout: Seconds to wait for each pong response.
+        max_missed_pongs: Consecutive missed pongs before closing.
+        kwargs: Additional keyword arguments passed to AgentSideConnection.
+        on_disconnect: Optional callback invoked when the client disconnects
+            (any exception path, including ConnectionClosed and unexpected errors).
+            Receives the AgentSideConnection so the caller can read
+            ``connection_id`` and perform session cleanup.
+            Called in the ``finally`` block before ``conn.close()``.
+    """
     import websockets
 
     from acp.agent.connection import AgentSideConnection
@@ -374,6 +401,7 @@ async def _handle_websocket_client(
     ws_writer = _WebSocketWriteStream(websocket)
 
     conn = AgentSideConnection(agent_factory, ws_writer, ws_reader, debug_file=debug_file, **kwargs)
+    conn.connection_id = uuid.uuid4().hex
     connections.append(conn)
 
     heartbeat_task: asyncio.Task[None] | None = None
@@ -412,6 +440,11 @@ async def _handle_websocket_client(
     except websockets.exceptions.ConnectionClosed:
         logger.info("WebSocket client disconnected")
     finally:
+        if on_disconnect is not None:
+            try:
+                await on_disconnect(conn)
+            except Exception:
+                logger.exception("Error in on_disconnect")
         if heartbeat_task is not None and not heartbeat_task.done():
             heartbeat_task.cancel()
             try:
@@ -478,7 +511,7 @@ async def _websocket_heartbeat(
             return
 
 
-async def _serve_streamable_http(
+async def _serve_streamable_http(  # noqa: PLR0915
     agent: Agent | Callable[[AgentSideConnection], Agent],
     host: str,
     port: int,
@@ -488,6 +521,7 @@ async def _serve_streamable_http(
     ping_interval: float | None = DEFAULT_WEBSOCKET_PING_INTERVAL,
     pong_timeout: float = DEFAULT_WEBSOCKET_PONG_TIMEOUT,
     max_missed_pongs: int = DEFAULT_WEBSOCKET_MAX_MISSED_PONGS,
+    on_disconnect: Callable[[AgentSideConnection], Awaitable[None]] | None = None,
     **kwargs: Any,
 ) -> None:
     """Run agent as a streamable HTTP WebSocket server (Starlette-based)."""
@@ -517,8 +551,10 @@ async def _serve_streamable_http(
         conn = AgentSideConnection(
             agent_factory, ws_writer, ws_reader, debug_file=debug_file, **kwargs
         )
+        conn.connection_id = connection_id
         active_connections.add(conn)
 
+        client_disconnected = False
         try:
             # Wait for shutdown or for the receive loop to end (client disconnect)
             _recv_conn = getattr(conn, "_conn", None)
@@ -527,6 +563,9 @@ async def _serve_streamable_http(
             if isinstance(recv_task, asyncio.Task):
                 waitables.append(recv_task)
             done, _pending = await asyncio.wait(waitables, return_when=asyncio.FIRST_COMPLETED)
+            # Determine if the client disconnected (recv_task completed before shutdown)
+            if recv_task is not None and recv_task in done:
+                client_disconnected = True
             # Cancel any remaining tasks
             for w in waitables:
                 if isinstance(w, asyncio.Task) and w not in done:
@@ -535,6 +574,11 @@ async def _serve_streamable_http(
                         await w
         finally:
             active_connections.discard(conn)
+            if client_disconnected and on_disconnect is not None:
+                try:
+                    await on_disconnect(conn)
+                except Exception:
+                    logger.exception("Error in on_disconnect callback")
             await conn.close()
 
     app = Starlette(routes=[WebSocketRoute("/acp", handle_acp)])

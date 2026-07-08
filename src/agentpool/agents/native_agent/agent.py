@@ -899,13 +899,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         tool_capabilities.append(create_approval_bridge_capability(self, input_provider))
         # 4. MCP servers
-        if self._mcp_snapshot is not None:
-            mcp_capabilities = await self.mcp.as_capability(
-                snapshot=self._mcp_snapshot,
-                session_pool=self._session_connection_pool,
-            )
-        else:
-            mcp_capabilities = await self.mcp.as_capability()
+        mcp_capabilities = await self.mcp.as_capability(
+            session_id=run_ctx.session_id if run_ctx else None
+        )
         tool_capabilities.extend(mcp_capabilities)
         # 5. Skill capabilities — from pool-scoped instances created during __aenter__.
         #    Each SkillCapability provides tools and MCP servers.

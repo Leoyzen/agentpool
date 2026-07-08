@@ -57,7 +57,7 @@ async def test_full_connection_lifecycle(
     assert len(manager) == 1
 
     # 4. Register a session pair to verify per-session streams
-    pair = conn.register_session()
+    pair, _ = conn.register_session()
     assert pair.to_session_send is not None
     assert pair.to_session_receive is not None
     assert pair.from_session_send is not None
@@ -107,7 +107,7 @@ async def test_multiple_messages_over_same_connection(
         server_config=server_config,
         send_to_client=send_to_client,
     )
-    pair = conn.register_session()
+    pair, _ = conn.register_session()
 
     # 2. Create transport and establish session
     transport = AcpMcpTransport(conn)
