@@ -50,7 +50,7 @@ from pydantic_ai import (
 
 from acp import InitializeRequest
 from acp.agent import ACPAgentAPI
-from agentpool.agents.acp_agent.session_state import ACPSessionState
+from agentpool.agents.acp_agent.session_state import ACPState
 from agentpool.agents.acp_agent.turn import ACPTurn
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.events import (
@@ -202,7 +202,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         self._agent_info: Implementation | None = None
         self._caps: AgentCapabilities | None = None
         self._sdk_session_id: str | None = session_id
-        self._state: ACPSessionState | None = None
+        self._state: ACPState | None = None
         self._extra_mcp_servers: list[McpServer] = []
         self._sessions_cache: list[SessionData] | None = None
         # ToolManagerBridge gets injection_manager from node's run context
@@ -342,7 +342,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         if not self._process or not self._process.stdin or not self._process.stdout:
             raise RuntimeError("Process not started")
 
-        self._state = ACPSessionState(session_id="")
+        self._state = ACPState(session_id="")
         self._client_handler = ACPClientHandler(self, self._state, self._input_provider)
         self._connection = ClientSideConnection(
             to_client=self._client_handler,
@@ -465,23 +465,12 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         self._prompt_task = prompt_task
 
         async def poll_acp_events() -> AsyncIterator[RichAgentStreamEvent[str]]:
-            """Poll raw updates from ACP state, convert to events, until prompt completes."""
-            from agentpool.agents.acp_agent.acp_converters import acp_to_native_event
-
+            """Await prompt completion. T3 routes events via async queue; T4 removes this entirely."""
             assert self._state
             while not prompt_task.done():
-                if self._client_handler:
-                    try:
-                        await self._client_handler._update_event.wait_with_timeout(0.05)
-                        self._client_handler._update_event.clear()
-                    except TimeoutError:
-                        pass
-                while (update := self._state.pop_update()) is not None:
-                    if native_event := acp_to_native_event(update):
-                        yield native_event
-            while (update := self._state.pop_update()) is not None:
-                if native_event := acp_to_native_event(update):
-                    yield native_event
+                await anyio.sleep(0.02)
+            return
+            yield  # pragma: no cover
 
         tool_metadata: dict[str, dict[str, Any]] = {}
 

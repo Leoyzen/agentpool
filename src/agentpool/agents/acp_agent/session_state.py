@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass, field as dataclass_field
 from typing import TYPE_CHECKING
 
@@ -24,30 +23,27 @@ PROTOCOL_VERSION = 1
 
 
 @dataclass
-class ACPSessionState:
+class ACPState:
     """Tracks state of an ACP session.
 
-    Raw ACP SessionUpdate objects are stored as the single source of truth.
-    Conversion to native events happens lazily during streaming consumption.
+    Preserves model/mode/config/commands state for the UI layer.
+    Stream data is pushed directly to an async queue (not stored here).
     """
 
     session_id: str
     """The session ID from the ACP server."""
 
-    updates: deque[SessionUpdate] = dataclass_field(default_factory=deque)
-    """Raw ACP session updates - single source of truth for stream data."""
-
     current_model_id: str | None = None
-    """Current model ID from session state (legacy)."""
+    """Current model ID from session state."""
 
     models: SessionModelState | None = None
-    """Full model state including available models (legacy)."""
+    """Full model state including available models."""
 
     modes: SessionModeState | None = None
-    """Full mode state including available modes (legacy)."""
+    """Full mode state including available modes."""
 
     current_mode_id: str | None = None
-    """Current mode ID (legacy)."""
+    """Current mode ID."""
 
     config_options: list[SessionConfigOption] = dataclass_field(default_factory=list)
     """Unified session config options (replaces modes/models in newer ACP versions)."""
@@ -62,26 +58,9 @@ class ACPSessionState:
     """Separate list for collecting updates during load (not consumed by streaming)."""
 
     def clear(self) -> None:
-        """Clear stream-related state for a new prompt turn."""
-        self.updates.clear()
-        # Note: Don't clear current_model_id, models, config_options - those persist
-
-    def add_update(self, update: SessionUpdate) -> None:
-        """Add a raw ACP update to the queue."""
-        self.updates.append(update)
-        # Also collect for load if we're loading
-        if self.is_loading:
-            self._load_updates.append(update)
-
-    def pop_update(self) -> SessionUpdate | None:
-        """Pop and return the next update, or None if empty."""
-        if self.updates:
-            return self.updates.popleft()
-        return None
-
-    def has_pending_updates(self) -> bool:
-        """Check if there are unconsumed updates."""
-        return len(self.updates) > 0
+        """Clear state for a new prompt turn."""
+        # Note: Don't clear session_id, current_model_id, models, config_options -
+        # those persist across turns
 
     def start_load(self) -> None:
         """Start collecting updates for session load."""

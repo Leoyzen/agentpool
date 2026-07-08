@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
     from pydantic_ai import ModelMessage
 
-    from acp.schema import ContentBlock, PromptResponse, SessionUpdate
+    from acp.schema import ContentBlock, SessionUpdate
     from agentpool.agents.context import AgentRunContext
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.hooks import AgentHooks
@@ -36,16 +36,20 @@ if TYPE_CHECKING:
 class ACPClientProtocol(Protocol):
     """Protocol defining the ACP client interface expected by ACPTurn.
 
-    The ACP client must provide three methods:
+    The ACP client must provide four capabilities:
 
-    - :meth:`prompt` — send a prompt to the remote agent, return a response handle
-    - :meth:`stream_events` — return an async iterator of session updates
+    - :meth:`prompt` — send a prompt to the remote agent (non-blocking, returns None)
+    - :meth:`stream_events` — return an async iterator of session updates (no args)
+    - :attr:`stop_reason` — return the stop reason after streaming completes
     - :meth:`get_messages` — return the full list of session updates for history
     """
 
-    async def prompt(self, session_id: str, content: list[ContentBlock]) -> PromptResponse: ...
+    async def prompt(self, session_id: str, content: list[ContentBlock]) -> None: ...
 
-    def stream_events(self, response: PromptResponse) -> AsyncIterator[SessionUpdate]: ...
+    def stream_events(self) -> AsyncIterator[SessionUpdate]: ...
+
+    @property
+    def stop_reason(self) -> str | None: ...
 
     async def get_messages(self, session_id: str) -> list[SessionUpdate]: ...
 
@@ -172,9 +176,9 @@ class ACPTurn(HookAwareTurn, Turn):
             full_prompt = "\n\n".join(self._prompts) if self._prompts else ""
             content = convert_to_acp_content([full_prompt])
 
-            # --- Phase 1: Send prompt ---
+            # --- Phase 1: Send prompt (non-blocking) ---
             try:
-                response = await self._acp_client.prompt(self._session_id, content)
+                await self._acp_client.prompt(self._session_id, content)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -187,7 +191,7 @@ class ACPTurn(HookAwareTurn, Turn):
 
             # --- Phase 2: Stream events ---
             try:
-                async for update in self._acp_client.stream_events(response):
+                async for update in self._acp_client.stream_events():
                     native_event = acp_to_native_event(update)
                     if native_event is not None:
                         # Fire advisory tool hooks for tool-related events.
