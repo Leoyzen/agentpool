@@ -217,13 +217,15 @@ class SkillCapability(AbstractCapability[AgentDepsT]):
         from pydantic_ai.mcp import MCPToolset
 
         agent = deps.native_agent
-        session_pool = agent._session_connection_pool
-        snapshot = agent._mcp_snapshot
+        run_ctx = deps.run_ctx
+        session_id = run_ctx.session_id if run_ctx is not None else "default"
+
+        ctx = agent.mcp.get_session_context(session_id)
+        session_pool = ctx.connection_pool if ctx else None
+        snapshot = ctx.snapshot if ctx else None
 
         if session_pool is None or snapshot is None:
             # Snapshot or pool not configured — fall back to legacy path.
-            run_ctx = deps.run_ctx
-            session_id = run_ctx.session_id if run_ctx is not None else "default"
             return await self._build_mcp_toolsets_legacy_session(session_id)
 
         # Filter skill configs from the snapshot for this skill.
@@ -233,8 +235,6 @@ class SkillCapability(AbstractCapability[AgentDepsT]):
 
         if not skill_entries:
             # No skill configs registered in snapshot — fall back.
-            run_ctx = deps.run_ctx
-            session_id = run_ctx.session_id if run_ctx is not None else "default"
             return await self._build_mcp_toolsets_legacy_session(session_id)
 
         toolsets: list[AbstractToolset[AgentDepsT]] = []

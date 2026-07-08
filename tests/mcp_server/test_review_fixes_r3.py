@@ -46,10 +46,10 @@ async def test_get_or_create_session_agent_does_not_recreate_cleaned_parent_sess
     1. Create a real Agent with a real MCPManager.
     2. Register it as a parent session in SessionController.
     3. Create parent MCP session context with a snapshot.
-    4. cleanup_session(parent_id) — removes it from _session_contexts.
+    4. cleanup_session(parent_id) — removes the session context.
     5. Create a child session state with parent_session_id=parent_id.
     6. Call get_or_create_session_agent(child_id).
-    7. Assert parent_id is NOT in _session_contexts (no phantom created).
+    7. Assert parent_id has NO session context (no phantom created).
     """
     from agentpool.agents.native_agent import Agent
     from agentpool.models.agents import NativeAgentConfig
@@ -92,7 +92,7 @@ async def test_get_or_create_session_agent_does_not_recreate_cleaned_parent_sess
         parent_ctx.snapshot = McpConfigSnapshot()
 
         await mcp_manager.cleanup_session(parent_id)
-        assert parent_id not in mcp_manager._session_contexts
+        assert mcp_manager.get_session_context(parent_id) is None
 
         child_state = SessionState(
             session_id=child_id,
@@ -105,7 +105,7 @@ async def test_get_or_create_session_agent_does_not_recreate_cleaned_parent_sess
             child_id, agent_name="test_agent"
         )
 
-        assert parent_id not in mcp_manager._session_contexts, (
+        assert mcp_manager.get_session_context(parent_id) is None, (
             "get_or_create_session_agent() must not recreate a cleaned-up "
             "parent session context via get_or_create_session()"
         )
@@ -195,8 +195,8 @@ async def test_get_or_create_session_agent_reads_parent_snapshot_without_leaking
             child_id, agent_name="test_agent"
         )
 
-        assert parent_id in mcp_manager._session_contexts
-        parent_ctx_after = mcp_manager._session_contexts[parent_id]
+        parent_ctx_after = mcp_manager.get_session_context(parent_id)
+        assert parent_ctx_after is not None
         assert parent_ctx_after is parent_ctx_original, (
             "Parent session context must be the same object, not recreated"
         )

@@ -50,9 +50,9 @@ async def test_as_capability_does_not_recreate_cleaned_session() -> None:
     1. Create MCPManager.
     2. get_or_create_session("test-leak") to create the context.
     3. cleanup_session("test-leak") to clean and pop it.
-    4. Assert the context is gone from _session_contexts.
+    4. Assert the context is gone (get_session_context() returns None).
     5. Call as_capability(session_id="test-leak").
-    6. Assert the context is STILL NOT in _session_contexts — the bug
+    6. Assert the context is STILL gone — the bug
        recreates it; the fix should not.
     7. cleanup().
     """
@@ -60,22 +60,22 @@ async def test_as_capability_does_not_recreate_cleaned_session() -> None:
     try:
         # 1-2. Create session context
         manager.get_or_create_session("test-leak")
-        assert "test-leak" in manager._session_contexts
+        assert manager.get_session_context("test-leak") is not None
 
         # 3. Clean up the session
         await manager.cleanup_session("test-leak")
 
         # 4. Context should be gone
-        assert "test-leak" not in manager._session_contexts
+        assert manager.get_session_context("test-leak") is None
 
         # 5. Call as_capability with the cleaned-up session_id
         await manager.as_capability(session_id="test-leak")
 
         # 6. BUG: get_or_create_session() recreates the context.
-        #    FIX: should use _session_contexts.get() so no recreation occurs.
-        assert "test-leak" not in manager._session_contexts, (
+        #    FIX: should use get_session_context() so no recreation occurs.
+        assert manager.get_session_context("test-leak") is None, (
             "as_capability() recreated a cleaned-up session context — "
-            "memory leak. Should use _session_contexts.get() instead of "
+            "memory leak. Should use get_session_context() instead of "
             "get_or_create_session()."
         )
     finally:
@@ -99,17 +99,17 @@ async def test_cleanup_session_does_not_recreate_context() -> None:
 
     Steps:
     1. Create MCPManager.
-    2. Assert "test-no-create" is not in _session_contexts.
+    2. Assert "test-no-create" has no session context.
     3. Patch get_or_create_session to track if it was called.
     4. Call cleanup_session("test-no-create").
     5. Assert get_or_create_session was NOT called.
-    6. Assert "test-no-create" is still not in _session_contexts.
+    6. Assert "test-no-create" still has no session context.
     7. cleanup().
     """
     manager = MCPManager(name="test")
     try:
         # 2. Session never created
-        assert "test-no-create" not in manager._session_contexts
+        assert manager.get_session_context("test-no-create") is None
 
         # 3-4. Wrap get_or_create_session to detect if it's called
         with patch.object(
@@ -121,15 +121,15 @@ async def test_cleanup_session_does_not_recreate_context() -> None:
 
             # 5. BUG: cleanup_session calls get_or_create_session, which
             #    creates a throwaway context.
-            #    FIX: should use _session_contexts.get() instead.
+            #    FIX: should use get_session_context() instead.
             assert not mock_get.called, (
                 "cleanup_session() called get_or_create_session() for a "
-                "non-existent session — should use _session_contexts.get() "
+                "non-existent session — should use get_session_context() "
                 "instead to avoid creating a throwaway SessionConnectionPool."
             )
 
-        # 6. Still not in _session_contexts
-        assert "test-no-create" not in manager._session_contexts
+        # 6. Still no session context
+        assert manager.get_session_context("test-no-create") is None
     finally:
         await manager.cleanup()
 
@@ -340,7 +340,7 @@ async def test_cleanup_session_identity_check_prevents_redundant_work() -> None:
     idempotent, but the redundant work is wasteful.
 
     Fix: After ``async with ctx._cleanup_lock:``, check
-    ``if self._session_contexts.get(session_id) is not ctx: return``.
+    ``if self.get_session_context(session_id) is not ctx: return``.
 
     This test creates a session, then fires two concurrent
     cleanup_session() calls. With the fix, connection_pool.cleanup() is

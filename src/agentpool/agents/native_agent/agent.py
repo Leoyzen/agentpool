@@ -73,8 +73,7 @@ if TYPE_CHECKING:
     )
     from agentpool.delegation import AgentPool
     from agentpool.hooks import AgentHooks
-    from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
-    from agentpool.mcp_server.session_pool import SessionConnectionPool
+    from agentpool.mcp_server.config_snapshot import McpConfigEntry
     from agentpool.messaging import MessageNode
     from agentpool.models.agents import NativeAgentConfig, ToolMode
     from agentpool.orchestrator.turn import Turn
@@ -327,11 +326,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self._providers = list(providers) if providers else None  # model discovery
         self._direct_history_processors = list(history_processors) if history_processors else None
         self._resolved_history_processors: list[Callable[..., Any]] | None = None
-        # MCP lifecycle snapshot — set externally (e.g. by SessionController) to
-        # enable snapshot-aware capability building in get_agentlet().
-        # When None, get_agentlet() falls back to the legacy as_capability() path.
-        self._mcp_snapshot: McpConfigSnapshot | None = None
-        self._session_connection_pool: SessionConnectionPool | None = None
+
         self._extra_capabilities: list[Any] = capabilities or []
 
     def _build_pool_configs(self) -> tuple[McpConfigEntry, ...]:
@@ -911,10 +906,13 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             pool_capabilities = self.agent_pool.skill_capabilities
             if pool_capabilities:
                 # Ensure a snapshot exists for skill config registration.
-                if self._mcp_snapshot is None:
-                    from agentpool.mcp_server.config_snapshot import McpConfigSnapshot
+                session_id = run_ctx.session_id if run_ctx else None
+                if session_id is not None:
+                    ctx = self.mcp.get_or_create_session(session_id)
+                    if ctx.snapshot is None:
+                        from agentpool.mcp_server.config_snapshot import McpConfigSnapshot
 
-                    self._mcp_snapshot = McpConfigSnapshot()
+                        self.mcp.update_session_snapshot(session_id, McpConfigSnapshot())
                 # Collect skill config entries from visible capabilities.
                 skill_entries: list[McpConfigEntry] = []
                 visibility_checker = getattr(self.agent_pool, "is_skill_visible_to_node", None)
@@ -926,10 +924,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     tool_capabilities.append(cap)
                     skill_entries.extend(cap.build_config_entries())
                 # Register skill configs in the snapshot.
-                if skill_entries:
-                    self._mcp_snapshot = self._mcp_snapshot.with_skill_configs(
-                        tuple(skill_entries),
-                    )
+                if skill_entries and session_id is not None:
+                    ctx = self.mcp.get_or_create_session(session_id)
+                    existing = ctx.snapshot
+                    if existing is not None:
+                        self.mcp.update_session_snapshot(
+                            session_id,
+                            existing.with_skill_configs(
+                                tuple(skill_entries),
+                            ),
+                        )
 
         # Collect pydantic-ai compatible instructions from SystemPrompts and providers
         all_instructions: list[Any] = []

@@ -109,10 +109,8 @@ async def test_full_create_session_chain_populates_mcp_session_context() -> None
         )
 
         # Assert: agent's MCPManager has a _SessionContext with non-None snapshot
-        assert session_id in result_agent.mcp._session_contexts, (
-            "get_or_create_session_agent() must create a _SessionContext"
-        )
-        ctx = result_agent.mcp._session_contexts[session_id]
+        ctx = result_agent.mcp.get_session_context(session_id)
+        assert ctx is not None, "get_or_create_session_agent() must create a _SessionContext"
         assert ctx.snapshot is not None, (
             "get_or_create_session_agent() must call update_session_snapshot()"
         )
@@ -142,7 +140,7 @@ async def test_session_controller_close_session_with_real_agent_and_mcp_resource
     """close_session() calls agent.mcp.cleanup_session() and agent.__aexit__().
 
     Creates a real Agent via Agent.from_callback(), manually registers it
-    in controller._session_agents, populates agent.mcp._session_contexts
+    in controller._session_agents, populates agent.mcp session context
     with snapshot, toolset_cache entry, and acp_connection_ids. Then calls
     close_session() and verifies the session context is cleaned and the
     agent context is exited.
@@ -163,7 +161,7 @@ async def test_session_controller_close_session_with_real_agent_and_mcp_resource
 
     session_id = "test-g5-close-session"
 
-    # Populate agent.mcp._session_contexts with real data
+    # Populate agent.mcp session context with real data
     ctx = agent.mcp.get_or_create_session(session_id)
     ctx.snapshot = McpConfigSnapshot()
     ctx.toolset_cache["test-client-id"] = MagicMock()
@@ -181,15 +179,15 @@ async def test_session_controller_close_session_with_real_agent_and_mcp_resource
     controller._sessions[session_id] = session
 
     # Verify pre-close state
-    assert session_id in agent.mcp._session_contexts
+    assert agent.mcp.get_session_context(session_id) is not None
     assert len(ctx.toolset_cache) > 0
     assert len(ctx.acp_connection_ids) > 0
 
     with contextlib.suppress(Exception):
         await controller.close_session(session_id)
 
-    # Assert: _session_contexts is empty after close
-    assert session_id not in agent.mcp._session_contexts, (
+    # Assert: session context is empty after close
+    assert agent.mcp.get_session_context(session_id) is None, (
         "close_session() must call agent.mcp.cleanup_session() which removes the session context"
     )
     # Assert: session removed from controller._sessions
@@ -317,7 +315,7 @@ async def test_pool_shutdown_cleans_all_session_mcp_resources() -> None:
 
     Creates a real MCPManager with multiple session contexts populated
     (3 sessions with snapshots, toolset_cache entries, acp_connection_ids).
-    Calls await manager.cleanup() and asserts _session_contexts is empty
+    Calls await manager.cleanup() and asserts session contexts are empty
     for all sessions after cleanup.
 
     Note: MCPManager.cleanup() closes the exit_stack and clears providers.
@@ -340,8 +338,8 @@ async def test_pool_shutdown_cleans_all_session_mcp_resources() -> None:
 
         # Verify pre-cleanup state
         for sid in session_ids:
-            assert sid in manager._session_contexts
-            ctx = manager._session_contexts[sid]
+            ctx = manager.get_session_context(sid)
+            assert ctx is not None
             assert ctx.snapshot is not None
             assert len(ctx.toolset_cache) > 0
             assert len(ctx.acp_connection_ids) > 0
@@ -352,8 +350,8 @@ async def test_pool_shutdown_cleans_all_session_mcp_resources() -> None:
 
         # Assert: all session contexts removed
         for sid in session_ids:
-            assert sid not in manager._session_contexts, (
-                f"cleanup_session() must remove session {sid} from _session_contexts"
+            assert manager.get_session_context(sid) is None, (
+                f"cleanup_session() must remove session {sid} from the session context registry"
             )
 
         # Final global cleanup
@@ -361,4 +359,5 @@ async def test_pool_shutdown_cleans_all_session_mcp_resources() -> None:
     finally:
         # Ensure cleanup even on assertion failure
         for sid in session_ids:
-            manager._session_contexts.pop(sid, None)
+            with contextlib.suppress(Exception):
+                await manager.cleanup_session(sid)

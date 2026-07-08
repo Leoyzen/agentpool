@@ -208,6 +208,22 @@ class MCPManager:
             self._session_contexts[session_id] = ctx
         return ctx
 
+    def get_session_context(self, session_id: str) -> _SessionContext | None:
+        """Return the per-session MCP context for ``session_id``, or ``None``.
+
+        Unlike :meth:`get_or_create_session`, this method does not create a
+        new context if one does not exist — it simply looks up the existing
+        context.
+
+        Args:
+            session_id: Unique identifier for the session.
+
+        Returns:
+            The ``_SessionContext`` for this session, or ``None`` if no
+            context has been created yet.
+        """
+        return self._session_contexts.get(session_id)
+
     def update_session_snapshot(
         self,
         session_id: str,

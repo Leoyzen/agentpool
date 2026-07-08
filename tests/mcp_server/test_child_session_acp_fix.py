@@ -168,4 +168,4 @@ async def test_cleanup_session_calls_aexit_on_toolsets_before_clearing() -> None
     # __aexit__ was called with (None, None, None)
     assert aexit_args == [(None, None, None)]
     # Session context was removed
-    assert session_id not in manager._session_contexts
+    assert manager.get_session_context(session_id) is None

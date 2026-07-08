@@ -1,11 +1,11 @@
-"""TDD test: session MCP configs merged into agent _mcp_snapshot.
+"""TDD test: session MCP configs merged into agent MCPManager snapshot.
 
 ## Behavior
 
 ``ACPSession.initialize_mcp_servers()`` converts each MCP server to an
-``McpConfigEntry`` and merges it into the agent's ``_mcp_snapshot`` via
-``with_session_configs()``.  For ACP-transport servers, the transport is
-created and stored in the agent's ``_session_connection_pool``.
+``McpConfigEntry`` and stores it in the agent's MCPManager session context
+snapshot via ``update_session_snapshot()``.  For ACP-transport servers, the
+transport is created and stored in the agent's MCPManager's session context.
 
 This replaces the old behavior of creating ``MCPResourceProvider`` instances
 and registering them on ``agent.tools``.
@@ -53,11 +53,11 @@ def _make_mock_http_mcp_server(name: str = "workspace-fs") -> Any:
 
 @pytest.mark.unit
 async def test_initialize_mcp_servers_registers_providers_on_agent() -> None:
-    """After initialize_mcp_servers(), _mcp_snapshot has session config entries.
+    """After initialize_mcp_servers(), the MCPManager snapshot has session config entries.
 
     Given: An ACPSession with an HttpMcpServer.
     When: initialize_mcp_servers() is called.
-    Then: The agent's _mcp_snapshot.session_configs contains an entry
+    Then: The agent's MCPManager snapshot.session_configs contains an entry
           whose server_config.name matches the MCP server name.
     """
     _pool, _agent, session_pool = _make_pool_with_session_pool()
@@ -83,11 +83,11 @@ async def test_initialize_mcp_servers_registers_providers_on_agent() -> None:
 
     await acp_session.initialize_mcp_servers()
 
-    # EXPECT: _mcp_snapshot is set and contains the session config
-    assert session_agent._mcp_snapshot is not None, (
-        "_mcp_snapshot should be set after initialize_mcp_servers()"
-    )
-    session_configs = session_agent._mcp_snapshot.session_configs
+    # EXPECT: snapshot is set and contains the session config
+    ctx = session_agent.mcp.get_session_context(session_id)
+    assert ctx is not None, "session context should exist after initialize_mcp_servers()"
+    assert ctx.snapshot is not None, "snapshot should be set after initialize_mcp_servers()"
+    session_configs = ctx.snapshot.session_configs
     assert len(session_configs) >= 1, "session_configs should contain at least one entry"
     config_names = [e.server_config.name for e in session_configs]
     assert "workspace-fs" in config_names, (
@@ -103,7 +103,7 @@ async def test_initialize_mcp_servers_with_no_servers_is_noop() -> None:
 
     Given: An ACPSession with mcp_servers=None.
     When: initialize_mcp_servers() is called.
-    Then: _mcp_snapshot remains None (no changes).
+    Then: The MCPManager snapshot has no config entries (no changes).
     """
     _pool, _agent, session_pool = _make_pool_with_session_pool()
     await session_pool.start()
@@ -123,9 +123,10 @@ async def test_initialize_mcp_servers_with_no_servers_is_noop() -> None:
 
     await acp_session.initialize_mcp_servers()
 
-    # _mcp_snapshot should have no session configs (no servers to configure)
-    if session_agent._mcp_snapshot is not None:
-        assert len(session_agent._mcp_snapshot.session_configs) == 0, (
+    # snapshot should have no session configs (no servers to configure)
+    ctx = session_agent.mcp.get_session_context(session_id)
+    if ctx is not None and ctx.snapshot is not None:
+        assert len(ctx.snapshot.session_configs) == 0, (
             "session_configs should be empty when no MCP servers are configured"
         )
 
@@ -138,7 +139,7 @@ async def test_initialize_mcp_servers_does_not_duplicate_providers() -> None:
 
     Given: An ACPSession with an HttpMcpServer.
     When: initialize_mcp_servers() is called twice.
-    Then: _mcp_snapshot.session_configs contains exactly one entry
+    Then: The MCPManager snapshot.session_configs contains exactly one entry
           for the server (deduplicated by client_id).
     """
     _pool, _agent, session_pool = _make_pool_with_session_pool()
@@ -161,8 +162,10 @@ async def test_initialize_mcp_servers_does_not_duplicate_providers() -> None:
     # Second call — should deduplicate by client_id
     await acp_session.initialize_mcp_servers()
 
-    assert session_agent._mcp_snapshot is not None
-    session_configs = session_agent._mcp_snapshot.session_configs
+    ctx = session_agent.mcp.get_session_context(session_id)
+    assert ctx is not None, "session context should exist after second initialize_mcp_servers()"
+    assert ctx.snapshot is not None, "snapshot should be set after second initialize_mcp_servers()"
+    session_configs = ctx.snapshot.session_configs
     # EXPECT: only one entry for the server
     client_ids = [e.server_config.client_id for e in session_configs]
     assert len(client_ids) == len(set(client_ids)), (
