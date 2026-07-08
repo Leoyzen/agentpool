@@ -852,6 +852,10 @@ class ACPSession:
                 self.get_cwd_context in self.agent.sys_prompts.prompts
             ):
                 self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            if isinstance(self.agent, Agent) and (
+                self.get_locale_prompt in self.agent.sys_prompts.prompts
+            ):
+                self.agent.sys_prompts.prompts.remove(self.get_locale_prompt)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
             # Unregister skill command callback to prevent memory leak
             if hasattr(self, "_skill_command_callback"):
