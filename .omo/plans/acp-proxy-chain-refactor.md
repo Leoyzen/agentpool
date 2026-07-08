@@ -216,7 +216,7 @@ Your next move: approve to start execution, or run a high-accuracy review first.
   QA scenarios: happy — zero-proxy init; N-proxy init in order; passthrough skips deserialization; error as JSON-RPC. failure — proxy crash aborts and cleans up; error not skipped; orphans cleaned. Evidence: `.omo/evidence/task-12-acp-proxy-chain-refactor.log`
   Commit: Y | test(acp): add Phase 2 tests for Conductor and Proxy protocol
 
-- [ ] 13. Rewrite ACPAgent — init, output type, create_turn, run_stream
+- [x] 13. Rewrite ACPAgent — init, output type, create_turn, run_stream
   What to do / Must NOT do: Rewrite `ACPAgent.__init__()` (acp_agent.py:129-211) — accept optional `proxy_chain` config, create Conductor instead of direct subprocess. Change output type from `str` to `ChatMessage[str]`. Rewrite `create_turn()` — construct `ACPClientAdapter` from Conductor's connection + handler. Rewrite `run_stream()` — delegate to `ACPTurn.execute()` via graph Step. Add `use_conductor` feature flag (default: true). Must NOT break configs without `proxy_chain`. Must NOT remove `use_conductor: false` fallback.
   Parallelization: Wave 3 | Blocked by: T6, T12 | Blocks: T14, T17 | Can parallelize with: T14
   References: `openspec/changes/acp-proxy-chain-refactor/specs/acp-single-execution-path/spec.md:1-30`; `src/agentpool/agents/acp_agent/acp_agent.py:129-211,632-662`; `src/agentpool/agents/agent.py` (BaseAgent); `src/agentpool/messaging/messagenode.py` (ChatMessage); design.md D2
@@ -224,7 +224,7 @@ Your next move: approve to start execution, or run a high-accuracy review first.
   QA scenarios: happy — use_conductor=true creates Conductor; create_turn constructs adapter; run_stream delegates to ACPTurn; backward compat. failure — invalid proxy_chain raises error; use_conductor=false falls back. Evidence: `.omo/evidence/task-13-acp-proxy-chain-refactor.log`
   Commit: Y | refactor(acp-agent): rewrite ACPAgent to use Conductor, output ChatMessage[str]
 
-- [ ] 14. Create ProxyChainConfig model + migrate ToolManagerBridge to ToolsetFactory
+- [x] 14. Create ProxyChainConfig model + migrate ToolManagerBridge to ToolsetFactory
   What to do / Must NOT do: Create `ProxyChainConfig` Pydantic model with `type` discriminator (unknown types raise `ValidationError` at config load time with message "Unknown proxy type: {type}"). Add `proxy_chain: list[ProxyChainConfig] | None` to `ACPAgentConfig` (base.py:218). Add `use_conductor: bool = True` to `BaseACPAgentConfig` (base.py:31). Migrate `ToolManagerBridge` to `ToolsetFactory` (NOT `ResourceProvider` — deprecated at `resource_providers/base.py:90`). Must NOT use `ResourceProvider`. Must NOT use `getattr` for discrimination.
   Parallelization: Wave 3 | Blocked by: T0 | Blocks: T17 | Can parallelize with: T13
   References: `openspec/changes/acp-proxy-chain-refactor/specs/acp-proxy-chain/spec.md:73-85`; `src/agentpool/models/acp_agents/base.py:31,218`; `src/agentpool/tools/factory.py:19` (ToolsetFactory); `src/agentpool/resource_providers/base.py:90` (deprecated warning); `src/agentpool/agents/acp_agent/acp_agent.py:162,209` (ToolManagerBridge); design.md D7; Metis findings C2, M4
@@ -232,7 +232,7 @@ Your next move: approve to start execution, or run a high-accuracy review first.
   QA scenarios: happy — proxy_chain parses; use_conductor defaults True; ToolsetFactory used. failure — unknown type raises ValidationError at load time; missing type raises error. Evidence: `.omo/evidence/task-14-acp-proxy-chain-refactor.log`
   Commit: Y | feat(config): add ProxyChainConfig, migrate ToolManagerBridge to ToolsetFactory
 
-- [ ] 15. Update AgentPool to pass proxy chain config to ACPAgent
+- [x] 15. Update AgentPool to pass proxy chain config to ACPAgent
   What to do / Must NOT do: Update `AgentPool` to pass proxy chain config to ACPAgent during instantiation. Wire config from YAML through to Conductor. Must NOT break existing agent instantiation.
   Parallelization: Wave 3 | Blocked by: T13 | Blocks: T17
   References: `src/agentpool/delegation/pool.py` (AgentPool); `src/agentpool/models/acp_agents/base.py:187` (get_agent method)
@@ -240,7 +240,7 @@ Your next move: approve to start execution, or run a high-accuracy review first.
   QA scenarios: happy — config flows from YAML to Conductor. failure — missing config handled gracefully. Evidence: `.omo/evidence/task-15-acp-proxy-chain-refactor.log`
   Commit: Y | refactor(pool): pass proxy chain config to ACPAgent during instantiation
 
-- [ ] 16. Write Phase 3 tests — Conductor integration, backward compat, multi-turn
+- [x] 16. Write Phase 3 tests — Conductor integration, backward compat, multi-turn
   What to do / Must NOT do: Write integration test: ACPAgent with Conductor + zero proxies (backward compat). Write integration test: ACPAgent with Conductor + proxy chain. Write integration test: multi-turn run (3 turns with steer/followup through Conductor — verify hooks fire per-turn, events stream correctly across turns). Verify existing tests pass with `use_conductor: true`. Must NOT use real subprocess in unit tests.
   Parallelization: Wave 3 | Blocked by: T13, T14, T15 | Blocks: T18, T23
   References: `openspec/changes/acp-proxy-chain-refactor/tasks.md:49-52`; `tests/agents/acp_agent/`; `tests/conftest.py`; Metis finding L3 (multi-turn test)
@@ -248,7 +248,7 @@ Your next move: approve to start execution, or run a high-accuracy review first.
   QA scenarios: happy — zero-proxy works; proxy chain works; multi-turn hooks fire per-turn; existing tests pass. failure — use_conductor=false works; invalid config raises error; multi-turn hooks not double-fired. Evidence: `.omo/evidence/task-16-acp-proxy-chain-refactor.log`
   Commit: Y | test(acp-agent): add Phase 3 integration tests including multi-turn
 
-- [ ] 17. Create proxy type registry + impls package
+- [x] 17. Create proxy type registry + impls package
   What to do / Must NOT do: Create proxy type registry — map string discriminators to proxy classes. Create `src/acp/proxy/impls/__init__.py`. Follow existing registry patterns (entry points). Must NOT hardcode proxy types in Conductor.
   Parallelization: Wave 4 | Blocked by: T12 | Blocks: T18, T19, T20
   References: `openspec/changes/acp-proxy-chain-refactor/specs/acp-proxy-impls/spec.md:99-107`; `src/acp/proxy/protocol.py`; `pyproject.toml` (entry points)
