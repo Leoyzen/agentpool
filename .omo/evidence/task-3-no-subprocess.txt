@@ -1,3 +1,0 @@
-# No subprocess dependencies or macOS skip markers found
-# Command: grep -E 'npx|uvx|test-mcp-server|@pytest\.mark\.skipif.*darwin' tests/servers/acp_server/test_mcp_notification_bridge.py
-# Output: (empty)

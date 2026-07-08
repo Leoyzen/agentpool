@@ -1,8 +1,0 @@
-QA Scenario: Capabilities can include providers flag
-Tool: Bash
-Preconditions: None
-Steps:
-  1. uv run python -c "from acp.schema.capabilities import AgentCapabilities; c = AgentCapabilities.create(providers=True); print(c.providers)"
-Expected Result: Output is "True"
-Actual Result: True
-Status: PASS

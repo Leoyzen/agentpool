@@ -1,5 +1,0 @@
-src/agentpool/agents/base_agent.py:230:        self._cancelled = False
-src/agentpool/agents/base_agent.py:494:        self._cancelled = False  # Reset cancellation flag for backward compat
-src/agentpool/agents/base_agent.py:503:        self._cancelled = True  # Signal cancellation via flag for backward compat
-src/agentpool/agents/base_agent.py:1011:        return self._cancelled or background_cancelled
-src/agentpool/agents/base_agent.py:1022:        self._cancelled = True

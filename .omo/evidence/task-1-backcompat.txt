@@ -1,8 +1,0 @@
-=== Task 1: Backward Compatibility Evidence ===
-
-ResourceChangeEvent constructor usage remains compatible:
-
-$ uv run python -c "from agentpool.resource_providers.base import ResourceChangeEvent; e = ResourceChangeEvent('p', 'base', 'tools')"
-Exit code: 0
-
-No uri required, existing positional/keyword argument patterns work.
