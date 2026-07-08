@@ -17,7 +17,13 @@ import contextlib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self, override
 
+import structlog
+
+from acp.proxy.constants import PROXY_INITIALIZE, PROXY_SUCCESSOR
 from agentpool.messaging.messagenode import MessageNode
+
+
+logger: structlog.stdlib.BoundLogger = structlog.get_logger(__name__)
 
 
 if TYPE_CHECKING:
@@ -122,6 +128,10 @@ class Conductor(MessageNode[Any, str]):
         self._exit_stack: contextlib.AsyncExitStack | None = None
         self._conductor_initialized: bool = False
 
+        # Chain initialization state — populated during _initialize_chain
+        self._intercepted_methods: list[list[str]] = []
+        self._chain_initialized: bool = False
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -217,6 +227,21 @@ class Conductor(MessageNode[Any, str]):
             # For T8, we store None and allow external injection.
             pass
 
+        # Initialize the proxy chain: call proxy/initialize on each
+        # proxy, then initialize on the terminal agent. If any
+        # component fails, clean up all started components.
+        try:
+            await self._initialize_chain()
+        except Exception:
+            if self._exit_stack is not None:
+                await self._exit_stack.aclose()
+                self._exit_stack = None
+            self._process = None
+            self._reader = None
+            self._writer = None
+            self._connection = None
+            raise
+
         self._conductor_initialized = True
         return self
 
@@ -245,9 +270,130 @@ class Conductor(MessageNode[Any, str]):
         self._reader = None
         self._writer = None
         self._connection = None
+        self._intercepted_methods.clear()
+        self._chain_initialized = False
         self._conductor_initialized = False
 
         await super().__aexit__(exc_type, exc_val, exc_tb)
+
+    # ------------------------------------------------------------------
+    # Chain initialization (T9)
+    # ------------------------------------------------------------------
+
+    def _is_terminal(self, index: int) -> bool:
+        """Return True if the component at *index* is the terminal agent.
+
+        The terminal agent is the last component in the chain. Since
+        ``_proxy_chain`` contains only proxies, any index equal to or
+        greater than its length refers to the terminal agent position.
+
+        Args:
+            index: Zero-based chain position (0 = first proxy).
+
+        Returns:
+            True if the index refers to the terminal agent.
+        """
+        return index >= len(self._proxy_chain)
+
+    async def _initialize_chain(self) -> None:
+        """Run the full proxy chain initialization sequence.
+
+        Calls ``proxy/initialize`` ({attr:`PROXY_INITIALIZE`}) on each
+        proxy in order from client toward terminal agent, then calls
+        ``initialize`` on the terminal agent (last component).
+
+        After initialization, the intercepted-methods lists from each
+        proxy are stored for use by message routing (T10). The
+        ``proxy/successor`` ({attr:`PROXY_SUCCESSOR`}) forwarding chain
+        is established implicitly by the list ordering: proxy *i*'s
+        successor is proxy *i+1*, and the last proxy's successor is the
+        terminal agent.
+
+        !!! note "Zero-proxy case"
+
+            When ``_proxy_chain`` is empty, this method skips proxy
+            initialization and connects directly to the terminal agent.
+
+        Raises:
+            Exception: If any proxy or the terminal agent fails during
+                initialization. All started components are cleaned up
+                before re-raising.
+        """
+        # Initialize each proxy in order (client → terminal).
+        for i, proxy in enumerate(self._proxy_chain):
+            try:
+                intercepted = await self._initialize_proxy(proxy, i)
+            except Exception:
+                # A proxy crashed during init — abort and clean up.
+                logger.exception(
+                    "proxy_init_failed",
+                    proxy_index=i,
+                    method=PROXY_INITIALIZE,
+                )
+                self._intercepted_methods.clear()
+                raise
+            self._intercepted_methods.append(intercepted)
+
+        # Initialize the terminal agent (last component).
+        try:
+            await self._initialize_terminal()
+        except Exception:
+            # Terminal agent init failed — clean up proxy state.
+            logger.exception("terminal_init_failed")
+            self._intercepted_methods.clear()
+            raise
+
+        self._chain_initialized = True
+        logger.info(
+            "chain_initialized",
+            proxy_count=len(self._proxy_chain),
+            forwarding_method=PROXY_SUCCESSOR,
+        )
+
+    async def _initialize_proxy(self, proxy: Proxy, index: int) -> list[str]:
+        """Initialize a single proxy and return its intercepted methods.
+
+        Calls ``proxy_initialize()`` on the proxy, which returns the
+        list of ACP method names the proxy intercepts. These are stored
+        by the Conductor for passthrough optimization (T10): message
+        types not in any proxy's ``intercepted_methods`` are forwarded
+        without deserialization.
+
+        Args:
+            proxy: The proxy to initialize.
+            index: Zero-based chain position (0 = closest to client).
+
+        Returns:
+            List of intercepted ACP method names (e.g.
+            ``["session/prompt", "session/update"]``).
+        """
+        logger.debug("proxy_init_start", proxy_index=index, method=PROXY_INITIALIZE)
+        return proxy.proxy_initialize()
+
+    async def _initialize_terminal(self) -> None:
+        """Initialize the terminal agent (last component in the chain).
+
+        Sends the standard ACP ``initialize`` method to the terminal
+        agent subprocess via the :class:`ClientSideConnection`. This is
+        NOT ``proxy/initialize`` — the terminal agent is a standard ACP
+        agent and does not know about proxy chains.
+
+        Raises:
+            RuntimeError: If the connection has not been established.
+        """
+        if self._connection is None:
+            raise RuntimeError(
+                "Cannot initialize terminal agent: connection not established",
+            )
+
+        from acp.agent.acp_agent_api import ACPAgentAPI
+
+        api = ACPAgentAPI(self._connection)
+        await api.initialize(
+            title=self.name,
+            version="0.1.0",
+            name=self.name,
+        )
 
     # ------------------------------------------------------------------
     # MessageNode abstract methods (T9, T10, T11 will implement fully)
