@@ -314,10 +314,10 @@ Your next move: approve to start execution, or run a high-accuracy review first.
 
 ## Final verification wave
 > Runs in parallel after ALL todos. ALL must APPROVE. Surface results and wait for the user's explicit okay before declaring complete.
-- [ ] F1. Plan compliance audit — verify all todos match OpenSpec change specs (proposal, design, tasks, 6 spec files)
-- [ ] F2. Code quality review — `uv run ruff check src/` + `uv run --no-group docs mypy src/` both clean, no `cast()`/`getattr`/`hasattr`/`as any`
-- [ ] F3. Real manual QA — `uv run pytest` full suite passes, `agentpool run <acp_agent> "test prompt"` works end-to-end
-- [ ] F4. Scope fidelity — verify no out-of-scope items implemented (no remote transport, no session fork, no native agent proxy chains, no hot-swap)
+- [x] F1. Plan compliance audit — verify all todos match OpenSpec change specs (proposal, design, tasks, 6 spec files)
+- [x] F2. Code quality review — `uv run ruff check src/` + `uv run --no-group docs mypy src/` both clean, no `cast()`/`getattr`/`hasattr`/`as any`
+- [x] F3. Real manual QA — `uv run pytest` full suite passes, `agentpool run <acp_agent> "test prompt"` works end-to-end
+- [x] F4. Scope fidelity — verify no out-of-scope items implemented (no remote transport, no session fork, no native agent proxy chains, no hot-swap)
 
 ## Commit strategy
 
