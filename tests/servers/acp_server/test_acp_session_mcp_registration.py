@@ -5,7 +5,7 @@
 ``ACPSession.initialize_mcp_servers()`` converts each MCP server to an
 ``McpConfigEntry`` and stores it in the agent's MCPManager session context
 snapshot via ``update_session_snapshot()``.  For ACP-transport servers, the
-transport is created and stored in the agent's ``_session_connection_pool``.
+transport is created and stored in the agent's MCPManager's session context.
 
 This replaces the old behavior of creating ``MCPResourceProvider`` instances
 and registering them on ``agent.tools``.
@@ -85,7 +85,8 @@ async def test_initialize_mcp_servers_registers_providers_on_agent() -> None:
 
     # EXPECT: snapshot is set and contains the session config
     ctx = session_agent.mcp.get_session_context(session_id)
-    assert ctx is not None and ctx.snapshot is not None, (
+    assert ctx is not None, "session context should exist after initialize_mcp_servers()"
+    assert ctx.snapshot is not None, (
         "snapshot should be set after initialize_mcp_servers()"
     )
     session_configs = ctx.snapshot.session_configs
@@ -164,7 +165,8 @@ async def test_initialize_mcp_servers_does_not_duplicate_providers() -> None:
     await acp_session.initialize_mcp_servers()
 
     ctx = session_agent.mcp.get_session_context(session_id)
-    assert ctx is not None and ctx.snapshot is not None
+    assert ctx is not None, "session context should exist after second initialize_mcp_servers()"
+    assert ctx.snapshot is not None, "snapshot should be set after second initialize_mcp_servers()"
     session_configs = ctx.snapshot.session_configs
     # EXPECT: only one entry for the server
     client_ids = [e.server_config.client_id for e in session_configs]

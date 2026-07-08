@@ -195,7 +195,7 @@ async def test_initialize_mcp_servers_registers_transport_and_syncs_snapshot() -
 
     Also verifies the session context snapshot is set (both paths updated).
     """
-    mcp_manager, _acp_manager, agent, acp_agent, acp_session, _mock_client = _build_test_fixture(
+    mcp_manager, _acp_manager, _agent, acp_agent, acp_session, _mock_client = _build_test_fixture(
         "test1-session"
     )
 
