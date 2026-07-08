@@ -822,3 +822,30 @@ class ACPSession:
     def register_update_callback(self, callback: Callable[[], None]) -> None:
         """Register callback for command updates."""
         self._update_callbacks.append(callback)
+
+    async def process_prompt(self, content_blocks: list[Any]) -> None:
+        """Compatibility wrapper for prompt execution.
+
+        Runs the agent, converts events to ACP session updates, and sends
+        them via the client. Used by test harnesses and skill command bridges.
+
+        Args:
+            content_blocks: List of ACP content blocks to send as prompt.
+        """
+        from agentpool_server.acp_server.event_converter import ACPEventConverter
+
+        # Extract text from content blocks
+        prompt_text = ""
+        for block in content_blocks:
+            if isinstance(block, dict) and "text" in block:
+                prompt_text += block["text"]
+            elif hasattr(block, "text"):
+                prompt_text += block.text
+
+        converter = ACPEventConverter()
+        async for event in self.agent.run_stream(prompt_text):
+            async for update in converter.convert(event):
+                from acp.schema import SessionNotification
+
+                notification = SessionNotification(sessionId=self.session_id, update=update)
+                await self.client.session_update(notification)

@@ -105,11 +105,10 @@ async def test_skill_content_reaches_model_prompt(agent_pool_with_skill: AgentPo
 
     content_block = TextContentBlock(text="/test-skill some arguments")
 
-    # Capture what session_pool.run_stream receives
-    session_pool = agent_pool_with_skill._session_pool  # type: ignore[reportPrivateUsage]
+    # Capture what agent.run_stream receives
     captured_args: tuple[Any, ...] = ()
     captured_kwargs: dict[str, Any] = {}
-    original_run_stream = session_pool.run_stream
+    original_run_stream = agent.run_stream
 
     def mock_run_stream(*args: Any, **kwargs: Any) -> Any:
         nonlocal captured_args, captured_kwargs
@@ -122,26 +121,25 @@ async def test_skill_content_reaches_model_prompt(agent_pool_with_skill: AgentPo
 
         return _empty()
 
-    session_pool.run_stream = mock_run_stream  # type: ignore[method-assign]
+    agent.run_stream = mock_run_stream  # type: ignore[method-assign]
 
     try:
         await session.process_prompt([content_block])
     finally:
-        session_pool.run_stream = original_run_stream  # type: ignore[method-assign]
+        agent.run_stream = original_run_stream  # type: ignore[method-assign]
 
     # ASSERTIONS
-    assert captured_args, "session_pool.run_stream should have been called"
-    # The first arg is session_id
-    assert captured_args[0] == "test-session"
+    assert captured_args, "agent.run_stream should have been called"
+    # The first arg is the prompt text (which includes skill command)
+    assert "/test-skill" in captured_args[0]
     # Skill content may be passed via staged_content rather than as positional args
 
 
 async def test_skill_content_format_matches_opencode_pattern(agent_pool_with_skill: AgentPool):
-    """Verify skill content reaches session_pool.run_stream.
+    """Verify skill content reaches agent.run_stream.
 
-    process_prompt() now routes through session_pool.run_stream() instead of
-    calling agent._stream_events() directly. We verify that run_stream is called
-    with the skill instructions in the content.
+    process_prompt() routes through agent.run_stream(). We verify that
+    run_stream is called with the skill instructions in the content.
     """
     agent = agent_pool_with_skill.manifest.agents["test_agent"].get_agent(
         pool=agent_pool_with_skill
@@ -167,9 +165,8 @@ async def test_skill_content_format_matches_opencode_pattern(agent_pool_with_ski
 
     content_block = TextContentBlock(text="/test-skill some arguments")
 
-    session_pool = agent_pool_with_skill._session_pool  # type: ignore[reportPrivateUsage]
     captured_args: tuple[Any, ...] = ()
-    original_run_stream = session_pool.run_stream
+    original_run_stream = agent.run_stream
 
     def mock_run_stream(*args: Any, **kwargs: Any) -> Any:
         nonlocal captured_args
@@ -181,12 +178,12 @@ async def test_skill_content_format_matches_opencode_pattern(agent_pool_with_ski
 
         return _empty()
 
-    session_pool.run_stream = mock_run_stream  # type: ignore[method-assign]
+    agent.run_stream = mock_run_stream  # type: ignore[method-assign]
 
     try:
         await session.process_prompt([content_block])
     finally:
-        session_pool.run_stream = original_run_stream  # type: ignore[method-assign]
+        agent.run_stream = original_run_stream  # type: ignore[method-assign]
 
     assert captured_args
     # run_stream was called — skill content is delivered via staged_content

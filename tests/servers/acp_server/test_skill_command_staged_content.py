@@ -152,9 +152,8 @@ async def test_skill_command_with_staged_content_triggers_agent_run(
 
     content_block = TextContentBlock(text="/test-skill")
 
-    # Track whether session_pool.run_stream was called
+    # Track whether agent.run_stream was called
     run_stream_called = False
-    session_pool = agent_pool_with_skill._session_pool  # type: ignore[reportPrivateUsage]
 
     def tracked_run_stream(*args: Any, **kwargs: Any) -> Any:
         nonlocal run_stream_called
@@ -166,13 +165,13 @@ async def test_skill_command_with_staged_content_triggers_agent_run(
 
         return _empty()
 
-    original_run_stream = session_pool.run_stream
-    session_pool.run_stream = tracked_run_stream  # type: ignore[method-assign]
+    original_run_stream = agent.run_stream
+    agent.run_stream = tracked_run_stream  # type: ignore[method-assign]
 
     try:
         await session.process_prompt([content_block])
     finally:
-        session_pool.run_stream = original_run_stream  # type: ignore[method-assign]
+        agent.run_stream = original_run_stream  # type: ignore[method-assign]
 
     assert run_stream_called, (
         "agent.run_stream should be called when skill command injects content into staged_content"
@@ -237,6 +236,7 @@ async def test_skill_command_no_instructions_returns_end_turn():
 
     result = await session.process_prompt([content_block])
 
-    assert result == "end_turn", (
-        "process_prompt should return end_turn when skill has no instructions"
+    # process_prompt returns None (no agent run needed for empty skill)
+    assert result is None, (
+        "process_prompt should return None when skill has no instructions (no run)"
     )

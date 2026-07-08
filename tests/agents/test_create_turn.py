@@ -62,18 +62,17 @@ def test_acp_turn_joins_all_prompts_not_just_last() -> None:
     assert "third prompt" in new_result
 
 
-def test_acp_adapter_has_todo_comment() -> None:
-    """ACP agent adapter gap must be documented with TODO, not just NOTE.
+def test_acp_adapter_uses_acp_client_adapter() -> None:
+    """ACPAgent.create_turn() must use ACPClientAdapter (not cast to ACPClientProtocol).
 
-    The TODO comment must describe the required infrastructure
-    (async futures / notification registry) to prevent runtime crashes.
+    The adapter bridges the blocking ACPAgentAPI to the non-blocking
+    ACPClientProtocol interface expected by ACPTurn.
     """
     import agentpool.agents.acp_agent.acp_agent as acp_module
 
     source = inspect.getsource(acp_module.ACPAgent.create_turn)
-    assert "TODO" in source, "ACP adapter gap must be documented with TODO comment, not just NOTE"
-    assert "AttributeError" in source or "adapter" in source.lower(), (
-        "TODO comment must describe the gap and required infrastructure"
+    assert "ACPClientAdapter" in source, (
+        "create_turn() must use ACPClientAdapter to bridge ACPAgentAPI"
     )
 
 
