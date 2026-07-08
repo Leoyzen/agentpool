@@ -457,10 +457,10 @@ class ACPSession:
         """Initialize MCP servers if any are configured.
 
         Session-level MCP servers are converted to :class:`McpConfigEntry`
-        objects and merged into the agent's ``_mcp_snapshot``.  For
-        ACP-transport servers, the transport is created and stored in the
-        agent's ``_session_connection_pool`` so that snapshot-aware
-        capability building can reuse it.
+        objects and merged into the agent's MCPManager session context.
+        For ACP-transport servers, the transport is registered via
+        ``MCPManager.add_acp_transport()`` so that snapshot-aware
+        capability building can discover it.
         """
         if not self.mcp_servers:
             return
@@ -494,13 +494,7 @@ class ACPSession:
 
                         transport = AcpMcpTransport(conn, timeout=600.0)
                         if isinstance(self.agent, Agent):
-                            # Store on the agent's session connection pool
-                            # if one is available (legacy path).
-                            if self.agent._session_connection_pool is not None:
-                                await self.agent._session_connection_pool.add_transport(
-                                    cfg.client_id, transport
-                                )
-                            # Always register the ACP transport on the
+                            # Register the ACP transport on the
                             # MCPManager's session context so that
                             # as_capability() can find it and child sessions
                             # can inherit it via copy_pre_created_transports().
@@ -540,7 +534,8 @@ class ACPSession:
         # Merge new session configs into the agent's MCP snapshot, deduplicating
         # by client_id so that re-initialisation does not duplicate entries.
         if entries and isinstance(self.agent, Agent):
-            existing = self.agent._mcp_snapshot
+            existing_ctx = self.agent.mcp.get_session_context(self.session_id)
+            existing = existing_ctx.snapshot if existing_ctx else None
             existing_session = existing.session_configs if existing is not None else ()
             seen_ids: set[str] = {e.server_config.client_id for e in existing_session}
             merged: list[McpConfigEntry] = list(existing_session)
@@ -549,10 +544,10 @@ class ACPSession:
                     merged.append(entry)
                     seen_ids.add(entry.server_config.client_id)
             new_snapshot = (existing or McpConfigSnapshot()).with_session_configs(tuple(merged))
-            self.agent._mcp_snapshot = new_snapshot
-            # Sync the updated snapshot to the MCPManager's session context
-            # so that as_capability(session_id) can discover ACP MCP configs
-            # and child sessions can inherit them via copy_pre_created_transports().
+            # Persist the updated snapshot to the MCPManager's session
+            # context so that as_capability(session_id) can discover ACP
+            # MCP configs and child sessions can inherit them via
+            # copy_pre_created_transports().
             self.agent.mcp.update_session_snapshot(self.session_id, new_snapshot)
             self.log.info(
                 "Updated agent MCP snapshot with session configs",
