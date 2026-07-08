@@ -3060,3 +3060,612 @@ AgentPool → SessionPool → SessionController → MCPManager → agent → Pro
 | Resource acquisition not crash-safe | Medium | Resource | Journal-tracked resource acquisition |
 
 **Recommendation**: These derived lifecycle gaps should be addressed in sub-RFCs that build on the unified architecture. The primary fix is making resource acquisition and cleanup part of the RunLoop's durable lifecycle, not ad-hoc operations scattered across the codebase.
+
+---
+
+## Appendix D: ToolTransport — Cross-Layer Transport for Remote Tool Calls
+
+### D.1: The Cross-Layer Access Problem
+
+The six dimensions handle the **execution model** (how Turns run, how events flow). ResourceProviders handle the **capability model** (what tools are available). These are orthogonal — until a tool call needs to reach a remote service (e.g., MCP-over-ACP).
+
+**Problem**: When tools are remote, ResourceProvider needs network transport. But EventTransport is owned by CommChannel (Dimension 6). ResourceProvider is a sibling of CommChannel under RunLoop — there is no defined path for ResourceProvider to access EventTransport.
+
+This is not a hypothetical concern. MCP-over-ACP, remote MCP servers, and any distributed tool invocation all require the capability layer to send/receive messages over transport. Connection lifecycle (expire, timeout, reconnect) must be handled at the transport level, not leaked into Turn execution logic.
+
+### D.2: Design Principle
+
+**ToolTransport is part of the capability model, not a seventh dimension.**
+
+The six dimensions handle Turn lifecycle. ToolTransport handles tool invocation transport. They are orthogonal but may share underlying infrastructure (e.g., the same MQ connection).
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                        RunLoop                             │
+│                                                           │
+│  ┌─────────────────────┐  ┌──────────────────────────┐   │
+│  │  Execution Model    │  │  Capability Model         │   │
+│  │  (6 dimensions)     │  │                           │   │
+│  │                     │  │  ResourceProvider         │   │
+│  │  CommChannel ───────┼──┼─► ToolTransport           │   │
+│  │   └─ EventTransport │  │    ├─ LocalToolTransport  │   │
+│  │       (MQ conn)     │  │    ├─ ACPToolTransport    │   │
+│  │                     │  │    └─ MQToolTransport ────┼───┼──► shared MQ connection
+│  │                     │  │                           │   │
+│  └─────────────────────┘  └──────────────────────────┘   │
+│                                                           │
+│  Shared infrastructure:                                   │
+│    CommChannel.EventTransport ──────┐                    │
+│    ToolTransport.MQ ────────────────┘ (same MQ client)   │
+└──────────────────────────────────────────────────────────┘
+```
+
+### D.3: ToolTransport Protocol
+
+```python
+from __future__ import annotations
+from typing import Protocol, runtime_checkable, Any, Callable
+from dataclasses import dataclass
+from enum import Enum
+import asyncio
+import time
+import json
+import hashlib
+
+
+class TransportState(Enum):
+    """State of a ToolTransport connection."""
+    CONNECTED = "connected"
+    RECONNECTING = "reconnecting"
+    DEGRADED = "degraded"       # Partial connectivity (some tools unavailable)
+    ERROR = "error"             # No connectivity
+
+
+class ToolTimeoutError(Exception):
+    """Tool call exceeded timeout."""
+
+
+class ToolConnectionError(Exception):
+    """Tool transport connection lost and could not be re-established."""
+
+
+@dataclass
+class ToolDefinition:
+    """Discovered tool metadata."""
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+
+
+@dataclass
+class ToolResult:
+    """Successful tool execution result."""
+    tool_name: str
+    output: Any
+    is_error: bool = False
+
+
+@dataclass
+class ToolError:
+    """Failed tool execution result."""
+    tool_name: str
+    error_type: str          # "timeout" | "connection" | "execution" | "not_found"
+    error_message: str
+    retryable: bool = False
+
+
+@runtime_checkable
+class ToolTransport(Protocol):
+    """Transport for remote tool calls.
+
+    Implementations MAY share underlying connection with EventTransport
+    (e.g., MQToolTransport shares the same MQ client as MessageQueueTransport),
+    but MUST NOT depend on CommChannel internals.
+
+    Connection lifecycle (expire, timeout, reconnect) is handled internally.
+    Implementations SHOULD catch transport errors and return ToolError
+    rather than raising exceptions.
+    """
+
+    async def call_tool(
+        self,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        turn_id: str,
+        timeout: float = 30.0,
+    ) -> ToolResult | ToolError:
+        """Call a remote tool and return the result.
+
+        Idempotent via turn_id + call_id: if the remote already processed
+        this tool call (e.g., after reconnect), returns the cached result
+        instead of re-executing.
+
+        Implementations SHOULD catch ToolTimeoutError and
+        ToolConnectionError internally and return ToolError instead
+        of propagating exceptions. This ensures errors are data
+        (journalable, replayable) rather than control flow.
+        """
+        ...
+
+    async def discover_tools(self) -> list[ToolDefinition]:
+        """Discover available remote tools.
+
+        Implementations MAY cache results. Cache invalidates on
+        TransportState changes (RECONNECTING → CONNECTED triggers
+        re-discovery).
+        """
+        ...
+
+    def add_state_listener(
+        self,
+        callback: Callable[[TransportState], None],
+    ) -> None:
+        """Register a callback for transport state changes.
+
+        ResourceProvider uses this to mark tools as unavailable during
+        RECONNECTING/ERROR and re-discover tools on CONNECTED.
+        """
+        ...
+
+    async def close(self) -> None:
+        """Clean up transport resources (connections, subscriptions)."""
+        ...
+```
+
+### D.4: Implementations
+
+#### LocalToolTransport
+
+No transport — direct function call. For built-in tools (bash, read, grep, etc.).
+
+```python
+class LocalToolTransport:
+    """No-op transport for local tools. Calls execute in-process."""
+
+    def __init__(self) -> None:
+        self._state: TransportState = TransportState.CONNECTED
+
+    async def call_tool(
+        self, tool_name: str, tool_input: dict, turn_id: str, timeout: float = 30.0
+    ) -> ToolResult | ToolError:
+        # Local tools are called directly by the agent, not via transport.
+        # This transport exists only for interface uniformity; call_tool()
+        # is never invoked on it in practice.
+        return ToolError(tool_name, "not_found", "Local tools are called directly", retryable=False)
+
+    async def discover_tools(self) -> list[ToolDefinition]:
+        return []  # Local tools are registered statically.
+
+    def add_state_listener(self, callback: Callable[[TransportState], None]) -> None:
+        pass  # Always CONNECTED, no state changes.
+
+    async def close(self) -> None:
+        pass
+```
+
+#### ACPToolTransport
+
+Direct ACP JSON-RPC connection to a remote agent (stdio or websocket). Connection managed by MCPLifecycleManager.
+
+```python
+class ACPToolTransport:
+    """Direct ACP transport for remote tool calls.
+
+    Manages its own connection (stdio subprocess or websocket) to a
+    remote ACP agent. Connection lifecycle is handled by
+    MCPLifecycleManager (exponential backoff reconnection).
+    """
+
+    def __init__(
+        self,
+        command: str,
+        args: list[str] | None = None,
+        cwd: str | None = None,
+        reconnect_backoff: float = 1.0,  # Exponential backoff base
+        reconnect_max_attempts: int = 5,
+    ) -> None:
+        self._command = command
+        self._args = args or []
+        self._cwd = cwd
+        self._backoff = reconnect_backoff
+        self._max_attempts = reconnect_max_attempts
+        self._state: TransportState = TransportState.ERROR
+        self._state_callbacks: list[Callable[[TransportState], None]] = []
+        self._tool_cache: list[ToolDefinition] | None = None
+
+    async def _ensure_connected(self) -> None:
+        """Connect or reconnect if needed. Raises ToolConnectionError on failure."""
+        ...
+
+    async def call_tool(
+        self, tool_name: str, tool_input: dict, turn_id: str, timeout: float = 30.0
+    ) -> ToolResult | ToolError:
+        try:
+            await self._ensure_connected()
+            # Send ACP tool/call request, await response
+            result = await self._send_request(
+                "tools/call", {"name": tool_name, "arguments": tool_input},
+                timeout=timeout,
+            )
+            return ToolResult(tool_name=tool_name, output=result)
+        except ToolTimeoutError:
+            return ToolError(tool_name, "timeout", f"Tool call timed out after {timeout}s", retryable=True)
+        except ToolConnectionError as e:
+            return ToolError(tool_name, "connection", str(e), retryable=True)
+
+    async def discover_tools(self) -> list[ToolDefinition]:
+        if self._tool_cache is not None and self._state == TransportState.CONNECTED:
+            return self._tool_cache
+        await self._ensure_connected()
+        result = await self._send_request("tools/list", {})
+        self._tool_cache = [ToolDefinition(**t) for t in result]
+        return self._tool_cache
+
+    def add_state_listener(self, callback: Callable[[TransportState], None]) -> None:
+        self._state_callbacks.append(callback)
+
+    def _set_state(self, state: TransportState) -> None:
+        if self._state != state:
+            self._state = state
+            self._tool_cache = None  # Invalidate cache on state change
+            for cb in self._state_callbacks:
+                cb(state)
+
+    async def close(self) -> None:
+        self._set_state(TransportState.ERROR)
+        # Terminate subprocess or close websocket
+        ...
+```
+
+#### MQToolTransport
+
+Shares the underlying MQ connection with `MessageQueueTransport` (EventTransport). Uses separate topics for tool calls and results.
+
+```python
+class MQToolTransport:
+    """MQ-based transport for remote tool calls.
+
+    Shares the underlying MQ client (Redis/NATS/Kafka) with
+    MessageQueueTransport (EventTransport), but uses separate topics.
+    This avoids duplicating MQ connections while keeping tool call
+    traffic isolated from agent event traffic.
+
+    Connection lifecycle is delegated to the shared MQ client,
+    which handles reconnection internally. State changes propagate
+    to both CommChannel and MQToolTransport.
+    """
+
+    def __init__(
+        self,
+        mq_client: Any,  # Shared MQ client (same instance as MessageQueueTransport)
+        session_id: str,
+        tool_call_topic: str | None = None,    # Default: {session_id}:tool_calls
+        tool_result_topic: str | None = None,  # Default: {session_id}:tool_results
+    ) -> None:
+        self._mq = mq_client
+        self._session_id = session_id
+        self._call_topic = tool_call_topic or f"{session_id}:tool_calls"
+        self._result_topic = tool_result_topic or f"{session_id}:tool_results"
+        self._state: TransportState = TransportState.CONNECTED
+        self._state_callbacks: list[Callable[[TransportState], None]] = []
+        self._pending: dict[str, asyncio.Future[ToolResult | ToolError]] = {}
+        self._tool_cache: list[ToolDefinition] | None = None
+        self._consumer_task: asyncio.Task | None = None
+
+    async def start(self) -> None:
+        """Start consuming tool results from MQ."""
+        self._consumer_task = asyncio.create_task(self._consume_results())
+
+    async def call_tool(
+        self, tool_name: str, tool_input: dict, turn_id: str, timeout: float = 30.0
+    ) -> ToolResult | ToolError:
+        # call_id includes input hash to avoid collisions when the same
+        # tool is called multiple times within a single turn.
+        input_hash = hashlib.md5(
+            json.dumps(tool_input, sort_keys=True).encode()
+        ).hexdigest()[:8]
+        call_id = f"{turn_id}:{tool_name}:{input_hash}"
+        future: asyncio.Future[ToolResult | ToolError] = asyncio.get_running_loop().create_future()
+        self._pending[call_id] = future
+
+        envelope = EventEnvelope(
+            seq=0,  # Tool calls don't use Journal seq; idempotency via call_id
+            session_id=self._session_id,
+            tenant_id=self._session_id,  # Per-session isolation
+            turn_id=turn_id,
+            event_type="tool_call_request",
+            event_data={"call_id": call_id, "tool_name": tool_name, "tool_input": tool_input},
+            schema_version="1.0",
+            timestamp=time.time(),
+            metadata={},
+        )
+        await self._mq.publish(self._call_topic, json.dumps(envelope.to_dict()))
+
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        except TimeoutError:
+            self._pending.pop(call_id, None)
+            return ToolError(tool_name, "timeout", f"Tool call timed out after {timeout}s", retryable=True)
+
+    async def _consume_results(self) -> None:
+        """Consume tool results from MQ and resolve pending futures."""
+        async for message in self._mq.subscribe(self._result_topic):
+            envelope = EventEnvelope.from_dict(json.loads(message))
+            data = envelope.event_data
+            call_id = data.get("call_id")
+            if call_id and call_id in self._pending:
+                future = self._pending.pop(call_id)
+                if data.get("is_error"):
+                    future.set_result(ToolError(
+                        tool_name=data["tool_name"],
+                        error_type=data.get("error_type", "execution"),
+                        error_message=data.get("error_message", data.get("output", "")),
+                        retryable=data.get("retryable", False),
+                    ))
+                else:
+                    future.set_result(ToolResult(
+                        tool_name=data["tool_name"],
+                        output=data.get("output"),
+                        is_error=False,
+                    ))
+
+    def add_state_listener(self, callback: Callable[[TransportState], None]) -> None:
+        self._state_callbacks.append(callback)
+
+    def _on_mq_state_change(self, connected: bool) -> None:
+        """Called by shared MQ client on connection state change."""
+        new_state = TransportState.CONNECTED if connected else TransportState.RECONNECTING
+        if self._state != new_state:
+            self._state = new_state
+            self._tool_cache = None
+            for cb in self._state_callbacks:
+                cb(new_state)
+
+    async def close(self) -> None:
+        if self._consumer_task:
+            self._consumer_task.cancel()
+        self._state = TransportState.ERROR
+        for future in self._pending.values():
+            future.set_exception(ToolConnectionError("Transport closed"))
+        self._pending.clear()
+```
+
+### D.5: MQ Topic Extension
+
+The MQ topic scheme extends to support tool calls:
+
+```
+MQ Topics (per session):
+  {session_id}:events         ← CommChannel (agent events to consumer)
+  {session_id}:feedback       ← CommChannel (consumer → RunLoop: steer, followup)
+  {session_id}:prompts        ← TriggerSource (prompts to RunLoop)
+  {session_id}:tool_calls     ← ToolTransport (tool call requests to remote agents)    [NEW]
+  {session_id}:tool_results   ← ToolTransport (tool results from remote agents)       [NEW]
+```
+
+Tool call and result messages use the same `EventEnvelope` format:
+
+```json
+// tool_calls topic
+{
+  "seq": 0,
+  "session_id": "coder_session",
+  "tenant_id": "coder_session",
+  "turn_id": "turn_abc123",
+  "event_type": "tool_call_request",
+  "event_data": {
+    "call_id": "turn_abc123:filesystem.read_file:a1b2c3d4",
+    "tool_name": "filesystem.read_file",
+    "tool_input": {"path": "/src/main.py"}
+  },
+  "schema_version": "1.0",
+  "timestamp": 1720435200.0,
+  "metadata": {}
+}
+
+// tool_results topic (success)
+{
+  "seq": 0,
+  "session_id": "coder_session",
+  "tenant_id": "coder_session",
+  "turn_id": "turn_abc123",
+  "event_type": "tool_call_result",
+  "event_data": {
+    "call_id": "turn_abc123:filesystem.read_file:a1b2c3d4",
+    "tool_name": "filesystem.read_file",
+    "output": "file contents here...",
+    "is_error": false
+  },
+  "schema_version": "1.0",
+  "timestamp": 1720435201.0,
+  "metadata": {}
+}
+
+// tool_results topic (error)
+{
+  "seq": 0,
+  "session_id": "coder_session",
+  "tenant_id": "coder_session",
+  "turn_id": "turn_abc123",
+  "event_type": "tool_call_result",
+  "event_data": {
+    "call_id": "turn_abc123:filesystem.read_file:a1b2c3d4",
+    "tool_name": "filesystem.read_file",
+    "is_error": true,
+    "error_type": "connection",
+    "error_message": "MCP server connection expired",
+    "retryable": true
+  },
+  "schema_version": "1.0",
+  "timestamp": 1720435201.0,
+  "metadata": {}
+}
+```
+
+**Note**: `seq=0` for tool calls because they are not journaled by the Journal (they are not agent events). Idempotency is handled via `call_id` (composed of `turn_id` + `tool_name` + input hash) in the tool execution log.
+
+### D.6: Connection Lifecycle Handling
+
+#### MQ Connection Drop (shared by EventTransport + MQToolTransport)
+
+```
+1. MQ client detects connection loss
+2. MQ client internally reconnects (built-in to Redis/NATS/Kafka clients)
+3. State change propagated to both consumers:
+   - MessageQueueTransport → CommChannel._on_mq_state_change()
+   - MQToolTransport._on_mq_state_change()
+4. Both transition to RECONNECTING:
+   - CommChannel: pauses event publishing, queues events
+   - MQToolTransport: marks remote tools as "degraded", new tool calls queue
+5. Reconnection succeeds → both transition to CONNECTED:
+   - CommChannel: flushes queued events
+   - MQToolTransport: re-discovers tools, resumes pending tool calls
+6. Reconnection fails (timeout) → both transition to ERROR:
+   - CommChannel: reports error to RunLoop
+   - MQToolTransport: fails pending tool calls with ToolConnectionError
+```
+
+#### MCP Server Connection Expire (managed by MCPLifecycleManager)
+
+```
+1. Tool call arrives at remote MCP proxy agent
+2. MCP proxy's MCPLifecycleManager detects MCP connection expired
+3. MCPLifecycleManager attempts reconnection (exponential backoff)
+4. Reconnection succeeds:
+   - Tool call executes normally
+   - Result flows back: MCP → ResourceProvider → ToolTransport → MQ → main RunLoop
+5. Reconnection fails:
+   - ToolError(error_type="connection", retryable=True) flows back
+   - Main RunLoop receives error, decides: retry, skip, or fail Turn
+```
+
+#### Tool Call In-Flight + Crash
+
+```
+1. ToolCallStartEvent written to Journal (turn_id=abc, tool=filesystem.read_file)
+2. Tool execution log entry: {turn_id=abc, tool=filesystem.read_file, status=interrupted}
+3. Crash occurs
+4. Recovery: Journal.resume() → load snapshot → replay journal
+5. Replay finds ToolCallStartEvent → check tool execution log:
+   - status=completed → use cached result from ToolCallCompleteEvent (already in journal)
+   - status=interrupted → re-send tool call (idempotent via call_id)
+   - no record exists → remote likely didn't receive, re-send
+6. Remote receives re-sent tool call with same call_id:
+   - Already processed → returns cached result (idempotent)
+   - Not processed → executes normally
+7. Tool execution log updated: status=completed, result stored
+```
+
+### D.7: MCP-over-ACP Composition Pattern
+
+Under this architecture, MCP-over-ACP is a **composition of two RunLoops** connected via MQ:
+
+```
+Main RunLoop                           MCP Proxy RunLoop
+┌──────────────────────┐               ┌──────────────────────────┐
+│ Trigger: MQTrigger   │               │ Trigger: MQTrigger        │
+│ Journal: DurableJour │               │ Journal: MemoryJournal    │
+│ Snapshot: DurableSnap│               │ Snapshot: MemorySnapshot  │
+│ Comm: MQChannel      │◄─────────────►│ Comm: MQChannel           │
+│ Transport: NATS      │  MQ topics    │ Transport: NATS           │
+│                      │               │                           │
+│ Capabilities:        │               │ Capabilities:             │
+│  - bash (local)      │               │  - MCP filesystem         │
+│  - read (local)      │  tool_calls → │  - MCP git                │
+│  - remote_tools ─────┼──────────────►│  - MCP slack              │
+│    (ToolTransport:   │  tool_results │                           │
+│     MQToolTransport) │◄──────────────┤ ResourceProvider:         │
+│                      │               │  MCPResourceProvider      │
+└──────────────────────┘               │  (ToolTransport: ACP)     │
+                                       └──────────────────────────┘
+```
+
+**Key points**:
+- The MCP proxy is a full RunLoop with its own six dimensions (lightweight: MemoryJournal, MemorySnapshotStore)
+- The main RunLoop's ResourceProvider uses `MQToolTransport` to reach the proxy
+- The proxy RunLoop's ResourceProvider uses `ACPToolTransport` (or direct MCP) to reach MCP servers
+- Connection lifecycle is handled at each layer: MQ reconnection (shared), ACP/MCP reconnection (MCPLifecycleManager)
+- Tool calls are idempotent via `call_id` (turn_id + tool_name + input hash) — safe to retry after any connection failure
+- The proxy can be in any language — it just needs to consume `tool_calls` topic and publish to `tool_results` topic
+
+### D.8: YAML Configuration
+
+```yaml
+agents:
+  coder:
+    type: native
+    model: "openai:gpt-4o"
+    lifecycle:
+      journal: durable
+      snapshot: durable
+      comm: mq
+      transport:
+        type: message_queue
+        backend: nats_jetstream
+        url: "nats://localhost:4222"
+      session_id: coder
+    capabilities:
+      tools:
+        - type: local
+          name: bash
+        - type: local
+          name: read
+        - type: remote
+          transport: mq          # Uses MQToolTransport (shares NATS connection)
+          agent: mcp_proxy       # Routes to mcp_proxy's tool_calls topic
+          tools: [filesystem, git, slack]
+
+  mcp_proxy:
+    type: acp
+    command: acp-mcp-proxy
+    args: ["--mcp-config", "mcp_servers.yml"]
+    lifecycle:
+      journal: memory
+      snapshot: memory
+      comm: mq
+      transport:
+        type: message_queue
+        backend: nats_jetstream
+        url: "nats://localhost:4222"
+      session_id: mcp_proxy
+    capabilities:
+      tools:
+        - type: mcp
+          server: filesystem
+          transport: stdio
+        - type: mcp
+          server: git
+          transport: stdio
+        - type: mcp
+          server: slack
+          transport: websocket
+```
+
+### D.9: Impact on RFC-0042 Dimensions
+
+ToolTransport does **not** add a seventh dimension. The six dimensions remain unchanged:
+
+| Dimension | Impact | Change |
+|---|---|---|
+| RunLoop | None | RunLoop still owns CommChannel, Journal, SnapshotStore |
+| TriggerSource | None | TriggerSource still handles prompt arrival |
+| Journal | None | Journal still handles event persistence; tool calls tracked via tool execution log |
+| SnapshotStore | None | SnapshotStore still handles state snapshots |
+| CommChannel | None | CommChannel still owns EventTransport for agent events |
+| EventTransport | Minor | MessageQueueTransport may share MQ client with MQToolTransport |
+
+**What changes**: ResourceProvider (capability model, orthogonal to dimensions) gains an optional `ToolTransport` dependency for remote tool access. This is a capability model concern, not an execution model concern.
+
+### D.10: Decision Record
+
+| Decision | Rationale |
+|---|---|
+| ToolTransport is a Protocol, not ABC | Consistent with all other dimension interfaces in RFC-0042 |
+| ToolTransport is NOT a dimension | It belongs to the capability model, orthogonal to the execution model (6 dimensions) |
+| MQToolTransport shares MQ client with EventTransport | Avoids duplicating connections; single reconnection logic |
+| Tool calls use separate MQ topics | Isolates tool call traffic from agent event traffic; allows independent scaling |
+| `seq=0` for tool call envelopes | Tool calls are not agent events; idempotency via `turn_id` + `call_id` in tool execution log |
+| `call_tool()` returns `ToolResult \| ToolError` (not raises) | Errors are data, not exceptions — enables journaling and replay |
+| State change via `add_state_listener()` (observer registration) | Disambiguated from `CommChannel.on_state_change()` which IS the callback; ToolTransport REGISTERS callbacks (observer subject vs observer callback) |
+| ACPToolTransport manages own connection | ACP is a different protocol from MQ; connection lifecycle is independent |
+| LocalToolTransport returns `ToolError(not_found)` | Local tools are called directly; `call_tool()` returns error if accidentally invoked, maintaining Protocol contract |
