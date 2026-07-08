@@ -33,6 +33,9 @@ class MCPStatus(OpenCodeBaseModel):
     tools: list[str] = Field(default_factory=list)
     error: str | None = None
 
+    server_type: str = "unknown"
+    """Transport type (stdio, sse, http, acp)."""
+
 
 class McpAuthorizationResponse(OpenCodeBaseModel):
     """Response from starting MCP OAuth flow."""

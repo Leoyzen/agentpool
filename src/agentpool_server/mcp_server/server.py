@@ -167,6 +167,35 @@ class MCPServer(BaseServer):
         self._prompts_registered = True
         logger.info("Registered MCP prompts", count=len(prompts))
 
+    def _register_mcp_status_resource(self) -> None:
+        """Register a resource exposing MCP server connection statuses.
+
+        Clients can read ``agentpool://mcp-servers/status`` to get a JSON
+        summary of all configured MCP servers and their connection state.
+        """
+        import json
+
+        @self.fastmcp.resource(
+            uri="agentpool://mcp-servers/status",
+            name="MCPServersStatus",
+            description="Connection status of all MCP servers managed by AgentPool.",
+            mime_type="application/json",
+        )
+        async def get_mcp_servers_status() -> str:
+            """Return JSON with each MCP server's connection status."""
+            mcp_manager = self.pool.mcp
+            statuses: list[dict[str, Any]] = []
+            for provider in mcp_manager.get_mcp_providers():
+                status = provider.get_status()
+                statuses.append({
+                    "name": status.name,
+                    "status": status.status,
+                    "display_name": status.display_name,
+                    "server_type": status.server_type,
+                    "error": status.error,
+                })
+            return json.dumps({"servers": statuses})
+
     def _register_resource_handlers(self) -> None:
         """Register resource subscription handlers."""
 
@@ -226,6 +255,7 @@ class MCPServer(BaseServer):
         # Register pool tools and prompts before starting
         await self._register_pool_tools()
         await self._register_pool_prompts()
+        self._register_mcp_status_resource()
 
         # Start FastMCP server
         if self.config.transport == "stdio":
