@@ -5,7 +5,7 @@ status: DRAFT
 author: yuchen.liu
 reviewers: []
 created: 2026-07-08
-last_updated: 2026-07-08 (revision 4.3: Oracle-reviewed PASS — _replaying flag, StateUpdate session_id, journal instance injection, MQChannel seq fix)
+last_updated: 2026-07-08 (revision 4.4: Oracle VERIFIED — glossary dedup, RunState enum, ProtocolBridge None guard)
 decision_date:
 related_rfcs:
   - RFC-0041 (Run vs Turn Separation — prerequisite Phase 1)
