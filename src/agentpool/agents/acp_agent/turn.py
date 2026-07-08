@@ -9,6 +9,7 @@ and populating ``message_history`` / ``final_message`` after execution.
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
@@ -150,6 +151,7 @@ class ACPTurn(HookAwareTurn, Turn):
 
         run_id = self._run_ctx.run_id
 
+        turn_start = time.perf_counter()
         try:
             # --- Phase 0: Fire pre_turn hooks ---
             pre_turn_result = await self._fire_pre_turn_hooks()
@@ -257,4 +259,5 @@ class ACPTurn(HookAwareTurn, Turn):
 
             yield StreamCompleteEvent(message=self._final_message)
         finally:
-            await self._fire_post_turn_hooks(self._final_message)
+            duration_ms = (time.perf_counter() - turn_start) * 1000
+            await self._fire_post_turn_hooks(self._final_message, duration_ms=duration_ms)
