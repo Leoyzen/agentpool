@@ -911,10 +911,13 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             pool_capabilities = self.agent_pool.skill_capabilities
             if pool_capabilities:
                 # Ensure a snapshot exists for skill config registration.
-                if self._mcp_snapshot is None:
-                    from agentpool.mcp_server.config_snapshot import McpConfigSnapshot
+                session_id = run_ctx.session_id if run_ctx else None
+                if session_id is not None:
+                    ctx = self.mcp.get_or_create_session(session_id)
+                    if ctx.snapshot is None:
+                        from agentpool.mcp_server.config_snapshot import McpConfigSnapshot
 
-                    self._mcp_snapshot = McpConfigSnapshot()
+                        self.mcp.update_session_snapshot(session_id, McpConfigSnapshot())
                 # Collect skill config entries from visible capabilities.
                 skill_entries: list[McpConfigEntry] = []
                 visibility_checker = getattr(self.agent_pool, "is_skill_visible_to_node", None)
@@ -926,10 +929,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     tool_capabilities.append(cap)
                     skill_entries.extend(cap.build_config_entries())
                 # Register skill configs in the snapshot.
-                if skill_entries:
-                    self._mcp_snapshot = self._mcp_snapshot.with_skill_configs(
-                        tuple(skill_entries),
-                    )
+                if skill_entries and session_id is not None:
+                    ctx = self.mcp.get_or_create_session(session_id)
+                    existing = ctx.snapshot
+                    if existing is not None:
+                        self.mcp.update_session_snapshot(
+                            session_id,
+                            existing.with_skill_configs(
+                                tuple(skill_entries),
+                            ),
+                        )
 
         # Collect pydantic-ai compatible instructions from SystemPrompts and providers
         all_instructions: list[Any] = []
