@@ -59,7 +59,7 @@ def test_get_or_create_session_creates_and_returns_same(
 
     assert ctx1 is ctx2
     assert isinstance(ctx1, _SessionContext)
-    assert "sess-1" in manager._session_contexts
+    assert manager.get_session_context("sess-1") is not None
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +78,8 @@ def test_get_or_create_session_creates_fresh_for_different_ids(
     assert ctx_a is not ctx_b
     assert ctx_a.connection_pool is not ctx_b.connection_pool
     assert ctx_a.toolset_cache is not ctx_b.toolset_cache
-    assert len(manager._session_contexts) == 2
+    assert manager.get_session_context("sess-a") is not None
+    assert manager.get_session_context("sess-b") is not None
 
 
 # ---------------------------------------------------------------------------
@@ -139,13 +140,13 @@ async def test_add_acp_transport_stores_transport_and_ids(
 async def test_cleanup_session_clears_all_resources(
     manager: MCPManager,
 ) -> None:
-    """After cleanup, session_id is NOT in _session_contexts."""
+    """After cleanup, session_id is NOT in the session context registry."""
     manager.get_or_create_session("sess-clean")
-    assert "sess-clean" in manager._session_contexts
+    assert manager.get_session_context("sess-clean") is not None
 
     await manager.cleanup_session("sess-clean")
 
-    assert "sess-clean" not in manager._session_contexts
+    assert manager.get_session_context("sess-clean") is None
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +165,7 @@ async def test_cleanup_session_is_idempotent(
     # Second call should be a no-op, not raise
     await manager.cleanup_session("sess-idem")
 
-    assert "sess-idem" not in manager._session_contexts
+    assert manager.get_session_context("sess-idem") is None
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +189,7 @@ async def test_concurrent_cleanup_session_no_error(
     for result in results:
         assert not isinstance(result, Exception), f"Concurrent cleanup raised: {result!r}"
 
-    assert "sess-concurrent" not in manager._session_contexts
+    assert manager.get_session_context("sess-concurrent") is None
 
 
 # ---------------------------------------------------------------------------
@@ -239,4 +240,4 @@ async def test_concurrent_cleanup_from_two_paths(
             f"Concurrent cleanup from two paths raised: {result!r}"
         )
 
-    assert session_id not in manager._session_contexts
+    assert manager.get_session_context(session_id) is None

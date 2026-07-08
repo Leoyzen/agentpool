@@ -111,7 +111,8 @@ async def test_after_cleanup_all_registries_consistent() -> None:
 
     Creates a session with ACP transport and session connection, then
     calls ``cleanup_session()`` on the MCPManager. Verifies that the
-    session is removed from ``_session_contexts``, ``_session_connections``,
+    the session context is removed (``get_session_context()`` returns None),
+    ``_session_connections``,
     and the ACP connection is removed from ``_connections`` when no other
     sessions reference it.
     """
@@ -148,7 +149,7 @@ async def test_after_cleanup_all_registries_consistent() -> None:
         )
 
         # Verify pre-cleanup state
-        assert session_id in mcp_manager._session_contexts
+        assert mcp_manager.get_session_context(session_id) is not None
         assert session_id in acp_manager._session_connections
         assert connection_id in acp_manager._connections
         assert conn.has_active_sessions()
@@ -157,7 +158,7 @@ async def test_after_cleanup_all_registries_consistent() -> None:
         await mcp_manager.cleanup_session(session_id)
 
         # Assert: session removed from MCPManager
-        assert session_id not in mcp_manager._session_contexts
+        assert mcp_manager.get_session_context(session_id) is None
 
         # Assert: session removed from AcpMcpConnectionManager reverse index
         assert session_id not in acp_manager._session_connections
@@ -348,7 +349,7 @@ async def test_cleanup_session_acp_manager_raises_session_still_popped() -> None
     Wires a mock AcpMcpConnectionManager whose ``cleanup_session`` raises
     ``RuntimeError``. Creates a session context, then calls
     ``cleanup_session()``. The session must still be removed from
-    ``_session_contexts`` and no exception should propagate.
+    ``get_session_context()`` returns None and no exception should propagate.
     """
     manager = MCPManager(name="test")
     try:
@@ -370,7 +371,7 @@ async def test_cleanup_session_acp_manager_raises_session_still_popped() -> None
         await manager.cleanup_session("d1-session")
 
         # Assert: session removed despite ACP manager error
-        assert "d1-session" not in manager._session_contexts
+        assert manager.get_session_context("d1-session") is None
 
         # Assert: ACP manager cleanup was called
         mock_acp_manager.cleanup_session.assert_called_once_with("d1-session")
@@ -564,7 +565,7 @@ async def test_cleanup_session_connection_pool_raises_session_still_popped() -> 
     Creates a real MCPManager with a mock connection pool whose
     ``cleanup()`` raises ``RuntimeError``, wires a mock ACP manager,
     creates a session, and calls ``cleanup_session()``. The session must
-    still be removed from ``_session_contexts`` and the ACP manager
+    still be removed (``get_session_context()`` returns None) and the ACP manager
     cleanup must still be called despite the pool error.
     """
     manager = MCPManager(name="test")
@@ -585,7 +586,7 @@ async def test_cleanup_session_connection_pool_raises_session_still_popped() -> 
         await manager.cleanup_session("d5-session")
 
         # Assert: session removed despite pool error
-        assert "d5-session" not in manager._session_contexts
+        assert manager.get_session_context("d5-session") is None
 
         # Assert: ACP manager cleanup still called despite pool error
         mock_acp_manager.cleanup_session.assert_called_once_with("d5-session")

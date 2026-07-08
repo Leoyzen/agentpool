@@ -101,7 +101,7 @@ async def test_cleanup_session_delegates_to_wired_acp_mcp_manager() -> None:
     Creates real MCPManager + AcpMcpConnectionManager wired via
     ``_acp_mcp_manager``, registers an ACP connection + session, adds
     an ACP transport, then calls ``cleanup_session()``. All three
-    registries must be cleaned: ``_session_contexts``,
+    registries must be cleaned: the session context registry,
     ``_session_connections``, and the connection's ``_session_streams``.
     """
     mcp_manager, acp_manager = _make_wired_managers()
@@ -136,7 +136,7 @@ async def test_cleanup_session_delegates_to_wired_acp_mcp_manager() -> None:
 
         # Verify pre-state
         assert session_id in acp_manager._session_connections
-        assert session_id in mcp_manager._session_contexts
+        assert mcp_manager.get_session_context(session_id) is not None
         assert conn.has_active_sessions()
 
         # Cleanup
@@ -145,7 +145,7 @@ async def test_cleanup_session_delegates_to_wired_acp_mcp_manager() -> None:
         # Assert all three registries cleaned
         assert session_id not in acp_manager._session_connections
         assert not conn.has_active_sessions()
-        assert session_id not in mcp_manager._session_contexts
+        assert mcp_manager.get_session_context(session_id) is None
     finally:
         await mcp_manager.cleanup()
 
@@ -206,7 +206,7 @@ async def test_acp_session_close_full_delegation_chain() -> None:
     Creates wired MCPManager + AcpMcpConnectionManager, registers an
     ACP connection + session, adds an ACP transport, constructs a real
     ACPSession, then calls ``session.close()``. The close must clean
-    up ``_session_contexts``, ``_session_connections``, and the
+    up the session context registry, ``_session_connections``, and the
     connection's active sessions.
     """
     from agentpool import Agent
@@ -274,7 +274,7 @@ async def test_acp_session_close_full_delegation_chain() -> None:
         )
 
         # Verify pre-state
-        assert session_id in mcp_manager._session_contexts
+        assert mcp_manager.get_session_context(session_id) is not None
         assert session_id in acp_manager._session_connections
         assert conn.has_active_sessions()
 
@@ -282,7 +282,7 @@ async def test_acp_session_close_full_delegation_chain() -> None:
         await session.close()
 
         # Assert all registries cleaned
-        assert session_id not in mcp_manager._session_contexts
+        assert mcp_manager.get_session_context(session_id) is None
         assert session_id not in acp_manager._session_connections
         assert not conn.has_active_sessions()
     finally:
@@ -391,7 +391,7 @@ async def test_full_lifecycle_create_acp_transport_cleanup_unregister() -> None:
         await mcp_manager.cleanup_session(session_id)
 
         # Assert after cleanup: all three registries empty
-        assert session_id not in mcp_manager._session_contexts
+        assert mcp_manager.get_session_context(session_id) is None
         assert session_id not in acp_manager._session_connections
         assert not conn.has_active_sessions()
         assert connection_id not in acp_manager._connections
@@ -713,7 +713,7 @@ async def test_concurrent_cleanup_from_disconnect_and_controller_no_double_free(
             f"prevent redundant cleanup work."
         )
 
-        # Session removed from _session_contexts
-        assert session_id not in mcp_manager._session_contexts
+        # Session removed from session context registry
+        assert mcp_manager.get_session_context(session_id) is None
     finally:
         await mcp_manager.cleanup()
