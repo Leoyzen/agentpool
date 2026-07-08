@@ -264,7 +264,7 @@ Your next move: approve to start execution, or run a high-accuracy review first.
   QA scenarios: happy — pre_turn injects/denies; pre_tool_use modifies/denies; post_tool_use modifies; post_turn on JSON-RPC response. failure — deny blocks; no matching hooks = passthrough; post_turn NOT on chunks. Evidence: `.omo/evidence/task-18-acp-proxy-chain-refactor.log`
   Commit: Y | feat(acp): implement HookProxy with all 4 hook type mappings
 
-- [ ] 19. Implement HookProxy/HookAwareTurn coexistence + auto-insert + disable request_permission
+- [x] 19. Implement HookProxy/HookAwareTurn coexistence + auto-insert + disable request_permission
   What to do / Must NOT do: Implement coexistence — Conductor passes `_hooks=None` to ACPTurn when HookProxy in chain (HookAwareTurn guard skips). Pass agent's `AgentHooks` when no HookProxy. Implement Conductor auto-insert HookProxy at position 0 when agent has hooks. **Disable `ACPClientHandler.request_permission()` hook firing when HookProxy is active** — Conductor signals handler to skip hooks (prevent double-firing). Must NOT use `hooks_fired` guard. Must NOT double-fire hooks.
   Parallelization: Wave 4 | Blocked by: T18 | Blocks: T21
   References: `openspec/changes/acp-proxy-chain-refactor/specs/acp-proxy-impls/spec.md:42-67`; `src/agentpool/orchestrator/turn.py:78,135` (HookAwareTurn, _hooks=None guard); `src/agentpool/agents/acp_agent/client_handler.py` (request_permission method — search for it); design.md D9; Metis finding M2 (double-firing via request_permission)

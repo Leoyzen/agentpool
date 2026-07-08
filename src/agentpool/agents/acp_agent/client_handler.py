@@ -97,6 +97,8 @@ class ACPClientHandler(Client):
         # Async queue for stream-data updates (set by ACPClientAdapter).
         # When None, stream data falls back to _load_updates capture during session load.
         self._stream_queue: asyncio.Queue[SessionUpdate] | None = None
+        # When False, request_permission skips hook firing (HookProxy handles hooks).
+        self._hooks_enabled: bool = True
         # Copy auto_approve from agent (can be updated via set_auto_approve)
 
     @property
@@ -128,6 +130,17 @@ class ACPClientHandler(Client):
         in-place regardless of the queue.
         """
         self._stream_queue = queue
+
+    def set_hooks_enabled(self, enabled: bool) -> None:
+        """Enable or disable hook firing in request_permission.
+
+        When False, request_permission skips hook firing entirely.
+        Used by Conductor when HookProxy is active to prevent double-firing.
+
+        Args:
+            enabled: True to enable hooks, False to disable.
+        """
+        self._hooks_enabled = enabled
 
     async def session_update(self, params: SessionNotification[Any]) -> None:
         """Handle session update notifications from the agent.
@@ -232,6 +245,12 @@ class ACPClientHandler(Client):
         self, params: RequestPermissionRequest
     ) -> RequestPermissionResponse:
         """Handle permission requests via InputProvider."""
+        # When hooks are disabled (HookProxy active), skip hook firing
+        # to prevent double-firing. HookProxy handles hooks via proxy_successor.
+        if not self._hooks_enabled:
+            if params.options:
+                return RequestPermissionResponse.allowed(params.options[0].option_id)
+            return RequestPermissionResponse.allowed("")
         tc = params.tool_call
         name = tc.title or "operation"
         logger.info("Permission requested", tool_name=name)

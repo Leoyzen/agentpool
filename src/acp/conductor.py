@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from acp.client.connection import ClientSideConnection
     from acp.proxy.protocol import Proxy
     from agentpool.agents.acp_agent.client_handler import ACPClientHandler
+    from agentpool.hooks.agent_hooks import AgentHooks
     from agentpool.messaging import ChatMessage
     from agentpool.talk.stats import AggregatedMessageStats, MessageStats
 
@@ -90,6 +91,7 @@ class Conductor(MessageNode[Any, str]):
         env: Mapping[str, str] | None = None,
         proxy_chain: list[Proxy] | None = None,
         client_handler: ACPClientHandler | None = None,
+        agent_hooks: AgentHooks | None = None,
         description: str | None = None,
         **kwargs: Any,
     ) -> None:
@@ -108,6 +110,9 @@ class Conductor(MessageNode[Any, str]):
             client_handler: Optional pre-created handler. When ``None``,
                 the Conductor will own the handler lifecycle but defer
                 creation until sufficient context is available (T13).
+            agent_hooks: Optional AgentHooks from the agent. When hooks are
+                present and no HookProxy is in the chain, a HookProxy is
+                auto-inserted at position 0.
             description: Optional human-readable description.
             **kwargs: Additional keyword arguments passed to MessageNode.
         """
@@ -122,6 +127,8 @@ class Conductor(MessageNode[Any, str]):
         self._proxy_chain: list[Proxy] = list(proxy_chain) if proxy_chain else []
         self._client_handler: ACPClientHandler | None = client_handler
         self._owns_handler: bool = client_handler is None
+        self._agent_hooks: AgentHooks | None = agent_hooks
+        self._has_hook_proxy: bool = False
 
         # Runtime state — populated during __aenter__
         self._process: Process | None = None
@@ -168,6 +175,56 @@ class Conductor(MessageNode[Any, str]):
     def is_initialized(self) -> bool:
         """Whether the Conductor has been entered via ``__aenter__``."""
         return self._conductor_initialized
+
+    @property
+    def has_hook_proxy(self) -> bool:
+        """Whether a HookProxy is active in the proxy chain."""
+        return self._has_hook_proxy
+
+    def get_turn_hooks(self) -> AgentHooks | None:
+        """Return hooks for ACPTurn, or None if HookProxy handles them.
+
+        When a HookProxy is in the chain, returns None so HookAwareTurn
+        skips hook firing (hooks are handled by the proxy). Otherwise,
+        returns the agent's AgentHooks for normal HookAwareTurn firing.
+
+        Returns:
+            AgentHooks if no HookProxy, None if HookProxy is active.
+        """
+        if self._has_hook_proxy:
+            return None
+        return self._agent_hooks
+
+    def _maybe_auto_insert_hook_proxy(self) -> None:
+        """Auto-insert HookProxy at position 0 when agent has hooks.
+
+        If the agent has hooks (AgentHooks with has_hooks() == True) and
+        no HookProxy is already in the chain, creates a HookProxy wrapping
+        the hooks and inserts it at position 0.
+        """
+        if self._agent_hooks is None or not self._agent_hooks.has_hooks():
+            return
+
+        # Check if HookProxy is already in the chain
+        from acp.proxy.impls.hook_proxy import HookProxy
+
+        for proxy in self._proxy_chain:
+            if isinstance(proxy, HookProxy):
+                self._has_hook_proxy = True
+                return
+
+        # Auto-insert HookProxy at position 0
+        hook_proxy = HookProxy(hooks=[self._agent_hooks])
+        self._proxy_chain.insert(0, hook_proxy)
+        self._has_hook_proxy = True
+
+    def _detect_hook_proxy(self) -> None:
+        """Detect if a HookProxy is in the chain after initialization."""
+        from acp.proxy.impls.hook_proxy import HookProxy
+
+        self._has_hook_proxy = any(
+            isinstance(proxy, HookProxy) for proxy in self._proxy_chain
+        )
 
     @override
     @property
@@ -230,6 +287,9 @@ class Conductor(MessageNode[Any, str]):
             # For T8, we store None and allow external injection.
             pass
 
+        # Auto-insert HookProxy if agent has hooks and none is in the chain.
+        self._maybe_auto_insert_hook_proxy()
+
         # Initialize the proxy chain: call proxy/initialize on each
         # proxy, then initialize on the terminal agent. If any
         # component fails, clean up all started components.
@@ -244,6 +304,11 @@ class Conductor(MessageNode[Any, str]):
             self._writer = None
             self._connection = None
             raise
+
+        # Disable request_permission hooks when HookProxy is active
+        # to prevent double-firing (hooks handled by proxy, not handler).
+        if self._has_hook_proxy and self._client_handler is not None:
+            self._client_handler.set_hooks_enabled(False)
 
         self._conductor_initialized = True
         return self
