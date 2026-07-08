@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any, Literal
 import anyio
 from exxec.acp_provider import ACPExecutionEnvironment
 import logfire
-from pydantic_ai import UsageLimitExceeded
 from slashed import CommandStore
 from tokonomics.model_discovery.model_info import ModelInfo
 
@@ -35,9 +34,7 @@ from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapsh
 from agentpool.skills.uri_resolver import MAX_PROVIDER_NAME_LENGTH
 from agentpool_server.acp_server.converters import (
     convert_acp_mcp_server_to_config,
-    from_acp_content,
 )
-from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.input_provider import ACPInputProvider
 from agentpool_server.opencode_server.skill_bridge import create_skill_command
 
@@ -50,10 +47,8 @@ if TYPE_CHECKING:
 
     from acp import Client, RequestPermissionRequest, RequestPermissionResponse
     from acp.schema import (
-        ContentBlock,
         Implementation,
         McpServer,
-        StopReason,
         Usage,
     )
     from agentpool.agents.base_agent import BaseAgent, StateUpdate
@@ -135,18 +130,6 @@ def split_commands(
     return commands, non_command_content
 
 
-def infer_stop_reason(error_msg: str) -> StopReason:
-    """Infers the reason for stopping the session based on the error message."""
-    if "request_limit" in error_msg:
-        return "max_turn_requests"
-    if any(limit in error_msg for limit in ["tokens_limit", "token_limit"]):
-        return "max_tokens"
-    # Tool call limits don't have a direct ACP stop reason, treat as refusal
-    if "tool_calls_limit" in error_msg or "tool call" in error_msg:
-        return "refusal"
-    return "max_tokens"  # Default to max_tokens for other usage limits
-
-
 @dataclass
 class ACPSession:
     """Individual ACP session state and management.
@@ -217,7 +200,6 @@ class ACPSession:
         self.log = logger.bind(session_id=self.session_id)
         self._task_lock = asyncio.Lock()
         self._cancelled = False
-        self._current_converter: ACPEventConverter | None = None
         self.last_usage: Usage | None = None
         self.fs = ACPFileSystem(
             self.client,
@@ -625,10 +607,6 @@ class ACPSession:
         This actively interrupts the running agent by calling its interrupt() method,
         which handles protocol-specific cancellation (e.g., sending CancelNotification
         for ACP agents, etc.).
-
-        Note:
-            Tool call cleanup is handled in process_prompt() to avoid race conditions
-            with the converter state being modified from multiple async contexts.
         """
         self._cancelled = True
         self.log.info("Session cancelled, interrupting agent")
@@ -640,123 +618,6 @@ class ACPSession:
     def is_cancelled(self) -> bool:
         """Check if the session is cancelled."""
         return self._cancelled
-
-    async def process_prompt(self, content_blocks: Sequence[ContentBlock]) -> StopReason:  # noqa: PLR0911
-        """Process a prompt request and stream responses.
-
-        Args:
-            content_blocks: List of content blocks from the prompt request
-
-        Returns:
-            Stop reason
-        """
-        self._cancelled = False
-        fs = self.agent.env.get_fs()
-        contents = [from_acp_content(i, fs=fs) for i in content_blocks]
-        self.log.debug("Converted content", content=contents)
-        if not contents:
-            self.log.warning("Empty prompt received")
-            return "refusal"
-        commands, non_command_content = split_commands(contents, self.command_store)
-        async with self._task_lock:
-            if commands:  # Process commands if found
-                for command in commands:
-                    self.log.info("Processing slash command", command=command)
-                    await self.execute_slash_command(command)
-
-                # If only commands and no staged content, end turn
-                if not non_command_content and len(self.agent.staged_content) == 0:
-                    return "end_turn"
-
-            self.log.debug("Processing prompt", content_items=len(non_command_content))
-            event_count = 0
-            # Derive turn-complete support from client capabilities
-            client_supports_turn_complete = (
-                bool(self.client_capabilities.turn_complete)
-                if self.client_capabilities is not None
-                else False
-            )
-            # Create a new event converter for this prompt
-            converter = ACPEventConverter(
-                subagent_display_mode=self.subagent_display_mode,
-                raw_input_mode=self.raw_input_mode,
-                client_supports_turn_complete=client_supports_turn_complete,
-            )
-            self._current_converter = converter  # Track for cancellation
-
-            # Route through SessionPool for unified session management.
-            # MCP tools are handled via McpConfigSnapshot → as_capability() →
-            # MCPToolset, not through agent.tools.providers.
-            agent_pool_ref = getattr(self.agent, "agent_pool", None)
-            session_pool = agent_pool_ref.session_pool if agent_pool_ref is not None else None
-            try:
-                if session_pool is not None:
-                    stream = session_pool.run_stream(
-                        self.session_id,
-                        *non_command_content,
-                        input_provider=self.input_provider,
-                        deps=self,
-                    )
-                else:
-                    raise RuntimeError(  # noqa: TRY301
-                        f"SessionPool is required for prompt processing "
-                        f"in session {self.session_id}"
-                    )
-
-                async for event in stream:
-                    if self._cancelled:
-                        self.log.info("Cancelled during event loop, cleaning up tool calls")
-                        # Send cancellation notifications for any pending tool calls
-                        # This happens in the same async context as the converter
-                        async for cancel_update in converter.cancel_pending_tools():
-                            await self.notifications.send_update(cancel_update)
-                        # CRITICAL: Allow time for client to process tool completion notifications
-                        # before sending PromptResponse. Without this delay, the client may receive
-                        # and process the PromptResponse before the tool notifications, causing UI
-                        # state desync where subsequent prompts appear stuck/unresponsive.
-                        # This is needed because even though send() awaits the write, the client
-                        # may process messages asynchronously or out of order.
-                        await anyio.sleep(0.05)
-                        self._current_converter = None
-                        return "cancelled"
-
-                    event_count += 1
-                    async for update in converter.convert(event):
-                        await self.notifications.send_update(update)
-                    # Yield control to allow notifications to be sent immediately
-                    await anyio.sleep(0.01)
-                self.log.info("Streaming finished", events_processed=event_count)
-            except asyncio.CancelledError:
-                # Task was cancelled (e.g., via interrupt()) - return proper stop reason
-                # This is critical: CancelledError doesn't inherit from Exception,
-                # so we must catch it explicitly to send the PromptResponse
-                self.log.info("Stream cancelled via CancelledError, cleaning up tool calls")
-                # Send cancellation notifications for any pending tool calls
-                async for cancel_update in converter.cancel_pending_tools():
-                    await self.notifications.send_update(cancel_update)
-                # CRITICAL: Allow time for client to process tool completion notifications
-                # before sending PromptResponse. See comment in cancellation branch above.
-                await anyio.sleep(0.05)
-                self._current_converter = None
-                return "cancelled"
-            except UsageLimitExceeded as e:
-                self.log.info("Usage limit exceeded", error=str(e))
-                return infer_stop_reason(str(e))
-            except Exception as e:
-                self._current_converter = None  # Clear converter reference
-                self.log.exception("Error during streaming")
-                # Send error as toast notification instead of polluting chat history
-                await self._send_toast(
-                    message=f"Agent error: {e}",
-                    level="error",
-                )
-                await anyio.sleep(0.05)  # Allow network buffers to flush
-                return "end_turn"
-            else:
-                # Title generation is now handled automatically by log_session
-                self.last_usage = converter.last_usage
-                self._current_converter = None  # Clear converter reference
-                return "end_turn"
 
     async def _send_toast(
         self,

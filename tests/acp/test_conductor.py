@@ -47,7 +47,7 @@ class FakeProxy:
             raise self._init_error
         return self._intercepted
 
-    def proxy_successor(
+    async def proxy_successor(
         self,
         method: str,
         params: dict[str, Any],
@@ -68,7 +68,7 @@ class SuccessorFailingProxy:
     def proxy_initialize(self) -> list[str]:
         return self._intercepted
 
-    def proxy_successor(
+    async def proxy_successor(
         self,
         method: str,
         params: dict[str, Any],
@@ -87,7 +87,7 @@ class RequestErrorProxy:
     def proxy_initialize(self) -> list[str]:
         return self._intercepted
 
-    def proxy_successor(
+    async def proxy_successor(
         self,
         method: str,
         params: dict[str, Any],

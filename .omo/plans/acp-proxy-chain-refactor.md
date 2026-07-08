@@ -288,7 +288,7 @@ Your next move: approve to start execution, or run a high-accuracy review first.
   QA scenarios: happy — all hooks tested; coexistence verified; context injection; tool provider. failure — deny blocks; no double-firing; missing files; MCP failures. Evidence: `.omo/evidence/task-21-acp-proxy-chain-refactor.log`
   Commit: Y | test(acp): add Phase 4 tests for all built-in proxy implementations
 
-- [ ] 22. Refactor AgentPoolACPAgent as terminal agent + remove legacy dual path + split ACPEventConverter
+- [x] 22. Refactor AgentPoolACPAgent as terminal agent + remove legacy dual path + split ACPEventConverter
   What to do / Must NOT do: Refactor `AgentPoolACPAgent` to operate as terminal agent behind Conductor — respond to `initialize` (not `proxy/initialize`). Remove legacy `ACPSession.process_prompt()` dual path — consolidate to `ACPProtocolHandler.handle_prompt()`. Split `ACPEventConverter` refactoring into: (a) define proxy component interface, (b) extract stateless conversion functions, (c) implement proxy wrapper, (d) migrate callers. Verify `ACPProtocolHandler` (ProtocolEventConsumerMixin) works unchanged. Must NOT break existing ACP server. Must NOT remove ACPProtocolHandler.
   Parallelization: Wave 5 | Blocked by: T16, T21 | Blocks: T23
   References: `openspec/changes/acp-proxy-chain-refactor/specs/acp-server/spec.md:32-45`; `openspec/changes/acp-proxy-chain-refactor/specs/acp-single-execution-path/spec.md:1-30`; `src/agentpool_server/acp_server/acp_agent.py` (1150 lines); `src/agentpool_server/acp_server/session.py` (939 lines); `src/agentpool_server/acp_server/handler.py` (774 lines); `src/agentpool_server/acp_server/event_converter.py` (912 lines); Metis finding M1 (split ACPEventConverter)
