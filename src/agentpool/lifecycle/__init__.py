@@ -12,6 +12,7 @@ subsequent tasks.
 
 from __future__ import annotations
 
+from agentpool.lifecycle.comm_channel import DirectChannel, ProtocolChannel
 from agentpool.lifecycle.event_transport import InProcessTransport
 from agentpool.lifecycle.journal import DurableJournal, MemoryJournal
 from agentpool.lifecycle.protocols import (
@@ -43,6 +44,7 @@ from agentpool.lifecycle.types import (
 __all__ = [
     "ChannelTrigger",
     "CommChannel",
+    "DirectChannel",
     "DurableJournal",
     "DurableSnapshotStore",
     "EventEnvelope",
@@ -54,6 +56,7 @@ __all__ = [
     "MemoryJournal",
     "MemorySnapshotStore",
     "Prompt",
+    "ProtocolChannel",
     "ProtocolTrigger",
     "ResumeResult",
     "RunState",
