@@ -218,6 +218,19 @@ class RunHandle:
     _lifecycle_session_id: str = "default"
     _run_state: RunState = RunState.IDLE
     _state_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    _recover_strategy: str = "mark_interrupted"
+    """Crash recovery strategy: ``"mark_interrupted"`` or ``"retry"``.
+
+    Only active when both ``lifecycle.journal`` and ``lifecycle.snapshot``
+    are durable.
+    """
+    _recovered_inflight_turn_id: str | None = None
+    """Turn ID of the in-flight Turn detected during crash recovery.
+
+    Set by ``start()`` when ``resume_result.is_inflight`` is ``True``.
+    Used by the ``"retry"`` strategy to check
+    ``journal.get_tool_executions(turn_id)`` before re-executing.
+    """
 
     def __post_init__(self) -> None:
         """Initialize default lifecycle dimensions.
@@ -253,6 +266,26 @@ class RunHandle:
             ``True`` if the lifecycle state is ``RunState.RUNNING``.
         """
         return self._run_state == RunState.RUNNING
+
+    @property
+    def recovered_tool_executions(self) -> list[Any]:
+        """Tool executions from the interrupted Turn, for idempotent retry.
+
+        When ``recover_strategy == "retry"`` and an in-flight Turn was
+        detected, this property returns the list of completed tool
+        execution records from the journal. The Turn execution path
+        can check this to skip already-completed tools during
+        re-execution.
+
+        Returns:
+            List of ``ToolExecutionRecord`` objects, or empty list if
+            no in-flight Turn was recovered or no journal is configured.
+        """
+        if self._recovered_inflight_turn_id is None:
+            return []
+        if self._journal is None:
+            return []
+        return self._journal.get_tool_executions(self._recovered_inflight_turn_id)
 
     async def _transition(
         self,
@@ -322,6 +355,7 @@ class RunHandle:
         assert self._snapshot_store is not None  # set by __post_init__
         assert self._comm_channel is not None  # set by __post_init__
         assert self._trigger_source is not None  # set by __post_init__
+        recovered_prompt: str | None = None
         resume_result = self._journal.resume(self._snapshot_store)
         if resume_result is not None:
             if resume_result.is_inflight:
@@ -330,6 +364,26 @@ class RunHandle:
                 for event in resume_result.events:
                     await self._comm_channel.publish(event)
                 self._comm_channel._replaying = False
+                self._recovered_inflight_turn_id = resume_result.inflight_turn_id
+                # Apply recovery strategy.
+                if self._recover_strategy == "retry":
+                    # Re-queue the interrupted Turn's prompt for re-execution.
+                    # The prompt is extracted from the snapshot state dict
+                    # saved before the Turn started.
+                    state_dict = resume_result.state
+                    if isinstance(state_dict, dict):
+                        prompt_val: Any = state_dict.get("prompt")
+                        if isinstance(prompt_val, str) and prompt_val:
+                            recovered_prompt = prompt_val
+                elif self._recover_strategy == "mark_interrupted":
+                    # Mark the interrupted Turn's result as interrupted in
+                    # the snapshot store so it's not re-detected on next
+                    # recovery.
+                    if resume_result.inflight_turn_id is not None:
+                        self._snapshot_store.save_turn_result(
+                            resume_result.inflight_turn_id,
+                            {"status": "interrupted"},
+                        )
                 await self._transition(RunState.IDLE, stop_reason="crash_recovery")
             else:
                 await self._transition(RunState.IDLE)
@@ -346,7 +400,11 @@ class RunHandle:
 
         try:
             async with session.turn_lock:
-                current_prompts: list[str] = [initial_prompt]
+                # For "retry" recovery, prepend the recovered prompt.
+                if recovered_prompt is not None:
+                    current_prompts: list[str] = [recovered_prompt]
+                else:
+                    current_prompts = [initial_prompt]
                 while not self._closing:
                     if not current_prompts:
                         self._status = RunStatus.idle
@@ -450,6 +508,17 @@ class RunHandle:
                             session_id=self.session_id,
                         ),
                     ])
+
+                    # Pre-turn snapshot: save prompt and turn_id for
+                    # crash recovery. If the process crashes during
+                    # turn.execute(), this snapshot allows the "retry"
+                    # strategy to recover the prompt and turn_id.
+                    self._snapshot_store.save({
+                        "state": RunState.RUNNING.value,
+                        "run_id": self.run_id,
+                        "turn_id": turn_id,
+                        "prompt": "\n".join(current_prompts),
+                    })
 
                     turn_failed = False
                     try:
