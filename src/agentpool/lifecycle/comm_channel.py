@@ -220,6 +220,12 @@ class ProtocolChannel:
         Otherwise, the event is journaled (append or upsert) before
         being published to the EventBus.
 
+        ``StateUpdate`` events are journaled but NOT published to the
+        EventBus. They are internal lifecycle signals (state machine
+        transitions) that protocol servers do not need to receive.
+        This preserves backward compatibility with tests and protocol
+        handlers that do not expect ``StateUpdate`` on the EventBus.
+
         Args:
             event: The event to publish.
 
@@ -236,7 +242,12 @@ class ProtocolChannel:
             else:
                 self._journal.append(event)
 
-        await self._event_bus.publish(self._session_id, event)
+        # StateUpdate events are internal lifecycle signals — journal
+        # them but do not publish to EventBus. This prevents protocol
+        # servers and EventBus subscribers from receiving state machine
+        # transitions they don't know how to handle.
+        if not isinstance(event, StateUpdate):
+            await self._event_bus.publish(self._session_id, event)
 
     def recv(self) -> Feedback | None:
         """Non-blocking dequeue from the feedback queue.
