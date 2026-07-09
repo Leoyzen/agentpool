@@ -251,8 +251,28 @@ def _enable_wal(dbapi_conn: Any, connection_record: Any) -> None:
     cursor.close()
 
 
+# Known event types for deserialization reconstruction.
+_KNOWN_EVENT_TYPES: dict[str, type] = {}
+
+
+def _register_event_type(cls: type) -> type:
+    """Register an event class for deserialization reconstruction.
+
+    Args:
+        cls: The event class to register.
+
+    Returns:
+        The same class (for use as a decorator).
+    """
+    _KNOWN_EVENT_TYPES[cls.__name__] = cls
+    return cls
+
+
 def _json_default(obj: Any) -> Any:
     """Custom JSON default handler for dataclasses, Pydantic models, and Enums.
+
+    Adds a ``__event_type__`` marker to serialized dataclasses and
+    Pydantic models so they can be reconstructed during deserialization.
 
     Args:
         obj: The object to serialize.
@@ -261,9 +281,13 @@ def _json_default(obj: Any) -> Any:
         A JSON-serializable representation of the object.
     """
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        return dataclasses.asdict(obj)
+        result: dict[str, Any] = dataclasses.asdict(obj)
+        result["__event_type__"] = type(obj).__name__
+        return result
     if isinstance(obj, BaseModel):
-        return obj.model_dump(mode="json")
+        result = obj.model_dump(mode="json")
+        result["__event_type__"] = type(obj).__name__
+        return result
     if isinstance(obj, Enum):
         return obj.value
     return str(obj)
@@ -285,12 +309,40 @@ def _serialize_event(event: Any) -> str:
 def _deserialize_event(event_json: str) -> Any:
     """Deserialize an event from JSON string.
 
-    Returns the parsed JSON value. If parsing fails, returns the raw string.
+    If the JSON contains a ``__event_type__`` marker matching a
+    registered event class, reconstructs the original event object.
+    Otherwise returns the parsed JSON value. If parsing fails,
+    returns the raw string.
+
+    Args:
+        event_json: The JSON string to deserialize.
+
+    Returns:
+        The deserialized event object, parsed JSON value, or raw string.
     """
     try:
-        return json.loads(event_json)
+        data: Any = json.loads(event_json)
     except (json.JSONDecodeError, TypeError):
         return event_json
+
+    if isinstance(data, dict):
+        event_type_name = data.pop("__event_type__", None)
+        if event_type_name is not None:
+            cls = _KNOWN_EVENT_TYPES.get(event_type_name)
+            if cls is not None:
+                try:
+                    if isinstance(cls, type) and issubclass(cls, BaseModel):
+                        return cls.model_validate(data)
+                    if dataclasses.is_dataclass(cls):
+                        valid_fields: set[str] = {f.name for f in dataclasses.fields(cls)}
+                        filtered_data: dict[str, Any] = {
+                            k: v for k, v in data.items() if k in valid_fields
+                        }
+                        return cls(**filtered_data)
+                except Exception:  # noqa: BLE001
+                    pass  # Fall through to return dict
+
+    return data
 
 
 def _extract_turn_id(event: Any) -> str | None:
@@ -574,6 +626,32 @@ class DurableJournal:
     def close(self) -> None:
         """Dispose the database engine."""
         self._engine.dispose()
+
+
+# Register known event types for deserialization reconstruction.
+from agentpool.agents.events.events import (  # noqa: E402
+    MessageReplacementEvent,
+    PlanUpdateEvent,
+    RunErrorEvent,
+    RunFailedEvent,
+    RunStartedEvent,
+    StateUpdate,
+    StreamCompleteEvent,
+    ToolCallUpdateEvent,
+)
+
+
+for _cls in [
+    StateUpdate,
+    ToolCallUpdateEvent,
+    MessageReplacementEvent,
+    PlanUpdateEvent,
+    RunStartedEvent,
+    RunErrorEvent,
+    RunFailedEvent,
+    StreamCompleteEvent,
+]:
+    _register_event_type(_cls)
 
 
 __all__ = [
