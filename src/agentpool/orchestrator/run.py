@@ -7,13 +7,27 @@ import contextlib
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Any, Self
+import uuid
 
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     RunErrorEvent,
     RunFailedEvent,
     RunStartedEvent,
+    StateUpdate,
     StreamCompleteEvent,
+)
+from agentpool.lifecycle import (
+    DirectChannel,
+    EventTransport,
+    ImmediateTrigger,
+    InProcessTransport,
+    Journal,
+    MemoryJournal,
+    MemorySnapshotStore,
+    RunState,
+    SnapshotStore,
+    TriggerSource,
 )
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
@@ -28,6 +42,7 @@ if TYPE_CHECKING:
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.agents.events.events import RichAgentStreamEvent
+    from agentpool.lifecycle.protocols import CommChannel
     from agentpool.orchestrator.core import EventBus, SessionState
 
 
@@ -191,6 +206,79 @@ class RunHandle:
     _interrupt_task: asyncio.Task[None] | None = None
 
     # ------------------------------------------------------------------
+    # Lifecycle dimensions (M2)
+    # ------------------------------------------------------------------
+    _trigger_source: TriggerSource | None = None
+    _journal: Journal | None = None
+    _snapshot_store: SnapshotStore | None = None
+    _comm_channel: CommChannel | None = None
+    _event_transport: EventTransport | None = None
+    _lifecycle_session_id: str = "default"
+    _run_state: RunState = RunState.IDLE
+    _state_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    def __post_init__(self) -> None:
+        """Initialize default lifecycle dimensions.
+
+        Any dimension left as ``None`` is populated with the default
+        in-process implementation. The journal is injected into the
+        CommChannel to ensure the channel can persist events.
+        """
+        if self._journal is None:
+            self._journal = MemoryJournal()
+        if self._snapshot_store is None:
+            self._snapshot_store = MemorySnapshotStore()
+        if self._comm_channel is None:
+            self._comm_channel = DirectChannel(self._journal)
+        else:
+            # Inject journal into existing CommChannel if not already set.
+            try:
+                existing_journal: Journal | None = self._comm_channel._journal  # type: ignore[attr-defined]
+            except AttributeError:
+                existing_journal = None
+            if existing_journal is None:
+                self._comm_channel._journal = self._journal  # type: ignore[attr-defined]
+        if self._event_transport is None:
+            self._event_transport = InProcessTransport()
+        if self._trigger_source is None:
+            self._trigger_source = ImmediateTrigger("")
+
+    @property
+    def is_running(self) -> bool:
+        """Whether the RunLoop is in the RUNNING state.
+
+        Returns:
+            ``True`` if the lifecycle state is ``RunState.RUNNING``.
+        """
+        return self._run_state == RunState.RUNNING
+
+    async def _transition(
+        self,
+        new_state: RunState,
+        stop_reason: str | None = None,
+    ) -> None:
+        """Transition to a new RunState, notifying CommChannel and publishing StateUpdate.
+
+        Acquires the internal state lock to serialize transitions. After
+        setting the state, calls ``comm_channel.on_state_change()`` and
+        publishes a ``StateUpdate`` event via ``comm_channel.publish()``.
+
+        Args:
+            new_state: The target RunState.
+            stop_reason: Optional reason for the transition.
+        """
+        async with self._state_lock:
+            self._run_state = new_state
+        if self._comm_channel is not None:
+            self._comm_channel.on_state_change(new_state)
+            state_event = StateUpdate(
+                session_id=self._lifecycle_session_id,
+                state=new_state,
+                stop_reason=stop_reason,
+            )
+            await self._comm_channel.publish(state_event)
+
+    # ------------------------------------------------------------------
     # New session-level lifecycle
     # ------------------------------------------------------------------
 
@@ -226,6 +314,34 @@ class RunHandle:
         # CancelNotification, native _iteration_task cancel).
         self._cancel_fn = self._create_cancel_fn()
 
+        # --- Lifecycle dimensions (M2) ---
+        # Crash recovery: check journal for prior state.
+        assert self._journal is not None  # set by __post_init__
+        assert self._snapshot_store is not None  # set by __post_init__
+        assert self._comm_channel is not None  # set by __post_init__
+        assert self._trigger_source is not None  # set by __post_init__
+        resume_result = self._journal.resume(self._snapshot_store)
+        if resume_result is not None:
+            if resume_result.is_inflight:
+                # In-flight crash recovery: replay journaled events.
+                self._comm_channel._replaying = True
+                for event in resume_result.events:
+                    await self._comm_channel.publish(event)
+                self._comm_channel._replaying = False
+                await self._transition(RunState.IDLE, stop_reason="crash_recovery")
+            else:
+                await self._transition(RunState.IDLE)
+        else:
+            # Fresh start: save initial snapshot.
+            self._snapshot_store.save(
+                {"state": RunState.IDLE.value, "run_id": self.run_id},
+            )
+            await self._transition(RunState.IDLE)
+
+        # Subscribe dimensions.
+        self._trigger_source.subscribe(self)
+        self._comm_channel.attach(self)
+
         try:
             async with session.turn_lock:
                 current_prompts: list[str] = [initial_prompt]
@@ -248,6 +364,11 @@ class RunHandle:
                             continue
 
                     self._status = RunStatus.running
+                    # Lifecycle state transition: IDLE → RUNNING.
+                    await self._transition(RunState.RUNNING)
+                    # Generate a unique turn_id for this Turn.
+                    turn_id = str(uuid.uuid4())
+                    self.run_ctx.turn_id = turn_id
                     # Reset per-turn state: clear the completion event
                     # and clear any stale cancelled flag from a prior turn.
                     self._turn_complete_event.clear()
@@ -278,6 +399,7 @@ class RunHandle:
                         else None,
                     )
                     await event_bus.publish(self.session_id, run_started)
+                    await self._comm_channel.publish(run_started)
 
                     # Set _current_input_provider ContextVar so MCP
                     # elicitation can access it during turn execution.
@@ -310,6 +432,7 @@ class RunHandle:
                     try:
                         async for event in turn.execute():
                             await event_bus.publish(self.session_id, event)
+                            await self._comm_channel.publish(event)
                             # Save assistant final message to conversation BEFORE
                             # yielding. The _consume_run caller closes the generator
                             # immediately after receiving StreamCompleteEvent, which
@@ -333,6 +456,7 @@ class RunHandle:
                             agent_name=self.agent_type,
                         )
                         await event_bus.publish(self.session_id, error_event)
+                        await self._comm_channel.publish(error_event)
                         yield error_event
 
                     if self.run_ctx.cancelled:
@@ -341,14 +465,13 @@ class RunHandle:
                         # RunFailedEvent must be published BEFORE _turn_complete_event
                         # so the event converter can emit
                         # TurnCompleteUpdate(stop_reason="cancelled").
-                        await event_bus.publish(
-                            self.session_id,
-                            RunFailedEvent(
-                                run_id=self.run_id,
-                                session_id=self.session_id,
-                                exception=RuntimeError("Run cancelled"),
-                            ),
+                        cancelled_event = RunFailedEvent(
+                            run_id=self.run_id,
+                            session_id=self.session_id,
+                            exception=RuntimeError("Run cancelled"),
                         )
+                        await event_bus.publish(self.session_id, cancelled_event)
+                        await self._comm_channel.publish(cancelled_event)
                         # Capture cancelled state BEFORE setting _turn_complete_event.
                         # handle_prompt() checks run_handle.cancelled after waking from
                         # _turn_complete_event.wait(). But the loop may reset cancelled=False
@@ -381,6 +504,22 @@ class RunHandle:
                     if not turn_failed:
                         with contextlib.suppress(RuntimeError):
                             self._message_history = turn.message_history
+
+                    # Lifecycle state transition: RUNNING → IDLE.
+                    await self._transition(RunState.IDLE)
+
+                    # Snapshot at turn boundary (after state transition).
+                    self._snapshot_store.save(
+                        {
+                            "state": self._run_state.value,
+                            "run_id": self.run_id,
+                            "turn_id": turn_id,
+                        },
+                    )
+                    # Save turn result for idempotency.
+                    with contextlib.suppress(RuntimeError):
+                        final_msg = turn.final_message
+                        self._snapshot_store.save_turn_result(turn_id, final_msg)
 
                     # Between turns: wait for background child tasks to complete,
                     # then collect their steer messages as prompts for next turn.
@@ -429,8 +568,21 @@ class RunHandle:
                 self._status = RunStatus.done
         finally:
             self._status = RunStatus.done
+            # Lifecycle state transition: → DONE.
+            with contextlib.suppress(Exception):
+                await self._transition(RunState.DONE)
             self._turn_complete_event.set()
             self.complete_event.set()
+            # Close lifecycle dimensions.
+            with contextlib.suppress(Exception):
+                if self._trigger_source is not None:
+                    self._trigger_source.close()
+            with contextlib.suppress(Exception):
+                if self._comm_channel is not None:
+                    self._comm_channel.close()
+            with contextlib.suppress(Exception):
+                if self._event_transport is not None:
+                    self._event_transport.close()
 
     def steer(self, message: str) -> bool:
         """Inject a steer message into the active turn or wake idle handle.

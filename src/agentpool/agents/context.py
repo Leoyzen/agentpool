@@ -194,6 +194,14 @@ class AgentRunContext:
     steer_callback: Callable[[str, str], Awaitable[bool]] | None = None
     """Set by RunHandle.start(), allows tools to call steer() via run_ctx."""
 
+    turn_id: str | None = None
+    """Unique identifier for the current Turn, set by RunHandle.start().
+
+    Generated as ``str(uuid.uuid4())`` before ``agent.create_turn()`` so
+    that all events, journal entries, and snapshots within a single Turn
+    share the same ``turn_id`` for idempotent crash recovery.
+    """
+
     async def complete_background_task(self, child_session_id: str, message: str) -> None:
         """Signal that a background child task has completed.
 
