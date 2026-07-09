@@ -37,6 +37,7 @@ from agentpool.messaging import ChatMessage  # noqa: TC001
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from agentpool.lifecycle.types import RunState
     from agentpool.tools.base import ToolKind
     from agentpool.utils.todos import PlanEntry
 
@@ -824,6 +825,70 @@ class SessionResumeEvent:
     """Event type identifier."""
 
 
+@dataclass(kw_only=True)
+class StateUpdate:
+    """Event indicating a RunLoop state transition.
+
+    Published on every state transition (idle → running → idle → done).
+    For ``IDLE`` transitions after crash recovery, ``stop_reason`` SHALL
+    be ``"crash_recovery"``.
+    """
+
+    session_id: str
+    """ID of the session whose state changed."""
+    state: RunState
+    """The new RunState."""
+    stop_reason: str | None = None
+    """Optional reason for the transition (e.g. ``"crash_recovery"``)."""
+    event_kind: Literal["state_update"] = "state_update"
+    """Event type identifier."""
+
+
+@dataclass(kw_only=True)
+class ToolCallUpdateEvent:
+    """Entity-state event for tool call updates.
+
+    Represents the latest state of a tool call. Uses upsert semantics
+    in the Journal (key: ``f"tool_call:{tool_call_id}"``) so only the
+    most recent state per tool call is retained.
+    """
+
+    tool_call_id: str
+    """The ID of the tool call."""
+    tool_name: str
+    """The name of the tool being called."""
+    status: ToolCallStatus = "in_progress"
+    """Current execution status."""
+    title: str | None = None
+    """Human-readable title describing the operation."""
+    tool_input: dict[str, Any] = field(default_factory=dict)
+    """The input parameters sent to the tool."""
+    tool_result: Any | None = None
+    """The result returned by the tool (``None`` if not completed)."""
+    session_id: str = ""
+    """ID of the session that emitted this event."""
+    event_kind: Literal["tool_call_update"] = "tool_call_update"
+    """Event type identifier."""
+
+
+@dataclass(kw_only=True)
+class MessageReplacementEvent:
+    """Entity-state event for message replacement.
+
+    Indicates that a previous message should be replaced with new content.
+    Uses upsert semantics in the Journal (key: ``f"msg:{message_id}"``).
+    """
+
+    message_id: str
+    """The ID of the message to replace."""
+    content: str
+    """The replacement content."""
+    session_id: str = ""
+    """ID of the session that emitted this event."""
+    event_kind: Literal["message_replacement"] = "message_replacement"
+    """Event type identifier."""
+
+
 type RichAgentStreamEvent[OutputDataT] = (
     AgentStreamEvent
     | StreamCompleteEvent[OutputDataT]
@@ -842,6 +907,9 @@ type RichAgentStreamEvent[OutputDataT] = (
     | SpawnSessionStart
     | ToolResultMetadataEvent
     | CustomEvent[Any]
+    | StateUpdate
+    | ToolCallUpdateEvent
+    | MessageReplacementEvent
 )
 
 
