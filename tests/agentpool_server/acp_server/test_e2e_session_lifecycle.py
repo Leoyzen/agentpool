@@ -114,7 +114,7 @@ async def test_e2e_session_lifecycle() -> None:  # noqa: PLR0915
         # Empty snapshot → no servers → empty capability list
         assert old_caps == []
         # Session context still exists during the turn
-        assert session_id in mcp_manager._session_contexts
+        assert mcp_manager.get_session_context(session_id) is not None
 
         # Store references to pre-disconnect resources for later comparison
         old_toolset_cache = old_ctx.toolset_cache
@@ -134,7 +134,7 @@ async def test_e2e_session_lifecycle() -> None:  # noqa: PLR0915
         assert not old_conn.has_active_sessions()
 
         # Verify MCP session context is removed
-        assert session_id not in mcp_manager._session_contexts
+        assert mcp_manager.get_session_context(session_id) is None
 
         # ================================================================
         # Phase 5: RECONNECT - Create fresh ACP connection + session
@@ -214,7 +214,7 @@ async def test_e2e_session_lifecycle() -> None:  # noqa: PLR0915
         assert new_caps == []
 
         # 7j: Session context still exists after resume
-        assert session_id in mcp_manager._session_contexts
+        assert mcp_manager.get_session_context(session_id) is not None
 
     finally:
         # Ensure cleanup even on assertion failure

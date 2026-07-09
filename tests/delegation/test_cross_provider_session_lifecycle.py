@@ -722,8 +722,8 @@ async def test_pool_backed_team_and_teamrun_create_child_sessions() -> None:
     team = BaseTeam([agent_a], mode="parallel", name="parallel_team")
     teamrun = BaseTeam([agent_b], mode="sequential", name="sequential_team")
 
-    mock_pool = AsyncMock()
-    mock_session_pool = AsyncMock()
+    mock_pool = MagicMock()
+    mock_session_pool = MagicMock()
 
     def _make_child_state(session_id: str):
         m = MagicMock()
@@ -742,7 +742,19 @@ async def test_pool_backed_team_and_teamrun_create_child_sessions() -> None:
 
     mock_session_pool.run_stream = _mock_run_stream
     mock_session_pool.sessions.get_session = MagicMock(return_value=None)
+    mock_session_pool.close_session = AsyncMock()
     mock_pool.session_pool = mock_session_pool
+    # storage property on MessageNode accesses _agent_pool.storage directly
+    mock_pool.storage = MagicMock()
+    mock_pool.storage.log_session = AsyncMock()
+    mock_pool.storage.save_session = AsyncMock()
+    # host_context calls _agent_pool.get_context(); return a mock context
+    mock_context = MagicMock()
+    mock_context.session_pool = mock_session_pool
+    mock_context.storage = MagicMock()
+    mock_context.storage.log_session = AsyncMock()
+    mock_context.storage.save_session = AsyncMock()
+    mock_pool.get_context.return_value = mock_context
 
     team.agent_pool = mock_pool
     agent_a.agent_pool = mock_pool

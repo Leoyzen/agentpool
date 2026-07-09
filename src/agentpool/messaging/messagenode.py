@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 import asyncio
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Literal, Self, overload
+import warnings
 
 from anyenv.signals import Signal
 
@@ -140,9 +141,17 @@ class MessageNode[TDeps, TResult](ABC):
     def agent_pool(self) -> AgentPool[Any] | None:
         """Compatibility shim: returns the pool reference.
 
-        In M1b, this will return a HostContext-compatible proxy.
-        For now, returns the raw pool for backward compatibility.
+        .. deprecated:: M2
+            Use :attr:`host_context` instead. The ``agent_pool`` property
+            will be removed in M3. ``host_context`` provides the same
+            infrastructure fields via an immutable :class:`HostContext`.
         """
+        warnings.warn(
+            "agent_pool is deprecated, use host_context (HostContext) instead. "
+            "See AGENTS.md for migration guide.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self._agent_pool
 
     @agent_pool.setter
@@ -245,7 +254,7 @@ class MessageNode[TDeps, TResult](ABC):
     @property
     def storage(self) -> StorageManager | None:
         """Get storage manager from pool."""
-        return self.agent_pool.storage if self.agent_pool else None
+        return self._agent_pool.storage if self._agent_pool else None
 
     @property
     def name(self) -> str:
@@ -418,7 +427,7 @@ class MessageNode[TDeps, TResult](ABC):
 
         if callable(target):
             target = Agent.from_callback(target)
-            if pool := self.agent_pool:
+            if pool := self._agent_pool:
                 target.agent_pool = pool
         # we are explicit here just to make disctinction clear, we only want sequences
         # of message units
@@ -428,7 +437,7 @@ class MessageNode[TDeps, TResult](ABC):
                 match t:
                     case _ if callable(t):
                         other = Agent.from_callback(t)
-                        if pool := self.agent_pool:
+                        if pool := self._agent_pool:
                             other.agent_pool = pool
                         targets.append(other)
                     case MessageNode():

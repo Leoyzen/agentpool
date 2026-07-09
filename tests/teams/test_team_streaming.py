@@ -262,6 +262,14 @@ async def test_pool_backed_team_creates_child_sessions() -> None:
         agents={"alpha": None, "beta": None},
         teams={},
     )
+    # host_context calls _agent_pool.get_context(); configure it to return
+    # a context with the session_pool so team code can resolve sessions.
+    # Use MagicMock (not AsyncMock) for get_context since it's synchronous.
+    mock_pool.get_context = MagicMock(return_value=MagicMock(
+        session_pool=mock_sessions,
+        manifest=mock_pool.manifest,
+        storage=AsyncMock(),
+    ))
     team.agent_pool = mock_pool
 
     events = [event async for event in team.run_stream("test", session_id="ses_parent")]
@@ -474,6 +482,13 @@ async def test_teamrun_child_session_uses_pool_sessions() -> None:
     mock_pool.manifest = SimpleNamespace(
         agents={"a1": None},
         teams={},
+    )
+    # host_context calls _agent_pool.get_context(); configure it to return
+    # a context with the session_pool so team code can resolve sessions.
+    mock_pool.get_context.return_value = MagicMock(
+        session_pool=mock_sessions,
+        manifest=mock_pool.manifest,
+        storage=AsyncMock(),
     )
     team.agent_pool = mock_pool
 

@@ -5,7 +5,7 @@
 ``ACPSession.initialize_mcp_servers()`` converts each MCP server to an
 ``McpConfigEntry`` and merges it into the agent's ``_mcp_snapshot`` via
 ``with_session_configs()``.  For ACP-transport servers, the transport is
-created and stored in the agent's ``_session_connection_pool``.
+created and stored in the MCPManager's session context.
 
 This replaces the old behavior of creating ``MCPResourceProvider`` instances
 and registering them on ``agent.tools``.

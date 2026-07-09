@@ -169,6 +169,17 @@ class _FakeAgentPool:
             teams={},
         )
 
+    def get_context(self) -> SimpleNamespace:
+        """Return a HostContext-like object for host_context property."""
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            session_pool=self.session_pool,
+            storage=self.storage,
+            manifest=self.manifest,
+            mcp=self.mcp,
+        )
+
 
 class FailingAgent(MessageNode[Any, Any]):
     """An agent that always raises an exception."""

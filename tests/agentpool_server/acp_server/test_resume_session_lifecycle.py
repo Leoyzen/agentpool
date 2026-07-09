@@ -2,7 +2,7 @@
 
 Verifies that resume_session() closes the old session (removing it from
 _acp_sessions) and creates a fresh session with new MCP resources
-(different _SessionContext in MCPManager._session_contexts).
+(different _SessionContext in MCPManager's session context).
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ async def test_resume_closes_old_session() -> None:
     4. Call resume_session() with the same session_id.
     5. Verify old session was closed (popped from _acp_sessions, close called).
     6. Verify new session is a different object in _acp_sessions.
-    7. Verify MCPManager._session_contexts has a fresh _SessionContext
+    7. Verify MCPManager's session context has a fresh _SessionContext
        (different object, different toolset_cache, different connection_pool).
     """
     session_id = "test-resume-lifecycle-1"
@@ -106,7 +106,7 @@ async def test_resume_closes_old_session() -> None:
 
     # --- 5. Verify old session was closed ---
     # resume_session pops old session and calls close() on it
-    # mock_old_close calls cleanup_session which removes session from _session_contexts
+    # mock_old_close calls cleanup_session which removes the old session context
     assert result is mock_new_session
 
     # --- 6. Verify new session replaced old in _acp_sessions ---
@@ -116,9 +116,9 @@ async def test_resume_closes_old_session() -> None:
 
     # --- 7. Verify fresh MCP resources ---
     # After cleanup_session (old) + get_or_create_session (new),
-    # _session_contexts should have a completely new _SessionContext
-    assert session_id in mcp_manager._session_contexts
-    new_ctx = mcp_manager._session_contexts[session_id]
+    # The session context should be completely new
+    new_ctx = mcp_manager.get_session_context(session_id)
+    assert new_ctx is not None
     assert new_ctx is not old_ctx
     assert new_ctx.toolset_cache is not old_toolset_cache
     assert new_ctx.connection_pool is not old_connection_pool

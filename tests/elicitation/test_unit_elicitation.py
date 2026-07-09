@@ -886,7 +886,11 @@ async def test_handle_elicitation_updates_session_status_to_checkpointed(
     mock_sessions.store = mock_store
     mock_session_pool.sessions = mock_sessions
     mock_pool.session_pool = mock_session_pool
+    mock_host_ctx = MagicMock()
+    mock_host_ctx.session_pool = mock_session_pool
+    mock_pool.get_context.return_value = mock_host_ctx
     agent_ctx.node.agent_pool = mock_pool
+    agent_ctx.node.host_context = mock_host_ctx
 
     payload = ElicitationResumePayload(
         deferred_handle="tc-status-1",
@@ -960,7 +964,11 @@ async def test_handle_elicitation_skips_status_update_if_not_active(
     mock_sessions.store = mock_store
     mock_session_pool.sessions = mock_sessions
     mock_pool.session_pool = mock_session_pool
+    mock_host_ctx = MagicMock()
+    mock_host_ctx.session_pool = mock_session_pool
+    mock_pool.get_context.return_value = mock_host_ctx
     agent_ctx.node.agent_pool = mock_pool
+    agent_ctx.node.host_context = mock_host_ctx
 
     payload = ElicitationResumePayload(
         deferred_handle="tc-skip-1",

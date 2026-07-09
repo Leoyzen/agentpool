@@ -401,7 +401,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                 # Update session store status to "checkpointed" so
                 # resume_session() can find it without relying on the
                 # allow_active_run workaround.
-                pool = self.node.agent_pool
+                pool = self.node.host_context
                 if pool is not None and pool.session_pool is not None:
                     store = pool.session_pool.sessions.store
                     if store is not None:
@@ -475,7 +475,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         session_id = self.run_ctx.session_id
         if not session_id:
             return None
-        pool = self.node.agent_pool
+        pool = self.node.host_context
         if pool is None or pool.session_pool is None:
             return None
         return pool.session_pool.sessions.get_session(session_id)
@@ -597,7 +597,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             The child session ID string.
         """
         child_sid: str
-        pool = self.node.agent_pool
+        pool = self.node.host_context
         if pool is not None and pool.session_pool is not None:
             effective_parent = parent_session_id or self.node._events.session_id
             # Guard against MagicMock auto-generated attributes in tests:
