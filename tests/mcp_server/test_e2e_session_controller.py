@@ -97,6 +97,19 @@ async def test_full_create_session_chain_populates_mcp_session_context() -> None
     mock_pool.skills_instruction_provider = None
     mock_pool.skills_tools_provider = MagicMock()
     mock_pool.mcp = agent.mcp  # Use the agent's own MCPManager
+    mock_pool.get_context.return_value = MagicMock()
+
+    # Use side_effect to mimic AgentFactory._create_native_main() behavior:
+    # populate the MCP session context with a snapshot.
+    async def _mock_create_session_agent(**kwargs: object) -> Agent:
+        sid = kwargs.get("session_id", "")
+        agent.mcp.get_or_create_session(sid)
+        agent.mcp.update_session_snapshot(sid, McpConfigSnapshot())
+        return agent
+
+    mock_pool._factory.create_session_agent = AsyncMock(
+        side_effect=_mock_create_session_agent,
+    )
 
     controller = SessionController(pool=mock_pool)
 

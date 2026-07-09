@@ -208,6 +208,13 @@ class MCPManager:
             self._session_contexts[session_id] = ctx
         return ctx
 
+    def get_session_context(self, session_id: str) -> _SessionContext | None:
+        """Get the session context for ``session_id`` without creating one.
+
+        Returns ``None`` if no context exists for the session.
+        """
+        return self._session_contexts.get(session_id)
+
     def update_session_snapshot(
         self,
         session_id: str,
