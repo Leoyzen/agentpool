@@ -21,18 +21,24 @@ if TYPE_CHECKING:
 
 
 class InProcessTransport:
-    """In-process EventTransport using per-topic ``asyncio.Queue``.
+    """In-process EventTransport using per-subscriber ``asyncio.Queue``.
 
-    Events are delivered as Python objects without serialization. An
-    optional replay buffer allows late subscribers to receive previously
-    published events.
+    Each subscriber gets its own queue, ensuring that every subscriber
+    receives all events published to the topic (broadcast semantics).
+    Events published before any subscriber exists are buffered in a
+    per-topic backlog and delivered to the first subscriber.
+
+    An optional replay buffer allows late subscribers to receive
+    previously published events.
 
     Attributes:
         _replay_buffer_size: Maximum number of events retained per topic.
             ``0`` disables the replay buffer entirely.
-        _queues: Per-topic asyncio queues for delivering new events.
+        _subscribers: Per-topic set of subscriber queues for broadcasting.
         _replay_buffers: Per-topic lists of retained envelopes (only
             populated when ``_replay_buffer_size > 0``).
+        _backlog: Per-topic lists of events published before any
+            subscriber was registered.
         _closed: Whether ``close()`` has been called.
     """
 
@@ -44,42 +50,17 @@ class InProcessTransport:
                 late-subscriber replay. ``0`` disables replay (default).
         """
         self._replay_buffer_size: int = replay_buffer_size
-        self._queues: dict[str, asyncio.Queue[EventEnvelope]] = {}
+        self._subscribers: dict[str, set[asyncio.Queue[EventEnvelope | None]]] = {}
         self._replay_buffers: dict[str, list[EventEnvelope]] = {}
+        self._backlog: dict[str, list[EventEnvelope]] = {}
         self._closed: bool = False
-
-    def _get_queue(self, topic: str) -> asyncio.Queue[EventEnvelope]:
-        """Return the queue for *topic*, creating it if necessary.
-
-        Args:
-            topic: The topic identifier.
-
-        Returns:
-            The asyncio queue for the topic.
-        """
-        if topic not in self._queues:
-            self._queues[topic] = asyncio.Queue()
-        return self._queues[topic]
-
-    def _get_replay_buffer(self, topic: str) -> list[EventEnvelope]:
-        """Return the replay buffer list for *topic*.
-
-        Args:
-            topic: The topic identifier.
-
-        Returns:
-            The list of retained envelopes for the topic.
-        """
-        if topic not in self._replay_buffers:
-            self._replay_buffers[topic] = []
-        return self._replay_buffers[topic]
 
     async def publish(self, envelope: EventEnvelope) -> None:
         """Publish an envelope to the transport.
 
-        Pushes the envelope to the per-topic queue and appends it to
-        the replay buffer (if configured). The topic is derived from
-        ``envelope.session_id``.
+        Broadcasts the envelope to all active subscriber queues for the
+        topic. If no subscribers exist, the envelope is buffered in a
+        per-topic backlog for delivery to the first subscriber.
 
         Args:
             envelope: The envelope to publish.
@@ -92,11 +73,16 @@ class InProcessTransport:
             raise RuntimeError(msg)
 
         topic = envelope.session_id
-        queue = self._get_queue(topic)
-        await queue.put(envelope)
+
+        subs = self._subscribers.get(topic)
+        if subs:
+            for queue in subs:
+                await queue.put(envelope)
+        else:
+            self._backlog.setdefault(topic, []).append(envelope)
 
         if self._replay_buffer_size > 0:
-            buffer = self._get_replay_buffer(topic)
+            buffer = self._replay_buffers.setdefault(topic, [])
             buffer.append(envelope)
             if len(buffer) > self._replay_buffer_size:
                 del buffer[0]
@@ -105,9 +91,9 @@ class InProcessTransport:
         """Return an async iterator of envelopes for *topic*.
 
         If ``from_seq > 0`` and a replay buffer exists, replayed events
-        with ``seq >= from_seq`` are yielded first, then new events from
-        the queue as they arrive. If no replay buffer is configured or
-        ``from_seq`` is 0, only new events are yielded.
+        with ``seq >= from_seq`` are yielded first, then backlog events
+        (if any), then new events from the subscriber's own queue as
+        they arrive.
 
         Args:
             topic: Topic identifier (typically ``session_id``).
@@ -127,7 +113,10 @@ class InProcessTransport:
         return self._iterate(topic, from_seq)
 
     async def _iterate(self, topic: str, from_seq: int) -> AsyncIterator[EventEnvelope]:
-        """Async generator yielding replayed then new envelopes.
+        """Async generator yielding replayed, backlog, then new envelopes.
+
+        Creates a per-subscriber queue so each subscriber independently
+        receives all new events. Cleans up the queue on exit.
 
         Args:
             topic: Topic identifier.
@@ -136,19 +125,35 @@ class InProcessTransport:
         Yields:
             ``EventEnvelope`` objects, replayed first then live.
         """
-        if from_seq > 0 and self._replay_buffer_size > 0:
-            buffer = self._replay_buffers.get(topic, [])
-            for envelope in buffer:
-                if envelope.seq is not None and envelope.seq >= from_seq:
-                    yield envelope
+        queue: asyncio.Queue[EventEnvelope | None] = asyncio.Queue()
+        self._subscribers.setdefault(topic, set()).add(queue)
+        try:
+            # Yield replayed events first.
+            if from_seq > 0 and self._replay_buffer_size > 0:
+                buffer = self._replay_buffers.get(topic, [])
+                for envelope in buffer:
+                    if envelope.seq is not None and envelope.seq >= from_seq:
+                        yield envelope
 
-        queue = self._get_queue(topic)
-        while True:
-            envelope = await queue.get()
-            if envelope is None:  # sentinel from close()
-                break
-            yield envelope
-            queue.task_done()
+            # Yield backlog events (published before any subscriber).
+            backlog = self._backlog.pop(topic, [])
+            for envelope in backlog:
+                yield envelope
+
+            # Yield new events from subscriber's own queue.
+            while True:
+                item: EventEnvelope | None = await queue.get()
+                if item is None:  # sentinel from close()
+                    break
+                yield item
+                queue.task_done()
+        finally:
+            # Clean up subscriber queue.
+            subs = self._subscribers.get(topic)
+            if subs is not None:
+                subs.discard(queue)
+                if not subs:
+                    del self._subscribers[topic]
 
     def ack(self, seq: int) -> None:
         """Acknowledge that an event has been processed.
@@ -164,12 +169,14 @@ class InProcessTransport:
         """Release all transport resources.
 
         Sets ``_closed = True`` and puts a ``None`` sentinel on each
-        per-topic queue to wake blocked consumers. Subsequent calls to
+        subscriber queue to wake blocked consumers. Subsequent calls to
         ``publish()`` or ``subscribe()`` raise ``RuntimeError``.
         """
         self._closed = True
-        for queue in self._queues.values():
-            queue.put_nowait(None)  # type: ignore[arg-type]  # sentinel from close()
+        for _topic, queues in list(self._subscribers.items()):
+            for queue in queues:
+                queue.put_nowait(None)
+        self._subscribers.clear()
 
 
 __all__ = ["InProcessTransport"]

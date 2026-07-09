@@ -27,7 +27,10 @@ Usage::
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+from platformdirs import user_state_dir
 
 from agentpool.lifecycle.comm_channel import DirectChannel
 from agentpool.lifecycle.event_transport import InProcessTransport
@@ -47,6 +50,26 @@ if TYPE_CHECKING:
         TriggerSource,
     )
     from agentpool_config.lifecycle import LifecycleConfig
+
+
+_APP_NAME = "agentpool"
+_APP_AUTHOR = "agentpool"
+_STATE_DIR: Path = Path(user_state_dir(_APP_NAME, _APP_AUTHOR))
+
+
+def _sanitize_session_id(session_id: str) -> str:
+    """Sanitize session_id for safe use in filenames.
+
+    Removes any characters that are not alphanumeric, hyphen, or
+    underscore to prevent path traversal attacks.
+
+    Args:
+        session_id: The raw session identifier.
+
+    Returns:
+        A sanitized string safe for use in filenames.
+    """
+    return "".join(c for c in session_id if c.isalnum() or c in ("-", "_"))
 
 
 def create_dimensions(
@@ -97,17 +120,22 @@ def create_dimensions(
     if lifecycle_config is None or lifecycle_config.is_all_defaults():
         return (None, None, None, None, None)
 
+    safe_session_id = _sanitize_session_id(session_id)
+
+    # Ensure state directory exists for durable storage.
+    _STATE_DIR.mkdir(parents=True, exist_ok=True)
+
     # Create Journal based on config.
     if lifecycle_config.journal == "durable":
-        journal: Journal = DurableJournal(f"sqlite:///lifecycle_{session_id}.db")
+        journal_db = _STATE_DIR / f"lifecycle_{safe_session_id}.db"
+        journal: Journal = DurableJournal(f"sqlite:///{journal_db}")
     else:
         journal = MemoryJournal()
 
     # Create SnapshotStore based on config.
     if lifecycle_config.snapshot == "durable":
-        snapshot_store: SnapshotStore = DurableSnapshotStore(
-            f"lifecycle_{session_id}_snapshot.db",
-        )
+        snapshot_db = _STATE_DIR / f"lifecycle_{safe_session_id}_snapshot.db"
+        snapshot_store: SnapshotStore = DurableSnapshotStore(snapshot_db)
     else:
         snapshot_store = MemorySnapshotStore()
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 from typing import TYPE_CHECKING, Any
 
 
@@ -109,6 +110,7 @@ class DurableSnapshotStore:
             db_path: Filesystem path to the SQLite database file.
         """
         self._db_path: str = str(db_path)
+        self._lock: threading.Lock = threading.Lock()
         self._conn: sqlite3.Connection = sqlite3.connect(
             self._db_path,
             isolation_level=None,  # autocommit mode; we manage transactions
@@ -120,25 +122,26 @@ class DurableSnapshotStore:
 
     def _ensure_tables(self) -> None:
         """Create tables if they do not exist."""
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS snapshots (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                seq INTEGER NOT NULL DEFAULT 0,
-                state_blob TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        with self._lock:
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    seq INTEGER NOT NULL DEFAULT 0,
+                    state_blob TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """,
             )
-            """,
-        )
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS turn_results (
-                turn_id TEXT PRIMARY KEY,
-                result_blob TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS turn_results (
+                    turn_id TEXT PRIMARY KEY,
+                    result_blob TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """,
             )
-            """,
-        )
 
     def save(self, state: Any) -> int:
         """Persist a full state snapshot with crash-safe atomic write.
@@ -154,13 +157,14 @@ class DurableSnapshotStore:
             The sequence number of the snapshot.
         """
         state_blob = json.dumps(state, default=str)
-        self._conn.execute("BEGIN IMMEDIATE")
-        cursor = self._conn.execute(
-            "INSERT INTO snapshots (state_blob) VALUES (?)",
-            (state_blob,),
-        )
-        row_id = cursor.lastrowid
-        self._conn.execute("COMMIT")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            cursor = self._conn.execute(
+                "INSERT INTO snapshots (state_blob) VALUES (?)",
+                (state_blob,),
+            )
+            row_id = cursor.lastrowid
+            self._conn.execute("COMMIT")
         if row_id is None:
             msg = "Failed to insert snapshot: no rowid returned"
             raise RuntimeError(msg)
@@ -173,10 +177,11 @@ class DurableSnapshotStore:
             Tuple of ``(state, last_journal_seq)`` if a valid snapshot
             exists, ``None`` otherwise.
         """
-        cursor = self._conn.execute(
-            "SELECT id, state_blob FROM snapshots ORDER BY id DESC LIMIT 1",
-        )
-        row = cursor.fetchone()
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT id, state_blob FROM snapshots ORDER BY id DESC LIMIT 1",
+            )
+            row = cursor.fetchone()
         if row is None:
             return None
         row_id, state_blob = row
@@ -195,16 +200,17 @@ class DurableSnapshotStore:
             result: The Turn's result.
         """
         result_blob = json.dumps(result, default=str)
-        self._conn.execute("BEGIN IMMEDIATE")
-        self._conn.execute(
-            """
-            INSERT INTO turn_results (turn_id, result_blob)
-            VALUES (?, ?)
-            ON CONFLICT(turn_id) DO UPDATE SET result_blob = excluded.result_blob
-            """,
-            (turn_id, result_blob),
-        )
-        self._conn.execute("COMMIT")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            self._conn.execute(
+                """
+                INSERT INTO turn_results (turn_id, result_blob)
+                VALUES (?, ?)
+                ON CONFLICT(turn_id) DO UPDATE SET result_blob = excluded.result_blob
+                """,
+                (turn_id, result_blob),
+            )
+            self._conn.execute("COMMIT")
 
     def has_turn_result(self, turn_id: str) -> bool:
         """Check whether a Turn was already completed.
@@ -215,22 +221,25 @@ class DurableSnapshotStore:
         Returns:
             ``True`` if the Turn result was saved, ``False`` otherwise.
         """
-        cursor = self._conn.execute(
-            "SELECT 1 FROM turn_results WHERE turn_id = ?",
-            (turn_id,),
-        )
-        return cursor.fetchone() is not None
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT 1 FROM turn_results WHERE turn_id = ?",
+                (turn_id,),
+            )
+            return cursor.fetchone() is not None
 
     def clear(self) -> None:
         """Remove all snapshots and turn results from the database."""
-        self._conn.execute("BEGIN IMMEDIATE")
-        self._conn.execute("DELETE FROM snapshots")
-        self._conn.execute("DELETE FROM turn_results")
-        self._conn.execute("COMMIT")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            self._conn.execute("DELETE FROM snapshots")
+            self._conn.execute("DELETE FROM turn_results")
+            self._conn.execute("COMMIT")
 
     def close(self) -> None:
         """Close the database connection."""
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
 
     def __enter__(self) -> Self:
         """Enter context manager."""
@@ -243,7 +252,8 @@ class DurableSnapshotStore:
         exc_tb: TracebackType | None,
     ) -> None:
         """Exit context manager, closing the connection."""
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
 
 
 __all__ = [
