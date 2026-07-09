@@ -869,9 +869,11 @@ class RunHandle:
         # transitions to DONE, so this handles the case where the
         # loop isn't running or has already exited.
         if self._run_state != RunState.DONE:
+
             async def _safe_done() -> None:
                 with contextlib.suppress(Exception):
                     await self._transition(RunState.DONE)
+
             with contextlib.suppress(RuntimeError):
                 self._close_task: asyncio.Task[None] | None = asyncio.create_task(_safe_done())
 
