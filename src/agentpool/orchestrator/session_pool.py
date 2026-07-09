@@ -929,11 +929,32 @@ class SessionPool:
         NOT create an asyncio task to consume ``start()``. The caller
         is responsible for draining ``start()``.
 
+        Creates the RunHandle with ProtocolTrigger and ProtocolChannel
+        lifecycle dimensions for protocol server integration, matching
+        the pattern in :meth:`SessionController._start_run_handle`.
+
         Returns:
             The newly created and registered RunHandle.
         """
+        from agentpool.lifecycle import (
+            MemoryJournal,
+            ProtocolChannel,
+            ProtocolTrigger,
+        )
+
         event_bus = self.event_bus
         run_ctx = AgentRunContext(session_id=session_id, event_bus=event_bus)
+
+        trigger = ProtocolTrigger()
+        comm_channel: ProtocolChannel | None = None
+        if event_bus is not None:
+            journal = MemoryJournal()
+            comm_channel = ProtocolChannel(
+                journal=journal,
+                event_bus=event_bus,
+                session_id=session_id,
+            )
+
         run_handle = RunHandle(
             run_id=uuid.uuid4().hex,
             session_id=session_id,
@@ -942,6 +963,8 @@ class SessionPool:
             event_bus=event_bus,
             session=session,
             run_ctx=run_ctx,
+            _trigger_source=trigger,
+            _comm_channel=comm_channel,
         )
         self.sessions._runs[run_handle.run_id] = run_handle
         session.current_run_id = run_handle.run_id

@@ -901,6 +901,13 @@ class SessionController:
     ) -> RunHandle:
         """Create, register, and launch a RunHandle via the new path.
 
+        Creates the RunHandle with ProtocolTrigger and ProtocolChannel
+        lifecycle dimensions when an EventBus is available. The
+        ProtocolChannel publishes events to the EventBus (replacing
+        the direct ``event_bus.publish()`` calls in ``start()``),
+        and the ProtocolTrigger allows steer/followup delivery via
+        ``trigger.deliver()``.
+
         Args:
             session: The session state.
             agent: The agent instance (native or ACP).
@@ -912,6 +919,12 @@ class SessionController:
         Returns:
             The newly created RunHandle.
         """
+        from agentpool.lifecycle import (
+            MemoryJournal,
+            ProtocolChannel,
+            ProtocolTrigger,
+        )
+
         event_bus = self._event_bus
         run_ctx = AgentRunContext(session_id=session_id, event_bus=event_bus, deps=deps)
         # Bridge agent.conversation (ChatMessage list) → list[ModelMessage]
@@ -929,6 +942,18 @@ class SessionController:
         # (e.g. from a cancelled turn). Without this, PydanticAI rejects
         # the next user prompt with "unprocessed tool calls" error.
         model_messages = inject_cancelled_tool_results(model_messages)
+
+        # Create lifecycle dimensions for protocol server integration.
+        trigger = ProtocolTrigger()
+        comm_channel: ProtocolChannel | None = None
+        if event_bus is not None:
+            journal = MemoryJournal()
+            comm_channel = ProtocolChannel(
+                journal=journal,
+                event_bus=event_bus,
+                session_id=session_id,
+            )
+
         run_handle = RunHandle(
             run_id=uuid.uuid4().hex,
             session_id=session_id,
@@ -938,6 +963,8 @@ class SessionController:
             session=session,
             run_ctx=run_ctx,
             _message_history=model_messages,
+            _trigger_source=trigger,
+            _comm_channel=comm_channel,
         )
         self._runs[run_handle.run_id] = run_handle
         session.current_run_id = run_handle.run_id

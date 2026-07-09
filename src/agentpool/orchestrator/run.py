@@ -268,6 +268,26 @@ class RunHandle:
         return self._run_state == RunState.RUNNING
 
     @property
+    def _channel_publishes_to_event_bus(self) -> bool:
+        """Whether the CommChannel publishes events to the EventBus itself.
+
+        ``ProtocolChannel`` calls ``event_bus.publish(session_id, event)``
+        inside its own ``publish()`` method. When this is the case,
+        ``start()`` must NOT also call ``event_bus.publish()`` directly
+        to avoid double-publishing.
+
+        ``DirectChannel`` does not publish to the EventBus, so the
+        direct call in ``start()`` is required.
+
+        Returns:
+            ``True`` if the CommChannel publishes to the EventBus
+            internally, ``False`` otherwise.
+        """
+        from agentpool.lifecycle.comm_channel import ProtocolChannel
+
+        return isinstance(self._comm_channel, ProtocolChannel)
+
+    @property
     def recovered_tool_executions(self) -> list[Any]:
         """Tool executions from the interrupted Turn, for idempotent retry.
 
@@ -409,6 +429,19 @@ class RunHandle:
                     if not current_prompts:
                         self._status = RunStatus.idle
                         self._idle_event.clear()
+                        # Drain CommChannel feedback queue (ProtocolChannel)
+                        # BEFORE deciding to block. Feedback may have been
+                        # enqueued by steer/followup via deliver_feedback()
+                        # while the loop was running (e.g., during cancel).
+                        # Without this, the loop would block on
+                        # _idle_event.wait() even though feedback is already
+                        # available in the CommChannel.
+                        if self._comm_channel is not None:
+                            while True:
+                                fb = self._comm_channel.recv()
+                                if fb is None:
+                                    break
+                                self._message_queue.append(fb.content)
                         # Check if messages were queued during cancel/cleanup
                         # before blocking. Without this, messages routed through
                         # _message_queue by the cancel path would deadlock: cancel()
@@ -430,9 +463,9 @@ class RunHandle:
                                 # handled as final Turns.
                                 if not self._message_queue:
                                     break
-                        # Drain CommChannel feedback queue (ProtocolChannel).
-                        # Feedback may have been enqueued by steer/followup
-                        # via deliver_feedback() while the loop was idle.
+                        # Drain CommChannel feedback queue again after
+                        # waking from idle (feedback may have arrived
+                        # during the wait).
                         if self._comm_channel is not None:
                             while True:
                                 fb = self._comm_channel.recv()
@@ -479,7 +512,8 @@ class RunHandle:
                         if session is not None
                         else None,
                     )
-                    await event_bus.publish(self.session_id, run_started)
+                    if not self._channel_publishes_to_event_bus:
+                        await event_bus.publish(self.session_id, run_started)
                     await self._comm_channel.publish(run_started)
 
                     # Set _current_input_provider ContextVar so MCP
@@ -523,7 +557,8 @@ class RunHandle:
                     turn_failed = False
                     try:
                         async for event in turn.execute():
-                            await event_bus.publish(self.session_id, event)
+                            if not self._channel_publishes_to_event_bus:
+                                await event_bus.publish(self.session_id, event)
                             await self._comm_channel.publish(event)
                             # Save assistant final message to conversation BEFORE
                             # yielding. The _consume_run caller closes the generator
@@ -547,7 +582,8 @@ class RunHandle:
                             run_id=self.run_id,
                             agent_name=self.agent_type,
                         )
-                        await event_bus.publish(self.session_id, error_event)
+                        if not self._channel_publishes_to_event_bus:
+                            await event_bus.publish(self.session_id, error_event)
                         await self._comm_channel.publish(error_event)
                         yield error_event
 
@@ -562,7 +598,8 @@ class RunHandle:
                             session_id=self.session_id,
                             exception=RuntimeError("Run cancelled"),
                         )
-                        await event_bus.publish(self.session_id, cancelled_event)
+                        if not self._channel_publishes_to_event_bus:
+                            await event_bus.publish(self.session_id, cancelled_event)
                         await self._comm_channel.publish(cancelled_event)
                         # Capture cancelled state BEFORE setting _turn_complete_event.
                         # handle_prompt() checks run_handle.cancelled after waking from
@@ -724,8 +761,13 @@ class RunHandle:
             if deliver is not None:
                 feedback = Feedback(content=message, is_steer=True)
                 self._comm_channel.deliver_feedback(feedback)  # type: ignore[attr-defined]
-                if self._status == RunStatus.idle:
-                    self._idle_event.set()
+                # Always set _idle_event when delivering via ProtocolChannel.
+                # If the loop is running, the event is cleared when entering
+                # idle, and the loop then drains CommChannel feedback. If the
+                # loop is transitioning to idle (e.g., after cancel), the
+                # event prevents blocking on _idle_event.wait() when the
+                # feedback is already in the CommChannel queue.
+                self._idle_event.set()
                 return True
 
         # Fallback: DirectChannel path (existing logic).
@@ -766,8 +808,8 @@ class RunHandle:
             if deliver is not None:
                 feedback = Feedback(content=message, is_steer=False)
                 self._comm_channel.deliver_feedback(feedback)  # type: ignore[attr-defined]
-                if self._status == RunStatus.idle:
-                    self._idle_event.set()
+                # Always set _idle_event (see steer() for rationale).
+                self._idle_event.set()
                 return True
 
         # Fallback: DirectChannel path (existing logic).
