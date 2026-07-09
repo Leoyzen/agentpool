@@ -361,10 +361,10 @@ async def test_lifecycle_context_manager() -> None:
 
 
 def test_name_property_default() -> None:
-    """Name defaults to 'filtered:{inner_name}'."""
+    """Name defaults to the wrapped capability's name."""
     inner = FunctionToolsetCapability([_make_test_tool("t")], name="my_cap")
     cap = FilteredToolsetCapability(inner, lambda _ctx, _td: True)
-    assert cap.name == "filtered:my_cap"
+    assert cap.name == "my_cap"
 
 
 def test_name_property_override() -> None:
@@ -405,7 +405,7 @@ def test_name_derived_from_class_name_when_no_name_property() -> None:
 
     bare = _NamelessCap()
     cap = FilteredToolsetCapability(bare, lambda _ctx, _td: True)
-    assert cap.name == "filtered:_NamelessCap"
+    assert cap.name == "_NamelessCap"
 
 
 # ---- Filter with deny list pattern ----
