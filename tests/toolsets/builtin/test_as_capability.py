@@ -1,16 +1,18 @@
-"""Tests for builtin tool provider get_capabilities() methods."""
+"""Tests for builtin toolset get_toolset() and get_tools() methods."""
 
 from __future__ import annotations
 
 from collections.abc import Awaitable
+import contextlib
 from typing import Any, cast
 from unittest.mock import MagicMock
 
 from pydantic_ai import RunContext
-from pydantic_ai.capabilities import FunctionToolsetCapability, Toolset
+from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.toolsets import AbstractToolset
 import pytest
 
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool_toolsets.builtin import (
     CodeTools,
     DebugTools,
@@ -33,21 +35,27 @@ def _make_run_context() -> RunContext[Any]:
     )
 
 
-async def _resolve_toolset(cap: Toolset[Any]) -> AbstractToolset[Any] | None:
-    """Resolve a Toolset capability to its underlying AbstractToolset.
+async def _resolve_toolset(cap: AbstractCapability[Any]) -> AbstractToolset[Any] | None:
+    """Resolve a capability to its underlying AbstractToolset.
 
-    Since get_capabilities() returns Toolset(callable) for lazy evaluation,
+    Since get_toolset() may return a callable for lazy evaluation,
     we need to invoke the callable with a mock RunContext to get the
-    actual toolset.
+    actual toolset. Also ensures tools are initialized by calling
+    get_tools() first for lazy-initialization providers.
     """
     from collections.abc import Callable
+
+    # Ensure tools are initialized for lazy providers (e.g. CodeTools)
+    get_tools_fn = getattr(cap, "get_tools", None)
+    if get_tools_fn is not None:
+        with contextlib.suppress(Exception):
+            await get_tools_fn()
 
     toolset_or_callable = cap.get_toolset()
     if toolset_or_callable is None:
         return None
     if isinstance(toolset_or_callable, AbstractToolset):
         return toolset_or_callable
-    # It's a callable - invoke with mock context
     mock_ctx = _make_run_context()
     callable_ts = cast(Callable[[Any], Any], toolset_or_callable)
     result = callable_ts(mock_ctx)
@@ -57,11 +65,11 @@ async def _resolve_toolset(cap: Toolset[Any]) -> AbstractToolset[Any] | None:
 
 
 @pytest.mark.unit
-class TestCapabilityGetCapabilities:
-    """Tests for AbstractCapability.get_capabilities() base implementation."""
+class TestCapabilityIsAbstractCapability:
+    """Tests that builtin toolsets are AbstractCapability instances."""
 
     async def test_returns_toolset_capability(self) -> None:
-        """Default implementation returns a Toolset capability."""
+        """FunctionToolsetCapability is an AbstractCapability."""
 
         class SimpleProvider(FunctionToolsetCapability):
             def __init__(self) -> None:
@@ -69,38 +77,31 @@ class TestCapabilityGetCapabilities:
                 self._tools = [self.create_tool(lambda x: x, name_override="identity")]
 
         provider = SimpleProvider()
-        cap = provider.get_capabilities()
-
-        assert isinstance(cap, Toolset)
+        assert isinstance(provider, AbstractCapability)
 
     async def test_empty_tools_returns_toolset(self) -> None:
-        """Provider with no tools still returns a Toolset capability."""
+        """Provider with no tools is still an AbstractCapability."""
 
         class EmptyProvider(FunctionToolsetCapability):
             pass
 
         provider = EmptyProvider(name="empty")
-        cap = provider.get_capabilities()
-
-        assert isinstance(cap, Toolset)
+        assert isinstance(provider, AbstractCapability)
 
 
 @pytest.mark.unit
 class TestDebugToolsAsCapability:
-    """Tests for DebugTools.get_capabilities()."""
+    """Tests for DebugTools as a capability."""
 
-    async def test_returns_toolset_capability(self) -> None:
-        """DebugTools returns a Toolset capability."""
+    async def test_is_abstract_capability(self) -> None:
+        """DebugTools is an AbstractCapability."""
         provider = DebugTools()
-        cap = cast(Toolset[Any], provider.get_capabilities())
-
-        assert isinstance(cap, Toolset)
+        assert isinstance(provider, AbstractCapability)
 
     async def test_toolset_contains_expected_tools(self) -> None:
         """Capability toolset includes introspection and platform_paths tools."""
         provider = DebugTools()
-        cap = cast(Toolset[Any], provider.get_capabilities())
-        toolset = await _resolve_toolset(cap)
+        toolset = await _resolve_toolset(provider)
 
         assert toolset is not None
         tools = await toolset.get_tools(_make_run_context())
@@ -111,20 +112,17 @@ class TestDebugToolsAsCapability:
 
 @pytest.mark.unit
 class TestSubagentToolsAsCapability:
-    """Tests for SubagentTools.get_capabilities()."""
+    """Tests for SubagentTools as a capability."""
 
-    async def test_returns_toolset_capability(self) -> None:
-        """SubagentTools returns a Toolset capability."""
+    async def test_is_abstract_capability(self) -> None:
+        """SubagentTools is an AbstractCapability."""
         provider = SubagentTools()
-        cap = cast(Toolset[Any], provider.get_capabilities())
-
-        assert isinstance(cap, Toolset)
+        assert isinstance(provider, AbstractCapability)
 
     async def test_toolset_contains_expected_tools(self) -> None:
         """Capability toolset includes list_available_nodes and task tools."""
         provider = SubagentTools()
-        cap = cast(Toolset[Any], provider.get_capabilities())
-        toolset = await _resolve_toolset(cap)
+        toolset = await _resolve_toolset(provider)
 
         assert toolset is not None
         tools = await toolset.get_tools(_make_run_context())
@@ -135,20 +133,17 @@ class TestSubagentToolsAsCapability:
 
 @pytest.mark.unit
 class TestSkillsToolsAsCapability:
-    """Tests for SkillsTools.get_capabilities()."""
+    """Tests for SkillsTools as a capability."""
 
-    async def test_returns_toolset_capability(self) -> None:
-        """SkillsTools returns a Toolset capability."""
+    async def test_is_abstract_capability(self) -> None:
+        """SkillsTools is an AbstractCapability."""
         provider = SkillsTools()
-        cap = cast(Toolset[Any], provider.get_capabilities())
-
-        assert isinstance(cap, Toolset)
+        assert isinstance(provider, AbstractCapability)
 
     async def test_toolset_contains_expected_tools(self) -> None:
         """Capability toolset includes load_skill and list_skills tools."""
         provider = SkillsTools()
-        cap = cast(Toolset[Any], provider.get_capabilities())
-        toolset = await _resolve_toolset(cap)
+        toolset = await _resolve_toolset(provider)
 
         assert toolset is not None
         tools = await toolset.get_tools(_make_run_context())
@@ -159,20 +154,17 @@ class TestSkillsToolsAsCapability:
 
 @pytest.mark.unit
 class TestCodeToolsAsCapability:
-    """Tests for CodeTools.get_capabilities()."""
+    """Tests for CodeTools as a capability."""
 
-    async def test_returns_toolset_capability(self) -> None:
-        """CodeTools returns a Toolset capability."""
+    async def test_is_abstract_capability(self) -> None:
+        """CodeTools is an AbstractCapability."""
         provider = CodeTools()
-        cap = cast(Toolset[Any], provider.get_capabilities())
-
-        assert isinstance(cap, Toolset)
+        assert isinstance(provider, AbstractCapability)
 
     async def test_toolset_contains_format_code_tool(self) -> None:
         """Capability toolset always includes format_code tool."""
         provider = CodeTools()
-        cap = cast(Toolset[Any], provider.get_capabilities())
-        toolset = await _resolve_toolset(cap)
+        toolset = await _resolve_toolset(provider)
 
         assert toolset is not None
         tools = await toolset.get_tools(_make_run_context())
@@ -182,20 +174,17 @@ class TestCodeToolsAsCapability:
 
 @pytest.mark.unit
 class TestProcessManagementToolsAsCapability:
-    """Tests for ProcessManagementTools.get_capabilities()."""
+    """Tests for ProcessManagementTools as a capability."""
 
-    async def test_returns_toolset_capability(self) -> None:
-        """ProcessManagementTools returns a Toolset capability."""
+    async def test_is_abstract_capability(self) -> None:
+        """ProcessManagementTools is an AbstractCapability."""
         provider = ProcessManagementTools()
-        cap = cast(Toolset[Any], provider.get_capabilities())
-
-        assert isinstance(cap, Toolset)
+        assert isinstance(provider, AbstractCapability)
 
     async def test_toolset_contains_expected_tools(self) -> None:
         """Capability toolset includes process management tools."""
         provider = ProcessManagementTools()
-        cap = cast(Toolset[Any], provider.get_capabilities())
-        toolset = await _resolve_toolset(cap)
+        toolset = await _resolve_toolset(provider)
 
         assert toolset is not None
         tools = await toolset.get_tools(_make_run_context())
@@ -210,19 +199,16 @@ class TestProcessManagementToolsAsCapability:
 
 @pytest.mark.unit
 class TestWorkersToolsAsCapability:
-    """Tests for WorkersTools.get_capabilities()."""
+    """Tests for WorkersTools as a capability."""
 
-    async def test_returns_toolset_capability_with_no_workers(self) -> None:
-        """WorkersTools with no workers returns a Toolset capability."""
+    async def test_is_abstract_capability_with_no_workers(self) -> None:
+        """WorkersTools with no workers is an AbstractCapability."""
         provider = WorkersTools(workers=[])
-        cap = cast(Toolset[Any], provider.get_capabilities())
-
-        assert isinstance(cap, Toolset)
+        assert isinstance(provider, AbstractCapability)
 
     async def test_empty_workers_yields_no_tools(self) -> None:
         """WorkersTools with empty workers list produces empty toolset."""
         provider = WorkersTools(workers=[])
-        cap = cast(Toolset[Any], provider.get_capabilities())
-        toolset = await _resolve_toolset(cap)
+        toolset = await _resolve_toolset(provider)
 
         assert toolset is None

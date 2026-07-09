@@ -827,11 +827,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
         # Pooled native agents: delegate to session_pool.followup().
         ctx = self.host_context
-        if (
-            self.AGENT_TYPE == "native"
-            and ctx is not None
-            and ctx.session_pool is not None
-        ):
+        if self.AGENT_TYPE == "native" and ctx is not None and ctx.session_pool is not None:
             warnings.warn(
                 "queue_prompt() is deprecated for pooled native agents. "
                 "Use host_context.session_pool.followup() instead.",
@@ -884,11 +880,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         ctx = self.host_context
 
         # Pooled native agents: delegate to session_pool.steer().
-        if (
-            self.AGENT_TYPE == "native"
-            and ctx is not None
-            and ctx.session_pool is not None
-        ):
+        if self.AGENT_TYPE == "native" and ctx is not None and ctx.session_pool is not None:
             warnings.warn(
                 "inject_prompt() is deprecated for pooled native agents. "
                 "Use host_context.session_pool.steer() instead.",

@@ -62,20 +62,18 @@ class ProcessManagementTools(FunctionToolsetCapability):
         return agent_ctx.agent.env
 
     async def get_tools(self) -> Sequence[Tool]:
-        return [
-            self.create_tool(self.start_process, category="execute", open_world=True),
-            self.create_tool(
-                self.get_process_output, category="execute", read_only=True, idempotent=True
-            ),
-            self.create_tool(
-                self.wait_for_process, category="execute", read_only=True, idempotent=True
-            ),
-            self.create_tool(self.kill_process, category="execute", destructive=True),
-            self.create_tool(self.release_process, category="execute"),
-            self.create_tool(
-                self.list_processes, category="search", read_only=True, idempotent=True
-            ),
-        ]
+        # create_tool already appends to self._tools
+        # Clear and rebuild to avoid duplicates on repeated calls
+        self._tools = []
+        self.create_tool(self.start_process, category="execute", open_world=True)
+        self.create_tool(
+            self.get_process_output, category="execute", read_only=True, idempotent=True
+        )
+        self.create_tool(self.wait_for_process, category="execute", read_only=True, idempotent=True)
+        self.create_tool(self.kill_process, category="execute", destructive=True)
+        self.create_tool(self.release_process, category="execute")
+        self.create_tool(self.list_processes, category="search", read_only=True, idempotent=True)
+        return self._tools
 
     async def start_process(  # noqa: D417
         self,

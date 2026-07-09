@@ -952,8 +952,14 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         for provider in self.tools.providers:
             try:
                 provider_instructions = provider.get_instructions()
+                # Handle both sync (returns str|None|list) and async (returns coroutine)
+                if hasattr(provider_instructions, "__await__"):
+                    provider_instructions = await provider_instructions
                 if provider_instructions is not None:
-                    all_instructions.append(provider_instructions)
+                    if isinstance(provider_instructions, list):
+                        all_instructions.extend(provider_instructions)
+                    else:
+                        all_instructions.append(provider_instructions)
             except Exception as e:
                 # Provider failure - log and continue
                 logger.exception(

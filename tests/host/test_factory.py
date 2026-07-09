@@ -147,7 +147,10 @@ async def test_create_session_agent_native_main_calls_aenter() -> None:
 
 @pytest.mark.asyncio
 async def test_create_session_agent_native_main_no_pool_providers() -> None:
-    """When creating a native main agent, no pool providers are added (include_aggregating=False)."""
+    """When creating a native main agent, no pool providers are added.
+
+    (include_aggregating=False)
+    """
     agent = _make_agent_mock()
     cfg = _make_native_cfg(agent=agent)
     skills_tools = MagicMock()

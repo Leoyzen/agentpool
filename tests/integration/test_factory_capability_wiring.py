@@ -451,7 +451,6 @@ def test_mixed_capabilities_native_and_subagent() -> None:
     # Should have: 1 skills_tools_provider + 1 SubagentCapability
     # + 1 inline provider = 3
     subagent_caps = [c for c in caps if isinstance(c, SubagentCapability)]
-    function_caps = [c for c in caps if isinstance(c, FunctionToolsetCapability)]
 
     assert len(subagent_caps) == 1
     assert provider in caps
