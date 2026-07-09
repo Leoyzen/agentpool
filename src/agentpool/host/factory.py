@@ -103,6 +103,10 @@ class AgentFactory:
         - **Path C** (non-native): ``cfg`` is not ``NativeAgentConfig``.
           Builds MCP snapshot manually from pool and agent configs.
 
+        The lifecycle config from ``cfg.lifecycle`` is passed to the
+        agent via ``agent._lifecycle_config`` so the agent's RunLoop
+        can use durable dimensions when configured.
+
         Args:
             agent_name: Name of the agent to create.
             session_id: Unique session identifier.
@@ -123,7 +127,7 @@ class AgentFactory:
 
         if isinstance(cfg, NativeAgentConfig):
             if session.parent_session_id:
-                return await self._create_native_child(
+                agent = await self._create_native_child(
                     agent_name=agent_name,
                     session_id=session_id,
                     host_context=host_context,
@@ -132,7 +136,17 @@ class AgentFactory:
                     input_provider=input_provider,
                     parent_agent=parent_agent,
                 )
-            return await self._create_native_main(
+            else:
+                agent = await self._create_native_main(
+                    agent_name=agent_name,
+                    session_id=session_id,
+                    host_context=host_context,
+                    session=session,
+                    cfg=cfg,
+                    input_provider=input_provider,
+                )
+        else:
+            agent = await self._create_non_native(
                 agent_name=agent_name,
                 session_id=session_id,
                 host_context=host_context,
@@ -140,14 +154,11 @@ class AgentFactory:
                 cfg=cfg,
                 input_provider=input_provider,
             )
-        return await self._create_non_native(
-            agent_name=agent_name,
-            session_id=session_id,
-            host_context=host_context,
-            session=session,
-            cfg=cfg,
-            input_provider=input_provider,
-        )
+
+        # Pass lifecycle config from agent config to the agent instance
+        # so the RunLoop can create durable dimensions when configured.
+        agent._lifecycle_config = cfg.lifecycle
+        return agent
 
     async def _create_native_child(
         self,

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from agentpool.lifecycle.comm_channel import DirectChannel, ProtocolChannel
 from agentpool.lifecycle.event_transport import InProcessTransport
+from agentpool.lifecycle.factory import create_dimensions
 from agentpool.lifecycle.journal import DurableJournal, MemoryJournal
 from agentpool.lifecycle.protocols import (
     CommChannel,
@@ -64,4 +65,5 @@ __all__ = [
     "SnapshotStore",
     "ToolExecutionRecord",
     "TriggerSource",
+    "create_dimensions",
 ]

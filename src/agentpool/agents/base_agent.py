@@ -76,6 +76,7 @@ if TYPE_CHECKING:
     from agentpool.sessions import SessionData
     from agentpool.talk.stats import MessageStats
     from agentpool.ui.base import InputProvider
+    from agentpool_config.lifecycle import LifecycleConfig
     from agentpool_config.mcp_server import MCPServerConfig
 
     # Union type for state updates emitted via state_updated signal
@@ -203,6 +204,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
         commands: Sequence[BaseCommand] | None = None,
         hooks: AgentHooks | None = None,
+        lifecycle_config: LifecycleConfig | None = None,
     ) -> None:
         """Initialize base agent with shared infrastructure.
 
@@ -222,6 +224,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             event_handlers: Event handlers for this agent
             commands: Slash commands to register with this agent
             hooks: Agent hooks for intercepting agent behavior at run and tool events
+            lifecycle_config: Optional lifecycle configuration for the RunLoop.
+                When None, all defaults (in-memory) are used.
         """
         from exxec import ExecutionEnvironment, LocalExecutionEnvironment
         from slashed import CommandStore
@@ -279,11 +283,36 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self._internal_fs = IsolatedMemoryFileSystem()
         self.staged_content = StagedContent()
         self.metadata: dict[str, Any] = {}
+        self._lifecycle_config: LifecycleConfig | None = lifecycle_config
+        self._lifecycle_dimensions: tuple[Any, Any, Any, Any, Any] | None = None
 
     @property
     def _current_run_ctx(self) -> AgentRunContext | None:
         """Get current run context (using ContextVar for concurrency safety)."""
         return _current_run_ctx_var.get()
+
+    @property
+    def lifecycle_config(self) -> LifecycleConfig | None:
+        """Lifecycle configuration for this agent's RunLoop.
+
+        Returns:
+            The LifecycleConfig if set, or ``None`` for all-defaults.
+        """
+        return self._lifecycle_config
+
+    @property
+    def lifecycle_dimensions(
+        self,
+    ) -> tuple[Any, Any, Any, Any, Any] | None:
+        """Pre-created lifecycle dimensions for the current run, if any.
+
+        Returns:
+            Tuple of ``(trigger_source, journal, snapshot_store,
+            comm_channel, event_transport)`` if dimensions were created
+            from ``lifecycle_config``, or ``None`` if defaults should be
+            used.
+        """
+        return self._lifecycle_dimensions
 
     @property
     def session_id(self) -> str | None:
@@ -1094,7 +1123,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             self._run_context = None
 
     @method_spawner
-    async def run_stream(
+    async def run_stream(  # noqa: PLR0915
         self,
         *prompts: PromptCompatible,
         store_history: bool = True,
@@ -1184,6 +1213,18 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self._cancelled = False
         run_ctx.current_task = asyncio.current_task()
         self._run_context = run_ctx
+
+        # When lifecycle_config is set, pre-create dimensions so they're
+        # available for any RunHandle that wraps this run (e.g. via
+        # SessionController). When None or all-defaults, RunHandle's
+        # __post_init__ creates in-memory defaults automatically.
+        if self._lifecycle_config is not None and not self._lifecycle_config.is_all_defaults():
+            from agentpool.lifecycle.factory import create_dimensions
+
+            self._lifecycle_dimensions = create_dimensions(
+                self._lifecycle_config,
+                effective_session_id,
+            )
 
         token: Token[AgentRunContext | None] | None = None
         try:
