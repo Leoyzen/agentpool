@@ -31,6 +31,7 @@ if TYPE_CHECKING:
         QueueStrategy,
     )
     from agentpool.delegation import AgentPool
+    from agentpool.host.context import HostContext
     from agentpool.messaging.context import NodeContext
     from agentpool.storage import StorageManager
     from agentpool.talk import Talk, TeamTalk
@@ -110,7 +111,7 @@ class MessageNode[TDeps, TResult](ABC):
         self._name = name or self.__class__.__name__
         self._display_name = display_name
         self.log = logger.bind(agent_name=self._name)
-        self.agent_pool = agent_pool
+        self._agent_pool = agent_pool
         self.description = description
         self.connections = ConnectionManager(self)
         cfgs = list(event_configs) if event_configs else None
@@ -134,6 +135,26 @@ class MessageNode[TDeps, TResult](ABC):
             self._mcp_shared = False
             self.mcp = MCPManager(name_, servers=mcp_servers, owner=self.name)
         self.enable_db_logging = enable_logging
+
+    @property
+    def agent_pool(self) -> AgentPool[Any] | None:
+        """Compatibility shim: returns the pool reference.
+
+        In M1b, this will return a HostContext-compatible proxy.
+        For now, returns the raw pool for backward compatibility.
+        """
+        return self._agent_pool
+
+    @agent_pool.setter
+    def agent_pool(self, value: AgentPool[Any] | None) -> None:
+        self._agent_pool = value
+
+    @property
+    def host_context(self) -> HostContext | None:
+        """Return HostContext from the pool, if available."""
+        if self._agent_pool is not None:
+            return self._agent_pool.get_context()
+        return None
 
     async def log_session(
         self,
