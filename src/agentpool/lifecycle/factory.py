@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from platformdirs import user_state_dir
+from sqlalchemy import Engine, create_engine
 
 from agentpool.lifecycle.comm_channel import DirectChannel
 from agentpool.lifecycle.event_transport import InProcessTransport
@@ -56,6 +57,24 @@ _APP_NAME = "agentpool"
 _APP_AUTHOR = "agentpool"
 _STATE_DIR: Path = Path(user_state_dir(_APP_NAME, _APP_AUTHOR))
 _LIFECYCLE_DB: Path = _STATE_DIR / "lifecycle.db"
+
+# Shared SQLAlchemy engine cache so all DurableJournal instances in the
+# same process share a single connection pool.
+_engine_cache: dict[str, Engine] = {}
+
+
+def _get_engine(url: str) -> Engine:
+    """Get or create a shared SQLAlchemy engine for the given URL.
+
+    Args:
+        url: Database URL (e.g. ``"sqlite:///..."``).
+
+    Returns:
+        A cached ``Engine`` instance.
+    """
+    if url not in _engine_cache:
+        _engine_cache[url] = create_engine(url)
+    return _engine_cache[url]
 
 
 def _sanitize_session_id(session_id: str) -> str:
@@ -128,8 +147,10 @@ def create_dimensions(
 
     # Create Journal based on config.
     if lifecycle_config.journal == "durable":
+        engine_url = f"sqlite:///{_LIFECYCLE_DB}"
+        engine = _get_engine(engine_url)
         journal: Journal = DurableJournal(
-            f"sqlite:///{_LIFECYCLE_DB}",
+            engine,
             session_id=safe_session_id,
         )
     else:
