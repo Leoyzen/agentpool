@@ -815,9 +815,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         direct_tools: list[Any] = []
         # 1. Tool providers — collect capabilities or fall back to direct tools
         for provider in self.tools.providers:
-            cap = provider.get_capabilities()
-            if cap is not None:
-                tool_capabilities.append(cap)
+            # M3: providers are now AbstractCapability instances directly.
+            # They don't have get_capabilities() — they ARE capabilities.
+            from pydantic_ai.capabilities import AbstractCapability as _AbstractCapability
+
+            if isinstance(provider, _AbstractCapability):
+                tool_capabilities.append(provider)
             else:
                 # Provider not yet migrated to capability system — register
                 # tools directly via the legacy `tools` parameter

@@ -13,7 +13,9 @@ import pytest
 from upathtools import UPath
 
 from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
-from agentpool.capabilities.change_event import ChangeEvent, AbstractCapability
+from agentpool.capabilities.change_event import ChangeEvent
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from pydantic_ai.capabilities import AbstractCapability
 from agentpool.skills.skill import Skill
 
 

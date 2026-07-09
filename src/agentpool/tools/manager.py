@@ -56,8 +56,8 @@ class ToolManager:
             tools: Initial tools to register
             tool_mode: Tool execution mode (None or "codemode")
         """
+        from agentpool.capabilities.code_mode_capability import CodeModeCapability
         from agentpool.capabilities.function_toolset import FunctionToolsetCapability
-        # CodeModeCapability removed - use CodeModeCapability
 
         super().__init__()
         self.external_providers: list[AbstractCapability] = []

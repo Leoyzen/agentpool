@@ -43,6 +43,9 @@ if TYPE_CHECKING:
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.agents.events.events import RichAgentStreamEvent
+    from agentpool.capabilities.resource_source import AggregatedResourceSource
+    from agentpool.host.context import HostContext
+    from agentpool.host.registry import AgentRegistry
     from agentpool.lifecycle.protocols import CommChannel
     from agentpool.orchestrator.core import EventBus, SessionState
 
@@ -232,6 +235,21 @@ class RunHandle:
     ``journal.get_tool_executions(turn_id)`` before re-executing.
     """
 
+    # ------------------------------------------------------------------
+    # AgentContext injection (M3 task group 15)
+    # ------------------------------------------------------------------
+    _host_context: HostContext | None = None
+    """HostContext for constructing per-turn AgentContext.
+
+    When set, ``start()`` constructs an ``AgentContext`` per turn and
+    injects it into ``run_ctx.deps`` so capabilities like
+    ``SubagentCapability`` can access the delegation service.
+    """
+    _agent_registry: AgentRegistry | None = None
+    """Read-only registry of compiled agents for delegation."""
+    _resource_source: AggregatedResourceSource | None = None
+    """Per-agent aggregated resource source, or None if agent has none."""
+
     def __post_init__(self) -> None:
         """Initialize default lifecycle dimensions.
 
@@ -334,6 +352,48 @@ class RunHandle:
                 stop_reason=stop_reason,
             )
             await self._comm_channel.publish(state_event)
+
+    def _inject_agent_context(self) -> None:
+        """Construct and inject AgentContext into run_ctx.deps.
+
+        Builds a fresh ``AgentContext`` per turn using the host context,
+        agent registry, and resource source. The AgentContext is set as
+        ``run_ctx.deps`` so pydantic-ai's ``RunContext.deps`` carries it
+        into tool calls. Capabilities like ``SubagentCapability`` access
+        it via ``ctx.deps``.
+
+        When ``_host_context`` is None (standalone execution without a
+        pool), this is a no-op — ``run_ctx.deps`` stays at its prior value.
+        """
+        if self._host_context is None:
+            return
+        from agentpool.capabilities.agent_context import AgentContext
+        from agentpool.capabilities.runloop_delegation import RunLoopDelegationService
+        from agentpool.host.context import RunScope
+
+        registry = self._agent_registry
+        if registry is None:
+            return
+
+        scope = RunScope(
+            config_id=self._host_context.config_id or "default",
+            tenant_id=self._host_context.tenant_id or "default",
+            session_id=self.session_id,
+        )
+        delegation = RunLoopDelegationService(
+            registry=registry,
+            host=self._host_context,
+            session_id=self.session_id,
+        )
+        ctx = AgentContext(
+            agent_registry=registry,
+            delegation=delegation,
+            session=self.session,  # type: ignore[arg-type]
+            scope=scope,
+            host=self._host_context,
+            resources=self._resource_source,
+        )
+        self.run_ctx.deps = ctx
 
     # ------------------------------------------------------------------
     # New session-level lifecycle
@@ -496,6 +556,10 @@ class RunHandle:
                     # Clear hooks_fired so the new turn's hooks can fire
                     # even if the previous turn already fired them.
                     self.run_ctx.hooks_fired.clear()
+                    # Construct per-turn AgentContext and inject as deps
+                    # so capabilities (SubagentCapability, etc.) can access
+                    # the delegation service, resource sources, and host.
+                    self._inject_agent_context()
                     turn = agent.create_turn(
                         prompts=current_prompts,  # type: ignore[arg-type]
                         run_ctx=self.run_ctx,
