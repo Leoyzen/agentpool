@@ -671,7 +671,7 @@ class AgentPoolACPAgent(ACPAgent):
                     )
                     await session_pool.sessions.get_or_create_session_agent(params.session_id)
                     # MCP tools are handled via McpConfigSnapshot →
-                    # as_capability() → MCPToolset, not through
+                    # get_capabilities() → MCPToolset, not through
                     # agent.tools.providers.
                 except Exception:
                     logger.exception(

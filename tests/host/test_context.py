@@ -28,7 +28,6 @@ def _make_context(**overrides: Any) -> HostContext:
         "connection_registry": MagicMock(),
         "mcp": MagicMock(),
         "skills_registry": MagicMock(),
-        "skills_instruction_provider": MagicMock(),
         "skills_tools_provider": MagicMock(),
         "prompt_manager": MagicMock(),
         "process_manager": MagicMock(),
@@ -57,7 +56,6 @@ def test_hostcontext_can_be_constructed_with_all_required_fields():
     assert ctx.connection_registry is not None
     assert ctx.mcp is not None
     assert ctx.skills_registry is not None
-    assert ctx.skills_instruction_provider is not None
     assert ctx.skills_tools_provider is not None
     assert ctx.prompt_manager is not None
     assert ctx.process_manager is not None

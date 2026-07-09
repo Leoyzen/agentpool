@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal, Self, cast
 from schemez import OpenAIFunctionDefinition
 
 from agentpool.log import get_logger
-from agentpool.resource_providers import ResourceProvider
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
 
 if TYPE_CHECKING:
@@ -18,14 +18,14 @@ if TYPE_CHECKING:
 
     from mcp import ClientSession
     from mcp.types import CallToolResult
-    from pydantic_ai.capabilities import AbstractCapability
+    from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
     from agentpool.tools.base import Tool
 
 logger = get_logger(__name__)
 
 
-class McpRunTools(ResourceProvider):
+class McpRunTools(FunctionToolsetCapability):
     """Provider for MCP.run tools.
 
     Maintains a persistent SSE connection to MCP.run to receive tool change
@@ -135,11 +135,3 @@ if __name__ == "__main__":
         print(fns)
 
     anyio.run(main)
-
-    def as_capability(self: McpRunTools) -> AbstractCapability | None:
-        """Return a pydantic-ai capability for this provider.
-
-        Returns:
-            A pydantic-ai AbstractCapability instance, or None.
-        """
-        return None

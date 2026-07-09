@@ -61,7 +61,7 @@ class _FakeMCP:
 
 
 class _FakeSignal:
-    """Minimal stand-in for anyenv Signal used by AggregatingResourceProvider."""
+    """Minimal stand-in for anyenv Signal used by CombinedToolsetCapability."""
 
     def connect(self, callback: Any) -> None:
         pass
@@ -71,7 +71,7 @@ class _FakeSignal:
 
 
 class _FakeProvider:
-    """Fake MCPResourceProvider for testing provider filtering.
+    """Fake MCPCapability for testing provider filtering.
 
     Avoids creating a real ``MCPClient`` (which fails for ACP configs
     without a transport).
@@ -80,7 +80,7 @@ class _FakeProvider:
     def __init__(self, server: Any, **kwargs: Any) -> None:
         self.server = server
         self.name: str = kwargs.get("name", "fake")
-        # Signal attributes required by AggregatingResourceProvider setter
+        # Signal attributes required by CombinedToolsetCapability setter
         self.tools_changed = _FakeSignal()
         self.prompts_changed = _FakeSignal()
         self.resources_changed = _FakeSignal()
@@ -100,10 +100,10 @@ class _FakeProvider:
 
 @pytest.mark.unit
 async def test_mcpmanager_toolset_cache_shares_connection() -> None:
-    """as_capability() caches MCPToolset by client_id.
+    """get_capabilities() caches MCPToolset by client_id.
 
     Given an MCPManager with one StdioMCPServerConfig, calling
-    ``as_capability()`` twice should produce two MCP capability objects
+    ``get_capabilities()`` twice should produce two MCP capability objects
     backed by the *same* ``MCPToolset`` instance (cached by client_id).
     """
     config = StdioMCPServerConfig(
@@ -117,8 +117,8 @@ async def test_mcpmanager_toolset_cache_shares_connection() -> None:
         patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
         patch("pydantic_ai.capabilities.MCP", _FakeMCP),
     ):
-        caps1 = await manager.as_capability()
-        caps2 = await manager.as_capability()
+        caps1 = await manager.get_capabilities()
+        caps2 = await manager.get_capabilities()
 
     assert len(caps1) == 1
     assert len(caps2) == 1
@@ -140,7 +140,7 @@ async def test_mcpmanager_toolset_cache_keyed_by_client_id() -> None:
     """Different client_ids produce distinct toolsets; caching reuses by client_id.
 
     Given an MCPManager with two StdioMCPServerConfig entries (different
-    ``client_id`` values), the first ``as_capability()`` call creates
+    ``client_id`` values), the first ``get_capabilities()`` call creates
     two separate ``MCPToolset`` instances. A second call reuses the
     cached instances (keyed by client_id).
     """
@@ -160,8 +160,8 @@ async def test_mcpmanager_toolset_cache_keyed_by_client_id() -> None:
         patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
         patch("pydantic_ai.capabilities.MCP", _FakeMCP),
     ):
-        caps1 = await manager.as_capability()
-        caps2 = await manager.as_capability()
+        caps1 = await manager.get_capabilities()
+        caps2 = await manager.get_capabilities()
 
     assert len(caps1) == 2
     assert len(caps2) == 2
@@ -187,7 +187,7 @@ async def test_aggregating_provider_contains_only_acp_providers() -> None:
 
     When both ACP and non-ACP servers are registered, the aggregating
     provider should contain *only* the ACP providers. Non-ACP providers
-    are handled separately by ``as_capability()``.
+    are handled separately by ``get_capabilities()``.
     """
     acp_config = AcpMCPServerConfig(name="acp_server", acp_id="test-acp-1")
     stdio_config = StdioMCPServerConfig(
@@ -198,7 +198,7 @@ async def test_aggregating_provider_contains_only_acp_providers() -> None:
     manager = MCPManager(name="test")
 
     with patch(
-        "agentpool.mcp_server.manager.MCPResourceProvider",
+        "agentpool.mcp_server.manager.MCPCapability",
         _FakeProvider,
     ):
         await manager.setup_server(acp_config)
@@ -225,7 +225,7 @@ async def test_aggregating_provider_contains_only_acp_providers() -> None:
 async def test_non_acp_providers_excluded_from_aggregating_provider() -> None:
     """A manager with only non-ACP servers returns an empty aggregating provider.
 
-    The non-ACP capability is still accessible via ``as_capability()``.
+    The non-ACP capability is still accessible via ``get_capabilities()``.
     """
     stdio_config = StdioMCPServerConfig(
         name="stdio_only",
@@ -236,7 +236,7 @@ async def test_non_acp_providers_excluded_from_aggregating_provider() -> None:
     manager.add_server_config(stdio_config)
 
     with patch(
-        "agentpool.mcp_server.manager.MCPResourceProvider",
+        "agentpool.mcp_server.manager.MCPCapability",
         _FakeProvider,
     ):
         await manager.setup_server(stdio_config)
@@ -249,12 +249,12 @@ async def test_non_acp_providers_excluded_from_aggregating_provider() -> None:
     # No ACP providers -> empty aggregating provider
     assert len(agg.providers) == 0
 
-    # Non-ACP capability should still be available via as_capability()
+    # Non-ACP capability should still be available via get_capabilities()
     with (
         patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
         patch("pydantic_ai.capabilities.MCP", _FakeMCP),
     ):
-        caps = await manager.as_capability()
+        caps = await manager.get_capabilities()
 
     assert len(caps) == 1
     assert caps[0].id == "stdio_only"
@@ -292,11 +292,11 @@ def test_no_dedup_hack_in_get_agentlet() -> None:
         "It should have been removed."
     )
 
-    # Verify get_agentlet still calls as_capability() for MCP
+    # Verify get_agentlet still calls get_capabilities() for MCP
     # The call now spans multiple lines with session_id= parameter, so we
     # check for the opening of the call rather than a closed paren.
-    assert "await self.mcp.as_capability(" in source, (
-        "get_agentlet() should call 'await self.mcp.as_capability(' to collect MCP capabilities."
+    assert "await self.mcp.get_capabilities(" in source, (
+        "get_agentlet() should call 'await self.mcp.get_capabilities(' to collect MCP capabilities."
     )
 
 
@@ -344,8 +344,8 @@ async def test_engineer_librarian_mcp_tool_scoping() -> None:
         patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
         patch("pydantic_ai.capabilities.MCP", _FakeMCP),
     ):
-        pool_caps = await pool_mcp.as_capability()
-        agent_caps = await agent_mcp.as_capability()
+        pool_caps = await pool_mcp.get_capabilities()
+        agent_caps = await agent_mcp.get_capabilities()
 
     # Pool-level capability includes search_kb
     pool_ids = {c.id for c in pool_caps}

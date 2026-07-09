@@ -104,6 +104,14 @@ agentpool = "agentpool.utils:setup_env"
 [project.entry-points."universal_pathlib.implementations"]
 acp = "acp.filesystem:ACPPath"
 
+[project.entry-points."agentpool.capabilities"]
+mcp = "agentpool.capabilities.mcp_capability:MCPCapability"
+function_tools = "agentpool.capabilities.function_toolset:FunctionToolsetCapability"
+subagent = "agentpool.capabilities.subagent_capability:SubagentCapability"
+skill = "agentpool.skills.capability:SkillCapability"
+combined = "agentpool.capabilities.combined_toolset:CombinedToolsetCapability"
+code_mode = "agentpool.capabilities.code_mode_capability:CodeModeCapability"
+
 [project.optional-dependencies]
 a2a = ["fasta2a", "starlette"]  # A2A Server
 bot = [

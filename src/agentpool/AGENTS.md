@@ -38,7 +38,7 @@
 | EventTransport (InProcess) | `lifecycle/event_transport.py` |
 | Dimension factory from config | `lifecycle/factory.py` |
 | LifecycleConfig Pydantic model | `agentpool_config/lifecycle.py` |
-| ResourceProvider base + all providers | `resource_providers/{base,mcp_provider,pool,local,...}.py` |
+| Capability base + all capabilities | `capabilities/{function_toolset,filtered_toolset,combined_toolset,...}.py` |
 | Skill YAML frontmatter model | `skills/skill.py` |
 | Skill as pydantic-ai capability (instructions, tools, MCP) | `skills/capability.py` (`SkillCapability`) |
 | Skill MCP server connection lifecycle | `skills/skill_mcp_manager.py` (`SkillMcpManager`) |
@@ -58,7 +58,7 @@
 - **Every node extends MessageNode**: Agents, teams, and the pool itself. Always implement `_step` for pydantic-graph compatibility.
 - **Two queue systems**: Native agents use PydanticAI's `PendingMessageDrainCapability`. ACP agents use manual queues (`_post_turn_injections`, `_post_turn_prompts`). M2 adds `CommChannel` feedback loop for `ProtocolChannel` sessions.
 - **RunExecutor over bare iteration**: Always use `RunExecutor` to drive native agent runs. Bare `async for node in agent_run:` skips `after_node_run` hooks and breaks message draining.
-- **ToolManager is dead**: New tools go through `ResourceProvider.as_capability()`. `ToolManager` emits deprecation warnings.
+- **ToolManager is deprecated**: New tools go through native `AbstractCapability` instances. `ToolManager` emits deprecation warnings.
 - **Deferred imports for circular safety**: `TYPE_CHECKING` blocks + `from __future__ import annotations`. For truly circular paths (`messagenode` ↔ `team`), defer imports inside function bodies.
 - **Signals at step boundaries**: `SignalEmittingGraphRun` maps pydantic-graph transitions to `Talk` signals. Do not emit signals manually from inside steps.
 - **RunLoop = RunHandle + dimension injection**: RunHandle is NOT a new class. Its `start()` async generator is the RunLoop. Six pluggable dimensions (TriggerSource, Journal, SnapshotStore, CommChannel, EventTransport) are injected via constructor fields with `__post_init__` defaults.
@@ -71,7 +71,7 @@
 - **mcp.json companion file**: A `mcp.json` file in the skill directory (using Claude Desktop format `{"mcpServers": {...}}`) takes precedence over the frontmatter `mcp-servers` field. Environment variables (`${VAR}`) are expanded automatically.
 - **allowed_tools enforced via FilteredToolset**: The `parsed_allowed_tools()` method parses the space/comma-separated `allowed-tools` frontmatter string. `SkillCapability.get_wrapper_toolset()` wraps the assembled toolset in a `FilteredToolset` that drops tools not in the allowed list.
 - **SkillMcpManager has session-scoped lifecycle**: Connections are per `(session_id, server_name)` pair, lazily established on first tool access, with idle timeout (default 5 minutes) and exponential backoff retry (3 attempts). `on_run_ended()` triggers cleanup.
-- **One MCP server per provider**: Each `MCPResourceProvider` wraps exactly one server. Use `AggregatingProvider` to combine them.
+- **One MCP server per capability**: Each `MCPCapability` wraps exactly one server. Use `CombinedToolsetCapability` to combine them.
 
 ## Anti-Patterns
 
@@ -93,7 +93,7 @@
 - **Crash recovery via journal.resume()**: Detects in-flight Turns by comparing journal entries against snapshot store turn results. Strategy `"mark_interrupted"` skips re-execution; `"retry"` checks tool execution log for idempotency.
 - **Tool execution logging in HookAwareTurn**: `_fire_post_tool_hooks()` calls `_log_tool_execution()` which stores a `ToolExecutionRecord` in the Journal. Independent of hooks config.
 - **agent_pool deprecated for host_context**: `MessageNode.agent_pool` emits `DeprecationWarning` (M2), removal in M3. Use `host_context` (immutable `HostContext`).
-- **Codemode is a metacall**: `CodeModeResourceProvider` wraps all tools into a single Python execution tool. One tool to rule them all.
+- **Codemode is a metacall**: `CodeModeCapability` wraps all tools into a single Python execution tool. One tool to rule them all.
 - **Skill commands are protocol-agnostic**: `SkillCommand` wraps skills as slash commands working across ACP, AG-UI, and OpenCode without protocol-specific code.
 - **SkillCapability injection order matters**: In `get_agentlet()`, skill capabilities are injected at position 5 (after MCP, deferred bridge, approval bridge, and hook capabilities). Each skill produces one `SkillCapability` instance with its own `SkillMcpManager` and `SkillToolManager` — there is one manager tree shared across all skills from the same agentlet creation call.
 - **mcp.json format follows Claude Desktop**: The companion file uses `{"mcpServers": {"name": {"command": "...", "args": [...], ...}}}` JSON format. The `_load_mcp_json()` function handles env var expansion and converts entries to `SkillMcpServerConfig` objects. Only filesystem skills (UPath paths) can have companion files — virtual skills (PurePosixPath) cannot.

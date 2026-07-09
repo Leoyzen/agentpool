@@ -1,7 +1,7 @@
 """Integration test: create session, run turn, close, verify empty contexts.
 
 Verifies the full lifecycle: ``get_or_create_session`` →
-``update_session_snapshot`` → ``as_capability`` → ``cleanup_session``
+``update_session_snapshot`` → ``get_capabilities`` → ``cleanup_session``
 leaves ``_session_contexts`` empty.
 """
 
@@ -18,7 +18,7 @@ async def test_integration_create_run_close() -> None:
     """After create → snapshot → capability → cleanup, session context is gone.
 
     Exercises the full session lifecycle on MCPManager without real model
-    calls.  Uses an empty ``McpConfigSnapshot`` so ``as_capability`` returns
+    calls.  Uses an empty ``McpConfigSnapshot`` so ``get_capabilities`` returns
     an empty list (no MCP servers to connect).
     """
     manager = MCPManager(name="test")
@@ -36,8 +36,8 @@ async def test_integration_create_run_close() -> None:
         ctx = manager.get_or_create_session(session_id)
         assert ctx.snapshot is snapshot
 
-        # 3. Simulate running a turn — as_capability builds capabilities
-        caps = await manager.as_capability(session_id=session_id)
+        # 3. Simulate running a turn — get_capabilities builds capabilities
+        caps = await manager.get_capabilities(session_id=session_id)
         assert caps == []
 
         # Session context must still exist during the turn

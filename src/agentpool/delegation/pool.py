@@ -12,10 +12,9 @@ from anyenv import ProcessManager
 import anyio
 from upathtools import to_upath
 
+from agentpool.capabilities.combined_toolset import CombinedToolsetCapability, _NamedCapability
 from agentpool.delegation.message_flow_tracker import MessageFlowTracker
 from agentpool.log import get_logger
-from agentpool.resource_providers.aggregating import AggregatingResourceProvider
-from agentpool.resource_providers.local import LocalResourceProvider
 from agentpool.skills.command_registry import SkillCommandRegistry
 from agentpool.skills.uri_resolver import SkillURIResolver
 from agentpool.talk.registry import ConnectionRegistry
@@ -26,6 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from types import TracebackType
 
+    from pydantic_ai.capabilities import AbstractCapability
     from upathtools import JoinablePathLike, UPath
 
     from agentpool.common_types import AnyEventHandlerType
@@ -35,7 +35,6 @@ if TYPE_CHECKING:
     from agentpool.models.manifest import AgentsManifest, AnyAgentConfig
     from agentpool.orchestrator import SessionPool
     from agentpool.orchestrator.run import RunHandle
-    from agentpool.resource_providers.base import ResourceProvider
     from agentpool.ui.base import InputProvider
     from agentpool_config.session_pool import SessionPoolConfig
     from agentpool_config.task import Job
@@ -93,7 +92,6 @@ class AgentPool[TPoolDeps = None]:
         from agentpool.models.manifest import AgentsManifest
         from agentpool.observability import registry
         from agentpool.prompts.manager import PromptManager
-        from agentpool.resource_providers.skills_instruction import SkillsInstructionProvider
         from agentpool.skills.manager import SkillsManager
         from agentpool.storage import StorageManager
         from agentpool.utils.streams import FileOpsTracker
@@ -178,12 +176,6 @@ class AgentPool[TPoolDeps = None]:
                 config=self.manifest.skills,
                 config_file_path=self._config_file_path,
             )
-            self.skills_instruction_provider = SkillsInstructionProvider(
-                skills_registry=self.skills.registry,
-                injection_mode=self.manifest.skills.instruction.mode,
-                max_skills=self.manifest.skills.instruction.max_skills,
-                owner="pool",
-            )
             from agentpool_toolsets.builtin.skills import SkillsTools
 
             self.skills_tools_provider = SkillsTools(
@@ -193,7 +185,7 @@ class AgentPool[TPoolDeps = None]:
             self._tasks = TaskRegistry()
             self._skill_commands: SkillCommandRegistry | None = None
             self._skill_resolver: SkillURIResolver | None = None
-            self._skill_provider: AggregatingResourceProvider | None = None
+            self._skill_provider: CombinedToolsetCapability | None = None
             self._skill_mcp_manager: Any | None = None  # SkillMcpManager — pool-scoped
             self._skill_tool_manager: Any | None = None  # SkillToolManager — pool-scoped
             self._skill_capabilities: list[Any] = []  # SkillCapability instances
@@ -254,7 +246,6 @@ class AgentPool[TPoolDeps = None]:
                 connection_registry=self.connection_registry,
                 mcp=self.mcp,
                 skills_registry=self.skills,
-                skills_instruction_provider=self.skills_instruction_provider,
                 skills_tools_provider=self.skills_tools_provider,
                 prompt_manager=self.prompt_manager,
                 process_manager=self.process_manager,
@@ -288,8 +279,6 @@ class AgentPool[TPoolDeps = None]:
                 # Initialize skill provider and resolver BEFORE skill command registry
                 # so that skill_provider is available when syncing commands
                 await self._setup_skills_provider()
-                # Link skill provider to instruction provider so MCP skills are included
-                self.skills_instruction_provider.skill_provider = self._skill_provider
                 # Initialize skill command registry after skill provider is set up
                 self._skill_commands = SkillCommandRegistry(
                     skills_registry=self.skills.registry,
@@ -298,8 +287,6 @@ class AgentPool[TPoolDeps = None]:
                 await self._skill_commands.initialize()
                 # Create pool-scoped SkillCapability instances for all discovered skills
                 await self._rebuild_skill_capabilities()
-                if self.skills_instruction_provider:
-                    await self.exit_stack.enter_async_context(self.skills_instruction_provider)
                 # Initialize storage and sessions sequentially (they share the same DB)
                 await self.exit_stack.enter_async_context(self.storage)
                 if self._session_store is not None:
@@ -343,6 +330,9 @@ class AgentPool[TPoolDeps = None]:
             if self._running_count == 0:
                 # Stop all protocol server event consumers first
                 await self._stop_all_consumers()
+                # Stop AgentFactory hot-swap listeners (M3 Todo 11)
+                if self._factory_instance is not None:
+                    await self._factory_instance.stop_hot_swap_listeners()
                 # Shutdown SessionPool
                 assert self._session_pool is not None
                 await self._session_pool.shutdown()
@@ -350,9 +340,7 @@ class AgentPool[TPoolDeps = None]:
                 await self._session_pool._await_inflight_checkpoints()
                 self._session_pool = None
                 # Clean up skill provider and resolver
-                if self._skill_provider is not None:
-                    self._skill_provider.skills_changed.disconnect(self._on_skills_changed)
-                    self._skill_provider = None
+                self._skill_provider = None
                 self._skill_resolver = None
                 await self.cleanup()
 
@@ -484,50 +472,46 @@ class AgentPool[TPoolDeps = None]:
         return self._skill_resolver
 
     @property
-    def skill_provider(self) -> AggregatingResourceProvider | None:
+    def skill_provider(self) -> CombinedToolsetCapability | None:
         """Get the aggregating skill resource provider.
 
-        Returns the AggregatingResourceProvider that combines all skill sources
+        Returns the CombinedToolsetCapability that combines all skill sources
         (local filesystem and MCP servers), or None if not initialized.
         """
         return self._skill_provider
 
-    def register_skill_provider(self, provider: ResourceProvider) -> None:
+    def register_skill_provider(self, provider: AbstractCapability) -> None:
         """Register a skill provider dynamically.
 
-        Adds the provider to the aggregator and URI resolver so that its skills
-        become visible to SkillsInstructionProvider and load_skill.
+        Adds the provider to the URI resolver so that its skills
+        become visible to SkillCapability and load_skill.
         If called before _setup_skills_provider(), the provider is buffered
-        and added when the aggregator is created.
+        and added when the resolver is created.
 
         Args:
             provider: The resource provider to register
         """
-        if self._skill_provider is not None:
-            self._skill_provider.add_provider(provider)
+        name = self._provider_name(provider)
+        if self._skill_resolver is not None:
+            self._skill_resolver.register_provider(name, provider)
         else:
             if not hasattr(self, "_pending_skill_providers"):
-                self._pending_skill_providers: list[ResourceProvider] = []
+                self._pending_skill_providers: list[AbstractCapability] = []
             self._pending_skill_providers.append(provider)
 
-        if self._skill_resolver is not None:
-            self._skill_resolver.register_provider(provider.name, provider)
-
-    def unregister_skill_provider(self, provider: ResourceProvider) -> None:
+    def unregister_skill_provider(self, provider: AbstractCapability) -> None:
         """Unregister a previously registered skill provider.
 
-        Removes the provider from the aggregator and URI resolver.
+        Removes the provider from the URI resolver.
 
         Args:
             provider: The resource provider to unregister
         """
-        if self._skill_provider is not None:
-            self._skill_provider.remove_provider(provider)
-
+        name = self._provider_name(provider)
         if self._skill_resolver is not None:
-            self._skill_resolver.unregister_provider(provider.name)
+            self._skill_resolver.unregister_provider(name)
 
-        pending: list[ResourceProvider] = getattr(self, "_pending_skill_providers", [])
+        pending: list[AbstractCapability] = getattr(self, "_pending_skill_providers", [])
         if pending:
             with suppress(ValueError):
                 pending.remove(provider)
@@ -565,19 +549,14 @@ class AgentPool[TPoolDeps = None]:
             skill = await self._skill_resolver.resolve(skill_name)
             if not self.is_skill_visible_to_node(skill, node_name):
                 raise SkillNotFoundError(skill_name)
-            if type(skill.skill_path) is PurePosixPath:
-                if self._skill_provider is None:
-                    raise SkillNotFoundError(skill_name)
-                return await self._skill_provider.get_skill_instructions(skill.name)
             return skill.load_instructions()
 
-        if self._skill_provider is None:
-            raise SkillNotFoundError(skill_name)
-
-        for skill in await self._skill_provider.get_skills():
-            if skill.name == skill_name and self.is_skill_visible_to_node(skill, node_name):
-                return await self._skill_provider.get_skill_instructions(skill.name)
         raise SkillNotFoundError(skill_name)
+
+    @staticmethod
+    def _provider_name(provider: AbstractCapability) -> str:
+        """Get the name of a capability provider."""
+        return provider.name if isinstance(provider, _NamedCapability) else type(provider).__name__
 
     @staticmethod
     def _normalize_skill_scope_path(path: Any) -> str:
@@ -590,53 +569,31 @@ class AgentPool[TPoolDeps = None]:
     async def _setup_skills_provider(self) -> None:
         """Initialize the skill provider and resolver.
 
-        Creates an AggregatingResourceProvider that combines:
-        - LocalResourceProvider for filesystem skills (from SkillsManager)
-        - MCPResourceProvider for each MCP server in the pool
-
-        Also creates a SkillURIResolver and registers all providers.
-        Connects the skills_changed signal to _on_skills_changed callback.
+        Creates a CombinedToolsetCapability that combines MCP capabilities
+        for skill URI resolution. Individual SkillCapability instances are
+        created separately by ``_rebuild_skill_capabilities()``.
         """
-        providers: list[ResourceProvider] = []
+        providers: list[AbstractCapability] = []
 
-        # Add LocalResourceProvider for filesystem skills if SkillsManager exists
-        # Use the already-initialized resource_provider from SkillsManager
-        if self.skills and self.skills.registry.skills_dirs:
-            try:
-                local_provider = self.skills.resource_provider
-                providers.append(local_provider)
-            except RuntimeError:
-                # Fallback: create and initialize a new provider if resource_provider not available
-                local_provider = LocalResourceProvider(
-                    name="local",
-                    skills_dirs=list(self.skills.registry.skills_dirs),
-                )
-                await local_provider.__aenter__()
-                providers.append(local_provider)
-
-        # Add MCPResourceProvider for each MCP server
+        # Add MCPCapability for each MCP server
         providers.extend(self.mcp.providers)
 
         # Create aggregating provider
-        self._skill_provider = AggregatingResourceProvider(
-            providers=providers,
+        self._skill_provider = CombinedToolsetCapability(
+            capabilities=providers,
             name="skills",
         )
 
         # Create skill URI resolver and register providers
         self._skill_resolver = SkillURIResolver()
         for provider in providers:
-            self._skill_resolver.register_provider(provider.name, provider)
-
-        # Connect skills_changed signal to callback
-        self._skill_provider.skills_changed.connect(self._on_skills_changed)
+            self._skill_resolver.register_provider(self._provider_name(provider), provider)
 
         # Drain any pending skill providers that were registered before setup
-        pending: list[ResourceProvider] = getattr(self, "_pending_skill_providers", [])
+        pending: list[AbstractCapability] = getattr(self, "_pending_skill_providers", [])
         if pending:
             for provider in pending:
-                self._skill_provider.add_provider(provider)
-                self._skill_resolver.register_provider(provider.name, provider)
+                self._skill_resolver.register_provider(self._provider_name(provider), provider)
             self._pending_skill_providers.clear()
 
     async def _rebuild_skill_capabilities(self) -> None:
@@ -648,7 +605,6 @@ class AgentPool[TPoolDeps = None]:
 
         This method is called:
         - During ``__aenter__`` after skill discovery completes.
-        - Whenever ``_skill_provider.skills_changed`` fires (dynamic registration).
         """
         from agentpool.skills.capability import SkillCapability
         from agentpool.skills.skill_mcp_manager import SkillMcpManager

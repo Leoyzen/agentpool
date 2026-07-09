@@ -9,7 +9,7 @@ from schemez.helpers import json_schema_to_pydantic_code
 from upathtools import is_directory_sync, to_upath
 from upathtools.filesystems.file_filesystems import JsonSchemaFileSystem
 
-from agentpool.resource_providers import StaticResourceProvider
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
 
 if TYPE_CHECKING:
@@ -26,7 +26,7 @@ def _format_validation_error(error: jsonschema.ValidationError) -> str:
     return f"At '{path}': {error.message}"
 
 
-class ConfigCreationTools(StaticResourceProvider):
+class ConfigCreationTools(FunctionToolsetCapability):
     """Provider for config creation and validation tools."""
 
     def __init__(

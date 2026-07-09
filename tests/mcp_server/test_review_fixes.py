@@ -4,7 +4,7 @@ Round 1 tests (Fixes #1/#2/#3) are GREEN — already fixed in df377db9b.
 Round 2 tests (Fixes #4/#5/#6) are written BEFORE the fixes (RED phase).
 
 Bugs covered:
-- Fix #2 (DONE): as_capability(session_id) recreates a cleaned-up session context
+- Fix #2 (DONE): get_capabilities(session_id) recreates a cleaned-up session context
 - Fix #3 (DONE): cleanup_session() calls get_or_create_session() on non-existent sessions
 - Fix #1 (DONE): resume_session() doesn't remove session_id from old connection's
   _connection_sessions, causing close_all_sessions_for_connection() to close
@@ -17,7 +17,7 @@ Round 2:
 - Fix #5: cleanup_session() lacks identity check after acquiring lock —
   concurrent callers may do redundant work (all ops are idempotent, but
   the check is a defensive optimization).
-- Fix #6: as_capability() has 3 identical fallback loops — pure duplication.
+- Fix #6: get_capabilities() has 3 identical fallback loops — pure duplication.
 """
 
 from __future__ import annotations
@@ -32,16 +32,16 @@ from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 
 # ============================================================================
-# Fix #2: as_capability() must not recreate a cleaned-up session context
+# Fix #2: get_capabilities() must not recreate a cleaned-up session context
 # ============================================================================
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_as_capability_does_not_recreate_cleaned_session() -> None:
-    """as_capability(session_id=...) must not recreate a cleaned-up context.
+async def test_get_capabilities_does_not_recreate_cleaned_session() -> None:
+    """get_capabilities(session_id=...) must not recreate a cleaned-up context.
 
-    Bug: ``as_capability(session_id=...)`` calls ``get_or_create_session()``
+    Bug: ``get_capabilities(session_id=...)`` calls ``get_or_create_session()``
     which recreates an empty ``_SessionContext`` if cleanup already popped it.
     This is a memory leak — the dead context lingers forever with an empty
     snapshot, and the ``KeyError`` fallback code is dead.
@@ -51,7 +51,7 @@ async def test_as_capability_does_not_recreate_cleaned_session() -> None:
     2. get_or_create_session("test-leak") to create the context.
     3. cleanup_session("test-leak") to clean and pop it.
     4. Assert the context is gone from _session_contexts.
-    5. Call as_capability(session_id="test-leak").
+    5. Call get_capabilities(session_id="test-leak").
     6. Assert the context is STILL NOT in _session_contexts — the bug
        recreates it; the fix should not.
     7. cleanup().
@@ -68,13 +68,13 @@ async def test_as_capability_does_not_recreate_cleaned_session() -> None:
         # 4. Context should be gone
         assert "test-leak" not in manager._session_contexts
 
-        # 5. Call as_capability with the cleaned-up session_id
-        await manager.as_capability(session_id="test-leak")
+        # 5. Call get_capabilities with the cleaned-up session_id
+        await manager.get_capabilities(session_id="test-leak")
 
         # 6. BUG: get_or_create_session() recreates the context.
         #    FIX: should use _session_contexts.get() so no recreation occurs.
         assert "test-leak" not in manager._session_contexts, (
-            "as_capability() recreated a cleaned-up session context — "
+            "get_capabilities() recreated a cleaned-up session context — "
             "memory leak. Should use _session_contexts.get() instead of "
             "get_or_create_session()."
         )

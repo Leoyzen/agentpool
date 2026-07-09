@@ -715,8 +715,8 @@ async def test_no_double_firing_when_old_agenthooks_active(
 ) -> None:
     """No double-firing when old AgentHooks is active AND capability chain is active.
 
-    Verifies that as_capability() returns a ToolInterceptCapability directly
-    (not a CombinedCapability wrapping AgentHooks.as_capability()). This
+    Verifies that get_capabilities() returns a ToolInterceptCapability directly
+    (not a CombinedCapability wrapping AgentHooks.get_capabilities()). This
     prevents double-firing because the legacy Hooks callbacks are never
     registered in the capability chain — only ToolInterceptCapability fires
     tool hooks, delegating to AgentHooks.run_pre_tool_hooks() /

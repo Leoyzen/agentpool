@@ -215,10 +215,10 @@ class TestSkillsIncludeDefault:
 
     @pytest.mark.asyncio
     async def test_local_resource_provider_respects_include_default_false(self, tmp_path) -> None:
-        """LocalResourceProvider must not discover default skills when include_default=False.
+        """SkillCapability must not discover default skills when include_default=False.
 
         Regression: SkillsManager.discover_skills() did not sync registry.skills_dirs,
-        so LocalResourceProvider (created from those dirs) re-discovered default paths.
+        so SkillCapability (created from those dirs) re-discovered default paths.
         """
         import logging
 
@@ -262,14 +262,14 @@ class TestSkillsIncludeDefault:
 
         try:
             # Debug: print paths
-            from agentpool.resource_providers.local import LocalResourceProvider
+            # SkillCapability removed - use SkillCapability from agentpool.skills.capability
 
             print(
                 f"DEBUG: skills_manager.registry.skills_dirs ="
                 f" {skills_manager.registry.skills_dirs}"
             )
             provider = skills_manager.resource_provider
-            assert isinstance(provider, LocalResourceProvider)
+            assert isinstance(provider, SkillCapability)
             print(f"DEBUG: provider.skills_dirs = {provider.skills_dirs}")
             print(f"DEBUG: provider._registry.skills_dirs = {provider._registry.skills_dirs}")
 
@@ -288,7 +288,7 @@ class TestSkillsIncludeDefault:
             )
             assert "default-skill" not in skill_names, (
                 f"Default skill leaked into provider despite include_default=False. "
-                f"Got: {skill_names}. This is the LocalResourceProvider regression."
+                f"Got: {skill_names}. This is the SkillCapability regression."
             )
         finally:
             await skills_manager.__aexit__(None, None, None)

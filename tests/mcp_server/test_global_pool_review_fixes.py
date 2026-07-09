@@ -28,9 +28,9 @@ class TestBuildToolsetLogsWarning:
         _build_toolset catches the exception, then it must call
         logger.warning (not silently swallow).
         """
-        from agentpool.resource_providers.base import ResourceProvider
+        from pydantic_ai.capabilities import AbstractCapability
 
-        class _FailingProvider(ResourceProvider):
+        class _FailingProvider(FunctionToolsetCapability):
             def __init__(self) -> None:
                 super().__init__(name="test-fail")
 
@@ -40,8 +40,8 @@ class TestBuildToolsetLogsWarning:
         # Verify the source code includes logger.warning in the except block
         import inspect
 
-        source = inspect.getsource(ResourceProvider.as_capability)
+        source = inspect.getsource(AbstractCapability.get_capabilities)
         assert "logger.warning" in source, (
-            "Expected logger.warning() in as_capability() source "
+            "Expected logger.warning() in get_capabilities() source "
             "when get_tools() raises, but exception is silently swallowed"
         )

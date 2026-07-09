@@ -146,7 +146,7 @@ class NativeTurn(HookAwareTurn, Turn):
             try:
                 # Use timeout to prevent hang when MCP providers are still
                 # connecting (e.g. ACP session/load hasn't arrived yet).
-                # MCP tools are handled via snapshot/as_capability path,
+                # MCP tools are handled via snapshot/get_capabilities path,
                 # so get_tools() here is only for building tool kind map.
                 all_tools = await asyncio.wait_for(
                     self._agent.tools.get_tools(),

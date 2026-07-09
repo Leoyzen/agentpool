@@ -27,8 +27,8 @@ from unittest.mock import MagicMock
 import pytest
 from upathtools import UPath, to_upath
 
-from agentpool.resource_providers.aggregating import AggregatingResourceProvider
-from agentpool.resource_providers.local import LocalResourceProvider
+from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
+# SkillCapability removed - use SkillCapability from agentpool.skills.capability
 from agentpool.skills.command import SkillCommand
 from agentpool.skills.command_registry import SkillCommandRegistry
 from agentpool.skills.registry import SkillsRegistry
@@ -535,7 +535,7 @@ async def test_uri_resolution_performance(tmp_path: str) -> None:
         _create_real_skill(f"test-skill-{i}", skills_base_dir)
 
     # Set up provider and resolver
-    provider = LocalResourceProvider(
+    provider = SkillCapability(
         name="local",
         skills_dirs=[skills_base_dir],
         cache_ttl=60.0,
@@ -577,7 +577,7 @@ async def test_uri_resolution_bare_name_performance(tmp_path: str) -> None:
     for i in range(10):
         _create_real_skill(f"test-skill-{i}", skills_base_dir)
 
-    provider = LocalResourceProvider(
+    provider = SkillCapability(
         name="local",
         skills_dirs=[skills_base_dir],
         cache_ttl=60.0,
@@ -708,7 +708,7 @@ async def test_skill_discovery_100_skills_rfc0020(tmp_path: str) -> None:
 
 @pytest.mark.asyncio
 async def test_local_provider_caching_effectiveness(tmp_path: str) -> None:
-    """Benchmark caching effectiveness for LocalResourceProvider.
+    """Benchmark caching effectiveness for SkillCapability.
 
     Verifies that cached skill access is significantly faster than uncached.
     RFC-0020 target: cached access should be <5ms.
@@ -719,7 +719,7 @@ async def test_local_provider_caching_effectiveness(tmp_path: str) -> None:
     for i in range(20):
         _create_real_skill(f"test-skill-{i}", skills_base_dir)
 
-    provider = LocalResourceProvider(
+    provider = SkillCapability(
         name="local",
         skills_dirs=[skills_base_dir],
         cache_ttl=60.0,
@@ -762,7 +762,7 @@ async def test_local_provider_caching_effectiveness(tmp_path: str) -> None:
 
 @pytest.mark.asyncio
 async def test_aggregating_provider_caching(tmp_path: str) -> None:
-    """Benchmark caching for AggregatingResourceProvider.
+    """Benchmark caching for CombinedToolsetCapability.
 
     Verifies that aggregation doesn't negate caching benefits.
     """
@@ -772,14 +772,14 @@ async def test_aggregating_provider_caching(tmp_path: str) -> None:
     for i in range(20):
         _create_real_skill(f"test-skill-{i}", skills_base_dir)
 
-    local_provider = LocalResourceProvider(
+    local_provider = SkillCapability(
         name="local",
         skills_dirs=[skills_base_dir],
         cache_ttl=60.0,
     )
 
     async with local_provider:
-        aggregator = AggregatingResourceProvider(providers=[local_provider])
+        aggregator = CombinedToolsetCapability(capabilities=[local_provider])
 
         # Cold access
         start = time.perf_counter()
@@ -823,7 +823,7 @@ description: A skill with content
 
     (skill_dir / "SKILL.md").write_text(skill_content, encoding="utf-8")
 
-    provider = LocalResourceProvider(
+    provider = SkillCapability(
         name="local",
         skills_dirs=[skills_base_dir],
         cache_ttl=60.0,
@@ -868,8 +868,8 @@ async def test_multiple_providers_resolution(tmp_path: str) -> None:
         _create_real_skill(f"skill-set1-{i}", dir1)
         _create_real_skill(f"skill-set2-{i}", dir2)
 
-    provider1 = LocalResourceProvider(name="local1", skills_dirs=[dir1])
-    provider2 = LocalResourceProvider(name="local2", skills_dirs=[dir2])
+    provider1 = SkillCapability(name="local1", skills_dirs=[dir1])
+    provider2 = SkillCapability(name="local2", skills_dirs=[dir2])
 
     resolver = SkillURIResolver()
 

@@ -121,7 +121,7 @@ class TestReferenceLoadingChain:
     The chain is:
     1. _load_reference_content(skill, reference_path, pool)
     2. → pool.skill_provider.read_reference(original_name, ref_path)
-    3. → MCPResourceProvider.read_reference(skill_name, ref_path)
+    3. → MCPCapability.read_reference(skill_name, ref_path)
     4.   → constructs URI: skill://{skill_name}/references/{path}
     5.   → self.read_resource(uri)  # MCP client call
     6. → MCP server SkillsProvider.read_resource(uri)
@@ -229,7 +229,7 @@ class TestReferenceLoadingChain:
 
     @pytest.mark.asyncio
     async def test_e2e_uri_construction_matches_server_expectations(self) -> None:
-        """RED: Verify that MCPResourceProvider.read_reference() constructs URI correctly.
+        """RED: Verify that MCPCapability.read_reference() constructs URI correctly.
 
         The URI sent to the MCP server must match what the server's SkillsProvider
         expects. The server's SkillsProvider discovers skills by directory name
@@ -239,9 +239,9 @@ class TestReferenceLoadingChain:
 
         from mcp.types import TextResourceContents
 
-        from agentpool.resource_providers.mcp_provider import MCPResourceProvider
+        # MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
 
-        # Create a real MCPResourceProvider (with mocked client)
+        # Create a real MCPCapability (with mocked client)
         with patch("agentpool.mcp_server.MCPClient") as mock_client_class:
             mock_client = MagicMock()
             mock_client.connected = True
@@ -263,7 +263,7 @@ class TestReferenceLoadingChain:
             )
 
             mock_client_class.return_value = mock_client
-            provider = MCPResourceProvider(server="uvx test-server", name="test-mcp")
+            provider = MCPCapability(server="uvx test-server", name="test-mcp")
             provider.client = mock_client
 
             # Call read_reference with underscore skill name and references/ prefix
@@ -304,7 +304,7 @@ class TestReferenceLoadingChain:
 
         from mcp.types import TextResourceContents
 
-        from agentpool.resource_providers.mcp_provider import MCPResourceProvider
+        # MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
         from agentpool.skills.skill import Skill
 
         with patch("agentpool.mcp_server.MCPClient") as mock_client_class:
@@ -327,7 +327,7 @@ class TestReferenceLoadingChain:
             )
 
             mock_client_class.return_value = mock_client
-            provider = MCPResourceProvider(server="uvx test-server", name="test-mcp")
+            provider = MCPCapability(server="uvx test-server", name="test-mcp")
             provider.client = mock_client
 
             # Pre-populate the skill cache with the skill (including original_name metadata)
@@ -920,11 +920,11 @@ class TestProviderLessURIFallback:
         test_skill_with_args: UPath,
     ) -> None:
         """Test loading skill with provider-less URI and reference path."""
-        from agentpool.resource_providers.local import LocalResourceProvider
+        # SkillCapability removed - use SkillCapability from agentpool.skills.capability
         from agentpool.skills.uri_resolver import SkillURIResolver
 
         # Create a local provider directly with the test skill directory
-        provider = LocalResourceProvider(
+        provider = SkillCapability(
             name="test_local",
             skills_dirs=[UPath(tmp_path)],
         )
@@ -950,11 +950,11 @@ class TestProviderLessURIFallback:
         simple_skill: UPath,
     ) -> None:
         """Test loading skill with bare skill name (no URI scheme)."""
-        from agentpool.resource_providers.local import LocalResourceProvider
+        # SkillCapability removed - use SkillCapability from agentpool.skills.capability
         from agentpool.skills.uri_resolver import SkillURIResolver
 
         # Create a local provider directly with the test skill directory
-        provider = LocalResourceProvider(
+        provider = SkillCapability(
             name="test_local",
             skills_dirs=[UPath(tmp_path)],
         )

@@ -24,7 +24,7 @@ from agentpool.skills.exceptions import SecurityError, SkillNotFoundError
 
 
 if TYPE_CHECKING:
-    from agentpool.resource_providers.base import ResourceProvider
+    from pydantic_ai.capabilities import AbstractCapability
     from agentpool.skills.skill import Skill
 
 
@@ -301,9 +301,9 @@ class SkillURIResolver:
 
     def __init__(self) -> None:
         """Initialize the resolver with an empty provider registry."""
-        self._providers: dict[str, ResourceProvider] = {}
+        self._providers: dict[str, AbstractCapability] = {}
 
-    def register_provider(self, name: str, provider: ResourceProvider) -> None:
+    def register_provider(self, name: str, provider: AbstractCapability) -> None:
         """Register a resource provider.
 
         Args:
@@ -445,7 +445,7 @@ class SkillURIResolver:
         msg = f"Skill {resolved.skill_name!r} not found in provider {resolved.provider!r}"
         raise SkillNotFoundError(msg)
 
-    def get_provider(self, name: str) -> ResourceProvider | None:
+    def get_provider(self, name: str) -> AbstractCapability | None:
         """Get a registered provider by name.
 
         Args:

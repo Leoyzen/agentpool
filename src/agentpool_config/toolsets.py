@@ -27,7 +27,7 @@ from agentpool_config.workers import AgentWorkerConfig, WorkerConfig
 
 
 if TYPE_CHECKING:
-    from agentpool.resource_providers import ResourceProvider
+    from pydantic_ai.capabilities import AbstractCapability
     from agentpool_toolsets.search_toolset import SearchTools
 
 
@@ -67,8 +67,8 @@ class BaseToolsetConfig(Schema):
     namespace: str | None = Field(default=None, examples=["web", "files"], title="Tool namespace")
     """Optional namespace prefix for tool names"""
 
-    def get_provider(self) -> ResourceProvider:
-        """Implemented by subclasses, should return a ResourceProvider instance."""
+    def get_provider(self) -> AbstractCapability:
+        """Implemented by subclasses, should return a AbstractCapability instance."""
         raise NotImplementedError("Subclasses must implement this method")
 
 
@@ -98,7 +98,7 @@ class OpenAPIToolsetConfig(BaseToolsetConfig):
     )
     """Optional base URL for API requests, overrides the one in spec."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create OpenAPI tools provider from this config."""
         from agentpool_toolsets.openapi import OpenAPITools
 
@@ -125,7 +125,7 @@ class EntryPointToolsetConfig(BaseToolsetConfig):
     )
     """Python module path to load tools from via entry points."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create provider from this config."""
         from agentpool_toolsets.entry_points import EntryPointTools
 
@@ -162,7 +162,7 @@ class ComposioToolSetConfig(BaseToolsetConfig):
     )
     """List of toolsets to load."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create provider from this config."""
         from agentpool_toolsets.composio_toolset import ComposioTools
 
@@ -189,7 +189,7 @@ class SubagentToolsetConfig(BaseToolsetConfig):
     )
     """Optional tool filter to enable/disable specific tools."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create subagent tools provider."""
         from agentpool_toolsets.builtin.subagent_tools import SubagentTools
 
@@ -197,9 +197,9 @@ class SubagentToolsetConfig(BaseToolsetConfig):
             name="subagent_tools",
         )
         if self.tools is not None:
-            from agentpool.resource_providers import FilteringResourceProvider
+            from agentpool.capabilities.filtered_toolset import FilteredToolsetCapability
 
-            return FilteringResourceProvider(provider, cast(dict[str, bool], self.tools))
+            return FilteredToolsetCapability(provider, cast(dict[str, bool], self.tools))
         return provider
 
 
@@ -233,7 +233,7 @@ class WorkersToolsetConfig(BaseToolsetConfig):
                 resolved.append(worker)
         return resolved
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create workers tools provider."""
         from agentpool_toolsets.builtin.workers import WorkersTools
 
@@ -265,16 +265,16 @@ class ProcessManagementToolsetConfig(BaseToolsetConfig):
     )
     """Optional tool filter to enable/disable specific tools."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create Process management tools provider."""
         from agentpool_toolsets.builtin import ProcessManagementTools
 
         env = self.environment.get_provider() if self.environment else None
         provider = ProcessManagementTools(env=env, name="process_management")
         if self.tools is not None:
-            from agentpool.resource_providers import FilteringResourceProvider
+            from agentpool.capabilities.filtered_toolset import FilteredToolsetCapability
 
-            return FilteringResourceProvider(provider, cast(dict[str, bool], self.tools))
+            return FilteredToolsetCapability(provider, cast(dict[str, bool], self.tools))
         return provider
 
 
@@ -328,7 +328,7 @@ class SkillsToolsetConfig(BaseToolsetConfig):
     Limits the number of skills included in prompts to prevent excessive token usage.
     """
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create skills tools provider."""
         from agentpool_toolsets.builtin import SkillsTools
 
@@ -338,9 +338,9 @@ class SkillsToolsetConfig(BaseToolsetConfig):
             max_skills=self.max_skills,
         )
         if self.tools is not None:
-            from agentpool.resource_providers import FilteringResourceProvider
+            from agentpool.capabilities.filtered_toolset import FilteredToolsetCapability
 
-            return FilteringResourceProvider(provider, cast(dict[str, bool], self.tools))
+            return FilteredToolsetCapability(provider, cast(dict[str, bool], self.tools))
         return provider
 
 
@@ -369,16 +369,16 @@ class CodeToolsetConfig(BaseToolsetConfig):
     )
     """Optional execution environment. If None, falls back to agent's env at runtime."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create code tools provider."""
         from agentpool_toolsets.builtin.code import CodeTools
 
         env = self.environment.get_provider() if self.environment else None
         provider = CodeTools(env=env, name="code")
         if self.tools is not None:
-            from agentpool.resource_providers import FilteringResourceProvider
+            from agentpool.capabilities.filtered_toolset import FilteredToolsetCapability
 
-            return FilteringResourceProvider(provider, cast(dict[str, bool], self.tools))
+            return FilteredToolsetCapability(provider, cast(dict[str, bool], self.tools))
         return provider
 
 
@@ -505,7 +505,7 @@ class FSSpecToolsetConfig(BaseToolsetConfig):
     using progressive quality/dimension reduction. Default: 4.5MB (Anthropic limit).
     Set to None to use the default 4.5MB limit."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create FSSpec filesystem tools provider."""
         from agentpool.prompts.conversion_manager import ConversionManager
         from agentpool_toolsets.fsspec_toolset import FSSpecTools
@@ -563,7 +563,7 @@ class VFSToolsetConfig(BaseToolsetConfig):
     type: Literal["vfs"] = Field("vfs", init=False)
     """VFS registry filesystem toolset."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create VFS registry filesystem tools provider."""
         from agentpool_toolsets.vfs_toolset import VFSTools
 
@@ -646,7 +646,7 @@ class NotificationsToolsetConfig(BaseToolsetConfig):
     )
     """Named notification channels. Values can be a single Apprise URL or list of URLs."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create notifications tools provider."""
         from agentpool_toolsets.notifications import NotificationsTools
 
@@ -679,14 +679,14 @@ class CustomToolsetConfig(BaseToolsetConfig):
     be used to override the default provider name.
     """
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create custom provider from import path."""
-        from agentpool.resource_providers import ResourceProvider
+        from pydantic_ai.capabilities import AbstractCapability
         from agentpool.utils.importing import import_class
 
         provider_cls = import_class(self.import_path)
-        if not issubclass(provider_cls, ResourceProvider):
-            raise ValueError(f"{self.import_path} must be a ResourceProvider subclass")  # noqa: TRY004
+        if not issubclass(provider_cls, AbstractCapability):
+            raise ValueError(f"{self.import_path} must be a AbstractCapability subclass")  # noqa: TRY004
         kwargs = self.kw_args.copy()
         name = kwargs.pop("name", provider_cls.__name__)
 
@@ -719,14 +719,12 @@ class AggregatingToolsetConfig(BaseToolsetConfig):
     tool_mode: Literal["codemode"] | None = Field(None, title="Tool execution mode")
     """Optional tool mode. Set to 'codemode' to wrap all tools in Python execution."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create aggregating provider."""
-        from agentpool.resource_providers import AggregatingResourceProvider
+        from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
 
-        providers = [p.get_provider() for p in self.toolsets]
-        return AggregatingResourceProvider(
-            providers=providers, name="aggregating", tool_mode=self.tool_mode
-        )
+        capabilities = [p.get_provider() for p in self.toolsets]
+        return CombinedToolsetCapability(capabilities=capabilities, name="aggregating")
 
 
 class CodeModeToolsetConfig(BaseToolsetConfig):
@@ -748,17 +746,15 @@ class CodeModeToolsetConfig(BaseToolsetConfig):
     toolsets: list[ToolsetConfig] = Field(title="Wrapped toolsets")
     """List of toolsets to expose as a codemode toolset."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create Codemode toolset.
 
-        NOTE: This now delegates to AggregatingResourceProvider with tool_mode='codemode'.
+        NOTE: This now delegates to CombinedToolsetCapability.
         """
-        from agentpool.resource_providers import AggregatingResourceProvider
+        from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
 
-        providers = [p.get_provider() for p in self.toolsets]
-        return AggregatingResourceProvider(
-            providers=providers, name="codemode", tool_mode="codemode"
-        )
+        capabilities = [p.get_provider() for p in self.toolsets]
+        return CombinedToolsetCapability(capabilities=capabilities, name="codemode")
 
 
 class RemoteCodeModeToolsetConfig(BaseToolsetConfig):
@@ -780,14 +776,13 @@ class RemoteCodeModeToolsetConfig(BaseToolsetConfig):
     toolsets: list[ToolsetConfig] = Field(title="Wrapped toolsets")
     """List of toolsets to expose as a codemode toolset."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create Codemode toolset."""
-        from agentpool.resource_providers.codemode import RemoteCodeModeResourceProvider
+        from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
 
-        providers = [p.get_provider() for p in self.toolsets]
-        return RemoteCodeModeResourceProvider(
-            providers=providers,
-            execution_config=self.environment,
+        capabilities = [p.get_provider() for p in self.toolsets]
+        return CombinedToolsetCapability(
+            capabilities=capabilities, name="remote_codemode"
         )
 
 
@@ -818,13 +813,13 @@ class ImportToolsToolsetConfig(BaseToolsetConfig):
     )
     """List of tool configurations to import."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create static provider with imported tools."""
-        from agentpool.resource_providers import StaticResourceProvider
+        from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
         tools = [tool_config.get_tool() for tool_config in self.tools]
         name = self.namespace or "import_tools"
-        return StaticResourceProvider(name=name, tools=tools)
+        return FunctionToolsetCapability(name=name, tools=tools)
 
 
 class ConfigCreationToolsetConfig(BaseToolsetConfig):
@@ -849,7 +844,7 @@ class ConfigCreationToolsetConfig(BaseToolsetConfig):
     markup: MarkupType = Field(default="yaml", title="Markup language")
     """Markup language for the configuration (yaml, json, toml)."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create config creation toolset."""
         from agentpool_toolsets.config_creation import ConfigCreationTools
 
@@ -891,15 +886,15 @@ class PlanToolsetConfig(BaseToolsetConfig):
     )
     """Optional tool filter to enable/disable specific tools."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create plan tools provider."""
-        from agentpool.resource_providers import PlanProvider
+        # FunctionToolsetCapability removed - use FunctionToolsetCapability
 
-        provider = PlanProvider(mode=self.mode)
+        provider = FunctionToolsetCapability(mode=self.mode)
         if self.tools is not None:
-            from agentpool.resource_providers import FilteringResourceProvider
+            from agentpool.capabilities.filtered_toolset import FilteredToolsetCapability
 
-            return FilteringResourceProvider(provider, cast(dict[str, bool], self.tools))
+            return FilteredToolsetCapability(provider, cast(dict[str, bool], self.tools))
         return provider
 
 
@@ -923,7 +918,7 @@ class DebugToolsetConfig(BaseToolsetConfig):
     type: Literal["debug"] = Field("debug", init=False)
     """Debug toolset."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create debug tools provider."""
         from agentpool_toolsets.builtin.debug import DebugTools
 
@@ -967,7 +962,7 @@ class MCPDiscoveryToolsetConfig(BaseToolsetConfig):
     )
     """Server names that cannot be used."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create MCP discovery tools provider."""
         from agentpool_toolsets.mcp_discovery.toolset import MCPDiscoveryToolset
 
@@ -1005,7 +1000,7 @@ class CronToolsetConfig(BaseToolsetConfig):
     )
     """Path to the JSON file where scheduled jobs are persisted."""
 
-    def get_provider(self) -> ResourceProvider:
+    def get_provider(self) -> AbstractCapability:
         """Create cron tools provider."""
         from pathlib import Path
 

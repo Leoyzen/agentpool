@@ -27,7 +27,6 @@ def test_get_context_returns_host_context(pool: AgentPool[None]) -> None:
     assert ctx.connection_registry is pool.connection_registry
     assert ctx.mcp is pool.mcp
     assert ctx.skills_registry is pool.skills
-    assert ctx.skills_instruction_provider is pool.skills_instruction_provider
     assert ctx.skills_tools_provider is pool.skills_tools_provider
     assert ctx.prompt_manager is pool.prompt_manager
     assert ctx.process_manager is pool.process_manager

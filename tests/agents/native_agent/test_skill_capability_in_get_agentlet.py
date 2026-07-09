@@ -32,7 +32,7 @@ def mock_mcp_manager() -> MagicMock:
     mcp_mgr = MagicMock()
     cap1 = MagicMock()
     cap2 = MagicMock()
-    mcp_mgr.as_capability = AsyncMock(return_value=[cap1, cap2])
+    mcp_mgr.get_capabilities = AsyncMock(return_value=[cap1, cap2])
     return mcp_mgr
 
 
@@ -102,7 +102,7 @@ async def test_skill_capability_in_position_after_mcp_before_history(
         assert len(skill_caps) == 2, f"Expected 2 SkillCapability instances, got {len(skill_caps)}"
 
         # MCP caps are MagicMock instances — track via identity
-        mcp_caps = mock_mcp_manager.as_capability.return_value
+        mcp_caps = mock_mcp_manager.get_capabilities.return_value
         mcp_indices = [capabilities.index(c) for c in mcp_caps]
 
         # Find ProcessHistory index

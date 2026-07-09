@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agentpool.mcp_server.config_snapshot import McpConfigEntry
-    from agentpool.resource_providers.mcp_provider import MCPResourceProvider
+    # MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
     from agentpool.tools.base import Tool
     from agentpool_config.skills import SkillMcpServerConfig
 
@@ -52,8 +52,8 @@ class SkillMcpManager:
         # Registered server configs: server_name → SkillMcpServerConfig
         self._configs: dict[str, SkillMcpServerConfig] = {}
 
-        # Active connections: session_id → server_name → MCPResourceProvider
-        self._providers: dict[str, dict[str, MCPResourceProvider]] = {}
+        # Active connections: session_id → server_name → MCPCapability
+        self._providers: dict[str, dict[str, MCPCapability]] = {}
 
         # Per-server locks for thread-safe connect serialization
         self._locks: dict[str, asyncio.Lock] = {}
@@ -106,11 +106,11 @@ class SkillMcpManager:
 
     # ---- Connection ----
 
-    async def connect(self, server_name: str, session_id: str) -> MCPResourceProvider:
+    async def connect(self, server_name: str, session_id: str) -> MCPCapability:
         """Lazily connect to a skill MCP server, returning its provider.
 
         On first call for a ``(session_id, server_name)`` pair, creates an
-        ``MCPResourceProvider`` and establishes the connection. Subsequent
+        ``MCPCapability`` and establishes the connection. Subsequent
         calls return the existing provider.
 
         If the existing connection has been idle beyond the configured
@@ -124,7 +124,7 @@ class SkillMcpManager:
             session_id: Session identifier for connection scoping.
 
         Returns:
-            The connected ``MCPResourceProvider``.
+            The connected ``MCPCapability``.
 
         Raises:
             ValueError: If ``server_name`` was not registered via ``prepare()``.
@@ -303,7 +303,7 @@ class SkillMcpManager:
             self._locks[server_name] = asyncio.Lock()
         return self._locks[server_name]
 
-    def _get_provider(self, server_name: str, session_id: str) -> MCPResourceProvider | None:
+    def _get_provider(self, server_name: str, session_id: str) -> MCPCapability | None:
         """Get existing provider for a session+server pair, or None."""
         session_providers = self._providers.get(session_id, {})
         return session_providers.get(server_name)
@@ -312,12 +312,12 @@ class SkillMcpManager:
         self,
         server_name: str,
         session_id: str,
-        provider: MCPResourceProvider,
+        provider: MCPCapability,
     ) -> None:
         """Store a provider for a session+server pair."""
         self._providers.setdefault(session_id, {})[server_name] = provider
 
-    def _pop_provider(self, server_name: str, session_id: str) -> MCPResourceProvider | None:
+    def _pop_provider(self, server_name: str, session_id: str) -> MCPCapability | None:
         """Remove and return a provider for a session+server pair."""
         session_providers = self._providers.get(session_id, {})
         return session_providers.pop(server_name, None)
@@ -336,8 +336,8 @@ class SkillMcpManager:
 
     async def _create_and_connect(
         self, config: SkillMcpServerConfig, server_name: str
-    ) -> MCPResourceProvider:
-        """Create an MCPResourceProvider from config and connect it.
+    ) -> MCPCapability:
+        """Create an MCPCapability from config and connect it.
 
         Converts ``SkillMcpServerConfig`` to the appropriate
         ``MCPServerConfig`` subclass based on whether ``command`` or
@@ -348,12 +348,12 @@ class SkillMcpManager:
             server_name: Name for the provider.
 
         Returns:
-            A connected ``MCPResourceProvider``.
+            A connected ``MCPCapability``.
 
         Raises:
             ValueError: If neither ``command`` nor ``url`` is specified.
         """
-        from agentpool.resource_providers.mcp_provider import MCPResourceProvider
+        # MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
         from agentpool_config.mcp_server import (
             BaseMCPServerConfig,
             StdioMCPServerConfig,
@@ -382,7 +382,7 @@ class SkillMcpManager:
                 f"SkillMcpServerConfig for {server_name!r} must specify either 'command' or 'url'"
             )
 
-        provider = MCPResourceProvider(
+        provider = MCPCapability(
             server=mcp_config,
             name=f"skill_mcp_{server_name}",
             source="node",

@@ -479,7 +479,7 @@ async def test_resume_injects_session_mcp_providers(mocked_acp_agent):
     await mocked_acp_agent.resume_session(request)
 
     # MCP providers are no longer added via add_provider — they go through
-    # McpConfigSnapshot → as_capability() → MCPToolset. We verify that the
+    # McpConfigSnapshot → get_capabilities() → MCPToolset. We verify that the
     # session agent was created (which internally builds the snapshot).
     session_pool.sessions.get_or_create_session_agent.assert_called_once_with("resume-test-session")
     mock_session_agent.tools.add_provider.assert_not_called()

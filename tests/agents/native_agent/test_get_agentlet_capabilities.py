@@ -31,7 +31,7 @@ def mock_provider_with_capability() -> MagicMock:
     provider = MagicMock()
     provider.name = "mock_provider"
     cap = MagicMock()
-    provider.as_capability.return_value = cap
+    provider.get_capabilities.return_value = cap
     provider.get_instructions = AsyncMock(return_value=[])
     provider.get_tools = AsyncMock(return_value=[])
     return provider
@@ -42,7 +42,7 @@ def mock_provider_no_capability() -> MagicMock:
     """Mock tool provider that returns no capability."""
     provider = MagicMock()
     provider.name = "no_cap_provider"
-    provider.as_capability.return_value = None
+    provider.get_capabilities.return_value = None
     provider.get_instructions = AsyncMock(return_value=[])
     provider.get_tools = AsyncMock(return_value=[])
     return provider
@@ -53,7 +53,7 @@ def mock_provider_with_instructions() -> MagicMock:
     """Mock tool provider that returns instructions."""
     provider = MagicMock()
     provider.name = "instruction_provider"
-    provider.as_capability.return_value = None
+    provider.get_capabilities.return_value = None
     provider.get_tools = AsyncMock(return_value=[])
 
     def simple_instruction() -> str:
@@ -77,7 +77,7 @@ def mock_mcp_manager() -> MagicMock:
     mcp_mgr = MagicMock()
     cap1 = MagicMock()
     cap2 = MagicMock()
-    mcp_mgr.as_capability = AsyncMock(return_value=[cap1, cap2])
+    mcp_mgr.get_capabilities = AsyncMock(return_value=[cap1, cap2])
     return mcp_mgr
 
 
@@ -100,7 +100,7 @@ async def test_get_agentlet_collects_tool_provider_capabilities(
     mock_provider_with_capability: MagicMock,
     mock_provider_no_capability: MagicMock,
 ) -> None:
-    """Tool providers' as_capability() results are collected."""
+    """Tool providers' get_capabilities() results are collected."""
     # Add mock providers to external_providers list
     mock_agent.tools.external_providers = [
         mock_provider_with_capability,
@@ -111,14 +111,14 @@ async def test_get_agentlet_collects_tool_provider_capabilities(
         mock_pydantic_agent.return_value = MagicMock()
         await mock_agent.get_agentlet(None, None, None)
 
-        # Verify both providers' as_capability were called
-        mock_provider_with_capability.as_capability.assert_called_once()
-        mock_provider_no_capability.as_capability.assert_called_once()
+        # Verify both providers' get_capabilities were called
+        mock_provider_with_capability.get_capabilities.assert_called_once()
+        mock_provider_no_capability.get_capabilities.assert_called_once()
 
         # Verify capability from first provider was passed
         call_kwargs = mock_pydantic_agent.call_args.kwargs
         capabilities = call_kwargs.get("capabilities", []) or []
-        assert mock_provider_with_capability.as_capability.return_value in capabilities
+        assert mock_provider_with_capability.get_capabilities.return_value in capabilities
 
 
 # ---------------------------------------------------------------------------
@@ -206,20 +206,20 @@ async def test_get_agentlet_collects_mcp_capabilities(
     mock_agent: Agent[Any],
     mock_mcp_manager: MagicMock,
 ) -> None:
-    """MCP capabilities collected from mcp.as_capability()."""
+    """MCP capabilities collected from mcp.get_capabilities()."""
     mock_agent.mcp = mock_mcp_manager
 
     with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
         mock_pydantic_agent.return_value = MagicMock()
         await mock_agent.get_agentlet(None, None, None)
 
-        mock_mcp_manager.as_capability.assert_called_once()
+        mock_mcp_manager.get_capabilities.assert_called_once()
 
         call_kwargs = mock_pydantic_agent.call_args.kwargs
         capabilities = call_kwargs.get("capabilities", []) or []
 
         # Both MCP capabilities should be in the list
-        mcp_caps = mock_mcp_manager.as_capability.return_value
+        mcp_caps = mock_mcp_manager.get_capabilities.return_value
         for cap in mcp_caps:
             assert cap in capabilities
 
@@ -328,9 +328,9 @@ async def test_get_agentlet_passes_capabilities_to_pydantic_agent(
         capabilities = call_kwargs.get("capabilities", []) or []
 
         # Verify all capability types are present
-        assert mock_provider_with_capability.as_capability.return_value in capabilities
+        assert mock_provider_with_capability.get_capabilities.return_value in capabilities
         assert hooks_cap in capabilities
-        assert any(cap in capabilities for cap in mock_mcp_manager.as_capability.return_value)
+        assert any(cap in capabilities for cap in mock_mcp_manager.get_capabilities.return_value)
         assert any(isinstance(cap, ProcessHistory) for cap in capabilities)
         assert any(isinstance(cap, NativeTool) for cap in capabilities)
 
@@ -469,7 +469,7 @@ async def test_get_agentlet_handles_failing_provider_instructions(
     """Errors in provider.get_instructions are logged and skipped."""
     failing_provider = MagicMock()
     failing_provider.name = "failing_provider"
-    failing_provider.as_capability.return_value = None
+    failing_provider.get_capabilities.return_value = None
     failing_provider.get_tools = AsyncMock(return_value=[])
     failing_provider.get_instructions = AsyncMock(side_effect=RuntimeError("Instruction failure"))
 

@@ -64,8 +64,7 @@ class SkillActivationCapability(AbstractCapability[Any]):
 
     Before each model request, evaluates which skills are relevant to
     the current prompt and injects their instructions into the system
-    prompt. This replaces the static injection approach used by
-    ``SkillsInstructionProvider``.
+    prompt. This replaces the static injection approach.
 
     Skill matching is delegated to a callable that receives the
     conversation messages and returns a list of skill names to activate.

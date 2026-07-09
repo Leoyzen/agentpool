@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from agentpool import log
 from agentpool.agents.context import AgentContext  # noqa: TC001
-from agentpool.resource_providers import ResourceProvider
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
 
 if TYPE_CHECKING:
@@ -30,7 +30,7 @@ def filter_lines_regex(pattern_str: str, text: str) -> str:
         return f"Invalid filter regex: {regex_err}"
 
 
-class ProcessManagementTools(ResourceProvider):
+class ProcessManagementTools(FunctionToolsetCapability):
     """Provider for background process management tools.
 
     Provides tools for starting, monitoring, and controlling background processes.

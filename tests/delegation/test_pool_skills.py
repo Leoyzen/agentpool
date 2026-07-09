@@ -12,7 +12,7 @@ import pytest
 from upathtools import UPath
 
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
-from agentpool.resource_providers.aggregating import AggregatingResourceProvider
+from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
 from agentpool.skills.uri_resolver import SkillURIResolver
 from agentpool_config.skills import SkillsConfig
 
@@ -163,9 +163,9 @@ class TestSkillProviderProperty:
         self,
         manifest_with_skills: AgentsManifest,
     ) -> None:
-        """Test that skill_provider is an AggregatingResourceProvider."""
+        """Test that skill_provider is an CombinedToolsetCapability."""
         async with AgentPool(manifest_with_skills) as pool:
-            assert isinstance(pool.skill_provider, AggregatingResourceProvider)
+            assert isinstance(pool.skill_provider, CombinedToolsetCapability)
 
     async def test_skill_provider_has_local_provider(
         self,
@@ -297,7 +297,7 @@ class TestProviderAggregation:
         self,
         manifest_with_skills: AgentsManifest,
     ) -> None:
-        """Test that AggregatingResourceProvider properly handles skills_changed."""
+        """Test that CombinedToolsetCapability properly handles skills_changed."""
         async with AgentPool(manifest_with_skills) as pool:
             provider = pool.skill_provider
             assert provider is not None
@@ -500,13 +500,13 @@ class TestRegisterUnregisterSkillProvider:
         """Test that register_skill_provider() makes skills visible in aggregator."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from agentpool.resource_providers.base import ResourceProvider
+        from pydantic_ai.capabilities import AbstractCapability
 
         async with AgentPool(manifest_with_skills) as pool:
             skill = MagicMock(spec="Skill")
             skill.name = "dynamic-skill"
 
-            mock_provider = MagicMock(spec=ResourceProvider)
+            mock_provider = MagicMock(spec=AbstractCapability)
             mock_provider.name = "dynamic_provider"
             mock_provider.get_skills = AsyncMock(return_value=[skill])
             mock_provider.skills_changed = MagicMock()
@@ -527,13 +527,13 @@ class TestRegisterUnregisterSkillProvider:
         """Test that unregister_skill_provider() removes skills from aggregator."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from agentpool.resource_providers.base import ResourceProvider
+        from pydantic_ai.capabilities import AbstractCapability
 
         async with AgentPool(manifest_with_skills) as pool:
             skill = MagicMock(spec="Skill")
             skill.name = "temporary-skill"
 
-            mock_provider = MagicMock(spec=ResourceProvider)
+            mock_provider = MagicMock(spec=AbstractCapability)
             mock_provider.name = "temp_provider"
             mock_provider.get_skills = AsyncMock(return_value=[skill])
             mock_provider.skills_changed = MagicMock()
@@ -556,10 +556,10 @@ class TestRegisterUnregisterSkillProvider:
         """Test that register_skill_provider() adds provider to URI resolver."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from agentpool.resource_providers.base import ResourceProvider
+        from pydantic_ai.capabilities import AbstractCapability
 
         async with AgentPool(manifest_with_skills) as pool:
-            mock_provider = MagicMock(spec=ResourceProvider)
+            mock_provider = MagicMock(spec=AbstractCapability)
             mock_provider.name = "resolver_provider"
             mock_provider.get_skills = AsyncMock(return_value=[])
             mock_provider.skills_changed = MagicMock()
@@ -578,10 +578,10 @@ class TestRegisterUnregisterSkillProvider:
         """Test that unregister_skill_provider() removes from URI resolver."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from agentpool.resource_providers.base import ResourceProvider
+        from pydantic_ai.capabilities import AbstractCapability
 
         async with AgentPool(manifest_with_skills) as pool:
-            mock_provider = MagicMock(spec=ResourceProvider)
+            mock_provider = MagicMock(spec=AbstractCapability)
             mock_provider.name = "rm_provider"
             mock_provider.get_skills = AsyncMock(return_value=[])
             mock_provider.skills_changed = MagicMock()

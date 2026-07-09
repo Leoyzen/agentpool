@@ -4,10 +4,10 @@ Previously, when an agent shared the pool's MCPManager (``_mcp_shared =
 True``), the ``_toolset_cache`` on that shared manager was never
 invalidated between sessions.  On session resume, a new
 ``SessionConnectionPool`` was created with fresh transports, but
-``as_capability()`` returned the OLD cached ``MCPToolset`` (which held
+``get_capabilities()`` returned the OLD cached ``MCPToolset`` (which held
 the dead transport from the previous WebSocket session).
 
-After T10-T12, ``as_capability()`` accepts ``session_id`` and routes
+After T10-T12, ``get_capabilities()`` accepts ``session_id`` and routes
 session-scoped configs through per-session ``_SessionContext`` objects
 with their own ``toolset_cache``.  ``cleanup_session()`` clears the
 per-session cache, ensuring the next session gets a fresh toolset.
@@ -78,7 +78,7 @@ class _FakeTransport:
 
 @pytest.mark.unit
 async def test_session_resume_returns_fresh_toolset() -> None:
-    """as_capability() returns a fresh toolset after session cleanup+recreate.
+    """get_capabilities() returns a fresh toolset after session cleanup+recreate.
 
     After T10-T12, session-scoped toolsets are cached on the per-session
     ``_SessionContext.toolset_cache`` rather than the global
@@ -90,11 +90,11 @@ async def test_session_resume_returns_fresh_toolset() -> None:
     Steps:
     1. Create a shared MCPManager (simulating pool-level manager).
     2. Session 1: register session, add transport A, build snapshot,
-       call ``as_capability(session_id="s1")`` -> toolset cached with
+       call ``get_capabilities(session_id="s1")`` -> toolset cached with
        transport A on the session context.
     3. Call ``cleanup_session("s1")`` to tear down session 1.
     4. Session 2 (resume): register a new session, add transport B,
-       build a new snapshot, call ``as_capability(session_id="s2")``.
+       build a new snapshot, call ``get_capabilities(session_id="s2")``.
     5. Assert: the returned toolset holds transport B (fresh), NOT
        transport A (stale), and is a different object than toolset1.
     """
@@ -119,7 +119,7 @@ async def test_session_resume_returns_fresh_toolset() -> None:
             patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
             patch("pydantic_ai.capabilities.MCP", _FakeMCP),
         ):
-            caps1 = await manager.as_capability(session_id="s1")
+            caps1 = await manager.get_capabilities(session_id="s1")
 
         assert len(caps1) == 1
         toolset1 = cast(_FakeToolset, caps1[0].local)
@@ -145,7 +145,7 @@ async def test_session_resume_returns_fresh_toolset() -> None:
             patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
             patch("pydantic_ai.capabilities.MCP", _FakeMCP),
         ):
-            caps2 = await manager.as_capability(session_id="s2")
+            caps2 = await manager.get_capabilities(session_id="s2")
 
         assert len(caps2) == 1
         toolset2 = cast(_FakeToolset, caps2[0].local)
@@ -263,7 +263,7 @@ async def test_multiple_acp_servers_get_fresh_toolsets() -> None:
             patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
             patch("pydantic_ai.capabilities.MCP", _FakeMCP),
         ):
-            caps1 = await manager.as_capability(session_id="s1")
+            caps1 = await manager.get_capabilities(session_id="s1")
 
         assert len(caps1) == 2
 
@@ -291,7 +291,7 @@ async def test_multiple_acp_servers_get_fresh_toolsets() -> None:
             patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
             patch("pydantic_ai.capabilities.MCP", _FakeMCP),
         ):
-            caps2 = await manager.as_capability(session_id="s2")
+            caps2 = await manager.get_capabilities(session_id="s2")
 
         assert len(caps2) == 2
 
@@ -350,7 +350,7 @@ async def test_cleanup_session_clears_per_session_cache() -> None:
             patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
             patch("pydantic_ai.capabilities.MCP", _FakeMCP),
         ):
-            await manager.as_capability(session_id="s1")
+            await manager.get_capabilities(session_id="s1")
 
         # Per-session cache is populated
         assert len(ctx.toolset_cache) == 1

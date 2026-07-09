@@ -14,7 +14,7 @@ from pydantic_ai import RunContext  # noqa: TC002
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.log import get_logger
-from agentpool.resource_providers import StaticResourceProvider
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
 
 logger = get_logger(__name__)
@@ -233,7 +233,7 @@ async def get_platform_paths() -> str:
 # =============================================================================
 
 
-class DebugTools(StaticResourceProvider):
+class DebugTools(FunctionToolsetCapability):
     """Debug and introspection tools for agent development.
 
     Provides tools for:

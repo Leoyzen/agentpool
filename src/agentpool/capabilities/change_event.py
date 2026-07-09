@@ -1,0 +1,35 @@
+"""ChangeEvent — emitted when a capability's resources change.
+
+Part of the capability-native migration (M3). ``ChangeEvent`` is the
+capability-layer equivalent of
+:class:`~ChangeEvent`, using
+the signal names from ``AbstractCapability`` (``tools_changed`` etc.)
+as the ``kind`` discriminator.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Literal
+
+
+ChangeKind = Literal[
+    "tools_changed",
+    "prompts_changed",
+    "resources_changed",
+    "skills_changed",
+]
+"""Discriminator for which resource type changed in a capability."""
+
+
+@dataclass(frozen=True, slots=True)
+class ChangeEvent:
+    """Immutable event emitted when a capability's resources change.
+
+    Attributes:
+        capability_name: Name of the capability that emitted the event.
+        kind: Which resource type changed. Defaults to ``"tools_changed"``.
+    """
+
+    capability_name: str
+    kind: ChangeKind = "tools_changed"

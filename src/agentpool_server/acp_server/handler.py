@@ -521,7 +521,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         # create_session is idempotent — no-op if the session already exists.
         await session_pool.create_session(session_id, cwd=cwd)
 
-        # MCP tools are handled via McpConfigSnapshot → as_capability() →
+        # MCP tools are handled via McpConfigSnapshot → get_capabilities() →
         # MCPToolset, not through agent.tools.providers.
         acp_session = self.session_manager.get_session(session_id)
 

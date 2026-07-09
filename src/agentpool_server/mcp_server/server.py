@@ -72,10 +72,10 @@ class MCPServer(BaseServer):
         """
         from fastmcp import FastMCP
 
-        from agentpool.resource_providers.pool import PoolResourceProvider
+        # SubagentCapability removed - use SubagentCapability from agentpool.capabilities.subagent_capability
 
         super().__init__(pool, name=name, raise_exceptions=raise_exceptions)
-        self.provider = PoolResourceProvider(pool, zed_mode=config.zed_mode)
+        self.provider = SubagentCapability(pool, zed_mode=config.zed_mode)
         self.config = config
 
         self._subscriptions: defaultdict[str, set[mcp.ServerSession]] = defaultdict(set)

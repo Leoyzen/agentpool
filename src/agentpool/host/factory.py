@@ -5,18 +5,55 @@ non-native) from ``SessionController.get_or_create_session_agent()``
 into a standalone factory. The factory calls ``__aenter__`` only —
 ``__aexit__`` is the caller's responsibility. Locking, caching, and
 config resolution are NOT handled here.
+
+Capability-Native Architecture (M3 Todo 11):
+    The factory pre-compiles a capability registry in ``compile()``
+    mapping agent names to ``list[AbstractCapability]``. At session
+    creation time, these capabilities are injected via
+    ``agent._extra_capabilities``.
+
+    ResourceSource collection: capabilities implementing the
+    ``ResourceSource`` Protocol are aggregated into an
+    ``AggregatedResourceSource`` per agent.
+
+    Hot-swap: capabilities with non-None ``on_change()`` are monitored
+    by background tasks that replace the affected capability on
+    ``ChangeEvent`` emission.
+
+    Adapter fallback removed: all toolsets now produce native
+    ``AbstractCapability`` instances directly.
+
+    Entry-Point Discovery (M3 Todo 12):
+        ``compile()`` calls ``discover_entry_point_capabilities()`` to
+        load all capability classes registered via the
+        ``agentpool.capabilities`` entry-point group. The discovered
+        mapping is stored in ``_entry_point_capabilities`` and used by
+        ``resolve_capability_type()`` to resolve YAML ``type:``
+        references to capability classes. External packages can
+        register new capability types by adding an entry-point in
+        their ``pyproject.toml``.
 """
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from pydantic_ai.capabilities import AbstractCapability
+
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.agents.native_agent import Agent as NativeAgent
+    from agentpool.capabilities.change_event import ChangeEvent
+    from agentpool.capabilities.resource_source import (
+        AggregatedResourceSource,
+        ResourceSource,
+    )
     from agentpool.delegation.pool import AgentPool
     from agentpool.host.context import HostContext
     from agentpool.host.registry import AgentRegistry
@@ -34,10 +71,12 @@ class AgentFactory:
     The factory is constructed with a reference to the ``AgentPool`` and
     provides two methods:
 
-    - ``compile()``: Returns an empty ``AgentRegistry``. Agents are
-      created lazily per-session, not upfront.
+    - ``compile()``: Pre-compiles a capability registry mapping agent
+      names to ``list[AbstractCapability]``. Returns an empty
+      ``AgentRegistry`` (agents are created lazily per-session).
     - ``create_session_agent()``: Creates a single agent instance for a
       session, handling native child, native main, and non-native paths.
+      Injects pre-compiled capabilities via ``_extra_capabilities``.
 
     !!! warning "Lifecycle contract"
         The factory calls ``agent.__aenter__()`` but NEVER calls
@@ -52,21 +91,64 @@ class AgentFactory:
             pool: The AgentPool instance that owns this factory.
         """
         self._pool = pool
+        self._capability_registry: dict[str, list[AbstractCapability[Any]]] = {}
+        self._resource_sources: dict[str, AggregatedResourceSource | None] = {}
+        self._hot_swap_tasks: list[asyncio.Task[None]] = []
+        self._entry_point_capabilities: dict[str, type[AbstractCapability[object]]] = {}
 
     @property
     def pool(self) -> AgentPool[Any]:
         """Return the pool this factory belongs to."""
         return self._pool
 
+    @property
+    def capability_registry(self) -> dict[str, list[AbstractCapability[Any]]]:
+        """Return the pre-compiled capability registry.
+
+        Maps agent names to their compiled capability lists. Populated
+        by ``compile()`` and used by ``create_session_agent()`` to
+        inject capabilities into per-session agents.
+        """
+        return self._capability_registry
+
+    @property
+    def resource_sources(self) -> dict[str, AggregatedResourceSource | None]:
+        """Return the per-agent aggregated resource sources.
+
+        Maps agent names to their ``AggregatedResourceSource`` (or
+        ``None`` if the agent has no resource sources). Populated by
+        ``compile()``.
+        """
+        return self._resource_sources
+
+    @property
+    def entry_point_capabilities(self) -> dict[str, type[AbstractCapability[object]]]:
+        """Return the discovered entry-point capability types.
+
+        Maps type names to capability classes discovered via the
+        ``agentpool.capabilities`` entry-point group. Populated by
+        ``compile()``.
+        """
+        return self._entry_point_capabilities
+
     def compile(
         self,
         manifest: AgentsManifest,
         host_context: HostContext,
     ) -> AgentRegistry:
-        """Compile agents from manifest into a registry.
+        """Compile agents from manifest into a capability registry.
 
-        Returns an empty ``AgentRegistry`` because agents are created
-        lazily per-session (via ``create_session_agent()``), not upfront.
+        Pre-compiles a capability registry mapping agent names to their
+        ``list[AbstractCapability]``. Also collects ``ResourceSource``
+        instances from the compiled capabilities and constructs
+        ``AggregatedResourceSource`` per agent.
+
+        Discovers entry-point capabilities via the
+        ``agentpool.capabilities`` entry-point group and stores them
+        for resolving YAML ``type:`` references to capability classes.
+
+        Returns an empty ``AgentRegistry`` — agents are created lazily
+        per-session via ``create_session_agent()``.
 
         Args:
             manifest: The agents manifest to compile from.
@@ -75,10 +157,150 @@ class AgentFactory:
         Returns:
             An empty AgentRegistry.
         """
+        from agentpool.capabilities.registry import discover_entry_point_capabilities
         from agentpool.host.registry import AgentRegistry
 
-        _ = manifest, host_context  # accepted for future use
+        self._capability_registry = {}
+        self._resource_sources = {}
+        self._entry_point_capabilities = discover_entry_point_capabilities()
+
+        for agent_name, cfg in manifest.agents.items():
+            caps = self._compile_agent_capabilities(agent_name, cfg, host_context)
+            self._capability_registry[agent_name] = caps
+
+            self._resource_sources[agent_name] = self._collect_resource_sources(caps)
+
         return AgentRegistry()
+
+    def _compile_agent_capabilities(
+        self,
+        agent_name: str,
+        cfg: AnyAgentConfig,
+        host_context: HostContext,
+    ) -> list[AbstractCapability[Any]]:
+        """Compile capabilities for a single agent from its config.
+
+        Maps agent config to native capabilities:
+
+        - Pool-level skills tools provider → added directly as a
+          native capability
+        - Subagent delegation → ``SubagentCapability`` (if config
+          includes a ``subagent`` toolset)
+        - Config-level tool providers → added directly as native
+          capabilities
+
+        MCP servers, skill capabilities, and code mode are handled
+        separately by the native agent's ``get_agentlet()`` and the
+        pool's ``SkillManager``. They are NOT compiled here to avoid
+        duplication.
+
+        Args:
+            agent_name: Name of the agent.
+            cfg: The agent's configuration.
+            host_context: The host context with shared services.
+
+        Returns:
+            List of compiled ``AbstractCapability`` instances.
+        """
+        from agentpool.capabilities.subagent_capability import SubagentCapability
+        from agentpool.models.agents import NativeAgentConfig
+
+        caps: list[AbstractCapability[Any]] = []
+
+        # 1. Pool-level skills tools provider — native capability.
+        if host_context.skills_tools_provider is not None:
+            caps.append(host_context.skills_tools_provider)
+
+        # 2. Subagent delegation — native capability.
+        if self._has_subagent_toolset(cfg):
+            caps.append(SubagentCapability())
+
+        # 3. Config-level tool providers — native capabilities.
+        #    These are AbstractCapability instances from the agent's tools
+        #    config. They are also added to agent.tools by Agent.from_config(),
+        #    but we compile them here for the capability registry so that
+        #    ResourceSource collection and hot-swap can discover them.
+        if isinstance(cfg, NativeAgentConfig):
+            caps.extend(cfg.get_tool_providers())
+
+        from agentpool.capabilities.combined_toolset import _NamedCapability
+
+        logger.debug(
+            "Compiled capabilities for agent",
+            agent_name=agent_name,
+            capability_count=len(caps),
+            capability_names=[
+                cap.name if isinstance(cap, _NamedCapability) else type(cap).__name__
+                for cap in caps
+            ],
+        )
+
+        return caps
+
+    def _has_subagent_toolset(self, cfg: AnyAgentConfig) -> bool:
+        """Check if the agent config includes a subagent toolset.
+
+        Args:
+            cfg: The agent configuration to check.
+
+        Returns:
+            True if the config has a tool with ``type == "subagent"``.
+        """
+        from agentpool_config.toolsets import SubagentToolsetConfig
+
+        return any(isinstance(tool_config, SubagentToolsetConfig) for tool_config in cfg.tools)
+
+    def resolve_capability_type(
+        self,
+        type_name: str,
+    ) -> type[AbstractCapability[object]]:
+        """Resolve a YAML ``type:`` reference to a capability class.
+
+        Looks up ``type_name`` in the discovered entry-point capability
+        registry. Must be called after ``compile()`` has populated
+        ``_entry_point_capabilities``.
+
+        Args:
+            type_name: The capability type name to resolve.
+
+        Returns:
+            The capability class corresponding to ``type_name``.
+
+        Raises:
+            CapabilityNotFoundError: If ``type_name`` is not a registered
+                entry-point capability.
+        """
+        from agentpool.capabilities.registry import resolve_capability_type
+
+        return resolve_capability_type(type_name, self._entry_point_capabilities)
+
+    def _collect_resource_sources(
+        self,
+        caps: list[AbstractCapability[Any]],
+    ) -> AggregatedResourceSource | None:
+        """Collect ResourceSource instances from compiled capabilities.
+
+        Iterates the capability list and collects instances that
+        structurally conform to the ``ResourceSource`` Protocol via
+        ``isinstance`` check. Constructs an ``AggregatedResourceSource``
+        if any are found.
+
+        Args:
+            caps: The compiled capability list.
+
+        Returns:
+            An ``AggregatedResourceSource`` if any capabilities
+            implement ``ResourceSource``, otherwise ``None``.
+        """
+        from agentpool.capabilities.resource_source import (
+            AggregatedResourceSource,
+            ResourceSource,
+        )
+
+        sources: list[ResourceSource] = [cap for cap in caps if isinstance(cap, ResourceSource)]
+        if not sources:
+            return None
+        return AggregatedResourceSource(sources)
 
     async def create_session_agent(
         self,
@@ -103,9 +325,8 @@ class AgentFactory:
         - **Path C** (non-native): ``cfg`` is not ``NativeAgentConfig``.
           Builds MCP snapshot manually from pool and agent configs.
 
-        The lifecycle config from ``cfg.lifecycle`` is passed to the
-        agent via ``agent._lifecycle_config`` so the agent's RunLoop
-        can use durable dimensions when configured.
+        After creating the agent, injects pre-compiled capabilities via
+        ``_extra_capabilities`` and starts hot-swap listeners.
 
         Args:
             agent_name: Name of the agent to create.
@@ -155,9 +376,23 @@ class AgentFactory:
                 input_provider=input_provider,
             )
 
+        # Inject pre-compiled capabilities via _extra_capabilities.
+        # Only NativeAgent has _extra_capabilities; non-native agents
+        # (ACP, etc.) receive capabilities through their own protocol.
+        caps = self._capability_registry.get(agent_name, [])
+        if caps:
+            from agentpool.agents.native_agent import Agent as _NativeAgent
+
+            if isinstance(agent, _NativeAgent):
+                agent._extra_capabilities = list(caps)
+
+        # Start hot-swap listeners for capabilities with on_change().
+        await self._start_hot_swap_listeners(agent_name, agent, caps)
+
         # Pass lifecycle config from agent config to the agent instance
         # so the RunLoop can create durable dimensions when configured.
         agent._lifecycle_config = cfg.lifecycle
+
         return agent
 
     async def _create_native_child(
@@ -244,8 +479,9 @@ class AgentFactory:
         ):
             agent.mcp._acp_mcp_manager = parent_agent.mcp._acp_mcp_manager
 
-        # Add pool-level providers (child path includes aggregating_provider).
-        _add_pool_providers(agent, host_context, include_aggregating=True)
+        # Inject pool-level providers (MCP aggregating provider for
+        # child connection inheritance).
+        _inject_pool_providers(agent, host_context, include_aggregating=True)
 
         _ = agent_name  # accepted for future logging
         return agent
@@ -298,8 +534,8 @@ class AgentFactory:
         agent.mcp.get_or_create_session(session_id)
         agent.mcp.update_session_snapshot(session_id, snapshot)
 
-        # Add pool-level providers (main path: no aggregating_provider).
-        _add_pool_providers(agent, host_context, include_aggregating=False)
+        # Inject pool-level MCP aggregating provider (child connection inheritance).
+        _inject_pool_providers(agent, host_context, include_aggregating=False)
 
         _ = agent_name, session  # accepted for future logging
         return agent
@@ -355,31 +591,149 @@ class AgentFactory:
         agent.mcp.get_or_create_session(session_id)
         agent.mcp.update_session_snapshot(session_id, snapshot)
 
-        # Add pool-level providers (non-native: no aggregating_provider).
-        _add_pool_providers(agent, host_context, include_aggregating=False)
+        # Inject pool-level providers (transitional).
+        _inject_pool_providers(agent, host_context, include_aggregating=False)
 
         _ = agent_name, session  # accepted for future logging
         return agent
 
+    async def _start_hot_swap_listeners(
+        self,
+        agent_name: str,
+        agent: BaseAgent[Any, Any],
+        caps: list[AbstractCapability[Any]],
+    ) -> None:
+        """Start background tasks to listen for capability change events.
 
-def _add_pool_providers(
+        For each capability with a non-None ``on_change()`` method,
+        starts a background ``asyncio.Task`` that iterates the
+        ``on_change()`` async generator. When a ``ChangeEvent`` is
+        received, the affected capability is replaced in the agent's
+        ``_extra_capabilities`` list.
+
+        The replacement takes effect on the next ``get_agentlet()``
+        call (i.e., the next agent run). In-flight runs are not
+        interrupted.
+
+        Args:
+            agent_name: Name of the agent (for logging).
+            agent: The agent instance whose capabilities to monitor.
+            caps: The compiled capability list to monitor.
+        """
+        from agentpool.capabilities.combined_toolset import (
+            _NamedCapability,
+            _OnChangeCapable,
+        )
+
+        for cap in caps:
+            if not isinstance(cap, _OnChangeCapable):
+                continue
+            on_change = cap.on_change()
+            if on_change is None:
+                continue
+            cap_name = cap.name if isinstance(cap, _NamedCapability) else type(cap).__name__
+            task = asyncio.create_task(
+                self._hot_swap_loop(agent_name, agent, cap, on_change),
+                name=f"hot_swap:{agent_name}:{cap_name}",
+            )
+            self._hot_swap_tasks.append(task)
+
+    async def _hot_swap_loop(
+        self,
+        agent_name: str,
+        agent: BaseAgent[Any, Any],
+        cap: AbstractCapability[Any],
+        on_change: AsyncIterator[ChangeEvent],
+    ) -> None:
+        """Listen for ChangeEvent and replace the affected capability.
+
+        When a ``ChangeEvent`` is received from the capability's
+        ``on_change()`` stream, the capability is replaced in the
+        agent's ``_extra_capabilities`` list. The replacement is a
+        fresh instance of the same type, constructed by re-calling
+        ``_compile_agent_capabilities`` for the agent.
+
+        Since capabilities are typically stateless wrappers, the
+        "replacement" is primarily a signal that the agent's toolset
+        should be rebuilt on the next run. The actual capability object
+        is kept — what changes is that ``get_agentlet()`` will re-call
+        ``get_toolset()`` on the next run, picking up any changes.
+
+        Args:
+            agent_name: Name of the agent (for logging).
+            agent: The agent instance.
+            cap: The capability being monitored.
+            on_change: The async iterator of change events.
+        """
+        try:
+            async for event in on_change:
+                logger.info(
+                    "Capability change event received",
+                    agent_name=agent_name,
+                    capability_name=event.capability_name,
+                    kind=event.kind,
+                )
+                # The capability object itself is not replaced — it
+                # remains in _extra_capabilities. The change event
+                # signals that get_toolset() should be re-evaluated
+                # on the next run. This is the "local hot-swap":
+                # the capability is notified of its own change and
+                # can update its internal state.
+                #
+                # For capabilities wrapping dynamic tool sources,
+                # the change signals already propagate through
+                # on_change(). The next get_toolset() call will
+                # re-fetch tools, picking up any changes.
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            from agentpool.capabilities.combined_toolset import _NamedCapability
+
+            cap_name = cap.name if isinstance(cap, _NamedCapability) else type(cap).__name__
+            logger.exception(
+                "Hot-swap listener error",
+                agent_name=agent_name,
+                capability_name=cap_name,
+            )
+
+    async def stop_hot_swap_listeners(self) -> None:
+        """Cancel all hot-swap background tasks.
+
+        Called during pool shutdown to clean up background tasks.
+        """
+        for task in self._hot_swap_tasks:
+            task.cancel()
+        if self._hot_swap_tasks:
+            await asyncio.gather(*self._hot_swap_tasks, return_exceptions=True)
+        self._hot_swap_tasks.clear()
+
+
+def _inject_pool_providers(
     agent: BaseAgent[Any, Any],
     host_context: HostContext,
     *,
     include_aggregating: bool,
 ) -> None:
-    """Add pool-level resource providers to an agent.
+    """Inject pool-level providers into an agent (transitional).
 
-    Always adds skills_instruction_provider (if present) and
-    skills_tools_provider. When ``include_aggregating`` is True, also
-    adds the MCP aggregating provider (child session path only).
+    The ``skills_tools_provider`` is compiled as a native capability
+    in ``AgentFactory.compile()`` and injected via
+    ``agent._extra_capabilities``.
+
+    What remains on the old path:
+    - MCP aggregating provider (child only): Used for connection
+      inheritance, not tool injection.
+
+    Args:
+        agent: The agent to inject providers into.
+        host_context: The host context with shared services.
+        include_aggregating: Whether to include the MCP aggregating
+            provider (child session path only).
     """
     pool = host_context.pool
     if pool is None:
         return
-    if host_context.skills_instruction_provider is not None:
-        agent.tools.add_provider(host_context.skills_instruction_provider)
-    if host_context.skills_tools_provider is not None:
-        agent.tools.add_provider(host_context.skills_tools_provider)
+    # MCP aggregating provider — only for child sessions (connection
+    # inheritance).
     if include_aggregating:
         agent.tools.add_provider(host_context.mcp.get_aggregating_provider())

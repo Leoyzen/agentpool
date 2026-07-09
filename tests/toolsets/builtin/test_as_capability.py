@@ -1,4 +1,4 @@
-"""Tests for builtin tool provider as_capability() methods."""
+"""Tests for builtin tool provider get_capabilities() methods."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pydantic_ai.capabilities import Toolset
 from pydantic_ai.toolsets import AbstractToolset
 import pytest
 
-from agentpool.resource_providers import ResourceProvider, StaticResourceProvider
+from pydantic_ai.capabilities import AbstractCapability, FunctionToolsetCapability
 from agentpool_toolsets.builtin import (
     CodeTools,
     DebugTools,
@@ -37,7 +37,7 @@ def _make_run_context() -> RunContext[Any]:
 async def _resolve_toolset(cap: Toolset[Any]) -> AbstractToolset[Any] | None:
     """Resolve a Toolset capability to its underlying AbstractToolset.
 
-    Since as_capability() returns Toolset(callable) for lazy evaluation,
+    Since get_capabilities() returns Toolset(callable) for lazy evaluation,
     we need to invoke the callable with a mock RunContext to get the
     actual toolset.
     """
@@ -58,49 +58,49 @@ async def _resolve_toolset(cap: Toolset[Any]) -> AbstractToolset[Any] | None:
 
 
 @pytest.mark.unit
-class TestResourceProviderAsCapability:
-    """Tests for ResourceProvider.as_capability() base implementation."""
+class TestCapabilityGetCapabilities:
+    """Tests for AbstractCapability.get_capabilities() base implementation."""
 
     async def test_returns_toolset_capability(self) -> None:
         """Default implementation returns a Toolset capability."""
 
-        class SimpleProvider(StaticResourceProvider):
+        class SimpleProvider(FunctionToolsetCapability):
             def __init__(self) -> None:
                 super().__init__(name="simple")
                 self._tools = [self.create_tool(lambda x: x, name_override="identity")]
 
         provider = SimpleProvider()
-        cap = provider.as_capability()
+        cap = provider.get_capabilities()
 
         assert isinstance(cap, Toolset)
 
     async def test_empty_tools_returns_toolset(self) -> None:
         """Provider with no tools still returns a Toolset capability."""
 
-        class EmptyProvider(ResourceProvider):
+        class EmptyProvider(FunctionToolsetCapability):
             pass
 
         provider = EmptyProvider(name="empty")
-        cap = provider.as_capability()
+        cap = provider.get_capabilities()
 
         assert isinstance(cap, Toolset)
 
 
 @pytest.mark.unit
 class TestDebugToolsAsCapability:
-    """Tests for DebugTools.as_capability()."""
+    """Tests for DebugTools.get_capabilities()."""
 
     async def test_returns_toolset_capability(self) -> None:
         """DebugTools returns a Toolset capability."""
         provider = DebugTools()
-        cap = cast(Toolset[Any], provider.as_capability())
+        cap = cast(Toolset[Any], provider.get_capabilities())
 
         assert isinstance(cap, Toolset)
 
     async def test_toolset_contains_expected_tools(self) -> None:
         """Capability toolset includes introspection and platform_paths tools."""
         provider = DebugTools()
-        cap = cast(Toolset[Any], provider.as_capability())
+        cap = cast(Toolset[Any], provider.get_capabilities())
         toolset = await _resolve_toolset(cap)
 
         assert toolset is not None
@@ -112,19 +112,19 @@ class TestDebugToolsAsCapability:
 
 @pytest.mark.unit
 class TestSubagentToolsAsCapability:
-    """Tests for SubagentTools.as_capability()."""
+    """Tests for SubagentTools.get_capabilities()."""
 
     async def test_returns_toolset_capability(self) -> None:
         """SubagentTools returns a Toolset capability."""
         provider = SubagentTools()
-        cap = cast(Toolset[Any], provider.as_capability())
+        cap = cast(Toolset[Any], provider.get_capabilities())
 
         assert isinstance(cap, Toolset)
 
     async def test_toolset_contains_expected_tools(self) -> None:
         """Capability toolset includes list_available_nodes and task tools."""
         provider = SubagentTools()
-        cap = cast(Toolset[Any], provider.as_capability())
+        cap = cast(Toolset[Any], provider.get_capabilities())
         toolset = await _resolve_toolset(cap)
 
         assert toolset is not None
@@ -136,19 +136,19 @@ class TestSubagentToolsAsCapability:
 
 @pytest.mark.unit
 class TestSkillsToolsAsCapability:
-    """Tests for SkillsTools.as_capability()."""
+    """Tests for SkillsTools.get_capabilities()."""
 
     async def test_returns_toolset_capability(self) -> None:
         """SkillsTools returns a Toolset capability."""
         provider = SkillsTools()
-        cap = cast(Toolset[Any], provider.as_capability())
+        cap = cast(Toolset[Any], provider.get_capabilities())
 
         assert isinstance(cap, Toolset)
 
     async def test_toolset_contains_expected_tools(self) -> None:
         """Capability toolset includes load_skill and list_skills tools."""
         provider = SkillsTools()
-        cap = cast(Toolset[Any], provider.as_capability())
+        cap = cast(Toolset[Any], provider.get_capabilities())
         toolset = await _resolve_toolset(cap)
 
         assert toolset is not None
@@ -160,19 +160,19 @@ class TestSkillsToolsAsCapability:
 
 @pytest.mark.unit
 class TestCodeToolsAsCapability:
-    """Tests for CodeTools.as_capability()."""
+    """Tests for CodeTools.get_capabilities()."""
 
     async def test_returns_toolset_capability(self) -> None:
         """CodeTools returns a Toolset capability."""
         provider = CodeTools()
-        cap = cast(Toolset[Any], provider.as_capability())
+        cap = cast(Toolset[Any], provider.get_capabilities())
 
         assert isinstance(cap, Toolset)
 
     async def test_toolset_contains_format_code_tool(self) -> None:
         """Capability toolset always includes format_code tool."""
         provider = CodeTools()
-        cap = cast(Toolset[Any], provider.as_capability())
+        cap = cast(Toolset[Any], provider.get_capabilities())
         toolset = await _resolve_toolset(cap)
 
         assert toolset is not None
@@ -183,19 +183,19 @@ class TestCodeToolsAsCapability:
 
 @pytest.mark.unit
 class TestProcessManagementToolsAsCapability:
-    """Tests for ProcessManagementTools.as_capability()."""
+    """Tests for ProcessManagementTools.get_capabilities()."""
 
     async def test_returns_toolset_capability(self) -> None:
         """ProcessManagementTools returns a Toolset capability."""
         provider = ProcessManagementTools()
-        cap = cast(Toolset[Any], provider.as_capability())
+        cap = cast(Toolset[Any], provider.get_capabilities())
 
         assert isinstance(cap, Toolset)
 
     async def test_toolset_contains_expected_tools(self) -> None:
         """Capability toolset includes process management tools."""
         provider = ProcessManagementTools()
-        cap = cast(Toolset[Any], provider.as_capability())
+        cap = cast(Toolset[Any], provider.get_capabilities())
         toolset = await _resolve_toolset(cap)
 
         assert toolset is not None
@@ -211,19 +211,19 @@ class TestProcessManagementToolsAsCapability:
 
 @pytest.mark.unit
 class TestWorkersToolsAsCapability:
-    """Tests for WorkersTools.as_capability()."""
+    """Tests for WorkersTools.get_capabilities()."""
 
     async def test_returns_toolset_capability_with_no_workers(self) -> None:
         """WorkersTools with no workers returns a Toolset capability."""
         provider = WorkersTools(workers=[])
-        cap = cast(Toolset[Any], provider.as_capability())
+        cap = cast(Toolset[Any], provider.get_capabilities())
 
         assert isinstance(cap, Toolset)
 
     async def test_empty_workers_yields_no_tools(self) -> None:
         """WorkersTools with empty workers list produces empty toolset."""
         provider = WorkersTools(workers=[])
-        cap = cast(Toolset[Any], provider.as_capability())
+        cap = cast(Toolset[Any], provider.get_capabilities())
         toolset = await _resolve_toolset(cap)
 
         assert toolset is None

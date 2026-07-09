@@ -5,7 +5,7 @@ from __future__ import annotations
 from fnmatch import fnmatch
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
-from agentpool.resource_providers import StaticResourceProvider
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
 
 async def vfs_list(  # noqa: D417
@@ -180,7 +180,7 @@ async def vfs_info(ctx: AgentContext) -> str:
     return "\n".join(sections)
 
 
-class VFSTools(StaticResourceProvider):
+class VFSTools(FunctionToolsetCapability):
     """Provider for unified filesystem tools.
 
     Provides tools for listing and reading from the agent's overlay filesystem,

@@ -1,16 +1,16 @@
 """Shared utility for wrapping AgentPool tools for pydantic-ai.
 
-Extracted from ``ResourceProvider._wrap_for_pydantic_ai`` so that
+Extracted from ``AbstractCapability._wrap_for_pydantic_ai`` so that
 ``ToolsetFactory`` implementations can wrap tools without depending on the
-deprecated ``ResourceProvider`` hierarchy.
+deprecated ``AbstractCapability`` hierarchy.
 
 The long-term migration path is:
 
 1. ``StaticToolsetFactory`` and friends call ``wrap_tool_for_pydantic_ai``
-   directly (no ``ResourceProvider`` import).
-2. ``ResourceProvider._wrap_for_pydantic_ai`` delegates here for backwards
+   directly (no ``AbstractCapability`` import).
+2. ``AbstractCapability._wrap_for_pydantic_ai`` delegates here for backwards
    compatibility.
-3. Once all callers migrate, ``ResourceProvider`` is removed.
+3. Once all callers migrate, ``AbstractCapability`` is removed.
 """
 
 from __future__ import annotations

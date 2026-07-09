@@ -20,7 +20,7 @@ from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.agents.events import StreamCompleteEvent
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 from agentpool.log import get_logger
-from agentpool.resource_providers import StaticResourceProvider
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.tools.exceptions import ToolError
 
 
@@ -59,7 +59,7 @@ def _generate_task_id(description: str) -> str:
     return f"{timestamp}-{slug}"
 
 
-class SubagentTools(StaticResourceProvider):
+class SubagentTools(FunctionToolsetCapability):
     """Provider for task delegation tools with streaming progress."""
 
     def __init__(

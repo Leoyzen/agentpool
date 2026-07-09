@@ -23,7 +23,7 @@ from agentpool import Agent
 from agentpool.delegation import AgentPool
 from agentpool.models.agents import NativeAgentConfig
 from agentpool.models.manifest import AgentsManifest
-from agentpool.resource_providers.mcp_provider import MCPResourceProvider
+# MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
 from agentpool_config.mcp_server import AcpMCPServerConfig
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.acp_mcp_transport import AcpMcpTransport
@@ -355,12 +355,12 @@ async def test_get_tools_sends_tools_list_via_acp(
     acp_agent: AgentPoolACPAgent,
     server_config: AcpMcpServer,
 ) -> None:
-    """MCPResourceProvider.get_tools() must trigger tools/list via ACP mcp/message.
+    """MCPCapability.get_tools() must trigger tools/list via ACP mcp/message.
 
     This verifies the complete end-to-end flow:
 
     1. connect_acp_mcp_server() creates connection
-    2. MCPResourceProvider with AcpMcpTransport enters context
+    2. MCPCapability with AcpMcpTransport enters context
     3. Real initialize() completes (via _forward_to_client + mock response)
     4. provider.get_tools() calls refresh_tools_cache() -> list_tools()
     5. session.list_tools() sends MCP tools/list request
@@ -422,7 +422,7 @@ async def test_get_tools_sends_tools_list_via_acp(
         name=server_config.name,
         timeout=10.0,
     )
-    provider = MCPResourceProvider(server=acp_server_config, transport=transport)
+    provider = MCPCapability(server=acp_server_config, transport=transport)
 
     with anyio.fail_after(5):
         async with provider:

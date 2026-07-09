@@ -8,7 +8,7 @@ from pydantic_ai import Agent as PydanticAgent
 import pytest
 
 from agentpool.agents.native_agent import Agent
-from agentpool.resource_providers.base import ResourceProvider
+from pydantic_ai.capabilities import AbstractCapability
 
 
 if TYPE_CHECKING:
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from agentpool.prompts.instructions import InstructionFunc
 
 
-class SimpleInstructionProvider(ResourceProvider):
+class SimpleInstructionProvider(FunctionToolsetCapability):
     """Simple provider that returns static instructions."""
 
     def __init__(self) -> None:
@@ -33,7 +33,7 @@ class SimpleInstructionProvider(ResourceProvider):
 
         return [simple_instruction]
 
-    def as_capability(self) -> AbstractCapability | None:
+    def get_capabilities(self) -> AbstractCapability | None:
         """Return a pydantic-ai capability for this provider.
 
         Returns:
@@ -42,7 +42,7 @@ class SimpleInstructionProvider(ResourceProvider):
         return None
 
 
-class AgentContextInstructionProvider(ResourceProvider):
+class AgentContextInstructionProvider(FunctionToolsetCapability):
     """Provider that returns AgentContext-aware instruction."""
 
     def __init__(self) -> None:
@@ -57,7 +57,7 @@ class AgentContextInstructionProvider(ResourceProvider):
 
         return [with_agent_context]
 
-    def as_capability(self) -> AbstractCapability | None:
+    def get_capabilities(self) -> AbstractCapability | None:
         """Return a pydantic-ai capability for this provider.
 
         Returns:
@@ -66,7 +66,7 @@ class AgentContextInstructionProvider(ResourceProvider):
         return None
 
 
-class RunContextInstructionProvider(ResourceProvider):
+class RunContextInstructionProvider(FunctionToolsetCapability):
     """Provider that returns RunContext-aware instruction."""
 
     def __init__(self) -> None:
@@ -81,7 +81,7 @@ class RunContextInstructionProvider(ResourceProvider):
 
         return [with_run_context]
 
-    def as_capability(self) -> AbstractCapability | None:
+    def get_capabilities(self) -> AbstractCapability | None:
         """Return a pydantic-ai capability for this provider.
 
         Returns:
@@ -90,7 +90,7 @@ class RunContextInstructionProvider(ResourceProvider):
         return None
 
 
-class EmptyInstructionProvider(ResourceProvider):
+class EmptyInstructionProvider(FunctionToolsetCapability):
     """Provider that returns no instructions."""
 
     def __init__(self) -> None:
@@ -124,7 +124,7 @@ async def agent_with_instruction_providers():
 
     return agent
 
-    def as_capability(self) -> AbstractCapability | None:
+    def get_capabilities(self) -> AbstractCapability | None:
         """Return a pydantic-ai capability for this provider.
 
         Returns:
@@ -223,7 +223,7 @@ class TestNativeAgentInstructions:
     async def test_provider_get_instructions_error_handling(self):
         """Test that errors in provider.get_instructions are handled gracefully."""
 
-        class FailingInstructionProvider(ResourceProvider):
+        class FailingInstructionProvider(FunctionToolsetCapability):
             """Provider that fails to provide instructions."""
 
             def __init__(self) -> None:
@@ -252,7 +252,7 @@ class TestNativeAgentInstructions:
         from agentpool.models.agents import NativeAgentConfig
 
         # Create a simple provider with get_instructions
-        class SimpleRefProvider(ResourceProvider):
+        class SimpleRefProvider(FunctionToolsetCapability):
             def __init__(self) -> None:
                 super().__init__("simple_ref_provider")
 
@@ -292,7 +292,7 @@ class TestNativeAgentInstructions:
             provider_names = [p.name for p in agent.tools.providers]
             assert "simple_ref_provider" in provider_names
 
-    def as_capability(self) -> AbstractCapability | None:
+    def get_capabilities(self) -> AbstractCapability | None:
         """Return a pydantic-ai capability for this provider.
 
         Returns:

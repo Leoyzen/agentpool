@@ -502,7 +502,7 @@ class ACPSession:
                                 )
                             # Always register the ACP transport on the
                             # MCPManager's session context so that
-                            # as_capability() can find it and child sessions
+                            # get_capabilities() can find it and child sessions
                             # can inherit it via copy_pre_created_transports().
                             await self.agent.mcp.add_acp_transport(
                                 self.session_id,
@@ -551,7 +551,7 @@ class ACPSession:
             new_snapshot = (existing or McpConfigSnapshot()).with_session_configs(tuple(merged))
             self.agent._mcp_snapshot = new_snapshot
             # Sync the updated snapshot to the MCPManager's session context
-            # so that as_capability(session_id) can discover ACP MCP configs
+            # so that get_capabilities(session_id) can discover ACP MCP configs
             # and child sessions can inherit them via copy_pre_created_transports().
             self.agent.mcp.update_session_snapshot(self.session_id, new_snapshot)
             self.log.info(
@@ -704,7 +704,7 @@ class ACPSession:
             self._current_converter = converter  # Track for cancellation
 
             # Route through SessionPool for unified session management.
-            # MCP tools are handled via McpConfigSnapshot → as_capability() →
+            # MCP tools are handled via McpConfigSnapshot → get_capabilities() →
             # MCPToolset, not through agent.tools.providers.
             agent_pool_ref = getattr(self.agent, "agent_pool", None)
             session_pool = agent_pool_ref.session_pool if agent_pool_ref is not None else None

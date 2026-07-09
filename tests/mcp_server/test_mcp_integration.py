@@ -104,7 +104,7 @@ class TestCrossTaskLifecycle:
         creates the MCPToolset (task A) and the subagent's turn exits it
         (task B).
 
-        With the no-cache approach, each call to ``as_capability()``
+        With the no-cache approach, each call to ``get_capabilities()``
         creates a fresh MCPToolset, so this scenario (sharing one toolset
         across tasks) only happens if someone manually caches. This test
         documents the boundary: if someone reintroduces caching, this test
@@ -165,24 +165,24 @@ class TestCrossTaskLifecycle:
 
 
 # ---------------------------------------------------------------------------
-# 2. Real tool calls through MCPManager.as_capability()
+# 2. Real tool calls through MCPManager.get_capabilities()
 # ---------------------------------------------------------------------------
 
 
 class TestRealToolCalls:
     """Exercise the full MCPManager to tool call path with a real server.
 
-    Covers: MCPManager → as_capability() → MCPToolset → get_tools() → call_tool().
+    Covers: MCPManager → get_capabilities() → MCPToolset → get_tools() → call_tool().
 
     This verifies that ``to_transport()`` produces a working transport and
-    that ``MCPToolset`` constructed by ``as_capability()`` can actually
+    that ``MCPToolset`` constructed by ``get_capabilities()`` can actually
     call tools — not just that the types match.
     """
 
-    async def test_as_capability_toolset_can_call_tools(
+    async def test_get_capabilities_toolset_can_call_tools(
         self, fastmcp_server: Any, run_context: RunContext[Any]
     ):
-        """MCPToolset from as_capability() can list and call tools."""
+        """MCPToolset from get_capabilities() can list and call tools."""
         # MCPManager needs a config, but we bypass it by constructing
         # MCPToolset directly from the server (like pydantic-ai tests).
         toolset = MCPToolset(fastmcp_server, id="test_server")
@@ -200,10 +200,10 @@ class TestRealToolCalls:
             result = await toolset.call_tool("add", {"a": 2, "b": 3}, run_context, tools["add"])
             assert result == {"sum": 5}
 
-    async def test_as_capability_toolset_instructions(
+    async def test_get_capabilities_toolset_instructions(
         self, fastmcp_server: Any, run_context: RunContext[Any]
     ):
-        """MCPToolset from as_capability() exposes server instructions."""
+        """MCPToolset from get_capabilities() exposes server instructions."""
         toolset = MCPToolset(fastmcp_server, include_instructions=True)
         async with toolset:
             instructions = await toolset.get_instructions(run_context)
@@ -216,7 +216,7 @@ class TestRealToolCalls:
     ):
         """Two MCPToolset instances from the same server config are independent.
 
-        This verifies the no-cache approach: each ``as_capability()`` call
+        This verifies the no-cache approach: each ``get_capabilities()`` call
         produces a separate, fully functional toolset.
         """
         toolset1 = MCPToolset(fastmcp_server, id="ts1")
@@ -258,7 +258,7 @@ class TestSubagentMCPInheritance:
     - Agent-level MCPManager → private to the agent → subagents don't see it
 
     This mirrors the real subagent flow: parent agent's ``get_agentlet()``
-    calls ``self.mcp.as_capability()``. If the agent shares the pool's
+    calls ``self.mcp.get_capabilities()``. If the agent shares the pool's
     MCPManager (``self._mcp_shared = True``), it gets pool-level servers.
     If it has its own MCPManager, it only gets agent-level servers.
     """
@@ -277,7 +277,7 @@ class TestSubagentMCPInheritance:
             ],
         )
 
-        caps = await pool_mcp.as_capability()
+        caps = await pool_mcp.get_capabilities()
 
         assert len(caps) == 1
         assert caps[0].id == "search_kb"
@@ -307,8 +307,8 @@ class TestSubagentMCPInheritance:
             servers=[],
         )
 
-        parent_caps = await parent_mcp.as_capability()
-        subagent_caps = await subagent_mcp.as_capability()
+        parent_caps = await parent_mcp.get_capabilities()
+        subagent_caps = await subagent_mcp.get_capabilities()
 
         # Parent has its agent-level server
         assert len(parent_caps) == 1
@@ -349,8 +349,8 @@ class TestSubagentMCPInheritance:
             ],
         )
 
-        pool_caps = await pool_mcp.as_capability()
-        agent_caps = await agent_mcp.as_capability()
+        pool_caps = await pool_mcp.get_capabilities()
+        agent_caps = await agent_mcp.get_capabilities()
 
         assert pool_caps[0].local is not agent_caps[0].local
         assert pool_caps[0].id != agent_caps[0].id
@@ -384,18 +384,18 @@ class TestMCPManagerCleanup:
             ],
         )
 
-        caps = await manager.as_capability()
+        caps = await manager.get_capabilities()
         assert len(caps) == 1
 
         await manager.disconnect_all()
 
-        caps2 = await manager.as_capability()
+        caps2 = await manager.get_capabilities()
         assert len(caps2) == 1
 
         await manager.cleanup()
 
-    async def test_cleanup_after_as_capability(self):
-        """cleanup() after as_capability() doesn't raise."""
+    async def test_cleanup_after_get_capabilities(self):
+        """cleanup() after get_capabilities() doesn't raise."""
         manager = MCPManager(
             servers=[
                 StdioMCPServerConfig(
@@ -406,7 +406,7 @@ class TestMCPManagerCleanup:
             ],
         )
 
-        caps = await manager.as_capability()
+        caps = await manager.get_capabilities()
         assert len(caps) == 1
 
         # cleanup() should be safe
@@ -437,14 +437,14 @@ class TestMCPManagerCleanup:
 
 
 class TestACPMCPScoping:
-    """Verify ACP transport MCP servers are correctly excluded from as_capability().
+    """Verify ACP transport MCP servers are correctly excluded from get_capabilities().
 
     ACP servers go through ``get_aggregating_provider()`` instead of
-    ``as_capability()`` (which is for pydantic-ai's MCPToolset).
+    ``get_capabilities()`` (which is for pydantic-ai's MCPToolset).
     """
 
-    async def test_acp_excluded_from_as_capability(self):
-        """ACP servers go through get_aggregating_provider() instead of as_capability()."""
+    async def test_acp_excluded_from_get_capabilities(self):
+        """ACP servers go through get_aggregating_provider() instead of get_capabilities()."""
         manager = MCPManager(
             servers=[
                 StdioMCPServerConfig(
@@ -456,7 +456,7 @@ class TestACPMCPScoping:
             ],
         )
 
-        caps = await manager.as_capability()
+        caps = await manager.get_capabilities()
 
         # Only the non-ACP server should produce a capability
         assert len(caps) == 1
@@ -486,7 +486,7 @@ class TestACPMCPScoping:
             def disconnect(self, cb: Any) -> None:
                 pass
 
-        # _FakeProvider needs signal attributes for AggregatingResourceProvider
+        # _FakeProvider needs signal attributes for CombinedToolsetCapability
         for attr in ("tools_changed", "prompts_changed", "resources_changed", "skills_changed"):
             setattr(_FakeProvider, attr, _FakeSignal())
 
@@ -496,7 +496,7 @@ class TestACPMCPScoping:
         )
         manager = MCPManager(name="test")
 
-        with patch("agentpool.mcp_server.manager.MCPResourceProvider", _FakeProvider):
+        with patch("agentpool.mcp_server.manager.MCPCapability", _FakeProvider):
             await manager.setup_server(acp_config)
             await manager.setup_server(stdio_config)
 
@@ -510,23 +510,23 @@ class TestACPMCPScoping:
 
 
 # ---------------------------------------------------------------------------
-# 6. Real cross-task as_capability() (simulating subagent flow)
+# 6. Real cross-task get_capabilities() (simulating subagent flow)
 # ---------------------------------------------------------------------------
 
 
 class TestCrossTaskAsCapability:
-    """Simulate real subagent flow with cross-task as_capability() calls.
+    """Simulate real subagent flow with cross-task get_capabilities() calls.
 
-    Parent agent calls ``as_capability()`` in task A, subagent calls
-    ``as_capability()`` in task B. Both should succeed.
+    Parent agent calls ``get_capabilities()`` in task A, subagent calls
+    ``get_capabilities()`` in task B. Both should succeed.
 
     With caching, both calls return MCP wrappers backed by the same
     ``MCPToolset`` instance (cached by ``client_id``). The MCP wrappers
     themselves are always distinct.
     """
 
-    async def test_as_capability_in_different_tasks(self):
-        """as_capability() produces MCP wrappers sharing a cached MCPToolset."""
+    async def test_get_capabilities_in_different_tasks(self):
+        """get_capabilities() produces MCP wrappers sharing a cached MCPToolset."""
         manager = MCPManager(
             servers=[
                 StdioMCPServerConfig(
@@ -538,7 +538,7 @@ class TestCrossTaskAsCapability:
         )
 
         async def get_caps() -> list[Any]:
-            return await manager.as_capability()
+            return await manager.get_capabilities()
 
         task_a = asyncio.create_task(get_caps())
         caps_a = await task_a
@@ -556,8 +556,8 @@ class TestCrossTaskAsCapability:
 
         await manager.cleanup()
 
-    async def test_as_capability_concurrent_tasks(self):
-        """Concurrent as_capability() calls share cached MCPToolsets."""
+    async def test_get_capabilities_concurrent_tasks(self):
+        """Concurrent get_capabilities() calls share cached MCPToolsets."""
         manager = MCPManager(
             servers=[
                 StdioMCPServerConfig(
@@ -576,7 +576,7 @@ class TestCrossTaskAsCapability:
         results: list[list[Any]] = []
 
         async def get_caps() -> None:
-            caps = await manager.as_capability()
+            caps = await manager.get_capabilities()
             results.append(caps)
 
         async with anyio.create_task_group() as tg:

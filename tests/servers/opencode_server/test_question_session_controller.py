@@ -31,7 +31,6 @@ def mock_pool():
     pool.manifest.agents = {}
     pool.mcp = Mock()
     pool.mcp.get_aggregating_provider = Mock(return_value=Mock())
-    pool.skills_instruction_provider = None
     pool.skills_tools_provider = Mock()
     pool._config_file_path = None
     return pool
