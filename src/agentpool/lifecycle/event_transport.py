@@ -143,11 +143,10 @@ class InProcessTransport:
                     yield envelope
 
         queue = self._get_queue(topic)
-        while not self._closed:
-            try:
-                envelope = await asyncio.wait_for(queue.get(), timeout=0.1)
-            except TimeoutError:
-                continue
+        while True:
+            envelope = await queue.get()
+            if envelope is None:  # sentinel from close()
+                break
             yield envelope
             queue.task_done()
 
@@ -164,18 +163,13 @@ class InProcessTransport:
     def close(self) -> None:
         """Release all transport resources.
 
-        Sets ``_closed = True`` and drains all per-topic queues.
-        Subsequent calls to ``publish()`` or ``subscribe()`` raise
-        ``RuntimeError``.
+        Sets ``_closed = True`` and puts a ``None`` sentinel on each
+        per-topic queue to wake blocked consumers. Subsequent calls to
+        ``publish()`` or ``subscribe()`` raise ``RuntimeError``.
         """
         self._closed = True
         for queue in self._queues.values():
-            while not queue.empty():
-                try:
-                    queue.get_nowait()
-                    queue.task_done()
-                except asyncio.QueueEmpty:
-                    break
+            queue.put_nowait(None)  # type: ignore[arg-type]  # sentinel from close()
 
 
 __all__ = ["InProcessTransport"]

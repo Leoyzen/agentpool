@@ -16,9 +16,12 @@ with WAL mode for crash-safe persistence.
 
 from __future__ import annotations
 
+import dataclasses
+from enum import Enum
 import json
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel
 from sqlalchemy import Column, Text, create_engine, event as sa_event, text
 from sqlalchemy.orm import Session
 from sqlmodel import Field, SQLModel
@@ -193,9 +196,10 @@ class _JournalEntry(SQLModel, table=True):
     """SQL model for journal entries."""
 
     __tablename__ = "lifecycle_journal"
+    __table_args__ = {"sqlite_autoincrement": True}
 
-    seq: int = Field(primary_key=True)
-    """Monotonically increasing sequence number."""
+    seq: int = Field(default=None, primary_key=True)
+    """Monotonically increasing sequence number (autoincrement)."""
 
     entry_type: str = Field(index=True)
     """``"append"`` or ``"upsert"``."""
@@ -247,13 +251,33 @@ def _enable_wal(dbapi_conn: Any, connection_record: Any) -> None:
     cursor.close()
 
 
+def _json_default(obj: Any) -> Any:
+    """Custom JSON default handler for dataclasses, Pydantic models, and Enums.
+
+    Args:
+        obj: The object to serialize.
+
+    Returns:
+        A JSON-serializable representation of the object.
+    """
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return dataclasses.asdict(obj)
+    if isinstance(obj, BaseModel):
+        return obj.model_dump(mode="json")
+    if isinstance(obj, Enum):
+        return obj.value
+    return str(obj)
+
+
 def _serialize_event(event: Any) -> str:
     """Serialize an event to JSON string.
 
-    Falls back to ``repr()`` if the event is not JSON-serializable.
+    Handles dataclasses, Pydantic models, and Enums via a custom
+    default handler. Falls back to ``repr()`` if the event is not
+    JSON-serializable.
     """
     try:
-        return json.dumps(event, default=str)
+        return json.dumps(event, default=_json_default)
     except (TypeError, ValueError):
         return repr(event)
 
@@ -344,13 +368,6 @@ class DurableJournal:
         """Create tables if they don't exist."""
         SQLModel.metadata.create_all(self._engine)
 
-    def _next_seq(self) -> int:
-        """Get the next sequence number from the database."""
-        with Session(self._engine) as session:
-            result = session.execute(text("SELECT COALESCE(MAX(seq), 0) FROM lifecycle_journal"))
-            max_seq: int = result.scalar() or 0
-            return max_seq + 1
-
     def append(self, event: Any) -> int:
         """Create a new journal entry for a delta event.
 
@@ -363,9 +380,7 @@ class DurableJournal:
         Returns:
             Monotonically increasing sequence number.
         """
-        seq = self._next_seq()
         entry = _JournalEntry(
-            seq=seq,
             entry_type="append",
             upsert_key=None,
             event_json=_serialize_event(event),
@@ -373,7 +388,8 @@ class DurableJournal:
         with Session(self._engine) as session:
             session.add(entry)
             session.commit()
-        return seq
+            session.refresh(entry)
+            return entry.seq
 
     def upsert(self, key: str, event: Any) -> int:
         """Replace or create an entity-state entry by key.
@@ -387,7 +403,6 @@ class DurableJournal:
         """
         from sqlalchemy import delete as sa_delete
 
-        seq = self._next_seq()
         with Session(self._engine) as session:
             session.execute(
                 sa_delete(_JournalEntry).where(
@@ -395,14 +410,14 @@ class DurableJournal:
                 )
             )
             entry = _JournalEntry(
-                seq=seq,
                 entry_type="upsert",
                 upsert_key=key,
                 event_json=_serialize_event(event),
             )
             session.add(entry)
             session.commit()
-        return seq
+            session.refresh(entry)
+            return entry.seq
 
     async def replay(
         self,
@@ -465,8 +480,8 @@ class DurableJournal:
             stmt = (
                 select(_JournalEntry)
                 .where(_JournalEntry.seq > last_journal_seq)
-                .order_by(_JournalEntry.seq.asc())
-            )  # type: ignore[attr-defined]
+                .order_by(_JournalEntry.seq.asc())  # type: ignore[attr-defined]
+            )
             result = session.execute(stmt)
             rows: list[_JournalEntry] = list(result.scalars().all())
 
@@ -504,6 +519,10 @@ class DurableJournal:
         with Session(self._engine) as session:
             session.execute(sa_delete(_JournalEntry))
             session.execute(sa_delete(_ToolLogEntry))
+            if self._engine.dialect.name == "sqlite":
+                session.execute(
+                    text("DELETE FROM sqlite_sequence WHERE name = 'lifecycle_journal'")
+                )
             session.commit()
 
     def log_tool_execution(self, record: ToolExecutionRecord) -> None:
