@@ -33,11 +33,19 @@ def _make_pooled_native_agent() -> Agent:
     (``steer`` / ``followup``) without error.
     """
     agent = Agent(name="test-agent", model=TestModel(custom_output_text=TEST_RESPONSE))
-    agent.agent_pool = MagicMock(spec=AgentPool)
     session_pool = MagicMock()
     session_pool.steer = AsyncMock(return_value=True)
     session_pool.followup = AsyncMock(return_value=True)
-    agent.agent_pool.session_pool = session_pool
+
+    mock_pool = MagicMock(spec=AgentPool)
+    # host_context calls _agent_pool.get_context(); configure it to return
+    # a context with the session_pool mock.
+    mock_context = MagicMock()
+    mock_context.session_pool = session_pool
+    mock_pool.get_context.return_value = mock_context
+    mock_pool.session_pool = session_pool
+
+    agent.agent_pool = mock_pool
     agent._events.session_id = "test-session-id"
     return agent
 

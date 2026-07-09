@@ -104,6 +104,9 @@ async def _setup_session_pool(agent: Agent[Any]) -> tuple[SessionPool, str]:
 
     # Link agent back to pool so interrupt() can resolve session state
     mock_pool.session_pool = session_pool
+    # host_context calls _agent_pool.get_context(); configure it to return
+    # a context with the session_pool so interrupt() can resolve session state.
+    mock_pool.get_context.return_value = MagicMock(session_pool=session_pool)
     agent.agent_pool = mock_pool
     agent.session_id = session_id
 

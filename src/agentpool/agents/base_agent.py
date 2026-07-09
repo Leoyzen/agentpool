@@ -172,10 +172,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """Return the prompt used for title generation for this session."""
         if initial_prompt is None:
             return None
-        if self.agent_pool is None or self.agent_pool.session_pool is None:
+        ctx = self.host_context
+        if ctx is None or ctx.session_pool is None:
             return initial_prompt
 
-        session_controller = self.agent_pool.session_pool.sessions
+        session_controller = ctx.session_pool.sessions
         get_session = getattr(session_controller, "get_session", None)
         if not callable(get_session):
             return initial_prompt
@@ -371,7 +372,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             case BaseTeam():
                 return BaseTeam([self, *other.nodes], mode="parallel")
             case Callable():
-                agent_2 = Agent.from_callback(other, agent_pool=self.agent_pool)  # ty: ignore[no-matching-overload]
+                agent_2 = Agent.from_callback(other, agent_pool=self._agent_pool)  # ty: ignore[no-matching-overload]
                 return BaseTeam([self, agent_2], mode="parallel")
             case MessageNode():
                 return BaseTeam([self, other], mode="parallel")
@@ -393,7 +394,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         from agentpool.delegation.base_team import BaseTeam
 
         if callable(other):
-            other = Agent.from_callback(other, agent_pool=self.agent_pool)
+            other = Agent.from_callback(other, agent_pool=self._agent_pool)
 
         return BaseTeam([self, other], mode="sequential")
 
@@ -436,8 +437,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
         # Build layers: internal_fs on top, VFS resources below
         layers: list[AbstractFileSystem] = [self._internal_fs]
-        if self.agent_pool is not None and not self.agent_pool.vfs_registry.is_empty:
-            layers.append(self.agent_pool.vfs_registry.get_fs())
+        ctx = self.host_context
+        if ctx is not None and not ctx.vfs_registry.is_empty:
+            layers.append(ctx.vfs_registry.get_fs())
         return OverlayFileSystem(filesystems=layers)
 
     async def reset(self) -> None:
@@ -471,7 +473,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
         return AgentContext(
             node=self,
-            pool=self.agent_pool,
+            pool=self._agent_pool,
             input_provider=input_provider or self._input_provider,
             data=data,
             model_name=self.model_name,
@@ -726,8 +728,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Returns:
             The session's active run context, or None if not found.
         """
-        if self.agent_pool is not None:
-            session_pool = self.agent_pool.session_pool
+        if self.host_context is not None:
+            session_pool = self.host_context.session_pool
             if session_pool is None:
                 return None
             effective_session_id = session_id or getattr(self._events, "session_id", None)
@@ -767,8 +769,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             return run_ctx
 
         # Level 2: SessionPool lookup when pooled and session has active run
-        if self.agent_pool is not None:
-            session_pool = self.agent_pool.session_pool
+        ctx = self.host_context
+        if ctx is not None:
+            session_pool = ctx.session_pool
             if session_pool is not None:
                 effective_session_id = session_id or getattr(self._events, "session_id", None)
                 if effective_session_id is not None:
@@ -823,18 +826,19 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         run_ctx = self.get_active_run_context(session_id=session_id)
 
         # Pooled native agents: delegate to session_pool.followup().
+        ctx = self.host_context
         if (
             self.AGENT_TYPE == "native"
-            and self.agent_pool is not None
-            and self.agent_pool.session_pool is not None
+            and ctx is not None
+            and ctx.session_pool is not None
         ):
             warnings.warn(
                 "queue_prompt() is deprecated for pooled native agents. "
-                "Use agent_pool.session_pool.followup() instead.",
+                "Use host_context.session_pool.followup() instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
-            session_pool = self.agent_pool.session_pool
+            session_pool = ctx.session_pool
             effective_session_id = session_id or (
                 run_ctx.session_id if run_ctx else self._events.session_id
             )
@@ -877,20 +881,21 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 return "Changes made"
         """
         run_ctx = self.get_active_run_context(session_id=session_id)
+        ctx = self.host_context
 
         # Pooled native agents: delegate to session_pool.steer().
         if (
             self.AGENT_TYPE == "native"
-            and self.agent_pool is not None
-            and self.agent_pool.session_pool is not None
+            and ctx is not None
+            and ctx.session_pool is not None
         ):
             warnings.warn(
                 "inject_prompt() is deprecated for pooled native agents. "
-                "Use agent_pool.session_pool.steer() instead.",
+                "Use host_context.session_pool.steer() instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
-            session_pool = self.agent_pool.session_pool
+            session_pool = ctx.session_pool
             effective_session_id = session_id or (
                 run_ctx.session_id if run_ctx else self._events.session_id
             )
@@ -922,8 +927,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
         # No active run context — delegate to SessionPool for auto-resume
         effective_session_id = session_id or (run_ctx.session_id if run_ctx else None)
-        if self.agent_pool is not None and effective_session_id is not None:
-            _session_pool = self.agent_pool.session_pool
+        if ctx is not None and effective_session_id is not None:
+            _session_pool = ctx.session_pool
             if _session_pool is None:
                 return
             # Fire-and-forget: delegate to SessionPool for auto-resume.
@@ -936,8 +941,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # FALLBACK for shared agents: effective_session_id is None but session_pool exists.
         # This handles the case where BackgroundTaskProvider calls inject_prompt
         # after background task completion when the agent has no fixed session_id.
-        if self.agent_pool is not None:
-            _session_pool = self.agent_pool.session_pool
+        if ctx is not None:
+            _session_pool = ctx.session_pool
             if _session_pool is not None:
                 sessions = _session_pool.sessions.find_sessions_by_agent_name(self.name)
                 if sessions:
@@ -982,11 +987,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
         if (
             not _skip_pool
-            and self.agent_pool is not None
-            and self.agent_pool.session_pool is not None
+            and self.host_context is not None
+            and self.host_context.session_pool is not None
             and not _in_turn_context.get()
         ):
-            session_pool = self.agent_pool.session_pool
+            session_pool = self.host_context.session_pool
             effective_session_id = session_id or generate_session_id()
             existing_session = session_pool.sessions.get_session(effective_session_id)
             if existing_session is None or existing_session.agent_name == self.name:
@@ -1712,12 +1717,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             self._background_run_ctx.cancelled = True
 
         # When pooled, delegate to SessionPool for proper run cancellation.
-        if self.agent_pool is not None and self.agent_pool.session_pool is not None:
+        ctx = self.host_context
+        if ctx is not None and ctx.session_pool is not None:
             effective_session_id = session_id or (
                 effective_run_ctx.session_id if effective_run_ctx else self._events.session_id
             )
             if effective_session_id is not None:
-                session_pool = self.agent_pool.session_pool
+                session_pool = ctx.session_pool
                 session_pool.sessions.cancel_run_for_session(effective_session_id)
 
         await self._interrupt(effective_run_ctx)

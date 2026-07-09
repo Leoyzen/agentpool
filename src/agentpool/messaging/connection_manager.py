@@ -167,12 +167,12 @@ class ConnectionManager:
             exit_condition=exit_condition,
         )
         self._connections.append(talk)
-        if pool := source.agent_pool:
+        if ctx := source.host_context:
             # Always use Talk's name for registration
             if name:
-                pool.connection_registry.register(name, talk)
+                ctx.connection_registry.register(name, talk)
             else:
-                pool.connection_registry.register_auto(talk)
+                ctx.connection_registry.register_auto(talk)
         else:
             logger.debug("Could not register connection. no pool available", connection=name)
         return talk

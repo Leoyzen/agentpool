@@ -127,6 +127,12 @@ def _mock_session_pool(agent: Agent, run_ctx: AgentRunContext) -> None:
     agent_pool.storage = MagicMock()
     agent_pool.storage.log_message = AsyncMock()
     agent_pool.storage.log_session = AsyncMock()
+    # Set up get_context() to return a HostContext-like mock with the same
+    # session_pool and storage so migrated code using host_context works.
+    host_ctx = MagicMock()
+    host_ctx.session_pool = session_pool
+    host_ctx.storage = agent_pool.storage
+    agent_pool.get_context.return_value = host_ctx
     agent.agent_pool = agent_pool
 
 

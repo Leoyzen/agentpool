@@ -227,7 +227,7 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
         from agentpool.agents import Agent
 
         if callable(other):
-            other = Agent.from_callback(other, agent_pool=self.agent_pool)
+            other = Agent.from_callback(other, agent_pool=self._agent_pool)
 
         # If we're already a sequential team with no validator, extend it
         if self.mode == "sequential" and not self.validator:
@@ -255,7 +255,7 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
         from agentpool.agents import Agent
 
         if callable(other):
-            other = Agent.from_callback(other, agent_pool=self.agent_pool)
+            other = Agent.from_callback(other, agent_pool=self._agent_pool)
 
         match other:
             case BaseTeam() if other.mode == "parallel":
@@ -674,15 +674,16 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
         team_run_id: str,
     ) -> tuple[list[MessageNode[Any, Any]], dict[str, str]]:
         """Resolve team members to child-session agents for a parent session."""
-        if not parent_session_id or self.agent_pool is None or self.agent_pool.session_pool is None:
+        ctx = self.host_context
+        if not parent_session_id or ctx is None or ctx.session_pool is None:
             return nodes, {}
 
         from agentpool.agents.base_agent import BaseAgent
         from agentpool.utils.identifiers import generate_session_id
 
-        session_pool = self.agent_pool.session_pool
-        pool_agents = self.agent_pool.manifest.agents
-        pool_teams = self.agent_pool.manifest.teams
+        session_pool = ctx.session_pool
+        pool_agents = ctx.manifest.agents
+        pool_teams = ctx.manifest.teams
         scoped_nodes: list[MessageNode[Any, Any]] = []
         child_session_ids: dict[str, str] = {}
 
@@ -718,12 +719,13 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
 
     async def _save_scoped_storage_session(self, session_id: str | None) -> None:
         """Persist SessionPool session data to protocol storage for lineage checks."""
-        if not session_id or self.agent_pool is None or self.agent_pool.session_pool is None:
+        ctx = self.host_context
+        if not session_id or ctx is None or ctx.session_pool is None:
             return
-        storage = getattr(self.agent_pool, "storage", None)
+        storage = ctx.storage
         if storage is None:
             return
-        session_controller = self.agent_pool.session_pool.sessions
+        session_controller = ctx.session_pool.sessions
         session = session_controller.get_session(session_id)
         if session is None:
             return
@@ -731,17 +733,19 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
 
     async def _close_scoped_team_nodes(self, child_session_ids: dict[str, str]) -> None:
         """Close and delete round-scoped child sessions created for a team run."""
-        if not child_session_ids or self.agent_pool is None or self.agent_pool.session_pool is None:
+        ctx = self.host_context
+        if not child_session_ids or ctx is None or ctx.session_pool is None:
             return
         for session_id in reversed(list(child_session_ids.values())):
-            await self.agent_pool.session_pool.close_session(session_id)
+            await ctx.session_pool.close_session(session_id)
             await self._delete_scoped_storage_session(session_id)
 
     async def _delete_scoped_storage_session(self, session_id: str) -> None:
         """Remove protocol storage written for a round-scoped child session."""
-        if self.agent_pool is None:
+        ctx = self.host_context
+        if ctx is None:
             return
-        storage = getattr(self.agent_pool, "storage", None)
+        storage = ctx.storage
         if storage is None:
             return
         await storage.delete_session_messages(session_id)
@@ -766,7 +770,7 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
         self,
         member_skills: dict[str, list[str]],
     ) -> dict[str, str]:
-        if not member_skills or self.agent_pool is None:
+        if not member_skills or self.host_context is None:
             return {}
 
         result: dict[str, str] = {}
@@ -1160,13 +1164,13 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
             if not isinstance(node, SupportsRunStream):
                 raise TypeError(f"Node {node.name} does not support streaming")
             try:
-                pool = self.agent_pool
+                ctx = self.host_context
                 if (
-                    pool is not None
-                    and pool.session_pool is not None
+                    ctx is not None
+                    and ctx.session_pool is not None
                     and parent_session_id is not None
                 ):
-                    child_state = await pool.session_pool.create_session(
+                    child_state = await ctx.session_pool.create_session(
                         session_id=generate_session_id(),
                         parent_session_id=parent_session_id,
                         agent_name=node.name,

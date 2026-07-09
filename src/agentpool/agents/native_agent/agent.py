@@ -310,7 +310,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             all_prompts.extend(system_prompt)
         elif system_prompt:
             all_prompts.append(system_prompt)
-        prompt_manager = self.agent_pool.prompt_manager if self.agent_pool else None
+        prompt_manager = self.host_context.prompt_manager if self.host_context else None
         self.sys_prompts = SystemPrompts(all_prompts, prompt_manager=prompt_manager)
         self._formatted_system_prompt: str | None = None  # Set in __aenter__
         self._hook_manager = NativeAgentHookManager(
@@ -345,9 +345,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         """
         from agentpool.mcp_server.config_snapshot import McpConfigEntry
 
-        if self.agent_pool is None:
+        if self.host_context is None:
             return ()
-        pool_mcp = self.agent_pool.mcp
+        pool_mcp = self.host_context.mcp
         return tuple(
             McpConfigEntry(server_config=server, source="pool")
             for server in pool_mcp.servers
@@ -704,8 +704,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         from llmling_models import infer_model
 
         # Check if it's a variant
-        if self.agent_pool and model in self.agent_pool.manifest.model_variants:
-            config = self.agent_pool.manifest.model_variants[model]
+        ctx = self.host_context
+        if ctx and model in ctx.manifest.model_variants:
+            config = ctx.manifest.model_variants[model]
             return config.get_model(), config.get_model_settings()
         # Regular model string - no settings
         return infer_model(model), None
@@ -880,9 +881,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 td = self.config.elicitation_timeout
                 run_ctx.elicitation_timeout = td.total_seconds() if td is not None else None
         checkpoint_mgr: CheckpointManager | None = None
-        if self.agent_pool is not None:
+        if self.host_context is not None:
             checkpoint_mgr = CheckpointManager(
-                storage_manager=self.agent_pool.storage,
+                storage_manager=self.host_context.storage,
             )
         if run_ctx is not None:
             run_ctx.checkpoint_manager = checkpoint_mgr
@@ -911,10 +912,13 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             pool_capabilities = self.agent_pool.skill_capabilities
             if pool_capabilities:
                 # Ensure a snapshot exists for skill config registration.
-                if self._mcp_snapshot is None:
-                    from agentpool.mcp_server.config_snapshot import McpConfigSnapshot
+                session_id = run_ctx.session_id if run_ctx else None
+                if session_id is not None:
+                    ctx = self.mcp.get_or_create_session(session_id)
+                    if ctx.snapshot is None:
+                        from agentpool.mcp_server.config_snapshot import McpConfigSnapshot
 
-                    self._mcp_snapshot = McpConfigSnapshot()
+                        self.mcp.update_session_snapshot(session_id, McpConfigSnapshot())
                 # Collect skill config entries from visible capabilities.
                 skill_entries: list[McpConfigEntry] = []
                 visibility_checker = getattr(self.agent_pool, "is_skill_visible_to_node", None)
@@ -926,10 +930,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     tool_capabilities.append(cap)
                     skill_entries.extend(cap.build_config_entries())
                 # Register skill configs in the snapshot.
-                if skill_entries:
-                    self._mcp_snapshot = self._mcp_snapshot.with_skill_configs(
-                        tuple(skill_entries),
-                    )
+                if skill_entries and session_id is not None:
+                    ctx = self.mcp.get_or_create_session(session_id)
+                    existing = ctx.snapshot
+                    if existing is not None:
+                        self.mcp.update_session_snapshot(
+                            session_id,
+                            existing.with_skill_configs(
+                                tuple(skill_entries),
+                            ),
+                        )
 
         # Collect pydantic-ai compatible instructions from SystemPrompts and providers
         all_instructions: list[Any] = []
@@ -1322,11 +1332,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         mode_category = get_permission_category(self.tool_confirmation_mode)
         categories.append(mode_category)
         # Check configured model_variants first (RFC-0034: configured-first)
-        if self.agent_pool and self.agent_pool.manifest.model_variants:
+        ctx = self.host_context
+        if ctx and ctx.manifest.model_variants:
             # current_mode_id should be the actual model identifier to match option values
             current_model_id = self.model_name or ""
             model_modes = []
-            for variant_name, config in self.agent_pool.manifest.model_variants.items():
+            for variant_name, config in ctx.manifest.model_variants.items():
                 model = config.get_model()
                 mode_id = f"{model.system}:{model.model_name}"
                 model_modes.append(
@@ -1363,9 +1374,10 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             self.log.info("_set_mode called for model: %s", mode_id)
             # Resolve variant name from actual model identifier if needed
             variant_name = mode_id
-            if self.agent_pool and mode_id not in self.agent_pool.manifest.model_variants:
+            ctx = self.host_context
+            if ctx and mode_id not in ctx.manifest.model_variants:
                 # mode_id is an actual model identifier, find matching variant
-                for vn, config in self.agent_pool.manifest.model_variants.items():
+                for vn, config in ctx.manifest.model_variants.items():
                     model = config.get_model()
                     resolved = f"{model.system}:{model.model_name}"
                     if resolved == mode_id:
@@ -1386,8 +1398,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             # Also check model_variants from manifest (by variant name or identifier)
             if (
                 not is_valid
-                and self.agent_pool
-                and variant_name in self.agent_pool.manifest.model_variants
+                and ctx
+                and variant_name in ctx.manifest.model_variants
             ):
                 is_valid = True
                 self.log.info(
@@ -1397,8 +1409,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 )
             if not is_valid:
                 available = (
-                    list(self.agent_pool.manifest.model_variants.keys())
-                    if self.agent_pool
+                    list(ctx.manifest.model_variants.keys())
+                    if ctx
                     else "N/A"
                 )
                 self.log.warning(
@@ -1437,16 +1449,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         Returns:
             List of SessionData objects
         """
-        if not self.agent_pool:
+        if not self.host_context:
             return []
         # Get sessions from session store
         try:
             # Get session IDs from store — do NOT filter by agent_name so that
             # sessions from previous default_agents remain visible in the TUI.
             # Filter by cwd at the SQL level when provided.
-            session_ids = await self.agent_pool.storage.list_session_ids(cwd=cwd)
+            session_ids = await self.host_context.storage.list_session_ids(cwd=cwd)
             # Batch load all sessions in one query instead of N+1
-            sessions = await self.agent_pool.storage.load_sessions_batch(session_ids)
+            sessions = await self.host_context.storage.load_sessions_batch(session_ids)
             # Python-level cwd filter as secondary safeguard for path normalization
             # (resolve handles trailing slashes, symlinks, relative paths)
             resolved_filter = Path(cwd).resolve() if cwd is not None else None
@@ -1475,17 +1487,17 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         Returns:
             SessionData if session was found and loaded, None otherwise.
         """
-        if not self.agent_pool:
+        if not self.host_context:
             return None
 
         session_data: SessionData | None = None
         try:
-            session_data = await self.agent_pool.storage.load_session(session_id)
+            session_data = await self.host_context.storage.load_session(session_id)
         except Exception:
             self.log.exception("Failed to load session data", session_id=session_id)
 
         try:
-            messages = await self.agent_pool.storage.get_session_messages(session_id)
+            messages = await self.host_context.storage.get_session_messages(session_id)
             self.conversation.chat_messages.clear()
             self.conversation.chat_messages.extend(messages)
             self.log.info(

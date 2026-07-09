@@ -159,8 +159,8 @@ class Talk[TTransmittedData = Any]:
         match other:
             case Callable():  # ty: ignore[invalid-match-pattern]
                 other = Agent.from_callback(other)  # ty: ignore[no-matching-overload]
-                if pool := self.source.agent_pool:
-                    other.agent_pool = pool
+                if (ctx := self.source.host_context) and ctx.pool is not None:
+                    other.agent_pool = ctx.pool
                 return self.__rshift__(other)
             case Sequence():
                 team_talks = [self.__rshift__(o) for o in other]  # ty: ignore[no-matching-overload]
@@ -184,7 +184,8 @@ class Talk[TTransmittedData = Any]:
 
         if not condition:
             return default_return
-        registry = pool.connection_registry if (pool := self.source.agent_pool) else None
+        ctx = self.source.host_context
+        registry = ctx.connection_registry if ctx else None
         ctx = EventContext(
             message=message,
             target=target,
@@ -225,8 +226,8 @@ class Talk[TTransmittedData = Any]:
             timestamp=get_now(),
         )
         # Propagate to all event managers through registry
-        if pool := self.source.agent_pool:
-            for connection in pool.connection_registry.values():
+        if ctx := self.source.host_context:
+            for connection in ctx.connection_registry.values():
                 await connection.source._events.emit_event(event)
 
     async def _handle_message(
@@ -504,8 +505,8 @@ class TeamTalk[TTransmittedData = Any](list["Talk | TeamTalk"]):
             case Callable():  # ty: ignore[invalid-match-pattern]
                 other = Agent.from_callback(other)  # ty: ignore[no-matching-overload]
                 for talk_ in self.iter_talks():
-                    if pool := talk_.source.agent_pool:
-                        other.agent_pool = pool
+                    if (ctx := talk_.source.host_context) and ctx.pool is not None:
+                        other.agent_pool = ctx.pool
                         break
                 return self.__rshift__(other)
             case Sequence():

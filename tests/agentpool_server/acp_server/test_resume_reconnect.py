@@ -111,7 +111,7 @@ async def test_resume_after_reconnect() -> None:  # noqa: PLR0915
     await mcp_manager.cleanup_session(session_id)
 
     # MCPManager session context should be removed
-    assert session_id not in mcp_manager._session_contexts
+    assert mcp_manager.get_session_context(session_id) is None
 
     # --- Step 5: Reconnect + resume — create fresh session context ---
     # get_or_create_session creates a NEW _SessionContext with fresh state
