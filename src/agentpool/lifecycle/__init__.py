@@ -1,22 +1,35 @@
-"""Lifecycle package: types, Protocols, and (later) default implementations.
+"""Lifecycle package: types, Protocols, and default implementations.
 
 The lifecycle subsystem provides the six dimensions of the RunLoop:
 TriggerSource, Journal, SnapshotStore, CommChannel, EventTransport,
 and the RunLoop itself.
 
-This module exports the foundational types and Protocols. Default
-implementations (ImmediateTrigger, MemoryJournal, etc.) will be added
-in subsequent tasks.
+This module exports the foundational types, Protocols, TriggerSource
+implementations, and SnapshotStore implementations. Additional default
+implementations (MemoryJournal, CommChannel, etc.) will be added in
+subsequent tasks.
 """
 
 from __future__ import annotations
 
+from agentpool.lifecycle.event_transport import InProcessTransport
+from agentpool.lifecycle.journal import DurableJournal, MemoryJournal
 from agentpool.lifecycle.protocols import (
     CommChannel,
     EventTransport,
     Journal,
     SnapshotStore,
     TriggerSource,
+)
+from agentpool.lifecycle.snapshot_store import (
+    DurableSnapshotStore,
+    MemorySnapshotStore,
+)
+from agentpool.lifecycle.triggers import (
+    ChannelTrigger,
+    ImmediateTrigger,
+    ProtocolTrigger,
+    ScheduledTrigger,
 )
 from agentpool.lifecycle.types import (
     EventEnvelope,
@@ -28,14 +41,23 @@ from agentpool.lifecycle.types import (
 )
 
 __all__ = [
+    "ChannelTrigger",
     "CommChannel",
+    "DurableJournal",
+    "DurableSnapshotStore",
     "EventEnvelope",
     "EventTransport",
     "Feedback",
+    "ImmediateTrigger",
+    "InProcessTransport",
     "Journal",
+    "MemoryJournal",
+    "MemorySnapshotStore",
     "Prompt",
+    "ProtocolTrigger",
     "ResumeResult",
     "RunState",
+    "ScheduledTrigger",
     "SnapshotStore",
     "ToolExecutionRecord",
     "TriggerSource",
