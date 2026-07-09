@@ -101,11 +101,7 @@ class MemoryJournal:
         """
         upper = to_seq if to_seq is not None else float("inf")
         merged: list[tuple[int, Any]] = []
-        merged.extend(
-            (seq, evt)
-            for seq, evt in self._entries
-            if from_seq <= seq <= upper
-        )
+        merged.extend((seq, evt) for seq, evt in self._entries if from_seq <= seq <= upper)
         for seq, evt in self._upserts.values():
             if from_seq <= seq <= upper:
                 merged.append((seq, evt))
@@ -141,9 +137,7 @@ class MemoryJournal:
         merged_since.sort(key=lambda pair: pair[0])
         events_since_snapshot: list[Any] = [evt for _seq, evt in merged_since]
 
-        inflight_turn_id = _detect_inflight_turn(
-            events_since_snapshot, snapshot_store
-        )
+        inflight_turn_id = _detect_inflight_turn(events_since_snapshot, snapshot_store)
 
         return ResumeResult(
             is_inflight=inflight_turn_id is not None,
@@ -158,13 +152,9 @@ class MemoryJournal:
         Args:
             before_seq: Remove entries with seq below this value.
         """
-        self._entries = [
-            (seq, event) for seq, event in self._entries if seq >= before_seq
-        ]
+        self._entries = [(seq, event) for seq, event in self._entries if seq >= before_seq]
         self._upserts = {
-            key: (seq, event)
-            for key, (seq, event) in self._upserts.items()
-            if seq >= before_seq
+            key: (seq, event) for key, (seq, event) in self._upserts.items() if seq >= before_seq
         }
 
     def clear(self) -> None:
@@ -357,9 +347,7 @@ class DurableJournal:
     def _next_seq(self) -> int:
         """Get the next sequence number from the database."""
         with Session(self._engine) as session:
-            result = session.execute(
-                text("SELECT COALESCE(MAX(seq), 0) FROM lifecycle_journal")
-            )
+            result = session.execute(text("SELECT COALESCE(MAX(seq), 0) FROM lifecycle_journal"))
             max_seq: int = result.scalar() or 0
             return max_seq + 1
 
@@ -433,9 +421,7 @@ class DurableJournal:
         from sqlmodel import select
 
         with Session(self._engine) as session:
-            stmt = select(_JournalEntry).where(
-                _JournalEntry.seq >= from_seq
-            )
+            stmt = select(_JournalEntry).where(_JournalEntry.seq >= from_seq)
             if to_seq is not None:
                 stmt = stmt.where(_JournalEntry.seq <= to_seq)
             stmt = stmt.order_by(_JournalEntry.seq.asc())  # type: ignore[attr-defined]
@@ -476,19 +462,17 @@ class DurableJournal:
         from sqlmodel import select
 
         with Session(self._engine) as session:
-            stmt = select(_JournalEntry).where(
-                _JournalEntry.seq > last_journal_seq
-            ).order_by(_JournalEntry.seq.asc())  # type: ignore[attr-defined]
+            stmt = (
+                select(_JournalEntry)
+                .where(_JournalEntry.seq > last_journal_seq)
+                .order_by(_JournalEntry.seq.asc())
+            )  # type: ignore[attr-defined]
             result = session.execute(stmt)
             rows: list[_JournalEntry] = list(result.scalars().all())
 
-        events_since_snapshot: list[Any] = [
-            _deserialize_event(row.event_json) for row in rows
-        ]
+        events_since_snapshot: list[Any] = [_deserialize_event(row.event_json) for row in rows]
 
-        inflight_turn_id = _detect_inflight_turn(
-            events_since_snapshot, snapshot_store
-        )
+        inflight_turn_id = _detect_inflight_turn(events_since_snapshot, snapshot_store)
 
         return ResumeResult(
             is_inflight=inflight_turn_id is not None,
@@ -533,9 +517,7 @@ class DurableJournal:
             tool_name=record.tool_name,
             args_json=json.dumps(record.args, default=str),
             result_json=(
-                json.dumps(record.result, default=str)
-                if record.result is not None
-                else None
+                json.dumps(record.result, default=str) if record.result is not None else None
             ),
             status=record.status,
         )
@@ -555,9 +537,7 @@ class DurableJournal:
         from sqlmodel import select
 
         with Session(self._engine) as session:
-            stmt = select(_ToolLogEntry).where(
-                _ToolLogEntry.turn_id == turn_id
-            )
+            stmt = select(_ToolLogEntry).where(_ToolLogEntry.turn_id == turn_id)
             result = session.execute(stmt)
             rows: list[_ToolLogEntry] = list(result.scalars().all())
 
@@ -565,16 +545,8 @@ class DurableJournal:
             ToolExecutionRecord(
                 turn_id=row.turn_id,
                 tool_name=row.tool_name,
-                args=(
-                    json.loads(row.args_json)
-                    if row.args_json
-                    else {}
-                ),
-                result=(
-                    json.loads(row.result_json)
-                    if row.result_json is not None
-                    else None
-                ),
+                args=(json.loads(row.args_json) if row.args_json else {}),
+                result=(json.loads(row.result_json) if row.result_json is not None else None),
                 status=row.status,
             )
             for row in rows

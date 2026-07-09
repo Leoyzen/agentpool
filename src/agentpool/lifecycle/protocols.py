@@ -89,9 +89,7 @@ class Journal(Protocol):
         """
         ...
 
-    def replay(
-        self, from_seq: int = 0, to_seq: int | None = None
-    ) -> AsyncIterator[Any]:
+    def replay(self, from_seq: int = 0, to_seq: int | None = None) -> AsyncIterator[Any]:
         """Return an async iterator of events in sequence order.
 
         Append entries are all returned, ordered by ``seq``.
@@ -274,9 +272,7 @@ class EventTransport(Protocol):
         """
         ...
 
-    def subscribe(
-        self, topic: str, from_seq: int = 0
-    ) -> AsyncIterator[EventEnvelope]:
+    def subscribe(self, topic: str, from_seq: int = 0) -> AsyncIterator[EventEnvelope]:
         """Return an async iterator of envelopes for a topic.
 
         Args:
