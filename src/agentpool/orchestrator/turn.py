@@ -210,6 +210,60 @@ class HookAwareTurn:
             env=self._hook_env,
         )
 
+    def _log_tool_execution(
+        self,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        tool_output: Any,
+        tool_call_id: str | None = None,
+    ) -> None:
+        """Log a tool execution record to the journal for crash recovery.
+
+        Creates a :class:`ToolExecutionRecord` and stores it via
+        ``journal.log_tool_execution()``. Uses a separate guard key
+        (``"tool_log:{tool_call_id}"``) to prevent double-logging when
+        both old and new code paths are active.
+
+        Skips silently if any of the following are missing:
+        - ``run_ctx._run_handle`` (not running inside a pooled session)
+        - ``run_handle._journal`` (no journal configured)
+        - ``run_ctx.turn_id`` (turn_id not yet set)
+
+        Args:
+            tool_name: Name of the tool that was called.
+            tool_input: Input arguments that were passed to the tool.
+            tool_output: Output from the tool.
+            tool_call_id: Unique ID for this tool call, if available.
+        """
+        from agentpool.lifecycle.types import ToolExecutionRecord
+
+        # Separate guard to prevent double-logging.
+        if tool_call_id is not None:
+            log_guard = f"tool_log:{tool_call_id}"
+        else:
+            log_guard = f"tool_log:{tool_name}"
+        if log_guard in self._run_ctx.hooks_fired:
+            return
+        self._run_ctx.hooks_fired.add(log_guard)
+
+        run_handle = self._run_ctx._run_handle
+        if run_handle is None:
+            return
+        journal = run_handle._journal
+        if journal is None:
+            return
+        turn_id = self._run_ctx.turn_id
+        if turn_id is None:
+            return
+        record = ToolExecutionRecord(
+            turn_id=turn_id,
+            tool_name=tool_name,
+            args=tool_input,
+            result=tool_output,
+            status="completed",
+        )
+        journal.log_tool_execution(record)
+
     async def _fire_post_tool_hooks(
         self,
         tool_name: str,
@@ -219,6 +273,9 @@ class HookAwareTurn:
         tool_call_id: str | None = None,
     ) -> HookResult | None:
         """Fire post_tool_use hooks for a completed tool call.
+
+        Also logs the tool execution to the journal for crash recovery,
+        independent of whether hooks are configured.
 
         Args:
             tool_name: Name of the tool that was called.
@@ -231,6 +288,9 @@ class HookAwareTurn:
             Combined :class:`HookResult`, or ``None`` if hooks are not
             configured or already fired for this tool call.
         """
+        # Log tool execution to journal (independent of hooks).
+        self._log_tool_execution(tool_name, tool_input, tool_output, tool_call_id)
+
         if self._hooks is None:
             return None
         if tool_call_id is not None:
