@@ -55,6 +55,7 @@ if TYPE_CHECKING:
 _APP_NAME = "agentpool"
 _APP_AUTHOR = "agentpool"
 _STATE_DIR: Path = Path(user_state_dir(_APP_NAME, _APP_AUTHOR))
+_LIFECYCLE_DB: Path = _STATE_DIR / "lifecycle.db"
 
 
 def _sanitize_session_id(session_id: str) -> str:
@@ -87,11 +88,11 @@ def create_dimensions(
     Maps the config's fields to concrete implementations:
 
     - **journal**: ``"memory"`` → ``MemoryJournal``;
-      ``"durable"`` → ``DurableJournal`` with a SQLite DB path
-      derived from ``session_id``.
+      ``"durable"`` → ``DurableJournal`` with a shared SQLite DB
+      (``lifecycle.db``) using ``session_id`` for isolation.
     - **snapshot**: ``"memory"`` → ``MemorySnapshotStore``;
-      ``"durable"`` → ``DurableSnapshotStore`` with a SQLite DB
-      path derived from ``session_id``.
+      ``"durable"`` → ``DurableSnapshotStore`` with a shared SQLite
+      DB (``lifecycle.db``) using ``session_id`` for isolation.
     - **comm_channel**: Always ``DirectChannel(journal)``.
     - **event_transport**: Always ``InProcessTransport()``.
     - **trigger_source**: Always ``None`` — the caller (RunHandle)
@@ -106,8 +107,8 @@ def create_dimensions(
     Args:
         lifecycle_config: The lifecycle configuration, or ``None``
             for all-defaults.
-        session_id: Session identifier used to derive durable DB
-            file paths (e.g. ``"lifecycle_{session_id}.db"``).
+        session_id: Session identifier used for isolating entries in
+            the shared ``lifecycle.db`` database.
 
     Returns:
         Tuple of ``(trigger_source, journal, snapshot_store,
@@ -127,15 +128,19 @@ def create_dimensions(
 
     # Create Journal based on config.
     if lifecycle_config.journal == "durable":
-        journal_db = _STATE_DIR / f"lifecycle_{safe_session_id}.db"
-        journal: Journal = DurableJournal(f"sqlite:///{journal_db}")
+        journal: Journal = DurableJournal(
+            f"sqlite:///{_LIFECYCLE_DB}",
+            session_id=safe_session_id,
+        )
     else:
         journal = MemoryJournal()
 
     # Create SnapshotStore based on config.
     if lifecycle_config.snapshot == "durable":
-        snapshot_db = _STATE_DIR / f"lifecycle_{safe_session_id}_snapshot.db"
-        snapshot_store: SnapshotStore = DurableSnapshotStore(snapshot_db)
+        snapshot_store: SnapshotStore = DurableSnapshotStore(
+            _LIFECYCLE_DB,
+            session_id=safe_session_id,
+        )
     else:
         snapshot_store = MemorySnapshotStore()
 

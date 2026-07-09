@@ -201,6 +201,9 @@ class _JournalEntry(SQLModel, table=True):
     seq: int = Field(default=None, primary_key=True)
     """Monotonically increasing sequence number (autoincrement)."""
 
+    session_id: str = Field(index=True)
+    """Session identifier for isolation in shared DB."""
+
     entry_type: str = Field(index=True)
     """``"append"`` or ``"upsert"``."""
 
@@ -220,6 +223,9 @@ class _ToolLogEntry(SQLModel, table=True):
 
     id: int = Field(default=None, primary_key=True)
     """Auto-increment primary key."""
+
+    session_id: str = Field(index=True)
+    """Session identifier for isolation in shared DB."""
 
     turn_id: str = Field(index=True)
     """The Turn that executed this tool call."""
@@ -396,6 +402,7 @@ class DurableJournal:
     def __init__(
         self,
         engine: Engine | str,
+        session_id: str,
     ) -> None:
         """Initialize the durable journal.
 
@@ -403,12 +410,16 @@ class DurableJournal:
             engine: A SQLAlchemy ``Engine`` instance or a database URL
                 string. When a URL string is provided, a new sync engine
                 is created.
+            session_id: Session identifier for isolating entries in a
+                shared database.
         """
         if isinstance(engine, str):
             url = engine
             self._engine: Engine = create_engine(url)
         else:
             self._engine = engine
+
+        self._session_id: str = session_id
 
         # Enable WAL mode for SQLite databases.
         if self._engine.dialect.name == "sqlite":
@@ -433,6 +444,7 @@ class DurableJournal:
             Monotonically increasing sequence number.
         """
         entry = _JournalEntry(
+            session_id=self._session_id,
             entry_type="append",
             upsert_key=None,
             event_json=_serialize_event(event),
@@ -458,10 +470,12 @@ class DurableJournal:
         with Session(self._engine) as session:
             session.execute(
                 sa_delete(_JournalEntry).where(
-                    _JournalEntry.upsert_key == key  # type: ignore[arg-type]
+                    _JournalEntry.upsert_key == key,  # type: ignore[arg-type]
+                    _JournalEntry.session_id == self._session_id,  # type: ignore[arg-type]
                 )
             )
             entry = _JournalEntry(
+                session_id=self._session_id,
                 entry_type="upsert",
                 upsert_key=key,
                 event_json=_serialize_event(event),
@@ -488,7 +502,11 @@ class DurableJournal:
         from sqlmodel import select
 
         with Session(self._engine) as session:
-            stmt = select(_JournalEntry).where(_JournalEntry.seq >= from_seq)
+            stmt = (
+                select(_JournalEntry)
+                .where(_JournalEntry.seq >= from_seq)
+                .where(_JournalEntry.session_id == self._session_id)
+            )
             if to_seq is not None:
                 stmt = stmt.where(_JournalEntry.seq <= to_seq)
             stmt = stmt.order_by(_JournalEntry.seq.asc())  # type: ignore[attr-defined]
@@ -532,6 +550,7 @@ class DurableJournal:
             stmt = (
                 select(_JournalEntry)
                 .where(_JournalEntry.seq > last_journal_seq)
+                .where(_JournalEntry.session_id == self._session_id)
                 .order_by(_JournalEntry.seq.asc())  # type: ignore[attr-defined]
             )
             result = session.execute(stmt)
@@ -559,22 +578,38 @@ class DurableJournal:
         with Session(self._engine) as session:
             session.execute(
                 sa_delete(_JournalEntry).where(
-                    _JournalEntry.seq < before_seq  # type: ignore[arg-type]
+                    _JournalEntry.seq < before_seq,  # type: ignore[arg-type]
+                    _JournalEntry.session_id == self._session_id,  # type: ignore[arg-type]
                 )
             )
             session.commit()
 
     def clear(self) -> None:
-        """Remove all journal entries, resetting the sequence counter."""
+        """Remove all journal entries for this session, resetting the sequence counter."""
         from sqlalchemy import delete as sa_delete
 
         with Session(self._engine) as session:
-            session.execute(sa_delete(_JournalEntry))
-            session.execute(sa_delete(_ToolLogEntry))
-            if self._engine.dialect.name == "sqlite":
-                session.execute(
-                    text("DELETE FROM sqlite_sequence WHERE name = 'lifecycle_journal'")
+            session.execute(
+                sa_delete(_JournalEntry).where(
+                    _JournalEntry.session_id == self._session_id  # type: ignore[arg-type]
                 )
+            )
+            session.execute(
+                sa_delete(_ToolLogEntry).where(
+                    _ToolLogEntry.session_id == self._session_id  # type: ignore[arg-type]
+                )
+            )
+            # Reset autoincrement only if the table is now completely empty
+            # (i.e., no other sessions have entries in this shared DB).
+            if self._engine.dialect.name == "sqlite":
+                remaining = session.execute(text("SELECT COUNT(*) FROM lifecycle_journal")).scalar()
+                if remaining == 0:
+                    session.execute(
+                        text("DELETE FROM sqlite_sequence WHERE name = 'lifecycle_journal'")
+                    )
+                    session.execute(
+                        text("DELETE FROM sqlite_sequence WHERE name = 'lifecycle_tool_log'")
+                    )
             session.commit()
 
     def log_tool_execution(self, record: ToolExecutionRecord) -> None:
@@ -584,6 +619,7 @@ class DurableJournal:
             record: The tool execution record to store.
         """
         entry = _ToolLogEntry(
+            session_id=self._session_id,
             turn_id=record.turn_id,
             tool_name=record.tool_name,
             args_json=json.dumps(record.args, default=str),
@@ -608,7 +644,11 @@ class DurableJournal:
         from sqlmodel import select
 
         with Session(self._engine) as session:
-            stmt = select(_ToolLogEntry).where(_ToolLogEntry.turn_id == turn_id)
+            stmt = (
+                select(_ToolLogEntry)
+                .where(_ToolLogEntry.turn_id == turn_id)
+                .where(_ToolLogEntry.session_id == self._session_id)
+            )
             result = session.execute(stmt)
             rows: list[_ToolLogEntry] = list(result.scalars().all())
 

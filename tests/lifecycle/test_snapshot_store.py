@@ -31,7 +31,7 @@ def test_memory_snapshot_store_conforms_to_protocol():
 
 def test_durable_snapshot_store_conforms_to_protocol(tmp_path: Path):
     """DurableSnapshotStore is an instance of SnapshotStore Protocol."""
-    store = DurableSnapshotStore(tmp_path / "test_proto.db")
+    store = DurableSnapshotStore(tmp_path / "test_proto.db", session_id="test")
     try:
         assert isinstance(store, SnapshotStore)
     finally:
@@ -128,7 +128,7 @@ def test_memory_snapshot_store_clear_resets_seq():
 
 def test_durable_snapshot_store_load_returns_none_when_empty(tmp_path: Path):
     """load() returns None when no snapshot has been saved."""
-    store = DurableSnapshotStore(tmp_path / "test_empty.db")
+    store = DurableSnapshotStore(tmp_path / "test_empty.db", session_id="test")
     try:
         assert store.load() is None
     finally:
@@ -137,7 +137,7 @@ def test_durable_snapshot_store_load_returns_none_when_empty(tmp_path: Path):
 
 def test_durable_snapshot_store_save_load_round_trip(tmp_path: Path):
     """save() stores state, load() returns (state, seq) tuple."""
-    store = DurableSnapshotStore(tmp_path / "test_roundtrip.db")
+    store = DurableSnapshotStore(tmp_path / "test_roundtrip.db", session_id="test")
     try:
         state: dict[str, Any] = {"phase": "running", "count": 42}
         seq = store.save(state)
@@ -156,12 +156,12 @@ def test_durable_snapshot_store_persists_across_reinstantiation(tmp_path: Path):
     db_path = tmp_path / "persist.db"
     state: dict[str, Any] = {"phase": "running", "data": [1, 2, 3]}
 
-    store1 = DurableSnapshotStore(db_path)
+    store1 = DurableSnapshotStore(db_path, session_id="test")
     seq = store1.save(state)
     store1.save_turn_result("turn_abc", {"result": "done"})
     store1.close()
 
-    store2 = DurableSnapshotStore(db_path)
+    store2 = DurableSnapshotStore(db_path, session_id="test")
     try:
         loaded = store2.load()
         assert loaded is not None
@@ -176,7 +176,7 @@ def test_durable_snapshot_store_persists_across_reinstantiation(tmp_path: Path):
 def test_durable_snapshot_store_load_returns_none_for_corrupt(tmp_path: Path):
     """load() returns None for corrupt/partial snapshot data."""
     db_path = tmp_path / "corrupt.db"
-    store = DurableSnapshotStore(db_path)
+    store = DurableSnapshotStore(db_path, session_id="test")
     store.save({"phase": "running"})
     store.close()
 
@@ -188,7 +188,7 @@ def test_durable_snapshot_store_load_returns_none_for_corrupt(tmp_path: Path):
     conn.commit()
     conn.close()
 
-    store2 = DurableSnapshotStore(db_path)
+    store2 = DurableSnapshotStore(db_path, session_id="test")
     try:
         loaded = store2.load()
         assert loaded is None
@@ -198,7 +198,7 @@ def test_durable_snapshot_store_load_returns_none_for_corrupt(tmp_path: Path):
 
 def test_durable_snapshot_store_save_turn_result_and_has_turn_result(tmp_path: Path):
     """save_turn_result persists, has_turn_result checks DB."""
-    store = DurableSnapshotStore(tmp_path / "turn_results.db")
+    store = DurableSnapshotStore(tmp_path / "turn_results.db", session_id="test")
     try:
         assert store.has_turn_result("turn_1") is False
         store.save_turn_result("turn_1", {"output": "completed"})
@@ -210,11 +210,11 @@ def test_durable_snapshot_store_save_turn_result_and_has_turn_result(tmp_path: P
 def test_durable_snapshot_store_turn_result_persists_across_reinstantiation(tmp_path: Path):
     """Turn results persist across re-instantiation."""
     db_path = tmp_path / "turn_persist.db"
-    store1 = DurableSnapshotStore(db_path)
+    store1 = DurableSnapshotStore(db_path, session_id="test")
     store1.save_turn_result("turn_abc", {"output": "done"})
     store1.close()
 
-    store2 = DurableSnapshotStore(db_path)
+    store2 = DurableSnapshotStore(db_path, session_id="test")
     try:
         assert store2.has_turn_result("turn_abc") is True
     finally:
@@ -223,7 +223,7 @@ def test_durable_snapshot_store_turn_result_persists_across_reinstantiation(tmp_
 
 def test_durable_snapshot_store_clear_removes_all(tmp_path: Path):
     """clear() removes all snapshots and turn results."""
-    store = DurableSnapshotStore(tmp_path / "clear.db")
+    store = DurableSnapshotStore(tmp_path / "clear.db", session_id="test")
     try:
         store.save({"phase": "running"})
         store.save_turn_result("turn_1", {"output": "done"})
@@ -236,7 +236,7 @@ def test_durable_snapshot_store_clear_removes_all(tmp_path: Path):
 
 def test_durable_snapshot_store_clear_on_empty_does_not_crash(tmp_path: Path):
     """clear() on empty store does not crash."""
-    store = DurableSnapshotStore(tmp_path / "empty_clear.db")
+    store = DurableSnapshotStore(tmp_path / "empty_clear.db", session_id="test")
     try:
         store.clear()
         store.clear()
@@ -246,7 +246,7 @@ def test_durable_snapshot_store_clear_on_empty_does_not_crash(tmp_path: Path):
 
 def test_durable_snapshot_store_load_returns_latest(tmp_path: Path):
     """load() returns the most recently saved snapshot."""
-    store = DurableSnapshotStore(tmp_path / "latest.db")
+    store = DurableSnapshotStore(tmp_path / "latest.db", session_id="test")
     try:
         store.save({"phase": "idle"})
         store.save({"phase": "running"})
@@ -260,7 +260,7 @@ def test_durable_snapshot_store_load_returns_latest(tmp_path: Path):
 
 def test_durable_snapshot_store_save_turn_result_overwrites(tmp_path: Path):
     """save_turn_result with same turn_id overwrites previous result."""
-    store = DurableSnapshotStore(tmp_path / "overwrite.db")
+    store = DurableSnapshotStore(tmp_path / "overwrite.db", session_id="test")
     try:
         store.save_turn_result("turn_1", {"output": "first"})
         store.save_turn_result("turn_1", {"output": "second"})
@@ -282,7 +282,7 @@ def test_memory_journal_plus_durable_snapshot_store_compose(tmp_path: Path):
     db_path = tmp_path / "compose.db"
 
     # Simulate RunLoop: save snapshot at turn boundary
-    store = DurableSnapshotStore(db_path)
+    store = DurableSnapshotStore(db_path, session_id="test")
     try:
         state: dict[str, Any] = {
             "session_id": "sess_1",
@@ -294,7 +294,7 @@ def test_memory_journal_plus_durable_snapshot_store_compose(tmp_path: Path):
 
         # Simulate crash recovery: re-instantiate and load
         store.close()
-        store2 = DurableSnapshotStore(db_path)
+        store2 = DurableSnapshotStore(db_path, session_id="test")
         loaded = store2.load()
         assert loaded is not None
         loaded_state, loaded_seq = loaded

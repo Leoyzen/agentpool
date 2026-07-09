@@ -359,7 +359,7 @@ def test_memory_journal_tool_executions_isolated_by_turn_id():
 def test_durable_journal_protocol_conformance(tmp_path):
     """DurableJournal satisfies the Journal Protocol."""
     db_url = f"sqlite:///{tmp_path}/test_journal.db"
-    journal = DurableJournal(db_url)
+    journal = DurableJournal(db_url, session_id="test")
     assert isinstance(journal, Journal)
     journal.close()
 
@@ -372,7 +372,7 @@ def test_durable_journal_protocol_conformance(tmp_path):
 def test_durable_journal_append_returns_monotonic_seq(tmp_path):
     """DurableJournal append() returns strictly increasing sequence numbers."""
     db_url = f"sqlite:///{tmp_path}/test_append.db"
-    journal = DurableJournal(db_url)
+    journal = DurableJournal(db_url, session_id="test")
     seq1 = journal.append("event1")
     seq2 = journal.append("event2")
     seq3 = journal.append("event3")
@@ -385,7 +385,7 @@ def test_durable_journal_append_returns_monotonic_seq(tmp_path):
 def test_durable_journal_upsert_replaces_existing(tmp_path):
     """DurableJournal upsert() replaces by key and returns higher seq."""
     db_url = f"sqlite:///{tmp_path}/test_upsert.db"
-    journal = DurableJournal(db_url)
+    journal = DurableJournal(db_url, session_id="test")
     seq1 = journal.upsert("key1", "v1")
     seq2 = journal.upsert("key1", "v2")
     assert seq2 > seq1
@@ -395,7 +395,7 @@ def test_durable_journal_upsert_replaces_existing(tmp_path):
 async def test_durable_journal_replay_yields_in_order(tmp_path) -> None:
     """DurableJournal replay() yields events in sequence order."""
     db_url = f"sqlite:///{tmp_path}/test_replay.db"
-    journal = DurableJournal(db_url)
+    journal = DurableJournal(db_url, session_id="test")
     journal.append("a")
     journal.append("b")
     journal.append("c")
@@ -407,7 +407,7 @@ async def test_durable_journal_replay_yields_in_order(tmp_path) -> None:
 async def test_durable_journal_replay_upsert_dedup(tmp_path) -> None:
     """DurableJournal replay() returns only latest per upsert key."""
     db_url = f"sqlite:///{tmp_path}/test_replay_upsert.db"
-    journal = DurableJournal(db_url)
+    journal = DurableJournal(db_url, session_id="test")
     journal.upsert("key1", "v1")
     journal.append("delta1")
     journal.upsert("key1", "v2")
@@ -426,14 +426,14 @@ async def test_durable_journal_replay_upsert_dedup(tmp_path) -> None:
 async def test_durable_journal_data_survives_reinstantiation(tmp_path) -> None:
     """DurableJournal data survives re-instantiation with same DB file."""
     db_url = f"sqlite:///{tmp_path}/test_persist.db"
-    journal1 = DurableJournal(db_url)
+    journal1 = DurableJournal(db_url, session_id="test")
     journal1.append("event1")
     journal1.append("event2")
     journal1.upsert("key1", "value1")
     journal1.close()
 
     # Re-instantiate with same DB file
-    journal2 = DurableJournal(db_url)
+    journal2 = DurableJournal(db_url, session_id="test")
     events = [event async for event in journal2.replay()]
     assert "event1" in events
     assert "event2" in events
@@ -444,7 +444,7 @@ async def test_durable_journal_data_survives_reinstantiation(tmp_path) -> None:
 def test_durable_journal_tool_log_survives_reinstantiation(tmp_path):
     """DurableJournal tool execution log survives re-instantiation."""
     db_url = f"sqlite:///{tmp_path}/test_tool_persist.db"
-    journal1 = DurableJournal(db_url)
+    journal1 = DurableJournal(db_url, session_id="test")
     journal1.log_tool_execution(
         ToolExecutionRecord(
             turn_id="t1",
@@ -456,7 +456,7 @@ def test_durable_journal_tool_log_survives_reinstantiation(tmp_path):
     )
     journal1.close()
 
-    journal2 = DurableJournal(db_url)
+    journal2 = DurableJournal(db_url, session_id="test")
     results = journal2.get_tool_executions("t1")
     assert len(results) == 1
     assert results[0].tool_name == "bash"
@@ -473,7 +473,7 @@ def test_durable_journal_tool_log_survives_reinstantiation(tmp_path):
 def test_durable_journal_compact_removes_old_entries(tmp_path):
     """DurableJournal compact() removes entries with seq < before_seq."""
     db_url = f"sqlite:///{tmp_path}/test_compact.db"
-    journal = DurableJournal(db_url)
+    journal = DurableJournal(db_url, session_id="test")
     journal.append("a")  # seq 1
     journal.append("b")  # seq 2
     journal.append("c")  # seq 3
@@ -490,7 +490,7 @@ def test_durable_journal_compact_removes_old_entries(tmp_path):
 def test_durable_journal_compact_on_empty_does_not_crash(tmp_path):
     """DurableJournal compact() on empty journal does not crash."""
     db_url = f"sqlite:///{tmp_path}/test_compact_empty.db"
-    journal = DurableJournal(db_url)
+    journal = DurableJournal(db_url, session_id="test")
     journal.compact(before_seq=0)
     journal.compact(before_seq=100)
     journal.close()
@@ -504,7 +504,7 @@ def test_durable_journal_compact_on_empty_does_not_crash(tmp_path):
 def test_durable_journal_clear_resets(tmp_path):
     """DurableJournal clear() removes all entries."""
     db_url = f"sqlite:///{tmp_path}/test_clear.db"
-    journal = DurableJournal(db_url)
+    journal = DurableJournal(db_url, session_id="test")
     journal.append("a")
     journal.upsert("key1", "v1")
     journal.log_tool_execution(
@@ -527,7 +527,7 @@ def test_durable_journal_clear_resets(tmp_path):
 def test_durable_journal_resume_returns_none_without_snapshot(tmp_path):
     """DurableJournal resume() returns None when no snapshot exists."""
     db_url = f"sqlite:///{tmp_path}/test_resume_none.db"
-    journal = DurableJournal(db_url)
+    journal = DurableJournal(db_url, session_id="test")
     store = MemorySnapshotStore()
     result = journal.resume(store)
     assert result is None
@@ -537,7 +537,7 @@ def test_durable_journal_resume_returns_none_without_snapshot(tmp_path):
 def test_durable_journal_resume_normal_recovery(tmp_path):
     """DurableJournal resume() returns ResumeResult with events since snapshot."""
     db_url = f"sqlite:///{tmp_path}/test_resume_normal.db"
-    journal = DurableJournal(db_url)
+    journal = DurableJournal(db_url, session_id="test")
     journal.append("event1")  # seq 1
     journal.append("event2")  # seq 2
     store = MemorySnapshotStore()
@@ -555,7 +555,7 @@ def test_durable_journal_resume_normal_recovery(tmp_path):
 def test_durable_journal_resume_detects_inflight_turn(tmp_path):
     """DurableJournal resume() detects in-flight Turn."""
     db_url = f"sqlite:///{tmp_path}/test_resume_inflight.db"
-    journal = DurableJournal(db_url)
+    journal = DurableJournal(db_url, session_id="test")
     # Use a dict event so turn_id survives JSON round-trip
     journal.append({"turn_id": "turn_001", "payload": "delta"})
     store = MemorySnapshotStore()
@@ -578,7 +578,7 @@ def test_durable_journal_enables_wal_mode(tmp_path):
 
     db_path = tmp_path / "test_wal.db"
     db_url = f"sqlite:///{db_path}"
-    journal = DurableJournal(db_url)
+    journal = DurableJournal(db_url, session_id="test")
     journal.append("event1")
     journal.close()
 
@@ -601,7 +601,7 @@ def test_durable_journal_accepts_engine_instance(tmp_path):
 
     db_url = f"sqlite:///{tmp_path}/test_engine.db"
     engine = create_engine(db_url)
-    journal = DurableJournal(engine)
+    journal = DurableJournal(engine, session_id="test")
     seq = journal.append("event1")
     assert seq == 1
     journal.close()
@@ -620,7 +620,7 @@ def test_durable_journal_corrupt_db_handled_gracefully(tmp_path):
     db_url = f"sqlite:///{db_path}"
     # Creating the journal should raise a DatabaseError, not crash
     with pytest.raises(Exception):  # noqa: B017
-        DurableJournal(db_url)
+        DurableJournal(db_url, session_id="test")
 
 
 # ---------------------------------------------------------------------------

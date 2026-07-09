@@ -135,8 +135,10 @@ def test_resume_fresh_start_returns_none_memory():
 def test_resume_fresh_start_returns_none_durable(tmp_path: Any):
     """DurableJournal.resume() returns None when no snapshot exists."""
     db_path = str(tmp_path / "test_journal.db")
-    journal = DurableJournal(f"sqlite:///{db_path}")
-    snapshot_store = DurableSnapshotStore(str(tmp_path / "test_snap.db"))
+    journal = DurableJournal(f"sqlite:///{db_path}", session_id="test")
+    snapshot_store = DurableSnapshotStore(
+        str(tmp_path / "test_snap.db"), session_id="test"
+    )
     try:
         result = journal.resume(snapshot_store)
         assert result is None
@@ -234,7 +236,7 @@ def test_resume_inflight_turn_not_detected_when_result_exists():
 def test_resume_inflight_durable(tmp_path: Any):
     """DurableJournal.resume() detects in-flight Turn."""
     db_path = str(tmp_path / "test_journal.db")
-    journal = DurableJournal(f"sqlite:///{db_path}")
+    journal = DurableJournal(f"sqlite:///{db_path}", session_id="test")
     # Use MemorySnapshotStore with seq=0 so journal entries (seq=1+)
     # are found. DurableSnapshotStore.save() returns rowid starting
     # from 1, which equals the first journal seq, causing no entries
@@ -774,13 +776,13 @@ async def test_tool_execution_logging_in_run_loop():
 def test_durable_snapshot_load_corrupt_returns_none(tmp_path: Any):
     """DurableSnapshotStore.load() returns None for corrupt snapshot."""
     snap_path = str(tmp_path / "corrupt.db")
-    store = DurableSnapshotStore(snap_path)
+    store = DurableSnapshotStore(snap_path, session_id="test")
     try:
         # Insert a corrupt snapshot directly. DurableSnapshotStore uses
         # autocommit mode (isolation_level=None), so INSERT is auto-committed.
         store._conn.execute(
-            "INSERT INTO snapshots (seq, state_blob) VALUES (?, ?)",
-            (1, "not valid json{{{"),
+            "INSERT INTO snapshots (session_id, seq, state_blob) VALUES (?, ?, ?)",
+            ("test", 1, "not valid json{{{"),
         )
 
         result = store.load()
@@ -793,13 +795,13 @@ def test_resume_with_corrupt_snapshot_returns_none(tmp_path: Any):
     """DurableJournal.resume() returns None when snapshot is corrupt."""
     db_path = str(tmp_path / "test_journal.db")
     snap_path = str(tmp_path / "corrupt.db")
-    journal = DurableJournal(f"sqlite:///{db_path}")
-    snapshot_store = DurableSnapshotStore(snap_path)
+    journal = DurableJournal(f"sqlite:///{db_path}", session_id="test")
+    snapshot_store = DurableSnapshotStore(snap_path, session_id="test")
     try:
         # Insert corrupt snapshot. Autocommit mode — no explicit COMMIT needed.
         snapshot_store._conn.execute(
-            "INSERT INTO snapshots (seq, state_blob) VALUES (?, ?)",
-            (1, "not valid json{{{"),
+            "INSERT INTO snapshots (session_id, seq, state_blob) VALUES (?, ?, ?)",
+            ("test", 1, "not valid json{{{"),
         )
 
         result = journal.resume(snapshot_store)
@@ -818,8 +820,8 @@ def test_resume_with_missing_journal_entries(tmp_path: Any):
     """DurableJournal.resume() handles missing journal entries gracefully."""
     db_path = str(tmp_path / "test_journal.db")
     snap_path = str(tmp_path / "test_snap.db")
-    journal = DurableJournal(f"sqlite:///{db_path}")
-    snapshot_store = DurableSnapshotStore(snap_path)
+    journal = DurableJournal(f"sqlite:///{db_path}", session_id="test")
+    snapshot_store = DurableSnapshotStore(snap_path, session_id="test")
     try:
         # Save a snapshot but don't add any journal entries.
         snapshot_store.save({"state": RunState.IDLE.value, "run_id": "prev"})
@@ -864,7 +866,7 @@ async def test_log_tool_execution_missing_turn_id_no_crash():
 def test_durable_journal_log_and_get_tool_executions(tmp_path: Any):
     """DurableJournal.log_tool_execution and get_tool_executions round-trip."""
     db_path = str(tmp_path / "test_journal.db")
-    journal = DurableJournal(f"sqlite:///{db_path}")
+    journal = DurableJournal(f"sqlite:///{db_path}", session_id="test")
     try:
         record = ToolExecutionRecord(
             turn_id="turn-1",
@@ -891,7 +893,7 @@ def test_durable_journal_tool_executions_persist_across_restart(tmp_path: Any):
     db_path = str(tmp_path / "test_journal.db")
 
     # Write tool execution record.
-    journal1 = DurableJournal(f"sqlite:///{db_path}")
+    journal1 = DurableJournal(f"sqlite:///{db_path}", session_id="test")
     journal1.log_tool_execution(ToolExecutionRecord(
         turn_id="turn-1",
         tool_name="bash",
@@ -902,7 +904,7 @@ def test_durable_journal_tool_executions_persist_across_restart(tmp_path: Any):
     journal1.close()
 
     # Recreate journal and verify persistence.
-    journal2 = DurableJournal(f"sqlite:///{db_path}")
+    journal2 = DurableJournal(f"sqlite:///{db_path}", session_id="test")
     try:
         records = journal2.get_tool_executions("turn-1")
         assert len(records) == 1
@@ -915,7 +917,7 @@ def test_durable_journal_tool_executions_persist_across_restart(tmp_path: Any):
 def test_durable_journal_get_tool_executions_empty(tmp_path: Any):
     """DurableJournal.get_tool_executions returns empty list for unknown turn."""
     db_path = str(tmp_path / "test_journal.db")
-    journal = DurableJournal(f"sqlite:///{db_path}")
+    journal = DurableJournal(f"sqlite:///{db_path}", session_id="test")
     try:
         records = journal.get_tool_executions("nonexistent")
         assert records == []
@@ -1004,7 +1006,7 @@ def test_durable_full_crash_recovery_cycle(tmp_path: Any):
     db_path = str(tmp_path / "test_journal.db")
 
     # Phase 1: Simulate pre-crash state.
-    journal = DurableJournal(f"sqlite:///{db_path}")
+    journal = DurableJournal(f"sqlite:///{db_path}", session_id="test")
     # Use MemorySnapshotStore with seq=0 so journal entries are found.
     # DurableSnapshotStore.save() returns rowid starting from 1, which
     # equals the first journal seq — see learnings for details.
@@ -1052,7 +1054,7 @@ def test_durable_retry_recovery_with_tool_log(tmp_path: Any):
     db_path = str(tmp_path / "test_journal.db")
 
     # Phase 1: Simulate pre-crash state.
-    journal = DurableJournal(f"sqlite:///{db_path}")
+    journal = DurableJournal(f"sqlite:///{db_path}", session_id="test")
     snapshot_store = MemorySnapshotStore()
     try:
         # Save pre-turn snapshot with prompt.

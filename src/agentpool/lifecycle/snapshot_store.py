@@ -103,13 +103,16 @@ class DurableSnapshotStore:
     first use via ``_ensure_tables()``.
     """
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, session_id: str) -> None:
         """Initialize the durable snapshot store.
 
         Args:
             db_path: Filesystem path to the SQLite database file.
+            session_id: Session identifier for isolating entries in a
+                shared database.
         """
         self._db_path: str = str(db_path)
+        self._session_id: str = session_id
         self._lock: threading.Lock = threading.Lock()
         self._conn: sqlite3.Connection = sqlite3.connect(
             self._db_path,
@@ -127,6 +130,7 @@ class DurableSnapshotStore:
                 """
                 CREATE TABLE IF NOT EXISTS snapshots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
                     seq INTEGER NOT NULL DEFAULT 0,
                     state_blob TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -135,11 +139,24 @@ class DurableSnapshotStore:
             )
             self._conn.execute(
                 """
+                CREATE INDEX IF NOT EXISTS idx_snapshots_session
+                ON snapshots (session_id)
+                """,
+            )
+            self._conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS turn_results (
                     turn_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
                     result_blob TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT (datetime('now'))
                 )
+                """,
+            )
+            self._conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_turn_results_session
+                ON turn_results (session_id)
                 """,
             )
 
@@ -160,8 +177,8 @@ class DurableSnapshotStore:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             cursor = self._conn.execute(
-                "INSERT INTO snapshots (state_blob) VALUES (?)",
-                (state_blob,),
+                "INSERT INTO snapshots (session_id, state_blob) VALUES (?, ?)",
+                (self._session_id, state_blob),
             )
             row_id = cursor.lastrowid
             self._conn.execute("COMMIT")
@@ -179,7 +196,9 @@ class DurableSnapshotStore:
         """
         with self._lock:
             cursor = self._conn.execute(
-                "SELECT id, state_blob FROM snapshots ORDER BY id DESC LIMIT 1",
+                "SELECT id, state_blob FROM snapshots "
+                "WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+                (self._session_id,),
             )
             row = cursor.fetchone()
         if row is None:
@@ -204,11 +223,11 @@ class DurableSnapshotStore:
             self._conn.execute("BEGIN IMMEDIATE")
             self._conn.execute(
                 """
-                INSERT INTO turn_results (turn_id, result_blob)
-                VALUES (?, ?)
+                INSERT INTO turn_results (turn_id, session_id, result_blob)
+                VALUES (?, ?, ?)
                 ON CONFLICT(turn_id) DO UPDATE SET result_blob = excluded.result_blob
                 """,
-                (turn_id, result_blob),
+                (turn_id, self._session_id, result_blob),
             )
             self._conn.execute("COMMIT")
 
@@ -223,17 +242,23 @@ class DurableSnapshotStore:
         """
         with self._lock:
             cursor = self._conn.execute(
-                "SELECT 1 FROM turn_results WHERE turn_id = ?",
-                (turn_id,),
+                "SELECT 1 FROM turn_results WHERE turn_id = ? AND session_id = ?",
+                (turn_id, self._session_id),
             )
             return cursor.fetchone() is not None
 
     def clear(self) -> None:
-        """Remove all snapshots and turn results from the database."""
+        """Remove all snapshots and turn results for this session from the database."""
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
-            self._conn.execute("DELETE FROM snapshots")
-            self._conn.execute("DELETE FROM turn_results")
+            self._conn.execute(
+                "DELETE FROM snapshots WHERE session_id = ?",
+                (self._session_id,),
+            )
+            self._conn.execute(
+                "DELETE FROM turn_results WHERE session_id = ?",
+                (self._session_id,),
+            )
             self._conn.execute("COMMIT")
 
     def close(self) -> None:
