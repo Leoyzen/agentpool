@@ -323,6 +323,8 @@ class RunHandle:
             stop_reason: Optional reason for the transition.
         """
         async with self._state_lock:
+            if self._run_state == new_state and stop_reason is None:
+                return
             self._run_state = new_state
         if self._comm_channel is not None:
             self._comm_channel.on_state_change(new_state)
@@ -381,9 +383,11 @@ class RunHandle:
             if resume_result.is_inflight:
                 # In-flight crash recovery: replay journaled events.
                 self._comm_channel._replaying = True
-                for event in resume_result.events:
-                    await self._comm_channel.publish(event)
-                self._comm_channel._replaying = False
+                try:
+                    for event in resume_result.events:
+                        await self._comm_channel.publish(event)
+                finally:
+                    self._comm_channel._replaying = False
                 self._recovered_inflight_turn_id = resume_result.inflight_turn_id
                 # Apply recovery strategy.
                 if self._recover_strategy == "retry":

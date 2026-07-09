@@ -124,7 +124,7 @@ class DurableSnapshotStore:
             """
             CREATE TABLE IF NOT EXISTS snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                seq INTEGER NOT NULL,
+                seq INTEGER NOT NULL DEFAULT 0,
                 state_blob TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
@@ -139,7 +139,6 @@ class DurableSnapshotStore:
             )
             """,
         )
-        self._conn.execute("PRAGMA wal_checkpoint(FULL)")
 
     def save(self, state: Any) -> int:
         """Persist a full state snapshot with crash-safe atomic write.
@@ -157,17 +156,11 @@ class DurableSnapshotStore:
         state_blob = json.dumps(state, default=str)
         self._conn.execute("BEGIN IMMEDIATE")
         cursor = self._conn.execute(
-            "INSERT INTO snapshots (seq, state_blob) VALUES (?, ?)",
-            (0, state_blob),
+            "INSERT INTO snapshots (state_blob) VALUES (?)",
+            (state_blob,),
         )
         row_id = cursor.lastrowid
-        self._conn.execute(
-            "UPDATE snapshots SET seq = id WHERE id = ?",
-            (row_id,),
-        )
         self._conn.execute("COMMIT")
-        # Force fsync on the database file
-        self._conn.execute("PRAGMA wal_checkpoint(FULL)")
         if row_id is None:
             msg = "Failed to insert snapshot: no rowid returned"
             raise RuntimeError(msg)
@@ -181,18 +174,18 @@ class DurableSnapshotStore:
             exists, ``None`` otherwise.
         """
         cursor = self._conn.execute(
-            "SELECT seq, state_blob FROM snapshots ORDER BY id DESC LIMIT 1",
+            "SELECT id, state_blob FROM snapshots ORDER BY id DESC LIMIT 1",
         )
         row = cursor.fetchone()
         if row is None:
             return None
-        seq, state_blob = row
+        row_id, state_blob = row
         try:
             state = json.loads(state_blob)
         except (json.JSONDecodeError, TypeError):
-            logger.warning("Corrupt snapshot detected (seq=%s), returning None", seq)
+            logger.warning("Corrupt snapshot detected (id=%s), returning None", row_id)
             return None
-        return (state, seq)
+        return (state, row_id)
 
     def save_turn_result(self, turn_id: str, result: Any) -> None:
         """Persist a completed Turn's result to the database.
@@ -212,7 +205,6 @@ class DurableSnapshotStore:
             (turn_id, result_blob),
         )
         self._conn.execute("COMMIT")
-        self._conn.execute("PRAGMA wal_checkpoint(FULL)")
 
     def has_turn_result(self, turn_id: str) -> bool:
         """Check whether a Turn was already completed.
@@ -235,7 +227,6 @@ class DurableSnapshotStore:
         self._conn.execute("DELETE FROM snapshots")
         self._conn.execute("DELETE FROM turn_results")
         self._conn.execute("COMMIT")
-        self._conn.execute("PRAGMA wal_checkpoint(FULL)")
 
     def close(self) -> None:
         """Close the database connection."""
