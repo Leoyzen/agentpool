@@ -101,6 +101,11 @@ def mock_agent_pool() -> Mock:
     pool.manifest.agents = {"test-agent": mock_cfg}
     pool.get_agent = Mock(return_value=mock_agent)
 
+    # Wire AgentFactory mock so SessionController.get_or_create_session_agent()
+    # can delegate to pool._factory.create_session_agent().
+    pool._factory.create_session_agent = AsyncMock(return_value=mock_agent)
+    pool.get_context = Mock(return_value=Mock())
+
     return pool
 
 
