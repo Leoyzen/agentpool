@@ -150,6 +150,7 @@ agents:
         ],
         name="acp-test-agent",
         cwd=str(Path.cwd()),
+        env_vars={"PYTHONPATH": str(Path.cwd())},
     )
     return config, config_file
 
