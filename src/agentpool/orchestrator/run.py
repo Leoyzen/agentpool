@@ -20,6 +20,7 @@ from agentpool.agents.events import (
 from agentpool.lifecycle import (
     DirectChannel,
     EventTransport,
+    Feedback,
     ImmediateTrigger,
     InProcessTransport,
     Journal,
@@ -198,6 +199,7 @@ class RunHandle:
     _cancel_fn: Callable[[], None] | None = None
     _status: RunStatus = RunStatus.idle
     _closing: bool = False
+    _closed: bool = False
     _idle_event: asyncio.Event = field(default_factory=_create_set_event)
     _message_queue: list[str] = field(default_factory=list)
     _message_history: list[ModelMessage] = field(default_factory=list)
@@ -357,7 +359,28 @@ class RunHandle:
                         if not self._message_queue:
                             await self._idle_event.wait()
                             if self._closing:
-                                break
+                                # Drain any feedback from CommChannel
+                                # before checking for pending messages.
+                                if self._comm_channel is not None:
+                                    while True:
+                                        fb = self._comm_channel.recv()
+                                        if fb is None:
+                                            break
+                                        self._message_queue.append(fb.content)
+                                # Process pending messages before exiting
+                                # so close() with queued followups are
+                                # handled as final Turns.
+                                if not self._message_queue:
+                                    break
+                        # Drain CommChannel feedback queue (ProtocolChannel).
+                        # Feedback may have been enqueued by steer/followup
+                        # via deliver_feedback() while the loop was idle.
+                        if self._comm_channel is not None:
+                            while True:
+                                fb = self._comm_channel.recv()
+                                if fb is None:
+                                    break
+                                self._message_queue.append(fb.content)
                         current_prompts = list(self._message_queue)
                         self._message_queue.clear()
                         if not current_prompts:
@@ -558,7 +581,22 @@ class RunHandle:
                         for k in completed_keys:
                             del self.run_ctx.child_done_events[k]
 
-                    current_prompts = list(self._message_queue)
+                    # Drain CommChannel feedback queue (ProtocolChannel).
+                    # Feedback may have been enqueued by steer/followup
+                    # via deliver_feedback() during the Turn. Steer
+                    # feedback is prioritized as next-turn prompts.
+                    feedback_steer: list[str] = []
+                    if self._comm_channel is not None:
+                        while True:
+                            fb = self._comm_channel.recv()
+                            if fb is None:
+                                break
+                            if fb.is_steer:
+                                feedback_steer.append(fb.content)
+                            else:
+                                self._message_queue.append(fb.content)
+
+                    current_prompts = feedback_steer + list(self._message_queue)
                     self._message_queue.clear()
 
                     # Signal that this turn has completed normally.
@@ -568,6 +606,7 @@ class RunHandle:
                 self._status = RunStatus.done
         finally:
             self._status = RunStatus.done
+            self._closed = True
             # Lifecycle state transition: → DONE.
             with contextlib.suppress(Exception):
                 await self._transition(RunState.DONE)
@@ -587,13 +626,40 @@ class RunHandle:
     def steer(self, message: str) -> bool:
         """Inject a steer message into the active turn or wake idle handle.
 
+        For ProtocolChannel (bidirectional CommChannel with
+        ``deliver_feedback()``), routes through the CommChannel feedback
+        loop. For DirectChannel (unidirectional), falls back to the
+        existing ``_message_queue`` / ``active_agent_run.enqueue()``
+        logic.
+
         Returns:
             True if the message was delivered, False if the handle is
             closing or in a non-steerable state.
+
+        Raises:
+            RuntimeError: If :meth:`close` has already been called.
         """
+        if self._closed:
+            msg = "Cannot steer after close()"
+            raise RuntimeError(msg)
+
         if self._closing:
             return False
 
+        # Try ProtocolChannel feedback path (deliver_feedback exists).
+        if self._comm_channel is not None:
+            try:
+                deliver: Any | None = self._comm_channel.deliver_feedback  # type: ignore[attr-defined]
+            except AttributeError:
+                deliver = None
+            if deliver is not None:
+                feedback = Feedback(content=message, is_steer=True)
+                self._comm_channel.deliver_feedback(feedback)  # type: ignore[attr-defined]
+                if self._status == RunStatus.idle:
+                    self._idle_event.set()
+                return True
+
+        # Fallback: DirectChannel path (existing logic).
         if self._status == RunStatus.idle:
             self._message_queue.append(message)
             self._idle_event.set()
@@ -612,11 +678,30 @@ class RunHandle:
     def followup(self, message: str) -> bool:
         """Queue a follow-up prompt for the next turn.
 
+        For ProtocolChannel, routes through the CommChannel feedback
+        loop with ``is_steer=False``. For DirectChannel, falls back
+        to the existing ``_message_queue`` logic.
+
         Returns:
             True if the message was queued, False if the handle is closing.
         """
         if self._closing:
             return False
+
+        # Try ProtocolChannel feedback path (deliver_feedback exists).
+        if self._comm_channel is not None:
+            try:
+                deliver: Any | None = self._comm_channel.deliver_feedback  # type: ignore[attr-defined]
+            except AttributeError:
+                deliver = None
+            if deliver is not None:
+                feedback = Feedback(content=message, is_steer=False)
+                self._comm_channel.deliver_feedback(feedback)  # type: ignore[attr-defined]
+                if self._status == RunStatus.idle:
+                    self._idle_event.set()
+                return True
+
+        # Fallback: DirectChannel path (existing logic).
         self._message_queue.append(message)
         if self._status == RunStatus.idle:
             self._idle_event.set()
@@ -642,9 +727,38 @@ class RunHandle:
         return self.steer(message)
 
     def close(self) -> None:
-        """Signal the run loop to stop after the current turn."""
+        """Signal the run loop to stop after the current turn.
+
+        Sets ``_closing`` flag to signal the loop to exit. Wakes any
+        idle wait via ``_idle_event.set()``. If the loop is idle (not
+        actively running a Turn), schedules an immediate transition
+        to ``RunState.DONE``.
+
+        The ``start()`` finally block sets ``_closed=True`` and closes
+        all lifecycle dimensions (comm_channel, trigger_source,
+        event_transport). This method only sets ``_closing`` — it does
+        NOT close dimensions or set ``_closed``.
+
+        Calling ``close()`` twice is a no-op: the second call returns
+        immediately because ``_closing`` is already ``True``.
+
+        After the ``start()`` finally block has run (``_closed=True``),
+        calling :meth:`steer` raises ``RuntimeError``.
+        """
+        if self._closing:
+            return
         self._closing = True
         self._idle_event.set()
+        # If idle and not in the start() loop, schedule immediate
+        # transition to DONE. The start() loop's finally block also
+        # transitions to DONE, so this handles the case where the
+        # loop isn't running or has already exited.
+        if self._run_state != RunState.DONE:
+            async def _safe_done() -> None:
+                with contextlib.suppress(Exception):
+                    await self._transition(RunState.DONE)
+            with contextlib.suppress(RuntimeError):
+                self._close_task: asyncio.Task[None] | None = asyncio.create_task(_safe_done())
 
     async def __aenter__(self) -> Self:
         return self
