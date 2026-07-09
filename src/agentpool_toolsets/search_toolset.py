@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from agentpool.log import get_logger
-from agentpool.resource_providers import ResourceProvider
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from pydantic_ai.capabilities import AbstractCapability
+    from agentpool.capabilities.function_toolset import FunctionToolsetCapability
     from searchly.base import (
         CountryCode,
         LanguageCode,
@@ -63,7 +63,7 @@ def format_news_results(response: NewsSearchResponse, query: str) -> str:
     return "\n".join(lines)
 
 
-class SearchTools(ResourceProvider):
+class SearchTools(FunctionToolsetCapability):
     """Provider for web and news search tools."""
 
     def __init__(
@@ -192,11 +192,3 @@ class SearchTools(ResourceProvider):
                 self.create_tool(self.news_search, read_only=True, idempotent=True, open_world=True)
             )
         return tools
-
-    def as_capability(self) -> AbstractCapability | None:
-        """Return a pydantic-ai capability for this provider.
-
-        Returns:
-            A pydantic-ai AbstractCapability instance, or None.
-        """
-        return None

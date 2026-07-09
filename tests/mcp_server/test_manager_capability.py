@@ -1,4 +1,4 @@
-"""Tests for MCPManager.as_capability() and MCP migration coverage."""
+"""Tests for MCPManager.get_capabilities() and MCP migration coverage."""
 
 from __future__ import annotations
 
@@ -18,14 +18,14 @@ from agentpool_config.mcp_server import (
 
 
 # =============================================================================
-# as_capability() tests
+# get_capabilities() tests
 # =============================================================================
 
 
 async def test_empty_servers_returns_empty_list() -> None:
     """An MCPManager with no servers should return an empty list."""
     manager = MCPManager(servers=[])
-    caps = await manager.as_capability()
+    caps = await manager.get_capabilities()
     assert caps == []
 
 
@@ -40,7 +40,7 @@ async def test_single_stdio_server() -> None:
     )
     manager = MCPManager(servers=[config])
 
-    caps = await manager.as_capability()
+    caps = await manager.get_capabilities()
 
     assert len(caps) == 1
     cap = caps[0]
@@ -60,7 +60,7 @@ async def test_single_sse_server() -> None:
     )
     manager = MCPManager(servers=[config])
 
-    caps = await manager.as_capability()
+    caps = await manager.get_capabilities()
 
     assert len(caps) == 1
     cap = caps[0]
@@ -79,7 +79,7 @@ async def test_single_streamable_http_server() -> None:
     )
     manager = MCPManager(servers=[config])
 
-    caps = await manager.as_capability()
+    caps = await manager.get_capabilities()
 
     assert len(caps) == 1
     cap = caps[0]
@@ -94,7 +94,7 @@ async def test_multiple_servers() -> None:
     sse_cfg = SSEMCPServerConfig(url=HttpUrl("http://localhost:8080/sse"))
     manager = MCPManager(servers=[stdio_cfg, sse_cfg])
 
-    caps = await manager.as_capability()
+    caps = await manager.get_capabilities()
 
     assert len(caps) == 2
     urls = {c.url for c in caps}
@@ -107,7 +107,7 @@ async def test_disabled_server_is_skipped() -> None:
     disabled = StdioMCPServerConfig(command="python", args=["disabled.py"], enabled=False)
     manager = MCPManager(servers=[enabled, disabled])
 
-    caps = await manager.as_capability()
+    caps = await manager.get_capabilities()
 
     assert len(caps) == 1
     assert caps[0].id == "python_enabled.py"
@@ -119,7 +119,7 @@ async def test_acp_server_is_skipped() -> None:
     acp = AcpMCPServerConfig(acp_id="my-acp-server")
     manager = MCPManager(servers=[stdio, acp])
 
-    caps = await manager.as_capability()
+    caps = await manager.get_capabilities()
 
     assert len(caps) == 1
     assert caps[0].id == "python_server.py"
@@ -134,7 +134,7 @@ async def test_allowed_tools_passed_through() -> None:
     )
     manager = MCPManager(servers=[config])
 
-    caps = await manager.as_capability()
+    caps = await manager.get_capabilities()
 
     assert len(caps) == 1
     assert caps[0].allowed_tools == ["read_file", "list_directory"]
@@ -147,7 +147,7 @@ async def test_capability_is_abstract_capability() -> None:
     config = StdioMCPServerConfig(command="echo", args=["hello"])
     manager = MCPManager(servers=[config])
 
-    caps = await manager.as_capability()
+    caps = await manager.get_capabilities()
 
     assert len(caps) == 1
     assert isinstance(caps[0], AbstractCapability)
@@ -158,19 +158,19 @@ async def test_server_without_name_uses_client_id() -> None:
     config = StdioMCPServerConfig(command="python", args=["server.py"])
     manager = MCPManager(servers=[config])
 
-    caps = await manager.as_capability()
+    caps = await manager.get_capabilities()
 
     assert len(caps) == 1
     assert caps[0].id == "python_server.py"
 
 
 async def test_does_not_modify_manager_state() -> None:
-    """as_capability() should be a pure read-only operation."""
+    """get_capabilities() should be a pure read-only operation."""
     config = StdioMCPServerConfig(command="python", args=["server.py"])
     manager = MCPManager(servers=[config])
 
-    caps1 = await manager.as_capability()
-    caps2 = await manager.as_capability()
+    caps1 = await manager.get_capabilities()
+    caps2 = await manager.get_capabilities()
 
     assert len(caps1) == len(caps2) == 1
     assert caps1[0].url == caps2[0].url
@@ -230,11 +230,11 @@ def test_elicitation_handler_has_4_arg_signature() -> None:
 
 
 async def test_include_instructions_is_true() -> None:
-    """MCPToolset constructed by as_capability() should have include_instructions=True."""
+    """MCPToolset constructed by get_capabilities() should have include_instructions=True."""
     config = StdioMCPServerConfig(command="python", args=["server.py"])
     manager = MCPManager(servers=[config])
 
-    caps = await manager.as_capability()
+    caps = await manager.get_capabilities()
 
     assert len(caps) == 1
     toolset = caps[0].local
@@ -261,7 +261,7 @@ async def test_different_client_ids_produce_distinct_toolsets() -> None:
     config_b = StdioMCPServerConfig(command="python", args=["server_b.py"])
     manager = MCPManager(servers=[config_a, config_b])
 
-    caps = await manager.as_capability()
+    caps = await manager.get_capabilities()
 
     assert len(caps) == 2
     assert caps[0].local is not caps[1].local
@@ -276,7 +276,7 @@ async def test_cache_cleanup_calls_aexit_on_cached_toolsets() -> None:
     config = StdioMCPServerConfig(command="python", args=["server.py"])
     manager = MCPManager(servers=[config])
 
-    await manager.as_capability()
+    await manager.get_capabilities()
 
     assert len(manager._toolset_cache) == 1
     cached_toolset = next(iter(manager._toolset_cache.values()))
@@ -301,7 +301,7 @@ async def test_cached_toolset_shared_across_tasks_without_error() -> None:
     manager = MCPManager(servers=[config])
 
     async def get_caps() -> list[Any]:
-        return await manager.as_capability()
+        return await manager.get_capabilities()
 
     task_a = asyncio.create_task(get_caps())
     caps_a = await task_a

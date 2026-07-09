@@ -48,7 +48,7 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
         Args:
             skills_registry: Optional SkillsRegistry to watch for changes.
                 If None, registry works in standalone mode.
-            skill_provider: Optional skill provider (e.g., AggregatingResourceProvider)
+            skill_provider: Optional skill provider (e.g., CombinedToolsetCapability)
                 to watch for skill changes from MCP servers and other sources.
         """
         super().__init__()
@@ -148,8 +148,8 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
             self._subscribe_to_registry()
 
         # Subscribe to skill provider changes for dynamic skill discovery
-        if self._skill_provider is not None:
-            self._subscribe_to_skill_provider()
+        # Skipped: CombinedToolsetCapability does not have skills_changed signal.
+        # Skill command sync relies on SkillsRegistry events instead.
 
     def _on_sync_complete(self, task: asyncio.Task[None]) -> None:
         """Log completion or failure of background _sync_commands task."""
@@ -183,9 +183,9 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
         Args:
             event: The resource change event from the provider.
         """
-        from agentpool.resource_providers.base import ResourceChangeEvent
+        from agentpool.capabilities.change_event import ChangeEvent
 
-        if isinstance(event, ResourceChangeEvent) and event.resource_type == "skills":
+        if isinstance(event, ChangeEvent) and event.resource_type == "skills":
             logger.debug(
                 "Skill provider change detected, refreshing commands",
                 provider=event.provider_name,

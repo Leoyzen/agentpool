@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Self, Union, get_args, get_ori
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Iterator
 
-    from agentpool.resource_providers import ResourceProvider
+    from pydantic_ai.capabilities import AbstractCapability
     from agentpool.tools.base import Tool
 
 
@@ -309,11 +309,11 @@ def tool_to_markdown(tool: Tool) -> str:
     return "\n".join(lines)
 
 
-def generate_tool_docs(toolset: ResourceProvider) -> str:
+def generate_tool_docs(toolset: AbstractCapability) -> str:
     """Generate markdown documentation for all tools in a toolset.
 
     Args:
-        toolset: A ResourceProvider that provides tools
+        toolset: A AbstractCapability that provides tools
 
     Returns:
         Markdown formatted documentation for all tools

@@ -14,8 +14,8 @@ import anyio
 
 from agentpool.log import get_logger
 from agentpool.mcp_server.global_pool import GlobalConnectionPool
-from agentpool.resource_providers import AggregatingResourceProvider, ResourceProvider
-from agentpool.resource_providers.mcp_provider import MCPResourceProvider
+from agentpool.capabilities.combined_toolset import CombinedToolsetCapability, AbstractCapability
+# MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
 from agentpool_config.mcp_server import AcpMCPServerConfig, BaseMCPServerConfig
 
 
@@ -148,7 +148,7 @@ class MCPManager:
 
     .. deprecated::
         This class is deprecated and will be removed in v0.5.0.
-        Use :meth:`as_capability()` instead.
+        Use :meth:`get_capabilities()` instead.
     """
 
     def __init__(
@@ -164,12 +164,12 @@ class MCPManager:
         self.servers: list[MCPServerConfig] = []
         for server in servers or []:
             self.add_server_config(server)
-        self.providers: list[MCPResourceProvider] = []
+        self.providers: list[MCPCapability] = []
         self.sampling_model = sampling_model
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
-            self.aggregating_provider = AggregatingResourceProvider(
-                providers=cast(list[ResourceProvider], self.providers),
+            self.aggregating_provider = CombinedToolsetCapability(
+                capabilities=cast(list[AbstractCapability], self.providers),
                 name=f"{name}_aggregated",
             )
         self.exit_stack = AsyncExitStack()
@@ -291,7 +291,7 @@ class MCPManager:
 
     async def setup_server(
         self, config: MCPServerConfig, *, add_to_config: bool = False
-    ) -> MCPResourceProvider | None:
+    ) -> MCPCapability | None:
         """Set up a single MCP server resource provider.
 
         Args:
@@ -321,7 +321,7 @@ class MCPManager:
             )
             return None
 
-        provider = MCPResourceProvider(
+        provider = MCPCapability(
             server=config,
             name=f"{self.name}_{config.display_name}",
             owner=self.owner,
@@ -333,7 +333,7 @@ class MCPManager:
         self.providers.append(provider)
         return provider
 
-    def get_mcp_providers(self) -> list[MCPResourceProvider]:
+    def get_mcp_providers(self) -> list[MCPCapability]:
         """Get all MCP resource providers managed by this manager."""
         return list(self.providers)
 
@@ -368,19 +368,19 @@ class MCPManager:
         await self.cleanup()
         self.exit_stack = AsyncExitStack()
 
-    def get_aggregating_provider(self) -> AggregatingResourceProvider:
+    def get_aggregating_provider(self) -> CombinedToolsetCapability:
         """Get an aggregating provider containing only ACP providers.
 
         Non-ACP providers are excluded because they are handled separately
-        by :meth:`as_capability()`.
+        by :meth:`get_capabilities()`.
         """
         acp_providers = [p for p in self.providers if isinstance(p.server, AcpMCPServerConfig)]
-        return AggregatingResourceProvider(
-            providers=cast(list[ResourceProvider], acp_providers),
+        return CombinedToolsetCapability(
+            capabilities=cast(list[AbstractCapability], acp_providers),
             name=f"{self.name}_acp_aggregated",
         )
 
-    async def as_capability(  # noqa: PLR0915
+    async def get_capabilities(  # noqa: PLR0915
         self,
         session_id: str | None = None,
     ) -> list[MCP]:
@@ -539,7 +539,7 @@ class MCPManager:
         else:
             if session_id is not None and ctx is None:
                 logger.warning(
-                    "Session %s context was removed during as_capability(); "
+                    "Session %s context was removed during get_capabilities(); "
                     "falling back to global-only MCP capabilities.",
                     session_id,
                 )

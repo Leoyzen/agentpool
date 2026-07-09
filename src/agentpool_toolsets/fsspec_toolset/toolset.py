@@ -29,7 +29,7 @@ from upathtools import is_directory
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.log import get_logger
 from agentpool.mime_utils import guess_type, is_binary_content, is_binary_mime
-from agentpool.resource_providers import ResourceProvider
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.tool_impls.delete_path import create_delete_path_tool
 from agentpool.tool_impls.download_file import create_download_file_tool
 from agentpool.tool_impls.grep import create_grep_tool
@@ -59,7 +59,7 @@ if TYPE_CHECKING:
     import fsspec
     from fsspec.asyn import AsyncFileSystem
     from pydantic_ai import ModelRequest
-    from pydantic_ai.capabilities import AbstractCapability
+    from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.common_types import ModelType
@@ -72,7 +72,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class FSSpecTools(ResourceProvider):
+class FSSpecTools(FunctionToolsetCapability):
     """Provider for fsspec filesystem tools.
 
     NOTE: The ACP execution environment used handles the Terminal events of the protocol,
@@ -145,14 +145,6 @@ class FSSpecTools(ResourceProvider):
         self._edit_tool = edit_tool
         self._max_image_size = max_image_size
         self._max_image_bytes = max_image_bytes
-
-    def as_capability(self) -> AbstractCapability | None:
-        """Return a pydantic-ai capability for this provider.
-
-        Returns:
-            A pydantic-ai AbstractCapability instance, or None.
-        """
-        return None
 
     def _get_fs(self, agent_ctx: AgentContext) -> AsyncFileSystem:
         """Get filesystem, falling back to agent's env if not set."""

@@ -1,6 +1,6 @@
 """Integration tests for skill providers.
 
-Tests cover AggregatingResourceProvider with Local and MCP providers,
+Tests cover CombinedToolsetCapability with Local and MCP providers,
 signal propagation, skill name collision resolution, and provider lifecycle.
 """
 
@@ -12,8 +12,8 @@ from unittest.mock import MagicMock
 import pytest
 from upathtools import UPath
 
-from agentpool.resource_providers.aggregating import AggregatingResourceProvider
-from agentpool.resource_providers.base import ResourceChangeEvent, ResourceProvider
+from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
+from agentpool.capabilities.change_event import ChangeEvent, AbstractCapability
 from agentpool.skills.skill import Skill
 
 
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.prompts.prompts import BasePrompt
-    from agentpool.resource_providers.resource_info import ResourceInfo
+    # ResourceInfo removed
     from agentpool.tools.base import Tool
 
 
@@ -33,8 +33,8 @@ if TYPE_CHECKING:
 # =============================================================================
 
 
-class MockLocalResourceProvider(ResourceProvider):
-    """Mock provider simulating LocalResourceProvider behavior."""
+class MockLocalCapability(FunctionToolsetCapability):
+    """Mock provider simulating SkillCapability behavior."""
 
     kind = "custom"
 
@@ -92,7 +92,7 @@ class MockLocalResourceProvider(ResourceProvider):
         """Emit tools changed signal for testing."""
         await self.tools_changed.emit(self.create_change_event("tools"))
 
-    def as_capability(self) -> AbstractCapability | None:
+    def get_capabilities(self) -> AbstractCapability | None:
         """Return a pydantic-ai capability for this provider.
 
         Returns:
@@ -101,8 +101,8 @@ class MockLocalResourceProvider(ResourceProvider):
         return None
 
 
-class MockMCPResourceProvider(ResourceProvider):
-    """Mock provider simulating MCPResourceProvider behavior."""
+class MockMCPCapability(FunctionToolsetCapability):
+    """Mock provider simulating MCPCapability behavior."""
 
     kind = "mcp"
 
@@ -233,11 +233,11 @@ def mock_tool_mcp() -> MagicMock:
 
 @pytest.mark.integration
 class TestAggregatingProviderBasics:
-    """Test basic AggregatingResourceProvider functionality."""
+    """Test basic CombinedToolsetCapability functionality."""
 
     async def test_empty_provider_list(self) -> None:
         """Test aggregating provider with no child providers."""
-        provider = AggregatingResourceProvider(providers=[], name="empty")
+        provider = CombinedToolsetCapability(capabilities=[], name="empty")
 
         skills = await provider.get_skills()
         tools = await provider.get_tools()
@@ -251,8 +251,8 @@ class TestAggregatingProviderBasics:
 
     async def test_single_provider_aggregation(self, mock_skill_local: Skill) -> None:
         """Test aggregating provider with single child provider."""
-        local_provider = MockLocalResourceProvider(name="local", skills=[mock_skill_local])
-        aggregator = AggregatingResourceProvider(providers=[local_provider])
+        local_provider = MockLocalCapability(name="local", skills=[mock_skill_local])
+        aggregator = CombinedToolsetCapability(capabilities=[local_provider])
 
         skills = await aggregator.get_skills()
 
@@ -263,9 +263,9 @@ class TestAggregatingProviderBasics:
         self, mock_skill_local: Skill, mock_skill_mcp: Skill
     ) -> None:
         """Test aggregating provider combines resources from multiple providers."""
-        local_provider = MockLocalResourceProvider(name="local", skills=[mock_skill_local])
-        mcp_provider = MockMCPResourceProvider(name="mcp", skills=[mock_skill_mcp])
-        aggregator = AggregatingResourceProvider(providers=[local_provider, mcp_provider])
+        local_provider = MockLocalCapability(name="local", skills=[mock_skill_local])
+        mcp_provider = MockMCPCapability(name="mcp", skills=[mock_skill_mcp])
+        aggregator = CombinedToolsetCapability(capabilities=[local_provider, mcp_provider])
 
         skills = await aggregator.get_skills()
         skill_names = {s.name for s in skills}
@@ -291,15 +291,15 @@ class TestSkillNameCollisionResolution:
     ) -> None:
         """Test that when skills have same name, first provider's skill wins.
 
-        AggregatingResourceProvider deduplicates by name with first-wins priority.
+        CombinedToolsetCapability deduplicates by name with first-wins priority.
         Local provider is first, so local skill is kept and MCP is dropped.
         """
-        local_provider = MockLocalResourceProvider(
+        local_provider = MockLocalCapability(
             name="local", skills=[mock_skill_collision_local]
         )
-        mcp_provider = MockMCPResourceProvider(name="mcp", skills=[mock_skill_collision_mcp])
+        mcp_provider = MockMCPCapability(name="mcp", skills=[mock_skill_collision_mcp])
         # Local provider is first, so its skill should win
-        aggregator = AggregatingResourceProvider(providers=[local_provider, mcp_provider])
+        aggregator = CombinedToolsetCapability(capabilities=[local_provider, mcp_provider])
 
         skills = await aggregator.get_skills()
 
@@ -318,12 +318,12 @@ class TestSkillNameCollisionResolution:
 
         With MCP provider first, the MCP skill wins in name collision.
         """
-        local_provider = MockLocalResourceProvider(
+        local_provider = MockLocalCapability(
             name="local", skills=[mock_skill_collision_local]
         )
-        mcp_provider = MockMCPResourceProvider(name="mcp", skills=[mock_skill_collision_mcp])
+        mcp_provider = MockMCPCapability(name="mcp", skills=[mock_skill_collision_mcp])
         # MCP provider is first this time
-        aggregator = AggregatingResourceProvider(providers=[mcp_provider, local_provider])
+        aggregator = CombinedToolsetCapability(capabilities=[mcp_provider, local_provider])
 
         skills = await aggregator.get_skills()
 
@@ -345,13 +345,13 @@ class TestSignalPropagation:
 
     async def test_skills_changed_signal_propagation(self, mock_skill_local: Skill) -> None:
         """Test that skills_changed signals propagate from child to aggregate."""
-        local_provider = MockLocalResourceProvider(name="local", skills=[mock_skill_local])
-        aggregator = AggregatingResourceProvider(providers=[local_provider])
+        local_provider = MockLocalCapability(name="local", skills=[mock_skill_local])
+        aggregator = CombinedToolsetCapability(capabilities=[local_provider])
 
         # Track signals received by aggregator
-        received_events: list[ResourceChangeEvent] = []
+        received_events: list[ChangeEvent] = []
 
-        async def on_skills_changed(event: ResourceChangeEvent) -> None:
+        async def on_skills_changed(event: ChangeEvent) -> None:
             received_events.append(event)
 
         aggregator.skills_changed.connect(on_skills_changed)
@@ -366,12 +366,12 @@ class TestSignalPropagation:
 
     async def test_tools_changed_signal_propagation(self, mock_tool_local: Tool) -> None:
         """Test that tools_changed signals propagate from child to aggregate."""
-        local_provider = MockLocalResourceProvider(name="local", tools=[mock_tool_local])
-        aggregator = AggregatingResourceProvider(providers=[local_provider])
+        local_provider = MockLocalCapability(name="local", tools=[mock_tool_local])
+        aggregator = CombinedToolsetCapability(capabilities=[local_provider])
 
-        received_events: list[ResourceChangeEvent] = []
+        received_events: list[ChangeEvent] = []
 
-        async def on_tools_changed(event: ResourceChangeEvent) -> None:
+        async def on_tools_changed(event: ChangeEvent) -> None:
             received_events.append(event)
 
         aggregator.tools_changed.connect(on_tools_changed)
@@ -384,12 +384,12 @@ class TestSignalPropagation:
 
     async def test_prompts_changed_signal_propagation(self) -> None:
         """Test that prompts_changed signals propagate from child to aggregate."""
-        mcp_provider = MockMCPResourceProvider(name="mcp")
-        aggregator = AggregatingResourceProvider(providers=[mcp_provider])
+        mcp_provider = MockMCPCapability(name="mcp")
+        aggregator = CombinedToolsetCapability(capabilities=[mcp_provider])
 
-        received_events: list[ResourceChangeEvent] = []
+        received_events: list[ChangeEvent] = []
 
-        async def on_prompts_changed(event: ResourceChangeEvent) -> None:
+        async def on_prompts_changed(event: ChangeEvent) -> None:
             received_events.append(event)
 
         aggregator.prompts_changed.connect(on_prompts_changed)
@@ -406,13 +406,13 @@ class TestSignalPropagation:
         mock_skill_mcp: Skill,
     ) -> None:
         """Test signals from multiple providers all propagate to aggregate."""
-        local_provider = MockLocalResourceProvider(name="local", skills=[mock_skill_local])
-        mcp_provider = MockMCPResourceProvider(name="mcp", skills=[mock_skill_mcp])
-        aggregator = AggregatingResourceProvider(providers=[local_provider, mcp_provider])
+        local_provider = MockLocalCapability(name="local", skills=[mock_skill_local])
+        mcp_provider = MockMCPCapability(name="mcp", skills=[mock_skill_mcp])
+        aggregator = CombinedToolsetCapability(capabilities=[local_provider, mcp_provider])
 
-        received_events: list[ResourceChangeEvent] = []
+        received_events: list[ChangeEvent] = []
 
-        async def on_skills_changed(event: ResourceChangeEvent) -> None:
+        async def on_skills_changed(event: ChangeEvent) -> None:
             received_events.append(event)
 
         aggregator.skills_changed.connect(on_skills_changed)
@@ -427,13 +427,13 @@ class TestSignalPropagation:
 
     async def test_signal_forwarded_to_external_listener(self, mock_skill_local: Skill) -> None:
         """Test that aggregate signals reach external listeners."""
-        local_provider = MockLocalResourceProvider(name="local", skills=[mock_skill_local])
-        aggregator = AggregatingResourceProvider(providers=[local_provider])
+        local_provider = MockLocalCapability(name="local", skills=[mock_skill_local])
+        aggregator = CombinedToolsetCapability(capabilities=[local_provider])
 
         # External listener tracking
-        external_events: list[ResourceChangeEvent] = []
+        external_events: list[ChangeEvent] = []
 
-        async def external_listener(event: ResourceChangeEvent) -> None:
+        async def external_listener(event: ChangeEvent) -> None:
             external_events.append(event)
 
         # Connect to aggregate provider (simulating agent pool listener)
@@ -457,8 +457,8 @@ class TestAsyncContextManagerHandling:
     """Test async context manager handling for providers."""
 
     async def test_local_provider_context_manager(self) -> None:
-        """Test LocalResourceProvider-style context manager entry/exit."""
-        provider = MockLocalResourceProvider(name="local")
+        """Test SkillCapability-style context manager entry/exit."""
+        provider = MockLocalCapability(name="local")
 
         assert not provider.entered
         assert not provider.exited
@@ -471,8 +471,8 @@ class TestAsyncContextManagerHandling:
         assert provider.exited
 
     async def test_mcp_provider_context_manager(self) -> None:
-        """Test MCPResourceProvider-style context manager entry/exit."""
-        provider = MockMCPResourceProvider(name="mcp")
+        """Test MCPCapability-style context manager entry/exit."""
+        provider = MockMCPCapability(name="mcp")
 
         assert not provider.entered
         assert not provider.exited
@@ -485,10 +485,10 @@ class TestAsyncContextManagerHandling:
         assert provider.exited
 
     async def test_aggregating_provider_context_manager(self) -> None:
-        """Test AggregatingResourceProvider context manager delegates to children."""
-        local_provider = MockLocalResourceProvider(name="local")
-        mcp_provider = MockMCPResourceProvider(name="mcp")
-        AggregatingResourceProvider(providers=[local_provider, mcp_provider])
+        """Test CombinedToolsetCapability context manager delegates to children."""
+        local_provider = MockLocalCapability(name="local")
+        mcp_provider = MockMCPCapability(name="mcp")
+        CombinedToolsetCapability(capabilities=[local_provider, mcp_provider])
 
         # Aggregator doesn't require context manager, but children might
         # This tests that aggregator works with child providers that need cleanup
@@ -519,14 +519,14 @@ class TestProviderLifecycle:
 
     async def test_signal_disconnection_on_provider_replace(self) -> None:
         """Test that old provider signals are disconnected when replaced."""
-        old_provider = MockLocalResourceProvider(name="old")
-        new_provider = MockLocalResourceProvider(name="new")
+        old_provider = MockLocalCapability(name="old")
+        new_provider = MockLocalCapability(name="new")
 
-        aggregator = AggregatingResourceProvider(providers=[old_provider])
+        aggregator = CombinedToolsetCapability(capabilities=[old_provider])
 
-        received_events: list[ResourceChangeEvent] = []
+        received_events: list[ChangeEvent] = []
 
-        async def on_skills_changed(event: ResourceChangeEvent) -> None:
+        async def on_skills_changed(event: ChangeEvent) -> None:
             received_events.append(event)
 
         aggregator.skills_changed.connect(on_skills_changed)
@@ -549,16 +549,16 @@ class TestProviderLifecycle:
 
     async def test_multiple_signal_types_isolation(self) -> None:
         """Test that different signal types don't interfere."""
-        provider = MockLocalResourceProvider(name="test")
-        aggregator = AggregatingResourceProvider(providers=[provider])
+        provider = MockLocalCapability(name="test")
+        aggregator = CombinedToolsetCapability(capabilities=[provider])
 
-        skills_events: list[ResourceChangeEvent] = []
-        tools_events: list[ResourceChangeEvent] = []
+        skills_events: list[ChangeEvent] = []
+        tools_events: list[ChangeEvent] = []
 
-        async def on_skills(event: ResourceChangeEvent) -> None:
+        async def on_skills(event: ChangeEvent) -> None:
             skills_events.append(event)
 
-        async def on_tools(event: ResourceChangeEvent) -> None:
+        async def on_tools(event: ChangeEvent) -> None:
             tools_events.append(event)
 
         aggregator.skills_changed.connect(on_skills)
@@ -592,9 +592,9 @@ class TestEndToEndSkillResolution:
         mock_skill_mcp: Skill,
     ) -> None:
         """Test that skills from both Local and MCP providers are available."""
-        local_provider = MockLocalResourceProvider(name="local", skills=[mock_skill_local])
-        mcp_provider = MockMCPResourceProvider(name="mcp", skills=[mock_skill_mcp])
-        aggregator = AggregatingResourceProvider(providers=[local_provider, mcp_provider])
+        local_provider = MockLocalCapability(name="local", skills=[mock_skill_local])
+        mcp_provider = MockMCPCapability(name="mcp", skills=[mock_skill_mcp])
+        aggregator = CombinedToolsetCapability(capabilities=[local_provider, mcp_provider])
 
         skills = await aggregator.get_skills()
         skill_map = {s.name: s for s in skills}
@@ -608,9 +608,9 @@ class TestEndToEndSkillResolution:
         self, mock_tool_local: Tool, mock_tool_mcp: Tool
     ) -> None:
         """Test that tools from multiple providers are aggregated."""
-        local_provider = MockLocalResourceProvider(name="local", tools=[mock_tool_local])
-        mcp_provider = MockMCPResourceProvider(name="mcp", tools=[mock_tool_mcp])
-        aggregator = AggregatingResourceProvider(providers=[local_provider, mcp_provider])
+        local_provider = MockLocalCapability(name="local", tools=[mock_tool_local])
+        mcp_provider = MockMCPCapability(name="mcp", tools=[mock_tool_mcp])
+        aggregator = CombinedToolsetCapability(capabilities=[local_provider, mcp_provider])
 
         tools = await aggregator.get_tools()
 
@@ -624,18 +624,18 @@ class TestEndToEndSkillResolution:
         mock_tool_mcp: Tool,
     ) -> None:
         """Test complete integration: Local + MCP -> Aggregating -> Signals."""
-        local_provider = MockLocalResourceProvider(
+        local_provider = MockLocalCapability(
             name="local", skills=[mock_skill_local], tools=[mock_tool_local]
         )
-        mcp_provider = MockMCPResourceProvider(
+        mcp_provider = MockMCPCapability(
             name="mcp", skills=[mock_skill_mcp], tools=[mock_tool_mcp]
         )
-        aggregator = AggregatingResourceProvider(providers=[local_provider, mcp_provider])
+        aggregator = CombinedToolsetCapability(capabilities=[local_provider, mcp_provider])
 
         # Track all signal types
-        all_events: list[ResourceChangeEvent] = []
+        all_events: list[ChangeEvent] = []
 
-        async def track_all(event: ResourceChangeEvent) -> None:
+        async def track_all(event: ChangeEvent) -> None:
             all_events.append(event)
 
         aggregator.skills_changed.connect(track_all)
@@ -660,13 +660,13 @@ class TestEndToEndSkillResolution:
         self, mock_skill_local: Skill
     ) -> None:
         """Test full signal chain: child -> aggregate -> external listener."""
-        local_provider = MockLocalResourceProvider(name="local", skills=[mock_skill_local])
-        aggregator = AggregatingResourceProvider(providers=[local_provider])
+        local_provider = MockLocalCapability(name="local", skills=[mock_skill_local])
+        aggregator = CombinedToolsetCapability(capabilities=[local_provider])
 
         # External listener (e.g., agent pool or UI component)
         external_received: list[dict[str, Any]] = []
 
-        async def external_listener(event: ResourceChangeEvent) -> None:
+        async def external_listener(event: ChangeEvent) -> None:
             external_received.append({
                 "provider": event.provider_name,
                 "kind": event.provider_kind,
@@ -696,9 +696,9 @@ class TestProviderPropertyManagement:
 
     async def test_providers_property_getter(self) -> None:
         """Test that providers property returns the list of providers."""
-        local = MockLocalResourceProvider(name="local")
-        mcp = MockMCPResourceProvider(name="mcp")
-        aggregator = AggregatingResourceProvider(providers=[local, mcp])
+        local = MockLocalCapability(name="local")
+        mcp = MockMCPCapability(name="mcp")
+        aggregator = CombinedToolsetCapability(capabilities=[local, mcp])
 
         providers = aggregator.providers
 
@@ -708,10 +708,10 @@ class TestProviderPropertyManagement:
 
     async def test_providers_property_setter_replaces_providers(self) -> None:
         """Test that setting providers replaces the entire list."""
-        old_provider = MockLocalResourceProvider(name="old")
-        new_provider = MockLocalResourceProvider(name="new")
+        old_provider = MockLocalCapability(name="old")
+        new_provider = MockLocalCapability(name="new")
 
-        aggregator = AggregatingResourceProvider(providers=[old_provider])
+        aggregator = CombinedToolsetCapability(capabilities=[old_provider])
         assert len(aggregator.providers) == 1
 
         aggregator.providers = [new_provider]
@@ -720,14 +720,14 @@ class TestProviderPropertyManagement:
 
     async def test_signal_reconnection_on_provider_change(self) -> None:
         """Test that signals are properly reconnected when providers change."""
-        provider1 = MockLocalResourceProvider(name="p1")
-        provider2 = MockLocalResourceProvider(name="p2")
+        provider1 = MockLocalCapability(name="p1")
+        provider2 = MockLocalCapability(name="p2")
 
-        aggregator = AggregatingResourceProvider(providers=[provider1])
+        aggregator = CombinedToolsetCapability(capabilities=[provider1])
 
         events: list[str] = []
 
-        async def on_change(event: ResourceChangeEvent) -> None:
+        async def on_change(event: ChangeEvent) -> None:
             events.append(event.provider_name)
 
         aggregator.skills_changed.connect(on_change)
@@ -755,28 +755,23 @@ class TestProviderPropertyManagement:
 
 @pytest.mark.integration
 class TestToolModeCodemode:
-    """Test tool_mode="codemode" behavior in AggregatingResourceProvider."""
+    """Test tool_mode="codemode" behavior in CombinedToolsetCapability."""
 
     async def test_tool_mode_default_none(self, mock_tool_local: MagicMock) -> None:
-        """Test that default tool_mode is None (no codemode wrapping)."""
-        local_provider = MockLocalResourceProvider(name="local", tools=[mock_tool_local])
-        aggregator = AggregatingResourceProvider(providers=[local_provider])
+        """Test that CombinedToolsetCapability stores capabilities without codemode wrapping."""
+        local_provider = MockLocalCapability(name="local", tools=[mock_tool_local])
+        aggregator = CombinedToolsetCapability(capabilities=[local_provider])
 
-        tools = await aggregator.get_tools()
-
-        # Should return tools directly without codemode wrapping
-        assert len(tools) == 1
-        assert tools[0] is mock_tool_local
+        # CombinedToolsetCapability stores capabilities for later toolset composition
+        assert len(aggregator.capabilities) == 1
 
     async def test_codemode_provider_configured(self) -> None:
-        """Test that codemode tool_mode is properly stored."""
-        local_provider = MockLocalResourceProvider(name="local")
-        aggregator = AggregatingResourceProvider(providers=[local_provider], tool_mode="codemode")
+        """Test that CombinedToolsetCapability stores capabilities."""
+        local_provider = MockLocalCapability(name="local")
+        aggregator = CombinedToolsetCapability(capabilities=[local_provider])
 
-        # Verify tool_mode is stored
-        assert aggregator.tool_mode == "codemode"
-        # Codemode provider should be None initially (lazy creation)
-        assert aggregator._codemode_provider is None
+        # Verify capabilities are stored
+        assert len(aggregator.capabilities) == 1
 
 
 # =============================================================================
@@ -790,16 +785,16 @@ class TestErrorHandling:
 
     async def test_get_request_parts_not_found(self) -> None:
         """Test that KeyError is raised when prompt not found in any provider."""
-        local_provider = MockLocalResourceProvider(name="local")
-        mcp_provider = MockMCPResourceProvider(name="mcp")
-        aggregator = AggregatingResourceProvider(providers=[local_provider, mcp_provider])
+        local_provider = MockLocalCapability(name="local")
+        mcp_provider = MockMCPCapability(name="mcp")
+        aggregator = CombinedToolsetCapability(capabilities=[local_provider, mcp_provider])
 
         with pytest.raises(KeyError, match="Prompt 'nonexistent' not found"):
             await aggregator.get_request_parts("nonexistent")
 
     async def test_empty_providers_signal_still_works(self) -> None:
         """Test that signals work even with no child providers."""
-        aggregator = AggregatingResourceProvider(providers=[], name="empty")
+        aggregator = CombinedToolsetCapability(capabilities=[], name="empty")
 
         # Should be able to emit without error
         event = aggregator.create_change_event("skills")
@@ -822,9 +817,9 @@ class TestResourceAggregation:
         mock_prompt1 = MagicMock(name="prompt1")
         mock_prompt2 = MagicMock(name="prompt2")
 
-        local_provider = MockLocalResourceProvider(name="local", prompts=[mock_prompt1])
-        mcp_provider = MockMCPResourceProvider(name="mcp", prompts=[mock_prompt2])
-        aggregator = AggregatingResourceProvider(providers=[local_provider, mcp_provider])
+        local_provider = MockLocalCapability(name="local", prompts=[mock_prompt1])
+        mcp_provider = MockMCPCapability(name="mcp", prompts=[mock_prompt2])
+        aggregator = CombinedToolsetCapability(capabilities=[local_provider, mcp_provider])
 
         prompts = await aggregator.get_prompts()
 
@@ -835,15 +830,15 @@ class TestResourceAggregation:
         mock_resource1 = MagicMock(name="resource1")
         mock_resource2 = MagicMock(name="resource2")
 
-        local_provider = MockLocalResourceProvider(name="local", resources=[mock_resource1])
-        mcp_provider = MockMCPResourceProvider(name="mcp", resources=[mock_resource2])
-        aggregator = AggregatingResourceProvider(providers=[local_provider, mcp_provider])
+        local_provider = MockLocalCapability(name="local", resources=[mock_resource1])
+        mcp_provider = MockMCPCapability(name="mcp", resources=[mock_resource2])
+        aggregator = CombinedToolsetCapability(capabilities=[local_provider, mcp_provider])
 
         resources = await aggregator.get_resources()
 
         assert len(resources) == 2
 
-    def as_capability(self) -> AbstractCapability | None:
+    def get_capabilities(self) -> AbstractCapability | None:
         """Return a pydantic-ai capability for this provider.
 
         Returns:

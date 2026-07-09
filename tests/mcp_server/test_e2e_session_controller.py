@@ -33,7 +33,7 @@ def _make_mock_pool() -> MagicMock:
     """Create a mock AgentPool suitable for SessionController tests.
 
     Returns a MagicMock with manifest, main_agent_name, _config_file_path,
-    skills_instruction_provider, skills_tools_provider, and mcp configured
+    skills_tools_provider, and mcp configured
     so that SessionController.get_or_create_session_agent() can resolve
     a NativeAgentConfig and call cfg.get_agent().
     """
@@ -46,7 +46,6 @@ def _make_mock_pool() -> MagicMock:
     )
     mock_pool.main_agent_name = "test_agent"
     mock_pool._config_file_path = None
-    mock_pool.skills_instruction_provider = None
     mock_pool.skills_tools_provider = MagicMock()
     mock_pool.mcp = MCPManager(name="pool-mcp")
     return mock_pool
@@ -94,7 +93,6 @@ async def test_full_create_session_chain_populates_mcp_session_context() -> None
     mock_pool.manifest = manifest
     mock_pool.main_agent_name = "test_agent"
     mock_pool._config_file_path = None
-    mock_pool.skills_instruction_provider = None
     mock_pool.skills_tools_provider = MagicMock()
     mock_pool.mcp = agent.mcp  # Use the agent's own MCPManager
     mock_pool.get_context.return_value = MagicMock()

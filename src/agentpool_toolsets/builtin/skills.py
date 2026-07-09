@@ -7,7 +7,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
-from agentpool.resource_providers import StaticResourceProvider
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.skills.skill_mcp_manager import SkillMcpManager
 from agentpool.skills.skill_tool_manager import SkillToolManager
 from agentpool.skills.uri_resolver import ResolvedSkillURI
@@ -491,7 +491,7 @@ async def list_skills(ctx: AgentContext) -> str:
     return "\n".join(lines)
 
 
-class SkillsTools(StaticResourceProvider):
+class SkillsTools(FunctionToolsetCapability):
     """Provider for skills and commands tools.
 
     Provides tools to:

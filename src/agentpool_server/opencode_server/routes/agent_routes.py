@@ -11,7 +11,7 @@ from pydantic import BaseModel, HttpUrl
 
 from agentpool.log import get_logger
 from agentpool.mcp_server.manager import MCPManager
-from agentpool.resource_providers import AggregatingResourceProvider
+from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
 from agentpool_config.mcp_server import (
     SSEMCPServerConfig,
     StdioMCPServerConfig,
@@ -109,7 +109,7 @@ def _find_mcp_manager(state: Any, session_id: str | None = None) -> MCPManager |
         match provider:
             case MCPManager():
                 return provider
-            case AggregatingResourceProvider():
+            case CombinedToolsetCapability():
                 for nested in provider.providers:
                     if isinstance(nested, MCPManager):
                         return nested
@@ -149,7 +149,7 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
     Skills are specialized capabilities available to agents.
     Returns skills from:
     1. Local filesystem (via SkillsManager)
-    2. MCP providers (via AggregatingResourceProvider)
+    2. MCP providers (via CombinedToolsetCapability)
     """
     from pathlib import PurePosixPath
 
@@ -160,7 +160,7 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
 
     skills: list[SkillInfo] = []
 
-    # 1. Get MCP provider skills from AggregatingResourceProvider first
+    # 1. Get MCP provider skills from CombinedToolsetCapability first
     # These will be overridden by local skills if names conflict
     if pool.skill_provider is not None:
         try:

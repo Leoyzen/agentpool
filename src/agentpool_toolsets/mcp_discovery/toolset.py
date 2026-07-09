@@ -26,14 +26,14 @@ from agentpool.mcp_server.registries.official_registry_client import (
     MCPRegistryClient,
     MCPRegistryError,
 )
-from agentpool.resource_providers import ResourceProvider
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from fastmcp.client.sampling import SamplingHandler
-    from pydantic_ai.capabilities import AbstractCapability
+    from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
     from agentpool.mcp_server.registries.official_registry_client import RegistryServer
     from agentpool.tools.base import Tool
@@ -46,7 +46,7 @@ logger = get_logger(__name__)
 PARQUET_PATH = Path(__file__).parent / "data" / "mcp_servers.parquet"
 
 
-class MCPDiscoveryToolset(ResourceProvider):
+class MCPDiscoveryToolset(FunctionToolsetCapability):
     """Toolset for dynamic MCP server discovery and tool execution.
 
     This toolset allows agents to:
@@ -90,14 +90,6 @@ class MCPDiscoveryToolset(ResourceProvider):
         self._table: Any = None
         self._embed_model: Any = None
         self._tmpdir: str | None = None
-
-    def as_capability(self) -> AbstractCapability | None:
-        """Return a pydantic-ai capability for this provider.
-
-        Returns:
-            A pydantic-ai AbstractCapability instance, or None.
-        """
-        return None
 
     def _get_registry(self) -> MCPRegistryClient:
         """Get or create the registry client."""

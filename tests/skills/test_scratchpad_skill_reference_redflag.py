@@ -27,7 +27,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentpool.resource_providers.mcp_provider import MCPResourceProvider
+# MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
 from agentpool.skills.skill import Skill
 from agentpool.skills.uri_resolver import SkillURIResolver
 from agentpool_toolsets.builtin.skills import load_skill
@@ -82,14 +82,14 @@ def mock_mcp_client_with_scratchpad_skills():
 
 @pytest.fixture
 def scratchpad_provider(mock_mcp_client_with_scratchpad_skills):
-    """Create an MCPResourceProvider that simulates ng's scratchpad connection.
+    """Create an MCPCapability that simulates ng's scratchpad connection.
 
     Provider name is "pool_mcp_scratchpad" (as registered by MCPManager),
     NOT "systematic-troubleshooting" (which is the skill name).
     """
     with patch("agentpool.mcp_server.MCPClient") as mock_client_class:
         mock_client_class.return_value = mock_mcp_client_with_scratchpad_skills
-        provider = MCPResourceProvider(
+        provider = MCPCapability(
             server="streamable-http http://127.0.0.1:8890/mcp",
             name="pool_mcp_scratchpad",
         )
@@ -128,7 +128,7 @@ class TestScratchpadSkillReferenceLoading:
     @pytest.mark.asyncio
     async def test_bare_skill_name_loads_successfully(
         self,
-        scratchpad_provider: MCPResourceProvider,
+        scratchpad_provider: MCPCapability,
     ) -> None:
         """Test 1: Bare skill name works (this already works in production)."""
         resolver = SkillURIResolver()
@@ -142,7 +142,7 @@ class TestScratchpadSkillReferenceLoading:
     @pytest.mark.asyncio
     async def test_uri_with_skill_name_as_netloc_loads_successfully(
         self,
-        scratchpad_provider: MCPResourceProvider,
+        scratchpad_provider: MCPCapability,
     ) -> None:
         """Test 2: URI with skill name as netloc should work via fallback.
 

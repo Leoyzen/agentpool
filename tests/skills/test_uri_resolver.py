@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool.resource_providers.base import ResourceProvider
+from pydantic_ai.capabilities import AbstractCapability
 from agentpool.skills.exceptions import SecurityError, SkillNotFoundError
 from agentpool.skills.uri_resolver import (
     ResolvedSkillURI,
@@ -365,7 +365,7 @@ def test_validate_skill_name_strips_whitespace() -> None:
 def test_resolver_register_provider() -> None:
     """Test registering a provider."""
     resolver = SkillURIResolver()
-    provider = MagicMock(spec=ResourceProvider)
+    provider = MagicMock(spec=AbstractCapability)
 
     resolver.register_provider("local", provider)
 
@@ -375,8 +375,8 @@ def test_resolver_register_provider() -> None:
 def test_resolver_register_multiple_providers() -> None:
     """Test registering multiple providers."""
     resolver = SkillURIResolver()
-    provider1 = MagicMock(spec=ResourceProvider)
-    provider2 = MagicMock(spec=ResourceProvider)
+    provider1 = MagicMock(spec=AbstractCapability)
+    provider2 = MagicMock(spec=AbstractCapability)
 
     resolver.register_provider("local", provider1)
     resolver.register_provider("remote", provider2)
@@ -388,7 +388,7 @@ def test_resolver_register_multiple_providers() -> None:
 def test_resolver_unregister_provider() -> None:
     """Test unregistering a provider."""
     resolver = SkillURIResolver()
-    provider = MagicMock(spec=ResourceProvider)
+    provider = MagicMock(spec=AbstractCapability)
 
     resolver.register_provider("local", provider)
     assert resolver.get_provider("local") is provider
@@ -408,7 +408,7 @@ def test_resolver_unregister_nonexistent_provider() -> None:
 def test_resolver_list_providers() -> None:
     """Test listing registered providers."""
     resolver = SkillURIResolver()
-    provider = MagicMock(spec=ResourceProvider)
+    provider = MagicMock(spec=AbstractCapability)
 
     resolver.register_provider("local", provider)
     resolver.register_provider("remote", provider)
@@ -422,7 +422,7 @@ def test_resolver_list_providers() -> None:
 def test_resolver_register_with_invalid_provider_name() -> None:
     """Test that invalid provider name raises SecurityError."""
     resolver = SkillURIResolver()
-    provider = MagicMock(spec=ResourceProvider)
+    provider = MagicMock(spec=AbstractCapability)
 
     with pytest.raises(SecurityError, match="Invalid provider name"):
         resolver.register_provider("invalid.name", provider)
@@ -439,7 +439,7 @@ async def test_resolver_resolve_with_explicit_provider() -> None:
     resolver = SkillURIResolver()
     skill = MagicMock(spec="Skill")
     skill.name = "my-skill"
-    provider = MagicMock(spec=ResourceProvider)
+    provider = MagicMock(spec=AbstractCapability)
     provider.get_skills = AsyncMock(return_value=[skill])
 
     resolver.register_provider("local", provider)
@@ -454,7 +454,7 @@ async def test_resolver_resolve_with_bare_skill_name() -> None:
     resolver = SkillURIResolver()
     skill = MagicMock(spec="Skill")
     skill.name = "my-skill"
-    provider = MagicMock(spec=ResourceProvider)
+    provider = MagicMock(spec=AbstractCapability)
     provider.get_skills = AsyncMock(return_value=[skill])
 
     resolver.register_provider("local", provider)
@@ -467,7 +467,7 @@ async def test_resolver_resolve_with_bare_skill_name() -> None:
 async def test_resolver_resolve_not_found_in_provider() -> None:
     """Test that SkillNotFoundError is raised when skill not in provider."""
     resolver = SkillURIResolver()
-    provider = MagicMock(spec=ResourceProvider)
+    provider = MagicMock(spec=AbstractCapability)
     provider.get_skills = AsyncMock(return_value=[])
 
     resolver.register_provider("local", provider)
@@ -480,7 +480,7 @@ async def test_resolver_resolve_not_found_in_provider() -> None:
 async def test_resolver_resolve_not_found_any_provider() -> None:
     """Test that SkillNotFoundError is raised when skill not in any provider."""
     resolver = SkillURIResolver()
-    provider = MagicMock(spec=ResourceProvider)
+    provider = MagicMock(spec=AbstractCapability)
     provider.get_skills = AsyncMock(return_value=[])
 
     resolver.register_provider("local", provider)
@@ -505,12 +505,12 @@ async def test_resolver_resolve_searches_multiple_providers() -> None:
 
     skill1 = MagicMock(spec="Skill")
     skill1.name = "skill-1"
-    provider1 = MagicMock(spec=ResourceProvider)
+    provider1 = MagicMock(spec=AbstractCapability)
     provider1.get_skills = AsyncMock(return_value=[])
 
     skill2 = MagicMock(spec="Skill")
     skill2.name = "skill-2"
-    provider2 = MagicMock(spec=ResourceProvider)
+    provider2 = MagicMock(spec=AbstractCapability)
     provider2.get_skills = AsyncMock(return_value=[skill2])
 
     resolver.register_provider("provider1", provider1)
@@ -528,12 +528,12 @@ async def test_resolver_resolve_first_match_wins() -> None:
 
     skill1 = MagicMock(spec="Skill")
     skill1.name = "my-skill"
-    provider1 = MagicMock(spec=ResourceProvider)
+    provider1 = MagicMock(spec=AbstractCapability)
     provider1.get_skills = AsyncMock(return_value=[skill1])
 
     skill2 = MagicMock(spec="Skill")
     skill2.name = "my-skill"
-    provider2 = MagicMock(spec=ResourceProvider)
+    provider2 = MagicMock(spec=AbstractCapability)
     provider2.get_skills = AsyncMock(return_value=[skill2])
 
     resolver.register_provider("provider1", provider1)
@@ -554,7 +554,7 @@ def test_unregister_provider_removes_from_list() -> None:
     """Test that unregister_provider() removes provider from the registry."""
     resolver = SkillURIResolver()
 
-    provider = MagicMock(spec=ResourceProvider)
+    provider = MagicMock(spec=AbstractCapability)
     resolver.register_provider("test_provider", provider)
 
     assert "test_provider" in resolver.list_providers()
@@ -581,7 +581,7 @@ async def test_unregister_provider_prevents_resolution() -> None:
 
     skill = MagicMock(spec="Skill")
     skill.name = "my-skill"
-    provider = MagicMock(spec=ResourceProvider)
+    provider = MagicMock(spec=AbstractCapability)
     provider.get_skills = AsyncMock(return_value=[skill])
 
     resolver.register_provider("test_provider", provider)

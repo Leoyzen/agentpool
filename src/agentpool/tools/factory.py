@@ -1,8 +1,8 @@
-"""ToolsetFactory protocol — thin replacement for ResourceProvider hierarchy.
+"""ToolsetFactory protocol — thin replacement for AbstractCapability hierarchy.
 
 Phase 5 of the thin-wrapper refactor. Defines a structural protocol that
 produces pydantic-ai capabilities (Toolset, Hooks, MCP) without the
-heavyweight ResourceProvider base class.
+heavyweight AbstractCapability base class.
 
 Each factory is a lightweight callable that returns a pydantic-ai
 ``AbstractToolset`` or ``None`` (if no tools are available).
@@ -35,7 +35,7 @@ class ToolsetFactory(Protocol):
 class StaticToolsetFactory:
     """Factory wrapping a pre-configured list of AgentPool Tool objects.
 
-    Replaces ``StaticResourceProvider`` for the common case where tools
+    Replaces ``FunctionToolsetCapability`` for the common case where tools
     are known at configuration time and do not change.
     """
 
@@ -76,10 +76,10 @@ class StaticToolsetFactory:
 
 
 class AdapterToolsetFactory:
-    """Adapter wrapping an existing ResourceProvider.
+    """Adapter wrapping an existing AbstractCapability.
 
     Allows incremental migration: callers can switch from
-    ``provider.as_capability()`` to ``AdapterToolsetFactory(provider).create_capability()``
+    ``provider.get_capabilities()`` to ``AdapterToolsetFactory(provider).create_capability()``
     without changing the provider itself.
     """
 
@@ -89,7 +89,7 @@ class AdapterToolsetFactory:
     async def create_capability(self) -> AbstractToolset[Any] | None:
         from pydantic_ai.toolsets import AbstractToolset
 
-        cap = self._provider.as_capability()
+        cap = self._provider.get_capabilities()
         if cap is None:
             return None
         if isinstance(cap, AbstractToolset):
@@ -104,15 +104,15 @@ class AdapterToolsetFactory:
 class MCPToolsetFactory:
     """Factory wrapping an MCP server, producing a pydantic-ai toolset.
 
-    Replaces ``MCPResourceProvider`` for the common case where MCP tools
-    are needed without the full ``ResourceProvider`` lifecycle.
+    Replaces ``MCPCapability`` for the common case where MCP tools
+    are needed without the full ``AbstractCapability`` lifecycle.
     """
 
     def __init__(self, mcp_provider: Any, *, name: str = "mcp") -> None:
         """Initialize with an MCP resource provider.
 
         Args:
-            mcp_provider: An ``MCPResourceProvider`` instance.
+            mcp_provider: An ``MCPCapability`` instance.
             name: Name for the factory.
         """
         self._provider = mcp_provider
@@ -120,7 +120,7 @@ class MCPToolsetFactory:
 
     async def create_capability(self) -> AbstractToolset[Any] | None:
         """Build and return a pydantic-ai toolset from the MCP server, or ``None``."""
-        cap = self._provider.as_capability()
+        cap = self._provider.get_capabilities()
         if cap is None:
             return None
         if isinstance(cap, AbstractToolset):
@@ -135,15 +135,15 @@ class MCPToolsetFactory:
 class LocalSkillToolsetFactory:
     """Factory wrapping local skill discovery, producing a pydantic-ai toolset.
 
-    Replaces ``LocalResourceProvider`` for the common case where filesystem
-    skills are needed without the full ``ResourceProvider`` lifecycle.
+    Replaces ``SkillCapability`` for the common case where filesystem
+    skills are needed without the full ``AbstractCapability`` lifecycle.
     """
 
     def __init__(self, local_provider: Any, *, name: str = "local") -> None:
         """Initialize with a local resource provider.
 
         Args:
-            local_provider: A ``LocalResourceProvider`` instance.
+            local_provider: A ``SkillCapability`` instance.
             name: Name for the factory.
         """
         self._provider = local_provider
@@ -151,7 +151,7 @@ class LocalSkillToolsetFactory:
 
     async def create_capability(self) -> AbstractToolset[Any] | None:
         """Build and return a pydantic-ai toolset from local skills, or ``None``."""
-        cap = self._provider.as_capability()
+        cap = self._provider.get_capabilities()
         if cap is None:
             return None
         if isinstance(cap, AbstractToolset):
@@ -166,15 +166,15 @@ class LocalSkillToolsetFactory:
 class PoolToolsetFactory:
     """Factory wrapping pool delegation tools, producing a pydantic-ai toolset.
 
-    Replaces ``PoolResourceProvider`` for the common case where subagent
-    delegation tools are needed without the full ``ResourceProvider`` lifecycle.
+    Replaces ``SubagentCapability`` for the common case where subagent
+    delegation tools are needed without the full ``AbstractCapability`` lifecycle.
     """
 
     def __init__(self, pool_provider: Any, *, name: str = "pool") -> None:
         """Initialize with a pool resource provider.
 
         Args:
-            pool_provider: A ``PoolResourceProvider`` instance.
+            pool_provider: A ``SubagentCapability`` instance.
             name: Name for the factory.
         """
         self._provider = pool_provider
@@ -182,7 +182,7 @@ class PoolToolsetFactory:
 
     async def create_capability(self) -> AbstractToolset[Any] | None:
         """Build and return a pydantic-ai toolset from pool delegation, or ``None``."""
-        cap = self._provider.as_capability()
+        cap = self._provider.get_capabilities()
         if cap is None:
             return None
         if isinstance(cap, AbstractToolset):

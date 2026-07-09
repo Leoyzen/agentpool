@@ -9,14 +9,14 @@ from schemez.openapi.loader import load_openapi_spec, parse_operations
 from upathtools import read_path, to_upath
 
 from agentpool.log import get_logger
-from agentpool.resource_providers import ResourceProvider
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import httpx
-    from pydantic_ai.capabilities import AbstractCapability
+    from agentpool.capabilities.function_toolset import FunctionToolsetCapability
     from upathtools import JoinablePathLike
 
     from agentpool.tools.base import Tool
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class OpenAPITools(ResourceProvider):
+class OpenAPITools(FunctionToolsetCapability):
     """Provider for OpenAPI-based tools."""
 
     def __init__(
@@ -117,11 +117,3 @@ class OpenAPITools(ResourceProvider):
         response = await self._client.request(method=method, url=path, params=params, json=body)
         response.raise_for_status()
         return response.json()  # type: ignore[no-any-return]
-
-    def as_capability(self) -> AbstractCapability | None:
-        """Return a pydantic-ai capability for this provider.
-
-        Returns:
-            A pydantic-ai AbstractCapability instance, or None.
-        """
-        return None

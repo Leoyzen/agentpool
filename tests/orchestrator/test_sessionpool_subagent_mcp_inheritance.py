@@ -10,7 +10,7 @@ behavior and the regression it prevents.
 Pool-level MCP servers (defined in the top-level ``mcp_servers:`` YAML
 section) are stored in ``pool.mcp``.  Every agent that does NOT have its
 own ``mcp_servers`` gets ``self.mcp = pool.mcp`` (shared), so
-``get_agentlet()`` calls ``pool.mcp.as_capability()`` and the subagent
+``get_agentlet()`` calls ``pool.mcp.get_capabilities()`` and the subagent
 sees pool-level tools.
 
 ### Rule 2: Agent-level MCP servers are NOT inherited by child sessions
@@ -36,7 +36,7 @@ child's own config-level providers are present.
 ``agent.__aexit__()``.  The parent owns the lifecycle.
 
 ### Rule 6: No cross-task CancelScope sharing
-Each ``as_capability()`` call creates a fresh ``MCPToolset`` (no
+Each ``get_capabilities()`` call creates a fresh ``MCPToolset`` (no
 ``_toolset_cache``).  This prevents the ``RuntimeError: Attempted to
 exit cancel scope in a different task`` when a parent agent (task A)
 and subagent (task B) share the same MCPManager.
@@ -49,18 +49,18 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
-from agentpool.resource_providers import ResourceProvider, StaticResourceProvider
+from pydantic_ai.capabilities import AbstractCapability, FunctionToolsetCapability
 from agentpool.tools.base import Tool
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentpool.resource_providers.resource_info import ResourceInfo
+    # ResourceInfo removed
     from agentpool.skills.skill import Skill
 
 
-class MockMCPResourceProvider(ResourceProvider):
+class MockMCPCapability(FunctionToolsetCapability):
     """Mock MCP provider for testing inheritance."""
 
     kind = "mcp"
@@ -112,7 +112,7 @@ async def test_pool_level_mcp_accessible_to_child_without_own_mcp_servers() -> N
 
     When the child agent's config has no ``mcp_servers``, the child's
     ``self.mcp`` is set to ``pool.mcp`` during ``MessageNode.__init__``.
-    This means ``get_agentlet()`` → ``self.mcp.as_capability()`` returns
+    This means ``get_agentlet()`` → ``self.mcp.get_capabilities()`` returns
     pool-level MCP capabilities.
 
     Regression: If someone adds ``agent.mcp = parent_agent.mcp`` back,
@@ -323,11 +323,11 @@ async def test_parent_external_providers_not_inherited_by_child() -> None:
 
         # Add runtime providers to parent
         mock_tool = Tool.from_callable(_mock_tool, name_override="mock_tool")
-        mcp_provider = MockMCPResourceProvider(
+        mcp_provider = MockMCPCapability(
             name="parent_mcp_provider",
             tools=[mock_tool],
         )
-        static_provider = StaticResourceProvider(
+        static_provider = FunctionToolsetCapability(
             name="parent_static_provider",
             tools=[mock_tool],
         )
@@ -415,7 +415,7 @@ async def test_child_session_is_not_per_session_agent() -> None:
 async def test_toolset_cache_exists_on_mcp_manager() -> None:
     """MCPManager has a _toolset_cache attribute for connection reuse.
 
-    ``as_capability()`` caches ``MCPToolset`` instances by ``client_id``
+    ``get_capabilities()`` caches ``MCPToolset`` instances by ``client_id``
     so repeated calls reuse the same underlying connection. The ``MCP``
     wrapper instances remain distinct.
     """
@@ -428,10 +428,10 @@ async def test_toolset_cache_exists_on_mcp_manager() -> None:
 
 
 @pytest.mark.integration
-async def test_as_capability_caches_toolset_by_client_id() -> None:
-    """as_capability() caches MCPToolset by client_id.
+async def test_get_capabilities_caches_toolset_by_client_id() -> None:
+    """get_capabilities() caches MCPToolset by client_id.
 
-    Two calls to ``manager.as_capability()`` return MCP capabilities
+    Two calls to ``manager.get_capabilities()`` return MCP capabilities
     with the same underlying ``MCPToolset`` instance (cached by
     ``client_id``). The MCP wrappers themselves are distinct.
     """
@@ -448,8 +448,8 @@ async def test_as_capability_caches_toolset_by_client_id() -> None:
         ],
     )
 
-    caps1 = await manager.as_capability()
-    caps2 = await manager.as_capability()
+    caps1 = await manager.get_capabilities()
+    caps2 = await manager.get_capabilities()
 
     assert len(caps1) == 1
     assert len(caps2) == 1
@@ -470,11 +470,10 @@ async def test_as_capability_caches_toolset_by_client_id() -> None:
 
 @pytest.mark.integration
 async def test_skills_providers_added_to_child_session() -> None:
-    """Rule 7: Skills instruction and tools providers are added to children.
+    """Rule 7: Skills tools provider is added to children.
 
-    The orchestrator adds ``pool.skills_instruction_provider`` and
-    ``pool.skills_tools_provider`` to child session agents, so subagents
-    can discover and use skills.
+    The orchestrator adds ``pool.skills_tools_provider`` to child session
+    agents, so subagents can discover and use skills.
     """
     agent_config = NativeAgentConfig(
         name="test_agent",
@@ -501,10 +500,6 @@ async def test_skills_providers_added_to_child_session() -> None:
         )
         child_agent = await session_pool.sessions.get_or_create_session_agent(child_session_id)
 
-        if pool.skills_instruction_provider is not None:
-            assert pool.skills_instruction_provider in child_agent.tools.external_providers, (
-                "Child must have pool.skills_instruction_provider."
-            )
         if pool.skills_tools_provider is not None:
             assert pool.skills_tools_provider in child_agent.tools.external_providers, (
                 "Child must have pool.skills_tools_provider."

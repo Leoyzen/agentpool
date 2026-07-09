@@ -7,7 +7,7 @@
 ``with_session_configs()``.  For ACP-transport servers, the transport is
 created and stored in the MCPManager's session context.
 
-This replaces the old behavior of creating ``MCPResourceProvider`` instances
+This replaces the old behavior of creating ``MCPCapability`` instances
 and registering them on ``agent.tools``.
 """
 

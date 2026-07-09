@@ -5,14 +5,14 @@ from typing import TYPE_CHECKING
 import pytest
 from schemez import OpenAIFunctionDefinition
 
-from agentpool.resource_providers import ResourceProvider
+from pydantic_ai.capabilities import AbstractCapability
 
 
 if TYPE_CHECKING:
     from pydantic_ai.capabilities import AbstractCapability
 
 
-class MockProvider(ResourceProvider):
+class MockProvider(FunctionToolsetCapability):
     """Mock provider for testing schema overrides."""
 
     async def my_tool(self, x: int, y: str) -> str:
@@ -51,7 +51,7 @@ async def test_to_pydantic_ai_includes_parameter_descriptions_from_override():
     assert pydantic_tool.name == "my_tool"
     assert pydantic_tool.description == "Original description."
 
-    def as_capability(self) -> AbstractCapability | None:
+    def get_capabilities(self) -> AbstractCapability | None:
         """Return a pydantic-ai capability for this provider.
 
         Returns:

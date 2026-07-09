@@ -39,11 +39,11 @@ async def test_code_toolset_filtering():
 
 
 async def test_filtering_provider_delegates_attributes():
-    """Test that FilteringResourceProvider delegates attributes correctly."""
+    """Test that FilteredToolsetCapability delegates attributes correctly."""
     config = SubagentToolsetConfig(tools={"task": True})
     provider = config.get_provider()
 
     # Should delegate name attribute
     assert provider.name == "subagent_tools"
-    # Should have log attribute from ResourceProvider
+    # Should have log attribute from AbstractCapability
     assert hasattr(provider, "log")

@@ -59,9 +59,9 @@ def server_config_url() -> SkillMcpServerConfig:
 
 
 def make_mock_provider() -> AsyncMock:
-    """Create a mocked MCPResourceProvider that behaves like a connected one."""
+    """Create a mocked MCPCapability that behaves like a connected one."""
     provider = AsyncMock()
-    # MCPResourceProvider.__aexit__ should not raise
+    # MCPCapability.__aexit__ should not raise
     provider.__aenter__ = AsyncMock(return_value=provider)
     provider.__aexit__ = AsyncMock(return_value=None)
     provider.get_tools = AsyncMock(return_value=[])
@@ -722,10 +722,10 @@ class TestCreateAndConnect:
         """_create_and_connect() creates StdioMCPServerConfig from command-based config."""
         config = SkillMcpServerConfig(command="uvx", args=["mcp-server"])
 
-        # MCPResourceProvider is imported inside _create_and_connect() body,
+        # MCPCapability is imported inside _create_and_connect() body,
         # so patch at the actual module path
         with patch(
-            "agentpool.resource_providers.mcp_provider.MCPResourceProvider",
+            "MCPCapability",
             autospec=True,
         ) as mock_provider:
             mock_instance = mock_provider.return_value
@@ -750,7 +750,7 @@ class TestCreateAndConnect:
         config = SkillMcpServerConfig(url="http://remote:8080/mcp")
 
         with patch(
-            "agentpool.resource_providers.mcp_provider.MCPResourceProvider",
+            "MCPCapability",
             autospec=True,
         ) as mock_provider:
             mock_instance = mock_provider.return_value

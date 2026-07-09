@@ -357,11 +357,9 @@ class SessionPool:
             )
 
         # Add pool-level providers (non-MCP only).
-        # MCP tools are handled via McpConfigSnapshot → as_capability() →
+        # MCP tools are handled via McpConfigSnapshot → get_capabilities() →
         # MCPToolset, not through agent.tools.providers.
         if self.pool is not None:
-            if self.pool.skills_instruction_provider:
-                agent.tools.add_provider(self.pool.skills_instruction_provider)
             agent.tools.add_provider(self.pool.skills_tools_provider)
 
         await agent.__aenter__()
@@ -403,11 +401,9 @@ class SessionPool:
             )
 
         # Add pool-level providers (non-MCP only).
-        # MCP tools are handled via McpConfigSnapshot → as_capability() →
+        # MCP tools are handled via McpConfigSnapshot → get_capabilities() →
         # MCPToolset, not through agent.tools.providers.
         if self.pool is not None:
-            if self.pool.skills_instruction_provider:
-                agent.tools.add_provider(self.pool.skills_instruction_provider)
             agent.tools.add_provider(self.pool.skills_tools_provider)
 
         await agent.__aenter__()

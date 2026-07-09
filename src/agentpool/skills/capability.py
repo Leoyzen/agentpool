@@ -25,11 +25,19 @@ from pydantic_ai.toolsets import (
     PrefixedToolset,
 )
 
+from agentpool.capabilities.resource_source import (
+    Resource,
+    ResourceContent,
+    ResourceNotFoundError,
+)
 from agentpool.skills.skill import Skill  # noqa: TC001
 
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from agentpool.agents.context import AgentContext
+    from agentpool.capabilities.resource_source import ResourceChange
     from agentpool.mcp_server.config_snapshot import McpConfigEntry
     from agentpool.skills.skill_mcp_manager import SkillMcpManager
     from agentpool.skills.skill_tool_manager import SkillToolManager
@@ -86,10 +94,7 @@ class SkillCapability(AbstractCapability[AgentDepsT]):
     def get_instructions(self) -> str | None:
         """Return raw skill instruction content.
 
-        No XML wrapper — ``SkillsInstructionProvider`` owns the XML wrapper.
-        Note: pydantic-ai will inject this into the system prompt, and
-        ``SkillsInstructionProvider`` may also inject skill content via the
-        ``<available-skills>`` XML block (depending on injection mode).
+        pydantic-ai will inject this into the system prompt.
         """
         raw = self._skill.load_instructions()
         if not raw:
@@ -360,3 +365,84 @@ class SkillCapability(AbstractCapability[AgentDepsT]):
         if session_id is None:
             return
         await self._mcp_manager.cleanup(session_id)
+
+    # ---- ResourceSource protocol ----
+
+    @staticmethod
+    def _make_skill_uri(skill_name: str) -> str:
+        """Build the ``skill://`` URI for a given skill name.
+
+        Args:
+            skill_name: The skill's name.
+
+        Returns:
+            URI string in the form ``skill://{skill_name}``.
+        """
+        return f"skill://{skill_name}"
+
+    @property
+    def _skill_uri(self) -> str:
+        """The ``skill://`` URI for this capability's wrapped skill."""
+        return self._make_skill_uri(self._skill.name)
+
+    def list(self) -> list[Resource]:
+        """List resources exposed by this skill capability.
+
+        Returns a single ``Resource`` representing the SKILL.md file
+        with URI ``skill://{skill_name}`` and MIME type ``text/markdown``.
+
+        Returns:
+            List containing one ``Resource`` for this skill.
+        """
+        return [
+            Resource(
+                uri=self._skill_uri,
+                name=self._skill.name,
+                mime_type="text/markdown",
+                description=self._skill.description,
+            )
+        ]
+
+    def read(self, uri: str) -> ResourceContent:
+        """Read skill content by URI.
+
+        Args:
+            uri: URI of the skill to read (``skill://{skill_name}``).
+
+        Returns:
+            ``ResourceContent`` with the SKILL.md instruction content.
+
+        Raises:
+            ResourceNotFoundError: If the URI does not match this skill.
+        """
+        if not self.exists(uri):
+            raise ResourceNotFoundError(uri)
+        content = self._skill.load_instructions()
+        return ResourceContent(
+            uri=uri,
+            content=content,
+            mime_type="text/markdown",
+        )
+
+    def exists(self, uri: str) -> bool:
+        """Check if a resource URI exists in this skill capability.
+
+        Args:
+            uri: URI to check.
+
+        Returns:
+            ``True`` if the URI matches this skill's ``skill://`` URI.
+        """
+        return uri == self._skill_uri
+
+    def on_change(self) -> AsyncIterator[ResourceChange] | None:
+        """Subscribe to resource changes for this skill.
+
+        SkillCapability wraps a single static ``Skill`` instance. Since
+        the ``Skill`` model does not emit change notifications, this
+        method returns ``None`` to indicate a static source.
+
+        Returns:
+            ``None`` — static source, no change notifications.
+        """
+        return None

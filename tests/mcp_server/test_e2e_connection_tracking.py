@@ -214,23 +214,23 @@ async def test_connection_id_propagation_create_session_populates_connection_ses
 
 
 # ============================================================================
-# G9: as_capability() during concurrent cleanup_session()
+# G9: get_capabilities() during concurrent cleanup_session()
 # ============================================================================
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_as_capability_during_concurrent_cleanup() -> None:
-    """as_capability() called concurrently with cleanup_session() must not crash.
+async def test_get_capabilities_during_concurrent_cleanup() -> None:
+    """get_capabilities() called concurrently with cleanup_session() must not crash.
 
-    Verifies the GAP-11 race condition: ``as_capability(session_id)`` uses
+    Verifies the GAP-11 race condition: ``get_capabilities(session_id)`` uses
     ``self._session_contexts.get(session_id)`` which returns None if
     ``cleanup_session()`` has already popped the context. The method must
     handle this gracefully by falling back to global-only capabilities.
 
     Either:
-    - as_capability runs first: returns capabilities from snapshot (empty)
-    - cleanup runs first: as_capability gets None, falls back to global-only
+    - get_capabilities runs first: returns capabilities from snapshot (empty)
+    - cleanup runs first: get_capabilities gets None, falls back to global-only
     Both outcomes are acceptable; no exception should be raised.
     """
     manager = MCPManager(name="test-g9")
@@ -245,7 +245,7 @@ async def test_as_capability_during_concurrent_cleanup() -> None:
 
         # Fire both concurrently
         results: list[object] = await asyncio.gather(
-            manager.as_capability(session_id=session_id),
+            manager.get_capabilities(session_id=session_id),
             manager.cleanup_session(session_id),
             return_exceptions=True,
         )
@@ -253,7 +253,7 @@ async def test_as_capability_during_concurrent_cleanup() -> None:
         # Neither should have raised
         for result in results:
             assert not isinstance(result, Exception), (
-                f"Concurrent as_capability/cleanup raised: {result!r}"
+                f"Concurrent get_capabilities/cleanup raised: {result!r}"
             )
 
         # Session must be removed from _session_contexts after both complete

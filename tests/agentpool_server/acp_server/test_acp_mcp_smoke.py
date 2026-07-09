@@ -25,7 +25,7 @@ from agentpool import Agent
 from agentpool.delegation import AgentPool
 from agentpool.models.agents import NativeAgentConfig
 from agentpool.models.manifest import AgentsManifest
-from agentpool.resource_providers.mcp_provider import MCPResourceProvider
+# MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
 from agentpool_config.mcp_server import AcpMCPServerConfig
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.acp_mcp_transport import AcpMcpTransport
@@ -153,7 +153,7 @@ async def test_initialize_and_get_tools_with_json_round_trip(
         name=server_config.name,
         timeout=10.0,
     )
-    provider = MCPResourceProvider(server=acp_server_config, transport=transport)
+    provider = MCPCapability(server=acp_server_config, transport=transport)
 
     # Step 1: initialize() must complete without hanging
     with anyio.fail_after(5):

@@ -7,13 +7,13 @@ from typing import TYPE_CHECKING, Any
 from schemez.functionschema.typedefs import OpenAIFunctionDefinition
 
 from agentpool.log import get_logger
-from agentpool.resource_providers import ResourceProvider
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from pydantic_ai.capabilities import AbstractCapability
+    from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
     from agentpool.tools.base import Tool
 
@@ -50,7 +50,7 @@ def get_schema(channel_names: list[str] | None) -> OpenAIFunctionDefinition:
     )
 
 
-class NotificationsTools(ResourceProvider):
+class NotificationsTools(FunctionToolsetCapability):
     """Provider for Apprise-based notification tools.
 
     Provides a send_notification tool that can send messages via
@@ -145,11 +145,3 @@ class NotificationsTools(ResourceProvider):
             "target": target_desc,
             "message": "Notification delivery may have failed for some channels",
         }
-
-    def as_capability(self) -> AbstractCapability | None:
-        """Return a pydantic-ai capability for this provider.
-
-        Returns:
-            A pydantic-ai AbstractCapability instance, or None.
-        """
-        return None

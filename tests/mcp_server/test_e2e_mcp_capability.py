@@ -4,17 +4,17 @@ Covers five scenarios that exercise the full chain from MCPManager
 through AcpMcpConnectionManager, AcpMcpTransport, and
 SessionConnectionPool:
 
-G2: as_capability() with ACP config creates a real toolset cached on
+G2: get_capabilities() with ACP config creates a real toolset cached on
     the session context.
 G3: connect_acp_mcp_server() -> add_acp_transport() -> snapshot merge
-    leaves the correct state for as_capability() to find.
-G4: as_capability() returns a non-empty list and the underlying ACP
+    leaves the correct state for get_capabilities() to find.
+G4: get_capabilities() returns a non-empty list and the underlying ACP
     transport's connect_session() + ClientSession.initialize() works
     end-to-end through the mock ACP client.
 G10: cleanup_session() properly removes all resources when the ACP
     transport fails mid-execution, without hanging.
 G12: child session inherits parent's ACP transports via
-    copy_pre_created_transports() and as_capability() finds them.
+    copy_pre_created_transports() and get_capabilities() finds them.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ from agentpool_server.acp_server.acp_mcp_transport import AcpMcpTransport
 
 
 class _FakeTransport:
-    """Fake ClientTransport for testing add_acp_transport and as_capability.
+    """Fake ClientTransport for testing add_acp_transport and get_capabilities.
 
     Mimics the interface needed by MCPToolset: provides a
     ``connect_session`` async context manager that yields ``None``
@@ -174,17 +174,17 @@ def _make_responsive_send_request(
 
 
 # ---------------------------------------------------------------------------
-# G2: as_capability with ACP config creates real toolset
+# G2: get_capabilities with ACP config creates real toolset
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
-async def test_as_capability_with_acp_config_creates_real_toolset() -> None:
-    """as_capability(session_id) with ACP config creates a real toolset.
+async def test_get_capabilities_with_acp_config_creates_real_toolset() -> None:
+    """get_capabilities(session_id) with ACP config creates a real toolset.
 
     Verifies that when a snapshot contains an ACP config entry and the
     session's connection pool has a pre-created transport for that
-    config's client_id, ``as_capability()`` returns a non-empty list
+    config's client_id, ``get_capabilities()`` returns a non-empty list
     with a toolset that is:
     1. Cached in ``ctx.toolset_cache``.
     2. Constructed with the transport from ``ctx.connection_pool``.
@@ -209,7 +209,7 @@ async def test_as_capability_with_acp_config_creates_real_toolset() -> None:
             patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
             patch("pydantic_ai.capabilities.MCP", _FakeMCP),
         ):
-            caps = await mcp_manager.as_capability(session_id=session_id)
+            caps = await mcp_manager.get_capabilities(session_id=session_id)
 
         assert len(caps) == 1
         toolset = cast(_FakeToolset, caps[0].local)
@@ -241,7 +241,7 @@ async def test_initialize_mcp_servers_full_chain() -> None:
     After setup, verifies:
     - ``_session_connections`` has the session.
     - ``acp_connection_ids`` has the ``(connection_id, session_key)`` tuple.
-    - Snapshot with ACP config entry allows ``as_capability()`` to find
+    - Snapshot with ACP config entry allows ``get_capabilities()`` to find
       the transport.
     """
     from agentpool import Agent
@@ -312,7 +312,7 @@ async def test_initialize_mcp_servers_full_chain() -> None:
             patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
             patch("pydantic_ai.capabilities.MCP", _FakeMCP),
         ):
-            caps = await mcp_manager.as_capability(session_id=session_id)
+            caps = await mcp_manager.get_capabilities(session_id=session_id)
 
         assert len(caps) == 1
         toolset = cast(_FakeToolset, caps[0].local)
@@ -324,13 +324,13 @@ async def test_initialize_mcp_servers_full_chain() -> None:
 
 
 # ---------------------------------------------------------------------------
-# G4: Tool execution through as_capability and ACP transport
+# G4: Tool execution through get_capabilities and ACP transport
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
-async def test_tool_execution_through_as_capability_and_acp_transport() -> None:  # noqa: PLR0915
-    """as_capability + AcpMcpTransport.connect_session + ClientSession.initialize.
+async def test_tool_execution_through_get_capabilities_and_acp_transport() -> None:  # noqa: PLR0915
+    """get_capabilities + AcpMcpTransport.connect_session + ClientSession.initialize.
 
     This is the hardest test.  It verifies the complete end-to-end flow:
 
@@ -338,7 +338,7 @@ async def test_tool_execution_through_as_capability_and_acp_transport() -> None:
        mock client that responds to mcp/connect and mcp/message.
     2. ``AcpMcpTransport(conn)`` wraps the connection.
     3. ``add_acp_transport()`` registers the transport.
-    4. ``as_capability(session_id)`` returns a non-empty list with a
+    4. ``get_capabilities(session_id)`` returns a non-empty list with a
        toolset built from the ACP transport.
     5. The ACP transport's ``connect_session()`` creates a real
        ``ClientSession``.
@@ -419,7 +419,7 @@ async def test_tool_execution_through_as_capability_and_acp_transport() -> None:
             patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
             patch("pydantic_ai.capabilities.MCP", _FakeMCP),
         ):
-            caps = await mcp_manager.as_capability(session_id=session_id)
+            caps = await mcp_manager.get_capabilities(session_id=session_id)
 
         assert len(caps) == 1
         toolset = cast(_FakeToolset, caps[0].local)
@@ -462,7 +462,7 @@ async def test_acp_transport_failure_during_tool_execution_cleanup() -> None:
     1. Create wired MCPManager + AcpMcpConnectionManager.
     2. Create ACP connection + register session.
     3. Add a failing transport (raises RuntimeError on connect_session).
-    4. Build snapshot and call as_capability() (toolset created but
+    4. Build snapshot and call get_capabilities() (toolset created but
        not entered — no failure yet).
     5. Attempt to enter the toolset's transport -> RuntimeError.
     6. Call cleanup_session() — must complete without hanging.
@@ -511,7 +511,7 @@ async def test_acp_transport_failure_during_tool_execution_cleanup() -> None:
             patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
             patch("pydantic_ai.capabilities.MCP", _FakeMCP),
         ):
-            caps = await mcp_manager.as_capability(session_id=session_id)
+            caps = await mcp_manager.get_capabilities(session_id=session_id)
 
         assert len(caps) == 1
         toolset = cast(_FakeToolset, caps[0].local)
@@ -544,7 +544,7 @@ async def test_child_session_inherits_parent_acp_transports() -> None:
 
     Verifies that ``SessionConnectionPool.copy_pre_created_transports()``
     copies pre-created (ACP) transports from the parent's connection pool
-    to the child's, and that the child's ``as_capability()`` can find
+    to the child's, and that the child's ``get_capabilities()`` can find
     the ACP transport.
 
     Setup:
@@ -553,11 +553,11 @@ async def test_child_session_inherits_parent_acp_transports() -> None:
     3. Call ``copy_pre_created_transports()`` from parent's pool to
        child's pool.
     4. Build snapshot with ACP config entry for the child.
-    5. Call ``as_capability(session_id=child_session_id)``.
+    5. Call ``get_capabilities(session_id=child_session_id)``.
 
     Asserts:
     - Child's ``connection_pool`` has the pre-created transport.
-    - ``as_capability()`` returns a non-empty list for the child.
+    - ``get_capabilities()`` returns a non-empty list for the child.
     - The child's toolset uses the inherited transport.
     """
     mcp_manager, _acp_manager = _make_wired_managers()
@@ -591,7 +591,7 @@ async def test_child_session_inherits_parent_acp_transports() -> None:
             patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
             patch("pydantic_ai.capabilities.MCP", _FakeMCP),
         ):
-            caps = await mcp_manager.as_capability(session_id=child_session_id)
+            caps = await mcp_manager.get_capabilities(session_id=child_session_id)
 
         assert len(caps) == 1
         toolset = cast(_FakeToolset, caps[0].local)

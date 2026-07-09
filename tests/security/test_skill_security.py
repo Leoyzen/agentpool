@@ -25,13 +25,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentpool.resource_providers.local import LocalResourceProvider
-from agentpool.resource_providers.mcp_provider import MCPResourceProvider
+# SkillCapability removed - use SkillCapability from agentpool.skills.capability
+# MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
 from agentpool.skills.exceptions import ReferenceNotFoundError, SecurityError, SkillNotFoundError
 
 
 # =============================================================================
-# Path Traversal Attack Tests - LocalResourceProvider
+# Path Traversal Attack Tests - SkillCapability
 # =============================================================================
 
 
@@ -69,8 +69,8 @@ Instructions.
 
 @pytest.fixture
 async def local_provider(skill_with_references):
-    """Create and enter a LocalResourceProvider context."""
-    provider = LocalResourceProvider(
+    """Create and enter a SkillCapability context."""
+    provider = SkillCapability(
         name="security-test",
         skills_dirs=[skill_with_references],
         cache_ttl=60.0,
@@ -83,7 +83,7 @@ async def local_provider(skill_with_references):
 @pytest.mark.security
 async def test_local_path_traversal_absolute_path(skill_with_references):
     """Test path traversal with absolute path attempt: /etc/passwd."""
-    provider = LocalResourceProvider(
+    provider = SkillCapability(
         name="security-test",
         skills_dirs=[skill_with_references],
     )
@@ -144,7 +144,7 @@ async def test_local_path_traversal_mixed_separators(local_provider):
 
 
 # =============================================================================
-# URL-Encoded Path Traversal Tests - LocalResourceProvider
+# URL-Encoded Path Traversal Tests - SkillCapability
 # =============================================================================
 
 
@@ -152,7 +152,7 @@ async def test_local_path_traversal_mixed_separators(local_provider):
 @pytest.mark.security
 async def test_local_url_encoded_traversal_percent_2f(local_provider):
     """Test URL-encoded path traversal: ..%2f..%2f..%2fetc%2fpasswd."""
-    # LocalResourceProvider does not URL-decode before checking
+    # SkillCapability does not URL-decode before checking
     # This should fail as file not found (path still blocked)
     with pytest.raises((SecurityError, ReferenceNotFoundError)):
         await local_provider.read_reference("test-skill", "..%2f..%2f..%2fetc%2fpasswd")
@@ -184,7 +184,7 @@ async def test_local_url_encoded_dot(local_provider):
 
 
 # =============================================================================
-# Null Byte Injection Tests - LocalResourceProvider
+# Null Byte Injection Tests - SkillCapability
 # =============================================================================
 
 
@@ -213,7 +213,7 @@ async def test_local_null_byte_at_start(local_provider):
 
 
 # =============================================================================
-# Symlink Attack Tests - LocalResourceProvider
+# Symlink Attack Tests - SkillCapability
 # =============================================================================
 
 
@@ -238,7 +238,7 @@ async def test_local_symlink_to_outside_directory(skill_with_references):
     try:
         symlink_path.symlink_to(outside_file)
 
-        provider = LocalResourceProvider(
+        provider = SkillCapability(
             name="symlink-test",
             skills_dirs=[skill_with_references],
         )
@@ -284,7 +284,7 @@ async def test_local_symlink_chain_traversal(skill_with_references):
         # Create link2 -> link1 (within refs)
         link2.symlink_to(link1)
 
-        provider = LocalResourceProvider(
+        provider = SkillCapability(
             name="symlink-chain-test",
             skills_dirs=[skill_with_references],
         )
@@ -301,7 +301,7 @@ async def test_local_symlink_chain_traversal(skill_with_references):
 
 
 # =============================================================================
-# Path Traversal Attack Tests - MCPResourceProvider
+# Path Traversal Attack Tests - MCPCapability
 # =============================================================================
 
 
@@ -318,10 +318,10 @@ def mock_mcp_client():
 
 @pytest.fixture
 def mcp_provider(mock_mcp_client):
-    """Create an MCPResourceProvider with mocked client."""
+    """Create an MCPCapability with mocked client."""
     with patch("agentpool.mcp_server.MCPClient") as mock_client_class:
         mock_client_class.return_value = mock_mcp_client
-        provider = MCPResourceProvider(server="uvx test-server", name="security-test-mcp")
+        provider = MCPCapability(server="uvx test-server", name="security-test-mcp")
         provider.client = mock_mcp_client
         yield provider
 
@@ -367,7 +367,7 @@ async def test_mcp_path_traversal_deeply_nested(mcp_provider):
 
 
 # =============================================================================
-# URL-Encoded Path Traversal Tests - MCPResourceProvider
+# URL-Encoded Path Traversal Tests - MCPCapability
 # =============================================================================
 
 
@@ -376,7 +376,7 @@ async def test_mcp_path_traversal_deeply_nested(mcp_provider):
 async def test_mcp_url_encoded_traversal_percent_2f(mcp_provider):
     """Test MCP URL-encoded path traversal: ..%2f..%2f..%2fetc%2fpasswd.
 
-    MCPResourceProvider properly URL-decodes before checking,
+    MCPCapability properly URL-decodes before checking,
     so this should raise SecurityError.
     """
     with pytest.raises(SecurityError) as exc_info:
@@ -416,7 +416,7 @@ async def test_mcp_double_url_encoding(mcp_provider):
 
 
 # =============================================================================
-# Null Byte Injection Tests - MCPResourceProvider
+# Null Byte Injection Tests - MCPCapability
 # =============================================================================
 
 

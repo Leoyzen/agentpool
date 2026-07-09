@@ -2,7 +2,7 @@
 
 Tests the full chain: ``ACPSession.initialize_mcp_servers()`` →
 ``MCPManager.add_acp_transport()`` → ``update_session_snapshot()`` →
-``as_capability()`` → child session inheritance via
+``get_capabilities()`` → child session inheritance via
 ``get_or_create_session_agent()`` → FunctionModel-driven tool discovery.
 
 Covers the two bug fixes:
@@ -228,16 +228,16 @@ async def test_initialize_mcp_servers_registers_transport_and_syncs_snapshot() -
 
 
 # ---------------------------------------------------------------------------
-# Test 2: as_capability finds ACP configs after initialize
+# Test 2: get_capabilities finds ACP configs after initialize
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
-async def test_as_capability_finds_acp_configs_after_initialize() -> None:
-    """as_capability(session_id) returns non-empty list after initialize.
+async def test_get_capabilities_finds_acp_configs_after_initialize() -> None:
+    """get_capabilities(session_id) returns non-empty list after initialize.
 
     After ``initialize_mcp_servers()``, the session context has both a
-    transport and a snapshot.  ``as_capability()`` should find the ACP
+    transport and a snapshot.  ``get_capabilities()`` should find the ACP
     config and create a toolset using the ACP transport.
     """
     mcp_manager, _acp_manager, _agent, acp_agent, acp_session, _mock_client = _build_test_fixture(
@@ -251,9 +251,9 @@ async def test_as_capability_finds_acp_configs_after_initialize() -> None:
             patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
             patch("pydantic_ai.capabilities.MCP", _FakeMCP),
         ):
-            caps = await mcp_manager.as_capability(session_id=acp_session.session_id)
+            caps = await mcp_manager.get_capabilities(session_id=acp_session.session_id)
 
-        assert len(caps) > 0, "as_capability must return non-empty list"
+        assert len(caps) > 0, "get_capabilities must return non-empty list"
 
         toolset = cast(_FakeToolset, caps[0].local)
         assert toolset.client is not None, "Toolset must use the ACP transport"
@@ -359,16 +359,16 @@ async def test_child_session_inherits_acp_configs_and_transports() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 4: child as_capability finds inherited ACP configs
+# Test 4: child get_capabilities finds inherited ACP configs
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
-async def test_child_as_capability_finds_inherited_acp_configs() -> None:
-    """as_capability on child session returns non-empty list.
+async def test_child_get_capabilities_finds_inherited_acp_configs() -> None:
+    """get_capabilities on child session returns non-empty list.
 
     After child session inherits parent's ACP configs and transports,
-    calling ``as_capability(session_id=child_session_id)`` on the
+    calling ``get_capabilities(session_id=child_session_id)`` on the
     child's MCPManager should return a non-empty list.
     """
     from agentpool.orchestrator.session_pool import SessionPool
@@ -416,9 +416,9 @@ async def test_child_as_capability_finds_inherited_acp_configs() -> None:
             patch("pydantic_ai.mcp.MCPToolset", _FakeToolset),
             patch("pydantic_ai.capabilities.MCP", _FakeMCP),
         ):
-            caps = await child_agent.mcp.as_capability(session_id=child_session_id)
+            caps = await child_agent.mcp.get_capabilities(session_id=child_session_id)
 
-        assert len(caps) > 0, "Child as_capability must return non-empty list"
+        assert len(caps) > 0, "Child get_capabilities must return non-empty list"
 
         toolset = cast(_FakeToolset, caps[0].local)
         assert toolset.client is not None, "Child toolset must use inherited ACP transport"
@@ -440,7 +440,7 @@ async def test_function_model_discovers_mcp_tools_through_acp_transport() -> Non
     """FunctionModel discovers MCP tools through the real ACP transport.
 
     This is the key E2E test.  It creates a real pydantic-ai Agent with
-    ``FunctionModel`` and the MCP capabilities from ``as_capability()``.
+    ``FunctionModel`` and the MCP capabilities from ``get_capabilities()``.
     The FunctionModel function checks ``agent_info.function_tools`` for
     the MCP tool name ``test_tool`` and calls it on the first turn.
 
@@ -460,7 +460,7 @@ async def test_function_model_discovers_mcp_tools_through_acp_transport() -> Non
         await acp_session.initialize_mcp_servers()
 
         # Get real MCP capabilities (no patching)
-        caps = await mcp_manager.as_capability(session_id=acp_session.session_id)
+        caps = await mcp_manager.get_capabilities(session_id=acp_session.session_id)
         assert len(caps) > 0, "Must have MCP capabilities"
 
         call_count = 0

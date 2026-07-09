@@ -17,7 +17,7 @@ from agentpool.agents.events import (
 )
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 from agentpool.log import get_logger
-from agentpool.resource_providers import ResourceProvider
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.tools.exceptions import ToolError
 
 
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class WorkersTools(ResourceProvider):
+class WorkersTools(FunctionToolsetCapability):
     """Provider for worker agent tools.
 
     Creates tools for each configured worker that delegate to agents/teams in the pool.

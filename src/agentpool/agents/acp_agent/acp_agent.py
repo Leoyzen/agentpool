@@ -99,7 +99,7 @@ if TYPE_CHECKING:
     from agentpool.messaging import MessageHistory
     from agentpool.models.acp_agents import BaseACPAgentConfig
     from agentpool.orchestrator.turn import Turn
-    from agentpool.resource_providers import ResourceProvider
+    from pydantic_ai.capabilities import AbstractCapability
     from agentpool.sessions import SessionData
     from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig
@@ -145,7 +145,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         # ACP initialization
         init_request: InitializeRequest | None = None,
         # Tools
-        tool_providers: list[ResourceProvider] | None = None,
+        tool_providers: list[AbstractCapability] | None = None,
         mcp_servers: Sequence[str | MCPServerConfig] | None = None,
         # Runtime options
         deps_type: type[TDeps] | None = None,

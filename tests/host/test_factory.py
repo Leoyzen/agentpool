@@ -13,7 +13,6 @@ from agentpool.host.factory import AgentFactory
 pytestmark = pytest.mark.unit
 
 
-_DEFAULT_INSTRUCTION_PROVIDER = MagicMock()
 _DEFAULT_TOOLS_PROVIDER = MagicMock()
 _DEFAULT_MCP = MagicMock()
 
@@ -22,7 +21,6 @@ def _make_host_context(
     *,
     pool: Any | None = None,
     config_file_path: str | None = None,
-    skills_instruction_provider: Any | None = _DEFAULT_INSTRUCTION_PROVIDER,
     skills_tools_provider: Any | None = _DEFAULT_TOOLS_PROVIDER,
     mcp: Any | None = _DEFAULT_MCP,
 ) -> Any:
@@ -30,7 +28,6 @@ def _make_host_context(
     ctx = MagicMock()
     ctx.pool = pool if pool is not None else MagicMock()
     ctx.config_file_path = config_file_path
-    ctx.skills_instruction_provider = skills_instruction_provider
     ctx.skills_tools_provider = skills_tools_provider
     ctx.mcp = mcp if mcp is not None else MagicMock()
     return ctx
@@ -149,14 +146,12 @@ async def test_create_session_agent_native_main_calls_aenter() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_session_agent_native_main_adds_providers() -> None:
-    """When creating a native main agent, pool providers are added."""
+async def test_create_session_agent_native_main_no_pool_providers() -> None:
+    """When creating a native main agent, no pool providers are added (include_aggregating=False)."""
     agent = _make_agent_mock()
     cfg = _make_native_cfg(agent=agent)
-    skills_instruction = MagicMock()
     skills_tools = MagicMock()
     host_context = _make_host_context(
-        skills_instruction_provider=skills_instruction,
         skills_tools_provider=skills_tools,
     )
 
@@ -171,10 +166,8 @@ async def test_create_session_agent_native_main_adds_providers() -> None:
             cfg=cfg,
         )
 
-    # skills_instruction_provider + skills_tools_provider added
-    assert agent.tools.add_provider.call_count == 2
-    agent.tools.add_provider.assert_any_call(skills_instruction)
-    agent.tools.add_provider.assert_any_call(skills_tools)
+    # _inject_pool_providers with include_aggregating=False adds no providers.
+    agent.tools.add_provider.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

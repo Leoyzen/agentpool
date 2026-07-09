@@ -96,12 +96,6 @@ async def test_skills_injection_agent_override_full_when_global_off(temp_skills_
     async with AgentPool(manifest) as pool:
         agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
 
-        # SessionController normally adds pool.skills_instruction_provider
-        # to the agent's tools. Without it, get_instructions() is never
-        # called for skills injection.
-        if pool.skills_instruction_provider is not None:
-            agent.tools.add_provider(pool.skills_instruction_provider)
-
         agentlet: PydanticAgent[None, str] = await agent.get_agentlet(  # type: ignore[attr-defined]
             None, None, None
         )

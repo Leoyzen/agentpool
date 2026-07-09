@@ -79,7 +79,7 @@ if TYPE_CHECKING:
     from agentpool.models.agents import NativeAgentConfig, ToolMode
     from agentpool.orchestrator.turn import Turn
     from agentpool.prompts.prompts import PromptType
-    from agentpool.resource_providers import ResourceProvider
+    from pydantic_ai.capabilities import AbstractCapability
     from agentpool.sessions import SessionData
     from agentpool.tools.base import FunctionTool
     from agentpool.ui.base import InputProvider
@@ -115,7 +115,7 @@ class AgentKwargs(TypedDict, total=False):
     model: ModelType
     system_prompt: str | Sequence[str]
     tools: Sequence[ToolType] | None
-    toolsets: Sequence[ResourceProvider] | None
+    toolsets: Sequence[AbstractCapability] | None
     mcp_servers: Sequence[str | MCPServerConfig] | None
     skills_paths: Sequence[JoinablePathLike] | None
     retries: int
@@ -155,7 +155,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         description: str | None = None,
         display_name: str | None = None,
         tools: Sequence[ToolType] | None = None,
-        toolsets: Sequence[ResourceProvider] | None = None,
+        toolsets: Sequence[AbstractCapability] | None = None,
         mcp_servers: Sequence[str | MCPServerConfig] | None = None,
         resources: Sequence[PromptType | str] = (),
         skills_paths: Sequence[JoinablePathLike] | None = None,
@@ -329,7 +329,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self._resolved_history_processors: list[Callable[..., Any]] | None = None
         # MCP lifecycle snapshot — set externally (e.g. by SessionController) to
         # enable snapshot-aware capability building in get_agentlet().
-        # When None, get_agentlet() falls back to the legacy as_capability() path.
+        # When None, get_agentlet() falls back to the legacy get_capabilities() path.
         self._mcp_snapshot: McpConfigSnapshot | None = None
         self._session_connection_pool: SessionConnectionPool | None = None
         self._extra_capabilities: list[Any] = capabilities or []
@@ -815,7 +815,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         direct_tools: list[Any] = []
         # 1. Tool providers — collect capabilities or fall back to direct tools
         for provider in self.tools.providers:
-            cap = provider.as_capability()
+            cap = provider.get_capabilities()
             if cap is not None:
                 tool_capabilities.append(cap)
             else:
@@ -900,13 +900,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         tool_capabilities.append(create_approval_bridge_capability(self, input_provider))
         # 4. MCP servers
-        mcp_capabilities = await self.mcp.as_capability(
+        mcp_capabilities = await self.mcp.get_capabilities(
             session_id=run_ctx.session_id if run_ctx else None
         )
         tool_capabilities.extend(mcp_capabilities)
         # 5. Skill capabilities — from pool-scoped instances created during __aenter__.
         #    Each SkillCapability provides tools and MCP servers.
-        #    Instructions are handled by SkillsInstructionProvider (no double injection).
         #    Skill MCP configs are registered in the snapshot for SessionConnectionPool.
         if self.agent_pool is not None:
             pool_capabilities = self.agent_pool.skill_capabilities

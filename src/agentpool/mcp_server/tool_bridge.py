@@ -27,7 +27,7 @@ from pydantic_ai.usage import RunUsage
 
 from agentpool.agents import Agent
 from agentpool.log import get_logger
-from agentpool.resource_providers import ResourceChangeEvent
+from agentpool.capabilities.change_event import ChangeEvent
 from agentpool.utils.signatures import filter_schema_params, get_params_matching_predicate
 
 
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from agentpool.agents import AgentContext
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.tools.base import Tool
-_ = ResourceChangeEvent  # Used at runtime in method signature
+_ = ChangeEvent  # Used at runtime in method signature
 
 
 logger = get_logger(__name__)
@@ -308,7 +308,7 @@ class ToolManagerBridge:
         for provider in self.node.tools.providers:
             provider.tools_changed.disconnect(self._on_tools_changed)
 
-    async def _on_tools_changed(self, event: ResourceChangeEvent) -> None:
+    async def _on_tools_changed(self, event: ChangeEvent) -> None:
         """Handle tool changes from a provider."""
         logger.info(
             "Tools changed in provider, refreshing MCP tools",

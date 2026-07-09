@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 
     from agentpool.common_types import MCPServerStatus, ToolType
     from agentpool.prompts.prompts import MCPClientPrompt
-    from agentpool.resource_providers import ResourceProvider
-    from agentpool.resource_providers.resource_info import ResourceInfo
+    from pydantic_ai.capabilities import AbstractCapability
+    # ResourceInfo removed
     from agentpool.tools.base import Tool
 
 
@@ -40,7 +40,7 @@ class ToolManager:
 
     .. deprecated::
         This class is deprecated and will be removed in v0.5.0.
-        Use :meth:`ResourceProvider.as_capability()` instead.
+        Use :meth:`AbstractCapability.get_capabilities()` instead.
     """
 
     def __init__(
@@ -56,18 +56,18 @@ class ToolManager:
             tools: Initial tools to register
             tool_mode: Tool execution mode (None or "codemode")
         """
-        from agentpool.resource_providers import StaticResourceProvider
-        from agentpool.resource_providers.codemode.provider import CodeModeResourceProvider
+        from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+        # CodeModeCapability removed - use CodeModeCapability
 
         super().__init__()
-        self.external_providers: list[ResourceProvider] = []
-        self.session_providers: list[ResourceProvider] = []
+        self.external_providers: list[AbstractCapability] = []
+        self.session_providers: list[AbstractCapability] = []
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
-            self.worker_provider = StaticResourceProvider(name="workers")
-            self.builtin_provider = StaticResourceProvider(name="builtin")
+            self.worker_provider = FunctionToolsetCapability(name="workers")
+            self.builtin_provider = FunctionToolsetCapability(name="builtin")
             self.tool_mode = tool_mode
-            self._codemode_provider = CodeModeResourceProvider([])
+            self._codemode_provider = CodeModeCapability([])
         # Forward to provider methods
         self.tool = self.builtin_provider.tool
         self.register_tool = self.builtin_provider.register_tool
@@ -76,7 +76,7 @@ class ToolManager:
             self.builtin_provider.add_tool(tool)
 
     @property
-    def providers(self) -> list[ResourceProvider]:
+    def providers(self) -> list[AbstractCapability]:
         """Get all providers: external + session + worker + builtin providers."""
         if self.tool_mode == "codemode":
             # Update the providers list with current providers
@@ -101,23 +101,23 @@ class ToolManager:
             return "No tools available"
         return f"Available tools: {', '.join(enabled_tools)}"
 
-    def add_provider(self, provider: ResourceProvider, owner: str | None = None) -> None:
+    def add_provider(self, provider: AbstractCapability, owner: str | None = None) -> None:
         """Add an external resource provider.
 
         Args:
-            provider: ResourceProvider instance (e.g., MCP server, custom provider)
+            provider: AbstractCapability instance (e.g., MCP server, custom provider)
             owner: Optional owner for the provider
         """
         if owner:
             provider.owner = owner
         self.external_providers.append(provider)
 
-    def remove_provider(self, provider: ResourceProvider | ProviderName) -> None:
+    def remove_provider(self, provider: AbstractCapability | ProviderName) -> None:
         """Remove an external resource provider."""
-        from agentpool.resource_providers import ResourceProvider
+        from pydantic_ai.capabilities import AbstractCapability
 
         match provider:
-            case ResourceProvider():
+            case AbstractCapability():
                 self.external_providers.remove(provider)
             case str():
                 for p in self.external_providers:
@@ -186,7 +186,7 @@ class ToolManager:
         """Get all prompts from all providers."""
         from agentpool.mcp_server.manager import MCPManager
         from agentpool.prompts.prompts import MCPClientPrompt as MCPPrompt
-        from agentpool.resource_providers import AggregatingResourceProvider
+        from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
 
         all_prompts: list[MCPClientPrompt] = []
         # Get prompts from all external providers (check if they're MCP providers)
@@ -201,9 +201,9 @@ class ToolManager:
                     all_prompts.extend(mcp_prompts)
                 except Exception:
                     logger.exception("Failed to get prompts from provider", provider=provider)
-            elif isinstance(provider, AggregatingResourceProvider):
+            elif isinstance(provider, CombinedToolsetCapability):
                 try:
-                    # AggregatingResourceProvider can directly provide prompts
+                    # CombinedToolsetCapability can directly provide prompts
                     prompts = await provider.get_prompts()
                     # Filter to only MCPClientPrompt instances
                     mcp_prompts = [p for p in prompts if isinstance(p, MCPPrompt)]
@@ -259,7 +259,7 @@ class ToolManager:
     @asynccontextmanager
     async def with_session_providers(
         self,
-        providers: Sequence[ResourceProvider],
+        providers: Sequence[AbstractCapability],
     ) -> AsyncIterator[None]:
         """Temporarily inject session-level providers for the duration of a run.
 
@@ -326,21 +326,21 @@ class ToolManager:
     async def get_mcp_server_info(self) -> dict[str, MCPServerStatus]:
         """Get information about configured MCP servers."""
         from agentpool.mcp_server.manager import MCPManager
-        from agentpool.resource_providers import AggregatingResourceProvider
-        from agentpool.resource_providers.mcp_provider import MCPResourceProvider
+        from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
+        # MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
 
-        def add_status(provider: MCPResourceProvider, result: dict[str, MCPServerStatus]) -> None:
+        def add_status(provider: MCPCapability, result: dict[str, MCPServerStatus]) -> None:
             result[provider.name] = provider.get_status()
 
         result: dict[str, MCPServerStatus] = {}
         try:
             for provider in self.external_providers:
                 match provider:
-                    case MCPResourceProvider():
+                    case MCPCapability():
                         add_status(provider, result)
-                    case AggregatingResourceProvider():
+                    case CombinedToolsetCapability():
                         for nested in provider.providers:
-                            if isinstance(nested, MCPResourceProvider):
+                            if isinstance(nested, MCPCapability):
                                 add_status(nested, result)
                     case MCPManager():
                         for mcp_provider in provider.get_mcp_providers():

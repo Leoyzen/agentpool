@@ -11,7 +11,7 @@ from upathtools import is_directory
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.log import get_logger
-from agentpool.resource_providers import ResourceProvider
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool_toolsets.fsspec_toolset.diagnostics import (
     DiagnosticsManager,
     format_diagnostics_table,
@@ -81,7 +81,7 @@ def _detect_language(path: str) -> str | None:
     return EXTENSION_TO_LANGUAGE.get(suffix)
 
 
-class CodeTools(ResourceProvider):
+class CodeTools(FunctionToolsetCapability):
     """Provider for code analysis and transformation tools."""
 
     def __init__(

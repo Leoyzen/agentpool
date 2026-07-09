@@ -53,13 +53,13 @@ async def test_invalid_tool_operations():
 
 async def test_providers_property():
     """Test that providers property returns all providers."""
-    from agentpool.resource_providers import StaticResourceProvider
+    from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
     tool1 = Tool.from_callable(lambda x: x, name_override="tool1")
     manager = ToolManager([tool1])
 
     # Add an external provider
-    external_provider = StaticResourceProvider(name="test_external")
+    external_provider = FunctionToolsetCapability(name="test_external")
     manager.add_provider(external_provider)
 
     # Check providers property includes all three types
