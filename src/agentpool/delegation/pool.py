@@ -29,6 +29,8 @@ if TYPE_CHECKING:
     from upathtools import JoinablePathLike, UPath
 
     from agentpool.common_types import AnyEventHandlerType
+    from agentpool.host.context import HostContext
+    from agentpool.host.factory import AgentFactory
     from agentpool.messaging.compaction import CompactionPipeline
     from agentpool.models.manifest import AgentsManifest, AnyAgentConfig
     from agentpool.orchestrator import SessionPool
@@ -228,10 +230,45 @@ class AgentPool[TPoolDeps = None]:
                 kwargs.pop("enable_session_pool")
             self._session_pool_config = session_pool_config or self.manifest.session_pool
             self._session_pool: SessionPool | None = None
+            self._host_context: HostContext | None = None
+            self._factory_instance: AgentFactory | None = None
             self._protocol_servers: list[Any] = []
             # Graph topology attributes preserved for future re-implementation
             self._graph: Any | None = None
             self._graph_config: Any | None = None
+
+    def get_context(self) -> HostContext:
+        """Return cached HostContext, creating it on first call."""
+        if self._host_context is None:
+            from agentpool.host.context import HostContext
+
+            self._host_context = HostContext(
+                manifest=self.manifest,
+                storage=self.storage,
+                vfs_registry=self.vfs_registry,
+                connection_registry=self.connection_registry,
+                mcp=self.mcp,
+                skills_registry=self.skills,
+                skills_instruction_provider=self.skills_instruction_provider,
+                skills_tools_provider=self.skills_tools_provider,
+                prompt_manager=self.prompt_manager,
+                process_manager=self.process_manager,
+                file_ops=self.file_ops,
+                todos=self.todos,
+                session_pool=self._session_pool,
+                config_file_path=self._config_file_path,
+                pool=self,
+            )
+        return self._host_context
+
+    @property
+    def _factory(self) -> AgentFactory:
+        """Lazy-initialized AgentFactory, cached on first access."""
+        if self._factory_instance is None:
+            from agentpool.host.factory import AgentFactory
+
+            self._factory_instance = AgentFactory(pool=self)
+        return self._factory_instance
 
     async def __aenter__(self) -> Self:
         """Enter async context and initialize all agents."""
