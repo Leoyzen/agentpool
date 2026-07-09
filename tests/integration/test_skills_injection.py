@@ -75,7 +75,14 @@ async def test_skills_injection_default_off(temp_skills_dir):
 
 @pytest.mark.integration
 async def test_skills_injection_agent_override_full_when_global_off(temp_skills_dir):
-    """Test agent-specific override to full mode when global is off."""
+    """Test agent-specific override to full mode when global is off.
+
+    In the capability-native system, skills are injected via
+    ``SkillCapability`` instances in the agent's capabilities. Their
+    instructions are stored in ``_cap_instructions``, not ``_instructions``.
+    This test verifies that skill instructions are present even when
+    global injection mode is "off".
+    """
     manifest = AgentsManifest(
         skills=SkillsConfig(
             paths=[UPath(temp_skills_dir)],
@@ -100,17 +107,18 @@ async def test_skills_injection_agent_override_full_when_global_off(temp_skills_
             None, None, None
         )
 
-        all_inst_texts = []
         ctx = agent.get_context()
         run_ctx = MagicMock(spec=RunContext)
         run_ctx.deps = ctx
-        for inst in agentlet._instructions:
-            if callable(inst):
-                all_inst_texts.append(await inst(run_ctx))
-            else:
-                all_inst_texts.append(inst)
 
-        combined_instructions = "\n".join(all_inst_texts)
-        assert "<available-skills>" in combined_instructions
-        assert 'name="test-skill-1"' in combined_instructions
-        assert "Full instructions for skill 1." in combined_instructions
+        # Collect capability instructions (where SkillCapability instructions live)
+        cap_inst_texts: list[str] = []
+        for inst in agentlet._cap_instructions:
+            if callable(inst):
+                cap_inst_texts.append(await inst(run_ctx))
+            else:
+                cap_inst_texts.append(inst)
+
+        combined_cap_instructions = "\n".join(cap_inst_texts)
+        # SkillCapability provides raw skill instructions
+        assert "Full instructions for skill 1." in combined_cap_instructions

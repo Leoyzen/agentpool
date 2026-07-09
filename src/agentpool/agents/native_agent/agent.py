@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 
     from exxec import ExecutionEnvironment
     from pydantic_ai import AgentBuiltinTool, UsageLimits, UserContent
+    from pydantic_ai.capabilities import AbstractCapability
     from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models import Model
     from pydantic_ai.output import OutputSpec
@@ -79,7 +80,6 @@ if TYPE_CHECKING:
     from agentpool.models.agents import NativeAgentConfig, ToolMode
     from agentpool.orchestrator.turn import Turn
     from agentpool.prompts.prompts import PromptType
-    from pydantic_ai.capabilities import AbstractCapability
     from agentpool.sessions import SessionData
     from agentpool.tools.base import FunctionTool
     from agentpool.ui.base import InputProvider
@@ -792,8 +792,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         run_ctx: AgentRunContext | None = None,
     ) -> PydanticAgent[AgentContext[TDeps], AgentOutputType]:
         """Create pydantic-ai agent from current state."""
-        from agentpool.utils.context_wrapping import wrap_instruction
-
         final_type = to_type(output_type) if output_type not in [None, str] else self._output_type
         actual_model = model or self._model
         if isinstance(actual_model, str):
@@ -837,7 +835,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 except Exception:
                     logger.exception(
                         "Failed to register tools from provider",
-                        provider=provider.name,
+                        provider=type(provider).__name__,
                     )
         # 2. Hooks capability — always registered (unified tool interception)
         from agentpool.agents.native_agent.tool_intercept import ToolInterceptCapability
@@ -953,27 +951,14 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # Collect instructions from all providers
         for provider in self.tools.providers:
             try:
-                provider_instructions = await provider.get_instructions()
-                # Wrap each instruction for pydantic-ai compatibility
-                for instruction_fn in provider_instructions:
-                    try:
-                        wrapped_instruction = wrap_instruction(
-                            instruction_fn, fallback="", _warn=False
-                        )
-                        all_instructions.append(wrapped_instruction)
-                    except Exception:
-                        # Wrap failure - log and skip this instruction
-                        logger.exception(
-                            "Failed to wrap instruction, skipping",
-                            provider=provider.name,
-                            instruction=instruction_fn,
-                        )
-                        continue
+                provider_instructions = provider.get_instructions()
+                if provider_instructions is not None:
+                    all_instructions.append(provider_instructions)
             except Exception as e:
                 # Provider failure - log and continue
                 logger.exception(
                     "Failed to get instructions from provider",
-                    provider=provider.name,
+                    provider=type(provider).__name__,
                     error=str(e),
                 )
                 continue
@@ -1398,11 +1383,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     is_valid = True
                     self.log.info("Model %s validated against tokonomics", mode_id)
             # Also check model_variants from manifest (by variant name or identifier)
-            if (
-                not is_valid
-                and ctx
-                and variant_name in ctx.manifest.model_variants
-            ):
+            if not is_valid and ctx and variant_name in ctx.manifest.model_variants:
                 is_valid = True
                 self.log.info(
                     "Model %s validated against model_variants (variant: %s)",
@@ -1410,11 +1391,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     variant_name,
                 )
             if not is_valid:
-                available = (
-                    list(ctx.manifest.model_variants.keys())
-                    if ctx
-                    else "N/A"
-                )
+                available = list(ctx.manifest.model_variants.keys()) if ctx else "N/A"
                 self.log.warning(
                     "Model %s validation failed. Available variants: %s",
                     mode_id,

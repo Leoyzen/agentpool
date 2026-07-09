@@ -34,10 +34,11 @@ from pydantic_ai.toolsets import AbstractToolset, AgentToolset, CombinedToolset
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Sequence
     from types import TracebackType
 
     from agentpool.capabilities.change_event import ChangeEvent
+    from agentpool.tools.base import Tool
 
 
 # ---- Protocols for optional capability methods ----
@@ -73,6 +74,13 @@ class _LifecycleCapable(Protocol):
         exc_val: BaseException | None,
         exc_tb: object,
     ) -> None: ...
+
+
+@runtime_checkable
+class _ToolCollecting(Protocol):
+    """Protocol for capabilities that expose ``get_tools()`` (backward compat)."""
+
+    async def get_tools(self) -> Sequence[Any]: ...
 
 
 class CombinedToolsetCapability(AbstractCapability[AgentDepsT]):
@@ -175,6 +183,35 @@ class CombinedToolsetCapability(AbstractCapability[AgentDepsT]):
         if not parts:
             return None
         return "\n\n".join(parts)
+
+    # ---- Backward compat: tool collection ----
+
+    async def get_tools(self) -> Sequence[Tool[object]]:
+        """Collect tools from all children that have ``get_tools()``.
+
+        This is a backward-compat method for code that still calls
+        ``get_tools()`` on the combined capability (e.g.,
+        :class:`~agentpool.tools.manager.ToolManager`). It iterates
+        children that satisfy the :class:`_ToolCollecting` Protocol and
+        collects their tools into a flat list.
+        """
+        import asyncio
+
+        all_tools: list[Tool[object]] = []
+        coros: list[Any] = []
+        caps_with_tools: list[AbstractCapability[AgentDepsT]] = []
+        for cap in self._capabilities:
+            if isinstance(cap, _ToolCollecting):
+                coros.append(cap.get_tools())
+                caps_with_tools.append(cap)
+        if not coros:
+            return all_tools
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        for _cap, result in zip(caps_with_tools, results, strict=False):
+            if isinstance(result, BaseException):
+                continue
+            all_tools.extend(result)
+        return all_tools
 
     # ---- Change signal bridging ----
 
