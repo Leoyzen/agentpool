@@ -27,8 +27,17 @@
 | Tool base classes + signature parsing | `tools/base.py` |
 | Concrete tool implementations | `tool_impls/{bash,read,grep,...}/` |
 | RunExecutor (native agent loop) | `orchestrator/run_executor.py` |
-| EventBus, SessionController, TurnRunner | `orchestrator/core.py` |
-| RunHandle lifecycle | `orchestrator/run.py` |
+| EventBus, SessionController | `orchestrator/core.py` |
+| RunHandle lifecycle (RunLoop) | `orchestrator/run.py` |
+| Lifecycle dimensions (5 Protocols) | `lifecycle/protocols.py` |
+| Lifecycle types (RunState, ToolExecutionRecord) | `lifecycle/types.py` |
+| TriggerSource implementations | `lifecycle/triggers.py` |
+| Journal implementations (Memory, Durable) | `lifecycle/journal.py` |
+| SnapshotStore implementations (Memory, Durable) | `lifecycle/snapshot_store.py` |
+| CommChannel implementations (Direct, Protocol) | `lifecycle/comm_channel.py` |
+| EventTransport (InProcess) | `lifecycle/event_transport.py` |
+| Dimension factory from config | `lifecycle/factory.py` |
+| LifecycleConfig Pydantic model | `agentpool_config/lifecycle.py` |
 | ResourceProvider base + all providers | `resource_providers/{base,mcp_provider,pool,local,...}.py` |
 | Skill YAML frontmatter model | `skills/skill.py` |
 | Skill as pydantic-ai capability (instructions, tools, MCP) | `skills/capability.py` (`SkillCapability`) |
@@ -47,11 +56,15 @@
 ## Conventions
 
 - **Every node extends MessageNode**: Agents, teams, and the pool itself. Always implement `_step` for pydantic-graph compatibility.
-- **Two queue systems**: Native agents use PydanticAI's `PendingMessageDrainCapability`. ACP agents use `TurnRunner` manual queues (`_post_turn_injections`, `_post_turn_prompts`).
+- **Two queue systems**: Native agents use PydanticAI's `PendingMessageDrainCapability`. ACP agents use manual queues (`_post_turn_injections`, `_post_turn_prompts`). M2 adds `CommChannel` feedback loop for `ProtocolChannel` sessions.
 - **RunExecutor over bare iteration**: Always use `RunExecutor` to drive native agent runs. Bare `async for node in agent_run:` skips `after_node_run` hooks and breaks message draining.
 - **ToolManager is dead**: New tools go through `ResourceProvider.as_capability()`. `ToolManager` emits deprecation warnings.
 - **Deferred imports for circular safety**: `TYPE_CHECKING` blocks + `from __future__ import annotations`. For truly circular paths (`messagenode` ↔ `team`), defer imports inside function bodies.
 - **Signals at step boundaries**: `SignalEmittingGraphRun` maps pydantic-graph transitions to `Talk` signals. Do not emit signals manually from inside steps.
+- **RunLoop = RunHandle + dimension injection**: RunHandle is NOT a new class. Its `start()` async generator is the RunLoop. Six pluggable dimensions (TriggerSource, Journal, SnapshotStore, CommChannel, EventTransport) are injected via constructor fields with `__post_init__` defaults.
+- **CommChannel owns the Journal**: Every `CommChannel` has a `_journal` reference. `publish()` journals (append/upsert) before delivery. `StateUpdate` events are journaled but NOT published to EventBus.
+- **ProtocolChannel bridges protocol servers**: `SessionController` creates `ProtocolTrigger` and `ProtocolChannel` for protocol-handler sessions. Trigger delivers prompts via a queue; Channel publishes events to EventBus.
+- **`lifecycle.EventEnvelope` != `orchestrator.event_bus.EventEnvelope`**: Different types with different responsibilities. Lifecycle envelope is for language-agnostic transport serialization.
 - **Skills parse YAML frontmatter**: `Skill` model uses `extra="forbid"` to reject unknown keys. Instructions lazy-load from `SKILL.md`.
 - **Skills are capabilities**: `SkillCapability` wraps each `Skill` as an `AbstractCapability` providing instructions (`get_instructions`), tools (`get_toolset`), and tool filtering (`get_wrapper_toolset`). Injected in `get_agentlet()` at position 5 (after MCP capabilities).
 - **Skill tools come in two flavors**: Python tools declared via `tools` field (`SkillToolConfig` with `import_path` like `"os:getcwd"`) imported eagerly by `SkillToolManager`. MCP servers declared via `mcp_servers` field (`SkillMcpServerConfig` with `command+args` or `url`) connected lazily per-run by `SkillMcpManager`. Both are prefixed with `{skill_name}__tool__` and `{skill_name}__mcp__` respectively.
@@ -67,6 +80,8 @@
 - **Mutable state on Agent objects**: `AgentRunContext` is per-execution isolation. Stashing mutable state on the `Agent` instance leaks between runs.
 - **Config model imports from core**: Import config types from `agentpool_config.*`, not `agentpool.models`, to avoid circular deps.
 - **Direct tool code in `tools/`**: Tool framework goes in `tools/`. Concrete implementations go in `tool_impls/`.
+- **Accessing `agent_pool` read-only**: Use `host_context` (immutable `HostContext`) instead. The `agent_pool` property emits `DeprecationWarning` as of M2.
+- **Mixing `lifecycle.EventEnvelope` with `orchestrator.event_bus.EventEnvelope`**: These are separate types with different roles. Import from `agentpool.lifecycle.types` for lifecycle transport envelopes; from `agentpool.orchestrator.event_bus` for internal EventBus envelopes.
 - **Blocking calls in async paths**: MCP connections, tool execution, and hooks all expect async methods. Use `anyio` or `asyncio`.
 
 ## Notes
@@ -75,6 +90,9 @@
 - **Compaction is a pipeline**: `CompactionPipeline` runs strategies in sequence. Each strategy receives full history and returns a condensed version.
 - **EventBus scoped subscriptions**: `"session"` (exact), `"descendants"` (children), `"subtree"` (full subtree), `"all"` (everything). Default is `"session"`.
 - **RunHandle cleanup**: `complete_event` fires after all cleanup. `close_session()` awaits it with timeout, then falls back to `cancel_run()`.
+- **Crash recovery via journal.resume()**: Detects in-flight Turns by comparing journal entries against snapshot store turn results. Strategy `"mark_interrupted"` skips re-execution; `"retry"` checks tool execution log for idempotency.
+- **Tool execution logging in HookAwareTurn**: `_fire_post_tool_hooks()` calls `_log_tool_execution()` which stores a `ToolExecutionRecord` in the Journal. Independent of hooks config.
+- **agent_pool deprecated for host_context**: `MessageNode.agent_pool` emits `DeprecationWarning` (M2), removal in M3. Use `host_context` (immutable `HostContext`).
 - **Codemode is a metacall**: `CodeModeResourceProvider` wraps all tools into a single Python execution tool. One tool to rule them all.
 - **Skill commands are protocol-agnostic**: `SkillCommand` wraps skills as slash commands working across ACP, AG-UI, and OpenCode without protocol-specific code.
 - **SkillCapability injection order matters**: In `get_agentlet()`, skill capabilities are injected at position 5 (after MCP, deferred bridge, approval bridge, and hook capabilities). Each skill produces one `SkillCapability` instance with its own `SkillMcpManager` and `SkillToolManager` — there is one manager tree shared across all skills from the same agentlet creation call.
