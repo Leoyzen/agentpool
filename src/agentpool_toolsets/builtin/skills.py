@@ -184,7 +184,7 @@ def _visible_model_skills(
     ]
 
 
-async def _load_visible_bare_skill(
+async def _load_visible_bare_skill(  # noqa: PLR0911
     ctx: AgentContext,
     skill_name: str,
     node_name: str | None,
@@ -200,17 +200,29 @@ async def _load_visible_bare_skill(
     if skill_provider is None:
         return None
 
-    providers = getattr(skill_provider, "providers", None)
-    provider_list = list(providers) if isinstance(providers, (list, tuple)) else [skill_provider]
-    for provider in provider_list:
-        provider_skills = await provider.get_skills()
+    # Use capabilities property (CombinedToolsetCapability) instead of old providers
+    capabilities = getattr(skill_provider, "capabilities", None)
+    if capabilities is None:
+        return None
+    for provider in capabilities:
+        # Try get_skills() if the capability supports it (e.g. MCPCapability)
+        get_skills_fn = getattr(provider, "get_skills", None)
+        if get_skills_fn is None:
+            continue
+        try:
+            provider_skills = await get_skills_fn()
+        except Exception:  # noqa: BLE001
+            continue
         visible_provider_skills = _visible_model_skills(ctx, provider_skills, node_name)
         provider_skill = next(
             (skill for skill in visible_provider_skills if skill.name == skill_name),
             None,
         )
         if provider_skill is not None:
-            return provider_skill, await provider.get_skill_instructions(provider_skill.name)
+            get_instructions_fn = getattr(provider, "get_skill_instructions", None)
+            if get_instructions_fn is not None:
+                return provider_skill, await get_instructions_fn(provider_skill.name)
+            return provider_skill, ""
 
     return None
 
@@ -301,7 +313,14 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
         elif isinstance(skill.skill_path, PurePosixPath):
             if ctx.pool.skill_provider is not None:
                 try:
-                    instructions = await ctx.pool.skill_provider.get_skill_instructions(skill.name)
+                    # Try get_skill_instructions on the skill_provider if available
+                    get_instructions_fn = getattr(
+                        ctx.pool.skill_provider, "get_skill_instructions", None
+                    )
+                    if get_instructions_fn is not None:
+                        instructions = await get_instructions_fn(skill.name)
+                    else:
+                        instructions = ""
                 except Exception as e:  # noqa: BLE001
                     return f"Failed to load skill instructions for {skill.name!r}: {e}"
             else:
@@ -397,7 +416,18 @@ async def _available_skill_names(ctx: AgentContext, node_name: str | None) -> st
     provider_skills: list[Skill] = []
     if ctx.pool.skill_provider is not None:
         try:
-            provider_skills = await ctx.pool.skill_provider.get_skills()
+            # Try get_skills on skill_provider or its child capabilities
+            get_skills_fn = getattr(ctx.pool.skill_provider, "get_skills", None)
+            if get_skills_fn is not None:
+                provider_skills = await get_skills_fn()
+            else:
+                # Try iterating child capabilities
+                capabilities = getattr(ctx.pool.skill_provider, "capabilities", [])
+                for cap in capabilities:
+                    cap_get_skills = getattr(cap, "get_skills", None)
+                    if cap_get_skills is not None:
+                        with contextlib.suppress(Exception):
+                            provider_skills.extend(await cap_get_skills())
         except Exception:  # noqa: BLE001
             provider_skills = []
 
@@ -408,7 +438,7 @@ async def _available_skill_names(ctx: AgentContext, node_name: str | None) -> st
     return ", ".join(sorted(all_skills))
 
 
-async def list_skills(ctx: AgentContext) -> str:
+async def list_skills(ctx: AgentContext) -> str:  # noqa: PLR0915
     """List all available skills.
 
     Returns:
@@ -429,7 +459,17 @@ async def list_skills(ctx: AgentContext) -> str:
     provider_skills: list[Skill] = []
     if ctx.pool.skill_provider is not None:
         with contextlib.suppress(Exception):
-            provider_skills = await ctx.pool.skill_provider.get_skills()
+            get_skills_fn = getattr(ctx.pool.skill_provider, "get_skills", None)
+            if get_skills_fn is not None:
+                provider_skills = await get_skills_fn()
+            else:
+                # Try iterating child capabilities
+                capabilities = getattr(ctx.pool.skill_provider, "capabilities", [])
+                for cap in capabilities:
+                    cap_get_skills = getattr(cap, "get_skills", None)
+                    if cap_get_skills is not None:
+                        with contextlib.suppress(Exception):
+                            provider_skills.extend(await cap_get_skills())
 
     visible_provider_skills = _visible_model_skills(ctx, provider_skills, requested_node_name)
     seen: set[str] = {s.name for s in visible_skills}
@@ -457,7 +497,13 @@ async def list_skills(ctx: AgentContext) -> str:
             for provider_name in resolver.list_providers():
                 provider = resolver.get_provider(provider_name)
                 if provider:
-                    provider_skills = await provider.get_skills()
+                    get_skills_fn = getattr(provider, "get_skills", None)
+                    if get_skills_fn is None:
+                        continue
+                    try:
+                        provider_skills = await get_skills_fn()
+                    except Exception:  # noqa: BLE001
+                        continue
                     if any(s.name == skill.name for s in provider_skills):
                         lines.append(f"  - URI: `skill://{provider_name}/{skill.name}`")
                         break

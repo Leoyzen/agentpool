@@ -210,8 +210,8 @@ async def test_aggregating_provider_contains_only_acp_providers() -> None:
     agg = manager.get_aggregating_provider()
 
     # Aggregating provider should contain only the ACP provider
-    assert len(agg.providers) == 1
-    assert agg.providers[0].server is acp_config
+    assert len(agg.capabilities) == 1
+    assert agg.capabilities[0].server is acp_config
 
     await manager.cleanup()
 
@@ -247,7 +247,7 @@ async def test_non_acp_providers_excluded_from_aggregating_provider() -> None:
     agg = manager.get_aggregating_provider()
 
     # No ACP providers -> empty aggregating provider
-    assert len(agg.providers) == 0
+    assert len(agg.capabilities) == 0
 
     # Non-ACP capability should still be available via get_capabilities()
     with (

@@ -67,13 +67,11 @@ class SubagentTools(FunctionToolsetCapability):
         name: str = "subagent_tools",
     ) -> None:
         super().__init__(name=name)
-        for tool in [
-            self.create_tool(
-                self.list_available_nodes, category="search", read_only=True, idempotent=True
-            ),
-            self.create_tool(self.task, category="other"),
-        ]:
-            self.add_tool(tool)
+        # create_tool already adds to _tools, no need to call add_tool
+        self.create_tool(
+            self.list_available_nodes, category="search", read_only=True, idempotent=True
+        )
+        self.create_tool(self.task, category="other")
 
     async def list_available_nodes(  # noqa: D417
         self,

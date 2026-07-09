@@ -7,10 +7,9 @@ converts to pydantic-ai format.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic_ai import Agent as PydanticAgent, RunContext
-from pydantic_ai.capabilities import AbstractCapability
 import pytest
 
 from agentpool.agents.context import AgentContext
@@ -22,10 +21,6 @@ from agentpool.prompts.instructions import (
     PydanticAIInstruction,
 )
 from agentpool.utils.context_wrapping import wrap_instruction
-
-
-if TYPE_CHECKING:
-    from pydantic_ai.capabilities import AbstractCapability
 
 
 class TestPydanticAIInstructionType:
@@ -237,24 +232,10 @@ class PydanticAIInstructionProvider(FunctionToolsetCapability):
     """Provider that returns pydantic-ai compatible instructions."""
 
     def __init__(self) -> None:
-        super().__init__("pydantic_ai_provider")
-        self.kind = "base"
-
-    async def get_instructions(self) -> list[InstructionFunc]:
-        """Return instruction with RunContext[AgentContext] signature."""
-
-        def pydantic_ai_instruction(ctx: RunContext[AgentContext[Any]]) -> str:
-            return f"PydanticAI instruction: model={ctx.deps.model_name}"
-
-        return [pydantic_ai_instruction]
-
-    def get_capabilities(self) -> AbstractCapability | None:
-        """Return a pydantic-ai capability for this provider.
-
-        Returns:
-            A pydantic-ai AbstractCapability instance, or None.
-        """
-        return None
+        super().__init__(
+            name="pydantic_ai_provider",
+            instructions="PydanticAI instruction provider",
+        )
 
 
 @pytest.mark.requires_openai_key
@@ -308,25 +289,7 @@ class TestNativeAgentPydanticAIInstructions:
 
         class MixedProvider(FunctionToolsetCapability):
             def __init__(self) -> None:
-                super().__init__("mixed_provider")
-                self.kind = "base"
-
-            async def get_instructions(self) -> list[InstructionFunc]:
-                def simple() -> str:
-                    return "Simple instruction"
-
-                def with_agent_ctx(ctx: AgentContext[Any]) -> str:
-                    return f"Agent: {ctx.model_name}"
-
-                def with_pydantic_ai_ctx(
-                    ctx: RunContext[AgentContext[Any]],
-                ) -> str:
-                    return f"PydanticAI: {ctx.deps.model_name}"
-
-                return [simple, with_agent_ctx, with_pydantic_ai_ctx]
-
-            def get_capabilities(self) -> AbstractCapability | None:
-                return None
+                super().__init__(name="mixed_provider", instructions="Mixed instruction provider")
 
         agent = Agent(
             name="mixed_agent",
@@ -339,5 +302,5 @@ class TestNativeAgentPydanticAIInstructions:
             agentlet = await agent.get_agentlet(None, None, None)
 
             assert isinstance(agentlet, PydanticAgent)
-            # System prompt + 3 provider instructions
-            assert len(agentlet._instructions) >= 4  # type: ignore[arg-type]
+            # System prompt + provider instruction
+            assert len(agentlet._instructions) >= 2  # type: ignore[arg-type]

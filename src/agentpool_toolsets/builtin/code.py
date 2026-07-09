@@ -135,16 +135,16 @@ class CodeTools(FunctionToolsetCapability):
 
     async def get_tools(self) -> Sequence[Tool]:
         """Get code analysis tools."""
-        if self._tools is not None:
+        if self._tools is not None and len(self._tools) > 0:
             return self._tools
 
-        self._tools = [self.create_tool(self.format_code, category="execute")]
+        # create_tool already appends to self._tools, so we just call it
+        self._tools = []
+        self.create_tool(self.format_code, category="execute")
         if importlib.util.find_spec("ast_grep_py"):
-            self._tools.append(self.create_tool(self.ast_grep, category="search", idempotent=True))
+            self.create_tool(self.ast_grep, category="search", idempotent=True)
         # Always register - checks for env at runtime (self.execution_env or agent.env)
-        self._tools.append(
-            self.create_tool(self.run_diagnostics, category="search", idempotent=True)
-        )
+        self.create_tool(self.run_diagnostics, category="search", idempotent=True)
         return self._tools
 
     async def format_code(  # noqa: D417
