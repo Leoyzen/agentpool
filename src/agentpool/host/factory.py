@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from agentpool.log import get_logger
+
 
 if TYPE_CHECKING:
     from agentpool.agents.base_agent import BaseAgent
@@ -21,6 +23,9 @@ if TYPE_CHECKING:
     from agentpool.models.agents import NativeAgentConfig
     from agentpool.models.manifest import AgentsManifest, AnyAgentConfig
     from agentpool.orchestrator.session_controller import SessionState
+
+
+logger = get_logger(__name__)
 
 
 class AgentFactory:
@@ -192,21 +197,13 @@ class AgentFactory:
             parent_ctx = parent_agent.mcp._session_contexts.get(
                 session.parent_session_id,
             )
-            parent_snapshot = (
-                parent_ctx.snapshot if parent_ctx is not None else None
-            )
+            parent_snapshot = parent_ctx.snapshot if parent_ctx is not None else None
 
         snapshot = McpConfigSnapshot(
-            pool_configs=(
-                parent_snapshot.pool_configs
-                if parent_snapshot is not None
-                else ()
-            ),
+            pool_configs=(parent_snapshot.pool_configs if parent_snapshot is not None else ()),
             agent_configs=agent._build_agent_configs(),
             session_configs=(
-                parent_snapshot.session_configs
-                if parent_snapshot is not None
-                else ()
+                parent_snapshot.session_configs if parent_snapshot is not None else ()
             ),
             skill_configs=(),
         )
@@ -223,10 +220,7 @@ class AgentFactory:
             parent_ctx = parent_agent.mcp._session_contexts.get(
                 session.parent_session_id,
             )
-            if (
-                parent_ctx is not None
-                and parent_ctx.connection_pool is not None
-            ):
+            if parent_ctx is not None and parent_ctx.connection_pool is not None:
                 await child_ctx.connection_pool.copy_pre_created_transports(
                     parent_ctx.connection_pool,
                 )
@@ -260,11 +254,7 @@ class AgentFactory:
         Path B: Builds MCP snapshot from the agent's own pool and agent
         configs. Loads conversation history from storage.
         """
-        import logging
-
         from agentpool_config.context import ConfigContextManager
-
-        logger = logging.getLogger(__name__)
 
         with ConfigContextManager(host_context.config_file_path):
             agent: NativeAgent[Any, Any] = cfg.get_agent(

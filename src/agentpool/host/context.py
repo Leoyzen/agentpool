@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from anyenv import ProcessManager
+    from upathtools import UPath
 
     from agentpool.delegation.pool import AgentPool
     from agentpool.mcp_server.manager import MCPManager
@@ -55,7 +56,7 @@ class HostContext:
     file_ops: FileOpsTracker
     todos: TodoTracker
     session_pool: SessionPool | None
-    config_file_path: str | Path | None
+    config_file_path: str | Path | UPath | None
     config_id: str | None = None
     tenant_id: str | None = None
     capability_cache: CapabilityCache = field(default_factory=CapabilityCache)

@@ -238,8 +238,13 @@ class AgentPool[TPoolDeps = None]:
             self._graph_config: Any | None = None
 
     def get_context(self) -> HostContext:
-        """Return cached HostContext, creating it on first call."""
-        if self._host_context is None:
+        """Return cached HostContext, creating it on first call.
+
+        If the cached context was created before ``__aenter__`` set
+        ``self._session_pool``, the cache is rebuilt so that
+        ``session_pool`` is up-to-date.
+        """
+        if self._host_context is None or self._host_context.session_pool is not self._session_pool:
             from agentpool.host.context import HostContext
 
             self._host_context = HostContext(
