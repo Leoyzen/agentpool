@@ -93,13 +93,12 @@ class FilteredToolsetCapability(AbstractCapability[AgentDepsT]):
             filter_func: Function called per tool to decide inclusion.
                 Receives the run context and tool definition; returns
                 ``True`` to include, ``False`` to exclude.
-            name: Optional name override. Defaults to a derived name
-                combining ``"filtered:"`` with the wrapped capability's
-                name (if available) or class name.
+            name: Optional name override. Defaults to the wrapped
+                capability's name (if available) or class name.
         """
         self._wrapped = wrapped
         self._filter_func = filter_func
-        self._name = name or f"filtered:{_derive_name(wrapped)}"
+        self._name = name or _derive_name(wrapped)
 
     # ---- Properties ----
 

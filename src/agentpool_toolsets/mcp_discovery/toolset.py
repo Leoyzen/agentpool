@@ -220,25 +220,25 @@ class MCPDiscoveryToolset(FunctionToolsetCapability):
         if self._tools is not None:
             return self._tools
 
-        self._tools = [
-            self.create_tool(
-                self.search_mcp_servers,
-                category="search",
-                read_only=True,
-                idempotent=True,
-            ),
-            self.create_tool(
-                self.list_mcp_tools,
-                category="search",
-                read_only=True,
-                idempotent=True,
-            ),
-            self.create_tool(
-                self.call_mcp_tool,
-                category="execute",
-                open_world=True,
-            ),
-        ]
+        # Initialize before create_tool calls, which append to self._tools
+        self._tools = []
+        self.create_tool(
+            self.search_mcp_servers,
+            category="search",
+            read_only=True,
+            idempotent=True,
+        )
+        self.create_tool(
+            self.list_mcp_tools,
+            category="search",
+            read_only=True,
+            idempotent=True,
+        )
+        self.create_tool(
+            self.call_mcp_tool,
+            category="execute",
+            open_world=True,
+        )
         return self._tools
 
     async def search_mcp_servers(  # noqa: D417

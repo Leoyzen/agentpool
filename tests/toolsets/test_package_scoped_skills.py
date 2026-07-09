@@ -35,6 +35,11 @@ class _FakeSkillProvider:
     def __init__(self, skills: list[Skill]) -> None:
         self._skills = skills
 
+    @property
+    def capabilities(self) -> list[_FakeSkillProvider]:
+        """Return self as the sole capability, matching real provider interface."""
+        return [self]
+
     async def get_skills(self) -> list[Skill]:
         return self._skills
 
