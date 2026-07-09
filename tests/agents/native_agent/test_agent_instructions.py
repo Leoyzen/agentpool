@@ -5,10 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Agent as PydanticAgent
+from pydantic_ai.capabilities import AbstractCapability
 import pytest
 
 from agentpool.agents.native_agent import Agent
-from pydantic_ai.capabilities import AbstractCapability
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
 
 if TYPE_CHECKING:

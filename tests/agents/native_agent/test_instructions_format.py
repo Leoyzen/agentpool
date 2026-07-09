@@ -10,16 +10,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Agent as PydanticAgent, RunContext
+from pydantic_ai.capabilities import AbstractCapability
 import pytest
 
 from agentpool.agents.context import AgentContext
 from agentpool.agents.native_agent import Agent
 from agentpool.agents.sys_prompts import SystemPrompts
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.prompts.instructions import (
     InstructionFunc,
     PydanticAIInstruction,
 )
-from pydantic_ai.capabilities import AbstractCapability
 from agentpool.utils.context_wrapping import wrap_instruction
 
 
@@ -340,4 +341,3 @@ class TestNativeAgentPydanticAIInstructions:
             assert isinstance(agentlet, PydanticAgent)
             # System prompt + 3 provider instructions
             assert len(agentlet._instructions) >= 4  # type: ignore[arg-type]
-

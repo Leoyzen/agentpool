@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 import pytest
 from schemez import OpenAIFunctionDefinition
 
-from pydantic_ai.capabilities import AbstractCapability
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
 
 if TYPE_CHECKING:

@@ -16,12 +16,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agentpool.capabilities.change_event import ChangeEvent
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.capabilities.resource_source import (
     AggregatedResourceSource,
 )
 from agentpool.capabilities.subagent_capability import SubagentCapability
 from agentpool.host.factory import AgentFactory, _inject_pool_providers
-from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.tools.base import Tool
 
 

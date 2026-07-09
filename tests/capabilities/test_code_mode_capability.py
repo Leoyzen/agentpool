@@ -5,12 +5,13 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.toolsets import FunctionToolset
+import pytest
 
 from agentpool.capabilities.code_mode_capability import CodeModeCapability
 from agentpool.tools.base import FunctionTool
+
 
 pytestmark = pytest.mark.unit
 
@@ -161,11 +162,11 @@ async def test_inner_tools_callable_via_meta_tool() -> None:
     cap = CodeModeCapability[Any](tools=tools)
     ctx = _make_ctx()
 
-    code = '''
+    code = """
 async def main():
     result = await _add(a=3, b=5)
     return result
-'''
+"""
     result = await cap._execute_code(ctx, code, "test_add")
 
     assert result == 8
@@ -177,12 +178,12 @@ async def test_multiple_inner_tools_callable() -> None:
     cap = CodeModeCapability[Any](tools=tools)
     ctx = _make_ctx()
 
-    code = '''
+    code = """
 async def main():
     sum_result = await _add(a=10, b=20)
     greeting = await _greet(name="World")
     return f"{greeting} Sum is {sum_result}"
-'''
+"""
     result = await cap._execute_code(ctx, code, "multi_tool")
 
     assert "Hello, World" in result
@@ -195,11 +196,11 @@ async def test_code_execution_returns_success_message_on_falsy() -> None:
     cap = CodeModeCapability[Any](tools=tools)
     ctx = _make_ctx()
 
-    code = '''
+    code = """
 async def main():
     await _add(a=1, b=2)
     return None
-'''
+"""
     result = await cap._execute_code(ctx, code, "falsy_return")
 
     assert result == "Code executed successfully"
@@ -211,11 +212,11 @@ async def test_code_execution_error_captured() -> None:
     cap = CodeModeCapability[Any](tools=tools)
     ctx = _make_ctx()
 
-    code = '''
+    code = """
 async def main():
     raise ValueError("boom")
     return "unreachable"
-'''
+"""
     result = await cap._execute_code(ctx, code, "error_test")
 
     assert isinstance(result, str)
@@ -249,11 +250,11 @@ async def test_empty_tools_code_execution_without_tool_calls() -> None:
     cap = CodeModeCapability[Any](tools=[])
     ctx = _make_ctx()
 
-    code = '''
+    code = """
 async def main():
     x = 2 + 3
     return f"Result: {x}"
-'''
+"""
     result = await cap._execute_code(ctx, code, "no_tools")
 
     assert result == "Result: 5"
@@ -293,10 +294,10 @@ async def test_missing_return_raises_model_retry() -> None:
     cap = CodeModeCapability[Any](tools=_make_tools())
     ctx = _make_ctx()
 
-    code = '''
+    code = """
 async def main():
     x = 1
-'''
+"""
     with pytest.raises(ModelRetry, match="return"):
         await cap._execute_code(ctx, code, "no_return")
 

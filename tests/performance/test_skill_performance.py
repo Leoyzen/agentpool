@@ -28,7 +28,7 @@ import pytest
 from upathtools import UPath, to_upath
 
 from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
-# SkillCapability removed - use SkillCapability from agentpool.skills.capability
+from agentpool.skills.capability import SkillCapability
 from agentpool.skills.command import SkillCommand
 from agentpool.skills.command_registry import SkillCommandRegistry
 from agentpool.skills.registry import SkillsRegistry

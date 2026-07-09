@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentpool.log import get_logger
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:

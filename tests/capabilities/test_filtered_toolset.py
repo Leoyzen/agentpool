@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 from typing import Any
 
+from pydantic_ai.toolsets import FilteredToolset
 import pytest
-from pydantic_ai.toolsets import FilteredToolset, FunctionToolset
 
 from agentpool.capabilities.filtered_toolset import FilteredToolsetCapability
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
-from agentpool.capabilities.change_event import ChangeEvent
 from agentpool.tools.base import Tool
 
 
@@ -282,7 +280,7 @@ async def test_on_change_returns_none_for_non_agentpool_capability() -> None:
         async def __aenter__(self) -> Any:
             return self
 
-        async def __aexit__(self, *args: Any) -> None:
+        async def __aexit__(self, *args: object) -> None:
             pass
 
     from pydantic_ai.capabilities import AbstractCapability
@@ -377,7 +375,7 @@ def test_name_property_override() -> None:
 
 
 def test_wrapped_property() -> None:
-    """wrapped property returns the wrapped capability."""
+    """Wrapped property returns the wrapped capability."""
     inner = FunctionToolsetCapability([_make_test_tool("t")], name="inner")
     cap = FilteredToolsetCapability(inner, lambda _ctx, _td: True)
     assert cap.wrapped is inner

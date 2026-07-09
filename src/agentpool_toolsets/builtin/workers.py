@@ -16,8 +16,8 @@ from agentpool.agents.events import (
     SubAgentEvent,
 )
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
-from agentpool.log import get_logger
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentpool.log import get_logger
 from agentpool.tools.exceptions import ToolError
 
 

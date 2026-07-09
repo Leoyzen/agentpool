@@ -12,6 +12,7 @@ from mcp import types
 import platformdirs
 
 import agentpool
+from agentpool.capabilities.subagent_capability import SubagentCapability
 from agentpool.log import get_logger
 from agentpool.mcp_server import constants
 from agentpool_server import BaseServer
@@ -71,8 +72,6 @@ class MCPServer(BaseServer):
             raise_exceptions: Whether to raise exceptions during server start
         """
         from fastmcp import FastMCP
-
-        # SubagentCapability removed - use SubagentCapability from agentpool.capabilities.subagent_capability
 
         super().__init__(pool, name=name, raise_exceptions=raise_exceptions)
         self.provider = SubagentCapability(pool, zed_mode=config.zed_mode)

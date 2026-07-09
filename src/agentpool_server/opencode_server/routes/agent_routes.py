@@ -9,9 +9,9 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, HttpUrl
 
+from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
 from agentpool.log import get_logger
 from agentpool.mcp_server.manager import MCPManager
-from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
 from agentpool_config.mcp_server import (
     SSEMCPServerConfig,
     StdioMCPServerConfig,

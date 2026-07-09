@@ -46,17 +46,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from pydantic_ai.capabilities import FunctionToolsetCapability
 import pytest
 
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
-from pydantic_ai.capabilities import AbstractCapability, FunctionToolsetCapability
 from agentpool.tools.base import Tool
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    # ResourceInfo removed
     from agentpool.skills.skill import Skill
 
 
@@ -71,7 +70,7 @@ class MockMCPCapability(FunctionToolsetCapability):
         skills: list[Skill] | None = None,
         tools: list[Tool] | None = None,
         prompts: list[Any] | None = None,
-        resources: list[ResourceInfo] | None = None,
+        resources: list[Any] | None = None,
     ) -> None:
         super().__init__(name=name)
         self._skills = skills or []
@@ -91,7 +90,7 @@ class MockMCPCapability(FunctionToolsetCapability):
         """Get mock prompts."""
         return self._prompts
 
-    async def get_resources(self) -> list[ResourceInfo]:
+    async def get_resources(self) -> list[Any]:
         """Get mock resources."""
         return self._resources
 

@@ -7,14 +7,12 @@ from typing import TYPE_CHECKING, Any
 
 from epregistry import EntryPointRegistry
 
-from agentpool.log import get_logger
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-    from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
     from agentpool.tools.base import Tool
 

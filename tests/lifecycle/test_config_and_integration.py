@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from agentpool_config.lifecycle import LifecycleConfig
-from agentpool_config.nodes import BaseAgentConfig
+from agentpool.lifecycle.comm_channel import DirectChannel
+from agentpool.lifecycle.event_transport import InProcessTransport
 from agentpool.lifecycle.factory import create_dimensions
 from agentpool.lifecycle.journal import DurableJournal, MemoryJournal
 from agentpool.lifecycle.snapshot_store import (
     DurableSnapshotStore,
     MemorySnapshotStore,
 )
-from agentpool.lifecycle.comm_channel import DirectChannel
-from agentpool.lifecycle.event_transport import InProcessTransport
+from agentpool_config.lifecycle import LifecycleConfig
+from agentpool_config.nodes import BaseAgentConfig
 
 
 # ---------------------------------------------------------------------------

@@ -15,8 +15,8 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from fsspec import AbstractFileSystem
-
     from pydantic_ai.capabilities import AbstractCapability
+
     from agentpool.skills.skill import Skill
 
 

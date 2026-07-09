@@ -13,8 +13,8 @@ import anyenv
 from pydantic_ai import RunContext  # noqa: TC002
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
-from agentpool.log import get_logger
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentpool.log import get_logger
 
 
 logger = get_logger(__name__)

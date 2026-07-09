@@ -12,10 +12,10 @@ import warnings
 
 import anyio
 
+from agentpool.capabilities.combined_toolset import AbstractCapability, CombinedToolsetCapability
+from agentpool.capabilities.mcp_capability import MCPCapability
 from agentpool.log import get_logger
 from agentpool.mcp_server.global_pool import GlobalConnectionPool
-from agentpool.capabilities.combined_toolset import CombinedToolsetCapability, AbstractCapability
-# MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
 from agentpool_config.mcp_server import AcpMCPServerConfig, BaseMCPServerConfig
 
 

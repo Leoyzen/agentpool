@@ -80,6 +80,7 @@ if TYPE_CHECKING:
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
     from pydantic_ai import ThinkingPart, ToolCallPart, UserContent
+    from pydantic_ai.capabilities import AbstractCapability
     from pydantic_ai.messages import ModelMessage
     from slashed import BaseCommand
     from tokonomics.model_discovery.model_info import ModelInfo
@@ -99,7 +100,6 @@ if TYPE_CHECKING:
     from agentpool.messaging import MessageHistory
     from agentpool.models.acp_agents import BaseACPAgentConfig
     from agentpool.orchestrator.turn import Turn
-    from pydantic_ai.capabilities import AbstractCapability
     from agentpool.sessions import SessionData
     from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig

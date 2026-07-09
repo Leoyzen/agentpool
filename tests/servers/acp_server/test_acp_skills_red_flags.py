@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 from upathtools import UPath
 
+from agentpool.skills.capability import SkillCapability
 from agentpool.skills.manager import SkillsManager
 from agentpool_config.skills import SkillsConfig
 
@@ -262,8 +263,6 @@ class TestSkillsIncludeDefault:
 
         try:
             # Debug: print paths
-            # SkillCapability removed - use SkillCapability from agentpool.skills.capability
-
             print(
                 f"DEBUG: skills_manager.registry.skills_dirs ="
                 f" {skills_manager.registry.skills_dirs}"

@@ -13,10 +13,11 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from agentpool.capabilities.mcp_capability import MCPCapability
+
 
 if TYPE_CHECKING:
     from agentpool.mcp_server.config_snapshot import McpConfigEntry
-    # MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
     from agentpool.tools.base import Tool
     from agentpool_config.skills import SkillMcpServerConfig
 

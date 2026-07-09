@@ -22,10 +22,10 @@ import pytest
 
 from acp.schema.mcp import AcpMcpServer
 from agentpool import Agent
+from agentpool.capabilities.mcp_capability import MCPCapability
 from agentpool.delegation import AgentPool
 from agentpool.models.agents import NativeAgentConfig
 from agentpool.models.manifest import AgentsManifest
-# MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
 from agentpool_config.mcp_server import AcpMCPServerConfig
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.acp_mcp_transport import AcpMcpTransport

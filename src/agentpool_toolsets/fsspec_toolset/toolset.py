@@ -27,9 +27,9 @@ from sublime_search import replace_content
 from upathtools import is_directory
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.log import get_logger
 from agentpool.mime_utils import guess_type, is_binary_content, is_binary_mime
-from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.tool_impls.delete_path import create_delete_path_tool
 from agentpool.tool_impls.download_file import create_download_file_tool
 from agentpool.tool_impls.grep import create_grep_tool
@@ -59,7 +59,6 @@ if TYPE_CHECKING:
     import fsspec
     from fsspec.asyn import AsyncFileSystem
     from pydantic_ai import ModelRequest
-    from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.common_types import ModelType

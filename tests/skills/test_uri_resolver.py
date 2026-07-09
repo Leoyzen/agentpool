@@ -13,9 +13,9 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+from pydantic_ai.capabilities import AbstractCapability
 import pytest
 
-from pydantic_ai.capabilities import AbstractCapability
 from agentpool.skills.exceptions import SecurityError, SkillNotFoundError
 from agentpool.skills.uri_resolver import (
     ResolvedSkillURI,

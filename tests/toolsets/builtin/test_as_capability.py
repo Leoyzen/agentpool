@@ -7,11 +7,10 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 from pydantic_ai import RunContext
-from pydantic_ai.capabilities import Toolset
+from pydantic_ai.capabilities import FunctionToolsetCapability, Toolset
 from pydantic_ai.toolsets import AbstractToolset
 import pytest
 
-from pydantic_ai.capabilities import AbstractCapability, FunctionToolsetCapability
 from agentpool_toolsets.builtin import (
     CodeTools,
     DebugTools,

@@ -5,16 +5,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Self
 
-from agentpool.log import get_logger
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentpool.log import get_logger
 from agentpool.utils.time_utils import datetime_to_ms
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from types import TracebackType
-
-    from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
     from agentpool.tools.base import Tool
     from agentpool_bot.cron.cron_types import CronSchedule
