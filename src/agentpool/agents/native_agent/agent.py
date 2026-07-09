@@ -1396,11 +1396,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     is_valid = True
                     self.log.info("Model %s validated against tokonomics", mode_id)
             # Also check model_variants from manifest (by variant name or identifier)
-            if (
-                not is_valid
-                and ctx
-                and variant_name in ctx.manifest.model_variants
-            ):
+            if not is_valid and ctx and variant_name in ctx.manifest.model_variants:
                 is_valid = True
                 self.log.info(
                     "Model %s validated against model_variants (variant: %s)",
@@ -1408,11 +1404,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     variant_name,
                 )
             if not is_valid:
-                available = (
-                    list(ctx.manifest.model_variants.keys())
-                    if ctx
-                    else "N/A"
-                )
+                available = list(ctx.manifest.model_variants.keys()) if ctx else "N/A"
                 self.log.warning(
                     "Model %s validation failed. Available variants: %s",
                     mode_id,

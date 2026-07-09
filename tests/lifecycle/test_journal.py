@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
+import sqlalchemy
 
 from agentpool.lifecycle import (
     DurableJournal,
@@ -14,10 +15,6 @@ from agentpool.lifecycle import (
     MemorySnapshotStore,
     ToolExecutionRecord,
 )
-
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
 
 
 pytestmark = pytest.mark.unit
@@ -619,7 +616,7 @@ def test_durable_journal_corrupt_db_handled_gracefully(tmp_path):
     db_path.write_text("not a database")
     db_url = f"sqlite:///{db_path}"
     # Creating the journal should raise a DatabaseError, not crash
-    with pytest.raises(Exception):  # noqa: B017
+    with pytest.raises(sqlalchemy.exc.DatabaseError, match="not a database"):
         DurableJournal(db_url, session_id="test")
 
 

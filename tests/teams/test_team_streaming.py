@@ -265,11 +265,13 @@ async def test_pool_backed_team_creates_child_sessions() -> None:
     # host_context calls _agent_pool.get_context(); configure it to return
     # a context with the session_pool so team code can resolve sessions.
     # Use MagicMock (not AsyncMock) for get_context since it's synchronous.
-    mock_pool.get_context = MagicMock(return_value=MagicMock(
-        session_pool=mock_sessions,
-        manifest=mock_pool.manifest,
-        storage=AsyncMock(),
-    ))
+    mock_pool.get_context = MagicMock(
+        return_value=MagicMock(
+            session_pool=mock_sessions,
+            manifest=mock_pool.manifest,
+            storage=AsyncMock(),
+        )
+    )
     team.agent_pool = mock_pool
 
     events = [event async for event in team.run_stream("test", session_id="ses_parent")]

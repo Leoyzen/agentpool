@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+import pydantic
 import pytest
 
-from agentpool_config.lifecycle import LifecycleConfig
-from agentpool_config.nodes import BaseAgentConfig
+from agentpool.lifecycle.comm_channel import DirectChannel
+from agentpool.lifecycle.event_transport import InProcessTransport
 from agentpool.lifecycle.factory import create_dimensions
 from agentpool.lifecycle.journal import DurableJournal, MemoryJournal
 from agentpool.lifecycle.snapshot_store import (
     DurableSnapshotStore,
     MemorySnapshotStore,
 )
-from agentpool.lifecycle.comm_channel import DirectChannel
-from agentpool.lifecycle.event_transport import InProcessTransport
+from agentpool_config.lifecycle import LifecycleConfig
+from agentpool_config.nodes import BaseAgentConfig
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +82,7 @@ def test_lifecycle_config_is_all_defaults_false() -> None:
 def test_lifecycle_config_frozen() -> None:
     """LifecycleConfig is frozen (immutable)."""
     config = LifecycleConfig()
-    with pytest.raises(Exception):  # noqa: PT011
+    with pytest.raises(pydantic.ValidationError, match="frozen"):
         config.journal = "durable"  # type: ignore[misc]
 
 
@@ -109,7 +110,8 @@ def test_create_dimensions_durable_journal() -> None:
     """create_dimensions with journal=durable returns DurableJournal."""
     config = LifecycleConfig(journal="durable")
     trigger, journal, snapshot, comm, transport = create_dimensions(
-        config, "test_session",
+        config,
+        "test_session",
     )
     assert trigger is None  # RunHandle fills in ImmediateTrigger
     assert isinstance(journal, DurableJournal)
@@ -122,7 +124,8 @@ def test_create_dimensions_durable_snapshot() -> None:
     """create_dimensions with snapshot=durable returns DurableSnapshotStore."""
     config = LifecycleConfig(snapshot="durable")
     trigger, journal, snapshot, comm, transport = create_dimensions(
-        config, "test_session",
+        config,
+        "test_session",
     )
     assert trigger is None
     assert isinstance(journal, MemoryJournal)  # journal still memory
@@ -139,7 +142,8 @@ def test_create_dimensions_all_durable() -> None:
         recover_strategy="retry",
     )
     trigger, journal, snapshot, comm, transport = create_dimensions(
-        config, "test_session",
+        config,
+        "test_session",
     )
     assert trigger is None
     assert isinstance(journal, DurableJournal)

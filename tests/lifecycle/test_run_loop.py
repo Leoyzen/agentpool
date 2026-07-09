@@ -8,13 +8,12 @@ and turn_id generation.
 from __future__ import annotations
 
 import asyncio
-import uuid
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
+import uuid
 
 import pytest
 
-from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     RunStartedEvent,
     StateUpdate,
@@ -22,7 +21,6 @@ from agentpool.agents.events import (
 )
 from agentpool.lifecycle import (
     DirectChannel,
-    Feedback,
     ImmediateTrigger,
     InProcessTransport,
     MemoryJournal,
@@ -30,7 +28,7 @@ from agentpool.lifecycle import (
     RunState,
 )
 from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventBus, SessionState
+from agentpool.orchestrator.core import EventBus
 from agentpool.orchestrator.run import RunHandle, RunStatus
 from agentpool.orchestrator.turn import Turn
 
@@ -102,10 +100,7 @@ def _make_run_handle(
 
 async def _consume_gen(gen: Any) -> list[Any]:
     """Consume an async generator and return all events."""
-    events: list[Any] = []
-    async for event in gen:
-        events.append(event)
-    return events
+    return [event async for event in gen]
 
 
 # ---------------------------------------------------------------------------
@@ -424,8 +419,6 @@ async def test_turn_id_unique_per_turn() -> None:
 @pytest.mark.unit
 async def test_crash_recovery_start_inflight() -> None:
     """When journal.resume() returns in-flight ResumeResult, events are replayed."""
-    from agentpool.lifecycle.types import ResumeResult
-
     # Set up a journal with prior state.
     journal = MemoryJournal()
     snapshot_store = MemorySnapshotStore()
@@ -465,9 +458,7 @@ async def test_crash_recovery_start_inflight() -> None:
     await consumer
 
     # The first StateUpdate should have stop_reason="crash_recovery".
-    crash_recovery_events = [
-        e for e in state_events if e.stop_reason == "crash_recovery"
-    ]
+    crash_recovery_events = [e for e in state_events if e.stop_reason == "crash_recovery"]
     assert len(crash_recovery_events) >= 1
     assert crash_recovery_events[0].state == RunState.IDLE
 
@@ -475,8 +466,6 @@ async def test_crash_recovery_start_inflight() -> None:
 @pytest.mark.unit
 async def test_crash_recovery_normal_resume() -> None:
     """When journal.resume() returns non-inflight ResumeResult, IDLE transition occurs."""
-    from agentpool.lifecycle.types import ResumeResult
-
     journal = MemoryJournal()
     snapshot_store = MemorySnapshotStore()
 
@@ -1035,7 +1024,9 @@ async def test_idempotency_skip_when_turn_result_exists() -> None:
 
     # Pre-populate snapshot store with a turn result for a known turn_id.
     known_turn_id = "pre-completed-turn"
-    handle._snapshot_store.save_turn_result(known_turn_id, ChatMessage(content="done", role="assistant"))
+    handle._snapshot_store.save_turn_result(
+        known_turn_id, ChatMessage(content="done", role="assistant")
+    )
 
     assert handle._snapshot_store.has_turn_result(known_turn_id) is True
     # The turn result exists, confirming idempotency data is available.

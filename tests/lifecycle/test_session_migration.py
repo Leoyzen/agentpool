@@ -15,14 +15,11 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import anyio
-
 import pytest
 
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
-    RunErrorEvent,
     RunStartedEvent,
-    StateUpdate,
     StreamCompleteEvent,
 )
 from agentpool.lifecycle import (
@@ -31,13 +28,10 @@ from agentpool.lifecycle import (
     MemoryJournal,
     ProtocolChannel,
     ProtocolTrigger,
-    RunState,
 )
-from agentpool.lifecycle.comm_channel import ProtocolChannel as _ProtocolChannel
-from agentpool.lifecycle.triggers import ProtocolTrigger as _ProtocolTrigger
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.event_bus import EventBus
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.session_controller import (
     SessionController,
     SessionState,
@@ -549,7 +543,7 @@ async def test_close_session_with_active_run_completes() -> None:
     controller._session_scopes["s1"] = anyio.CancelScope()
 
     # Create run handle.
-    run_handle = controller._start_run_handle(session, agent, "s1", "hello")
+    controller._start_run_handle(session, agent, "s1", "hello")
 
     # Give background task a moment.
     await asyncio.sleep(0.01)
