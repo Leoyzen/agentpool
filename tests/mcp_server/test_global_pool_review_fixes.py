@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 import pytest
 
 

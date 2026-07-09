@@ -5,14 +5,15 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.toolsets import FunctionToolset
+import pytest
 
 from agentpool.capabilities.agent_context import AgentContext
-from agentpool.host.context import RunScope
 from agentpool.capabilities.delegation import AgentNotFoundError, DelegationService
 from agentpool.capabilities.subagent_capability import SubagentCapability
+from agentpool.host.context import RunScope
+
 
 pytestmark = pytest.mark.unit
 

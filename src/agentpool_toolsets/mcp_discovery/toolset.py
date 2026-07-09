@@ -20,20 +20,19 @@ from pydantic import HttpUrl
 from pydantic_ai import RunContext  # noqa: TC002
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.log import get_logger
 from agentpool.mcp_server.client import MCPClient
 from agentpool.mcp_server.registries.official_registry_client import (
     MCPRegistryClient,
     MCPRegistryError,
 )
-from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from fastmcp.client.sampling import SamplingHandler
-    from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
     from agentpool.mcp_server.registries.official_registry_client import RegistryServer
     from agentpool.tools.base import Tool

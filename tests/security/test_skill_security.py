@@ -25,8 +25,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# SkillCapability removed - use SkillCapability from agentpool.skills.capability
-# MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
+from agentpool.capabilities.mcp_capability import MCPCapability
+from agentpool.skills.capability import SkillCapability
 from agentpool.skills.exceptions import ReferenceNotFoundError, SecurityError, SkillNotFoundError
 
 

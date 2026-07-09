@@ -27,7 +27,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
+from agentpool.capabilities.mcp_capability import MCPCapability
 from agentpool.skills.skill import Skill
 from agentpool.skills.uri_resolver import SkillURIResolver
 from agentpool_toolsets.builtin.skills import load_skill

@@ -8,15 +8,14 @@ from schemez.openapi.callable_factory import OpenAPICallableFactory
 from schemez.openapi.loader import load_openapi_spec, parse_operations
 from upathtools import read_path, to_upath
 
-from agentpool.log import get_logger
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import httpx
-    from agentpool.capabilities.function_toolset import FunctionToolsetCapability
     from upathtools import JoinablePathLike
 
     from agentpool.tools.base import Tool

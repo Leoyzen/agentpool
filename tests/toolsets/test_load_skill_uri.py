@@ -14,6 +14,8 @@ from upathtools import UPath
 
 from agentpool import Agent, AgentPool, AgentsManifest, NativeAgentConfig
 from agentpool.agents.context import AgentContext
+from agentpool.capabilities.mcp_capability import MCPCapability
+from agentpool.skills.capability import SkillCapability
 from agentpool.skills.skill import Skill
 from agentpool.skills.uri_resolver import ResolvedSkillURI
 from agentpool_config.skills import SkillsConfig
@@ -239,8 +241,6 @@ class TestReferenceLoadingChain:
 
         from mcp.types import TextResourceContents
 
-        # MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
-
         # Create a real MCPCapability (with mocked client)
         with patch("agentpool.mcp_server.MCPClient") as mock_client_class:
             mock_client = MagicMock()
@@ -304,7 +304,6 @@ class TestReferenceLoadingChain:
 
         from mcp.types import TextResourceContents
 
-        # MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
         from agentpool.skills.skill import Skill
 
         with patch("agentpool.mcp_server.MCPClient") as mock_client_class:
@@ -920,7 +919,6 @@ class TestProviderLessURIFallback:
         test_skill_with_args: UPath,
     ) -> None:
         """Test loading skill with provider-less URI and reference path."""
-        # SkillCapability removed - use SkillCapability from agentpool.skills.capability
         from agentpool.skills.uri_resolver import SkillURIResolver
 
         # Create a local provider directly with the test skill directory
@@ -950,7 +948,6 @@ class TestProviderLessURIFallback:
         simple_skill: UPath,
     ) -> None:
         """Test loading skill with bare skill name (no URI scheme)."""
-        # SkillCapability removed - use SkillCapability from agentpool.skills.capability
         from agentpool.skills.uri_resolver import SkillURIResolver
 
         # Create a local provider directly with the test skill directory

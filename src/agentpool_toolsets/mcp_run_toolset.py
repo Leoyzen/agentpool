@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
 from schemez import OpenAIFunctionDefinition
 
-from agentpool.log import get_logger
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 
     from mcp import ClientSession
     from mcp.types import CallToolResult
-    from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
     from agentpool.tools.base import Tool
 

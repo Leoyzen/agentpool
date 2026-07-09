@@ -25,6 +25,7 @@ from agentpool.skills.exceptions import SecurityError, SkillNotFoundError
 
 if TYPE_CHECKING:
     from pydantic_ai.capabilities import AbstractCapability
+
     from agentpool.skills.skill import Skill
 
 

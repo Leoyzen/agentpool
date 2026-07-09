@@ -15,10 +15,10 @@ from tokonomics.model_names import ModelId  # noqa: TC002
 from toprompt import render_prompt
 
 from agentpool import log
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.common_types import EndStrategy  # noqa: TC001
 from agentpool.models.fields import OutputTypeField, SystemPromptField  # noqa: TC001
 from agentpool.prompts.prompts import PromptMessage, StaticPrompt
-from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool_config import BaseToolConfig, NativeAgentToolConfig
 from agentpool_config.builtin_tools import BaseBuiltinToolConfig
 from agentpool_config.knowledge import Knowledge  # noqa: TC001
@@ -31,11 +31,12 @@ from agentpool_config.workers import WorkerConfig  # noqa: TC001
 if TYPE_CHECKING:
     import builtins
 
+    from pydantic_ai.capabilities import AbstractCapability
+
     from agentpool.agents.native_agent import Agent
     from agentpool.common_types import AnyEventHandlerType
     from agentpool.delegation import AgentPool
     from agentpool.prompts.prompts import BasePrompt
-    from pydantic_ai.capabilities import AbstractCapability
     from agentpool.tools.base import Tool
     from agentpool.ui.base import InputProvider
     from agentpool_config.workers import AgentWorkerConfig

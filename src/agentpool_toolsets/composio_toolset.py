@@ -5,14 +5,12 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
-from agentpool.log import get_logger
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-
-    from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
     from agentpool.tools.base import Tool
 

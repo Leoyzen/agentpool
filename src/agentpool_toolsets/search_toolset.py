@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from agentpool.log import get_logger
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentpool.capabilities.function_toolset import FunctionToolsetCapability
     from searchly.base import (
         CountryCode,
         LanguageCode,

@@ -962,7 +962,7 @@ class SessionController:
         from agentpool.host.registry import AgentRegistry
 
         agent_registry = AgentRegistry(
-            {name: None for name in self.pool.manifest.agents},  # type: ignore[arg-type]
+            dict.fromkeys(self.pool.manifest.agents),  # type: ignore[arg-type]
         )
         run_handle = RunHandle(
             run_id=uuid.uuid4().hex,

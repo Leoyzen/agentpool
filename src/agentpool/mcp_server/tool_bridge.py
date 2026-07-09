@@ -26,8 +26,8 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
 from agentpool.agents import Agent
-from agentpool.log import get_logger
 from agentpool.capabilities.change_event import ChangeEvent
+from agentpool.log import get_logger
 from agentpool.utils.signatures import filter_schema_params, get_params_matching_predicate
 
 

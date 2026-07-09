@@ -6,14 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 from schemez.functionschema.typedefs import OpenAIFunctionDefinition
 
-from agentpool.log import get_logger
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
-
-    from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
     from agentpool.tools.base import Tool
 

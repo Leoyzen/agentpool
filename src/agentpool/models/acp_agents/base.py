@@ -20,11 +20,11 @@ from agentpool_config.toolsets import BaseToolsetConfig
 
 if TYPE_CHECKING:
     from exxec import ExecutionEnvironment
+    from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.agents.acp_agent import ACPAgent
     from agentpool.common_types import AnyEventHandlerType
     from agentpool.delegation import AgentPool
-    from pydantic_ai.capabilities import AbstractCapability
     from agentpool.ui.base import InputProvider
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic_ai.capabilities import AbstractCapability
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool_config.toolsets import CustomToolsetConfig
 
 

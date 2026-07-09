@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Sequence
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Literal, assert_never
+from typing import TYPE_CHECKING, Any, Literal, assert_never
 import warnings
 
+from agentpool.capabilities.mcp_capability import MCPCapability
 from agentpool.log import get_logger
 from agentpool.utils.baseregistry import AgentPoolError
 
@@ -15,10 +16,10 @@ from agentpool.utils.baseregistry import AgentPoolError
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from pydantic_ai.capabilities import AbstractCapability
+
     from agentpool.common_types import MCPServerStatus, ToolType
     from agentpool.prompts.prompts import MCPClientPrompt
-    from pydantic_ai.capabilities import AbstractCapability
-    # ResourceInfo removed
     from agentpool.tools.base import Tool
 
 
@@ -184,9 +185,9 @@ class ToolManager:
 
     async def list_prompts(self) -> list[MCPClientPrompt]:
         """Get all prompts from all providers."""
+        from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
         from agentpool.mcp_server.manager import MCPManager
         from agentpool.prompts.prompts import MCPClientPrompt as MCPPrompt
-        from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
 
         all_prompts: list[MCPClientPrompt] = []
         # Get prompts from all external providers (check if they're MCP providers)
@@ -213,13 +214,13 @@ class ToolManager:
 
         return all_prompts
 
-    async def list_resources(self) -> list[ResourceInfo]:
+    async def list_resources(self) -> list[Any]:
         """Get all resources from all providers.
 
         Returns:
-            List of ResourceInfo objects from all providers
+            List of resource objects from all providers
         """
-        all_resources: list[ResourceInfo] = []
+        all_resources: list[Any] = []
         # Get resources from all providers concurrently
         provider_coroutines = [provider.get_resources() for provider in self.providers]
         results = await asyncio.gather(*provider_coroutines, return_exceptions=True)
@@ -236,7 +237,7 @@ class ToolManager:
 
         return all_resources
 
-    async def get_resource(self, name: str) -> ResourceInfo:
+    async def get_resource(self, name: str) -> Any:
         """Get a specific resource by name or URI.
 
         Args:
@@ -249,7 +250,11 @@ class ToolManager:
             ToolError: If resource not found
         """
         resource = next(
-            (r for r in await self.list_resources() if name in (r.name, r.uri)),
+            (
+                r
+                for r in await self.list_resources()
+                if getattr(r, "name", None) == name or getattr(r, "uri", None) == name
+            ),
             None,
         )
         if not resource:
@@ -325,9 +330,8 @@ class ToolManager:
 
     async def get_mcp_server_info(self) -> dict[str, MCPServerStatus]:
         """Get information about configured MCP servers."""
-        from agentpool.mcp_server.manager import MCPManager
         from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
-        # MCPCapability removed - use MCPCapability from agentpool.capabilities.mcp_capability
+        from agentpool.mcp_server.manager import MCPManager
 
         def add_status(provider: MCPCapability, result: dict[str, MCPServerStatus]) -> None:
             result[provider.name] = provider.get_status()

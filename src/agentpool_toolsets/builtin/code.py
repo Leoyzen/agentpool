@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Any
 from upathtools import is_directory
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
-from agentpool.log import get_logger
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentpool.log import get_logger
 from agentpool_toolsets.fsspec_toolset.diagnostics import (
     DiagnosticsManager,
     format_diagnostics_table,

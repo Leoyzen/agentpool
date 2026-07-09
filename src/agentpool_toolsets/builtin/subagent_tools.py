@@ -19,8 +19,8 @@ from pydantic_ai import ModelRetry
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.agents.events import StreamCompleteEvent
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
-from agentpool.log import get_logger
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentpool.log import get_logger
 from agentpool.tools.exceptions import ToolError
 
 

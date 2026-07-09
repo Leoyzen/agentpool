@@ -21,6 +21,7 @@ from upathtools import UPath, core
 from upathtools_config import FilesystemConfigType
 from upathtools_config.base import FileSystemConfig
 
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool_config.converters import ConversionConfig
 from agentpool_config.tools import ImportToolConfig
 from agentpool_config.workers import AgentWorkerConfig, WorkerConfig
@@ -28,6 +29,7 @@ from agentpool_config.workers import AgentWorkerConfig, WorkerConfig
 
 if TYPE_CHECKING:
     from pydantic_ai.capabilities import AbstractCapability
+
     from agentpool_toolsets.search_toolset import SearchTools
 
 
@@ -682,6 +684,7 @@ class CustomToolsetConfig(BaseToolsetConfig):
     def get_provider(self) -> AbstractCapability:
         """Create custom provider from import path."""
         from pydantic_ai.capabilities import AbstractCapability
+
         from agentpool.utils.importing import import_class
 
         provider_cls = import_class(self.import_path)
@@ -781,9 +784,7 @@ class RemoteCodeModeToolsetConfig(BaseToolsetConfig):
         from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
 
         capabilities = [p.get_provider() for p in self.toolsets]
-        return CombinedToolsetCapability(
-            capabilities=capabilities, name="remote_codemode"
-        )
+        return CombinedToolsetCapability(capabilities=capabilities, name="remote_codemode")
 
 
 class ImportToolsToolsetConfig(BaseToolsetConfig):
@@ -888,8 +889,6 @@ class PlanToolsetConfig(BaseToolsetConfig):
 
     def get_provider(self) -> AbstractCapability:
         """Create plan tools provider."""
-        # FunctionToolsetCapability removed - use FunctionToolsetCapability
-
         provider = FunctionToolsetCapability(mode=self.mode)
         if self.tools is not None:
             from agentpool.capabilities.filtered_toolset import FilteredToolsetCapability

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from pydantic_ai.toolsets import FunctionToolset
+import pytest
 
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.tools.base import Tool
@@ -87,7 +87,7 @@ def test_capability_construction_without_instructions() -> None:
 
 
 def test_capability_tools_property_returns_copy() -> None:
-    """tools property returns a copy — mutating it does not affect the capability."""
+    """Tools property returns a copy — mutating it does not affect the capability."""
     tool = _make_test_tool("original")
     cap = FunctionToolsetCapability([tool])
 

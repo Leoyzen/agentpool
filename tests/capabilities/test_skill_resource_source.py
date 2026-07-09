@@ -14,8 +14,8 @@ from __future__ import annotations
 import pathlib
 from pathlib import PurePosixPath
 
-import pytest
 from pydantic_ai.capabilities import AbstractCapability
+import pytest
 from upathtools import UPath
 
 from agentpool.capabilities.resource_source import (

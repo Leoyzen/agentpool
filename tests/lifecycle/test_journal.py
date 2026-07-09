@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
 
@@ -14,10 +14,6 @@ from agentpool.lifecycle import (
     MemorySnapshotStore,
     ToolExecutionRecord,
 )
-
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
 
 
 pytestmark = pytest.mark.unit
