@@ -15,6 +15,7 @@ from agentpool.models.manifest import AgentsManifest
 from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.models import (
     Config,
+    MCPStatus,
     Mode,
     Model,
     ModelCost,
@@ -516,3 +517,21 @@ async def list_modes(state: StateDep) -> list[Mode]:
         )
         for mode in category.available_modes
     ]
+
+
+@router.get("/config/mcp-servers")
+async def get_mcp_servers(state: StateDep) -> dict[str, MCPStatus]:
+    """Get MCP server connection statuses.
+
+    Returns a dict mapping server names to their connection status,
+    display name, transport type, and any error messages. This endpoint
+    complements ``GET /mcp`` by following the ``/config/*`` route
+    convention for configuration-adjacent queries.
+    """
+    from agentpool_server.opencode_server.converters import to_mcp_status
+
+    if state.agent is None:
+        return {}
+
+    server_info = await state.agent.get_mcp_server_info()
+    return {name: to_mcp_status(status) for name, status in server_info.items()}

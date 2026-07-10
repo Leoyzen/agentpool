@@ -87,6 +87,7 @@ def to_mcp_status(status: MCPServerStatus) -> MCPStatus:
         display_name=status.display_name or status.name,
         status=to_opencode_mcp_status(status.status),
         error=status.error,
+        server_type=status.server_type,
     )
 
 

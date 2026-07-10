@@ -412,7 +412,19 @@ class AgentPoolACPAgent(ACPAgent):
         # Gate turn_complete advertisement on client's declared support
         client_caps = params.client_capabilities
         turn_complete = bool(client_caps.turn_complete) if client_caps is not None else False
-        return InitializeResponse.create(
+        # Collect MCP server statuses for client visibility
+        mcp_servers_meta: list[dict[str, Any]] = []
+        if pool is not None and pool.mcp is not None:
+            for provider in pool.mcp.get_mcp_providers():
+                status = provider.get_status()
+                mcp_servers_meta.append({
+                    "name": status.name,
+                    "status": status.status,
+                    "display_name": status.display_name,
+                    "server_type": status.server_type,
+                    "error": status.error,
+                })
+        response = InitializeResponse.create(
             protocol_version=version,
             name="agentpool",
             title="AgentPool",
@@ -431,6 +443,9 @@ class AgentPoolACPAgent(ACPAgent):
             providers=True,
             turn_complete=turn_complete,
         )
+        if mcp_servers_meta:
+            response.field_meta = {"mcp_servers": mcp_servers_meta}
+        return response
 
     async def new_session(self, params: NewSessionRequest) -> NewSessionResponse:
         """Create a new session."""
