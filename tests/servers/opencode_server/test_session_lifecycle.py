@@ -400,7 +400,7 @@ class TestSessionStatus:
 
         server_state.agent.interrupt.assert_awaited_once()
         # Verify SessionPool cancel_run_for_session was called
-        session_pool = server_state.agent.agent_pool.session_pool
+        session_pool = server_state.agent.host_context.session_pool
         session_pool.sessions.cancel_run_for_session.assert_called_once_with(session_id)
 
     async def test_abort_nonexistent_session_returns_404(self, async_client: AsyncClient):
@@ -445,7 +445,7 @@ class TestSessionStatus:
         # Shared agent should NOT be interrupted
         server_state.agent.interrupt.assert_not_awaited()
         # cancel_run should be called with the run_id
-        session_pool = server_state.agent.agent_pool.session_pool
+        session_pool = server_state.agent.host_context.session_pool
         session_pool.cancel_run.assert_called_once_with("run-native-123")
 
     async def test_abort_non_native_shared_agent_skips_interrupt(
@@ -484,7 +484,7 @@ class TestSessionStatus:
         shared_agent.interrupt.assert_not_awaited()
         server_state.agent.interrupt.assert_not_awaited()
         # cancel_run should still be called with the run_id
-        session_pool = server_state.agent.agent_pool.session_pool
+        session_pool = server_state.agent.host_context.session_pool
         session_pool.cancel_run.assert_called_once_with("run-shared-456")
 
 

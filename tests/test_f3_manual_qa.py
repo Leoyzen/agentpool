@@ -93,6 +93,8 @@ async def test_scenario_a_skill_capability_in_chain_after_mcp(
     mock_pool = MagicMock()
     mock_pool.skill_capabilities = [cap1, cap2]
     mock_agent.agent_pool = mock_pool
+    # host_context is a property that calls _agent_pool.get_context()
+    mock_pool.get_context.return_value = MagicMock(pool=mock_pool)
 
     import agentpool.agents.native_agent.agent as agent_module
 

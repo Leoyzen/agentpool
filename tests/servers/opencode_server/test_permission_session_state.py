@@ -28,6 +28,7 @@ async def test_ensure_input_provider_stores_on_session_state():
     """A5.1: ensure_input_provider stores provider on SessionState when controller is available."""
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
 
     session = SessionState(session_id="test-session", agent_name="test-agent")
     session_controller = Mock()
@@ -51,6 +52,7 @@ async def test_list_permissions_reads_from_session_controller():
     """A5.2: list_permissions iterates sessions via SessionController."""
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
 
     session = SessionState(session_id="sess-1", agent_name="test-agent")
     provider = OpenCodeInputProvider(
@@ -89,6 +91,7 @@ async def test_reply_to_permission_resolves_via_session_controller():
     """A5.2: reply_to_permission finds and resolves via SessionController."""
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
 
     session = SessionState(session_id="sess-1", agent_name="test-agent")
     provider = OpenCodeInputProvider(
@@ -132,6 +135,7 @@ async def test_reply_to_permission_not_found_with_controller():
     """A5.2: reply_to_permission returns 404 when permission not found via controller."""
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
 
     session = SessionState(session_id="sess-1", agent_name="test-agent")
     # No input_provider set, so no permissions
@@ -231,6 +235,7 @@ async def test_legacy_fallback_without_session_controller():
     """A5.1: Without session_controller, routes return empty / 404 (no legacy fallback)."""
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
 
     state = ServerState(working_dir="/tmp", agent=mock_agent)
     provider = OpenCodeInputProvider(state=state, session_id="sess-legacy")

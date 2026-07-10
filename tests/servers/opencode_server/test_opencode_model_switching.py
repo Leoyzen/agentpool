@@ -397,6 +397,7 @@ class PerSessionAgentMock:
         self.set_mode_calls: list[tuple[str, str | None]] = []
         self.get_available_models_calls = 0
         self.agent_pool: Any = None
+        self.host_context: Any = None
         self.env: Any = None
         self.storage: Any = None
         self._input_provider = None
@@ -479,6 +480,7 @@ def _make_mock_state_with_session_agent(
 
     pool.session_pool = session_pool
     shared_agent.agent_pool = pool
+    shared_agent.host_context = pool
 
     state = ServerState(
         working_dir=str(tmp_project_dir),

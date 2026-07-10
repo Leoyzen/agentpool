@@ -259,7 +259,7 @@ async def build_model_state_for_acp(
 
     # Phase 1: Configured variants from manifest (configured-first)
     configured_models: list[ACPModelInfo] = []
-    agent_pool = agent.agent_pool
+    agent_pool = agent.host_context
     manifest = agent_pool.manifest if agent_pool else None
 
     if manifest and manifest.model_variants:

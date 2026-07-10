@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
     from acp import Client
     from acp.schema import ContentBlock, PromptResponse, StopReason
-    from agentpool import AgentPool
+    from agentpool.host.context import HostContext
     from agentpool.orchestrator.core import EventBus, EventEnvelope
     from agentpool_server.acp_server.session_manager import ACPSessionManager
 
@@ -46,7 +46,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
     is delegated to ``SessionPool.receive_request()``.
 
     Args:
-        agent_pool: The agent pool containing the SessionPool.
+        host_context: The host context containing the SessionPool.
         event_converter: Template converter used to derive per-session
             converters. The display mode is extracted from this instance.
         client: ACP client for sending session update notifications.
@@ -58,7 +58,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
 
     def __init__(
         self,
-        agent_pool: AgentPool[Any],
+        host_context: HostContext,
         session_manager: ACPSessionManager,
         event_converter: ACPEventConverter,
         client: Client,
@@ -67,7 +67,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
     ) -> None:
         """Initialize the protocol handler."""
         super().__init__()
-        self.agent_pool = agent_pool
+        self._host_context = host_context
         self.session_manager = session_manager
         self._event_converter_template = event_converter
         self.client = client
@@ -80,7 +80,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
     @property
     def event_bus(self) -> EventBus:
         """Return the EventBus instance to subscribe to."""
-        session_pool = self.agent_pool.session_pool
+        session_pool = self._host_context.session_pool
         if session_pool is None:
             raise RuntimeError("SessionPool not available")
         return session_pool.event_bus
@@ -341,7 +341,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         """
         from agentpool.sessions.models import ElicitationResumePayload
 
-        session_pool = self.agent_pool.session_pool
+        session_pool = self._host_context.session_pool
         if session_pool is None:
             logger.error(
                 "Cannot handle elicitation: SessionPool not available",
@@ -472,7 +472,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         """
         from agentpool_server.acp_server.converters import from_acp_content
 
-        session_pool = self.agent_pool.session_pool
+        session_pool = self._host_context.session_pool
         if session_pool is None:
             logger.error("SessionPool not available", session_id=session_id)
             return self._prompt_response("end_turn")
@@ -641,7 +641,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         Args:
             session_id: The session to cancel.
         """
-        session_pool = self.agent_pool.session_pool
+        session_pool = self._host_context.session_pool
         if session_pool is None:
             logger.warning("SessionPool not available for cancel", session_id=session_id)
             return
@@ -679,7 +679,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         Args:
             parent_sid: The session whose child runs should be cancelled.
         """
-        session_pool = self.agent_pool.session_pool
+        session_pool = self._host_context.session_pool
         if session_pool is None:
             return
         children = [child for child, parent in self._parent_of.items() if parent == parent_sid]
@@ -716,7 +716,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         Args:
             session_id: The session to close.
         """
-        session_pool = self.agent_pool.session_pool
+        session_pool = self._host_context.session_pool
 
         # Cancel all child sessions first (depth-first, pop-before-recurse)
         await self._cancel_subagents(session_id)

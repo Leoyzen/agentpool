@@ -80,6 +80,10 @@ async def test_skill_capability_in_position_after_mcp_before_history(
     cap2 = SkillCapability(sk2)
     mock_pool = MagicMock()
     mock_pool.skill_capabilities = [cap1, cap2]
+    # Set up host_context chain: agent.host_context → get_context() → ctx.pool → mock_pool
+    mock_ctx = MagicMock()
+    mock_ctx.pool = mock_pool
+    mock_pool.get_context.return_value = mock_ctx
     mock_agent.agent_pool = mock_pool
 
     # Set up history processor
@@ -168,6 +172,9 @@ async def test_skill_capability_not_included_without_skills_manager(
     mock_pool = MagicMock()
     # skill_capabilities is empty list — no skills discovered
     mock_pool.skill_capabilities = []
+    mock_ctx = MagicMock()
+    mock_ctx.pool = mock_pool
+    mock_pool.get_context.return_value = mock_ctx
     mock_agent.agent_pool = mock_pool
 
     with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
@@ -196,6 +203,9 @@ async def test_skill_capability_skipped_when_disabled(
     mock_pool = MagicMock()
     # Pool-level filtering removes disabled skills, so skill_capabilities is empty
     mock_pool.skill_capabilities = []
+    mock_ctx = MagicMock()
+    mock_ctx.pool = mock_pool
+    mock_pool.get_context.return_value = mock_ctx
     mock_agent.agent_pool = mock_pool
 
     with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
@@ -231,6 +241,9 @@ async def test_skill_capability_skipped_when_not_visible(
 
     # is_skill_visible_to_node returns False — skill is filtered out
     mock_pool.is_skill_visible_to_node = MagicMock(return_value=False)
+    mock_ctx = MagicMock()
+    mock_ctx.pool = mock_pool
+    mock_pool.get_context.return_value = mock_ctx
     mock_agent.agent_pool = mock_pool
 
     with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
@@ -272,6 +285,9 @@ async def test_skill_capability_mixed_visibility(
         return skill.name == "visible-skill"
 
     mock_pool.is_skill_visible_to_node = visibility_check
+    mock_ctx = MagicMock()
+    mock_ctx.pool = mock_pool
+    mock_pool.get_context.return_value = mock_ctx
     mock_agent.agent_pool = mock_pool
 
     with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:

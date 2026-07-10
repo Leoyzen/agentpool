@@ -95,9 +95,9 @@ class EditAgentFileCommand(NodeCommand):
     async def execute_command(self, ctx: CommandContext[NodeContext]) -> None:
         """Open agent's configuration file."""
         agent = ctx.context.agent
-        if not agent.agent_pool:
+        if not agent.host_context:
             raise RuntimeError("Agent is not part of an agent pool")
-        config_file_path = agent.agent_pool.manifest.config_file_path
+        config_file_path = agent.host_context.config_file_path
         if not config_file_path:
             raise CommandError("No configuration file path available")
 

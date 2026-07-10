@@ -114,13 +114,13 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
     """
     import logfire
 
-    if agent.agent_pool is None:
+    if agent.host_context is None:
         msg = "Agent must have agent_pool set"
         raise ValueError(msg)
 
     session_controller = None
-    if agent.agent_pool is not None and agent.agent_pool.session_pool is not None:
-        session_controller = agent.agent_pool.session_pool.sessions
+    if agent.host_context is not None and agent.host_context.session_pool is not None:
+        session_controller = agent.host_context.session_pool.sessions
 
     state = ServerState(
         working_dir=working_dir or str(Path.cwd()),

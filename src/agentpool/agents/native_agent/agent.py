@@ -912,8 +912,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # 5. Skill capabilities — from pool-scoped instances created during __aenter__.
         #    Each SkillCapability provides tools and MCP servers.
         #    Skill MCP configs are registered in the snapshot for SessionConnectionPool.
-        if self.agent_pool is not None:
-            pool_capabilities = self.agent_pool.skill_capabilities
+        if self.host_context is not None and self.host_context.pool is not None:
+            pool_capabilities = self.host_context.pool.skill_capabilities
             if pool_capabilities:
                 # Ensure a snapshot exists for skill config registration.
                 session_id = run_ctx.session_id if run_ctx else None
@@ -925,7 +925,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         self.mcp.update_session_snapshot(session_id, McpConfigSnapshot())
                 # Collect skill config entries from visible capabilities.
                 skill_entries: list[McpConfigEntry] = []
-                visibility_checker = getattr(self.agent_pool, "is_skill_visible_to_node", None)
+                visibility_checker = getattr(
+                    self.host_context.pool, "is_skill_visible_to_node", None
+                )
                 for cap in pool_capabilities:
                     if visibility_checker is not None and not visibility_checker(
                         cap._skill, self.name

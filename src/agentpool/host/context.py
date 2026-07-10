@@ -81,4 +81,5 @@ class HostContext:
     capability_cache: CapabilityCache = field(default_factory=CapabilityCache)
     model_registry: ModelRegistry = field(default_factory=ModelRegistry)
     model_cache: ModelCache = field(default_factory=ModelCache)
+    main_agent_name: str | None = None
     pool: AgentPool[Any] | None = None

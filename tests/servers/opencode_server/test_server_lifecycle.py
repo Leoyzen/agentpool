@@ -52,6 +52,7 @@ def shared_agent(mock_env: Mock, mock_pool: Mock) -> Mock:
     agent.env = mock_env
     agent._input_provider = None
     agent.agent_pool = mock_pool
+    agent.host_context = mock_pool
     agent.storage = None
     return agent
 

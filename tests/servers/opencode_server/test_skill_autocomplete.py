@@ -40,7 +40,7 @@ async def test_command_endpoint_no_skill_bridge_no_provider(
     """When skill_bridge is None and skill_provider is None, returns only MCP prompts."""
     # Ensure no skill bridge or provider
     server_state.skill_bridge = None
-    mock_agent.agent_pool.skill_provider = None  # type: ignore[attr-defined]
+    mock_agent.host_context.skill_provider = None  # type: ignore[attr-defined]
 
     # Mock MCP prompts
     mock_prompt = MagicMock()
@@ -80,7 +80,7 @@ async def test_command_endpoint_skill_bridge_commands(
     mock_bridge = MagicMock()
     mock_bridge.get_skill_commands = MagicMock(return_value=[skill_cmd])
     server_state.skill_bridge = mock_bridge
-    mock_agent.agent_pool.skill_provider = None  # type: ignore[attr-defined]
+    mock_agent.host_context.skill_provider = None  # type: ignore[attr-defined]
 
     # Mock empty MCP prompts
     mock_agent.list_prompts = AsyncMock(return_value=[])
@@ -123,8 +123,8 @@ async def test_command_endpoint_skill_provider_fallback(
     mock_resolved = MagicMock()
     mock_resolved.load_instructions = MagicMock(return_value="Process $1")
     mock_resolver.resolve = AsyncMock(return_value=mock_resolved)
-    mock_agent.agent_pool.skill_resolver = mock_resolver  # type: ignore[attr-defined]
-    mock_agent.agent_pool.skill_provider = None  # type: ignore[attr-defined]
+    mock_agent.host_context.skill_resolver = mock_resolver  # type: ignore[attr-defined]
+    mock_agent.host_context.skill_provider = None  # type: ignore[attr-defined]
 
     # Mock empty MCP prompts
     mock_agent.list_prompts = AsyncMock(return_value=[])
@@ -150,7 +150,7 @@ async def test_command_endpoint_mcp_prompts_have_source_mcp(
 ) -> None:
     """MCP prompts get source='mcp' and empty hints."""
     server_state.skill_bridge = None
-    mock_agent.agent_pool.skill_provider = None  # type: ignore[attr-defined]
+    mock_agent.host_context.skill_provider = None  # type: ignore[attr-defined]
 
     # Mock MCP prompts
     mock_prompt1 = MagicMock()
@@ -190,7 +190,7 @@ async def test_command_endpoint_skill_hints_from_template(
     mock_bridge = MagicMock()
     mock_bridge.get_skill_commands = MagicMock(return_value=[skill_cmd])
     server_state.skill_bridge = mock_bridge
-    mock_agent.agent_pool.skill_provider = None  # type: ignore[attr-defined]
+    mock_agent.host_context.skill_provider = None  # type: ignore[attr-defined]
 
     # Mock empty MCP prompts
     mock_agent.list_prompts = AsyncMock(return_value=[])
@@ -229,8 +229,8 @@ async def test_command_endpoint_skill_bridge_with_provider_for_virtual_skills(
     mock_resolved.load_instructions = MagicMock(return_value="Virtual instructions with $1")
     mock_resolver = MagicMock()
     mock_resolver.resolve = AsyncMock(return_value=mock_resolved)
-    mock_agent.agent_pool.skill_resolver = mock_resolver  # type: ignore[attr-defined]
-    mock_agent.agent_pool.skill_provider = None  # type: ignore[attr-defined]
+    mock_agent.host_context.skill_resolver = mock_resolver  # type: ignore[attr-defined]
+    mock_agent.host_context.skill_provider = None  # type: ignore[attr-defined]
 
     # Mock empty MCP prompts
     mock_agent.list_prompts = AsyncMock(return_value=[])
@@ -271,7 +271,7 @@ async def test_session_command_store_takes_priority(
     mock_agent: MagicMock,
 ) -> None:
     """When command is in CommandStore, uses CommandStore (existing behavior)."""
-    _setup_pool_sessions(mock_agent.agent_pool)
+    _setup_pool_sessions(mock_agent.host_context)
 
     # Create session
     response = await async_client.post("/session", json={"title": "Test Session"})
@@ -287,7 +287,7 @@ async def test_session_command_store_takes_priority(
 
     # skill_commands should NOT have the command — the CommandStore dispatch is
     # tested independently of the internal skill delegation inside _execute_slashed_command
-    mock_agent.agent_pool.skill_commands = None  # type: ignore[attr-defined]
+    mock_agent.host_context.skill_commands = None  # type: ignore[attr-defined]
 
     # Mock empty MCP prompts
     mock_agent.list_prompts = AsyncMock(return_value=[])
@@ -309,7 +309,7 @@ async def test_session_skill_commands_fallback(
     mock_agent: MagicMock,
 ) -> None:
     """When command is NOT in CommandStore but IS in pool.skill_commands, fallback works."""
-    _setup_pool_sessions(mock_agent.agent_pool)
+    _setup_pool_sessions(mock_agent.host_context)
 
     # Create session
     response = await async_client.post("/session", json={"title": "Test Session"})
@@ -329,8 +329,8 @@ async def test_session_skill_commands_fallback(
         instructions="Late skill instructions $1",
     )
     skill_cmd = SkillCommand(name="late-skill", description="Late registered", skill=skill)
-    mock_agent.agent_pool.skill_commands = {"late-skill": skill_cmd}  # type: ignore[attr-defined]
-    mock_agent.agent_pool.skill_provider = None  # type: ignore[attr-defined]
+    mock_agent.host_context.skill_commands = {"late-skill": skill_cmd}  # type: ignore[attr-defined]
+    mock_agent.host_context.skill_provider = None  # type: ignore[attr-defined]
 
     # Mock empty MCP prompts
     mock_agent.list_prompts = AsyncMock(return_value=[])
@@ -354,7 +354,7 @@ async def test_session_unknown_command_falls_back_to_mcp_or_404(
     mock_agent: MagicMock,
 ) -> None:
     """When command is NOT in CommandStore AND NOT in pool.skill_commands, falls to MCP or 404."""
-    _setup_pool_sessions(mock_agent.agent_pool)
+    _setup_pool_sessions(mock_agent.host_context)
 
     # Create session
     response = await async_client.post("/session", json={"title": "Test Session"})
@@ -367,7 +367,7 @@ async def test_session_unknown_command_falls_back_to_mcp_or_404(
     server_state.command_store = mock_command_store
 
     # skill_commands empty/None
-    mock_agent.agent_pool.skill_commands = None  # type: ignore[attr-defined]
+    mock_agent.host_context.skill_commands = None  # type: ignore[attr-defined]
 
     # No MCP prompts either
     mock_agent.list_prompts = AsyncMock(return_value=[])
@@ -388,7 +388,7 @@ async def test_session_skill_commands_fallback_then_mcp(
     mock_agent: MagicMock,
 ) -> None:
     """When not in CommandStore or skill_commands, MCP prompt is used as final fallback."""
-    _setup_pool_sessions(mock_agent.agent_pool)
+    _setup_pool_sessions(mock_agent.host_context)
 
     # Create session
     response = await async_client.post("/session", json={"title": "Test Session"})
@@ -401,7 +401,7 @@ async def test_session_skill_commands_fallback_then_mcp(
     server_state.command_store = mock_command_store
 
     # skill_commands exists but doesn't have this command
-    mock_agent.agent_pool.skill_commands = {}  # type: ignore[attr-defined]
+    mock_agent.host_context.skill_commands = {}  # type: ignore[attr-defined]
 
     # MCP prompt exists
     mock_prompt = MagicMock()

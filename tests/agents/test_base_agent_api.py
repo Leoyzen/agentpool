@@ -316,7 +316,7 @@ def test_is_turn_active_false_after_clearing_background_run_ctx(agent: _TestAgen
 async def test_baseagent_standalone_generates_ephemeral_session() -> None:
     """BaseAgent without an agent_pool generates an ephemeral session_id during run_stream."""
     agent = _TestAgent(name="standalone-test")
-    assert agent.agent_pool is None
+    assert agent.host_context is None
 
     async with agent:
         async for _event in agent.run_stream("hello"):

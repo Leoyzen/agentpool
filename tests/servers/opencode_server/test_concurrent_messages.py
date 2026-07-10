@@ -35,6 +35,7 @@ class SlowAgentMock:
         self.run_stream_call_count = 0
         self.active_runs: set[str] = set()
         self.agent_pool: Mock | None = None
+        self.host_context: Mock | None = None
         self.env: Mock | None = None
         self.storage: Any = None
         self.tools = []
@@ -178,6 +179,7 @@ def slow_mock_agent():  # noqa: PLR0915
     pool.manifest.agents = {agent.name: agent}
 
     agent.agent_pool = pool
+    agent.host_context = pool
 
     # Set up env mock
     env = Mock()

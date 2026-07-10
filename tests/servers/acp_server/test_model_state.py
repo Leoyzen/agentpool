@@ -31,7 +31,7 @@ class MockAgent:
 
     def __init__(self, model_name="gpt-4o", pool=None, toko_models=None):
         self.model_name = model_name
-        self.agent_pool = pool
+        self.host_context = pool
         self._toko_models = toko_models or []
 
     async def get_available_models(self):

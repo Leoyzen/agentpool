@@ -89,3 +89,15 @@ def test_config_file_path_accepts_string():
     """Given a string config path, when constructing HostContext, then it is stored."""
     ctx = _make_context(config_file_path="/path/to/config.yml")
     assert ctx.config_file_path == "/path/to/config.yml"
+
+
+def test_main_agent_name_defaults_to_none():
+    """Given no main_agent_name, when constructing HostContext, then it defaults to None."""
+    ctx = _make_context()
+    assert ctx.main_agent_name is None
+
+
+def test_main_agent_name_can_be_set():
+    """Given main_agent_name, when constructing HostContext, then it is stored."""
+    ctx = _make_context(main_agent_name="primary")
+    assert ctx.main_agent_name == "primary"

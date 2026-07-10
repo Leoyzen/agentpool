@@ -124,7 +124,7 @@ async def list_agents(state: StateDep) -> list[Agent]:
     switcher UI. All agents are marked as primary (visible in switcher).
     The default agent is always first in the returned list.
     """
-    pool = state.agent.agent_pool
+    pool = state.agent.host_context
     assert pool is not None, "AgentPool is not initialized"
     default_name = pool.main_agent_name
     agents = [
@@ -154,7 +154,7 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
     from pathlib import PurePosixPath
 
     # Access the pool via the agent's agent_pool reference
-    pool = state.agent.agent_pool
+    pool = state.agent.host_context
     if pool is None:
         return []
 

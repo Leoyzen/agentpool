@@ -17,7 +17,9 @@ class _Pool:
 
     def get_context(self) -> MagicMock:
         """Return a HostContext-like mock for host_context property."""
-        return MagicMock(skill_provider=self.skill_provider)
+        ctx = MagicMock()
+        ctx.pool = self  # pool points back to _Pool for skill_provider + methods
+        return ctx
 
 
 def test_team_loads_member_skills_from_pool_provider() -> None:

@@ -23,13 +23,13 @@ def create_mock_agent() -> MagicMock:
     agent = MagicMock(spec=BaseAgent)
     agent.name = "test_agent"
     agent.session_id = "original_session_id"
-    agent.agent_pool = MagicMock()
-    agent.agent_pool.manifest.config_file_path = "test_config.yml"
-    agent.agent_pool.storage.save_session = AsyncMock()
-    agent.agent_pool.storage.load_session = AsyncMock(return_value=None)
-    agent.agent_pool.session_pool = MagicMock()
-    agent.agent_pool.session_pool.sessions = MagicMock()
-    agent.agent_pool.session_pool.sessions.store = None
+    agent.host_context = MagicMock()
+    agent.host_context.manifest.config_file_path = "test_config.yml"
+    agent.host_context.storage.save_session = AsyncMock()
+    agent.host_context.storage.load_session = AsyncMock(return_value=None)
+    agent.host_context.session_pool = MagicMock()
+    agent.host_context.session_pool.sessions = MagicMock()
+    agent.host_context.session_pool.sessions.store = None
     agent.env = MagicMock()
     agent.env.cwd = "/test/dir"
     return agent
@@ -129,7 +129,7 @@ async def test_ensure_session_persists_to_storage(mock_state: ServerState) -> No
     assert kwargs["agent_name"] == "test_agent"
     assert kwargs["pool_id"] == "test_config.yml"
 
-    mock_state.agent.agent_pool.storage.save_session.assert_awaited_once_with(  # type: ignore[union-attr]
+    mock_state.agent.host_context.storage.save_session.assert_awaited_once_with(  # type: ignore[union-attr]
         mock_session_data
     )
 
@@ -245,7 +245,7 @@ async def test_ensure_session_is_idempotent(mock_state: ServerState) -> None:
         result2 = await ensure_session(mock_state, session_id)
 
     assert result1 is result2
-    mock_state.agent.agent_pool.storage.save_session.assert_awaited_once()  # type: ignore[union-attr]
+    mock_state.agent.host_context.storage.save_session.assert_awaited_once()  # type: ignore[union-attr]
 
 
 @pytest.mark.asyncio

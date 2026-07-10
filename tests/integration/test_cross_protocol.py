@@ -17,10 +17,10 @@ class TestCrossProtocolAlignment:
         # Setup: agent with multiple modes
         agent = MagicMock()
         agent.name = "agent_a"
-        agent.agent_pool = MagicMock()
+        agent.host_context = MagicMock()
         agent_b = MagicMock()
         agent_b.name = "agent_b"
-        agent.agent_pool.manifest.agents = {"agent_a": agent, "agent_b": agent_b}
+        agent.host_context.manifest.agents = {"agent_a": agent, "agent_b": agent_b}
         agent.get_modes = AsyncMock(
             return_value=[
                 ModeCategory(
@@ -51,8 +51,8 @@ class TestCrossProtocolAlignment:
         """agent_role config option hidden when /mode returns single mode."""
         agent = MagicMock()
         agent.name = "solo"
-        agent.agent_pool = MagicMock()
-        agent.agent_pool.manifest.agents = {"solo": agent}
+        agent.host_context = MagicMock()
+        agent.host_context.manifest.agents = {"solo": agent}
         agent.get_modes = AsyncMock(
             return_value=[
                 ModeCategory(
@@ -93,7 +93,7 @@ class TestCrossProtocolAlignment:
         agent = MagicMock()
         agent.name = "test"
         agent.model_name = "fast"
-        agent.agent_pool = pool
+        agent.host_context = pool
         agent.get_available_models = AsyncMock(return_value=[])
 
         router = ProviderRouter(manifest)  # type: ignore[arg-type]

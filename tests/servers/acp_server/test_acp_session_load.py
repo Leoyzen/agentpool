@@ -265,7 +265,7 @@ async def test_load_session_with_nested_acp_agent(
     nested_agent.conversation = MagicMock()
     nested_agent.conversation.chat_messages = []
     nested_agent.get_modes = AsyncMock(return_value=[])
-    nested_agent.agent_pool = mock_acp_agent.agent_pool
+    nested_agent.host_context = mock_acp_agent.host_context
 
     mock_session.agent = nested_agent
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)

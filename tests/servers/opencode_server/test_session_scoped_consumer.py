@@ -91,7 +91,7 @@ def server_state(tmp_path: Any, mock_agent_pool: Mock) -> ServerState:
     agent = Mock()
     agent.name = "test-agent"
     agent.storage = Mock()
-    agent.agent_pool = mock_agent_pool
+    agent.host_context = mock_agent_pool
     agent.env = Mock()
     return ServerState(working_dir=str(tmp_path), agent=agent)
 

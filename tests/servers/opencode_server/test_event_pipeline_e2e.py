@@ -99,9 +99,9 @@ def server_state(tmp_path: Any) -> ServerState:
     agent = Mock()
     agent.name = "test-agent"
     agent.storage = Mock()
-    agent.agent_pool = Mock()
-    agent.agent_pool.session_pool = Mock()
-    agent.agent_pool.session_pool.event_bus = Mock()  # will be overridden
+    agent.host_context = Mock()
+    agent.host_context.session_pool = Mock()
+    agent.host_context.session_pool.event_bus = Mock()  # will be overridden
     state = ServerState(working_dir=str(tmp_path), agent=agent)
     # Required for SessionPoolIntegration consumer to function
     state.messages = {}

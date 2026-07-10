@@ -389,8 +389,8 @@ async def test_skill_command_routes_through_session_pool(
         instructions="Direct skill instructions",
     )
     skill_cmd = SkillCommand(name="direct-skill", description="Direct skill", skill=skill)
-    mock_agent.agent_pool.skill_commands = {"direct-skill": skill_cmd}  # type: ignore[attr-defined]
-    mock_agent.agent_pool.skill_provider = None  # type: ignore[attr-defined]
+    mock_agent.host_context.skill_commands = {"direct-skill": skill_cmd}  # type: ignore[attr-defined]
+    mock_agent.host_context.skill_provider = None  # type: ignore[attr-defined]
 
     # Track agent.run_stream calls
     agent_calls: list[tuple[Any, Any]] = []
@@ -410,7 +410,7 @@ async def test_skill_command_routes_through_session_pool(
         if False:
             yield MagicMock()
 
-    mock_agent.agent_pool.session_pool.run_stream = _mock_session_run_stream  # type: ignore[attr-defined]
+    mock_agent.host_context.session_pool.run_stream = _mock_session_run_stream  # type: ignore[attr-defined]
 
     # Mock empty MCP prompts
     mock_agent.list_prompts = AsyncMock(return_value=[])
@@ -470,7 +470,7 @@ async def test_slash_command_routes_through_session_pool(
         if False:
             yield MagicMock()
 
-    mock_agent.agent_pool.session_pool.run_stream = _mock_session_run_stream  # type: ignore[attr-defined]
+    mock_agent.host_context.session_pool.run_stream = _mock_session_run_stream  # type: ignore[attr-defined]
 
     # Mock empty MCP prompts
     mock_agent.list_prompts = AsyncMock(return_value=[])
@@ -528,7 +528,7 @@ async def test_mcp_prompt_routes_through_session_pool(
         receive_request_calls.append((args, kwargs))
         return None
 
-    mock_agent.agent_pool.session_pool.receive_request = _mock_receive_request  # type: ignore[attr-defined]
+    mock_agent.host_context.session_pool.receive_request = _mock_receive_request  # type: ignore[attr-defined]
 
     response = await async_client.post(
         f"/session/{session_id}/command",

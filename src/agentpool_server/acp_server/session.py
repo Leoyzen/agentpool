@@ -25,7 +25,7 @@ from acp.agent.notifications import ACPNotifications
 from acp.filesystem import ACPFileSystem
 from acp.schema import AvailableCommand, ClientCapabilities
 from acp.schema.mcp import AcpMcpServer
-from agentpool import Agent, AgentPool
+from agentpool import Agent
 from agentpool.agents.acp_agent import ACPAgent
 from agentpool.agents.events.events import ToastInfo
 from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     )
     from agentpool.agents.base_agent import BaseAgent, StateUpdate
     from agentpool.common_types import PathReference
+    from agentpool.host.context import HostContext
     from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
     from agentpool_server.acp_server.session_manager import ACPSessionManager
 
@@ -165,7 +166,7 @@ class ACPSession:
     agent: BaseAgent[Any, Any]
     """Currently active agent instance.
 
-    The agent carries its own pool reference via agent.agent_pool,
+    The agent carries its own pool reference via agent.host_context,
     which is used for agent switching and pool-level operations.
     """
 
@@ -278,8 +279,8 @@ class ACPSession:
         Bridges skill commands into the session's command_store so they are
         included in available_commands_update notifications per ACP spec.
         """
-        pool = self.agent_pool
-        skill_registry = getattr(pool, "skill_commands", None)
+        ctx = self.host_context
+        skill_registry = ctx.pool.skill_commands
         if skill_registry is None:
             return
 
@@ -340,8 +341,8 @@ class ACPSession:
         and registers them as slashed commands in the session's command_store
         so they are included in available_commands_update notifications to ACP clients.
         """
-        pool = self.agent_pool
-        commands = pool.manifest.get_command_configs()
+        ctx = self.host_context
+        commands = ctx.manifest.get_command_configs()
         if commands is None:
             self.log.debug("No manifest commands to register")
             return
@@ -569,20 +570,22 @@ class ACPSession:
     async def init_client_skills(self) -> None:
         """Discover and load skills from client-side .claude/skills directory."""
         try:
-            await self.agent_pool.skills.add_skills_directory(".claude/skills", fs=self.fs)
-            skills = self.agent_pool.skills.list_skills()
+            await self.host_context.skills_registry.add_skills_directory(
+                ".claude/skills", fs=self.fs
+            )
+            skills = self.host_context.skills_registry.list_skills()
             self.log.info("Collected client-side skills", skill_count=len(skills))
         except Exception as e:
             self.log.exception("Failed to discover client-side skills", error=e)
 
     @property
-    def agent_pool(self) -> AgentPool[Any]:
-        """Get the agent pool from the current agent."""
-        pool = self.agent.agent_pool
-        if pool is None:
+    def host_context(self) -> HostContext:
+        """Get the host context from the current agent."""
+        ctx = self.agent.host_context
+        if ctx is None:
             msg = "Agent has no associated pool"
             raise RuntimeError(msg)
-        return pool
+        return ctx
 
     def get_cwd_context(self) -> str:
         """Get current working directory context for prompts."""
@@ -595,7 +598,7 @@ class ACPSession:
         Pool-level agents were removed — all agents are now session-scoped.
         """
         # Validate agent exists in config (not runtime instances)
-        available = list(self.agent_pool.agent_configs.keys())
+        available = list(self.host_context.pool.agent_configs.keys())
         if agent_name not in available:
             raise ValueError(f"Agent {agent_name!r} not found. Available: {available}")
 
@@ -610,11 +613,11 @@ class ACPSession:
             self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
         # Create new session agent via SessionPool (pool-level agents removed)
-        pool = self.agent_pool
-        if pool.session_pool is not None:
+        ctx = self.host_context
+        if ctx.session_pool is not None:
             # Invalidate cache so get_or_create_session_agent creates a fresh agent
-            pool.session_pool.sessions._session_agents.pop(self.session_id, None)
-            self.agent = await pool.session_pool.sessions.get_or_create_session_agent(
+            ctx.session_pool.sessions._session_agents.pop(self.session_id, None)
+            self.agent = await ctx.session_pool.sessions.get_or_create_session_agent(
                 self.session_id, agent_name=agent_name, input_provider=self.input_provider
             )
         else:
@@ -706,8 +709,8 @@ class ACPSession:
             # Route through SessionPool for unified session management.
             # MCP tools are handled via McpConfigSnapshot → get_capabilities() →
             # MCPToolset, not through agent.tools.providers.
-            agent_pool_ref = getattr(self.agent, "agent_pool", None)
-            session_pool = agent_pool_ref.session_pool if agent_pool_ref is not None else None
+            agent_ctx = self.agent.host_context
+            session_pool = agent_ctx.session_pool if agent_ctx is not None else None
             try:
                 if session_pool is not None:
                     stream = session_pool.run_stream(
@@ -836,7 +839,7 @@ class ACPSession:
 
             # Unregister skill command callback to prevent memory leak
             if hasattr(self, "_skill_command_callback"):
-                skill_registry = getattr(self.agent_pool, "skill_commands", None)
+                skill_registry = self.host_context.pool.skill_commands
                 if skill_registry is not None and hasattr(
                     skill_registry, "_command_change_handlers"
                 ):
@@ -873,7 +876,7 @@ class ACPSession:
 
     async def _register_prompt_hub_commands(self) -> None:
         """Register prompt hub prompts as slash commands."""
-        manager = self.agent_pool.prompt_manager
+        manager = self.host_context.prompt_manager
         cmd_count = 0
         all_prompts = await manager.list_prompts()
         for provider_name, prompt_names in all_prompts.items():

@@ -122,6 +122,7 @@ def mock_agent_with_event_bus(tmp_project_dir):
 
     pool.session_pool = session_pool
     agent.agent_pool = pool
+    agent.host_context = pool
 
     return agent, run_handle, event_bus
 

@@ -1551,8 +1551,8 @@ async def summarize_session(  # noqa: PLR0915
                 try:
                     agent = state.agent
                     pipeline = None
-                    if agent.agent_pool is not None:
-                        pipeline = agent.agent_pool.compaction_pipeline
+                    if agent.host_context is not None:
+                        pipeline = agent.host_context.manifest.get_compaction_pipeline()
                     if pipeline is None:
                         pipeline = summarizing_context()
 

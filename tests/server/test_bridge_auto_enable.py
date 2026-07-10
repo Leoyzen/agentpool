@@ -72,7 +72,7 @@ class TestACPBridgeAutoEnable:
         """Create a mock agent with pool reference."""
         agent = MagicMock()
         agent.name = "test_agent"
-        agent.agent_pool = mock_pool_with_skills
+        agent.host_context = MagicMock(pool=mock_pool_with_skills)
         agent.model_name = "test-model"
         return agent
 
@@ -98,7 +98,7 @@ class TestACPBridgeAutoEnable:
         """Test ACP agent does not wire bridge when pool has no skill commands."""
         agent = MagicMock()
         agent.name = "test_agent"
-        agent.agent_pool = mock_pool_no_skills
+        agent.host_context = MagicMock(pool=mock_pool_no_skills)
         agent.model_name = "test-model"
 
         with patch("agentpool_server.acp_server.acp_agent.ACPSessionManager"):
@@ -173,7 +173,7 @@ class TestOpenCodeBridgeAutoEnable:
         """Create a mock agent with pool reference."""
         agent = MagicMock()
         agent.name = "test_agent"
-        agent.agent_pool = mock_pool_with_skills
+        agent.host_context = MagicMock(pool=mock_pool_with_skills)
         agent.model_name = "test-model"
         agent.env = MagicMock()
         agent.storage = MagicMock()
@@ -184,7 +184,7 @@ class TestOpenCodeBridgeAutoEnable:
         """Create a mock agent without skills."""
         agent = MagicMock()
         agent.name = "test_agent"
-        agent.agent_pool = mock_pool_no_skills
+        agent.host_context = MagicMock(pool=mock_pool_no_skills)
         agent.model_name = "test-model"
         agent.env = MagicMock()
         agent.storage = MagicMock()
@@ -272,7 +272,7 @@ class TestBridgesReceiveCommands:
         """Test ACP bridge receives new commands added to registry."""
         agent = MagicMock()
         agent.name = "test_agent"
-        agent.agent_pool = mock_pool_with_skills
+        agent.host_context = MagicMock(pool=mock_pool_with_skills)
         agent.model_name = "test-model"
 
         with patch("agentpool_server.acp_server.acp_agent.ACPSessionManager"):
