@@ -87,11 +87,10 @@ def scratchpad_provider(mock_mcp_client_with_scratchpad_skills):
     Provider name is "pool_mcp_scratchpad" (as registered by MCPManager),
     NOT "systematic-troubleshooting" (which is the skill name).
     """
-    provider = MCPCapability(
+    return MCPCapability(
         client=mock_mcp_client_with_scratchpad_skills,
         name="pool_mcp_scratchpad",
     )
-    yield provider
 
 
 @pytest.fixture
