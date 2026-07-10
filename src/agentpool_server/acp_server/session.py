@@ -863,7 +863,7 @@ class ACPSession:
 
     async def _register_mcp_prompts_as_commands(self) -> None:
         """Register MCP prompts as slash commands."""
-        if all_prompts := await self.agent.tools.list_prompts():
+        if all_prompts := await self.agent.list_prompts():
             for prompt in all_prompts:
                 command = prompt.create_mcp_command(self.agent.staged_content)
                 self.command_store.register_command(command)

@@ -50,6 +50,15 @@ def mock_agent_context():
     mock_provider.get_skill_instructions = AsyncMock(
         return_value="# Troubleshooting Guide\n\nFollow these steps..."
     )
+    # Set up capabilities as a list with a child provider that has get_skills
+    mock_child_provider = MagicMock()
+    mock_child_provider.get_skills = AsyncMock(
+        return_value=[mcp_skill_hyphen, mcp_skill_from_underscore]
+    )
+    mock_child_provider.get_skill_instructions = AsyncMock(
+        return_value="# Troubleshooting Guide\n\nFollow these steps..."
+    )
+    mock_provider.capabilities = [mock_child_provider]
     ctx.pool.skill_provider = mock_provider
 
     # Mock skill_resolver
@@ -134,6 +143,7 @@ async def test_list_skills_shows_empty_when_no_skills():
     ctx.pool = MagicMock()
     ctx.pool.skills.list_skills.return_value = []
     ctx.pool.skill_provider = None
+    ctx.pool.skill_resolver = None
 
     result = await list_skills(ctx)
 

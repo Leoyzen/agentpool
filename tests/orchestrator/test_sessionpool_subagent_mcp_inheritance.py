@@ -267,10 +267,10 @@ async def test_pool_level_acp_provider_added_to_child_session() -> None:
         # EXPECT: Both parent and child have the pool's aggregating provider
         pool_agg = pool.mcp.get_aggregating_provider()
         parent_has_agg = any(
-            p is pool_agg or p.name == pool_agg.name for p in parent_agent.tools.external_providers
+            p is pool_agg or p.name == pool_agg.name for p in parent_agent._external_capabilities
         )
         child_has_agg = any(
-            p is pool_agg or p.name == pool_agg.name for p in child_agent.tools.external_providers
+            p is pool_agg or p.name == pool_agg.name for p in child_agent._external_capabilities
         )
 
         assert parent_has_agg, "Parent session must have pool.mcp.get_aggregating_provider()."
@@ -330,8 +330,8 @@ async def test_parent_external_providers_not_inherited_by_child() -> None:
             name="parent_static_provider",
             tools=[mock_tool],
         )
-        parent_agent.tools.add_provider(mcp_provider)
-        parent_agent.tools.add_provider(static_provider)
+        parent_agent._add_capability(mcp_provider)
+        parent_agent._add_capability(static_provider)
 
         await session_pool.create_session(
             child_session_id,
@@ -341,10 +341,10 @@ async def test_parent_external_providers_not_inherited_by_child() -> None:
         child_agent = await session_pool.sessions.get_or_create_session_agent(child_session_id)
 
         # EXPECT: Neither MCP nor non-MCP providers are inherited
-        assert mcp_provider not in child_agent.tools.external_providers, (
+        assert mcp_provider not in child_agent._external_capabilities, (
             "Child must NOT inherit parent's kind=='mcp' providers."
         )
-        assert static_provider not in child_agent.tools.external_providers, (
+        assert static_provider not in child_agent._external_capabilities, (
             "Child must NOT inherit parent's non-MCP providers."
         )
 
@@ -503,7 +503,7 @@ async def test_skills_providers_added_to_child_session() -> None:
             # The skills_tools_provider may be added directly or wrapped in a
             # CombinedToolsetCapability. In some controller paths (SessionController),
             # the provider may not be added yet — this is a known limitation.
-            providers = child_agent.tools.external_providers
+            providers = child_agent._external_capabilities
             found = pool.skills_tools_provider in providers
             if not found:
                 from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
@@ -645,7 +645,7 @@ async def test_base_agent_not_mutated_by_child_creation() -> None:
         child_session_id = "child-rule10-no-mutate"
 
         base_agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
-        base_provider_count = len(base_agent.tools.external_providers)
+        base_provider_count = len(base_agent._external_capabilities)
 
         await session_pool.create_session(parent_session_id, agent_name="test_agent")
         await session_pool.sessions.get_or_create_session_agent(parent_session_id)
@@ -658,10 +658,10 @@ async def test_base_agent_not_mutated_by_child_creation() -> None:
         await session_pool.sessions.get_or_create_session_agent(child_session_id)
 
         # EXPECT: base_agent provider count unchanged
-        assert len(base_agent.tools.external_providers) == base_provider_count, (
+        assert len(base_agent._external_capabilities) == base_provider_count, (
             "base_agent must NOT be mutated by child session creation. "
             f"Before: {base_provider_count}, "
-            f"after: {len(base_agent.tools.external_providers)}"
+            f"after: {len(base_agent._external_capabilities)}"
         )
 
         await session_pool.shutdown()

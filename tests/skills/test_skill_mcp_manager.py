@@ -64,7 +64,10 @@ def make_mock_provider() -> AsyncMock:
     # MCPCapability.__aexit__ should not raise
     provider.__aenter__ = AsyncMock(return_value=provider)
     provider.__aexit__ = AsyncMock(return_value=None)
-    provider.get_tools = AsyncMock(return_value=[])
+    # Set up client mock for get_tools() which calls provider.client.list_tools()
+    provider.client = Mock()
+    provider.client.list_tools = AsyncMock(return_value=[])
+    provider.client.convert_tool = Mock(return_value=Mock())
     return provider
 
 
@@ -362,17 +365,18 @@ class TestGetTools:
         manager: SkillMcpManager,
         server_config: SkillMcpServerConfig,
     ) -> None:
-        """get_tools() calls connect() then provider.get_tools()."""
+        """get_tools() calls connect() then provider.client.list_tools()."""
         manager.prepare("srv", server_config)
         mock_provider = make_mock_provider()
         mock_tools = [Mock(), Mock()]  # Two fake tool objects
-        mock_provider.get_tools.return_value = mock_tools
+        mock_provider.client.list_tools = AsyncMock(return_value=mock_tools)
+        mock_provider.client.convert_tool = Mock(side_effect=mock_tools)
 
         with patch.object(manager, "_create_and_connect", AsyncMock(return_value=mock_provider)):
             tools = await manager.get_tools("srv", "ses_1")
 
         assert len(tools) == 2
-        mock_provider.get_tools.assert_awaited_once()
+        mock_provider.client.list_tools.assert_awaited_once()
 
     async def test_get_tools_caches_across_calls(
         self,
@@ -382,14 +386,15 @@ class TestGetTools:
         """get_tools() returns cached tools on subsequent calls (provider caching)."""
         manager.prepare("srv", server_config)
         mock_provider = make_mock_provider()
-        mock_provider.get_tools.return_value = [Mock()]
+        mock_provider.client.list_tools = AsyncMock(return_value=[Mock()])
+        mock_provider.client.convert_tool = Mock(return_value=Mock())
 
         with patch.object(manager, "_create_and_connect", AsyncMock(return_value=mock_provider)):
             await manager.get_tools("srv", "ses_1")
             await manager.get_tools("srv", "ses_1")
 
-        # provider.get_tools called twice (each get_tools call goes through)
-        assert mock_provider.get_tools.await_count == 2
+        # client.list_tools called twice (each get_tools call goes through)
+        assert mock_provider.client.list_tools.await_count == 2
 
 
 # =========================================================================
@@ -722,10 +727,10 @@ class TestCreateAndConnect:
         """_create_and_connect() creates StdioMCPServerConfig from command-based config."""
         config = SkillMcpServerConfig(command="uvx", args=["mcp-server"])
 
-        # MCPCapability is imported inside _create_and_connect() body,
+        # MCPCapability is imported at module level in skill_mcp_manager,
         # so patch at the actual module path
         with patch(
-            "MCPCapability",
+            "agentpool.skills.skill_mcp_manager.MCPCapability",
             autospec=True,
         ) as mock_provider:
             mock_instance = mock_provider.return_value
@@ -736,8 +741,8 @@ class TestCreateAndConnect:
         mock_provider.assert_called_once()
         # Verify StdioMCPServerConfig was passed
         call_args = mock_provider.call_args.kwargs
-        assert call_args["server"].command == "uvx"
-        assert call_args["server"].args == ["mcp-server"]
+        assert call_args["client"].config.command == "uvx"
+        assert call_args["client"].config.args == ["mcp-server"]
         assert call_args["name"] == "skill_mcp_test-server"
         assert result is mock_instance
         mock_instance.__aenter__.assert_awaited_once()
@@ -750,7 +755,7 @@ class TestCreateAndConnect:
         config = SkillMcpServerConfig(url="http://remote:8080/mcp")
 
         with patch(
-            "MCPCapability",
+            "agentpool.skills.skill_mcp_manager.MCPCapability",
             autospec=True,
         ) as mock_provider:
             mock_instance = mock_provider.return_value
@@ -761,7 +766,7 @@ class TestCreateAndConnect:
         mock_provider.assert_called_once()
         call_args = mock_provider.call_args.kwargs
         # Should be a StreamableHTTPMCPServerConfig with url
-        assert str(call_args["server"].url) == "http://remote:8080/mcp"
+        assert str(call_args["client"].config.url) == "http://remote:8080/mcp"
         assert call_args["name"] == "skill_mcp_remote-server"
         assert result is mock_instance
         mock_instance.__aenter__.assert_awaited_once()

@@ -89,7 +89,7 @@ class TestProcessPromptTurnCompleteFlag:
         async def _noop_ctx(*args: Any, **kwargs: Any) -> AsyncIterator[None]:
             yield
 
-        agent.tools.with_session_providers = _noop_ctx  # type: ignore[method-assign]
+        agent._with_session_capabilities = _noop_ctx  # type: ignore[method-assign]
 
         captured_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         original_init = ACPEventConverter.__init__
@@ -134,7 +134,7 @@ class TestProcessPromptTurnCompleteFlag:
         async def _noop_ctx(*args: Any, **kwargs: Any) -> AsyncIterator[None]:
             yield
 
-        agent.tools.with_session_providers = _noop_ctx  # type: ignore[method-assign]
+        agent._with_session_capabilities = _noop_ctx  # type: ignore[method-assign]
 
         captured_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         original_init = ACPEventConverter.__init__
@@ -179,7 +179,7 @@ class TestProcessPromptTurnCompleteFlag:
         async def _noop_ctx(*args: Any, **kwargs: Any) -> AsyncIterator[None]:
             yield
 
-        agent.tools.with_session_providers = _noop_ctx  # type: ignore[method-assign]
+        agent._with_session_capabilities = _noop_ctx  # type: ignore[method-assign]
 
         captured_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         original_init = ACPEventConverter.__init__

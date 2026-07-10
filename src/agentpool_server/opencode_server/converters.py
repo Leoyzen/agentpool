@@ -185,12 +185,12 @@ async def extract_user_prompt_from_parts(
                     f"and call the task tool with agent_or_team='{agent_name}'"
                 )
                 result.append(instruction)
-            case SubtaskPartInput(agent=agent, prompt=subtask_prompt, description=desc):
+            case SubtaskPartInput(agent=subtask_agent, prompt=subtask_prompt, description=desc):
                 # Subtask - explicit task execution with pre-defined prompt
                 # Inject instruction to call task with the provided parameters
                 instruction = (
                     f"Call the task tool with:\n"
-                    f"  agent_or_team: '{agent}'\n"
+                    f"  agent_or_team: '{subtask_agent}'\n"
                     f"  prompt: '{subtask_prompt}'\n"
                     f"  description: '{desc}'"
                 )

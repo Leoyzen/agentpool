@@ -87,7 +87,7 @@ async def test_tool_call_only_response_has_no_text_deltas() -> None:
 
         # Create a tool that simulates a failed task delegation
         failing_tool = Tool.from_callable(_failing_tool, name_override="failing_tool")
-        agent.tools.register_tool(failing_tool)
+        agent._builtin_provider.register_tool(failing_tool)
 
         # Override model: call the tool, emit NO custom text
         await agent.set_model(
@@ -179,7 +179,7 @@ async def test_tool_error_does_not_break_stream() -> None:
             return "Error: Agent 'general' not found"
 
         broken_tool = Tool.from_callable(_broken_tool, name_override="broken_tool")
-        agent.tools.register_tool(broken_tool)
+        agent._builtin_provider.register_tool(broken_tool)
 
         await agent.set_model(
             TestModel(
