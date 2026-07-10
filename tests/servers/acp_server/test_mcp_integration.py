@@ -139,7 +139,7 @@ async def test_session_manager_with_mcp(
 
 
 async def test_tool_integration():
-    """Test that MCP tools would be properly integrated."""
+    """Test that tools are properly integrated via capabilities."""
 
     def simple_callback(message: str) -> str:
         return f"Test response for: {message}"
@@ -147,20 +147,17 @@ async def test_tool_integration():
     agent = Agent.from_callback(name="test_agent", callback=simple_callback)
 
     async with agent:
-        initial_tools = len(await agent.tools.get_tools())
-        # In real scenario, MCP tools would be added here
-        # For test, we'll simulate by adding a dummy tool
+        initial_tools = len(await agent._get_all_tools())
 
+        # Register a dummy tool via the builtin provider
         def dummy_mcp_tool(query: str) -> str:
             """Dummy MCP tool for testing."""
             return f"MCP result for: {query}"
 
-        meta = {"mcp_tool": "dummy_search"}
-        tool = Tool.from_callable(dummy_mcp_tool, source="mcp", metadata=meta)
+        tool = Tool.from_callable(dummy_mcp_tool, source="mcp")
+        agent._builtin_provider.register_tool(tool)
 
-        agent.tools.register_tool(tool)
-
-        final_tools = len(await agent.tools.get_tools())
+        final_tools = len(await agent._get_all_tools())
         assert final_tools == initial_tools + 1
 
 

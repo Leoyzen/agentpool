@@ -468,10 +468,24 @@ class TestACPMCPScoping:
         """ACP servers appear in get_aggregating_provider()."""
         from unittest.mock import patch
 
+        class _FakeClient:
+            def __init__(self, **kwargs: Any) -> None:
+                self.config = kwargs.get("config")
+
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *args: object) -> None:
+                pass
+
         class _FakeProvider:
-            def __init__(self, server: Any, **kwargs: Any) -> None:
-                self.server = server
+            def __init__(self, client: Any = None, **kwargs: Any) -> None:
+                self._client = client
                 self.name = kwargs.get("name", "fake")
+
+            @property
+            def client(self) -> Any:
+                return self._client
 
             async def __aenter__(self) -> Any:
                 return self
@@ -496,15 +510,18 @@ class TestACPMCPScoping:
         )
         manager = MCPManager(name="test")
 
-        with patch("agentpool.mcp_server.manager.MCPCapability", _FakeProvider):
+        with (
+            patch("agentpool.mcp_server.client.MCPClient", _FakeClient),
+            patch("agentpool.mcp_server.manager.MCPCapability", _FakeProvider),
+        ):
             await manager.setup_server(acp_config)
             await manager.setup_server(stdio_config)
 
         agg = manager.get_aggregating_provider()
 
         # Only ACP provider in aggregating provider
-        assert len(agg.providers) == 1
-        assert agg.providers[0].server is acp_config
+        assert len(agg.capabilities) == 1
+        assert agg.capabilities[0]._client.config is acp_config
 
         await manager.cleanup()
 
