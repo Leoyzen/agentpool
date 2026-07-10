@@ -276,15 +276,12 @@ class AgentPoolACPAgent(ACPAgent):
         # NEW: Cache agent config for per-session creation (RFC-0031)
         from agentpool.models.agents import NativeAgentConfig
 
-        if (
-            self.host_context
-            and self.host_context.main_agent_name
-            and self.host_context.main_agent_name in self.host_context.manifest.agents
-        ):
-            cfg = self.host_context.manifest.agents[self.host_context.main_agent_name]
+        ctx = self.host_context
+        if ctx is not None and ctx.main_agent_name and ctx.main_agent_name in ctx.manifest.agents:
+            cfg = ctx.manifest.agents[ctx.main_agent_name]
             if isinstance(cfg, NativeAgentConfig):
                 if cfg.name is None:
-                    cfg = cfg.model_copy(update={"name": self.host_context.main_agent_name})
+                    cfg = cfg.model_copy(update={"name": ctx.main_agent_name})
                 self._agent_config = cfg
 
         # Initialize SessionPool-backed protocol handler if feature flag is enabled

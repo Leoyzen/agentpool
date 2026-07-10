@@ -55,6 +55,7 @@ def mock_state_and_broadcast(
     agent.load_session = AsyncMock(return_value=session_data)
     # Explicitly set agent_pool so the SessionPool cold-load path is skipped
     agent.host_context = Mock()
+    agent.host_context.pool = agent.host_context  # state.py resolves _pool via _ctx.pool
     agent.host_context.session_pool = None
 
     # agent.conversation.chat_messages must be iterable (empty for cold load test)

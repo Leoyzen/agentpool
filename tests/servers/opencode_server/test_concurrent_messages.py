@@ -180,6 +180,7 @@ def slow_mock_agent():  # noqa: PLR0915
 
     agent.agent_pool = pool
     agent.host_context = pool
+    pool.pool = pool  # state.py resolves _pool via _ctx.pool
 
     # Set up env mock
     env = Mock()

@@ -100,6 +100,7 @@ def server_state(tmp_path: Any) -> ServerState:
     agent.name = "test-agent"
     agent.storage = Mock()
     agent.host_context = Mock()
+    agent.host_context.pool = agent.host_context  # state.py resolves _pool via _ctx.pool
     agent.host_context.session_pool = Mock()
     agent.host_context.session_pool.event_bus = Mock()  # will be overridden
     state = ServerState(working_dir=str(tmp_path), agent=agent)

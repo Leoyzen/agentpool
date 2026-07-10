@@ -55,6 +55,7 @@ def _server_state(tmp_path: Path) -> ServerState:
     agent._input_provider = None
     agent.agent_pool = pool
     agent.host_context = pool
+    pool.pool = pool  # state.py resolves _pool via _ctx.pool
     agent.storage = storage_manager
     agent.get_available_models = AsyncMock(return_value=[])
 

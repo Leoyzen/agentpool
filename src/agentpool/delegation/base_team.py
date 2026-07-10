@@ -787,16 +787,14 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
         return result
 
     async def _load_skill_instructions(self, skill_name: str, member_name: str) -> str:
-        if (
-            self.host_context is None
-            or self.host_context.pool is None
-            or self.host_context.pool.skill_provider is None
-        ):
+        ctx = self.host_context
+        pool = ctx.pool if ctx is not None else None
+        if pool is None or pool.skill_provider is None:
             from agentpool.skills.exceptions import SkillNotFoundError
 
             raise SkillNotFoundError(skill_name)
 
-        return await self.host_context.pool.get_skill_instructions_for_node(skill_name, member_name)
+        return await pool.get_skill_instructions_for_node(skill_name, member_name)
 
     @staticmethod
     def _format_skill_instruction(skill_name: str, instructions: str) -> str:

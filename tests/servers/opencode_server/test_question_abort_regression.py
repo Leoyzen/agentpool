@@ -309,6 +309,7 @@ def aborted_mock_agent(tmp_project_dir):
     agent = RunAbortedAgentMock()
     agent.agent_pool = _make_pool_mock(agent)
     agent.host_context = agent.agent_pool
+    agent.agent_pool.pool = agent.agent_pool  # state.py resolves _pool via _ctx.pool
     agent.env = _make_env_mock(str(tmp_project_dir))
     agent.storage = agent.agent_pool.storage
     return agent
@@ -320,6 +321,7 @@ def blocking_mock_agent(tmp_project_dir):
     agent = BlockingOnQuestionAgentMock()
     agent.agent_pool = _make_pool_mock(agent)
     agent.host_context = agent.agent_pool
+    agent.agent_pool.pool = agent.agent_pool  # state.py resolves _pool via _ctx.pool
     agent.env = _make_env_mock(str(tmp_project_dir))
     agent.storage = agent.agent_pool.storage
     return agent
@@ -342,6 +344,9 @@ def blocking_real_question_state(tmp_project_dir):
     placeholder_agent = RunAbortedAgentMock()
     placeholder_agent.agent_pool = _make_pool_mock(placeholder_agent)
     placeholder_agent.host_context = placeholder_agent.agent_pool
+    placeholder_agent.agent_pool.pool = (
+        placeholder_agent.agent_pool
+    )  # state.py resolves _pool via _ctx.pool
     placeholder_agent.env = _make_env_mock(str(tmp_project_dir))
     placeholder_agent.storage = placeholder_agent.agent_pool.storage
     state = ServerState(working_dir=str(tmp_project_dir), agent=placeholder_agent)
@@ -368,6 +373,7 @@ def blocking_real_question_state(tmp_project_dir):
     real_agent = BlockingOnRealQuestionAgentMock(state)
     real_agent.agent_pool = _make_pool_mock(real_agent)
     real_agent.host_context = real_agent.agent_pool
+    real_agent.agent_pool.pool = real_agent.agent_pool  # state.py resolves _pool via _ctx.pool
     real_agent.env = _make_env_mock(str(tmp_project_dir))
     real_agent.storage = real_agent.agent_pool.storage
     state.agent = real_agent

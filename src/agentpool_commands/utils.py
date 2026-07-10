@@ -102,7 +102,7 @@ class EditAgentFileCommand(NodeCommand):
             raise CommandError("No configuration file path available")
 
         try:
-            webbrowser.open(config_file_path)
+            webbrowser.open(str(config_file_path))
             msg = f"🌐 **Opening agent configuration:** `{config_file_path}`"
             await ctx.print(msg)
         except Exception as e:

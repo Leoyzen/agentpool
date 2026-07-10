@@ -123,7 +123,7 @@ async def test_command_endpoint_skill_provider_fallback(
     mock_resolved = MagicMock()
     mock_resolved.load_instructions = MagicMock(return_value="Process $1")
     mock_resolver.resolve = AsyncMock(return_value=mock_resolved)
-    mock_agent.host_context.skill_resolver = mock_resolver  # type: ignore[attr-defined]
+    mock_agent.host_context.pool.skill_resolver = mock_resolver  # type: ignore[attr-defined]
     mock_agent.host_context.skill_provider = None  # type: ignore[attr-defined]
 
     # Mock empty MCP prompts
@@ -229,7 +229,7 @@ async def test_command_endpoint_skill_bridge_with_provider_for_virtual_skills(
     mock_resolved.load_instructions = MagicMock(return_value="Virtual instructions with $1")
     mock_resolver = MagicMock()
     mock_resolver.resolve = AsyncMock(return_value=mock_resolved)
-    mock_agent.host_context.skill_resolver = mock_resolver  # type: ignore[attr-defined]
+    mock_agent.host_context.pool.skill_resolver = mock_resolver  # type: ignore[attr-defined]
     mock_agent.host_context.skill_provider = None  # type: ignore[attr-defined]
 
     # Mock empty MCP prompts

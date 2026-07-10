@@ -124,9 +124,9 @@ async def list_agents(state: StateDep) -> list[Agent]:
     switcher UI. All agents are marked as primary (visible in switcher).
     The default agent is always first in the returned list.
     """
-    pool = state.agent.host_context
-    assert pool is not None, "AgentPool is not initialized"
-    default_name = pool.main_agent_name
+    ctx = state.agent.host_context
+    assert ctx is not None, "AgentPool is not initialized"
+    default_name = ctx.main_agent_name
     agents = [
         Agent(
             name=name,
@@ -134,7 +134,7 @@ async def list_agents(state: StateDep) -> list[Agent]:
             mode="primary",
             default=(name == default_name),
         )
-        for name, agent in pool.manifest.agents.items()
+        for name, agent in ctx.manifest.agents.items()
     ]
     if not agents:
         return [Agent(name="default", description="Default agent", mode="primary", default=True)]
@@ -153,19 +153,19 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
     """
     from pathlib import PurePosixPath
 
-    # Access the pool via the agent's agent_pool reference
-    pool = state.agent.host_context
-    if pool is None:
+    ctx = state.agent.host_context
+    if ctx is None:
         return []
 
     skills: list[SkillInfo] = []
 
     # 1. Get MCP provider skills from skill resolver first
     # These will be overridden by local skills if names conflict
-    if pool.skill_resolver is not None:
+    skill_resolver = ctx.pool.skill_resolver if ctx.pool is not None else None
+    if skill_resolver is not None:
         try:
-            for provider_name in pool.skill_resolver.list_providers():
-                provider = pool.skill_resolver.get_provider(provider_name)
+            for provider_name in skill_resolver.list_providers():
+                provider = skill_resolver.get_provider(provider_name)
                 if provider is None:
                     continue
                 mcp_skills = await provider.get_skills()
@@ -174,7 +174,7 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
                     # (load_instructions returns empty for PurePosixPath)
                     if isinstance(skill.skill_path, PurePosixPath):
                         try:
-                            resolved = await pool.skill_resolver.resolve(skill.name)
+                            resolved = await skill_resolver.resolve(skill.name)
                             content = resolved.load_instructions()
                         except Exception as e:  # noqa: BLE001
                             logger.debug(
@@ -199,8 +199,8 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
 
     # 2. Get local filesystem skills from SkillsManager (takes priority)
     # Local skills override MCP skills with the same name
-    if pool.skills is not None:
-        for skill in pool.skills.list_skills():
+    if ctx.skills_registry is not None:
+        for skill in ctx.skills_registry.list_skills():
             # Remove any existing MCP skill with the same name (local takes priority)
             existing = next((s for s in skills if s.name == skill.name), None)
             if existing:

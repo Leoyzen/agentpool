@@ -36,6 +36,7 @@ def create_mock_agent() -> MagicMock:
     agent.name = "test_agent"
     agent.session_id = "original_session_id"
     agent.host_context = MagicMock()
+    agent.host_context.pool = agent.host_context  # state.py resolves _pool via _ctx.pool
     agent.host_context.manifest.config_file_path = "test_config.yml"
     agent.host_context.storage.save_session = AsyncMock()
     agent.host_context.storage.load_session = AsyncMock(return_value=None)
@@ -50,7 +51,9 @@ def create_mock_agent() -> MagicMock:
     agent.host_context.session_pool.event_bus = MagicMock()
     from tests._helpers.mock_stream import EmptyReceiveStream
 
-    agent.host_context.session_pool.event_bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
+    agent.host_context.session_pool.event_bus.subscribe = AsyncMock(
+        return_value=EmptyReceiveStream()
+    )
     agent.host_context.session_pool.event_bus.unsubscribe = AsyncMock()
     agent.env = MagicMock()
     agent.env.cwd = "/test/dir"

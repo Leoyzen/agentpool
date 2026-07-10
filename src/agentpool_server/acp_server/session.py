@@ -280,7 +280,8 @@ class ACPSession:
         included in available_commands_update notifications per ACP spec.
         """
         ctx = self.host_context
-        skill_registry = ctx.pool.skill_commands
+        pool = ctx.pool if ctx is not None else None
+        skill_registry = pool.skill_commands if pool is not None else None
         if skill_registry is None:
             return
 
@@ -598,7 +599,7 @@ class ACPSession:
         Pool-level agents were removed — all agents are now session-scoped.
         """
         # Validate agent exists in config (not runtime instances)
-        available = list(self.host_context.pool.agent_configs.keys())
+        available = list(self.host_context.manifest.agents.keys())
         if agent_name not in available:
             raise ValueError(f"Agent {agent_name!r} not found. Available: {available}")
 
@@ -839,7 +840,9 @@ class ACPSession:
 
             # Unregister skill command callback to prevent memory leak
             if hasattr(self, "_skill_command_callback"):
-                skill_registry = self.host_context.pool.skill_commands
+                ctx = self.host_context
+                pool = ctx.pool if ctx is not None else None
+                skill_registry = pool.skill_commands if pool is not None else None
                 if skill_registry is not None and hasattr(
                     skill_registry, "_command_change_handlers"
                 ):
