@@ -639,6 +639,7 @@ async def test_from_config_capabilities_not_duplicated() -> None:
     This test calls from_config() with a config containing a capability, then
     calls get_agentlet() and verifies the capability appears exactly once.
     """
+    from llmling_models_config import TestModelConfig
     from pydantic_ai.capabilities import Instrumentation
 
     from agentpool.models.agents import NativeAgentConfig
@@ -650,7 +651,7 @@ async def test_from_config_capabilities_not_duplicated() -> None:
     )
     config = NativeAgentConfig(
         name="test_dedup_agent",
-        model="openai:gpt-4o-mini",
+        model=TestModelConfig(custom_output_text="test"),
         system_prompt=["Be helpful."],
         capabilities=[cap_config],
     )

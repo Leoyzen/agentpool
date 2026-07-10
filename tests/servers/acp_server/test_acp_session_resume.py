@@ -536,6 +536,7 @@ async def test_resume_passes_through_to_session_manager_correctly(
         mcp_servers=resume_session_request.mcp_servers,
         client_capabilities=mock_acp_agent.client_capabilities,
         client_info=mock_acp_agent.client_info,
+        client_locale=mock_acp_agent.client_locale,
         subagent_display_mode=mock_acp_agent.subagent_display_mode,
         connection_id=mock_acp_agent._get_connection_id(),
     )

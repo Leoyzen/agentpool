@@ -187,6 +187,9 @@ class ACPSession:
     client_info: Implementation | None = None
     """Client implementation info (name, version, title)"""
 
+    client_locale: str | None = None
+    """Client locale for i18n (e.g. "en", "zh-CN"). Injected into agent prompts."""
+
     manager: ACPSessionManager | None = None
     """Session manager for managing sessions. Used for session management commands."""
 
@@ -250,6 +253,8 @@ class ACPSession:
             # to AcpMcpConnectionManager.cleanup_session(), leaking per-session
             # ACP stream pairs and reverse-index entries.
             self.agent.mcp._acp_mcp_manager = self.acp_agent._mcp_manager
+            if self.client_locale:
+                self.agent.sys_prompts.prompts.append(self.get_locale_prompt)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
         if isinstance(self.agent, ACPAgent):
 
             async def permission_callback(
@@ -583,6 +588,16 @@ class ACPSession:
         """Get current working directory context for prompts."""
         return f"Working directory: {self.cwd}" if self.cwd else ""
 
+    def get_locale_prompt(self) -> str:
+        """Get locale directive for the agent.
+
+        Returns a prompt instructing the agent to respond in the client's
+        preferred locale. Called by pydantic-ai on each model invocation.
+        """
+        if not self.client_locale:
+            return ""
+        return f"Language: You MUST respond in {self.client_locale}."
+
     async def switch_active_agent(self, agent_name: str) -> None:
         """Switch to a different agent in the pool.
 
@@ -603,6 +618,11 @@ class ACPSession:
         # Remove session-specific mutations from old agent before switching
         if isinstance(self.agent, Agent) and self.get_cwd_context in self.agent.sys_prompts.prompts:
             self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        if (
+            isinstance(self.agent, Agent)
+            and self.get_locale_prompt in self.agent.sys_prompts.prompts
+        ):
+            self.agent.sys_prompts.prompts.remove(self.get_locale_prompt)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
         # Create new session agent via SessionPool (pool-level agents removed)
         pool = self.agent_pool
@@ -621,6 +641,8 @@ class ACPSession:
         self.agent._input_provider = self.input_provider
         if isinstance(self.agent, Agent):
             self.agent.sys_prompts.prompts.append(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            if self.client_locale:
+                self.agent.sys_prompts.prompts.append(self.get_locale_prompt)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
         # Reconnect signal
         with suppress(Exception):
@@ -828,6 +850,10 @@ class ACPSession:
                 self.get_cwd_context in self.agent.sys_prompts.prompts
             ):
                 self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            if isinstance(self.agent, Agent) and (
+                self.get_locale_prompt in self.agent.sys_prompts.prompts
+            ):
+                self.agent.sys_prompts.prompts.remove(self.get_locale_prompt)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
             # Unregister skill command callback to prevent memory leak
             if hasattr(self, "_skill_command_callback"):

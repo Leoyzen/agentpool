@@ -77,6 +77,30 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+_LOCALE_MAX_LENGTH = 15
+
+
+def _extract_locale(field_meta: dict[str, Any] | None) -> str | None:
+    """Extract and validate locale from ACP client metadata.
+
+    Only allows alphanumeric characters, hyphens, and underscores to
+    prevent prompt injection via crafted locale strings.
+    """
+    if field_meta is None:
+        return None
+    raw = field_meta.get("locale")
+    if not isinstance(raw, str):
+        return None
+    locale = raw.strip()
+    if not locale or len(locale) > _LOCALE_MAX_LENGTH:
+        logger.warning("Invalid client locale ignored", locale=raw)
+        return None
+    if not all(c.isascii() and (c.isalnum() or c in "-_") for c in locale):
+        logger.warning("Invalid client locale ignored", locale=raw)
+        return None
+    logger.info("Client locale", locale=locale)
+    return locale
+
 
 async def get_session_model_state(
     agent: BaseAgent,
@@ -254,6 +278,7 @@ class AgentPoolACPAgent(ACPAgent):
         """Initialize derived attributes and setup after field assignment."""
         self.client_capabilities: ClientCapabilities | None = None
         self.client_info: Implementation | None = None
+        self.client_locale: str | None = None
         pool = self.agent_pool
         if pool is None:
             msg = "Default agent has no associated pool"
@@ -399,6 +424,9 @@ class AgentPoolACPAgent(ACPAgent):
         version = min(params.protocol_version, self.PROTOCOL_VERSION)
         self.client_capabilities = params.client_capabilities
         self.client_info = params.client_info
+        # Extract locale from client metadata (field_meta / _meta in JSON-RPC).
+        # Validate format to prevent prompt injection via crafted locale strings.
+        self.client_locale = _extract_locale(params.field_meta)
         logger.info("Client info", request=params.model_dump_json())
         self._initialized = True
         # Forward client capabilities to the SessionPool protocol handler so
@@ -449,6 +477,7 @@ class AgentPoolACPAgent(ACPAgent):
                 mcp_servers=params.mcp_servers,
                 client_capabilities=self.client_capabilities,
                 client_info=self.client_info,
+                client_locale=self.client_locale,
                 subagent_display_mode=self.subagent_display_mode,
                 raw_input_mode=self.raw_input_mode,
                 connection_id=self._get_connection_id(),
@@ -529,6 +558,7 @@ class AgentPoolACPAgent(ACPAgent):
                     mcp_servers=params.mcp_servers,
                     client_capabilities=self.client_capabilities,
                     client_info=self.client_info,
+                    client_locale=self.client_locale,
                     subagent_display_mode=self.subagent_display_mode,
                     connection_id=self._get_connection_id(),
                 )
@@ -623,6 +653,7 @@ class AgentPoolACPAgent(ACPAgent):
             mcp_servers=params.mcp_servers,
             client_capabilities=self.client_capabilities,
             client_info=self.client_info,
+            client_locale=self.client_locale,
             subagent_display_mode=self.subagent_display_mode,
             raw_input_mode=self.raw_input_mode,
             connection_id=self._get_connection_id(),
@@ -652,6 +683,7 @@ class AgentPoolACPAgent(ACPAgent):
                     mcp_servers=params.mcp_servers,
                     client_capabilities=self.client_capabilities,
                     client_info=self.client_info,
+                    client_locale=self.client_locale,
                     subagent_display_mode=self.subagent_display_mode,
                     connection_id=self._get_connection_id(),
                 )
