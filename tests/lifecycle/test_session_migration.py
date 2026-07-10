@@ -543,7 +543,7 @@ async def test_close_session_with_active_run_completes() -> None:
     controller._session_scopes["s1"] = anyio.CancelScope()
 
     # Create run handle.
-    run_handle = controller._start_run_handle(session, agent, "s1", "hello")
+    _run_handle = controller._start_run_handle(session, agent, "s1", "hello")
 
     # Give background task a moment.
     await asyncio.sleep(0.01)

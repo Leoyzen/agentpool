@@ -162,7 +162,7 @@ class ListMCPServersCommand(NodeCommand):
 
         rows = []
         for server in servers:
-            server_type = type(server.server).__name__.replace("MCPServerConfig", "")
+            server_type = type(server.client.config).__name__.replace("MCPServerConfig", "")
             rows.append({
                 "Name": server.name,
                 "Type": server_type,

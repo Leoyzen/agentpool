@@ -41,7 +41,6 @@ class CronTools(FunctionToolsetCapability):
     def __init__(self, service: CronService, name: str = "cron") -> None:
         super().__init__(name=name)
         self.service = service
-        self._tools: list[Tool] | None = None
 
     async def __aenter__(self) -> Self:
         """Start the cron service."""
@@ -59,7 +58,7 @@ class CronTools(FunctionToolsetCapability):
 
     async def get_tools(self) -> Sequence[Tool]:
         """Return cron management tools."""
-        if self._tools is not None:
+        if self._tools:
             return self._tools
 
         self._tools = [

@@ -19,7 +19,7 @@ from pydantic_ai import (
 from agentpool import log
 from agentpool.messaging.messages import ChatMessage
 from agentpool.sessions.models import SessionData
-from agentpool.tools.manager import ToolError
+from agentpool.tools.exceptions import ToolError
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict, to_user_content_or_path_ref
 from agentpool.utils.time_utils import datetime_to_ms, ms_to_datetime
 from agentpool_server.opencode_server.models import (
@@ -58,8 +58,8 @@ if TYPE_CHECKING:
     from fsspec.asyn import AsyncFileSystem
     from pydantic_ai import UserContent
 
+    from agentpool.agents.base_agent import BaseAgent
     from agentpool.common_types import MCPConnectionStatus, MCPServerStatus, PathReference
-    from agentpool.tools.manager import ToolManager
     from agentpool_server.opencode_server.models import ToolState
     from agentpool_server.opencode_server.models.mcp import (
         MCPConnectionStatus as OpenCodeMCPConnectionStatus,
@@ -122,10 +122,10 @@ def _get_input_from_state(state: ToolState, *, convert_params: bool = False) -> 
     return _convert_params_for_ui(state.input) if convert_params else state.input
 
 
-async def _resolve_mcp_resource(source: ResourceSource, tools: ToolManager) -> str | None:
+async def _resolve_mcp_resource(source: ResourceSource, agent: BaseAgent[Any, Any]) -> str | None:
     """Resolve an MCP resource and return its content as text (or None if cant be read)."""
     try:
-        resource = await tools.get_resource(source.uri)
+        resource = await agent.get_resource(source.uri)
     except ToolError:
         logger.warning("MCP resource not found", client_name=source.client_name, uri=source.uri)
         return None
@@ -142,7 +142,7 @@ async def _resolve_mcp_resource(source: ResourceSource, tools: ToolManager) -> s
 async def extract_user_prompt_from_parts(
     parts: list[PartInput],
     fs: AsyncFileSystem | None = None,
-    tools: ToolManager | None = None,
+    agent: BaseAgent[Any, Any] | None = None,
 ) -> Sequence[UserContent | PathReference]:
     """Extract user prompt from OpenCode message input parts.
 
@@ -157,7 +157,7 @@ async def extract_user_prompt_from_parts(
     Args:
         parts: List of OpenCode message input parts
         fs: Optional async filesystem for PathReference resolution
-        tools: Optional tool manager for resolving MCP resources
+        agent: Optional agent for resolving MCP resources
 
     Returns:
         Either a simple string (text-only) or a list of UserContent/PathReference items
@@ -169,8 +169,8 @@ async def extract_user_prompt_from_parts(
         match part:
             case TextPartInput(text=text):
                 result.append(text)
-            case FilePartInput(source=ResourceSource() as resource) if tools is not None:
-                content = await _resolve_mcp_resource(resource, tools)
+            case FilePartInput(source=ResourceSource() as resource) if agent is not None:
+                content = await _resolve_mcp_resource(resource, agent)
                 if content is not None:
                     result.append(content)
             case FilePartInput(mime=mime, url=url, filename=filename):

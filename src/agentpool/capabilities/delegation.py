@@ -42,7 +42,7 @@ class DelegationService(Protocol):
         - ``get_available_agents()``: list agent names in scope.
     """
 
-    async def spawn_subagent(
+    def spawn_subagent(
         self,
         name: str,
         prompt: str,

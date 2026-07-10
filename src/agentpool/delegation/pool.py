@@ -16,7 +16,7 @@ from agentpool.capabilities.combined_toolset import CombinedToolsetCapability, _
 from agentpool.delegation.message_flow_tracker import MessageFlowTracker
 from agentpool.log import get_logger
 from agentpool.skills.command_registry import SkillCommandRegistry
-from agentpool.skills.uri_resolver import SkillURIResolver
+from agentpool.skills.uri_resolver import SkillProvider, SkillURIResolver
 from agentpool.talk.registry import ConnectionRegistry
 from agentpool.tasks import TaskRegistry
 
@@ -493,7 +493,8 @@ class AgentPool[TPoolDeps = None]:
         """
         name = self._provider_name(provider)
         if self._skill_resolver is not None:
-            self._skill_resolver.register_provider(name, provider)
+            if isinstance(provider, SkillProvider):
+                self._skill_resolver.register_provider(name, provider)
         else:
             if not hasattr(self, "_pending_skill_providers"):
                 self._pending_skill_providers: list[AbstractCapability] = []
@@ -587,13 +588,15 @@ class AgentPool[TPoolDeps = None]:
         # Create skill URI resolver and register providers
         self._skill_resolver = SkillURIResolver()
         for provider in providers:
-            self._skill_resolver.register_provider(self._provider_name(provider), provider)
+            if isinstance(provider, SkillProvider):
+                self._skill_resolver.register_provider(self._provider_name(provider), provider)
 
         # Drain any pending skill providers that were registered before setup
         pending: list[AbstractCapability] = getattr(self, "_pending_skill_providers", [])
         if pending:
             for provider in pending:
-                self._skill_resolver.register_provider(self._provider_name(provider), provider)
+                if isinstance(provider, SkillProvider):
+                    self._skill_resolver.register_provider(self._provider_name(provider), provider)
             self._pending_skill_providers.clear()
 
     async def _rebuild_skill_capabilities(self) -> None:

@@ -103,7 +103,6 @@ class CodeTools(FunctionToolsetCapability):
         self._explicit_env = env
         self._explicit_cwd = cwd
         self._diagnostics_config = diagnostics_config
-        self._tools: list[Tool] | None = None
 
     def _get_env(self, agent_ctx: AgentContext) -> ExecutionEnvironment:
         """Get execution environment (explicit or from agent)."""
@@ -135,7 +134,7 @@ class CodeTools(FunctionToolsetCapability):
 
     async def get_tools(self) -> Sequence[Tool]:
         """Get code analysis tools."""
-        if self._tools is not None and len(self._tools) > 0:
+        if self._tools and len(self._tools) > 0:
             return self._tools
 
         # create_tool already appends to self._tools, so we just call it

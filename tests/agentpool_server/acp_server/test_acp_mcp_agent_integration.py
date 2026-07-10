@@ -422,11 +422,14 @@ async def test_get_tools_sends_tools_list_via_acp(
         name=server_config.name,
         timeout=10.0,
     )
-    provider = MCPCapability(server=acp_server_config, transport=transport)
+    from agentpool.mcp_server.client import MCPClient
+
+    acp_client = MCPClient(config=acp_server_config, transport=transport)
+    provider = MCPCapability(client=acp_client)
 
     with anyio.fail_after(5):
         async with provider:
-            tools = await provider.get_tools()
+            tools = await provider.client.list_tools()
 
     assert len(tools) >= 1, "Expected at least one tool from get_tools()"
 

@@ -354,7 +354,7 @@ async def _process_message_locked(  # noqa: PLR0915
     user_prompt = await extract_user_prompt_from_parts(
         request.parts,
         fs=state.fs,
-        tools=state.agent.tools,
+        agent=state.agent,
     )
 
     # --- Trigger title generation on first message (fire-and-forget) ---
@@ -778,7 +778,7 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
         user_prompt = await extract_user_prompt_from_parts(
             request.parts,
             fs=state.fs,
-            tools=state.agent.tools,
+            agent=state.agent,
         )
 
         # Use integration layer to ensure session creation and event consumer startup

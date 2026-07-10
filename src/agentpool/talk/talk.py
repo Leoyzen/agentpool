@@ -184,16 +184,16 @@ class Talk[TTransmittedData = Any]:
 
         if not condition:
             return default_return
-        ctx = self.source.host_context
-        registry = ctx.connection_registry if ctx else None
-        ctx = EventContext(
+        host_ctx = self.source.host_context
+        registry = host_ctx.connection_registry if host_ctx else None
+        event_ctx = EventContext(
             message=message,
             target=target,
             stats=self.stats,
             registry=registry,
             talk=self,
         )
-        return await execute(condition, ctx)
+        return await execute(condition, event_ctx)
 
     def on_event(
         self,

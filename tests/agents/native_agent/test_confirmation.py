@@ -383,8 +383,8 @@ async def test_multiple_confirmation_tools_same_run(
     mock_provider = MagicMock()
     mock_provider.get_tool_confirmation = AsyncMock(return_value="allow")
     mock_agent._input_provider = mock_provider
-    mock_agent.tools.register_tool(confirmation_tool_1)
-    mock_agent.tools.register_tool(confirmation_tool_2)
+    mock_agent._builtin_provider.register_tool(confirmation_tool_1)
+    mock_agent._builtin_provider.register_tool(confirmation_tool_2)
 
     with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
 
@@ -412,8 +412,8 @@ async def test_mixed_approval_denial_same_run(
     mock_provider = MagicMock()
     mock_provider.get_tool_confirmation = AsyncMock(side_effect=["allow", "skip"])
     mock_agent._input_provider = mock_provider
-    mock_agent.tools.register_tool(confirmation_tool_1)
-    mock_agent.tools.register_tool(confirmation_tool_2)
+    mock_agent._builtin_provider.register_tool(confirmation_tool_1)
+    mock_agent._builtin_provider.register_tool(confirmation_tool_2)
 
     with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
 
@@ -443,8 +443,8 @@ async def test_never_mode_auto_approves_all_tools(
     mock_provider.get_tool_confirmation = AsyncMock(return_value="allow")
     mock_agent._input_provider = mock_provider
     mock_agent.tool_confirmation_mode = "never"
-    mock_agent.tools.register_tool(confirmation_tool_1)
-    mock_agent.tools.register_tool(confirmation_tool_2)
+    mock_agent._builtin_provider.register_tool(confirmation_tool_1)
+    mock_agent._builtin_provider.register_tool(confirmation_tool_2)
 
     with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
 
@@ -469,8 +469,8 @@ async def test_abort_run_stops_subsequent_confirmations(
     mock_provider = MagicMock()
     mock_provider.get_tool_confirmation = AsyncMock(side_effect=["abort_run"])
     mock_agent._input_provider = mock_provider
-    mock_agent.tools.register_tool(confirmation_tool_1)
-    mock_agent.tools.register_tool(confirmation_tool_2)
+    mock_agent._builtin_provider.register_tool(confirmation_tool_1)
+    mock_agent._builtin_provider.register_tool(confirmation_tool_2)
 
     with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
 

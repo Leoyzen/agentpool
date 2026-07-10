@@ -185,10 +185,10 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
         """
         from agentpool.capabilities.change_event import ChangeEvent
 
-        if isinstance(event, ChangeEvent) and event.resource_type == "skills":
+        if isinstance(event, ChangeEvent) and event.kind == "skills_changed":
             logger.debug(
                 "Skill provider change detected, refreshing commands",
-                provider=event.provider_name,
+                provider=event.capability_name,
             )
             # Re-sync all skills respecting priority (local skills override MCP skills)
             await self._sync_commands()

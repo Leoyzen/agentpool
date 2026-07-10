@@ -273,7 +273,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             return
         # Add all tool providers to tool manager
         for provider in self._tool_providers:
-            self.tools.add_provider(provider)
+            self._external_capabilities.append(provider)
         await self._tool_bridge.start()
 
         url = HttpUrl(self._tool_bridge.url)

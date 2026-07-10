@@ -131,6 +131,6 @@ async def pick_one[T](
     select_option.__doc__ += f"\nOptions:\n{docs}"
     sys_prompt = "Select the most appropriate option based on the context."
     async with Agent(model=model, system_prompt=sys_prompt) as agent:
-        agent.tools.register_tool(select_option, enabled=True)
+        agent._builtin_provider.register_tool(select_option, enabled=True)
         await agent.run(prompt)
         return instances["selected"]

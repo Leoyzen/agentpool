@@ -319,11 +319,8 @@ def mock_mcp_client():
 @pytest.fixture
 def mcp_provider(mock_mcp_client):
     """Create an MCPCapability with mocked client."""
-    with patch("agentpool.mcp_server.MCPClient") as mock_client_class:
-        mock_client_class.return_value = mock_mcp_client
-        provider = MCPCapability(server="uvx test-server", name="security-test-mcp")
-        provider.client = mock_mcp_client
-        yield provider
+    provider = MCPCapability(client=mock_mcp_client, name="security-test-mcp")
+    yield provider
 
 
 @pytest.mark.asyncio

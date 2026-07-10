@@ -87,14 +87,11 @@ def scratchpad_provider(mock_mcp_client_with_scratchpad_skills):
     Provider name is "pool_mcp_scratchpad" (as registered by MCPManager),
     NOT "systematic-troubleshooting" (which is the skill name).
     """
-    with patch("agentpool.mcp_server.MCPClient") as mock_client_class:
-        mock_client_class.return_value = mock_mcp_client_with_scratchpad_skills
-        provider = MCPCapability(
-            server="streamable-http http://127.0.0.1:8890/mcp",
-            name="pool_mcp_scratchpad",
-        )
-        provider.client = mock_mcp_client_with_scratchpad_skills
-        yield provider
+    provider = MCPCapability(
+        client=mock_mcp_client_with_scratchpad_skills,
+        name="pool_mcp_scratchpad",
+    )
+    yield provider
 
 
 @pytest.fixture

@@ -35,10 +35,11 @@ from agentpool.agents.events import (
 )
 from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
 from agentpool.agents.native_agent.turn import NativeTurn
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.storage import StorageManager
-from agentpool.tools import Tool, ToolManager
+from agentpool.tools import Tool
 from agentpool.tools.exceptions import ToolError
 from agentpool.utils.result_utils import to_type
 
@@ -274,12 +275,15 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self.tool_confirmation_mode: ToolConfirmationMode = tool_confirmation_mode
         # Store builtin tools for pydantic-ai
         self._builtin_tools = list(builtin_tools) if builtin_tools else []
-        # Override tools with Agent-specific ToolManager (with tools and tool_mode)
-        self.tools = ToolManager(tools, tool_mode=tool_mode, _warn=False)
+        # Initialize built-in tools and tool mode (replaces deprecated ToolManager)
+        self._tool_mode = tool_mode
+        self._builtin_provider = FunctionToolsetCapability(name="builtin")
+        for tool in tools or []:
+            self._builtin_provider.add_tool(tool)
         for toolset_provider in toolsets or []:
-            self.tools.add_provider(toolset_provider)
+            self._external_capabilities.append(toolset_provider)
         aggregating_provider = self.mcp.get_aggregating_provider()
-        self.tools.add_provider(aggregating_provider)
+        self._external_capabilities.append(aggregating_provider)
         # Override conversation with Agent-specific MessageHistory (with storage, etc.)
         resources = list(resources)
         if knowledge:
@@ -812,7 +816,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         tool_capabilities: list[Any] = []
         direct_tools: list[Any] = []
         # 1. Tool providers — collect capabilities or fall back to direct tools
-        for provider in self.tools.providers:
+        for provider in self._all_capabilities:
             # M3: providers are now AbstractCapability instances directly.
             # They don't have get_capabilities() — they ARE capabilities.
             from pydantic_ai.capabilities import AbstractCapability as _AbstractCapability
@@ -854,7 +858,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         deferred_tools: dict[str, str] = {}
         try:
             # Timeout to prevent hang when ACP MCP providers are still connecting
-            all_tools = await asyncio.wait_for(self.tools.get_tools(), timeout=5.0)
+            all_tools = await asyncio.wait_for(self._get_all_tools(), timeout=5.0)
             for tool in all_tools:
                 if tool.deferred:
                     deferred_tools[tool.name] = tool.deferred_strategy
@@ -948,23 +952,23 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         system_instructions = await self.sys_prompts.to_pydantic_ai_instructions(self)
         all_instructions.extend(system_instructions)
 
-        # Collect instructions from all providers
-        for provider in self.tools.providers:
+        # Collect instructions from all capabilities
+        for cap in self._all_capabilities:
             try:
-                provider_instructions = provider.get_instructions()
+                cap_instructions = cap.get_instructions()
                 # Handle both sync (returns str|None|list) and async (returns coroutine)
-                if hasattr(provider_instructions, "__await__"):
-                    provider_instructions = await provider_instructions
-                if provider_instructions is not None:
-                    if isinstance(provider_instructions, list):
-                        all_instructions.extend(provider_instructions)
+                if hasattr(cap_instructions, "__await__"):
+                    cap_instructions = await cap_instructions
+                if cap_instructions is not None:
+                    if isinstance(cap_instructions, list):
+                        all_instructions.extend(cap_instructions)
                     else:
-                        all_instructions.append(provider_instructions)
+                        all_instructions.append(cap_instructions)
             except Exception as e:
-                # Provider failure - log and continue
+                # Capability failure - log and continue
                 logger.exception(
-                    "Failed to get instructions from provider",
-                    provider=type(provider).__name__,
+                    "Failed to get instructions from capability",
+                    capability=type(cap).__name__,
                     error=str(e),
                 )
                 continue
@@ -1183,7 +1187,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         pass_message_history: bool = False,
     ) -> Tool:
         """Register another agent as a worker tool."""
-        return self.tools.register_worker(
+        return self._worker_provider.register_worker(
             worker,
             name=name,
             reset_history_on_run=reset_history_on_run,
@@ -1269,7 +1273,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         async with AsyncExitStack() as stack:
             if tools is not None:  # Tools
                 await stack.enter_async_context(
-                    self.tools.temporary_tools(tools, exclusive=replace_tools)
+                    self._temporary_tools(tools, exclusive=replace_tools)
                 )
 
             if history is not None:  # History

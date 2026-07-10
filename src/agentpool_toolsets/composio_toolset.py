@@ -31,7 +31,6 @@ class ComposioTools(FunctionToolsetCapability):
             self.composio = Composio(api_key=key)
         else:
             self.composio = Composio()
-        self._tools: list[Tool] | None = None
         self._toolkits = toolsets
 
     def _create_tool_handler(self, tool_slug: str) -> Callable[..., Any]:
@@ -54,7 +53,7 @@ class ComposioTools(FunctionToolsetCapability):
     async def get_tools(self) -> Sequence[Tool]:
         """Get tools from composio."""
         # Return cached tools if available
-        if self._tools is not None:
+        if self._tools:
             return self._tools
 
         self._tools = []

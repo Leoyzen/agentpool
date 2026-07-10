@@ -100,10 +100,7 @@ def _make_run_handle(
 
 async def _consume_gen(gen: Any) -> list[Any]:
     """Consume an async generator and return all events."""
-    events: list[Any] = []
-    async for event in gen:
-        events.append(event)
-    return events
+    return [event async for event in gen]
 
 
 # ---------------------------------------------------------------------------
@@ -461,9 +458,7 @@ async def test_crash_recovery_start_inflight() -> None:
     await consumer
 
     # The first StateUpdate should have stop_reason="crash_recovery".
-    crash_recovery_events = [
-        e for e in state_events if e.stop_reason == "crash_recovery"
-    ]
+    crash_recovery_events = [e for e in state_events if e.stop_reason == "crash_recovery"]
     assert len(crash_recovery_events) >= 1
     assert crash_recovery_events[0].state == RunState.IDLE
 
@@ -1029,7 +1024,10 @@ async def test_idempotency_skip_when_turn_result_exists() -> None:
 
     # Pre-populate snapshot store with a turn result for a known turn_id.
     known_turn_id = "pre-completed-turn"
-    handle._snapshot_store.save_turn_result(known_turn_id, ChatMessage(content="done", role="assistant"))
+    handle._snapshot_store.save_turn_result(
+        known_turn_id,
+        ChatMessage(content="done", role="assistant"),
+    )
 
     assert handle._snapshot_store.has_turn_result(known_turn_id) is True
     # The turn result exists, confirming idempotency data is available.

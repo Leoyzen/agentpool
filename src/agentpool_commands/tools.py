@@ -228,8 +228,8 @@ class RegisterToolCommand(NodeCommand):
         """
         try:
             callable_func = import_callable(import_path)
-            # Register with ToolManager
-            tool_info = ctx.context.agent.tools.register_tool(
+            # Register with builtin provider
+            tool_info = ctx.context.agent._builtin_provider.register_tool(
                 callable_func,
                 name_override=name,
                 description_override=description,

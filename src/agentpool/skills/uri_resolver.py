@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 import unicodedata
 from urllib.parse import unquote, urlparse
 
@@ -24,9 +24,16 @@ from agentpool.skills.exceptions import SecurityError, SkillNotFoundError
 
 
 if TYPE_CHECKING:
-    from pydantic_ai.capabilities import AbstractCapability
-
     from agentpool.skills.skill import Skill
+
+
+@runtime_checkable
+class SkillProvider(Protocol):
+    """Protocol for capabilities that provide skills."""
+
+    async def get_skills(self) -> list[Skill]:
+        """Return the list of skills provided by this capability."""
+        ...
 
 
 # Maximum length for provider names (DNS label compatible)
@@ -302,9 +309,9 @@ class SkillURIResolver:
 
     def __init__(self) -> None:
         """Initialize the resolver with an empty provider registry."""
-        self._providers: dict[str, AbstractCapability] = {}
+        self._providers: dict[str, SkillProvider] = {}
 
-    def register_provider(self, name: str, provider: AbstractCapability) -> None:
+    def register_provider(self, name: str, provider: SkillProvider) -> None:
         """Register a resource provider.
 
         Args:
@@ -446,7 +453,7 @@ class SkillURIResolver:
         msg = f"Skill {resolved.skill_name!r} not found in provider {resolved.provider!r}"
         raise SkillNotFoundError(msg)
 
-    def get_provider(self, name: str) -> AbstractCapability | None:
+    def get_provider(self, name: str) -> SkillProvider | None:
         """Get a registered provider by name.
 
         Args:

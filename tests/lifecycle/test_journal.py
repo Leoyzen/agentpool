@@ -615,7 +615,7 @@ def test_durable_journal_corrupt_db_handled_gracefully(tmp_path):
     db_path.write_text("not a database")
     db_url = f"sqlite:///{db_path}"
     # Creating the journal should raise a DatabaseError, not crash
-    with pytest.raises(Exception):  # noqa: B017
+    with pytest.raises(Exception, match="not a database"):
         DurableJournal(db_url, session_id="test")
 
 

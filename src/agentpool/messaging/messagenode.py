@@ -128,7 +128,7 @@ class MessageNode[TDeps, TResult](ABC):
         # However, when the agent has its own MCP servers (agent-level),
         # create a dedicated MCPManager for them. Pool-level servers are
         # still accessible via agent_pool.mcp and are added separately by
-        # the orchestrator via agent.tools.add_provider().
+        # the orchestrator via agent._external_capabilities.append().
         if agent_pool is not None and not mcp_servers:
             self._mcp_shared = True
             self.mcp = agent_pool.mcp

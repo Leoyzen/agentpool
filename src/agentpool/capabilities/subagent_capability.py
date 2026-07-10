@@ -89,9 +89,7 @@ class SubagentCapability(AbstractCapability[AgentDepsT]):
         """
         delegation = _resolve_delegation(ctx)
         stream = delegation.spawn_subagent(name, prompt)
-        # The protocol is declared async def but implementations use yield;
-        # `await` would be correct from mypy's perspective but wrong at runtime
-        chunks = [str(chunk) async for chunk in stream]  # type: ignore[attr-defined]
+        chunks = [str(chunk) async for chunk in stream]
         return "\n".join(chunks) if chunks else ""
 
     @staticmethod

@@ -135,7 +135,6 @@ class FSSpecTools(FunctionToolsetCapability):
         self.max_file_size = max_file_size_kb * 1024  # Convert KB to bytes
         self.max_grep_output = max_grep_output_kb * 1024  # Convert KB to bytes
         self.use_subprocess_grep = use_subprocess_grep
-        self._tools: list[Tool] | None = None
         self._grep_backend: GrepBackend | None = None
         self._enable_diagnostics = enable_diagnostics
         self._diagnostics: DiagnosticsManager | None = None
@@ -216,7 +215,7 @@ class FSSpecTools(FunctionToolsetCapability):
 
     async def get_tools(self) -> Sequence[Tool]:
         """Get filesystem tools."""
-        if self._tools is not None:
+        if self._tools:
             return self._tools
         # Create standalone tools with toolset's configuration
         list_dir_tool = create_list_directory_tool(env=self.execution_env, cwd=self.cwd)

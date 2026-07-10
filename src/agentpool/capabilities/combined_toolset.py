@@ -190,8 +190,7 @@ class CombinedToolsetCapability(AbstractCapability[AgentDepsT]):
         """Collect tools from all children that have ``get_tools()``.
 
         This is a backward-compat method for code that still calls
-        ``get_tools()`` on the combined capability (e.g.,
-        :class:`~agentpool.tools.manager.ToolManager`). It iterates
+        ``get_tools()`` on the combined capability. It iterates
         children that satisfy the :class:`_ToolCollecting` Protocol and
         collects their tools into a flat list.
         """

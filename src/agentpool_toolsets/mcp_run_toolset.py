@@ -44,7 +44,6 @@ class McpRunTools(FunctionToolsetCapability):
         id_ = session_id or os.environ.get("MCP_RUN_SESSION_ID")
         config = ClientConfig()
         self.client = Client(session_id=id_, config=config)
-        self._tools: list[Tool] | None = None
         self._session: ClientSession | None = None
         # Context manager for persistent connection
         self._mcp_client_ctx: AbstractAsyncContextManager[ClientSession] | None = None
@@ -86,13 +85,12 @@ class McpRunTools(FunctionToolsetCapability):
     async def _on_tools_changed(self) -> None:
         """Handle tool list change notification."""
         logger.info("MCP.run tools changed, refreshing cache")
-        self._tools = None
-        await self.tools_changed.emit(self.create_change_event("tools"))
+        self._tools = []
 
     async def get_tools(self) -> Sequence[Tool]:
         """Get tools from MCP.run."""
         # Return cached tools if available
-        if self._tools is not None:
+        if self._tools:
             return self._tools
 
         self._tools = []
@@ -120,9 +118,8 @@ class McpRunTools(FunctionToolsetCapability):
     async def refresh_tools(self) -> None:
         """Manually refresh tools from MCP.run and emit change event."""
         logger.info("Manually refreshing MCP.run tools")
-        self._tools = None
+        self._tools = []
         await self.get_tools()
-        await self.tools_changed.emit(self.create_change_event("tools"))
 
 
 if __name__ == "__main__":

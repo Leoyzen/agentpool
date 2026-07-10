@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Self, Union, get_args, get_ori
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Iterator
 
-    from pydantic_ai.capabilities import AbstractCapability
+    from agentpool.capabilities.function_toolset import FunctionToolsetCapability
     from agentpool.tools.base import Tool
 
 
@@ -171,8 +171,7 @@ def get_discriminator_values(union_type: Any) -> dict[str, type]:
 
 
 def discriminator_to_filename(discriminator: str) -> str:
-    """Convert discriminator value to expected doc filename.
-    """
+    """Convert discriminator value to expected doc filename."""
     return discriminator.replace("_", "-")
 
 
@@ -263,11 +262,9 @@ def tool_to_markdown(tool: Tool) -> str:
     """
     lines = [f"### `{tool.name}`", ""]
 
-    if tool.description:
-        # Strip Args/Returns sections since we have a parameters table
-        if desc := _strip_docstring_sections(tool.description):
-            lines.append(desc)
-            lines.append("")
+    if tool.description and (desc := _strip_docstring_sections(tool.description)):
+        lines.append(desc)
+        lines.append("")
 
     # Get parameters from schema
     schema = tool.schema["function"]
@@ -309,7 +306,7 @@ def tool_to_markdown(tool: Tool) -> str:
     return "\n".join(lines)
 
 
-def generate_tool_docs(toolset: AbstractCapability) -> str:
+def generate_tool_docs(toolset: FunctionToolsetCapability[Any]) -> str:
     """Generate markdown documentation for all tools in a toolset.
 
     Args:

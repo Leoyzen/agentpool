@@ -206,7 +206,8 @@ class SkillMcpManager:
             List of tools from the MCP server.
         """
         provider = await self.connect(server_name, session_id)
-        tools = await provider.get_tools()
+        mcp_tools = await provider.client.list_tools()
+        tools = [provider.client.convert_tool(t) for t in mcp_tools]
         self._touch(session_id, server_name)
         return list(tools)
 
@@ -383,10 +384,12 @@ class SkillMcpManager:
                 f"SkillMcpServerConfig for {server_name!r} must specify either 'command' or 'url'"
             )
 
+        from agentpool.mcp_server.client import MCPClient
+
+        client = MCPClient(config=mcp_config)
         provider = MCPCapability(
-            server=mcp_config,
+            client=client,
             name=f"skill_mcp_{server_name}",
-            source="node",
         )
         await provider.__aenter__()
         return provider

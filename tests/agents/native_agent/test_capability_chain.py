@@ -112,7 +112,7 @@ async def test_deferred_bridge_receives_deferred_tools_mapping(
     mock_normal_tool.deferred = False
 
     # Mock get_tools to return our test tools
-    mock_agent.tools.get_tools = AsyncMock(
+    mock_agent._get_all_tools = AsyncMock(
         return_value=[mock_deferred_tool, mock_continue_tool, mock_normal_tool]
     )
 
@@ -169,7 +169,7 @@ async def test_deferred_bridge_empty_when_no_deferred_tools(
     mock_normal_tool.name = "read_file"
     mock_normal_tool.deferred = False
 
-    mock_agent.tools.get_tools = AsyncMock(return_value=[mock_normal_tool])
+    mock_agent._get_all_tools = AsyncMock(return_value=[mock_normal_tool])
 
     with (
         patch(
@@ -208,7 +208,7 @@ async def test_deferred_bridge_handles_get_tools_failure(
     mock_agent: Agent[Any],
 ) -> None:
     """DeferredToolBridge handles get_tools() failure gracefully (empty dict)."""
-    mock_agent.tools.get_tools = AsyncMock(side_effect=RuntimeError("Provider error"))
+    mock_agent._get_all_tools = AsyncMock(side_effect=RuntimeError("Provider error"))
 
     with (
         patch(

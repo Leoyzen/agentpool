@@ -357,10 +357,10 @@ class SessionPool:
             )
 
         # Add pool-level providers (non-MCP only).
-        # MCP tools are handled via McpConfigSnapshot → get_capabilities() →
-        # MCPToolset, not through agent.tools.providers.
+        # MCP tools are handled via McpConfigSnapshot -> get_capabilities() ->
+        # MCPToolset, not through agent._all_capabilities.
         if self.pool is not None:
-            agent.tools.add_provider(self.pool.skills_tools_provider)
+            agent._external_capabilities.append(self.pool.skills_tools_provider)
 
         await agent.__aenter__()
         return agent
@@ -401,10 +401,10 @@ class SessionPool:
             )
 
         # Add pool-level providers (non-MCP only).
-        # MCP tools are handled via McpConfigSnapshot → get_capabilities() →
-        # MCPToolset, not through agent.tools.providers.
+        # MCP tools are handled via McpConfigSnapshot -> get_capabilities() ->
+        # MCPToolset, not through agent._all_capabilities.
         if self.pool is not None:
-            agent.tools.add_provider(self.pool.skills_tools_provider)
+            agent._external_capabilities.append(self.pool.skills_tools_provider)
 
         await agent.__aenter__()
         return agent
@@ -453,7 +453,7 @@ class SessionPool:
                     compute_agent_config_hash,
                 )
 
-                agent_tools = await agent.tools.get_tools()
+                agent_tools = await agent._get_all_tools()
                 current_hash = compute_agent_config_hash(agent_tools)
                 if current_hash != session_data.agent_config_hash:
                     logger.warning(
