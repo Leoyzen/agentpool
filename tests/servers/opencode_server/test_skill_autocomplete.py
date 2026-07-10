@@ -104,19 +104,27 @@ async def test_command_endpoint_skill_provider_fallback(
     server_state: ServerState,
     mock_agent: MagicMock,
 ) -> None:
-    """When skill_provider is available (fallback path), skills appear with source='command'."""
-    # No skill bridge → triggers provider fallback
+    """When skill_resolver is available (fallback path), skills appear with source='command'."""
+    # No skill bridge → triggers resolver fallback
     server_state.skill_bridge = None
 
-    # Create skill_provider mock
+    # Create skill_resolver mock
     mock_skill = MagicMock()
     mock_skill.name = "provider-skill"
     mock_skill.description = "Provider skill"
 
     mock_provider = AsyncMock()
     mock_provider.get_skills = AsyncMock(return_value=[mock_skill])
-    mock_provider.get_skill_instructions = AsyncMock(return_value="Process $1")
-    mock_agent.agent_pool.skill_provider = mock_provider  # type: ignore[attr-defined]
+
+    mock_resolver = MagicMock()
+    mock_resolver.list_providers = MagicMock(return_value=["test-provider"])
+    mock_resolver.get_provider = MagicMock(return_value=mock_provider)
+
+    mock_resolved = MagicMock()
+    mock_resolved.load_instructions = MagicMock(return_value="Process $1")
+    mock_resolver.resolve = AsyncMock(return_value=mock_resolved)
+    mock_agent.agent_pool.skill_resolver = mock_resolver  # type: ignore[attr-defined]
+    mock_agent.agent_pool.skill_provider = None  # type: ignore[attr-defined]
 
     # Mock empty MCP prompts
     mock_agent.list_prompts = AsyncMock(return_value=[])
@@ -202,7 +210,7 @@ async def test_command_endpoint_skill_bridge_with_provider_for_virtual_skills(
     server_state: ServerState,
     mock_agent: MagicMock,
 ) -> None:
-    """When skill_bridge and skill_provider both exist, provider is used for instructions."""
+    """When skill_bridge and skill_resolver both exist, resolver is used for instructions."""
     # Use MagicMock for skill since we need load_instructions fallback behavior
     mock_skill_obj = MagicMock(spec=Skill)
     mock_skill_obj.load_instructions = MagicMock(return_value="Local fallback instructions")
@@ -216,10 +224,13 @@ async def test_command_endpoint_skill_bridge_with_provider_for_virtual_skills(
     mock_bridge.get_skill_commands = MagicMock(return_value=[mock_skill_cmd])
     server_state.skill_bridge = mock_bridge
 
-    # Provider returns different instructions than local
-    mock_provider = AsyncMock()
-    mock_provider.get_skill_instructions = AsyncMock(return_value="Virtual instructions with $1")
-    mock_agent.agent_pool.skill_provider = mock_provider  # type: ignore[attr-defined]
+    # Resolver returns different instructions than local
+    mock_resolved = MagicMock()
+    mock_resolved.load_instructions = MagicMock(return_value="Virtual instructions with $1")
+    mock_resolver = MagicMock()
+    mock_resolver.resolve = AsyncMock(return_value=mock_resolved)
+    mock_agent.agent_pool.skill_resolver = mock_resolver  # type: ignore[attr-defined]
+    mock_agent.agent_pool.skill_provider = None  # type: ignore[attr-defined]
 
     # Mock empty MCP prompts
     mock_agent.list_prompts = AsyncMock(return_value=[])
@@ -232,8 +243,8 @@ async def test_command_endpoint_skill_bridge_with_provider_for_virtual_skills(
     cmd = next(c for c in commands if c["name"] == "virtual-skill")
     assert cmd["template"] == "Virtual instructions with $1"
     assert cmd["hints"] == ["$1"]
-    # Provider was called, not local load_instructions
-    mock_provider.get_skill_instructions.assert_called_once_with("virtual-skill")
+    # Resolver was called, not local load_instructions
+    mock_resolver.resolve.assert_called_once_with("virtual-skill")
 
 
 # =============================================================================

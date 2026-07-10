@@ -2,7 +2,6 @@
 
 {% endif -%}
 {%- if inject_tools != "off" -%}
-{%- set tools = agent.tools.get_tools("enabled") -%}
 {%- if tools %}
 
 {%- if tool_usage_style == "strict" %}

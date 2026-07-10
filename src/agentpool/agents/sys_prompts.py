@@ -147,6 +147,11 @@ class SystemPrompts:
             await self.refresh_cache()
         env = get_jinja_env()
         template = env.from_string(self.template or text_templates.get_system_prompt())
+        # Pre-compute tools list for the template since agent.tools was removed
+        tools: list[Any] = []
+        if self.inject_tools != "off":
+            all_tools = await agent._get_all_tools()
+            tools = [t for t in all_tools if t.enabled]
         result = await template.render_async(
             agent=agent,
             prompts=self.prompts,
@@ -154,6 +159,7 @@ class SystemPrompts:
             inject_agent_info=self.inject_agent_info,
             inject_tools=self.inject_tools,
             tool_usage_style=self.tool_usage_style,
+            tools=tools,
         )
         return result.strip()
 
