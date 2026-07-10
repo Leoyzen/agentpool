@@ -136,9 +136,7 @@ def test_resume_fresh_start_returns_none_durable(tmp_path: Any):
     """DurableJournal.resume() returns None when no snapshot exists."""
     db_path = str(tmp_path / "test_journal.db")
     journal = DurableJournal(f"sqlite:///{db_path}", session_id="test")
-    snapshot_store = DurableSnapshotStore(
-        str(tmp_path / "test_snap.db"), session_id="test"
-    )
+    snapshot_store = DurableSnapshotStore(str(tmp_path / "test_snap.db"), session_id="test")
     try:
         result = journal.resume(snapshot_store)
         assert result is None
@@ -501,20 +499,24 @@ async def test_retry_recovers_tool_executions():
     )
     journal.append(_MockEvent(turn_id="inflight-1"))
     # Log some tool executions for the in-flight turn.
-    journal.log_tool_execution(ToolExecutionRecord(
-        turn_id="inflight-1",
-        tool_name="bash",
-        args={"command": "ls"},
-        result="file1\nfile2",
-        status="completed",
-    ))
-    journal.log_tool_execution(ToolExecutionRecord(
-        turn_id="inflight-1",
-        tool_name="read",
-        args={"path": "/tmp/test"},
-        result="content",
-        status="completed",
-    ))
+    journal.log_tool_execution(
+        ToolExecutionRecord(
+            turn_id="inflight-1",
+            tool_name="bash",
+            args={"command": "ls"},
+            result="file1\nfile2",
+            status="completed",
+        )
+    )
+    journal.log_tool_execution(
+        ToolExecutionRecord(
+            turn_id="inflight-1",
+            tool_name="read",
+            args={"path": "/tmp/test"},
+            result="content",
+            status="completed",
+        )
+    )
 
     turn = _StubTurn(events=[_stream_complete_event()], message_history=["m1"])
     agent = MagicMock()
@@ -894,13 +896,15 @@ def test_durable_journal_tool_executions_persist_across_restart(tmp_path: Any):
 
     # Write tool execution record.
     journal1 = DurableJournal(f"sqlite:///{db_path}", session_id="test")
-    journal1.log_tool_execution(ToolExecutionRecord(
-        turn_id="turn-1",
-        tool_name="bash",
-        args={"command": "echo hi"},
-        result="hi\n",
-        status="completed",
-    ))
+    journal1.log_tool_execution(
+        ToolExecutionRecord(
+            turn_id="turn-1",
+            tool_name="bash",
+            args={"command": "echo hi"},
+            result="hi\n",
+            status="completed",
+        )
+    )
     journal1.close()
 
     # Recreate journal and verify persistence.
@@ -1070,13 +1074,15 @@ def test_durable_retry_recovery_with_tool_log(tmp_path: Any):
         # Journal an event with turn_id.
         journal.append({"event_type": "RunStartedEvent", "turn_id": "inflight-1"})
         # Log tool executions.
-        journal.log_tool_execution(ToolExecutionRecord(
-            turn_id="inflight-1",
-            tool_name="bash",
-            args={"command": "ls"},
-            result="file1",
-            status="completed",
-        ))
+        journal.log_tool_execution(
+            ToolExecutionRecord(
+                turn_id="inflight-1",
+                tool_name="bash",
+                args={"command": "ls"},
+                result="file1",
+                status="completed",
+            )
+        )
 
         # Phase 2: Resume — should detect in-flight.
         result = journal.resume(snapshot_store)

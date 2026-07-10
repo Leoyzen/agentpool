@@ -149,7 +149,7 @@ class NativeTurn(HookAwareTurn, Turn):
                 # MCP tools are handled via snapshot/get_capabilities path,
                 # so get_tools() here is only for building tool kind map.
                 all_tools = await asyncio.wait_for(
-                    self._agent.tools.get_tools(),
+                    self._agent._get_all_tools(),
                     timeout=5.0,
                 )
                 for tool in all_tools:

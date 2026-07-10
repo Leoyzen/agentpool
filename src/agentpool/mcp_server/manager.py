@@ -11,8 +11,9 @@ from typing import TYPE_CHECKING, Any, Self, cast
 import warnings
 
 import anyio
+from pydantic_ai.capabilities import AbstractCapability
 
-from agentpool.capabilities.combined_toolset import AbstractCapability, CombinedToolsetCapability
+from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
 from agentpool.capabilities.mcp_capability import MCPCapability
 from agentpool.log import get_logger
 from agentpool.mcp_server.global_pool import GlobalConnectionPool
@@ -314,20 +315,23 @@ class MCPManager:
             self.add_server_config(config)
 
         # Deduplication: skip if a provider with the same client_id already exists
-        if any(p.server.client_id == config.client_id for p in self.providers):
+        if any(p.client.config.client_id == config.client_id for p in self.providers):
             logger.debug(
                 "MCP server already registered, skipping",
                 client_id=config.client_id,
             )
             return None
 
-        provider = MCPCapability(
-            server=config,
-            name=f"{self.name}_{config.display_name}",
-            owner=self.owner,
-            source="pool" if self.owner == "pool" else "node",
+        from agentpool.mcp_server.client import MCPClient
+
+        client = MCPClient(
+            config=config,
             sampling_callback=self._sampling_callback,
             accessible_roots=self._accessible_roots,
+        )
+        provider = MCPCapability(
+            client=client,
+            name=f"{self.name}_{config.display_name}",
         )
         provider = await self.exit_stack.enter_async_context(provider)
         self.providers.append(provider)
@@ -347,7 +351,7 @@ class MCPManager:
             True if a provider was removed, False otherwise
         """
         for i, provider in enumerate(self.providers):
-            if provider.server.client_id == client_id:
+            if provider._client.config.client_id == client_id:
                 # Note: We don't remove from exit_stack here because
                 # the provider was entered into the stack; cleanup() handles that
                 self.providers.pop(i)
@@ -374,7 +378,9 @@ class MCPManager:
         Non-ACP providers are excluded because they are handled separately
         by :meth:`get_capabilities()`.
         """
-        acp_providers = [p for p in self.providers if isinstance(p.server, AcpMCPServerConfig)]
+        acp_providers = [
+            p for p in self.providers if isinstance(p._client.config, AcpMCPServerConfig)
+        ]
         return CombinedToolsetCapability(
             capabilities=cast(list[AbstractCapability], acp_providers),
             name=f"{self.name}_acp_aggregated",

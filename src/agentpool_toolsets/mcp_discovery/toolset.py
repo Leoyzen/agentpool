@@ -83,7 +83,6 @@ class MCPDiscoveryToolset(FunctionToolsetCapability):
         self._allowed_servers = set(allowed_servers) if allowed_servers else None
         self._blocked_servers = set(blocked_servers) if blocked_servers else set()
         self._sampling_callback = sampling_callback
-        self._tools: list[Tool] | None = None
         # Lazy-loaded semantic search components
         self._db: Any = None
         self._table: Any = None
@@ -217,7 +216,7 @@ class MCPDiscoveryToolset(FunctionToolsetCapability):
 
     async def get_tools(self) -> Sequence[Tool]:
         """Get the discovery tools."""
-        if self._tools is not None:
+        if self._tools:
             return self._tools
 
         # Initialize before create_tool calls, which append to self._tools

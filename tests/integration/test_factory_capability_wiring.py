@@ -376,7 +376,7 @@ def test_inject_pool_providers_adds_aggregating_for_child() -> None:
 
     Given: host_context with pool and include_aggregating=True.
     When: _inject_pool_providers() is called.
-    Then: MCP aggregating provider is added to agent.tools.
+    Then: MCP aggregating provider is added to agent._external_capabilities.
     """
     mock_aggregating = MagicMock()
     host_context = _make_mock_host_context(
@@ -384,12 +384,12 @@ def test_inject_pool_providers_adds_aggregating_for_child() -> None:
     )
     host_context.mcp.get_aggregating_provider.return_value = mock_aggregating
     mock_agent = MagicMock()
+    mock_agent._external_capabilities = []
 
     _inject_pool_providers(mock_agent, host_context, include_aggregating=True)
 
-    # Should be called once: aggregating provider only
-    assert mock_agent.tools.add_provider.call_count == 1
-    mock_agent.tools.add_provider.assert_any_call(mock_aggregating)
+    # Should be in external_capabilities: aggregating provider only
+    assert mock_aggregating in mock_agent._external_capabilities
 
 
 def test_inject_pool_providers_skips_when_no_pool() -> None:

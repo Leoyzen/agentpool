@@ -213,24 +213,16 @@ def test_event_envelope_construction_with_all_fields():
 
 def test_event_envelope_default_metadata_is_independent():
     """Each EventEnvelope instance gets its own metadata dict."""
-    e1 = EventEnvelope(
-        event_type="a", session_id="s1", timestamp="t", payload={}
-    )
-    e2 = EventEnvelope(
-        event_type="b", session_id="s2", timestamp="t", payload={}
-    )
+    e1 = EventEnvelope(event_type="a", session_id="s1", timestamp="t", payload={})
+    e2 = EventEnvelope(event_type="b", session_id="s2", timestamp="t", payload={})
     e1.metadata["key"] = "val"
     assert "key" not in e2.metadata
 
 
 def test_event_envelope_default_payload_is_independent():
     """Each EventEnvelope instance gets its own payload dict."""
-    e1 = EventEnvelope(
-        event_type="a", session_id="s1", timestamp="t", payload={}
-    )
-    e2 = EventEnvelope(
-        event_type="b", session_id="s2", timestamp="t", payload={}
-    )
+    e1 = EventEnvelope(event_type="a", session_id="s1", timestamp="t", payload={})
+    e2 = EventEnvelope(event_type="b", session_id="s2", timestamp="t", payload={})
     e1.payload["key"] = "val"
     assert "key" not in e2.payload
 
@@ -258,9 +250,7 @@ class _DummyJournal:
     def upsert(self, key: str, event: Any) -> int:
         return 1
 
-    async def replay(
-        self, from_seq: int = 0, to_seq: int | None = None
-    ) -> AsyncIterator[Any]:
+    async def replay(self, from_seq: int = 0, to_seq: int | None = None) -> AsyncIterator[Any]:
         yield  # type: ignore[misc]
 
     def resume(self, snapshot_store: Any) -> ResumeResult | None:
@@ -317,9 +307,7 @@ class _DummyEventTransport:
 
     async def publish(self, envelope: EventEnvelope) -> None: ...
 
-    async def subscribe(
-        self, topic: str, from_seq: int = 0
-    ) -> AsyncIterator[EventEnvelope]:
+    async def subscribe(self, topic: str, from_seq: int = 0) -> AsyncIterator[EventEnvelope]:
         yield  # type: ignore[misc]
 
     def ack(self, seq: int) -> None: ...

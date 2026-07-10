@@ -251,7 +251,7 @@ class TestNativeAgentPydanticAIInstructions:
             model="openai:gpt-4o-mini",
             system_prompt="You are an AI assistant.",
         )
-        agent.tools.add_provider(provider)
+        agent._add_capability(provider)
 
         async with agent:
             agentlet: PydanticAgent[Any, str] = await agent.get_agentlet(None, None, None)
@@ -276,7 +276,7 @@ class TestNativeAgentPydanticAIInstructions:
             model="openai:gpt-4o-mini",
             system_prompt="You are an AI assistant.",
         )
-        agent.tools.add_provider(provider)
+        agent._add_capability(provider)
 
         async with agent:
             agentlet = await agent.get_agentlet(None, None, None)
@@ -296,7 +296,7 @@ class TestNativeAgentPydanticAIInstructions:
             model="openai:gpt-4o-mini",
             system_prompt="You are an AI assistant.",
         )
-        agent.tools.add_provider(MixedProvider())
+        agent._add_capability(MixedProvider())
 
         async with agent:
             agentlet = await agent.get_agentlet(None, None, None)

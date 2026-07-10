@@ -52,9 +52,9 @@ async def agent_with_instruction_providers():
         system_prompt="You are an AI assistant.",
     )
 
-    agent.tools.add_provider(provider1)
-    agent.tools.add_provider(provider2)
-    agent.tools.add_provider(provider3)
+    agent._add_capability(provider1)
+    agent._add_capability(provider2)
+    agent._add_capability(provider3)
 
     return agent
 
@@ -126,7 +126,7 @@ class TestNativeAgentInstructions:
             system_prompt="You are an assistant.",
         )
 
-        agent.tools.add_provider(EmptyInstructionProvider())
+        agent._add_capability(EmptyInstructionProvider())
 
         async with agent:
             agentlet: PydanticAgent[Any, str] = await agent.get_agentlet(None, None, None)
@@ -158,7 +158,7 @@ class TestNativeAgentInstructions:
             system_prompt="You are an assistant.",
         )
 
-        agent.tools.add_provider(FailingInstructionProvider())
+        agent._add_capability(FailingInstructionProvider())
 
         # The agent should handle the error — either by catching it
         # during instruction collection or by PydanticAI raising
@@ -193,11 +193,11 @@ class TestNativeAgentInstructions:
         agent = Agent.from_config(config)
 
         provider = SimpleRefProvider()
-        agent.tools.add_provider(provider)
+        agent._add_capability(provider)
 
         async with agent:
             agentlet: PydanticAgent[Any, str] = await agent.get_agentlet(None, None, None)
             assert isinstance(agentlet, PydanticAgent)
 
-            provider_names = [p.name for p in agent.tools.providers]
+            provider_names = [p.name for p in agent._all_capabilities]
             assert "simple_ref_provider" in provider_names

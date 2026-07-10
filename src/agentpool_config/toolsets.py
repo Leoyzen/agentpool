@@ -28,9 +28,27 @@ from agentpool_config.workers import AgentWorkerConfig, WorkerConfig
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pydantic_ai.capabilities import AbstractCapability
+    from pydantic_ai.tools import RunContext, ToolDefinition
 
     from agentpool_toolsets.search_toolset import SearchTools
+
+
+def _make_tool_filter(
+    tool_filter: dict[str, bool],
+) -> Callable[[RunContext[None], ToolDefinition], bool]:
+    """Create a tool filter function from a name→bool mapping.
+
+    Tools listed with ``True`` are included; ``False`` excludes them.
+    Tools not listed default to included (``True``).
+    """
+
+    def filter_func(_ctx: RunContext[None], tool: ToolDefinition) -> bool:
+        return tool_filter.get(tool.name, True)
+
+    return filter_func
 
 
 MarkupType = Literal["yaml", "json", "toml"]
@@ -201,7 +219,9 @@ class SubagentToolsetConfig(BaseToolsetConfig):
         if self.tools is not None:
             from agentpool.capabilities.filtered_toolset import FilteredToolsetCapability
 
-            return FilteredToolsetCapability(provider, cast(dict[str, bool], self.tools))
+            return FilteredToolsetCapability(
+                provider, _make_tool_filter(cast(dict[str, bool], self.tools))
+            )
         return provider
 
 
@@ -276,7 +296,9 @@ class ProcessManagementToolsetConfig(BaseToolsetConfig):
         if self.tools is not None:
             from agentpool.capabilities.filtered_toolset import FilteredToolsetCapability
 
-            return FilteredToolsetCapability(provider, cast(dict[str, bool], self.tools))
+            return FilteredToolsetCapability(
+                provider, _make_tool_filter(cast(dict[str, bool], self.tools))
+            )
         return provider
 
 
@@ -342,7 +364,9 @@ class SkillsToolsetConfig(BaseToolsetConfig):
         if self.tools is not None:
             from agentpool.capabilities.filtered_toolset import FilteredToolsetCapability
 
-            return FilteredToolsetCapability(provider, cast(dict[str, bool], self.tools))
+            return FilteredToolsetCapability(
+                provider, _make_tool_filter(cast(dict[str, bool], self.tools))
+            )
         return provider
 
 
@@ -380,7 +404,9 @@ class CodeToolsetConfig(BaseToolsetConfig):
         if self.tools is not None:
             from agentpool.capabilities.filtered_toolset import FilteredToolsetCapability
 
-            return FilteredToolsetCapability(provider, cast(dict[str, bool], self.tools))
+            return FilteredToolsetCapability(
+                provider, _make_tool_filter(cast(dict[str, bool], self.tools))
+            )
         return provider
 
 
@@ -694,7 +720,7 @@ class CustomToolsetConfig(BaseToolsetConfig):
         name = kwargs.pop("name", provider_cls.__name__)
 
         try:
-            return provider_cls(name=name, **kwargs)
+            return provider_cls(name=name, **kwargs)  # type: ignore[call-arg]
         except TypeError as e:
             # Provide a more helpful error message about parameter mismatch
             raise TypeError(
@@ -889,11 +915,16 @@ class PlanToolsetConfig(BaseToolsetConfig):
 
     def get_provider(self) -> AbstractCapability:
         """Create plan tools provider."""
-        provider = FunctionToolsetCapability(mode=self.mode)
+        # TODO: Migrate PlanProvider to capability-native architecture.
+        # The old PlanProvider was removed during M3 migration; plan tools
+        # need to be reimplemented as a FunctionToolsetCapability subclass.
+        provider = FunctionToolsetCapability(name="plan")
         if self.tools is not None:
             from agentpool.capabilities.filtered_toolset import FilteredToolsetCapability
 
-            return FilteredToolsetCapability(provider, cast(dict[str, bool], self.tools))
+            return FilteredToolsetCapability(
+                provider, _make_tool_filter(cast(dict[str, bool], self.tools))
+            )
         return provider
 
 

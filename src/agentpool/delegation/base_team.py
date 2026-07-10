@@ -8,6 +8,7 @@ dispatches execution based on ``mode`` ("parallel" or "sequential").
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass
 from itertools import pairwise
 from time import perf_counter
@@ -183,7 +184,7 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
         self._nodes.append(node)
         if isinstance(node, Agent):
             aggregating_provider = self.mcp.get_aggregating_provider()
-            node.tools.add_provider(aggregating_provider)
+            node._external_capabilities.append(aggregating_provider)
 
     def remove_node(self, node: MessageNode[Any, Any]) -> None:
         """Handler for removing nodes from the team."""
@@ -192,7 +193,8 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
         self._nodes.remove(node)
         if isinstance(node, Agent):
             aggregating_provider = self.mcp.get_aggregating_provider()
-            node.tools.remove_provider(aggregating_provider.name)
+            with contextlib.suppress(ValueError):
+                node._external_capabilities.remove(aggregating_provider)
 
     def __repr__(self) -> str:
         """Create readable representation."""
@@ -1243,6 +1245,6 @@ if __name__ == "__main__":
         agent_2 = Agent("My Agent", model="openai:gpt-5-nano")
         team = BaseTeam([agent, agent_2], mcp_servers=["uvx mcp-server-git"])
         async with team:
-            print(await agent.tools.get_tools())
+            print(await agent._get_all_tools())
 
     anyio.run(main)

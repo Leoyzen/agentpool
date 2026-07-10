@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from abc import abstractmethod
 import asyncio
-from collections.abc import Callable
-from contextlib import suppress
+from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 import os
@@ -26,17 +26,17 @@ from agentpool.agents.events import (
     resolve_event_handlers,
 )
 from agentpool.agents.modes import ModeInfo
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.common_types import IndividualEventHandler
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory, MessageNode
 from agentpool.prompts.convert import convert_prompts
-from agentpool.tools.manager import ToolManager
 from agentpool.utils.inspection import call_with_context
 from agentpool.utils.time_utils import get_now
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator, Sequence
+    from collections.abc import AsyncGenerator
     from contextvars import Token
     from datetime import datetime
 
@@ -130,7 +130,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
     """Base class for Agent and ACPAgent.
 
     Provides shared infrastructure:
-    - tools: ToolManager for tool registration and execution
+    - _builtin_provider: FunctionToolsetCapability for built-in tools
+    - _worker_provider: FunctionToolsetCapability for worker tools
+    - _external_capabilities: list of external capabilities
     - conversation: MessageHistory for conversation state
     - event_handler: MultiEventHandler for event distribution
     - _event_queue: Queue for streaming events
@@ -263,7 +265,12 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 stacklevel=2,
             )
         self._output_type: type[TResult] = output_type
-        self.tools = ToolManager(_warn=False)
+        # Direct capability management (replaces deprecated ToolManager)
+        self._builtin_provider = FunctionToolsetCapability(name="builtin")
+        self._worker_provider = FunctionToolsetCapability(name="workers")
+        self._external_capabilities: list[Any] = []
+        self._session_capabilities: list[Any] = []
+        self._tool_mode: Any | None = None
         handlers = resolve_event_handlers(event_handlers)
         self.event_handler: MultiEventHandler[IndividualEventHandler] = MultiEventHandler(handlers)
         self.hooks = hooks
@@ -345,7 +352,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         parts = [f"Agent: {self.name}", f"Type: {typ}", f"Model: {model}"]
         if self.description:
             parts.append(f"Description: {self.description}")
-        parts.extend([await self.tools.__prompt__(), self.conversation.__prompt__()])
+        parts.extend([await self._tools_prompt(), self.conversation.__prompt__()])
         return "\n".join(parts)
 
     @overload
@@ -445,9 +452,223 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
     async def reset(self) -> None:
         """Reset agent state (conversation history and tool states)."""
         await self.conversation.clear()
-        await self.tools.reset_states()
+        await self._reset_tool_states()
         event = self.AgentReset(agent_name=self.name)
         await self.agent_reset.emit(event)
+
+    # ---- Capability management (replaces deprecated ToolManager) ----
+
+    @property
+    def _all_capabilities(self) -> list[Any]:
+        """Return all capabilities: external + session + worker + builtin.
+
+        When ``_tool_mode == "codemode"``, callers should handle wrapping
+        in :class:`CodeModeCapability` in an async context (e.g.,
+        ``get_agentlet()``) since tool collection is async.
+        """
+        return [
+            *self._external_capabilities,
+            *self._session_capabilities,
+            self._worker_provider,
+            self._builtin_provider,
+        ]
+
+    def _add_capability(self, capability: Any, owner: str | None = None) -> None:
+        """Add an external capability.
+
+        Args:
+            capability: AbstractCapability instance to add
+            owner: Optional owner string (set on capability if supported)
+        """
+        if owner is not None:
+            # FunctionToolsetCapability supports .owner
+            with suppress(AttributeError):
+                capability.owner = owner
+        self._external_capabilities.append(capability)
+
+    async def _get_all_tools(self) -> list[Any]:
+        """Collect tools from all capabilities concurrently."""
+        from typing import Protocol, runtime_checkable
+
+        @runtime_checkable
+        class _ToolProviding(Protocol):
+            async def get_tools(self) -> Sequence[Any]: ...
+
+        import asyncio
+
+        caps = self._all_capabilities
+        coros: list[Any] = []
+        caps_with_tools: list[Any] = []
+        for cap in caps:
+            if isinstance(cap, _ToolProviding):
+                coros.append(cap.get_tools())
+                caps_with_tools.append(cap)
+        if not coros:
+            return []
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        tools_map: dict[str, Any] = {}
+        for cap, result in zip(caps_with_tools, results, strict=False):
+            if isinstance(result, BaseException):
+                logger.warning(
+                    "Failed to get tools from capability",
+                    capability=type(cap).__name__,
+                    error=str(result),
+                )
+                continue
+            for tool in result:
+                tools_map[tool.name] = tool
+        return list(tools_map.values())
+
+    async def _tools_prompt(self) -> str:
+        """Generate a summary of available tools for prompts."""
+        all_tools = await self._get_all_tools()
+        enabled_tools = [t.name for t in all_tools if t.enabled]
+        if not enabled_tools:
+            return "No tools available"
+        return f"Available tools: {', '.join(enabled_tools)}"
+
+    async def _reset_tool_states(self) -> None:
+        """Reset all tools to their default enabled states."""
+        for tool in await self._get_all_tools():
+            tool.enabled = True
+
+    async def _get_mcp_server_info(self) -> dict[str, Any]:
+        """Get information about configured MCP servers.
+
+        MCP server status is not directly available from capabilities.
+        Subclasses can override to provide agent-specific MCP server info.
+        """
+        return {}
+
+    async def get_resource(self, name: str) -> Any:
+        """Get a specific MCP resource by name or URI.
+
+        Args:
+            name: Name or URI of the resource to find
+
+        Raises:
+            ToolError: If resource not found
+        """
+        from typing import Protocol, runtime_checkable
+
+        from agentpool.tools.exceptions import ToolError
+
+        @runtime_checkable
+        class _ResourceProviding(Protocol):
+            async def get_resources(self) -> Sequence[Any]: ...
+
+        all_resources: list[Any] = []
+        caps = self._all_capabilities
+        coros: list[Any] = []
+        caps_with_resources: list[Any] = []
+        for cap in caps:
+            if isinstance(cap, _ResourceProviding):
+                coros.append(cap.get_resources())
+                caps_with_resources.append(cap)
+        if coros:
+            import asyncio
+
+            results = await asyncio.gather(*coros, return_exceptions=True)
+            for _cap, result in zip(caps_with_resources, results, strict=False):
+                if isinstance(result, BaseException):
+                    continue
+                all_resources.extend(result)
+        resource = next(
+            (
+                r
+                for r in all_resources
+                if getattr(r, "name", None) == name or getattr(r, "uri", None) == name
+            ),
+            None,
+        )
+        if not resource:
+            raise ToolError(f"Resource not found: {name}")
+        return resource
+
+    async def list_prompts(self) -> list[Any]:
+        """Get all prompts from external capabilities.
+
+        Returns:
+            List of prompt objects from capabilities that provide prompts
+        """
+        from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+        from agentpool.prompts.prompts import MCPClientPrompt as MCPPrompt
+
+        all_prompts: list[Any] = []
+        for provider in self._external_capabilities:
+            if isinstance(provider, FunctionToolsetCapability):
+                try:
+                    prompts = await provider.get_prompts()
+                    mcp_prompts = [p for p in prompts if isinstance(p, MCPPrompt)]
+                    all_prompts.extend(mcp_prompts)
+                except Exception:
+                    logger.exception(
+                        "Failed to get prompts from provider",
+                        provider=provider,
+                    )
+        return all_prompts
+
+    @asynccontextmanager
+    async def _with_session_capabilities(
+        self,
+        capabilities: Sequence[Any],
+    ) -> AsyncIterator[None]:
+        """Temporarily inject session-level capabilities for the duration of a run.
+
+        Args:
+            capabilities: Session-level capabilities to inject
+        """
+        self._session_capabilities[:] = list(capabilities)
+        try:
+            yield
+        finally:
+            self._session_capabilities.clear()
+
+    @asynccontextmanager
+    async def _temporary_tools(
+        self,
+        tools: Any,
+        *,
+        exclusive: bool = False,
+    ) -> AsyncIterator[list[Any]]:
+        """Temporarily register tools on the builtin provider.
+
+        Args:
+            tools: Tool(s) to register (Tool, callable, str, or sequence thereof)
+            exclusive: Whether to temporarily disable all other tools
+
+        Yields:
+            List of registered tool infos
+        """
+        from agentpool.tools.base import Tool as ToolClass
+
+        match tools:
+            case str() | Callable() | ToolClass():
+                tools_list = [tools]
+            case _:
+                tools_list = list(tools)
+        # Store original tool states if exclusive
+        all_tools = await self._get_all_tools()
+        original_states: dict[str, bool] = {}
+        if exclusive:
+            original_states = {t.name: t.enabled for t in all_tools}
+            for t in all_tools:
+                t.enabled = False
+        registered_tools: list[Any] = []
+        try:
+            for tool in tools_list:
+                tool_info = self._builtin_provider.register_tool(tool)
+                registered_tools.append(tool_info)
+            yield registered_tools
+        finally:
+            for tool_info in registered_tools:
+                self._builtin_provider.remove_tool(tool_info.name)
+            if exclusive:
+                for name_, was_enabled in original_states.items():
+                    all_tools_local = await self._get_all_tools()
+                    for t_ in all_tools_local:
+                        if t_.name == name_:
+                            t_.enabled = was_enabled
 
     def get_context(
         self,
@@ -1742,13 +1963,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Returns a dict mapping server names to their status info. Used by
         the OpenCode /mcp endpoint to display MCP servers in the UI.
 
-        The default implementation checks external_providers on the tool manager.
+        The default implementation checks external capabilities for MCP servers.
         Subclasses may override to provide agent-specific MCP server info.
 
         Returns:
             Dict mapping server name to MCPServerStatus
         """
-        return await self.tools.get_mcp_server_info()
+        return await self._get_mcp_server_info()
 
     @method_spawner
     async def run(

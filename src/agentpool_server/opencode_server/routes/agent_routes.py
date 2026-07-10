@@ -225,7 +225,7 @@ async def list_commands(state: StateDep) -> list[Command]:
 
     # Add MCP prompts as commands (source="mcp")
     try:
-        prompts = await state.agent.tools.list_prompts()
+        prompts = await state.agent.list_prompts()
         commands.extend([
             Command(name=p.name, description=p.description, source="mcp", hints=[]) for p in prompts
         ])

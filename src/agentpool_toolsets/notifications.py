@@ -72,7 +72,6 @@ class NotificationsTools(FunctionToolsetCapability):
 
         super().__init__(name=name)
         self.channels = channels
-        self._tools: list[Tool] | None = None
         self._apprise = apprise.Apprise()
         for channel_name, urls in self.channels.items():
             # Normalize to list
@@ -84,7 +83,7 @@ class NotificationsTools(FunctionToolsetCapability):
 
     async def get_tools(self) -> Sequence[Tool]:
         """Get notification tools with dynamic schema based on configured channels."""
-        if self._tools is not None:
+        if self._tools:
             return self._tools
 
         channel_names = sorted(self.channels.keys())

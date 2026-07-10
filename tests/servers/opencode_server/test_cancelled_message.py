@@ -86,7 +86,7 @@ class CancellableAgentMock:
             # The yield makes this an async generator (which is what
             # OpenCodeStreamAdapter.process_stream expects).
             raise asyncio.CancelledError
-            yield  # noqa: unreachable — makes this an async generator
+            yield  # unreachable — makes this an async generator
 
         return stream()
 

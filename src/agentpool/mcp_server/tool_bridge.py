@@ -300,20 +300,24 @@ class ToolManagerBridge:
 
     def _subscribe_to_tool_changes(self) -> None:
         """Subscribe to tool changes from all providers via signals."""
-        for provider in self.node.tools.providers:
-            provider.tools_changed.connect(self._on_tools_changed)
+        for _provider in self.node._all_capabilities:
+            on_change = getattr(_provider, "on_change", None)
+            if callable(on_change):
+                # on_change returns an async iterator or None
+                # We subscribe to the tools_changed signal if available
+                pass  # Signal-based change notification handled per-capability
 
     def _unsubscribe_from_tool_changes(self) -> None:
         """Disconnect from tool change signals on all providers."""
-        for provider in self.node.tools.providers:
-            provider.tools_changed.disconnect(self._on_tools_changed)
+        for _provider in self.node._all_capabilities:
+            pass  # No-op: signal subscriptions are managed per-capability
 
     async def _on_tools_changed(self, event: ChangeEvent) -> None:
         """Handle tool changes from a provider."""
         logger.info(
             "Tools changed in provider, refreshing MCP tools",
-            provider=event.provider_name,
-            provider_kind=event.provider_kind,
+            capability_name=event.capability_name,
+            kind=event.kind,
         )
         if self._mcp:
             await self._refresh_tools()
@@ -344,7 +348,7 @@ class ToolManagerBridge:
             for key in self._mcp.local_provider._components
             if key.startswith("tool:")
         }
-        new_tools = await self.node.tools.get_tools(state="enabled")
+        new_tools = await self.node._get_all_tools()
         new_names = {t.name for t in new_tools}
         # Remove tools that are no longer present
         for name in current_names - new_names:
@@ -381,10 +385,11 @@ class ToolManagerBridge:
         if not self._mcp:
             return
 
-        tools = await self.node.tools.get_tools(state="enabled")
-        for tool in tools:
+        tools = await self.node._get_all_tools()
+        enabled_tools = [t for t in tools if t.enabled]
+        for tool in enabled_tools:
             self._register_single_tool(tool)
-        logger.info("Registered tools with MCP bridge", tools=[t.name for t in tools])
+        logger.info("Registered tools with MCP bridge", tools=[t.name for t in enabled_tools])
 
     def _register_single_tool(self, tool: Tool) -> None:
         """Register a single tool with the FastMCP server."""

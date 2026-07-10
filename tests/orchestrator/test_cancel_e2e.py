@@ -55,7 +55,7 @@ class _BlockingTurn(Turn):
         while not self._run_ctx.cancelled:
             await asyncio.sleep(0.01)
         return
-        yield  # noqa: unreachable — makes this an async generator
+        yield  # unreachable — makes this an async generator
 
 
 class _StubTurn(Turn):

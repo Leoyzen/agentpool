@@ -26,13 +26,12 @@ class EntryPointTools(FunctionToolsetCapability):
     def __init__(self, module: str) -> None:
         super().__init__(name=module)
         self.module = module
-        self._tools: list[Tool] | None = None
         self.registry = EntryPointRegistry[Callable[..., Any]]("agentpool")
 
     async def get_tools(self) -> Sequence[Tool]:
         """Get tools from entry points."""
         # Return cached tools if available
-        if self._tools is not None:
+        if self._tools:
             return self._tools
 
         self._tools = []

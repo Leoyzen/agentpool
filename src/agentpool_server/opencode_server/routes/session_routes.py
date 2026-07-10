@@ -1852,7 +1852,7 @@ async def execute_command(  # noqa: PLR0915
         if state.command_store and state.command_store.get_command(request.command) is not None:
             # Check for collision with MCP prompts
             session_agent = state.agent
-            prompts = await session_agent.tools.list_prompts()
+            prompts = await session_agent.list_prompts()
             if any(p.name == request.command for p in prompts):
                 logger.warning(
                     "Both slashed command and prompt exist for '%s'. Using slashed command.",
@@ -1872,7 +1872,7 @@ async def execute_command(  # noqa: PLR0915
 
         # Fall back to MCP prompts (existing code remains unchanged)
         session_agent = state.agent
-        prompts = await session_agent.tools.list_prompts()
+        prompts = await session_agent.list_prompts()
         # Find matching prompt by name
         prompt = next((p for p in prompts if p.name == request.command), None)
         if prompt is None:

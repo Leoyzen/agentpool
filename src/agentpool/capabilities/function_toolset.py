@@ -46,7 +46,7 @@ class FunctionToolsetCapability(AbstractCapability[AgentDepsT]):
 
     def __init__(
         self,
-        tools: Sequence[Tool[object]] | None = None,
+        tools: Sequence[Tool[Any]] | None = None,
         *,
         name: str = "function_tools",
         instructions: str | None = None,
@@ -64,7 +64,7 @@ class FunctionToolsetCapability(AbstractCapability[AgentDepsT]):
             resources: Optional list of resources (backward compat).
             owner: Optional owner string (backward compat).
         """
-        self._tools: list[Tool[object]] = list(tools) if tools else []
+        self._tools: list[Tool[Any]] = list(tools) if tools else []
         self._name = name
         self._instructions = instructions
         self._prompts: list[BasePrompt] = list(prompts) if prompts else []
@@ -78,7 +78,7 @@ class FunctionToolsetCapability(AbstractCapability[AgentDepsT]):
         """Return the provider kind (backward compat)."""
         return "tools"
 
-    async def get_tools(self) -> Sequence[Tool[object]]:
+    async def get_tools(self) -> Sequence[Tool[Any]]:
         """Return the wrapped tool list (async, for backward compat)."""
         return self._tools
 
@@ -114,7 +114,7 @@ class FunctionToolsetCapability(AbstractCapability[AgentDepsT]):
         description_override: str | None = None,
         schema_override: Any | None = None,
         prepare: Any | None = None,
-    ) -> Tool[object]:
+    ) -> Tool[Any]:
         """Create a tool from a function and add it to this capability."""
         from agentpool.tools.base import Tool as ToolClass
         from agentpool_config.tools import ToolHints
@@ -157,7 +157,7 @@ class FunctionToolsetCapability(AbstractCapability[AgentDepsT]):
         source: ToolSource = "dynamic",
         requires_confirmation: bool = False,
         metadata: dict[str, str] | None = None,
-    ) -> Tool[object]:
+    ) -> Tool[Any]:
         """Register a new tool with custom settings."""
         from agentpool.tools.base import Tool as ToolClass
 
@@ -189,7 +189,7 @@ class FunctionToolsetCapability(AbstractCapability[AgentDepsT]):
         reset_history_on_run: bool = True,
         pass_message_history: bool = False,
         parent: Agent[Any, Any] | None = None,
-    ) -> Tool[object]:
+    ) -> Tool[Any]:
         """Register an agent as a worker tool."""
         from agentpool import Agent, BaseTeam
         from agentpool.agents.base_agent import BaseAgent
@@ -261,7 +261,7 @@ class FunctionToolsetCapability(AbstractCapability[AgentDepsT]):
         return self._name
 
     @property
-    def tools(self) -> list[Tool[object]]:
+    def tools(self) -> list[Tool[Any]]:
         """Return the wrapped tool list."""
         return list(self._tools)
 

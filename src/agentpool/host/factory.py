@@ -736,4 +736,4 @@ def _inject_pool_providers(
     # MCP aggregating provider — only for child sessions (connection
     # inheritance).
     if include_aggregating:
-        agent.tools.add_provider(host_context.mcp.get_aggregating_provider())
+        agent._external_capabilities.append(host_context.mcp.get_aggregating_provider())
