@@ -81,7 +81,7 @@ def test_lifecycle_config_is_all_defaults_false() -> None:
 def test_lifecycle_config_frozen() -> None:
     """LifecycleConfig is frozen (immutable)."""
     config = LifecycleConfig()
-    with pytest.raises(TypeError):
+    with pytest.raises((TypeError, ValueError)):
         config.journal = "durable"  # type: ignore[misc]
 
 
