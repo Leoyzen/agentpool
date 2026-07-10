@@ -1094,7 +1094,7 @@ class SessionPool:
     async def run_stream(
         self,
         session_id: str,
-        *prompts: str,
+        *prompts: Any,
         scope: str = "session",
         **kwargs: Any,
     ) -> AsyncIterator[Any]:
@@ -1122,7 +1122,7 @@ class SessionPool:
     async def _run_stream_run_turn(
         self,
         session_id: str,
-        *prompts: str,
+        *prompts: Any,
         scope: str = "session",
         **kwargs: Any,
     ) -> AsyncIterator[Any]:

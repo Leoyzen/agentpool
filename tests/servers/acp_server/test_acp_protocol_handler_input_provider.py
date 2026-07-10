@@ -83,7 +83,7 @@ def handler(
 ) -> ACPProtocolHandler:
     """Return an ACPProtocolHandler backed by mocked dependencies."""
     return ACPProtocolHandler(
-        agent_pool=mock_pool,
+        host_context=mock_pool,
         session_manager=mock_session_manager,
         event_converter=mock_event_converter,
         client=mock_client,
@@ -102,7 +102,7 @@ def handler_with_elicitation(
     from acp.schema.capabilities import ClientCapabilities, ElicitationCapabilities
 
     return ACPProtocolHandler(
-        agent_pool=mock_pool,
+        host_context=mock_pool,
         session_manager=mock_session_manager,
         event_converter=mock_event_converter,
         client=mock_client,
@@ -194,7 +194,7 @@ class TestHandlePromptInputProvider:
         """When SessionPool is not available, handle_prompt returns end_turn."""
         mock_pool.session_pool = None
         handler = ACPProtocolHandler(
-            agent_pool=mock_pool,
+            host_context=mock_pool,
             session_manager=MagicMock(),
             event_converter=mock_event_converter,
             client=mock_client,
@@ -216,7 +216,7 @@ class TestHandlePromptInputProvider:
         """When SessionPool is not available, handle_prompt returns early."""
         mock_pool.session_pool = None
         handler = ACPProtocolHandler(
-            agent_pool=mock_pool,
+            host_context=mock_pool,
             session_manager=MagicMock(),
             event_converter=mock_event_converter,
             client=mock_client,
@@ -270,7 +270,7 @@ class TestEventConsumerConverterFlag:
         from agentpool_server.acp_server.handler import ACPEventConverter
 
         handler = ACPProtocolHandler(
-            agent_pool=mock_pool,
+            host_context=mock_pool,
             session_manager=MagicMock(),
             event_converter=mock_event_converter,
             client=mock_client,
@@ -325,7 +325,7 @@ class TestHandlePromptBlockingBehavior:
         from acp.schema.capabilities import ClientCapabilities
 
         handler = ACPProtocolHandler(
-            agent_pool=mock_pool,
+            host_context=mock_pool,
             session_manager=MagicMock(),
             event_converter=mock_event_converter,
             client=mock_client,
@@ -430,7 +430,7 @@ class TestHandlePromptBlockingBehavior:
         from agentpool_server.acp_server.handler import ACPEventConverter
 
         handler = ACPProtocolHandler(
-            agent_pool=mock_pool,
+            host_context=mock_pool,
             session_manager=MagicMock(),
             event_converter=mock_event_converter,
             client=mock_client,
@@ -458,7 +458,7 @@ async def test_handle_event_uses_event_session_id_for_child(
     """Child session events use event.session_id instead of consumer session_id."""
     mock_client = AsyncMock()
     handler = ACPProtocolHandler(
-        agent_pool=mock_pool,
+        host_context=mock_pool,
         session_manager=MagicMock(),
         event_converter=mock_event_converter,
         client=mock_client,
@@ -503,7 +503,7 @@ async def test_handle_event_falls_back_to_consumer_session_id(
     """When event has no session_id, fall back to consumer session_id."""
     mock_client = AsyncMock()
     handler = ACPProtocolHandler(
-        agent_pool=mock_pool,
+        host_context=mock_pool,
         session_manager=MagicMock(),
         event_converter=mock_event_converter,
         client=mock_client,
@@ -581,7 +581,7 @@ async def test_handle_prompt_splits_and_executes_slash_commands(
     )
 
     handler = ACPProtocolHandler(
-        agent_pool=mock_pool,
+        host_context=mock_pool,
         session_manager=mock_session_manager,
         event_converter=mock_event_converter,
         client=mock_client,
@@ -639,7 +639,7 @@ async def test_handle_prompt_passes_non_command_content_to_receive_request(
     )
 
     handler = ACPProtocolHandler(
-        agent_pool=mock_pool,
+        host_context=mock_pool,
         session_manager=mock_session_manager,
         event_converter=mock_event_converter,
         client=mock_client,
@@ -680,7 +680,7 @@ async def test_handle_prompt_no_acp_session_skips_command_splitting(
     mock_session_manager.get_session = MagicMock(return_value=None)  # No session!
 
     handler = ACPProtocolHandler(
-        agent_pool=mock_pool,
+        host_context=mock_pool,
         session_manager=mock_session_manager,
         event_converter=mock_event_converter,
         client=mock_client,

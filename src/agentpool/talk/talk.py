@@ -159,8 +159,8 @@ class Talk[TTransmittedData = Any]:
         match other:
             case Callable():  # ty: ignore[invalid-match-pattern]
                 other = Agent.from_callback(other)  # ty: ignore[no-matching-overload]
-                if (ctx := self.source.host_context) and ctx.pool is not None:
-                    other.agent_pool = ctx.pool
+                if (pool := self.source._agent_pool) is not None:
+                    other._bind_pool(pool)
                 return self.__rshift__(other)
             case Sequence():
                 team_talks = [self.__rshift__(o) for o in other]  # ty: ignore[no-matching-overload]
@@ -505,8 +505,8 @@ class TeamTalk[TTransmittedData = Any](list["Talk | TeamTalk"]):
             case Callable():  # ty: ignore[invalid-match-pattern]
                 other = Agent.from_callback(other)  # ty: ignore[no-matching-overload]
                 for talk_ in self.iter_talks():
-                    if (ctx := talk_.source.host_context) and ctx.pool is not None:
-                        other.agent_pool = ctx.pool
+                    if (pool := talk_.source._agent_pool) is not None:
+                        other._bind_pool(pool)
                         break
                 return self.__rshift__(other)
             case Sequence():

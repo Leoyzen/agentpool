@@ -253,9 +253,17 @@ class AgentPool[TPoolDeps = None]:
                 todos=self.todos,
                 session_pool=self._session_pool,
                 config_file_path=self._config_file_path,
+                main_agent_name=self._safe_main_agent_name(),
                 pool=self,
             )
         return self._host_context
+
+    def _safe_main_agent_name(self) -> str | None:
+        """Return main_agent_name, or None if no agents are configured."""
+        try:
+            return self.main_agent_name
+        except RuntimeError:
+            return None
 
     @property
     def _factory(self) -> AgentFactory:

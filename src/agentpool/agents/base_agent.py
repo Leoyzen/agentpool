@@ -1256,7 +1256,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         final_message: ChatMessage[TResult] | None = None
         async for event in session_pool.run_stream(
             effective_session_id,
-            *prompts,  # type: ignore[arg-type]
+            *prompts,
             input_provider=input_provider,
             parent_session_id=parent_session_id,
             depth=depth,

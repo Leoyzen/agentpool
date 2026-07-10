@@ -158,6 +158,15 @@ class MessageNode[TDeps, TResult](ABC):
     def agent_pool(self, value: AgentPool[Any] | None) -> None:
         self._agent_pool = value
 
+    def _bind_pool(self, pool: AgentPool[Any] | None) -> None:
+        """Internal method to set the pool reference without DeprecationWarning.
+
+        Used by Talk wiring and other internal code that needs to set
+        the pool reference without going through the deprecated public
+        property setter.
+        """
+        self._agent_pool = pool
+
     @property
     def host_context(self) -> HostContext | None:
         """Return HostContext from the pool, if available."""
@@ -428,7 +437,7 @@ class MessageNode[TDeps, TResult](ABC):
         if callable(target):
             target = Agent.from_callback(target)
             if pool := self._agent_pool:
-                target.agent_pool = pool
+                target._bind_pool(pool)
         # we are explicit here just to make disctinction clear, we only want sequences
         # of message units
         if isinstance(target, Sequence) and not isinstance(target, BaseTeam):
@@ -438,7 +447,7 @@ class MessageNode[TDeps, TResult](ABC):
                     case _ if callable(t):
                         other = Agent.from_callback(t)
                         if pool := self._agent_pool:
-                            other.agent_pool = pool
+                            other._bind_pool(pool)
                         targets.append(other)
                     case MessageNode():
                         targets.append(t)

@@ -179,7 +179,7 @@ async def test_inject_prompt_from_different_task_with_session_pool(
 
     # After deprecation, inject_prompt() delegates to turns.steer() for native agents.
     # Verify the delegation happened correctly.
-    session_pool = slow_agent.agent_pool.session_pool  # type: ignore[union-attr]
+    session_pool = slow_agent.host_context.session_pool  # type: ignore[union-attr]
     session_pool.steer.assert_called_once_with(  # type: ignore[attr-defined]
         "test-session", "Background task completed"
     )
@@ -230,7 +230,7 @@ async def test_queue_prompt_from_different_task_with_session_pool(
 
     # After deprecation, queue_prompt() delegates to turns.followup() for native agents.
     # Verify the delegation happened correctly.
-    session_pool = slow_agent.agent_pool.session_pool  # type: ignore[union-attr]
+    session_pool = slow_agent.host_context.session_pool  # type: ignore[union-attr]
     session_pool.followup.assert_called_once_with(  # type: ignore[attr-defined]
         "test-session", "Follow-up prompt"
     )
@@ -334,7 +334,7 @@ async def test_inject_prompt_triggers_continuation(slow_agent: Agent[None]) -> N
 
     # After deprecation, inject_prompt() delegates to turns.steer() for native agents.
     # Verify the delegation happened correctly.
-    session_pool = slow_agent.agent_pool.session_pool  # type: ignore[union-attr]
+    session_pool = slow_agent.host_context.session_pool  # type: ignore[union-attr]
     session_pool.steer.assert_called_with(  # type: ignore[attr-defined]
         "test-session", "Follow-up from different task"
     )
@@ -417,7 +417,7 @@ async def test_hook_manager_consumes_cross_task_injection_with_session_pool(
 
     # After deprecation, inject_prompt() delegates to turns.steer() for native agents.
     # Verify the delegation happened correctly.
-    session_pool = slow_agent.agent_pool.session_pool  # type: ignore[union-attr]
+    session_pool = slow_agent.host_context.session_pool  # type: ignore[union-attr]
     session_pool.steer.assert_called_with(  # type: ignore[attr-defined]
         "test-session", "Background task result notice"
     )

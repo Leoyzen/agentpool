@@ -65,7 +65,7 @@ class PendingQuestion:
 class ServerState:
     """Shared state for the OpenCode server.
 
-    Uses agent.agent_pool for session persistence and storage.
+    Uses agent.host_context for session persistence and storage.
     In-memory state tracks active sessions and runtime data.
     """
 
@@ -114,7 +114,8 @@ class ServerState:
         # Cache non-session-scoped dependencies directly so they remain
         # accessible even after the shared ``self.agent`` is removed in a
         # later migration step.
-        self._pool: AgentPool[Any] | None = self.agent.agent_pool
+        _ctx = self.agent.host_context
+        self._pool: AgentPool[Any] | None = _ctx.pool if _ctx is not None else None
         self._storage: StorageManager | None = self.agent.storage
 
         # Create a standalone execution environment for shell commands.
@@ -213,7 +214,7 @@ class ServerState:
         """Get the agent pool.
 
         Returns the cached pool reference that was resolved from
-        ``self.agent.agent_pool`` during ``__post_init__``.  This avoids
+        ``self.agent.host_context`` during ``__post_init__``.  This avoids
         depending on the shared agent for non-session-scoped access.
         """
         if self._pool is None:

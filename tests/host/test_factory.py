@@ -195,9 +195,10 @@ async def test_create_session_agent_non_native_builds_snapshot_manually() -> Non
     mcp.servers = [mock_server]
     mcp.get_aggregating_provider = MagicMock(return_value=MagicMock())
 
-    host_context = _make_host_context(mcp=mcp)
+    pool = MagicMock()
+    host_context = _make_host_context(mcp=mcp, pool=pool)
 
-    factory = AgentFactory(pool=MagicMock())
+    factory = AgentFactory(pool=pool)
 
     # empty tuple → isinstance always False
     with patch("agentpool.models.agents.NativeAgentConfig", ()):
@@ -212,7 +213,7 @@ async def test_create_session_agent_non_native_builds_snapshot_manually() -> Non
     assert result is agent
     cfg.get_agent.assert_called_once_with(
         input_provider=None,
-        pool=host_context.pool,
+        pool=pool,
     )
     agent.__aenter__.assert_awaited_once()
     agent.mcp.get_or_create_session.assert_called_once_with("sess-1")

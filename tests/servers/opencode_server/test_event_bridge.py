@@ -41,7 +41,7 @@ def bridged_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
     from agentpool.orchestrator.core import EventBus
 
     # Wire a real EventBus into the mock pool so __post_init__ can discover it
-    mock_agent.agent_pool.session_pool.event_bus = EventBus()
+    mock_agent.host_context.session_pool.event_bus = EventBus()
 
     return ServerState(
         working_dir=str(tmp_project_dir),

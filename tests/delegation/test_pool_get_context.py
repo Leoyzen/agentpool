@@ -77,3 +77,12 @@ def test_get_context_session_pool_is_none_before_enter(pool: AgentPool[None]) ->
 
     assert ctx.session_pool is None
     assert ctx.session_pool is pool._session_pool
+
+
+@pytest.mark.unit
+def test_get_context_passes_main_agent_name(pool: AgentPool[None]) -> None:
+    """get_context() passes main_agent_name to HostContext (None for empty pool)."""
+    ctx = pool.get_context()
+
+    # Empty pool has no agents, so main_agent_name resolves to None
+    assert ctx.main_agent_name is None

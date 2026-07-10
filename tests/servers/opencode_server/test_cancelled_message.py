@@ -51,6 +51,7 @@ class CancellableAgentMock:
         self.name = "test-agent"
         self.run_stream_call_count = 0
         self.agent_pool: Mock | None = None
+        self.host_context: Mock | None = None
         self.env: Mock | None = None
         self.storage: Any = None
         self.tools: list[Any] = []
@@ -113,6 +114,8 @@ def cancellable_mock_agent():
     pool.manifest.agents = {agent.name: agent}
 
     agent.agent_pool = pool
+    agent.host_context = pool
+    pool.pool = pool  # state.py resolves _pool via _ctx.pool
 
     # Set up SessionPool mock for new architecture
     from agentpool.orchestrator.run import RunStatus

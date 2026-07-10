@@ -346,7 +346,7 @@ All processing units (Agents, Teams) inherit from `MessageNode[TInputType, TOutp
 - Type-safe input/output handling
 
 !!! warning "Deprecation: `agent_pool` property"
-    `MessageNode.agent_pool` is deprecated since M2 with `DeprecationWarning`. M3 migrated the majority of ~60 call sites, but 18 references remain (primarily in ACP server code: `acp_agent.py`, `session.py`, `handler.py`). The property is kept with the warning in place; full removal is tracked as a follow-up before M4.
+    `MessageNode.agent_pool` is deprecated since M2 with `DeprecationWarning`. M3.5 completed the migration of all ~64 remaining call sites across ACP server, OpenCode server, core agents, factory, and talk. The `agent_pool` property and setter remain as a deprecated shim for backward compatibility. `HostContext.pool` is kept as a temporary escape hatch for ~6 skill-related accesses (to be removed in the skill-service-extraction change). Full property removal is tracked as an optional task (T7.x) or will be done in M4.
 
     **Migration**: Use `MessageNode.host_context` instead, which returns an immutable `HostContext` with the same infrastructure fields. `host_context` is sourced from `AgentPool.get_context()` and provides access to MCP manager, storage, and registry without exposing the full mutable pool object.
 

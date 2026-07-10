@@ -309,6 +309,10 @@ def mock_agent(mock_env: Mock, mock_pool: Mock, storage_manager: StorageManager)
     agent._input_provider = None
     agent.run = AsyncMock(return_value=Mock(data="test response"))
     agent.agent_pool = mock_pool
+    # host_context is accessed by ServerState.__post_init__ instead of agent_pool
+    # state.py resolves _pool via _ctx.pool, so mock_pool.pool must return itself
+    agent.host_context = mock_pool
+    mock_pool.pool = mock_pool
     # Real storage manager (accessed via state.storage -> agent.storage)
     agent.storage = storage_manager
 
@@ -341,7 +345,7 @@ def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
     # Extract session_controller from mock pool so _event_generator can
     # subscribe to the EventBus and receive events broadcast via event_bridge.
     session_controller = None
-    session_pool = getattr(mock_agent.agent_pool, "session_pool", None)
+    session_pool = getattr(mock_agent.host_context, "session_pool", None)
     if session_pool is not None:
         session_controller = getattr(session_pool, "sessions", None)
 

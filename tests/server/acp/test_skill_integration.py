@@ -23,6 +23,7 @@ def mock_base_agent() -> MagicMock:
     agent = MagicMock()
     agent.name = "test_agent"
     agent.agent_pool = None  # Will be set by tests
+    agent.host_context = None  # Will be set by tests
     return agent
 
 
@@ -78,7 +79,7 @@ def test_bridge_created_when_pool_has_skill_commands(
     # Setup: Add a command to the registry
     skill_registry.register("test_skill", sample_skill_command)
     mock_pool.skill_commands = skill_registry
-    mock_base_agent.agent_pool = mock_pool
+    mock_base_agent.host_context = MagicMock(pool=mock_pool)
 
     # Create the ACP agent
     acp_agent = AgentPoolACPAgent(
@@ -108,7 +109,7 @@ def test_bridge_created_with_empty_skill_registry(
     skills_registry = SkillsRegistry()
     empty_registry = SkillCommandRegistry(skills_registry=skills_registry)
     mock_pool.skill_commands = empty_registry
-    mock_base_agent.agent_pool = mock_pool
+    mock_base_agent.host_context = MagicMock(pool=mock_pool)
 
     # Create the ACP agent
     acp_agent = AgentPoolACPAgent(
@@ -133,7 +134,7 @@ def test_bridge_not_created_when_no_skill_commands_attr(
     """Test graceful handling when pool has no skill_commands attribute."""
     # Setup: Pool without skill_commands attribute
     mock_pool.skill_commands = None
-    mock_base_agent.agent_pool = mock_pool
+    mock_base_agent.host_context = MagicMock(pool=mock_pool)
 
     # Create the ACP agent - should not raise
     acp_agent = AgentPoolACPAgent(
@@ -158,7 +159,7 @@ def test_bridge_receives_commands_from_registry(
     # Setup: Pre-populate registry before creating agent
     skill_registry.register("test_skill", sample_skill_command)
     mock_pool.skill_commands = skill_registry
-    mock_base_agent.agent_pool = mock_pool
+    mock_base_agent.host_context = MagicMock(pool=mock_pool)
 
     # Create the ACP agent
     acp_agent = AgentPoolACPAgent(
@@ -186,7 +187,7 @@ def test_bridge_receives_command_updates(
     # Setup: Pre-populate registry
     skill_registry.register("test_skill", sample_skill_command)
     mock_pool.skill_commands = skill_registry
-    mock_base_agent.agent_pool = mock_pool
+    mock_base_agent.host_context = MagicMock(pool=mock_pool)
 
     # Create the ACP agent
     acp_agent = AgentPoolACPAgent(
@@ -225,7 +226,7 @@ def test_get_skill_commands_returns_bridge_commands(
     # Setup
     skill_registry.register("test_skill", sample_skill_command)
     mock_pool.skill_commands = skill_registry
-    mock_base_agent.agent_pool = mock_pool
+    mock_base_agent.host_context = MagicMock(pool=mock_pool)
 
     # Create the ACP agent
     acp_agent = AgentPoolACPAgent(
@@ -253,7 +254,7 @@ def test_get_skill_commands_returns_none_when_no_bridge(
     """Test that get_skill_commands returns None when no bridge is configured."""
     # Setup: No skill_commands on pool
     mock_pool.skill_commands = None
-    mock_base_agent.agent_pool = mock_pool
+    mock_base_agent.host_context = MagicMock(pool=mock_pool)
 
     # Create the ACP agent
     acp_agent = AgentPoolACPAgent(
@@ -281,7 +282,7 @@ def test_bridge_handles_command_removal(
     # Setup: Add then remove command
     skill_registry.register("test_skill", sample_skill_command)
     mock_pool.skill_commands = skill_registry
-    mock_base_agent.agent_pool = mock_pool
+    mock_base_agent.host_context = MagicMock(pool=mock_pool)
 
     # Create the ACP agent
     acp_agent = AgentPoolACPAgent(

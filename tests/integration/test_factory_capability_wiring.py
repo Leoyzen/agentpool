@@ -366,7 +366,7 @@ def test_inject_pool_providers_adds_nothing_for_main_agent() -> None:
     )
     mock_agent = MagicMock()
 
-    _inject_pool_providers(mock_agent, host_context, include_aggregating=False)
+    _inject_pool_providers(mock_agent, host_context, host_context.pool, include_aggregating=False)
 
     mock_agent.tools.add_provider.assert_not_called()
 
@@ -386,7 +386,7 @@ def test_inject_pool_providers_adds_aggregating_for_child() -> None:
     mock_agent = MagicMock()
     mock_agent._external_capabilities = []
 
-    _inject_pool_providers(mock_agent, host_context, include_aggregating=True)
+    _inject_pool_providers(mock_agent, host_context, host_context.pool, include_aggregating=True)
 
     # Should be in external_capabilities: aggregating provider only
     assert mock_aggregating in mock_agent._external_capabilities
@@ -402,7 +402,7 @@ def test_inject_pool_providers_skips_when_no_pool() -> None:
     host_context = _make_mock_host_context(pool=None)
     mock_agent = MagicMock()
 
-    _inject_pool_providers(mock_agent, host_context, include_aggregating=True)
+    _inject_pool_providers(mock_agent, host_context, None, include_aggregating=True)
 
     mock_agent.tools.add_provider.assert_not_called()
 

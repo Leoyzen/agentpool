@@ -136,7 +136,7 @@ class TestSkillsIncludeDefault:
         # Create a mock agent with the pool
         mock_agent = MagicMock()
         mock_agent.name = "test_agent"
-        mock_agent.agent_pool = mock_pool
+        mock_agent.host_context = mock_pool
 
         # Create ACP agent with load_skills=None
         acp_agent = AgentPoolACPAgent(
@@ -148,8 +148,8 @@ class TestSkillsIncludeDefault:
         # The load_skills should be None, and when checking should_load_skills,
         # it should resolve to False based on manifest
         assert acp_agent.load_skills is None
-        assert acp_agent.agent_pool is not None
-        assert acp_agent.agent_pool.manifest.skills.include_default is False
+        assert acp_agent.host_context is not None
+        assert acp_agent.host_context.manifest.skills.include_default is False
 
     def test_serve_acp_cli_load_skills_defaults_to_none(self) -> None:
         """serve-acp CLI load_skills defaults to None.

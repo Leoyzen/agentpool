@@ -196,6 +196,7 @@ class TestQuestionRoutesViaSessionController:
 
         mock_agent = Mock()
         mock_agent.agent_pool = None
+        mock_agent.host_context = None
         state = ServerState(working_dir="/tmp", agent=mock_agent)
         state.session_controller = session_controller
 
@@ -213,6 +214,7 @@ class TestQuestionRoutesViaSessionController:
         """list_questions should return empty list when no session_controller."""
         mock_agent = Mock()
         mock_agent.agent_pool = None
+        mock_agent.host_context = None
         state = ServerState(working_dir="/tmp", agent=mock_agent)
         # No session_controller set, so list_questions should return empty
 
@@ -232,6 +234,7 @@ class TestQuestionRoutesViaSessionController:
 
         mock_agent = Mock()
         mock_agent.agent_pool = None
+        mock_agent.host_context = None
         state = ServerState(working_dir="/tmp", agent=mock_agent)
         state.session_controller = session_controller
         session.input_provider = OpenCodeInputProvider(state, "test_session")
@@ -261,6 +264,7 @@ class TestQuestionRoutesViaSessionController:
 
         mock_agent = Mock()
         mock_agent.agent_pool = None
+        mock_agent.host_context = None
         state = ServerState(working_dir="/tmp", agent=mock_agent)
         state.session_controller = session_controller
         broadcast_calls = []
@@ -290,6 +294,7 @@ class TestInputProviderStoresQuestionsOnSessionState:
 
         mock_agent = Mock()
         mock_agent.agent_pool = None
+        mock_agent.host_context = None
         state = ServerState(working_dir="/tmp", agent=mock_agent)
         state.session_controller = session_controller
         broadcast_calls = []
@@ -327,6 +332,7 @@ class TestInputProviderStoresQuestionsOnSessionState:
         """When no session_controller, questions are not stored on ServerState."""
         mock_agent = Mock()
         mock_agent.agent_pool = None
+        mock_agent.host_context = None
         state = ServerState(working_dir="/tmp", agent=mock_agent)
         broadcast_calls = []
 
@@ -369,6 +375,7 @@ class TestSSEDisconnectViaSessionController:
 
         mock_agent = Mock()
         mock_agent.agent_pool = None
+        mock_agent.host_context = None
         state = ServerState(working_dir="/tmp", agent=mock_agent)
         state.session_controller = session_controller
 
@@ -389,6 +396,7 @@ class TestSSEDisconnectViaSessionController:
 
         mock_agent = Mock()
         mock_agent.agent_pool = None
+        mock_agent.host_context = None
         state = ServerState(working_dir="/tmp", agent=mock_agent)
         state.session_controller = session_controller
 

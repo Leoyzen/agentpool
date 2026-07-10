@@ -68,8 +68,8 @@ if TYPE_CHECKING:
         SetSessionModeRequest,
     )
     from acp.schema.mcp import AcpMcpServer
-    from agentpool import AgentPool
     from agentpool.agents.base_agent import BaseAgent
+    from agentpool.host.context import HostContext
     from agentpool.models.agents import NativeAgentConfig
     from agentpool.storage.manager import SessionMetadataGeneratedEvent
     from agentpool_server.acp_server.handler import ACPProtocolHandler
@@ -168,7 +168,7 @@ def get_agent_role_config_option(agent: BaseAgent[Any, Any]) -> SessionConfigOpt
     Returns:
         SessionConfigOption for agent_role, or None if pool has <= 1 agents.
     """
-    pool = agent.agent_pool
+    pool = agent.host_context
     if pool is None or len(pool.manifest.agents) <= 1:
         return None
 
@@ -208,7 +208,7 @@ class AgentPoolACPAgent(ACPAgent):
     default_agent: BaseAgent[Any, Any]
     """Default agent instance to use for new sessions.
 
-    The agent carries its own pool reference via agent.agent_pool,
+    The agent carries its own pool reference via agent.host_context,
     which is used for pool-level operations and agent switching.
     """
 
@@ -254,18 +254,18 @@ class AgentPoolACPAgent(ACPAgent):
         """Initialize derived attributes and setup after field assignment."""
         self.client_capabilities: ClientCapabilities | None = None
         self.client_info: Implementation | None = None
-        pool = self.agent_pool
-        if pool is None:
+        ctx = self.host_context
+        if ctx is None or ctx.pool is None:
             msg = "Default agent has no associated pool"
             raise RuntimeError(msg)
         if self.session_manager is None:
-            self.session_manager = ACPSessionManager(pool=pool)
+            self.session_manager = ACPSessionManager(pool=ctx.pool)
         self.tasks = TaskManager()
         self._initialized = False
         self._sessions_cache: ListSessionsResponse | None = None
         self._sessions_cache_time: float = 0.0
         # Connect to title generation signal to notify clients of session updates
-        pool.storage.metadata_generated.connect(self._on_metadata_generated)
+        ctx.storage.metadata_generated.connect(self._on_metadata_generated)
         # Setup skill command bridge if pool has skill commands configured
         self._setup_skill_bridge()
 
@@ -276,26 +276,23 @@ class AgentPoolACPAgent(ACPAgent):
         # NEW: Cache agent config for per-session creation (RFC-0031)
         from agentpool.models.agents import NativeAgentConfig
 
-        if (
-            self.agent_pool
-            and self.agent_pool.main_agent_name
-            and self.agent_pool.main_agent_name in self.agent_pool.manifest.agents
-        ):
-            cfg = self.agent_pool.manifest.agents[self.agent_pool.main_agent_name]
+        ctx = self.host_context
+        if ctx is not None and ctx.main_agent_name and ctx.main_agent_name in ctx.manifest.agents:
+            cfg = ctx.manifest.agents[ctx.main_agent_name]
             if isinstance(cfg, NativeAgentConfig):
                 if cfg.name is None:
-                    cfg = cfg.model_copy(update={"name": self.agent_pool.main_agent_name})
+                    cfg = cfg.model_copy(update={"name": ctx.main_agent_name})
                 self._agent_config = cfg
 
         # Initialize SessionPool-backed protocol handler if feature flag is enabled
-        if self.agent_pool and (
-            self.agent_pool.manifest.acp and self.agent_pool.manifest.acp.use_session_pool
+        if self.host_context and (
+            self.host_context.manifest.acp and self.host_context.manifest.acp.use_session_pool
         ):
             from agentpool_server.acp_server.event_converter import ACPEventConverter
             from agentpool_server.acp_server.handler import ACPProtocolHandler
 
             self._protocol_handler = ACPProtocolHandler(
-                agent_pool=self.agent_pool,
+                host_context=self.host_context,
                 session_manager=self.session_manager,
                 event_converter=ACPEventConverter(
                     subagent_display_mode=self.subagent_display_mode,
@@ -338,12 +335,12 @@ class AgentPoolACPAgent(ACPAgent):
         This enables skill commands to be exposed as ACP slash commands.
         Gracefully handles cases where no skill commands are configured.
         """
-        pool = self.agent_pool
-        if pool is None:
+        ctx = self.host_context
+        if ctx is None or ctx.pool is None:
             return
 
         # Check if pool has skill_commands registry
-        skill_commands = getattr(pool, "skill_commands", None)
+        skill_commands = ctx.pool.skill_commands
         if skill_commands is None:
             return
 
@@ -388,9 +385,9 @@ class AgentPoolACPAgent(ACPAgent):
             logger.exception("Failed to send session info update", session_id=event.session_id)
 
     @property
-    def agent_pool(self) -> AgentPool[Any] | None:
-        """Get the agent pool from the default agent."""
-        return self.default_agent.agent_pool
+    def host_context(self) -> HostContext | None:
+        """Get the host context from the default agent."""
+        return self.default_agent.host_context
 
         # Note: Tool registration happens after initialize() when we know client caps
 
@@ -406,8 +403,8 @@ class AgentPoolACPAgent(ACPAgent):
         if self._protocol_handler is not None:
             self._protocol_handler.client_capabilities = self.client_capabilities
         # Initialize provider router from current pool manifest
-        pool = self.agent_pool
-        manifest = pool.manifest if pool else None
+        ctx = self.host_context
+        manifest = ctx.manifest if ctx else None
         self.provider_router = ProviderRouter(manifest)
         # Gate turn_complete advertisement on client's declared support
         client_caps = params.client_capabilities
@@ -487,11 +484,11 @@ class AgentPoolACPAgent(ACPAgent):
                 should_load_skills = self.load_skills
                 if (
                     should_load_skills is None
-                    and self.agent_pool
-                    and self.agent_pool.manifest
-                    and self.agent_pool.manifest.skills is not None
+                    and self.host_context
+                    and self.host_context.manifest
+                    and self.host_context.manifest.skills is not None
                 ):
-                    should_load_skills = self.agent_pool.manifest.skills.include_default
+                    should_load_skills = self.host_context.manifest.skills.include_default
                 elif should_load_skills is None:
                     should_load_skills = True  # Fallback default
 
@@ -660,10 +657,10 @@ class AgentPoolACPAgent(ACPAgent):
                 logger.error("Failed to resume session")
                 return ResumeSessionResponse()
 
-            if self.agent_pool is None:
+            if self.host_context is None:
                 logger.error("Agent pool not available")
                 return ResumeSessionResponse()
-            session_pool = self.agent_pool.session_pool
+            session_pool = self.host_context.session_pool
             if session_pool is not None:
                 try:
                     await session_pool.create_session(
@@ -962,8 +959,8 @@ class AgentPoolACPAgent(ACPAgent):
                 )
 
             # Get configured variants from manifest
-            agent_pool = getattr(session.agent, "agent_pool", None)
-            manifest = getattr(agent_pool, "manifest", None) if agent_pool else None
+            ctx = session.agent.host_context
+            manifest = ctx.manifest if ctx else None
             if manifest and manifest.model_variants:
                 valid_model_ids.update(manifest.model_variants.keys())
                 # Also include resolved identifiers from StringModelConfig variants,
@@ -1082,8 +1079,8 @@ class AgentPoolACPAgent(ACPAgent):
         """
         from acp.exceptions import RequestError
 
-        pool = session.agent.agent_pool
-        if pool is None or agent_name not in pool.manifest.agents:
+        ctx = session.agent.host_context
+        if ctx is None or agent_name not in ctx.manifest.agents:
             msg = {"agent_role": agent_name, "reason": "Unknown agent"}
             raise RequestError.invalid_params(msg)
         await self._swap_session_agent(session.session_id, agent_name)
@@ -1151,22 +1148,22 @@ class AgentPoolACPAgent(ACPAgent):
             new_agent = await self.server.swap_pool(config_path, agent_name)
 
             # 6. Update cached agent config from new pool
-            pool = new_agent.agent_pool
-            if pool is None:
+            ctx = new_agent.host_context
+            if ctx is None or ctx.pool is None:
                 msg = "New agent has no associated pool"
                 raise RuntimeError(msg)
 
             # Re-resolve _agent_config from the new pool's manifest
-            if pool.main_agent_name and pool.main_agent_name in pool.manifest.agents:
-                cfg = pool.manifest.agents[pool.main_agent_name]
+            if ctx.main_agent_name and ctx.main_agent_name in ctx.manifest.agents:
+                cfg = ctx.manifest.agents[ctx.main_agent_name]
                 from agentpool.models.agents import NativeAgentConfig
 
                 if isinstance(cfg, NativeAgentConfig):
                     if cfg.name is None:
-                        cfg = cfg.model_copy(update={"name": pool.main_agent_name})
+                        cfg = cfg.model_copy(update={"name": ctx.main_agent_name})
                     self._agent_config = cfg
-            elif pool.manifest.agents:
-                cfg = next(iter(pool.manifest.agents.values()))
+            elif ctx.manifest.agents:
+                cfg = next(iter(ctx.manifest.agents.values()))
                 from agentpool.models.agents import NativeAgentConfig
 
                 if isinstance(cfg, NativeAgentConfig):
@@ -1176,12 +1173,12 @@ class AgentPoolACPAgent(ACPAgent):
 
             # 7. Update default_agent reference and pool
             self.default_agent = new_agent
-            self.session_manager._pool = pool
+            self.session_manager._pool = ctx.pool
 
             # 8. Invalidate sessions cache
             self._sessions_cache = None
 
-            agent_names = list(pool.manifest.agents.keys())
+            agent_names = list(ctx.manifest.agents.keys())
             logger.info("Pool swap complete", agent_names=agent_names)
             return agent_names
         finally:

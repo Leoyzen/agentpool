@@ -407,7 +407,7 @@ class TestShellSessionPoolIsolation:
         session_id = session_response.json()["id"]
 
         # Set up a session_pool receive_request spy
-        pool = server_state.agent.agent_pool
+        pool = server_state.agent.host_context
         receive_request_mock = AsyncMock()
         pool.session_pool.receive_request = receive_request_mock
 

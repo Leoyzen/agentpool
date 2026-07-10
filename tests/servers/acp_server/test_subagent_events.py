@@ -71,7 +71,7 @@ def acp_handler(
     session_manager = AsyncMock()
     event_converter = ACPEventConverter()
     handler = ACPProtocolHandler(
-        agent_pool=mock_agent_pool,
+        host_context=mock_agent_pool,
         session_manager=session_manager,
         event_converter=event_converter,
         client=mock_client,
@@ -190,7 +190,7 @@ async def test_acp_handler_converts_stream_complete(
     mock_event_bus.subscribe = AsyncMock(return_value=_queue)
 
     handler = ACPProtocolHandler(
-        agent_pool=mock_agent_pool,
+        host_context=mock_agent_pool,
         session_manager=AsyncMock(),
         event_converter=ACPEventConverter(),
         client=mock_client,

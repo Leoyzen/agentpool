@@ -416,7 +416,7 @@ class AgentFactory:
         with ConfigContextManager(host_context.config_file_path):
             agent: NativeAgent[Any, Any] = cfg.get_agent(
                 input_provider=input_provider,
-                pool=host_context.pool,
+                pool=self._pool,
             )
 
         # Preserve runtime resources from parent agent.
@@ -481,7 +481,7 @@ class AgentFactory:
 
         # Inject pool-level providers (MCP aggregating provider for
         # child connection inheritance).
-        _inject_pool_providers(agent, host_context, include_aggregating=True)
+        _inject_pool_providers(agent, host_context, self._pool, include_aggregating=True)
 
         _ = agent_name  # accepted for future logging
         return agent
@@ -506,7 +506,7 @@ class AgentFactory:
         with ConfigContextManager(host_context.config_file_path):
             agent: NativeAgent[Any, Any] = cfg.get_agent(
                 input_provider=input_provider,
-                pool=host_context.pool,
+                pool=self._pool,
             )
 
         await agent.__aenter__()
@@ -535,7 +535,7 @@ class AgentFactory:
         agent.mcp.update_session_snapshot(session_id, snapshot)
 
         # Inject pool-level MCP aggregating provider (child connection inheritance).
-        _inject_pool_providers(agent, host_context, include_aggregating=False)
+        _inject_pool_providers(agent, host_context, self._pool, include_aggregating=False)
 
         _ = agent_name, session  # accepted for future logging
         return agent
@@ -564,14 +564,14 @@ class AgentFactory:
         with ConfigContextManager(host_context.config_file_path):
             agent: BaseAgent[Any, Any] = cfg.get_agent(
                 input_provider=input_provider,
-                pool=host_context.pool,
+                pool=self._pool,
             )
 
         await agent.__aenter__()
 
         # MCP snapshot strategy C: MANUAL from pool.
         pool_configs: tuple[McpConfigEntry, ...] = ()
-        if host_context.pool is not None:
+        if self._pool is not None:
             pool_configs = tuple(
                 McpConfigEntry(server_config=s, source="pool")
                 for s in host_context.mcp.servers
@@ -592,7 +592,7 @@ class AgentFactory:
         agent.mcp.update_session_snapshot(session_id, snapshot)
 
         # Inject pool-level providers (transitional).
-        _inject_pool_providers(agent, host_context, include_aggregating=False)
+        _inject_pool_providers(agent, host_context, self._pool, include_aggregating=False)
 
         _ = agent_name, session  # accepted for future logging
         return agent
@@ -711,6 +711,7 @@ class AgentFactory:
 def _inject_pool_providers(
     agent: BaseAgent[Any, Any],
     host_context: HostContext,
+    pool: AgentPool[Any] | None,
     *,
     include_aggregating: bool,
 ) -> None:
@@ -727,10 +728,11 @@ def _inject_pool_providers(
     Args:
         agent: The agent to inject providers into.
         host_context: The host context with shared services.
+        pool: The AgentPool instance (passed directly to avoid
+            deprecated pool access via host_context).
         include_aggregating: Whether to include the MCP aggregating
             provider (child session path only).
     """
-    pool = host_context.pool
     if pool is None:
         return
     # MCP aggregating provider — only for child sessions (connection
