@@ -168,11 +168,17 @@ class CodeModeCapability(AbstractCapability[AgentDepsT]):
             metadata_json = anyenv.dump_json(metadata, indent=True).encode("utf-8")
             script_bytes = python_code.encode("utf-8")
 
-            from fsspec.implementations.memory import MemoryFileSystem
+            from agentpool.capabilities.agent_context import AgentContext as _AgentContext
 
-            fallback_fs = MemoryFileSystem()
-            fallback_fs.pipe(script_path, script_bytes)
-            fallback_fs.pipe(metadata_path, metadata_json)
+            fs: Any = None
+            if isinstance(ctx.deps, _AgentContext):
+                fs = ctx.deps.host.internal_fs if ctx.deps.host is not None else None
+            if fs is None:
+                from fsspec.implementations.memory import MemoryFileSystem
+
+                fs = MemoryFileSystem()
+            fs.pipe(script_path, script_bytes)
+            fs.pipe(metadata_path, metadata_json)
 
         return result_value
 
