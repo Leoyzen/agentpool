@@ -143,6 +143,62 @@ class FSSpecTools(FunctionToolsetCapability):
         self._edit_tool = edit_tool
         self._max_image_size = max_image_size
         self._max_image_bytes = max_image_bytes
+        # Eagerly create tools so get_toolset() (sync) returns a non-None toolset.
+        self._setup_tools()
+
+    def _setup_tools(self) -> None:
+        """Create all filesystem tools synchronously.
+
+        Called from __init__ to populate self._tools so that
+        FunctionToolsetCapability.get_toolset() can build a FunctionToolset
+        without needing the async get_tools() call.
+        """
+        if self._tools:
+            return
+        list_dir_tool = create_list_directory_tool(env=self.execution_env, cwd=self.cwd)
+        read_tool = create_read_tool(
+            env=self.execution_env,
+            converter=self.converter,
+            cwd=self.cwd,
+            max_file_size_kb=self.max_file_size // 1024,
+            max_image_size=self._max_image_size,
+            max_image_bytes=self._max_image_bytes,
+            large_file_tokens=self._large_file_tokens,
+            map_max_tokens=self._map_max_tokens,
+        )
+
+        grep_tool = create_grep_tool(
+            env=self.execution_env,
+            cwd=self.cwd,
+            max_output_kb=self.max_grep_output // 1024,
+            use_subprocess_grep=self.use_subprocess_grep,
+        )
+
+        delete_tool = create_delete_path_tool(env=self.execution_env, cwd=self.cwd)
+        download_tool = create_download_file_tool(env=self.execution_env, cwd=self.cwd)
+        # Start with pre-built tools (create_tool appends to self._tools, so
+        # we set the list first, then use create_tool for the rest)
+        self._tools = [
+            list_dir_tool,
+            read_tool,
+            grep_tool,
+            delete_tool,
+            download_tool,
+        ]
+
+        # create_tool appends to self._tools internally
+        self.create_tool(self.write, category="edit")
+
+        # Add edit tool based on config - mutually exclusive
+        if self._edit_tool == "agentic":
+            self.create_tool(self.agentic_edit, category="edit")
+        elif self._edit_tool == "batch":
+            self.create_tool(self.edit_batch, category="edit", name_override="edit")
+        else:  # simple
+            self.create_tool(self.edit, category="edit")
+
+        # Add regex line editing tool
+        self.create_tool(self.regex_replace_lines, category="edit")
 
     def _get_fs(self, agent_ctx: AgentContext) -> AsyncFileSystem:
         """Get filesystem, falling back to agent's env if not set."""
@@ -214,53 +270,11 @@ class FSSpecTools(FunctionToolsetCapability):
         return path
 
     async def get_tools(self) -> Sequence[Tool]:
-        """Get filesystem tools."""
-        if self._tools:
-            return self._tools
-        # Create standalone tools with toolset's configuration
-        list_dir_tool = create_list_directory_tool(env=self.execution_env, cwd=self.cwd)
-        read_tool = create_read_tool(
-            env=self.execution_env,
-            converter=self.converter,  # Pass converter for automatic markdown conversion
-            cwd=self.cwd,
-            max_file_size_kb=self.max_file_size // 1024,
-            max_image_size=self._max_image_size,
-            max_image_bytes=self._max_image_bytes,
-            large_file_tokens=self._large_file_tokens,
-            map_max_tokens=self._map_max_tokens,
-        )
+        """Get filesystem tools.
 
-        grep_tool = create_grep_tool(
-            env=self.execution_env,
-            cwd=self.cwd,
-            max_output_kb=self.max_grep_output // 1024,
-            use_subprocess_grep=self.use_subprocess_grep,
-        )
-
-        delete_tool = create_delete_path_tool(env=self.execution_env, cwd=self.cwd)
-        download_tool = create_download_file_tool(env=self.execution_env, cwd=self.cwd)
-        self._tools = [
-            list_dir_tool,
-            read_tool,
-            grep_tool,
-            self.create_tool(self.write, category="edit"),
-            delete_tool,
-            download_tool,
-        ]
-
-        # Add edit tool based on config - mutually exclusive
-        if self._edit_tool == "agentic":
-            self._tools.append(self.create_tool(self.agentic_edit, category="edit"))
-        elif self._edit_tool == "batch":
-            self._tools.append(
-                self.create_tool(self.edit_batch, category="edit", name_override="edit")
-            )
-        else:  # simple
-            self._tools.append(self.create_tool(self.edit, category="edit"))
-
-        # Add regex line editing tool
-        self._tools.append(self.create_tool(self.regex_replace_lines, category="edit"))
-
+        Tools are eagerly created in __init__ via _setup_tools().
+        This method exists for backward compat with the async get_tools() protocol.
+        """
         return self._tools
 
     async def list_directory(  # noqa: D417

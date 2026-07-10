@@ -346,6 +346,8 @@ class SkillURIResolver:
             The matching Skill or None if not found.
         """
         for provider in self._providers.values():
+            if not isinstance(provider, SkillProvider):
+                continue
             skills = await provider.get_skills()
             for skill in skills:
                 if skill.name == skill_name:
@@ -438,6 +440,9 @@ class SkillURIResolver:
             raise ValueError(msg)
 
         provider = self._providers[resolved.provider]
+        if not isinstance(provider, SkillProvider):
+            msg = f"Provider {resolved.provider!r} does not implement SkillProvider"
+            raise TypeError(msg)
         skills = await provider.get_skills()
 
         for skill in skills:
