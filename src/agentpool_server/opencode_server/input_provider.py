@@ -650,7 +650,7 @@ class OpenCodeInputProvider(InputProvider):
                 return False
 
         if shared_future is not None:
-            future: asyncio.Future[list[list[str]]] = shared_future  # type: ignore[assignment]
+            future: asyncio.Future[list[list[str]]] = shared_future
         else:
             future = asyncio.get_event_loop().create_future()
         self._pending_questions_dict[handle] = PendingQuestion(
@@ -736,3 +736,7 @@ class OpenCodeInputProvider(InputProvider):
                 self._pending_questions_dict.pop(question_id, None)
         logger.info("Cancelled all pending questions", count=count, session_id=self.session_id)
         return count
+
+    def cleanup_elicitation_question(self, handle: str) -> None:
+        """Remove a pending elicitation question after timeout or cancellation."""
+        self._pending_questions_dict.pop(handle, None)

@@ -453,6 +453,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             ) from None
         finally:
             registry.remove(handle)
+            provider.cleanup_elicitation_question(handle)
 
         # Convert payload to ElicitResult.
         # payload can be either:
@@ -474,12 +475,36 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                 content: dict[str, Any] = {}
                 for i, key in enumerate(prop_keys[: len(payload)]):
                     answer_list = payload[i] if i < len(payload) else []
-                    content[key] = answer_list[0] if answer_list else ""
+                    prop_schema = props.get(key, {})
+                    if isinstance(prop_schema, dict) and (
+                        prop_schema.get("type") == "array" or "items" in prop_schema
+                    ):
+                        content[key] = answer_list
+                    else:
+                        content[key] = answer_list[0] if answer_list else ""
                 return MCPElicitResult(action="accept", content=content)
+
+            is_multi = isinstance(schema, dict) and (
+                schema.get("type") == "array" or "items" in schema
+            )
             answer = payload[0] if payload else []
-            if isinstance(answer, list):
-                return MCPElicitResult(action="accept", content={"value": answer})
-            return MCPElicitResult(action="accept", content={"value": [answer] if answer else []})
+            if is_multi:
+                return MCPElicitResult(
+                    action="accept",
+                    content={
+                        "value": answer if isinstance(answer, list) else [answer] if answer else []
+                    },
+                )
+            return MCPElicitResult(
+                action="accept",
+                content={
+                    "value": answer[0]
+                    if isinstance(answer, list) and answer
+                    else answer
+                    if isinstance(answer, str)
+                    else ""
+                },
+            )
 
         # ElicitationResumePayload path.
         match payload.action:
