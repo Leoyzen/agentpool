@@ -56,7 +56,7 @@ class ListToolsCommand(NodeCommand):
                 "Name": tool_info.name,
                 "Source": tool_info.source,
             }
-            for tool_info in await agent.tools.get_tools()
+            for tool_info in await agent._get_all_tools()
             if not source or tool_info.source == source
         ]
 
@@ -96,7 +96,10 @@ class ShowToolCommand(NodeCommand):
         agent = ctx.context.agent
 
         try:
-            tool_info = await agent.tools.get_tool(name)
+            all_tools = await agent._get_all_tools()
+            tool_info = next((t for t in all_tools if t.name == name), None)
+            if tool_info is None:
+                raise KeyError(name)  # noqa: TRY301
             # Start with the standard tool info format
             sections = [tool_info.format_info(indent="")]
 
@@ -147,7 +150,11 @@ class EnableToolCommand(NodeCommand):
             name: Tool name to enable
         """
         try:
-            await ctx.context.agent.tools.enable_tool(name)
+            all_tools = await ctx.context.agent._get_all_tools()
+            tool_info = next((t for t in all_tools if t.name == name), None)
+            if tool_info is None:
+                raise ValueError(f"Tool not found: {name}")  # noqa: TRY301
+            tool_info.enabled = True
             await ctx.print(f"✅ **Tool** `{name}` **enabled**")
         except ValueError as e:
             raise CommandError(f"Failed to enable tool: {e}") from e
@@ -182,7 +189,11 @@ class DisableToolCommand(NodeCommand):
             name: Tool name to disable
         """
         try:
-            await ctx.context.agent.tools.disable_tool(name)
+            all_tools = await ctx.context.agent._get_all_tools()
+            tool_info = next((t for t in all_tools if t.name == name), None)
+            if tool_info is None:
+                raise ValueError(f"Tool not found: {name}")  # noqa: TRY301
+            tool_info.enabled = False
             await ctx.print(f"❌ **Tool** `{name}` **disabled**")
         except ValueError as e:
             raise CommandError(f"Failed to disable tool: {e}") from e
@@ -296,7 +307,7 @@ class RegisterCodeToolCommand(NodeCommand):
             tool_obj.enabled = True
             tool_obj.source = "dynamic"
 
-            registered = ctx.context.agent.tools.register_tool(tool_obj)
+            registered = ctx.context.agent._builtin_provider.register_tool(tool_obj)
             await ctx.print(
                 f"**Tool registered:** `{registered.name}`"
                 f" - {registered.description or '*No description*'}"
@@ -306,5 +317,5 @@ class RegisterCodeToolCommand(NodeCommand):
 
 
 async def get_tool_names(ctx: CompletionContext[AgentContext]) -> list[str]:
-    manager = ctx.command_context.context.agent.tools
-    return list({t.name for t in await manager.get_tools()})
+    agent = ctx.command_context.context.agent
+    return list({t.name for t in await agent._get_all_tools()})

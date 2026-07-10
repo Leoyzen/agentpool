@@ -19,7 +19,7 @@ from agentpool_server import BaseServer
 
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Callable
     from contextlib import AbstractAsyncContextManager
 
     from fastmcp import FastMCP
@@ -74,7 +74,7 @@ class MCPServer(BaseServer):
         from fastmcp import FastMCP
 
         super().__init__(pool, name=name, raise_exceptions=raise_exceptions)
-        self.provider = SubagentCapability(pool, zed_mode=config.zed_mode)
+        self.provider = SubagentCapability()
         self.config = config
 
         self._subscriptions: defaultdict[str, set[mcp.ServerSession]] = defaultdict(set)
@@ -99,69 +99,25 @@ class MCPServer(BaseServer):
         if self._tools_registered:
             return
 
-        tools = await self.provider.get_tools()
-
-        for tool in tools:
-            # TODO: previously there was code to filter private attributes using a wrapper.
-            # comment said it was to remove _meta params, but not sure if it was required at all.
-            tool_annotations = types.ToolAnnotations(
-                title=tool.name,
-                readOnlyHint=tool.hints.read_only,
-                destructiveHint=tool.hints.destructive,
-                idempotentHint=tool.hints.idempotent,
-                openWorldHint=tool.hints.open_world,
-            )
-            # TODO: set task=True?
-            self.fastmcp.tool(annotations=tool_annotations)(tool.callable)
+        toolset = self.provider.get_toolset()
+        tool_count = 0
+        if toolset is not None:
+            # SubagentCapability provides a FunctionToolset with static methods
+            # Register them directly via FastMCP's @tool decorator
+            self.fastmcp.tool()(SubagentCapability.spawn_subagent)
+            self.fastmcp.tool()(SubagentCapability.get_available_agents)
+            tool_count = 2
 
         self._tools_registered = True
-        logger.info("Registered MCP tools", count=len(tools))
+        logger.info("Registered MCP tools", count=tool_count)
 
     async def _register_pool_prompts(self) -> None:
         """Register all pool prompts using FastMCP's @prompt decorator."""
         if self._prompts_registered:
             return
 
-        prompts = await self.provider.get_prompts()
-
-        for prompt in prompts:
-            # Create handler with closure to capture prompt instance
-            def make_handler(prompt_instance: BasePrompt) -> Callable[..., Awaitable[str]]:
-                async def handler(**kwargs: Any) -> str:
-                    """Dynamically generated prompt handler."""
-                    from agentpool.mcp_server import conversions
-
-                    try:
-                        assert prompt_instance.name
-                        parts = await self.provider.get_request_parts(
-                            prompt_instance.name, kwargs or {}
-                        )
-                        messages = [msg for p in parts for msg in conversions.to_mcp_messages(p)]
-
-                        # Format messages as text
-                        result_lines = []
-                        for msg in messages:
-                            if isinstance(msg.content, types.TextContent):
-                                result_lines.append(f"{msg.role}: {msg.content.text}")
-                            else:
-                                result_lines.append(f"{msg.role}: {msg.content}")
-
-                        return "\n".join(result_lines)
-                    except Exception as exc:
-                        logger.exception("Prompt execution failed", name=prompt_instance.name)
-                        return f"Prompt execution failed: {exc}"
-
-                # Set proper function metadata for FastMCP
-                assert prompt_instance.name
-                handler.__name__ = prompt_instance.name
-                handler.__doc__ = (
-                    prompt_instance.description or f"Get prompt {prompt_instance.name}"
-                )
-                return handler
-
-            # Register using FastMCP's prompt decorator
-            prompt_handler = make_handler(prompt)
-            self.fastmcp.prompt()(prompt_handler)
+        # SubagentCapability does not provide prompts
+        prompts: list[BasePrompt] = []
 
         self._prompts_registered = True
         logger.info("Registered MCP prompts", count=len(prompts))

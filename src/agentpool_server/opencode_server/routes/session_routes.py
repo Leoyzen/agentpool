@@ -374,13 +374,14 @@ async def _execute_skill_command(  # noqa: PLR0915
     if not skill_cmd:
         raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
 
-    # Load skill instructions - use provider for virtual skills
+    # Load skill instructions - use resolver for virtual skills
     instructions = ""
-    if state.pool.skill_provider is not None:
+    if state.pool.skill_resolver is not None:
         try:
-            instructions = await state.pool.skill_provider.get_skill_instructions(skill_name)
+            skill = await state.pool.skill_resolver.resolve(skill_name)
+            instructions = skill.load_instructions()
         except Exception:  # noqa: BLE001
-            # Fall back to local load if provider fetch fails
+            # Fall back to local load if resolver fails
             try:
                 instructions = skill_cmd.skill.load_instructions()
             except ValueError:

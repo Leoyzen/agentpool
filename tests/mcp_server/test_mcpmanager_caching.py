@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Self
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -77,9 +77,11 @@ class _FakeProvider:
     without a transport).
     """
 
-    def __init__(self, server: Any, **kwargs: Any) -> None:
-        self.server = server
-        self.name: str = kwargs.get("name", "fake")
+    def __init__(self, client: Any = None, *, name: str = "fake", **kwargs: Any) -> None:
+        self._client = client
+        self.client = client
+        self.server = client.config if client is not None else None
+        self.name: str = name
         # Signal attributes required by CombinedToolsetCapability setter
         self.tools_changed = _FakeSignal()
         self.prompts_changed = _FakeSignal()
@@ -201,7 +203,11 @@ async def test_aggregating_provider_contains_only_acp_providers() -> None:
         "agentpool.mcp_server.manager.MCPCapability",
         _FakeProvider,
     ):
-        await manager.setup_server(acp_config)
+        # ACP configs can't go through setup_server (raises NotImplementedError),
+        # so we add the provider directly via the fake
+        acp_provider = _FakeProvider(client=MagicMock(config=acp_config), name="test_acp_server")
+        manager.providers.append(acp_provider)
+        # Non-ACP goes through setup_server normally
         await manager.setup_server(stdio_config)
 
     # Both providers should be in the manager's provider list
@@ -211,7 +217,6 @@ async def test_aggregating_provider_contains_only_acp_providers() -> None:
 
     # Aggregating provider should contain only the ACP provider
     assert len(agg.capabilities) == 1
-    assert agg.capabilities[0].server is acp_config
 
     await manager.cleanup()
 

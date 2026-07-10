@@ -66,7 +66,7 @@ class AddWorkerCommand(AgentCommand):
             share_history_bool = share_history.lower() == "true"
 
             # Register worker
-            tool_info = ctx.context.agent.tools.register_worker(
+            tool_info = ctx.context.agent._worker_provider.register_worker(
                 worker,
                 reset_history_on_run=reset_history_bool,
                 pass_message_history=share_history_bool,
@@ -112,7 +112,7 @@ class RemoveWorkerCommand(AgentCommand):
         tool_name = f"ask_{worker_name}"  # Match the naming in to_tool
 
         try:
-            ctx.context.agent.tools.worker_provider.remove_tool(tool_name)
+            ctx.context.agent._worker_provider.remove_tool(tool_name)
             await ctx.print(f"🗑️ **Removed worker tool:** `{tool_name}`")
         except Exception as e:
             raise CommandError(f"Failed to remove worker: {e}") from e
@@ -144,7 +144,7 @@ class ListWorkersCommand(AgentCommand):
             ctx: Command context
         """
         # Filter tools by source="agent"
-        worker_tools = await ctx.context.agent.tools.worker_provider.get_tools()
+        worker_tools = await ctx.context.agent._worker_provider.get_tools()
         if not worker_tools:
             await ctx.print("ℹ️ **No worker tools registered**")  #  noqa: RUF001
             return
