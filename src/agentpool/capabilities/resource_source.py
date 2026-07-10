@@ -31,12 +31,14 @@ class Resource:
         name: Human-readable name of the resource.
         mime_type: MIME type of the resource content.
         description: Optional description of the resource.
+        source: Name of the source that provided this resource (for debugging/tracing).
     """
 
     uri: str
     name: str
     mime_type: str = "application/octet-stream"
     description: str = ""
+    source: str = ""
 
 
 @dataclass(frozen=True, slots=True)

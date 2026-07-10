@@ -92,7 +92,7 @@
 - **RunHandle cleanup**: `complete_event` fires after all cleanup. `close_session()` awaits it with timeout, then falls back to `cancel_run()`.
 - **Crash recovery via journal.resume()**: Detects in-flight Turns by comparing journal entries against snapshot store turn results. Strategy `"mark_interrupted"` skips re-execution; `"retry"` checks tool execution log for idempotency.
 - **Tool execution logging in HookAwareTurn**: `_fire_post_tool_hooks()` calls `_log_tool_execution()` which stores a `ToolExecutionRecord` in the Journal. Independent of hooks config.
-- **agent_pool deprecated for host_context**: `MessageNode.agent_pool` emits `DeprecationWarning` (M2), removal in M3. Use `host_context` (immutable `HostContext`).
+- **agent_pool deprecated for host_context**: `MessageNode.agent_pool` emits `DeprecationWarning` (M2). Most call sites migrated in M3 (~60), but 18 references remain (primarily ACP server code). Full removal tracked as follow-up before M4. Use `host_context` (immutable `HostContext`).
 - **Codemode is a metacall**: `CodeModeCapability` wraps all tools into a single Python execution tool. One tool to rule them all.
 - **Skill commands are protocol-agnostic**: `SkillCommand` wraps skills as slash commands working across ACP, AG-UI, and OpenCode without protocol-specific code.
 - **SkillCapability injection order matters**: In `get_agentlet()`, skill capabilities are injected at position 5 (after MCP, deferred bridge, approval bridge, and hook capabilities). Each skill produces one `SkillCapability` instance with its own `SkillMcpManager` and `SkillToolManager` — there is one manager tree shared across all skills from the same agentlet creation call.

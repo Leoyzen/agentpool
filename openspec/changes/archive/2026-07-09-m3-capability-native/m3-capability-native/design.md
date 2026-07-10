@@ -97,3 +97,44 @@ The migration is the third milestone (M3) of the six-milestone AgentWolf v1 foun
 - **[Trade-off] Two-axis design (Capability + ResourceSource) vs single-hierarchy** — Two interfaces on one object is conceptually cleaner but requires developers to understand the orthogonality. Documented with clear examples in RFC-0050. ACCEPTABLE trade-off.
 - **[Risk] AdapterToolsetFactory performance overhead** — During migration, unmigrated providers incur an extra adapter layer → Temporary, removed when migration completes. LOW risk.
 - **[Trade-off] `DelegationService` limited interface may need expansion** — Future use cases (inter-agent messaging, shared memory) may require more methods → Start minimal, add methods as proven needs arise (YAGNI). ACCEPTABLE trade-off.
+
+## Implementation Notes
+
+The following notes document divergences and completions observed during actual implementation relative to the spec above.
+
+### Note 1: Lazy compilation (Decision 4 refinement)
+
+`AgentFactory.compile()` returns an empty `AgentRegistry()` — agents are not eagerly instantiated at compile time. Instead, `create_session_agent()` creates agents lazily per-session. This is architecturally correct because AgentPool's session model requires per-session isolation (separate MCP connections, conversation history). The design above assumed eager compilation; the implementation chose lazy. The Decision 4 rationale ("Factory constructs AgentContext — rejected") is unchanged; the lazy approach reinforces that factory produces registries, not running agents.
+
+### Note 2: Task group 15 (RunLoop Integration) completed in M3
+
+The design stated task group 15 was deferred to M2 (Non-Goals section, paragraph 2). In reality, after M2 was merged, task group 15 was completed in the same M3 PR:
+
+- `RunLoopDelegationService` created in `capabilities/runloop_delegation.py`
+- `_inject_agent_context()` method added to `RunHandle` in `orchestrator/run.py`, called per-turn in `start()`
+- 10 tests in `tests/lifecycle/test_runloop_injection.py`
+- All 5 subtasks (15.1–15.5) marked complete
+
+### Note 3: `tools/factory.py` deleted as dead code
+
+After all 7 ResourceProviders were migrated and deleted (task group 13), `tools/factory.py` (194 LOC, 6 classes: `ToolsetFactory` Protocol, `StaticToolsetFactory`, `AdapterToolsetFactory`, `MCPToolsetFactory`, `LocalSkillToolsetFactory`, `PoolToolsetFactory`) was found to have zero remaining imports across the codebase. It was deleted as part of M3 cleanup. This deletion was not anticipated by the spec.
+
+### Note 4: `ToolManager` deleted
+
+`src/agentpool/tools/manager.py` (364 LOC) was deleted. All `agent.tools.X` references were migrated to direct capability access: `agent._get_all_tools()`, `agent._builtin_provider`, `agent._worker_provider`, `agent._external_capabilities`. This deletion was not anticipated by the spec but follows naturally from the ResourceProvider removal (task group 13).
+
+### Note 5: `agent_pool` backdoor partially remains
+
+The spec (Decision 5 alternative) described removing the `agent_pool` property entirely. M2 added `DeprecationWarning` and migrated ~60 call sites. M3 migrated additional sites, but 18 files still reference `agent_pool` (primarily ACP server code: `acp_agent.py`, `session.py`, `handler.py`). The `DeprecationWarning` remains in place. Full migration is tracked as a follow-up before M4 begins.
+
+### Note 6: `recompile()` not implemented
+
+The M1 spec mentioned `recompile()`. This is deferred to M4 (hot reload) since it depends on M4's `ConfigRegistry` infrastructure. Not an M3 regression.
+
+### Note 7: `Resource.source` field added
+
+The spec (Decision 3 area) required a `source` field on the `Resource` dataclass. This was initially missing from the implementation and has now been retroactively added.
+
+### Note 8: `HostContext.config_id` / `tenant_id` defaults
+
+Already `"default"` as specified — no change needed. Confirmed during implementation.

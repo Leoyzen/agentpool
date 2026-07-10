@@ -97,6 +97,8 @@
 - [x] 13.5 Update all remaining consumers across `src/` and `tests/` — remove `ResourceProvider` imports, replace with native `AbstractCapability` references, update test mocks, remove `as_capability()` method from any remaining code
 - [x] 13.6 Verify zero `ResourceProvider` references in `src/` and `tests/` via grep, and `resource_providers/` directory does not exist
 
+> **Post-cleanup observation**: After all ResourceProvider code was deleted (13.1–13.6), `src/agentpool/tools/factory.py` (194 LOC, 6 classes) was found to have zero remaining imports across the codebase. Deleted as dead code. No corresponding task existed in the original spec — this deletion was opportunistic cleanup enabled by the migration.
+
 ## 15. RunLoop Integration
 
 - [x] 15.1 Modify RunLoop._run_loop() to construct AgentContext per Turn from: agent_registry (from HostContext), delegation (DelegationService implementation), session (SessionState from RunLoop), scope (RunScope), resources (AggregatedResourceSource from AgentFactory), host (HostContext)

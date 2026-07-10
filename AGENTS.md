@@ -132,6 +132,7 @@ The codebase is organized into focused packages under `src/`:
 
 - **`agentpool/`** - Core agent framework
   - `agents/` - Agent implementations (native, ACP)
+  - `capabilities/` - Native pydantic-ai capability implementations (MCPCapability, FunctionToolsetCapability, CombinedToolsetCapability, SubagentCapability, CodeModeCapability, FilteredToolsetCapability, AgentContext, DelegationService, ResourceSource, entry-point registry)
   - `delegation/` - AgentPool orchestration, Team coordination, message routing
   - `lifecycle/` - RunLoop lifecycle dimensions (TriggerSource, Journal, SnapshotStore, CommChannel, EventTransport)
   - `messaging/` - Message processing, MessageNode abstraction, compaction
@@ -196,27 +197,38 @@ Skills are defined as `SKILL.md` files following the [Agent Skills Spec](https:/
 - `src/agentpool/skills/manager.py` — `SkillsManager` pool-level lifecycle
 - `src/agentpool/skills/uri_resolver.py` — `skill://` URI scheme resolver
 - `src/agentpool/skills/command.py` — `SkillCommand` wraps skills as protocol-agnostic slash commands
-- `src/agentpool/resource_providers/skills_instruction.py` — `SkillsInstructionProvider` injects skills as XML into prompts (metadata/full modes)
+- `src/agentpool/skills/instruction_provider.py` — `SkillsInstructionProvider` injects skills as XML into prompts (metadata/full modes) — migrated from `resource_providers/`
 
 **Injection Modes** (via YAML `skills.instruction`):
 - `off` — No injection
 - `metadata` — `<available-skills>` XML block (names + descriptions)
 - `full` — `<skill_content>` XML block with complete instructions + parameters
 
-### Resource Providers
+### Capabilities (M3 — replaces Resource Providers)
 
-`ResourceProvider` (abstract base in `src/agentpool/resource_providers/base.py`) abstracts tool/prompt/resource/skill access. Providers produce pydantic-ai `Toolset` capabilities via `as_capability()`.
+In M3, the old `ResourceProvider` hierarchy was replaced with native pydantic-ai `AbstractCapability` / `AbstractToolset` implementations. Each `AbstractCapability` produces tools, instructions, change notifications, and optionally implements `ResourceSource` for read-only data access. The old `src/agentpool/resource_providers/` directory (14 files, ~3860 LOC) was physically deleted after migration.
 
-| Provider | Purpose |
-|----------|---------|
-| `MCPResourceProvider` | Wraps MCP server (tools, prompts, resources, skills) |
-| `LocalResourceProvider` | Filesystem skill discovery via `SkillsRegistry` |
-| `PoolResourceProvider` | Exposes agents/teams as subagent delegation tools |
-| `StaticResourceProvider` | Pre-configured tools/prompts with `@tool` decorator |
-| `AggregatingResourceProvider` | Combines multiple providers, forwards change signals |
-| `FilteringResourceProvider` | Proxies another provider with tool filtering |
-| `CodeModeResourceProvider` | Wraps all tools into single Python execution meta-tool |
-| `PlanProvider` | Plan management tools (get/set plan entries) |
+| Capability | Replaces | Key File |
+|---|---|---|
+| `MCPCapability` | `MCPResourceProvider` | `capabilities/mcp_capability.py` |
+| `SkillCapability` | `LocalResourceProvider` | `skills/capability.py` |
+| `SubagentCapability` | `PoolResourceProvider` | `capabilities/subagent_capability.py` |
+| `FunctionToolsetCapability` | `StaticResourceProvider` | `capabilities/function_toolset.py` |
+| `CombinedToolsetCapability` | `AggregatingResourceProvider` | `capabilities/combined_toolset.py` |
+| `FilteredToolsetCapability` | `FilteringResourceProvider` | `capabilities/filtered_toolset.py` |
+| `CodeModeCapability` | `CodeModeResourceProvider` | `capabilities/code_mode_capability.py` |
+
+**Supporting types:**
+- `ResourceSource` (`capabilities/resource_source.py`) — `@runtime_checkable Protocol` for read-only data access (`list()`, `read(uri)`, `exists(uri)`, `on_change()`). Orthogonal to `AbstractCapability` — same object can implement both.
+- `AggregatedResourceSource` — Composes multiple `ResourceSource` instances, routes by URI scheme.
+- `AgentContext` (`capabilities/agent_context.py`) — Frozen dataclass carrying `agent_registry`, `delegation`, `session`, `scope`, `resources`, `host`. Constructed by RunLoop per-turn.
+- `DelegationService` (`capabilities/delegation.py`) — Protocol exposing `spawn_subagent(name, prompt)` and `get_available_agents()`. Limits tools to operations they need without exposing `AgentPool`.
+- `ChangeEvent` (`capabilities/change_event.py`) — Frozen dataclass for capability change notifications (`on_change()` stream).
+- Entry-point registry (`capabilities/registry.py`) — Discovers custom capabilities via `agentpool.capabilities` entry-point group.
+
+**Deleted alongside ResourceProviders:**
+- `src/agentpool/tools/factory.py` (194 LOC, 6 `ToolsetFactory` classes) — became dead code after all providers migrated.
+- `src/agentpool/tools/manager.py` (364 LOC, `ToolManager`) — all `agent.tools.X` access migrated to direct capability references.
 
 ### Hooks & Events System
 
@@ -334,7 +346,7 @@ All processing units (Agents, Teams) inherit from `MessageNode[TInputType, TOutp
 - Type-safe input/output handling
 
 !!! warning "Deprecation: `agent_pool` property"
-    `MessageNode.agent_pool` is deprecated in M2. It emits a `DeprecationWarning` and will be removed in M3.
+    `MessageNode.agent_pool` is deprecated since M2 with `DeprecationWarning`. M3 migrated the majority of ~60 call sites, but 18 references remain (primarily in ACP server code: `acp_agent.py`, `session.py`, `handler.py`). The property is kept with the warning in place; full removal is tracked as a follow-up before M4.
 
     **Migration**: Use `MessageNode.host_context` instead, which returns an immutable `HostContext` with the same infrastructure fields. `host_context` is sourced from `AgentPool.get_context()` and provides access to MCP manager, storage, and registry without exposing the full mutable pool object.
 
@@ -393,9 +405,11 @@ See the Graph Architecture section below for full details.
 #### Tool System
 Tools follow PydanticAI's tool pattern with AgentPool extensions:
 - Tools are typed functions with Pydantic schemas
-- Can access `AgentContext` for agent-specific state
-- Support `subagent` tool for delegation
+- `AbstractCapability` is the primary abstraction for providing tools, instructions, and change notifications. Each capability wraps a pydantic-ai `Toolset` and contributes to the agent's compiled tool list.
+- Can access `AgentContext` (injected via `RunContext.deps`) for agent-specific state including `DelegationService` for subagent spawning
+- Support `subagent` tool for delegation (routes through `DelegationService`, not directly to `AgentPool`)
 - Built-in toolsets provide common functionality (code editing, bash, grep)
+- `ResourceSource` is a separate protocol for read-only data access (MCP resources, skill content), orthogonal to `AbstractCapability`
 
 #### Protocol Bridging
 AgentPool acts as a protocol adapter:
@@ -1107,9 +1121,14 @@ The project uses entry points for extensibility:
 - `src/agentpool_config/lifecycle.py` - LifecycleConfig (journal/snapshot/recover_strategy)
 - `src/agentpool/skills/skill.py` - Skill model and parsing
 - `src/agentpool/skills/registry.py` - Skill discovery
-- `src/agentpool/resource_providers/base.py` - Resource provider interface
-- `src/agentpool/resource_providers/mcp_provider.py` - MCP server wrapping
-- `src/agentpool/resource_providers/skills_instruction.py` - Skill prompt injection
+- `src/agentpool/skills/capability.py` - `SkillCapability(AbstractCapability)` with `ResourceSource` implementation
+- `src/agentpool/skills/instruction_provider.py` - `SkillsInstructionProvider` injects skills as XML into prompts (metadata/full modes) — migrated from `resource_providers/`
+- `src/agentpool/capabilities/` - All native capability implementations (MCPCapability, FunctionToolsetCapability, CombinedToolsetCapability, SubagentCapability, CodeModeCapability, FilteredToolsetCapability)
+- `src/agentpool/capabilities/agent_context.py` - `AgentContext` frozen dataclass
+- `src/agentpool/capabilities/delegation.py` - `DelegationService` Protocol
+- `src/agentpool/capabilities/resource_source.py` - `ResourceSource` Protocol + `AggregatedResourceSource`
+- `src/agentpool/capabilities/registry.py` - Entry-point capability discovery
+- `src/agentpool/capabilities/runloop_delegation.py` - `RunLoopDelegationService` (M3, task group 15)
 - `src/agentpool/agents/events/events.py` - All event type definitions
 - `src/agentpool/hooks/agent_hooks.py` - Hook lifecycle management
 - `src/agentpool_server/acp_server/acp_agent.py` - ACP server agent wrapper
