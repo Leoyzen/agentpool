@@ -421,10 +421,23 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                     tool_call_id=handle,
                     exc_info=True,
                 )
-
         # Register future and await — agent run suspends here.
         timeout = run_ctx.elicitation_timeout
         future = registry.register(handle)
+
+        # Broadcast the question to the OpenCode TUI so the user can
+        # see and answer it. Without this, the TUI never shows the
+        # question and the future times out.
+        try:
+            await provider.broadcast_elicitation_question(handle, params, shared_future=future)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to broadcast elicitation question",
+                session_id=run_ctx.session_id,
+                tool_call_id=handle,
+                exc_info=True,
+            )
+
         try:
             if timeout is not None:
                 payload = await asyncio.wait_for(future, timeout=timeout)
@@ -439,13 +452,36 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                 else "Elicitation timed out"
             ) from None
         finally:
-            # Ensure the future is removed from the registry even on
-            # timeout or CancelledError, so retries don't hit ValueError.
             registry.remove(handle)
 
-        # Convert ElicitationResumePayload to ElicitResult.
+        # Convert payload to ElicitResult.
+        # payload can be either:
+        # - ElicitationResumePayload (from registry.resolve, used by
+        #   in-process resume and crash recovery)
+        # - list[list[str]] (from provider.resolve_question, used by
+        #   the OpenCode TUI REST endpoint)
         from mcp.types import ElicitResult as MCPElicitResult
 
+        if isinstance(payload, list):
+            schema = elicitation_params.get("requestedSchema", {})
+            if (
+                isinstance(schema, dict)
+                and schema.get("type") == "object"
+                and "properties" in schema
+            ):
+                props = schema["properties"]
+                prop_keys = list(props.keys())
+                content: dict[str, Any] = {}
+                for i, key in enumerate(prop_keys[: len(payload)]):
+                    answer_list = payload[i] if i < len(payload) else []
+                    content[key] = answer_list[0] if answer_list else ""
+                return MCPElicitResult(action="accept", content=content)
+            answer = payload[0] if payload else []
+            if isinstance(answer, list):
+                return MCPElicitResult(action="accept", content={"value": answer})
+            return MCPElicitResult(action="accept", content={"value": [answer] if answer else []})
+
+        # ElicitationResumePayload path.
         match payload.action:
             case "accept":
                 return MCPElicitResult(action="accept", content=payload.content)
