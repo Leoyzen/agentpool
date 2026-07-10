@@ -27,9 +27,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentpool.capabilities.mcp_capability import MCPCapability
 from agentpool.skills.skill import Skill
-from agentpool.skills.uri_resolver import SkillURIResolver
+from agentpool.skills.uri_resolver import SkillProvider, SkillURIResolver
 from agentpool_toolsets.builtin.skills import load_skill
 
 
@@ -82,15 +81,24 @@ def mock_mcp_client_with_scratchpad_skills():
 
 @pytest.fixture
 def scratchpad_provider(mock_mcp_client_with_scratchpad_skills):
-    """Create an MCPCapability that simulates ng's scratchpad connection.
+    """Create a mock SkillProvider that simulates ng's scratchpad connection.
 
     Provider name is "pool_mcp_scratchpad" (as registered by MCPManager),
     NOT "systematic-troubleshooting" (which is the skill name).
+
+    Uses a mock implementing the SkillProvider protocol directly, returning
+    a pre-built Skill object. This tests the resolver's fallback behavior,
+    not MCPCapability's skill loading from MCP resources.
     """
-    return MCPCapability(
-        client=mock_mcp_client_with_scratchpad_skills,
-        name="pool_mcp_scratchpad",
+    skill = Skill(
+        name="systematic-troubleshooting",
+        description="Systematic troubleshooting",
+        skill_path=PurePosixPath("skill://pool_mcp_scratchpad/systematic-troubleshooting"),
+        metadata={"original_name": "systematic_troubleshooting"},
     )
+    provider = MagicMock()
+    provider.get_skills = AsyncMock(return_value=[skill])
+    return provider
 
 
 @pytest.fixture
@@ -124,7 +132,7 @@ class TestScratchpadSkillReferenceLoading:
     @pytest.mark.asyncio
     async def test_bare_skill_name_loads_successfully(
         self,
-        scratchpad_provider: MCPCapability,
+        scratchpad_provider: SkillProvider,
     ) -> None:
         """Test 1: Bare skill name works (this already works in production)."""
         resolver = SkillURIResolver()
@@ -138,7 +146,7 @@ class TestScratchpadSkillReferenceLoading:
     @pytest.mark.asyncio
     async def test_uri_with_skill_name_as_netloc_loads_successfully(
         self,
-        scratchpad_provider: MCPCapability,
+        scratchpad_provider: SkillProvider,
     ) -> None:
         """Test 2: URI with skill name as netloc should work via fallback.
 
