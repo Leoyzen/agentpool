@@ -15,9 +15,9 @@
 
 - [x] 3.1 Create `src/agentpool/host/factory.py` defining `AgentFactory` class with `compile(manifest, host_context) -> AgentRegistry` and `recompile(new_manifest, host_context) -> AgentRegistry` methods
 - [x] 3.2 Move agent instantiation logic from `AgentPool._create_agents()` (or equivalent) into `AgentFactory.compile()` — includes: model resolution, tool/capability injection, team compilation, connection setup, skill loading
-- [x] 3.3 Implement `AgentFactory.recompile()` with diff-based logic: compare old vs new manifest, only recreate agents whose config section changed, preserve unchanged agents from cache
+- [ ] 3.3 Implement `AgentFactory.recompile()` with diff-based logic: compare old vs new manifest, only recreate agents whose config section changed, preserve unchanged agents from cache — **DEFERRED to M4**: not needed for M1 since agents are per-session, not upfront
 - [x] 3.4 Add internal compilation cache (`_last_manifest`, `_last_registry`) to AgentFactory for diff comparison
-- [x] 3.5 Write unit tests for AgentFactory: compile produces correct agents, recompile only recreates changed agents, factory does not start infrastructure
+- [~] 3.5 Write unit tests for AgentFactory: compile produces correct agents, recompile only recreates changed agents, factory does not start infrastructure — **PARTIAL**: compile tests written; recompile tests skipped (depends on T3.3)
 
 ## 4. AgentPool Facade
 
@@ -36,12 +36,12 @@
 
 ## 6. Integration Verification
 
-- [x] 6.1 Run full test suite: `uv run pytest` — all tests must pass without modification
+- [ ] 6.1 Run full test suite: `uv run pytest` — all tests must pass without modification — **SKIPPED per user request at time of M1**; should be run as part of pre-M4 cleanup
 - [x] 6.2 Run mypy: `uv run --no-group docs mypy src/agentpool/host/` — no type errors
 - [x] 6.3 Run ruff: `uv run ruff check src/agentpool/host/` — no lint errors
-- [x] 6.4 Verify example configs: `agentpool run assistant "Hello"` works with existing YAML configs
-- [x] 6.5 Verify ACP server: `agentpool serve-acp config.yml` starts and handles requests
-- [x] 6.6 Verify AgentFactory can be used standalone: `factory = AgentFactory(); registry = await factory.compile(manifest, host_context)` without AgentPool
+- [ ] 6.4 Verify example configs: `agentpool run assistant "Hello"` works with existing YAML configs — **DEFERRED**: manual QA not performed
+- [ ] 6.5 Verify ACP server: `agentpool serve-acp config.yml` starts and handles requests — **DEFERRED**: manual QA not performed
+- [ ] 6.6 Verify AgentFactory can be used standalone: `factory = AgentFactory(); registry = await factory.compile(manifest, host_context)` without AgentPool — **DEFERRED**: not verified
 
 ---
 
@@ -51,10 +51,10 @@
 
 **T2 AgentRegistry** — Done. Wraps `dict[str, BaseAgent]` with `get`/`get_or_none`/`list_names`/`exists`/`add`/`__len__`/`__contains__`/`__iter__`.
 
-**T3 AgentFactory** — Adapted. Has `compile()` (returns empty registry, lazy compilation) and `create_session_agent()` (extracts 3 creation paths from `SessionController`). `recompile()` deferred (not needed for M1 — agents are per-session, not upfront). Tests written.
+**T3 AgentFactory** — Partially done. Has `compile()` (returns empty registry, lazy compilation) and `create_session_agent()` (extracts 3 creation paths from `SessionController`). `recompile()` **deferred to M4** (not needed for M1 — agents are per-session, not upfront). Compile tests written; recompile tests skipped.
 
 **T4 AgentPool Facade** — Adapted. `AgentPool._factory` is a lazy property, `get_context()` added. `AgentPool.get_agent()` unchanged (agents are per-session via `SessionController`). No agent instantiation code removed from `AgentPool` (it was already in `SessionController`, now delegated to factory).
 
 **T5 Compatibility Shim** — Done. `agent_pool` is now `@property` with getter+setter, `host_context` property added, compatibility shim documented in docstring.
 
-**T6 Integration** — Adapted. Unit tests pass (29 host tests + 6 pool tests), ruff passes, imports verified. Full test suite skipped per user request. Manual QA deferred.
+**T6 Integration** — Partially done. Unit tests pass (29 host tests + 6 pool tests), ruff passes, imports verified. **Full test suite skipped** per user request. **Manual QA deferred** (example configs, ACP server, standalone factory). These should be run as part of pre-M4 cleanup.
