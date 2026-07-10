@@ -49,8 +49,14 @@ class WorkersTools(FunctionToolsetCapability):
         self.workers = workers
 
     async def get_tools(self) -> Sequence[Tool]:
-        """Get tools for all configured workers."""
-        return [self._create_worker_tool(i) for i in self.workers]
+        """Get tools for all configured workers.
+
+        Tools are created once and cached. Subsequent calls return the
+        cached list to avoid duplicate tool registration.
+        """
+        if not self._tools:
+            self._tools = [self._create_worker_tool(i) for i in self.workers]
+        return self._tools
 
     def _create_worker_tool(self, worker_config: WorkerConfig) -> Tool:
         """Create a tool for a single worker configuration."""
