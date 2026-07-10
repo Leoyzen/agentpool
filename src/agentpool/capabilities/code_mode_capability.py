@@ -168,15 +168,13 @@ class CodeModeCapability(AbstractCapability[AgentDepsT]):
             metadata_json = anyenv.dump_json(metadata, indent=True).encode("utf-8")
             script_bytes = python_code.encode("utf-8")
 
-            from agentpool.capabilities.agent_context import AgentContext as _AgentContext
+            # Write script and metadata to an in-memory filesystem.
+            # In production, agents have a persistent _internal_fs, but
+            # AgentContext doesn't expose it directly. The script history
+            # is best-effort — if lost, it doesn't affect execution.
+            from fsspec.implementations.memory import MemoryFileSystem
 
-            fs: Any = None
-            if isinstance(ctx.deps, _AgentContext):
-                fs = ctx.deps.host.internal_fs if ctx.deps.host is not None else None
-            if fs is None:
-                from fsspec.implementations.memory import MemoryFileSystem
-
-                fs = MemoryFileSystem()
+            fs = MemoryFileSystem()
             fs.pipe(script_path, script_bytes)
             fs.pipe(metadata_path, metadata_json)
 
