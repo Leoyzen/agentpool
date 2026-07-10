@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, assert_never
 
@@ -71,7 +70,6 @@ class ACPNotifications:
         session_id: str,
         *,
         notification_batch_size: int = 20,
-        notification_flush_interval: float = 0.0,
     ) -> None:
         """Initialize notifications helper.
 
@@ -80,24 +78,16 @@ class ACPNotifications:
             session_id: Session identifier
             notification_batch_size: Maximum number of SessionUpdate objects per
                 batch during replay. Default 20.
-            notification_flush_interval: Delay between batches in seconds.
-                Default 0.0 (no delay). Use > 0 for slow remote clients.
         """
         if notification_batch_size <= 0:
             raise ValueError(
                 f"notification_batch_size must be greater than 0, got {notification_batch_size}"
-            )
-        if notification_flush_interval < 0:
-            raise ValueError(
-                f"notification_flush_interval must be non-negative,"
-                f" got {notification_flush_interval}"
             )
         self.client = client
         self.id = session_id
         self.log = logger.bind(session_id=session_id)
         self._tool_call_inputs: dict[str, dict[str, Any]] = {}
         self.notification_batch_size = notification_batch_size
-        self.notification_flush_interval = notification_flush_interval
         self._batch_supported: bool = False
 
     async def create_tool_reporter(
@@ -557,10 +547,6 @@ class ACPNotifications:
         for i in range(0, len(all_updates), self.notification_batch_size):
             batch = all_updates[i : i + self.notification_batch_size]
             await self.send_batch_update(batch)
-            if self.notification_flush_interval > 0 and i + self.notification_batch_size < len(
-                all_updates
-            ):
-                await asyncio.sleep(self.notification_flush_interval)
 
     def _collect_request_updates(self, request: ModelRequest) -> list[SessionUpdate]:
         """Convert a ModelRequest to a list of SessionUpdate objects.
@@ -640,6 +626,13 @@ class ACPNotifications:
                 ):
                     converted = to_acp_content_blocks(content)
                     tool_input = self._tool_call_inputs.get(tool_call_id, {})
+                    if tool_call_id not in self._tool_call_inputs:
+                        self.log.debug(
+                            "Tool return has no matching cached tool call input — "
+                            "message ordering may be incorrect",
+                            tool_call_id=tool_call_id,
+                            tool_name=tool_name,
+                        )
                     acp_content = [ContentToolCallContent(content=block) for block in converted]
                     locations = [
                         ToolCallLocation(path=value)

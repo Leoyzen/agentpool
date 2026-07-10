@@ -470,10 +470,3 @@ async def test_init_rejects_non_positive_batch_size(mock_client):
 
     with pytest.raises(ValueError, match="notification_batch_size must be greater than 0"):
         ACPNotifications(mock_client, "session-1", notification_batch_size=-1)
-
-
-@pytest.mark.unit
-async def test_init_rejects_negative_flush_interval(mock_client):
-    """notification_flush_interval must be non-negative."""
-    with pytest.raises(ValueError, match="notification_flush_interval must be non-negative"):
-        ACPNotifications(mock_client, "session-1", notification_flush_interval=-0.1)
