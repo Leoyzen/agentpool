@@ -396,7 +396,8 @@ class McpServerCap(
         """Read skill content by name or URI.
 
         Tries to find an MCP resource matching the given name or URI,
-        then reads its content.
+        then reads its content. If ``name`` is a ``skill://`` URI,
+        extracts the short skill name before matching.
 
         Args:
             name: Skill name or resource URI to read.
@@ -410,10 +411,21 @@ class McpServerCap(
         except Exception:  # noqa: BLE001
             return None
 
+        # Extract short name from skill:// URI if present.
+        lookup_name = name
+        if name.startswith("skill://"):
+            path = name[len("skill://") :]
+            lookup_name = path.split("/")[-1] if path else name
+
         # Find matching resource by name or URI.
         target_uri: str | None = None
         for r in resources:
-            if r.name == name or str(r.uri) == name:
+            if (
+                r.name == lookup_name
+                or str(r.uri) == lookup_name
+                or r.name == name
+                or str(r.uri) == name
+            ):
                 target_uri = str(r.uri)
                 break
         if target_uri is None:
@@ -435,6 +447,9 @@ class McpServerCap(
     async def skill_exists(self, name: str) -> bool:
         """Check if a skill exists without reading it.
 
+        If ``name`` is a ``skill://`` URI, extracts the short skill
+        name before checking.
+
         Args:
             name: Skill name or resource URI to check.
 
@@ -446,7 +461,20 @@ class McpServerCap(
             resources = await client.list_resources()
         except Exception:  # noqa: BLE001
             return False
-        return any(r.name == name or str(r.uri) == name for r in resources)
+
+        # Extract short name from skill:// URI if present.
+        lookup_name = name
+        if name.startswith("skill://"):
+            path = name[len("skill://") :]
+            lookup_name = path.split("/")[-1] if path else name
+
+        return any(
+            r.name == lookup_name
+            or str(r.uri) == lookup_name
+            or r.name == name
+            or str(r.uri) == name
+            for r in resources
+        )
 
     # ---- CommandResource ----
 
@@ -527,7 +555,7 @@ class McpServerCap(
         The cached client reference is cleared so a new client will be
         obtained on next use.
         """
-        if self._client is not None:
+        if self._session_pool is None and self._client is not None:
             await self._client.__aexit__(exc_type, exc_val, exc_tb)
         self._client = None
         self._change_queues.clear()

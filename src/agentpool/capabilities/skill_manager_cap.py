@@ -179,7 +179,11 @@ class SkillManagerCap(
 
         # Determine which skills to inject.
         if self._matcher_fn is not None:
-            result = self._matcher_fn(messages)
+            sig = inspect.signature(self._matcher_fn)
+            if len(sig.parameters) >= 2:  # noqa: PLR2004
+                result = self._matcher_fn(messages, list(self._local_skills.keys()))
+            else:
+                result = self._matcher_fn(messages)
             if inspect.isawaitable(result):
                 result = await result
             matched: set[str] = {n for n in result if n in self._local_skills}

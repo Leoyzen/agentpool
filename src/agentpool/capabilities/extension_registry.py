@@ -421,25 +421,36 @@ class ExtensionRegistry:
             the URI cannot be resolved.
         """
         if uri.startswith("skill://"):
-            # Extract skill name from URI
+            # Extract skill name and optional provider from URI
             # Format: skill://provider/skill-name or skill://skill-name
             path = uri[len("skill://") :]
             parts = path.split("/", 1)
             if len(parts) == 2:  # noqa: PLR2004
+                provider_name = parts[0]
                 skill_name = parts[1].split("/")[0]
             else:
+                provider_name = None
                 skill_name = parts[0].split("/")[0] if parts[0] else ""
 
             if not skill_name:
                 skill_name = parts[0] if parts[0] else ""
 
             for cap in self.get_skill_resources(scope):
+                # If provider is specified, skip non-matching capabilities.
+                if provider_name is not None:
+                    cap_name: str
+                    try:
+                        cap_name = cap.get_serialization_name()
+                    except Exception:  # noqa: BLE001
+                        cap_name = type(cap).__name__
+                    if cap_name != provider_name:
+                        continue
                 try:
                     if await cap.skill_exists(skill_name):
                         content = await cap.read_skill(skill_name)
                         if content is not None:
                             return content
-                except Exception:  # noqa: BLE001  # noqa: BLE001
+                except Exception:  # noqa: BLE001
                     logger.warning(
                         "Failed to resolve skill URI %r via %s",
                         uri,
