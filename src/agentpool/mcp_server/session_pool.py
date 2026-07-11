@@ -30,7 +30,8 @@ from agentpool.log import get_logger
 if TYPE_CHECKING:
     from fastmcp.client import ClientTransport
 
-    from agentpool_config.mcp_server import BaseMCPServerConfig
+    from agentpool.mcp_server.client import MCPClient
+    from agentpool_config.mcp_server import BaseMCPServerConfig, MCPServerConfig
 
 
 logger = get_logger(__name__)
@@ -194,6 +195,32 @@ class SessionConnectionPool:
             await conn.ready_event.wait()
 
         return conn.transport
+
+    async def get_client(
+        self,
+        config: MCPServerConfig,
+        skill_name: str | None = None,
+    ) -> MCPClient:
+        """Get a pooled ``MCPClient`` for the given config.
+
+        Wraps the pooled transport, constructs ``MCPClient`` on the
+        transport, and performs the MCP handshake (initialize +
+        capabilities exchange). The pool retains ownership of the
+        transport — do NOT close the client's transport externally.
+
+        Args:
+            config: MCP server configuration.
+            skill_name: Optional skill name for skill-scoped isolation.
+
+        Returns:
+            A connected ``MCPClient`` wrapping the pooled transport.
+        """
+        from agentpool.mcp_server.client import MCPClient
+
+        transport = await self.get_transport(config, skill_name)
+        client = MCPClient(config=config, transport=transport)
+        await client.__aenter__()
+        return client
 
     async def add_transport(
         self,

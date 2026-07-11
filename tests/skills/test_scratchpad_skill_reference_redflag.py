@@ -28,8 +28,48 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agentpool.skills.skill import Skill
-from agentpool.skills.uri_resolver import SkillProvider, SkillURIResolver
+from agentpool.skills.uri_resolver import SkillURIResolver
 from agentpool_toolsets.builtin.skills import load_skill
+
+
+# =============================================================================
+# Test helpers
+# =============================================================================
+
+
+class _FakeSkillResource:
+    """Fake provider implementing SkillResource for testing URI resolution.
+
+    Returns pre-built Skill objects, simulating a provider that has
+    already loaded skills from MCP or another source.
+    """
+
+    def __init__(self, skills: list[Skill]) -> None:
+        self._skills = skills
+
+    async def list_skills(self):
+        from agentpool.capabilities.resource_protocols import SkillEntry
+
+        return [
+            SkillEntry(
+                name=skill.name,
+                description=skill.description,
+                uri=f"skill://provider/{skill.name}",
+                source="remote",
+            )
+            for skill in self._skills
+        ]
+
+    async def read_skill(self, name: str) -> str | None:
+        for skill in self._skills:
+            if skill.name == name:
+                if skill.instructions:
+                    return skill.load_instructions()
+                return f"Instructions for {name}"
+        return None
+
+    async def skill_exists(self, name: str) -> bool:
+        return any(skill.name == name for skill in self._skills)
 
 
 # =============================================================================
@@ -81,24 +121,23 @@ def mock_mcp_client_with_scratchpad_skills():
 
 @pytest.fixture
 def scratchpad_provider(mock_mcp_client_with_scratchpad_skills):
-    """Create a mock SkillProvider that simulates ng's scratchpad connection.
+    """Create a fake SkillResource provider that simulates ng's scratchpad connection.
 
     Provider name is "pool_mcp_scratchpad" (as registered by MCPManager),
     NOT "systematic-troubleshooting" (which is the skill name).
 
-    Uses a mock implementing the SkillProvider protocol directly, returning
+    Uses a fake implementing the SkillResource protocol directly, returning
     a pre-built Skill object. This tests the resolver's fallback behavior,
-    not MCPCapability's skill loading from MCP resources.
+    not McpServerCap's skill loading from MCP resources.
     """
     skill = Skill(
         name="systematic-troubleshooting",
         description="Systematic troubleshooting",
         skill_path=PurePosixPath("skill://pool_mcp_scratchpad/systematic-troubleshooting"),
         metadata={"original_name": "systematic_troubleshooting"},
+        instructions="Systematic troubleshooting instructions.",
     )
-    provider = MagicMock()
-    provider.get_skills = AsyncMock(return_value=[skill])
-    return provider
+    return _FakeSkillResource([skill])
 
 
 @pytest.fixture
@@ -132,7 +171,7 @@ class TestScratchpadSkillReferenceLoading:
     @pytest.mark.asyncio
     async def test_bare_skill_name_loads_successfully(
         self,
-        scratchpad_provider: SkillProvider,
+        scratchpad_provider: _FakeSkillResource,
     ) -> None:
         """Test 1: Bare skill name works (this already works in production)."""
         resolver = SkillURIResolver()
@@ -146,7 +185,7 @@ class TestScratchpadSkillReferenceLoading:
     @pytest.mark.asyncio
     async def test_uri_with_skill_name_as_netloc_loads_successfully(
         self,
-        scratchpad_provider: SkillProvider,
+        scratchpad_provider: _FakeSkillResource,
     ) -> None:
         """Test 2: URI with skill name as netloc should work via fallback.
 
@@ -235,9 +274,9 @@ class TestScratchpadSkillReferenceLoading:
             name="local-skill",
             description="Local skill",
             skill_path=PurePosixPath("/tmp/local-skill"),
+            instructions="Local skill instructions.",
         )
-        local_provider = MagicMock()
-        local_provider.get_skills = AsyncMock(return_value=[local_skill])
+        local_provider = _FakeSkillResource([local_skill])
 
         # Provider 2: scratchpad (HTTP MCP server)
         scratchpad_skill = Skill(
@@ -245,9 +284,9 @@ class TestScratchpadSkillReferenceLoading:
             description="Systematic troubleshooting",
             skill_path=PurePosixPath("skill://pool_mcp_scratchpad/systematic-troubleshooting"),
             metadata={"original_name": "systematic_troubleshooting"},
+            instructions="Systematic troubleshooting instructions.",
         )
-        scratchpad_provider = MagicMock()
-        scratchpad_provider.get_skills = AsyncMock(return_value=[scratchpad_skill])
+        scratchpad_provider = _FakeSkillResource([scratchpad_skill])
 
         resolver.register_provider("local", local_provider)
         resolver.register_provider("pool_mcp_scratchpad", scratchpad_provider)
@@ -279,10 +318,10 @@ class TestScratchpadSkillReferenceLoading:
             description="Systematic troubleshooting",
             skill_path=PurePosixPath("skill://pool_mcp_scratchpad/systematic_troubleshooting"),
             metadata={"original_name": "systematic_troubleshooting"},
+            instructions="Systematic troubleshooting instructions.",
         )
 
-        provider = MagicMock()
-        provider.get_skills = AsyncMock(return_value=[underscore_skill])
+        provider = _FakeSkillResource([underscore_skill])
         resolver.register_provider("pool_mcp_scratchpad", provider)
 
         # URI uses kebab-case
@@ -307,9 +346,9 @@ class TestScratchpadSkillReferenceLoading:
             name="other-skill",
             description="Other skill",
             skill_path=PurePosixPath("skill://pool_mcp_scratchpad/other-skill"),
+            instructions="Other instructions.",
         )
-        provider = MagicMock()
-        provider.get_skills = AsyncMock(return_value=[other_skill])
+        provider = _FakeSkillResource([other_skill])
         resolver.register_provider("pool_mcp_scratchpad", provider)
 
         uri = "skill://nonexistent-skill/references/guide.md"

@@ -15,8 +15,10 @@ Security features:
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
+from pathlib import PurePosixPath
 import re
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any
 import unicodedata
 from urllib.parse import unquote, urlparse
 
@@ -24,16 +26,14 @@ from agentpool.skills.exceptions import SecurityError, SkillNotFoundError
 
 
 if TYPE_CHECKING:
+    from agentpool.capabilities.resource_protocols import (
+        SkillEntry,
+        SkillResource,
+    )
     from agentpool.skills.skill import Skill
 
 
-@runtime_checkable
-class SkillProvider(Protocol):
-    """Protocol for capabilities that provide skills."""
-
-    async def get_skills(self) -> list[Skill]:
-        """Return the list of skills provided by this capability."""
-        ...
+logger = logging.getLogger(__name__)
 
 
 # Maximum length for provider names (DNS label compatible)
@@ -295,11 +295,24 @@ def _name_alternatives(name: str) -> list[str]:
     return []
 
 
+# Type alias: providers implement SkillResource protocol.
+if TYPE_CHECKING:
+    ProviderLike = SkillResource
+else:
+    ProviderLike = Any
+
+
 class SkillURIResolver:
     """Resolver for skill:// URIs using registered providers.
 
     Manages a registry of resource providers and resolves skill URIs
-    to actual skill instances.
+    to actual skill instances. Accepts both legacy ``SkillProvider``
+    (with ``get_skills()``) and new ``SkillResource`` (with
+    ``list_skills()``/``read_skill()``) providers.
+
+    When an ``ExtensionRegistry`` is provided, URI resolution is
+    delegated to ``ExtensionRegistry.resolve_uri()`` instead of
+    using the internal ``_providers`` dict.
 
     Example:
         >>> resolver = SkillURIResolver()
@@ -307,16 +320,27 @@ class SkillURIResolver:
         >>> skill = await resolver.resolve("skill://local/python-expert")
     """
 
-    def __init__(self) -> None:
-        """Initialize the resolver with an empty provider registry."""
-        self._providers: dict[str, SkillProvider] = {}
+    def __init__(
+        self,
+        extension_registry: Any | None = None,
+    ) -> None:
+        """Initialize the resolver with an empty provider registry.
 
-    def register_provider(self, name: str, provider: SkillProvider) -> None:
+        Args:
+            extension_registry: Optional ``ExtensionRegistry`` for
+                URI resolution. When set, ``resolve()`` delegates to
+                ``extension_registry.resolve_uri()`` instead of using
+                the internal ``_providers`` dict.
+        """
+        self._providers: dict[str, ProviderLike] = {}
+        self._extension_registry = extension_registry
+
+    def register_provider(self, name: str, provider: ProviderLike) -> None:
         """Register a resource provider.
 
         Args:
             name: Provider name (must be valid per _is_valid_provider_name)
-            provider: The resource provider instance
+            provider: The resource provider instance (SkillProvider or SkillResource)
 
         Raises:
             SecurityError: If provider name is invalid
@@ -338,6 +362,11 @@ class SkillURIResolver:
     ) -> Skill | None:
         """Search all providers for a skill by name.
 
+        Handles both legacy ``SkillProvider`` (with ``get_skills()``) and
+        new ``SkillResource`` (with ``list_skills()``/``read_skill()``)
+        providers. For ``SkillResource`` providers, constructs a lightweight
+        ``Skill`` object from the ``SkillEntry`` metadata and content.
+
         Args:
             skill_name: The skill name to search for.
             ref_path: Optional reference path to store on the skill if found.
@@ -345,15 +374,68 @@ class SkillURIResolver:
         Returns:
             The matching Skill or None if not found.
         """
+        from agentpool.capabilities.resource_protocols import SkillResource
+
         for provider in self._providers.values():
-            if not isinstance(provider, SkillProvider):
+            # Check for new SkillResource protocol first.
+            if isinstance(provider, SkillResource):
+                try:
+                    entries = await provider.list_skills()
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to list skills from provider",
+                        exc_info=True,
+                    )
+                    continue
+                for entry in entries:
+                    if entry.name == skill_name:
+                        return await self._build_skill_from_entry(entry, ref_path)
+                # Try name alternatives (underscore ↔ hyphen).
+                for alt_name in _name_alternatives(skill_name):
+                    for entry in entries:
+                        if entry.name == alt_name:
+                            return await self._build_skill_from_entry(entry, ref_path)
                 continue
-            skills = await provider.get_skills()
-            for skill in skills:
-                if skill.name == skill_name:
-                    if ref_path is not None:
-                        skill._resolved_reference_path = ref_path  # type: ignore[attr-defined]
-                    return skill
+        return None
+
+    async def _build_skill_from_entry(
+        self, entry: SkillEntry, ref_path: str | None
+    ) -> Skill | None:
+        """Construct a lightweight Skill from a SkillEntry.
+
+        Reads skill content from the provider's ``read_skill()`` method
+        and constructs a ``Skill`` object with the metadata and content.
+
+        Args:
+            entry: The SkillEntry with metadata.
+            ref_path: Optional reference path to attach.
+
+        Returns:
+            A Skill object, or None if content could not be read.
+        """
+        from agentpool.capabilities.resource_protocols import SkillResource
+
+        # Find the provider that owns this entry.
+        for provider in self._providers.values():
+            if not isinstance(provider, SkillResource):
+                continue
+            try:
+                content = await provider.read_skill(entry.name)
+            except Exception:  # noqa: BLE001
+                continue
+            if content is None:
+                continue
+            from agentpool.skills.skill import Skill
+
+            skill = Skill(
+                name=entry.name,
+                description=entry.description or f"Skill {entry.name}",
+                skill_path=PurePosixPath(entry.uri),
+                instructions=content,
+            )
+            if ref_path is not None:
+                skill._resolved_reference_path = ref_path  # type: ignore[attr-defined]
+            return skill
         return None
 
     async def _find_skill_with_alternatives(self, skill_name: str) -> Skill | None:
@@ -377,6 +459,10 @@ class SkillURIResolver:
     async def resolve(self, uri: str) -> Skill:
         """Resolve a skill URI to a Skill instance.
 
+        When an ``ExtensionRegistry`` is configured, delegates to
+        ``ExtensionRegistry.resolve_uri()`` for URI resolution.
+        Otherwise, falls back to the legacy ``_providers`` dict.
+
         Supports both full URIs with provider and provider-less URIs:
         - skill://provider/skill-name - Full URI with explicit provider
         - skill://provider/skill-name/references/file.md - Full URI with reference
@@ -393,6 +479,25 @@ class SkillURIResolver:
             SkillNotFoundError: If skill not found in provider
             ValueError: If provider not registered for explicit URIs
         """
+        # Delegate to ExtensionRegistry when available.
+        if self._extension_registry is not None:
+            from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+
+            content = await self._extension_registry.resolve_uri(uri, Scope(level=ScopeLevel.POOL))
+            if content is not None:
+                resolved = ResolvedSkillURI.parse(uri)
+                from pathlib import PurePosixPath
+
+                from agentpool.skills.skill import Skill
+
+                return Skill(
+                    name=resolved.skill_name,
+                    description=f"Skill {resolved.skill_name}",
+                    skill_path=PurePosixPath(uri),
+                    instructions=content if isinstance(content, str) else None,
+                )
+            msg = f"Skill {uri!r} not found via ExtensionRegistry"
+            raise SkillNotFoundError(msg)
         resolved = ResolvedSkillURI.parse(uri)
 
         # If no provider specified, search all providers
@@ -440,25 +545,31 @@ class SkillURIResolver:
             raise ValueError(msg)
 
         provider = self._providers[resolved.provider]
-        if not isinstance(provider, SkillProvider):
-            msg = f"Provider {resolved.provider!r} does not implement SkillProvider"
-            raise TypeError(msg)
-        skills = await provider.get_skills()
 
-        for skill in skills:
-            if skill.name == resolved.skill_name:
-                return skill
+        # Handle new SkillResource protocol.
+        from agentpool.capabilities.resource_protocols import SkillResource
 
-        # Fuzzy match: try swapping - and _ in the skill name
-        for alt_name in _name_alternatives(resolved.skill_name):
-            for skill in skills:
-                if skill.name == alt_name:
-                    return skill
+        if isinstance(provider, SkillResource):
+            entries = await provider.list_skills()
+            for entry in entries:
+                if entry.name == resolved.skill_name:
+                    skill = await self._build_skill_from_entry(entry, resolved.reference_path)
+                    if skill is not None:
+                        return skill
+            # Fuzzy match: try swapping - and _ in the skill name.
+            for alt_name in _name_alternatives(resolved.skill_name):
+                for entry in entries:
+                    if entry.name == alt_name:
+                        skill = await self._build_skill_from_entry(entry, resolved.reference_path)
+                        if skill is not None:
+                            return skill
+            msg = f"Skill {resolved.skill_name!r} not found in provider {resolved.provider!r}"
+            raise SkillNotFoundError(msg)
 
-        msg = f"Skill {resolved.skill_name!r} not found in provider {resolved.provider!r}"
-        raise SkillNotFoundError(msg)
+        msg = f"Provider {resolved.provider!r} does not implement SkillResource"
+        raise TypeError(msg)
 
-    def get_provider(self, name: str) -> SkillProvider | None:
+    def get_provider(self, name: str) -> ProviderLike | None:
         """Get a registered provider by name.
 
         Args:
