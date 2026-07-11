@@ -324,7 +324,7 @@ async def test_aexit_clears_client() -> None:
 
     await cap.__aexit__(None, None, None)
     assert cap._client is None
-    assert cap._change_queue is None
+    assert len(cap._change_queues) == 0
 
 
 # ---------------------------------------------------------------------------
