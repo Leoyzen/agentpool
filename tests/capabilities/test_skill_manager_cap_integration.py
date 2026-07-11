@@ -9,17 +9,14 @@ Tests cover:
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from typing import Any, Self
+from unittest.mock import MagicMock
 
 from pydantic_ai.messages import ModelRequest, SystemPromptPart, UserPromptPart
-import pytest
 
 from agentpool.capabilities.resource_protocols import (
     SkillEntry,
     SkillResource,
-    ToolEntry,
-    ToolResult,
 )
 from agentpool.capabilities.skill_manager_cap import SkillManagerCap
 from agentpool.skills.skill import Skill
@@ -59,11 +56,11 @@ class MockMcpServerCap(SkillResource):
             raise RuntimeError("MCP server connection failed")
         return name in self._content_map
 
-    async def __aenter__(self) -> MockMcpServerCap:
+    async def __aenter__(self) -> Self:
         self._entered = True
         return self
 
-    async def __aexit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: object) -> None:
         self._entered = False
 
     def get_toolset(self) -> Any:

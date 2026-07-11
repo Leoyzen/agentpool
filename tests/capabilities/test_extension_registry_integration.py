@@ -30,8 +30,7 @@ class FakeSkillCap:
         from agentpool.capabilities.resource_protocols import SkillEntry
 
         return [
-            SkillEntry(name=n, description=d, uri=f"skill://{n}")
-            for n, d in self._skills.items()
+            SkillEntry(name=n, description=d, uri=f"skill://{n}") for n, d in self._skills.items()
         ]
 
     async def read_skill(self, name: str) -> str | None:
@@ -61,12 +60,8 @@ class TestSessionLevelSkillScoping:
             Scope(level=ScopeLevel.SESSION, session_id="ses2"),
         )
 
-        ses1_skills = reg.get_skill_resources(
-            Scope(level=ScopeLevel.SESSION, session_id="ses1")
-        )
-        ses2_skills = reg.get_skill_resources(
-            Scope(level=ScopeLevel.SESSION, session_id="ses2")
-        )
+        ses1_skills = reg.get_skill_resources(Scope(level=ScopeLevel.SESSION, session_id="ses1"))
+        ses2_skills = reg.get_skill_resources(Scope(level=ScopeLevel.SESSION, session_id="ses2"))
 
         assert skill_a in ses1_skills
         assert skill_b not in ses1_skills
@@ -82,12 +77,8 @@ class TestSessionLevelSkillScoping:
         pool_skill = FakeSkillCap("pool-skill", {"pool-skill": "Pool content"})
         reg.register(pool_skill, Scope(level=ScopeLevel.POOL))
 
-        ses1_skills = reg.get_skill_resources(
-            Scope(level=ScopeLevel.SESSION, session_id="ses1")
-        )
-        ses2_skills = reg.get_skill_resources(
-            Scope(level=ScopeLevel.SESSION, session_id="ses2")
-        )
+        ses1_skills = reg.get_skill_resources(Scope(level=ScopeLevel.SESSION, session_id="ses1"))
+        ses2_skills = reg.get_skill_resources(Scope(level=ScopeLevel.SESSION, session_id="ses2"))
 
         assert pool_skill in ses1_skills
         assert pool_skill in ses2_skills

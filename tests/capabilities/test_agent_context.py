@@ -92,7 +92,7 @@ def _make_agent_context() -> AgentContext:
         session=_make_session_state(),
         scope=RunScope(),
         host=_make_host_context(),
-        resources=None,
+        extension_registry=None,
     )
 
 
@@ -140,7 +140,7 @@ def test_agent_context_frozen() -> None:
     """AgentContext is immutable."""
     ctx = _make_agent_context()
     with pytest.raises(FrozenInstanceError):
-        ctx.resources = MagicMock()  # type: ignore[misc]
+        ctx.extension_registry = MagicMock()  # type: ignore[misc]
 
 
 def test_agent_context_all_fields_accessible() -> None:
@@ -151,13 +151,13 @@ def test_agent_context_all_fields_accessible() -> None:
     assert ctx.session is not None
     assert ctx.scope is not None
     assert ctx.host is not None
-    # resources is separately tested for default
+    # extension_registry is separately tested for default
 
 
-def test_agent_context_resources_defaults_none() -> None:
-    """AgentContext.resources defaults to None."""
+def test_agent_context_extension_registry_defaults_none() -> None:
+    """AgentContext.extension_registry defaults to None."""
     ctx = _make_agent_context()
-    assert ctx.resources is None
+    assert ctx.extension_registry is None
 
 
 # =============================================================================

@@ -151,8 +151,6 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
     1. Local filesystem (via SkillsManager)
     2. MCP providers (via CombinedToolsetCapability)
     """
-    from pathlib import PurePosixPath
-
     ctx = state.agent.host_context
     if ctx is None:
         return []
@@ -168,29 +166,18 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
                 provider = skill_resolver.get_provider(provider_name)
                 if provider is None:
                     continue
-                mcp_skills = await provider.get_skills()
-                for skill in mcp_skills:
-                    # For MCP skills, get content via resolver
-                    # (load_instructions returns empty for PurePosixPath)
-                    if isinstance(skill.skill_path, PurePosixPath):
-                        try:
-                            resolved = await skill_resolver.resolve(skill.name)
-                            content = resolved.load_instructions()
-                        except Exception as e:  # noqa: BLE001
-                            logger.debug(
-                                "Failed to get skill instructions",
-                                skill=skill.name,
-                                error=str(e),
-                            )
-                            content = ""
-                    else:
-                        content = skill.load_instructions()
+                mcp_skills = await provider.list_skills()
+                for entry in mcp_skills:
+                    try:
+                        content = await provider.read_skill(entry.name) or ""
+                    except Exception:  # noqa: BLE001
+                        content = ""
 
                     skills.append(
                         SkillInfo(
-                            name=skill.name,
-                            description=skill.description,
-                            location=skill.safe_uri,
+                            name=entry.name,
+                            description=entry.description,
+                            location=entry.uri,
                             content=content,
                         )
                     )
@@ -278,22 +265,21 @@ async def list_commands(state: StateDep) -> list[Command]:
                 provider = state.pool.skill_resolver.get_provider(provider_name)
                 if provider is None:
                     continue
-                provider_skills = await provider.get_skills()
+                provider_skills = await provider.list_skills()
                 logger.debug(
                     "Got skills from skill_resolver",
                     skill_count=len(provider_skills),
                 )
-                for skill in provider_skills:
-                    # Use resolver for proper handling of virtual skills
+                for entry in provider_skills:
+                    # Use provider's read_skill for content
                     try:
-                        resolved = await state.pool.skill_resolver.resolve(skill.name)
-                        template = resolved.load_instructions()
+                        template = await provider.read_skill(entry.name) or ""
                     except Exception:  # noqa: BLE001
                         template = ""
                     commands.append(
                         Command(
-                            name=skill.name,
-                            description=skill.description,
+                            name=entry.name,
+                            description=entry.description,
                             source="command",
                             template=template,
                             hints=_extract_hints(template),

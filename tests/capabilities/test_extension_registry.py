@@ -50,8 +50,7 @@ class FakeSkillResource(FakeCapability):
         from agentpool.capabilities.resource_protocols import SkillEntry
 
         return [
-            SkillEntry(name=n, description=d, uri=f"skill://{n}")
-            for n, d in self._skills.items()
+            SkillEntry(name=n, description=d, uri=f"skill://{n}") for n, d in self._skills.items()
         ]
 
     async def read_skill(self, name: str) -> str | None:
@@ -502,9 +501,7 @@ class TestConcurrency:
 
         async def register_turn():
             for i in range(5):
-                await reg.register_async(
-                    FakeCapability(f"turn-{i}"), turn_scope
-                )
+                await reg.register_async(FakeCapability(f"turn-{i}"), turn_scope)
 
         def register_pool():
             for i in range(5):

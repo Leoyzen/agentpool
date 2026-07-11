@@ -40,13 +40,9 @@ class CorruptSkillResource:
         for name, content in self._skills.items():
             if content is None:
                 # Simulate corruption — skip this entry
-                logging.getLogger(__name__).warning(
-                    "Skipping corrupted skill %r", name
-                )
+                logging.getLogger(__name__).warning("Skipping corrupted skill %r", name)
                 continue
-            entries.append(
-                SkillEntry(name=name, description=content, uri=f"skill://{name}")
-            )
+            entries.append(SkillEntry(name=name, description=content, uri=f"skill://{name}"))
         return entries
 
     async def read_skill(self, name: str) -> str | None:
@@ -110,9 +106,7 @@ class TestSkillFileCorruption:
         cap = CorruptSkillResource()
         reg.register(cap, Scope(level=ScopeLevel.POOL))
 
-        result = await reg.resolve_uri(
-            "skill://corrupt-skill", Scope(level=ScopeLevel.POOL)
-        )
+        result = await reg.resolve_uri("skill://corrupt-skill", Scope(level=ScopeLevel.POOL))
         assert result is None
 
     @pytest.mark.asyncio
@@ -122,9 +116,7 @@ class TestSkillFileCorruption:
         cap = CorruptSkillResource()
         reg.register(cap, Scope(level=ScopeLevel.POOL))
 
-        result = await reg.resolve_uri(
-            "skill://good-skill", Scope(level=ScopeLevel.POOL)
-        )
+        result = await reg.resolve_uri("skill://good-skill", Scope(level=ScopeLevel.POOL))
         assert result == "Good content"
 
 

@@ -18,6 +18,7 @@ with a single capability that:
 from __future__ import annotations
 
 import html
+import inspect
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -180,6 +181,8 @@ class SkillManagerCap(
         # Determine which skills to inject.
         if self._matcher_fn is not None:
             result = self._matcher_fn(messages)
+            if inspect.isawaitable(result):
+                result = await result
             matched: set[str] = {n for n in result if n in self._local_skills}
         else:
             # Backward compat: inject all skills.

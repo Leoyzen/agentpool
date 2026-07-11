@@ -315,10 +315,7 @@ class MCPManager:
             self.add_server_config(config)
 
         # Deduplication: skip if a provider with the same client_id already exists
-        if any(
-            p.client is not None and p.client.config.client_id == config.client_id
-            for p in self.providers
-        ):
+        if any(p.config.client_id == config.client_id for p in self.providers):
             logger.debug(
                 "MCP server already registered, skipping",
                 client_id=config.client_id,
@@ -355,7 +352,7 @@ class MCPManager:
             True if a provider was removed, False otherwise
         """
         for i, provider in enumerate(self.providers):
-            if provider._client is not None and provider._client.config.client_id == client_id:
+            if provider.config.client_id == client_id:
                 # Note: We don't remove from exit_stack here because
                 # the provider was entered into the stack; cleanup() handles that
                 self.providers.pop(i)
@@ -382,11 +379,7 @@ class MCPManager:
         Non-ACP providers are excluded because they are handled separately
         by :meth:`get_capabilities()`.
         """
-        acp_providers = [
-            p
-            for p in self.providers
-            if p._client is not None and isinstance(p._client.config, AcpMCPServerConfig)
-        ]
+        acp_providers = [p for p in self.providers if isinstance(p.config, AcpMCPServerConfig)]
         return CombinedToolsetCapability(
             capabilities=cast(list[AbstractCapability], acp_providers),
             name=f"{self.name}_acp_aggregated",

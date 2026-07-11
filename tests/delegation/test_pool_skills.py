@@ -14,6 +14,7 @@ from upathtools import UPath
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
 from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
 from agentpool.capabilities.resource_protocols import SkillResource
+from agentpool.skills.exceptions import SkillNotFoundError
 from agentpool.skills.uri_resolver import SkillURIResolver
 from agentpool_config.skills import SkillsConfig
 
@@ -380,7 +381,7 @@ class TestProviderRegistration:
             resolver = pool.skill_resolver
             assert resolver is not None
 
-            with pytest.raises(ValueError, match="Provider 'mcp' not registered"):
+            with pytest.raises(SkillNotFoundError, match="not found via ExtensionRegistry"):
                 await resolver.resolve("skill://mcp/some-skill")
 
 

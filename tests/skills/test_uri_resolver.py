@@ -13,9 +13,9 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-from pydantic_ai.capabilities import AbstractCapability
 import pytest
 
+from agentpool.capabilities.resource_protocols import SkillEntry, SkillResource
 from agentpool.skills.exceptions import SecurityError, SkillNotFoundError
 from agentpool.skills.uri_resolver import (
     ResolvedSkillURI,
@@ -362,10 +362,22 @@ def test_validate_skill_name_strips_whitespace() -> None:
 # =============================================================================
 
 
+def _make_skill_resource(
+    entries: list[SkillEntry] | None = None,
+    content: str = "skill content",
+) -> MagicMock:
+    """Create a mock SkillResource provider for testing."""
+    provider = MagicMock(spec=SkillResource)
+    provider.list_skills = AsyncMock(return_value=entries or [])
+    provider.read_skill = AsyncMock(return_value=content)
+    provider.skill_exists = AsyncMock(return_value=len(entries or []) > 0)
+    return provider
+
+
 def test_resolver_register_provider() -> None:
     """Test registering a provider."""
     resolver = SkillURIResolver()
-    provider = MagicMock(spec=AbstractCapability)
+    provider = _make_skill_resource()
 
     resolver.register_provider("local", provider)
 
@@ -375,8 +387,8 @@ def test_resolver_register_provider() -> None:
 def test_resolver_register_multiple_providers() -> None:
     """Test registering multiple providers."""
     resolver = SkillURIResolver()
-    provider1 = MagicMock(spec=AbstractCapability)
-    provider2 = MagicMock(spec=AbstractCapability)
+    provider1 = _make_skill_resource()
+    provider2 = _make_skill_resource()
 
     resolver.register_provider("local", provider1)
     resolver.register_provider("remote", provider2)
@@ -388,7 +400,7 @@ def test_resolver_register_multiple_providers() -> None:
 def test_resolver_unregister_provider() -> None:
     """Test unregistering a provider."""
     resolver = SkillURIResolver()
-    provider = MagicMock(spec=AbstractCapability)
+    provider = _make_skill_resource()
 
     resolver.register_provider("local", provider)
     assert resolver.get_provider("local") is provider
@@ -408,7 +420,7 @@ def test_resolver_unregister_nonexistent_provider() -> None:
 def test_resolver_list_providers() -> None:
     """Test listing registered providers."""
     resolver = SkillURIResolver()
-    provider = MagicMock(spec=AbstractCapability)
+    provider = _make_skill_resource()
 
     resolver.register_provider("local", provider)
     resolver.register_provider("remote", provider)
@@ -422,7 +434,7 @@ def test_resolver_list_providers() -> None:
 def test_resolver_register_with_invalid_provider_name() -> None:
     """Test that invalid provider name raises SecurityError."""
     resolver = SkillURIResolver()
-    provider = MagicMock(spec=AbstractCapability)
+    provider = _make_skill_resource()
 
     with pytest.raises(SecurityError, match="Invalid provider name"):
         resolver.register_provider("invalid.name", provider)
@@ -437,38 +449,34 @@ def test_resolver_register_with_invalid_provider_name() -> None:
 async def test_resolver_resolve_with_explicit_provider() -> None:
     """Test resolving skill with explicit provider."""
     resolver = SkillURIResolver()
-    skill = MagicMock(spec="Skill")
-    skill.name = "my-skill"
-    provider = MagicMock(spec=AbstractCapability)
-    provider.get_skills = AsyncMock(return_value=[skill])
+    entry = SkillEntry(name="my-skill", description="desc", uri="skill://local/my-skill")
+    provider = _make_skill_resource(entries=[entry], content="instructions")
 
     resolver.register_provider("local", provider)
     result = await resolver.resolve("skill://local/my-skill")
 
-    assert result is skill
+    assert result.name == "my-skill"
+    assert result.description == "desc"
 
 
 @pytest.mark.asyncio
 async def test_resolver_resolve_with_bare_skill_name() -> None:
     """Test resolving bare skill name across all providers."""
     resolver = SkillURIResolver()
-    skill = MagicMock(spec="Skill")
-    skill.name = "my-skill"
-    provider = MagicMock(spec=AbstractCapability)
-    provider.get_skills = AsyncMock(return_value=[skill])
+    entry = SkillEntry(name="my-skill", description="desc", uri="skill://local/my-skill")
+    provider = _make_skill_resource(entries=[entry], content="instructions")
 
     resolver.register_provider("local", provider)
     result = await resolver.resolve("my-skill")
 
-    assert result is skill
+    assert result.name == "my-skill"
 
 
 @pytest.mark.asyncio
 async def test_resolver_resolve_not_found_in_provider() -> None:
     """Test that SkillNotFoundError is raised when skill not in provider."""
     resolver = SkillURIResolver()
-    provider = MagicMock(spec=AbstractCapability)
-    provider.get_skills = AsyncMock(return_value=[])
+    provider = _make_skill_resource(entries=[])
 
     resolver.register_provider("local", provider)
 
@@ -480,8 +488,7 @@ async def test_resolver_resolve_not_found_in_provider() -> None:
 async def test_resolver_resolve_not_found_any_provider() -> None:
     """Test that SkillNotFoundError is raised when skill not in any provider."""
     resolver = SkillURIResolver()
-    provider = MagicMock(spec=AbstractCapability)
-    provider.get_skills = AsyncMock(return_value=[])
+    provider = _make_skill_resource(entries=[])
 
     resolver.register_provider("local", provider)
 
@@ -503,22 +510,16 @@ async def test_resolver_resolve_searches_multiple_providers() -> None:
     """Test that resolver searches all providers for bare skill name."""
     resolver = SkillURIResolver()
 
-    skill1 = MagicMock(spec="Skill")
-    skill1.name = "skill-1"
-    provider1 = MagicMock(spec=AbstractCapability)
-    provider1.get_skills = AsyncMock(return_value=[])
-
-    skill2 = MagicMock(spec="Skill")
-    skill2.name = "skill-2"
-    provider2 = MagicMock(spec=AbstractCapability)
-    provider2.get_skills = AsyncMock(return_value=[skill2])
+    entry2 = SkillEntry(name="skill-2", description="desc", uri="skill://provider2/skill-2")
+    provider1 = _make_skill_resource(entries=[])
+    provider2 = _make_skill_resource(entries=[entry2], content="instructions")
 
     resolver.register_provider("provider1", provider1)
     resolver.register_provider("provider2", provider2)
 
     result = await resolver.resolve("skill-2")
 
-    assert result is skill2
+    assert result.name == "skill-2"
 
 
 @pytest.mark.asyncio
@@ -526,15 +527,10 @@ async def test_resolver_resolve_first_match_wins() -> None:
     """Test that first matching skill is returned when duplicates exist."""
     resolver = SkillURIResolver()
 
-    skill1 = MagicMock(spec="Skill")
-    skill1.name = "my-skill"
-    provider1 = MagicMock(spec=AbstractCapability)
-    provider1.get_skills = AsyncMock(return_value=[skill1])
-
-    skill2 = MagicMock(spec="Skill")
-    skill2.name = "my-skill"
-    provider2 = MagicMock(spec=AbstractCapability)
-    provider2.get_skills = AsyncMock(return_value=[skill2])
+    entry1 = SkillEntry(name="my-skill", description="desc1", uri="skill://provider1/my-skill")
+    entry2 = SkillEntry(name="my-skill", description="desc2", uri="skill://provider2/my-skill")
+    provider1 = _make_skill_resource(entries=[entry1], content="instructions1")
+    provider2 = _make_skill_resource(entries=[entry2], content="instructions2")
 
     resolver.register_provider("provider1", provider1)
     resolver.register_provider("provider2", provider2)
@@ -542,7 +538,8 @@ async def test_resolver_resolve_first_match_wins() -> None:
     result = await resolver.resolve("my-skill")
 
     # First provider's skill should be returned
-    assert result is skill1
+    assert result.name == "my-skill"
+    assert result.description == "desc1"
 
 
 # =============================================================================
@@ -554,7 +551,7 @@ def test_unregister_provider_removes_from_list() -> None:
     """Test that unregister_provider() removes provider from the registry."""
     resolver = SkillURIResolver()
 
-    provider = MagicMock(spec=AbstractCapability)
+    provider = _make_skill_resource()
     resolver.register_provider("test_provider", provider)
 
     assert "test_provider" in resolver.list_providers()
@@ -579,16 +576,14 @@ async def test_unregister_provider_prevents_resolution() -> None:
     """Test that skills from unregistered provider are no longer resolved."""
     resolver = SkillURIResolver()
 
-    skill = MagicMock(spec="Skill")
-    skill.name = "my-skill"
-    provider = MagicMock(spec=AbstractCapability)
-    provider.get_skills = AsyncMock(return_value=[skill])
+    entry = SkillEntry(name="my-skill", description="desc", uri="skill://test_provider/my-skill")
+    provider = _make_skill_resource(entries=[entry], content="instructions")
 
     resolver.register_provider("test_provider", provider)
 
     # Should resolve before unregister
     result = await resolver.resolve("my-skill")
-    assert result is skill
+    assert result.name == "my-skill"
 
     resolver.unregister_provider("test_provider")
 

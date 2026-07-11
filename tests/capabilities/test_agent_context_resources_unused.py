@@ -7,10 +7,8 @@ This validates that Phase 4 removal (task 4.14) is safe.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
-
-import pytest
+import re
 
 
 SRC_DIR = Path(__file__).resolve().parent.parent.parent / "src"
@@ -25,7 +23,7 @@ def _grep_source(pattern: str) -> list[str]:
             continue
         try:
             content = py_file.read_text()
-        except Exception:
+        except Exception:  # noqa: BLE001
             continue
         for i, line in enumerate(content.splitlines(), 1):
             if regex.search(line):
@@ -61,26 +59,11 @@ def test_no_agent_context_resources_reads() -> None:
 
     # Filter out known false positives (comments, docstrings)
     real_matches = [
-        m for m in all_matches
-        if not m.strip().startswith("#")
-        and '"""' not in m
-        and "'''" not in m
+        m
+        for m in all_matches
+        if not m.strip().startswith("#") and '"""' not in m and "'''" not in m
     ]
 
     assert not real_matches, (
-        f"Found {len(real_matches)} read(s) of AgentContext.resources:\n"
-        + "\n".join(real_matches)
-    )
-
-
-def test_agent_context_resources_field_exists() -> None:
-    """AgentContext still has the resources field (will be removed in Phase 4)."""
-    from agentpool.capabilities.agent_context import AgentContext
-
-    # Check that 'resources' is a field on the dataclass
-    import dataclasses
-
-    field_names = {f.name for f in dataclasses.fields(AgentContext)}
-    assert "resources" in field_names, (
-        "AgentContext.resources should still exist (removed in Phase 4 task 4.14)"
+        f"Found {len(real_matches)} read(s) of AgentContext.resources:\n" + "\n".join(real_matches)
     )

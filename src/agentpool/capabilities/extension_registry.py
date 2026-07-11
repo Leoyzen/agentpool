@@ -456,7 +456,7 @@ class ExtensionRegistry:
                     logger.warning(
                         "Failed to resolve MCP URI %r via %s",
                         uri,
-                        type(cap).__name__,
+                        type(mcp_cap).__name__,
                         exc_info=True,
                     )
             return None
