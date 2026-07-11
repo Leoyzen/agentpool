@@ -277,7 +277,7 @@ class SkillManagerCap(
                 except Exception:  # noqa: BLE001
                     logger.warning(
                         "Failed to list skills from child %r",
-                        child.name,
+                        child.get_serialization_name(),
                         exc_info=True,
                     )
 
@@ -310,7 +310,7 @@ class SkillManagerCap(
                     logger.warning(
                         "Failed to read skill %r from child %r",
                         name,
-                        child.name,
+                        child.get_serialization_name(),
                         exc_info=True,
                     )
                     continue
@@ -378,7 +378,7 @@ class SkillManagerCap(
                 except Exception:  # noqa: BLE001
                     logger.warning(
                         "Failed to list commands from child %r",
-                        child.name,
+                        child.get_serialization_name(),
                         exc_info=True,
                     )
 
