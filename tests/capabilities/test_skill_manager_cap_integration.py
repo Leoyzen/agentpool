@@ -41,6 +41,9 @@ class MockMcpServerCap(SkillResource):
         self._fail = fail_on_connect
         self._entered = False
 
+    def get_serialization_name(self) -> str:
+        return self.name
+
     async def list_skills(self) -> Any:
         if self._fail:
             raise RuntimeError("MCP server connection failed")

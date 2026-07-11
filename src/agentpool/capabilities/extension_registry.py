@@ -43,6 +43,18 @@ DEFAULT_MAX_COMPOSITION_DEPTH = 3
 """Default maximum composition depth (root-inclusive)."""
 
 
+def _get_cap_name(cap: Any) -> str:
+    """Get a capability's serialization name, falling back to class name.
+
+    Uses ``get_serialization_name()`` if available (defined on
+    ``AbstractCapability``), otherwise falls back to the type name.
+    """
+    try:
+        return cap.get_serialization_name()
+    except (AttributeError, TypeError):
+        return type(cap).__name__
+
+
 class ScopeLevel(Enum):
     """Capability scope level.
 
@@ -438,11 +450,7 @@ class ExtensionRegistry:
             for cap in self.get_skill_resources(scope):
                 # If provider is specified, skip non-matching capabilities.
                 if provider_name is not None:
-                    cap_name: str
-                    try:
-                        cap_name = cap.get_serialization_name()
-                    except Exception:  # noqa: BLE001
-                        cap_name = type(cap).__name__
+                    cap_name = _get_cap_name(cap)
                     if cap_name != provider_name:
                         continue
                 try:

@@ -73,7 +73,7 @@ class SkillManagerCap(
         local_skills: dict[str, Skill] | None = None,
         children: list[AbstractCapability[AgentDepsT]] | None = None,
         *,
-        matcher_fn: Callable[[Any], list[str]] | None = None,
+        matcher_fn: Callable[..., list[str]] | None = None,
         always_active: set[str] | None = None,
         registry: Any | None = None,
         name: str | None = None,
