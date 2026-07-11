@@ -50,9 +50,10 @@ def _get_cap_name(cap: Any) -> str:
     ``AbstractCapability``), otherwise falls back to the type name.
     """
     try:
-        return cap.get_serialization_name()
+        name: str = cap.get_serialization_name()
     except (AttributeError, TypeError):
         return type(cap).__name__
+    return name
 
 
 class ScopeLevel(Enum):
