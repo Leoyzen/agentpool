@@ -109,20 +109,22 @@ async def test_command_endpoint_skill_provider_fallback(
     server_state.skill_bridge = None
 
     # Create skill_resolver mock
-    mock_skill = MagicMock()
-    mock_skill.name = "provider-skill"
-    mock_skill.description = "Provider skill"
+    from agentpool.capabilities.resource_protocols import SkillEntry
+
+    mock_entry = SkillEntry(
+        name="provider-skill",
+        description="Provider skill",
+        uri="skill://test-provider/provider-skill",
+    )
 
     mock_provider = AsyncMock()
-    mock_provider.get_skills = AsyncMock(return_value=[mock_skill])
+    mock_provider.list_skills = AsyncMock(return_value=[mock_entry])
+    mock_provider.read_skill = AsyncMock(return_value="Process $1")
 
     mock_resolver = MagicMock()
     mock_resolver.list_providers = MagicMock(return_value=["test-provider"])
     mock_resolver.get_provider = MagicMock(return_value=mock_provider)
 
-    mock_resolved = MagicMock()
-    mock_resolved.load_instructions = MagicMock(return_value="Process $1")
-    mock_resolver.resolve = AsyncMock(return_value=mock_resolved)
     mock_agent.host_context.pool.skill_resolver = mock_resolver  # type: ignore[attr-defined]
     mock_agent.host_context.skill_provider = None  # type: ignore[attr-defined]
 
