@@ -227,15 +227,20 @@ class SkillManagerCap(
     ) -> SkillManagerCap[AgentDepsT]:
         """Create a per-run copy of this capability.
 
+        Calls ``for_run()`` on each child capability so children are
+        also per-run isolated.
+
         Args:
             ctx: The pydantic-ai run context.
 
         Returns:
-            A new ``SkillManagerCap`` sharing the same skills and children.
+            A new ``SkillManagerCap`` sharing the same skills but with
+            per-run copies of children.
         """
+        children_for_run = [await child.for_run(ctx) for child in self._children]
         cap = SkillManagerCap(
             local_skills=self._local_skills,
-            children=self._children,
+            children=children_for_run,
             matcher_fn=self._matcher_fn,
             always_active=self._always_active,
             registry=self._registry,

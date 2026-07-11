@@ -95,7 +95,7 @@ class McpServerCap(
         self._session_pool = session_pool
         self._name = name or config.client_id
         self._client: MCPClient | None = client
-        self._change_queue: asyncio.Queue[ChangeEvent] | None = None
+        self._change_queues: set[asyncio.Queue[ChangeEvent]] = set()
 
     # ---- Properties ----
 
@@ -157,39 +157,34 @@ class McpServerCap(
                     )
                     await asyncio.sleep(delay)
                 continue
-            # Success — set up change notification callbacks.
-            if self._change_queue is None:
-                self._change_queue = asyncio.Queue()
 
+            # Success — set up change notification callbacks.
             async def _on_tools_changed() -> None:
-                if self._change_queue is not None:
-                    await self._change_queue.put(
-                        ChangeEvent(
-                            capability_name=self._name,
-                            kind="tools_changed",
-                            source_uri=f"mcp://{self._name}",
-                        ),
-                    )
+                event = ChangeEvent(
+                    capability_name=self._name,
+                    kind="tools_changed",
+                    source_uri=f"mcp://{self._name}",
+                )
+                for q in list(self._change_queues):
+                    await q.put(event)
 
             async def _on_resources_changed() -> None:
-                if self._change_queue is not None:
-                    await self._change_queue.put(
-                        ChangeEvent(
-                            capability_name=self._name,
-                            kind="resources_changed",
-                            source_uri=f"mcp://{self._name}",
-                        ),
-                    )
+                event = ChangeEvent(
+                    capability_name=self._name,
+                    kind="resources_changed",
+                    source_uri=f"mcp://{self._name}",
+                )
+                for q in list(self._change_queues):
+                    await q.put(event)
 
             async def _on_prompts_changed() -> None:
-                if self._change_queue is not None:
-                    await self._change_queue.put(
-                        ChangeEvent(
-                            capability_name=self._name,
-                            kind="prompts_changed",
-                            source_uri=f"mcp://{self._name}",
-                        ),
-                    )
+                event = ChangeEvent(
+                    capability_name=self._name,
+                    kind="prompts_changed",
+                    source_uri=f"mcp://{self._name}",
+                )
+                for q in list(self._change_queues):
+                    await q.put(event)
 
             client._tool_change_callback = _on_tools_changed
             client._resource_change_callback = _on_resources_changed
@@ -257,15 +252,16 @@ class McpServerCap(
             An async iterator yielding ``ChangeEvent`` instances, or
             ``None`` if change notifications are not supported.
         """
-        if self._change_queue is None:
-            self._change_queue = asyncio.Queue()
-
-        queue = self._change_queue
+        queue: asyncio.Queue[ChangeEvent] = asyncio.Queue()
+        self._change_queues.add(queue)
 
         async def _generator() -> AsyncIterator[ChangeEvent]:
-            while True:
-                event = await queue.get()
-                yield event
+            try:
+                while True:
+                    event = await queue.get()
+                    yield event
+            finally:
+                self._change_queues.discard(queue)
 
         return _generator()
 
@@ -534,4 +530,4 @@ class McpServerCap(
         if self._client is not None:
             await self._client.__aexit__(exc_type, exc_val, exc_tb)
         self._client = None
-        self._change_queue = None
+        self._change_queues.clear()

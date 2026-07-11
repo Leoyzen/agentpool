@@ -135,6 +135,9 @@ class ExtensionRegistry:
         # Maps id(capability) → parent capability (or None for roots)
         self._parents: dict[int, AbstractCapability[Any] | None] = {}
 
+        # Background tasks for change stream merging
+        self._background_tasks: set[asyncio.Task[None]] = set()
+
     # ------------------------------------------------------------------
     # Registration
     # ------------------------------------------------------------------
@@ -534,6 +537,9 @@ class ExtensionRegistry:
                 await queue.put(None)
 
         tasks = [asyncio.create_task(_consume(s)) for s in streams]
+        for task in tasks:
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
 
         finished_count = 0
         try:

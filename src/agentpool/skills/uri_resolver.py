@@ -389,54 +389,52 @@ class SkillURIResolver:
                     continue
                 for entry in entries:
                     if entry.name == skill_name:
-                        return await self._build_skill_from_entry(entry, ref_path)
+                        return await self._build_skill_from_entry(provider, entry, ref_path)
                 # Try name alternatives (underscore ↔ hyphen).
                 for alt_name in _name_alternatives(skill_name):
                     for entry in entries:
                         if entry.name == alt_name:
-                            return await self._build_skill_from_entry(entry, ref_path)
+                            return await self._build_skill_from_entry(provider, entry, ref_path)
                 continue
         return None
 
     async def _build_skill_from_entry(
-        self, entry: SkillEntry, ref_path: str | None
+        self,
+        provider: SkillResource,
+        entry: SkillEntry,
+        ref_path: str | None,
     ) -> Skill | None:
         """Construct a lightweight Skill from a SkillEntry.
 
-        Reads skill content from the provider's ``read_skill()`` method
-        and constructs a ``Skill`` object with the metadata and content.
+        Reads skill content from the given provider's ``read_skill()``
+        method and constructs a ``Skill`` object with the metadata and
+        content.
 
         Args:
+            provider: The SkillResource that owns this entry.
             entry: The SkillEntry with metadata.
             ref_path: Optional reference path to attach.
 
         Returns:
             A Skill object, or None if content could not be read.
         """
-        from agentpool.capabilities.resource_protocols import SkillResource
+        try:
+            content = await provider.read_skill(entry.name)
+        except Exception:  # noqa: BLE001
+            return None
+        if content is None:
+            return None
+        from agentpool.skills.skill import Skill
 
-        # Find the provider that owns this entry.
-        for provider in self._providers.values():
-            if not isinstance(provider, SkillResource):
-                continue
-            try:
-                content = await provider.read_skill(entry.name)
-            except Exception:  # noqa: BLE001
-                continue
-            if content is None:
-                continue
-            from agentpool.skills.skill import Skill
-
-            skill = Skill(
-                name=entry.name,
-                description=entry.description or f"Skill {entry.name}",
-                skill_path=PurePosixPath(entry.uri),
-                instructions=content,
-            )
-            if ref_path is not None:
-                skill._resolved_reference_path = ref_path  # type: ignore[attr-defined]
-            return skill
-        return None
+        skill = Skill(
+            name=entry.name,
+            description=entry.description or f"Skill {entry.name}",
+            skill_path=PurePosixPath(entry.uri),
+            instructions=content,
+        )
+        if ref_path is not None:
+            skill._resolved_reference_path = ref_path  # type: ignore[attr-defined]
+        return skill
 
     async def _find_skill_with_alternatives(self, skill_name: str) -> Skill | None:
         """Search all providers for a skill, trying name alternatives.
@@ -553,14 +551,18 @@ class SkillURIResolver:
             entries = await provider.list_skills()
             for entry in entries:
                 if entry.name == resolved.skill_name:
-                    skill = await self._build_skill_from_entry(entry, resolved.reference_path)
+                    skill = await self._build_skill_from_entry(
+                        provider, entry, resolved.reference_path
+                    )
                     if skill is not None:
                         return skill
             # Fuzzy match: try swapping - and _ in the skill name.
             for alt_name in _name_alternatives(resolved.skill_name):
                 for entry in entries:
                     if entry.name == alt_name:
-                        skill = await self._build_skill_from_entry(entry, resolved.reference_path)
+                        skill = await self._build_skill_from_entry(
+                            provider, entry, resolved.reference_path
+                        )
                         if skill is not None:
                             return skill
             msg = f"Skill {resolved.skill_name!r} not found in provider {resolved.provider!r}"
