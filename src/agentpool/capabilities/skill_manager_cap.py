@@ -42,7 +42,6 @@ if TYPE_CHECKING:
     from pydantic_ai.capabilities import AbstractCapability
     from pydantic_ai.messages import ModelRequestContext
 
-    from agentpool.capabilities.mcp_server_cap import McpServerCap
     from agentpool.skills.skill import Skill
 
 
@@ -72,7 +71,7 @@ class SkillManagerCap(
     def __init__(
         self,
         local_skills: dict[str, Skill] | None = None,
-        children: list[McpServerCap[AgentDepsT]] | None = None,
+        children: list[AbstractCapability[AgentDepsT]] | None = None,
         *,
         matcher_fn: Callable[[Any], list[str]] | None = None,
         always_active: set[str] | None = None,
@@ -93,7 +92,7 @@ class SkillManagerCap(
             name: Optional name override.
         """
         self._local_skills: dict[str, Skill] = dict(local_skills) if local_skills else {}
-        self._children: list[McpServerCap[AgentDepsT]] = list(children) if children else []
+        self._children: list[AbstractCapability[AgentDepsT]] = list(children) if children else []
         self._matcher_fn = matcher_fn
         self._always_active: set[str] = set(always_active) if always_active else set()
         self._registry = registry
@@ -110,15 +109,15 @@ class SkillManagerCap(
         return self._local_skills
 
     @property
-    def children(self) -> list[McpServerCap[AgentDepsT]]:
-        """Return the child McpServerCap list."""
+    def children(self) -> list[AbstractCapability[AgentDepsT]]:
+        """Return the child capability list."""
         return list(self._children)
 
-    def add_child(self, child: McpServerCap[AgentDepsT]) -> None:
-        """Add a child McpServerCap at runtime.
+    def add_child(self, child: AbstractCapability[AgentDepsT]) -> None:
+        """Add a child capability at runtime.
 
         Args:
-            child: The McpServerCap to add.
+            child: The capability to add.
         """
         self._children.append(child)
         self._capabilities.append(child)
