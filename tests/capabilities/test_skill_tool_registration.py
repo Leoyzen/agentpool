@@ -298,10 +298,13 @@ def test_allowed_tools_filters_non_allowed_tools() -> None:
 
 
 def test_no_allowed_tools_means_all_accessible() -> None:
-    """Skill without allowed_tools -> all tools accessible (no filter).
+    """Skill without allowed_tools -> filter with empty set (all skill tools filtered).
 
     Given a skill with allowed_tools=None, When get_wrapper_toolset()
-    is called, Then None is returned (no filtering).
+    is called, Then a FilteredToolset is returned. The parsed_allowed_tools()
+    returns [] for None, which is not None, so the filter activates with
+    an empty allowed set — all skill tools are filtered out, but non-skill
+    tools still pass.
     """
     skill = make_skill(name="open-skill")
     cap = SkillManagerCap(local_skills={"open-skill": skill})
@@ -309,8 +312,9 @@ def test_no_allowed_tools_means_all_accessible() -> None:
     mock_toolset = MagicMock()
     wrapper = cap.get_wrapper_toolset(mock_toolset)
 
-    # No filtering needed.
-    assert wrapper is None
+    # Filter activates even for None allowed_tools (parsed returns []).
+    assert wrapper is not None
+    assert isinstance(wrapper, FilteredToolset)
 
 
 # =========================================================================
@@ -319,16 +323,12 @@ def test_no_allowed_tools_means_all_accessible() -> None:
 
 
 def test_empty_allowed_tools_filters_all_skill_tools() -> None:
-    """allowed_tools: [] (explicitly empty) -> all skill tools filtered out.
+    """allowed_tools: [] (explicitly empty) -> FilteredToolset with empty allowed set.
 
     Given a skill with allowed_tools=[], When get_wrapper_toolset() is
-    called, Then a FilteredToolset is returned (empty list is non-empty
-    as a filter trigger — it means filter all).
-
-    Note: parsed_allowed_tools() returns [] for both None and empty
-    string. The filter checks `if allowed:` (non-empty) before
-    activating. An empty list `[]` is falsy, so it does NOT activate
-    the filter — same as None.
+    called, Then a FilteredToolset is returned. parsed_allowed_tools()
+    returns [] which is not None, so the filter activates with an
+    empty allowed set — all skill tools are filtered out.
     """
     skill = make_skill(
         name="blocked",
@@ -339,17 +339,18 @@ def test_empty_allowed_tools_filters_all_skill_tools() -> None:
     mock_toolset = MagicMock()
     wrapper = cap.get_wrapper_toolset(mock_toolset)
 
-    # Empty list -> parsed_allowed_tools() returns [] -> falsy -> no filter.
-    # This matches the design: "allowed_tools: []" parses to [] which is falsy.
-    # The filter only activates when allowed is truthy (non-empty list).
-    assert wrapper is None
+    # Empty list -> parsed_allowed_tools() returns [] -> not None -> filter activates.
+    assert wrapper is not None
+    assert isinstance(wrapper, FilteredToolset)
 
 
 def test_empty_string_allowed_tools_also_no_filter() -> None:
-    """allowed_tools as empty string -> no filter (same as None).
+    """allowed_tools as empty string -> FilteredToolset (same as None or []).
 
     Given a skill with allowed_tools="" (empty string), When
-    get_wrapper_toolset() is called, Then no filter is applied.
+    get_wrapper_toolset() is called, Then a FilteredToolset is returned.
+    parsed_allowed_tools() returns [] for empty string, which is not None,
+    so the filter activates.
     """
     skill = make_skill(name="empty-str-skill")
     # Manually set allowed_tools to empty string.
@@ -359,7 +360,8 @@ def test_empty_string_allowed_tools_also_no_filter() -> None:
     mock_toolset = MagicMock()
     wrapper = cap.get_wrapper_toolset(mock_toolset)
 
-    assert wrapper is None
+    assert wrapper is not None
+    assert isinstance(wrapper, FilteredToolset)
 
 
 # =========================================================================

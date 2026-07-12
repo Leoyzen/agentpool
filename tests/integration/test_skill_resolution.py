@@ -212,8 +212,8 @@ class TestReferenceContentLoading:
         test_skill_with_reference: UPath,
     ) -> None:
         """Test resolving URI with reference path."""
-        # Parse URI with reference
-        resolved = ResolvedSkillURI.parse("skill://local/test-skill/references/guide.md")
+        # Parse URI with reference (D9 flat format: skill://skill-name/ref/path)
+        resolved = ResolvedSkillURI.parse("skill://test-skill/references/guide.md")
 
         assert resolved.skill_name == "test-skill"
         assert resolved.reference_path == "references/guide.md"
@@ -404,7 +404,7 @@ class TestErrorHandlingAndSecurity:
     ) -> None:
         """Test path traversal detection in skill URIs."""
         with pytest.raises(SecurityError, match="Path traversal detected"):
-            ResolvedSkillURI.parse("skill://local/skill-name/../other")
+            ResolvedSkillURI.parse("skill://skill-name/../other")
 
     async def test_null_byte_detection(
         self,
@@ -413,7 +413,7 @@ class TestErrorHandlingAndSecurity:
     ) -> None:
         """Test null byte detection in skill URIs."""
         with pytest.raises(SecurityError, match="null bytes"):
-            ResolvedSkillURI.parse("skill://local/skill\x00name")
+            ResolvedSkillURI.parse("skill://skill\x00name")
 
 
 # =============================================================================
@@ -468,7 +468,6 @@ class TestBackwardCompatibility:
         resolved = ResolvedSkillURI.parse("python-expert")
 
         assert resolved.skill_name == "python-expert"
-        assert resolved.provider is None
         assert resolved.reference_path is None
 
     async def test_both_resolution_methods_available(

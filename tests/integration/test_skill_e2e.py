@@ -406,7 +406,8 @@ async def test_extension_registry_resolves_via_skill_manager_cap() -> None:
     reg.register(cap, Scope(level=ScopeLevel.POOL))
 
     result = await reg.resolve_uri("skill://registry-skill", Scope(level=ScopeLevel.POOL))
-    assert result == "Registry skill content."
+    assert isinstance(result, Skill)
+    assert result.instructions == "Registry skill content."
 
 
 @pytest.mark.asyncio
@@ -425,7 +426,8 @@ async def test_extension_registry_unregisters_old_cap_on_rebuild() -> None:
 
     # Verify old cap works.
     result = await reg.resolve_uri("skill://rebuild-skill", Scope(level=ScopeLevel.POOL))
-    assert result == "Old content."
+    assert isinstance(result, Skill)
+    assert result.instructions == "Old content."
 
     # Unregister old, register new.
     reg.unregister(old_cap, Scope(level=ScopeLevel.POOL))
@@ -435,4 +437,5 @@ async def test_extension_registry_unregisters_old_cap_on_rebuild() -> None:
 
     # Verify new cap is used.
     result = await reg.resolve_uri("skill://rebuild-skill", Scope(level=ScopeLevel.POOL))
-    assert result == "New content."
+    assert isinstance(result, Skill)
+    assert result.instructions == "New content."

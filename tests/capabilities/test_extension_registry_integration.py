@@ -109,5 +109,9 @@ class TestSessionLevelSkillScoping:
             Scope(level=ScopeLevel.SESSION, session_id="ses2"),
         )
 
-        assert result1 == "Session 1 content"
-        assert result2 == "Session 2 content"
+        from agentpool.skills.skill import Skill
+
+        assert isinstance(result1, Skill)
+        assert result1.instructions == "Session 1 content"
+        assert isinstance(result2, Skill)
+        assert result2.instructions == "Session 2 content"
