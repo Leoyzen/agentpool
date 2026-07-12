@@ -299,17 +299,22 @@ class TestMatcherFnBackwardCompat:
 
 
 class TestResolveUriProviderRouting:
-    """ExtensionRegistry.resolve_uri should route by provider when present."""
+    """ExtensionRegistry.resolve_uri routes skill:// URIs (D9 flat format)."""
 
     @pytest.mark.asyncio
     async def test_resolve_uri_with_provider_routes_to_correct_cap(self) -> None:
-        """skill://provider/name should only query the matching provider."""
+        """skill://name with flat URI resolves to first matching cap.
+
+        With D9, provider segment is removed. skill://shared-name
+        iterates all caps and returns the first match.
+        """
         from agentpool.capabilities.extension_registry import (
             ExtensionRegistry,
             Scope,
             ScopeLevel,
         )
         from agentpool.capabilities.resource_protocols import SkillEntry
+        from agentpool.skills.skill import Skill
 
         class NamedSkillCap:
             """Fake SkillResource with a configurable serialization name."""
@@ -324,7 +329,7 @@ class TestResolveUriProviderRouting:
 
             async def list_skills(self) -> list[SkillEntry]:
                 return [
-                    SkillEntry(name=n, description=d, uri=f"skill://{self._ser_name}/{n}")
+                    SkillEntry(name=n, description=d, uri=f"skill://{n}")
                     for n, d in self._skills.items()
                 ]
 
@@ -342,14 +347,10 @@ class TestResolveUriProviderRouting:
         reg.register(cap_a, Scope(level=ScopeLevel.POOL))
         reg.register(cap_b, Scope(level=ScopeLevel.POOL))
 
-        # Route to providerB specifically
-        result = await reg.resolve_uri(
-            "skill://providerB/shared-name", Scope(level=ScopeLevel.POOL)
-        )
-        assert result == "content from B"
-
-        # cap_a.skill_exists should NOT have been called since provider didn't match
-        assert cap_a.skill_exists_calls == [], "cap_a was queried despite provider mismatch"
+        # Flat URI (D9): skill://shared-name resolves to first matching cap.
+        result = await reg.resolve_uri("skill://shared-name", Scope(level=ScopeLevel.POOL))
+        assert isinstance(result, Skill)
+        assert result.instructions == "content from A"
 
     @pytest.mark.asyncio
     async def test_resolve_uri_without_provider_iterates_all(self) -> None:
@@ -360,6 +361,7 @@ class TestResolveUriProviderRouting:
             ScopeLevel,
         )
         from agentpool.capabilities.resource_protocols import SkillEntry
+        from agentpool.skills.skill import Skill
 
         class NamedSkillCap:
             def __init__(self, ser_name: str, skills: dict[str, str]) -> None:
@@ -387,4 +389,5 @@ class TestResolveUriProviderRouting:
         reg.register(cap_a, Scope(level=ScopeLevel.POOL))
 
         result = await reg.resolve_uri("skill://my-skill", Scope(level=ScopeLevel.POOL))
-        assert result == "content from A"
+        assert isinstance(result, Skill)
+        assert result.instructions == "content from A"

@@ -467,7 +467,7 @@ class SkillManagerCap(
                     description=skill.description,
                     uri=f"skill://{name}",
                     source="local",
-                    skill_path=skill.skill_path,
+                    skill_path=skill.skill_path,  # type: ignore[arg-type]  # UPath subclass of PurePosixPath
                 )
             )
 

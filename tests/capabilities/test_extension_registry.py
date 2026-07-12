@@ -294,12 +294,16 @@ class TestURIRouting:
 
     @pytest.mark.asyncio
     async def test_resolve_skill_uri(self) -> None:
+        from agentpool.skills.skill import Skill
+
         reg = ExtensionRegistry()
         skill_cap = FakeSkillResource(skills={"my-skill": "skill content here"})
         reg.register(skill_cap, Scope(level=ScopeLevel.POOL))
 
         result = await reg.resolve_uri("skill://my-skill", Scope(level=ScopeLevel.POOL))
-        assert result == "skill content here"
+        assert isinstance(result, Skill)
+        assert result.name == "my-skill"
+        assert result.instructions == "skill content here"
 
     @pytest.mark.asyncio
     async def test_resolve_mcp_uri(self) -> None:

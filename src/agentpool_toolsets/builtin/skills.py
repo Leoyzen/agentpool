@@ -324,7 +324,7 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
                 return f"Failed to load reference {ref_path!r}: {e}"
         # Full skill loading: instructions already populated by resolver.
         else:
-            instructions = skill.instructions
+            instructions = skill.instructions or ""
     else:
         try:
             loaded = await _load_visible_bare_skill(ctx, resolved.skill_name, requested_node_name)

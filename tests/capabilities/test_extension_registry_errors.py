@@ -112,12 +112,15 @@ class TestSkillFileCorruption:
     @pytest.mark.asyncio
     async def test_good_skill_still_resolvable(self) -> None:
         """Non-corrupted skills still resolve correctly."""
+        from agentpool.skills.skill import Skill
+
         reg = ExtensionRegistry()
         cap = CorruptSkillResource()
         reg.register(cap, Scope(level=ScopeLevel.POOL))
 
         result = await reg.resolve_uri("skill://good-skill", Scope(level=ScopeLevel.POOL))
-        assert result == "Good content"
+        assert isinstance(result, Skill)
+        assert result.instructions == "Good content"
 
 
 class TestMcpServerTimeout:

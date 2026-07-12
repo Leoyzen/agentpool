@@ -16,6 +16,8 @@ are visible only for the duration of one turn and are guarded by an
 
 from __future__ import annotations
 
+from __future__ import annotations
+
 import asyncio
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -28,6 +30,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from pydantic_ai.capabilities import AbstractCapability
+
+    from agentpool.skills.skill import Skill
 
     from agentpool.capabilities.change_event import ChangeEvent
     from agentpool.capabilities.resource_protocols import (
@@ -401,14 +405,11 @@ class ExtensionRegistry:
         self,
         uri: str,
         scope: Scope,
-    ) -> str | bytes | None:
+    ) -> Skill | str | bytes | None:
         """Resolve a URI by routing based on scheme.
 
-        ``skill://`` URIs are resolved by querying
-        ``get_skill_resources(scope)`` and calling ``read_skill()``.
-        ``mcp://`` URIs are resolved by querying
-        ``get_mcp_resources(scope)`` and calling ``read_resource()``.
-        Unknown schemes return ``None``.
+        ``skill://`` URIs return a ``Skill`` object (with metadata and path).
+        ``mcp://`` URIs and unknown schemes return ``str | bytes | None``.
 
         Uses ``skill_exists()`` / ``resource_exists()`` for a
         cheap-check-first pattern before reading content.
