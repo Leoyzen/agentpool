@@ -27,8 +27,8 @@ Skills can be loaded using either a bare skill name or a skill:// URI:
 - `python-expert` - Load skill by name (searches all providers)
 
 ### URI Format
-- `skill://provider/skill-name` - Load skill from specific provider
-- `skill://provider/skill-name/references/file.md` - Load with reference file
+- `skill://skill-name` - Load skill by flat URI
+- `skill://skill-name/references/file.md` - Load with reference file
 
 ### Argument Substitution
 When providing arguments, the following substitutions are made:
@@ -36,7 +36,7 @@ When providing arguments, the following substitutions are made:
 - `$@` - Replaced with all arguments
 - `$ARGUMENTS` - Replaced with all arguments
 
-Example: `load_skill(ctx, "skill://local/python-expert", "arg1 arg2")`
+Example: `load_skill(ctx, "skill://python-expert", "arg1 arg2")`
 """
 
 BASE_DESC = f"""Load a Claude Code Skill and return its instructions.
@@ -262,7 +262,7 @@ async def load_skill(
         ctx: Agent context providing access to pool and skills
         skill_name: Name of the skill to load, or a skill:// URI.
             Use skill:// URI to load a specific reference file:
-            skill://provider/skill-name/references/file.md
+            skill://skill-name/references/file.md
         arguments: Optional space-separated arguments for substitution
 
     Returns:
@@ -518,7 +518,7 @@ async def list_skills(ctx: AgentContext) -> str:  # noqa: PLR0915
                     except Exception:  # noqa: BLE001
                         continue
                     if any(e.name == skill.name for e in entries):
-                        lines.append(f"  - URI: `skill://{provider_name}/{skill.name}`")
+                        lines.append(f"  - URI: `skill://{skill.name}`")
                         break
             else:
                 # Skill found but not in any registered provider
@@ -539,12 +539,12 @@ async def list_skills(ctx: AgentContext) -> str:  # noqa: PLR0915
     if has_resolver:
         lines.append("Or use a skill:// URI:")
         lines.append("```python")
-        lines.append('await load_skill(ctx, "skill://provider/skill-name")')
+        lines.append('await load_skill(ctx, "skill://skill-name")')
         lines.append("```")
         lines.append("")
         lines.append("With arguments for substitution:")
         lines.append("```python")
-        lines.append('await load_skill(ctx, "skill://provider/skill-name", "arg1 arg2")')
+        lines.append('await load_skill(ctx, "skill://skill-name", "arg1 arg2")')
         lines.append("```")
 
     return "\n".join(lines)
