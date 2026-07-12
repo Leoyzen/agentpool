@@ -422,7 +422,7 @@ class ExtensionRegistry:
             the URI cannot be resolved.
         """
         if uri.startswith("skill://"):
-              # Flat URI (D9): parse via ResolvedSkillURI for consistency.
+            # Flat URI (D9): parse via ResolvedSkillURI for consistency.
             from agentpool.skills.skill import Skill
             from agentpool.skills.uri_resolver import ResolvedSkillURI
 
