@@ -467,6 +467,7 @@ class SkillManagerCap(
                     description=skill.description,
                     uri=f"skill://{name}",
                     source="local",
+                    skill_path=skill.skill_path,
                 )
             )
 
