@@ -16,8 +16,6 @@ are visible only for the duration of one turn and are guarded by an
 
 from __future__ import annotations
 
-from __future__ import annotations
-
 import asyncio
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -31,8 +29,6 @@ if TYPE_CHECKING:
 
     from pydantic_ai.capabilities import AbstractCapability
 
-    from agentpool.skills.skill import Skill
-
     from agentpool.capabilities.change_event import ChangeEvent
     from agentpool.capabilities.resource_protocols import (
         ChangeObservable,
@@ -40,6 +36,7 @@ if TYPE_CHECKING:
         McpResource,
         SkillResource,
     )
+    from agentpool.skills.skill import Skill
 
 
 logger = logging.getLogger(__name__)
