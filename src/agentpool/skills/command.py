@@ -38,7 +38,7 @@ class SkillCommand:
     @property
     def resolved_skill_uri(self) -> str:
         """Get the skill URI, generating from name if not explicitly set."""
-        return self.skill_uri or f"skill://local/{self.name}"
+        return self.skill_uri or f"skill://{self.name}"
 
     def is_valid_input(self, input_text: str) -> tuple[bool, str | None]:
         """Validate input text for this command.

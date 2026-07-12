@@ -138,6 +138,39 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
             server_state=state,
         )
 
+    # Set up skill command bridge and CommandStore for slash commands.
+    # Builds SkillCommand objects from pool.skills and bridges them to
+    # slashed Commands for OpenCode's slash command execution endpoint.
+    if state.pool.skills is not None:
+        from slashed import CommandStore
+
+        from agentpool.skills.command import SkillCommand
+        from agentpool_server.opencode_server.skill_bridge import OpenCodeSkillBridge
+
+        skill_cmds: list[SkillCommand] = []
+        for skill in state.pool.skills.list_skills():
+            if not skill.user_invocable:
+                continue
+            skill_cmds.append(
+                SkillCommand(
+                    name=skill.name,
+                    description=skill.description,
+                    skill=skill,
+                    skill_uri=f"skill://{skill.name}",
+                )
+            )
+
+        bridge = OpenCodeSkillBridge(skill_provider=state.pool.skill_provider)
+        for cmd in skill_cmds:
+            bridge.handle_change(cmd.name, cmd)
+
+        state.skill_bridge = bridge
+        state.command_store = CommandStore(commands=bridge.get_commands())
+        logger.debug(
+            "OpenCode skill bridge setup complete",
+            command_count=len(skill_cmds),
+        )
+
     # Set up todo change callback to broadcast events
     async def on_todo_change(tracker: TodoTracker) -> None:
         """Broadcast todo updates to all active sessions."""
