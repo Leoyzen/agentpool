@@ -199,14 +199,6 @@ async def _execute_slashed_command(  # noqa: PLR0915
     if command is None:
         raise HTTPException(status_code=404, detail=f"Command not found: {request.command}")
 
-    # Check if this is a skill command by looking it up in pool.skill_commands
-    skill_cmd = None
-    if state.pool.skill_commands:
-        skill_cmd = state.pool.skill_commands.get(request.command)
-
-    if skill_cmd:
-        return await _execute_skill_command(state, session_id, request)
-
     # Create assistant message (before execution)
     now = now_ms()
     assistant_msg_id = identifier.ascending("message")
@@ -368,8 +360,6 @@ async def _execute_skill_command(  # noqa: PLR0915
 
     # Get skill command from pool
     skill_cmd = None
-    if state.pool.skill_commands:
-        skill_cmd = state.pool.skill_commands.get(skill_name)
 
     if not skill_cmd:
         raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
@@ -1860,16 +1850,6 @@ async def execute_command(  # noqa: PLR0915
                     request.command,
                 )
             return await _execute_slashed_command(state, session_id, request)
-
-        # Fallback: check pool.skill_commands directly when CommandStore misses
-        # This handles cases where skills were registered after CommandStore init
-        # or where the CommandStore sync callback hasn't fired yet
-        if state.pool.skill_commands and request.command in state.pool.skill_commands:
-            logger.debug(
-                "Command '%s' found in skill_commands but not CommandStore, executing as skill",
-                request.command,
-            )
-            return await _execute_skill_command(state, session_id, request)
 
         # Fall back to MCP prompts (existing code remains unchanged)
         session_agent = state.agent

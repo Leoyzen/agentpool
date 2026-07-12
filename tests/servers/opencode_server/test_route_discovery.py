@@ -51,7 +51,6 @@ def _server_state(tmp_path: Path) -> ServerState:
     pool.todos = todos
     pool.manifest = manifest
     pool.manifest.agents = {}
-    pool.skill_commands = None
     pool.skill_provider = None
     pool.skills = None
 

@@ -192,7 +192,6 @@ def mock_pool(  # noqa: PLR0915
     pool.file_ops = file_ops
     pool.todos = todos
     pool.manifest = manifest
-    pool.skill_commands = None
     # Sessions store delegates to the real StorageManager so that
     # create_session's pool.sessions.store.save() persists data that
     # storage.load_session() can retrieve. Without this, the mock

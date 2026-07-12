@@ -39,7 +39,6 @@ from agentpool_server.acp_server.converters import (
 )
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.input_provider import ACPInputProvider
-from agentpool_server.opencode_server.skill_bridge import create_skill_command
 
 
 if TYPE_CHECKING:
@@ -97,7 +96,6 @@ Query params must be URL-encoded (spaces → `%20`). Paths must be absolute.
 def get_all_commands() -> Sequence[BaseCommand]:
     """Return empty command list to align with OpenCode behavior.
 
-    Only skill commands are exposed via _register_skill_commands().
     All built-in framework commands are hidden to keep ACP consistent
     with OpenCode, which does not register agentpool_commands at all.
     """
@@ -266,74 +264,10 @@ class ACPSession:
         with suppress(Exception):
             self.agent.state_updated.disconnect(self._on_state_updated)
         self.agent.state_updated.connect(self._on_state_updated)
-        # Register skill commands from pool's SkillCommandRegistry
-        self._register_skill_commands()
         # Register global commands from manifest.commands (e.g., static commands like start_eval)
         self._register_manifest_commands()
 
         self.log.info("Created ACP session", current_agent=self.agent.name)
-
-    def _register_skill_commands(self) -> None:
-        """Register skill commands from pool's SkillCommandRegistry to command_store.
-
-        Bridges skill commands into the session's command_store so they are
-        included in available_commands_update notifications per ACP spec.
-        """
-        ctx = self.host_context
-        pool = ctx.pool if ctx is not None else None
-        skill_registry = pool.skill_commands if pool is not None else None
-        if skill_registry is None:
-            return
-
-        self._skill_command_callback = self._on_skill_command_changed
-        # Skip scheduling updates during initial registration;
-        # the caller of create_session already schedules a consolidated update.
-        self._skill_commands_initializing = True
-        try:
-            skill_registry.on_command_change(self._skill_command_callback)
-        finally:
-            self._skill_commands_initializing = False
-
-        self.log.debug(
-            "Subscribed to skill command changes",
-            skill_count=len(skill_registry.list_items()),
-        )
-
-    def _on_skill_command_changed(self, name: str, command: Any | None) -> None:
-        """Handle skill command add/remove changes from SkillCommandRegistry.
-
-        Args:
-            name: The name of the skill command.
-            command: The SkillCommand if added, None if removed.
-        """
-        if command is None:
-            # Command removed
-            try:
-                self.command_store.unregister_command(name)
-                self.log.debug("Unregistered skill command", skill_name=name)
-            except Exception:
-                self.log.exception("Failed to unregister skill command", skill_name=name)
-        else:
-            # Command added/updated
-            try:
-                from agentpool.skills.command import SkillCommand
-
-                if isinstance(command, SkillCommand):
-                    slashed_cmd = create_skill_command(command)
-                    self.command_store.register_command(slashed_cmd, replace=True)
-                    self.log.debug("Registered skill command", skill_name=name)
-            except Exception:
-                self.log.exception("Failed to register skill command", skill_name=name)
-
-        # Skip notification during initial registration
-        if getattr(self, "_skill_commands_initializing", False):
-            return
-
-        # Schedule update via TaskManager for proper lifecycle tracking
-        try:
-            self.acp_agent.tasks.create_task(self.send_available_commands_update())
-        except Exception:
-            self.log.exception("Failed to schedule command update")
 
     def _register_manifest_commands(self) -> None:
         """Register global commands from manifest to command_store.
@@ -837,17 +771,6 @@ class ACPSession:
                 self.get_cwd_context in self.agent.sys_prompts.prompts
             ):
                 self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
-
-            # Unregister skill command callback to prevent memory leak
-            if hasattr(self, "_skill_command_callback"):
-                ctx = self.host_context
-                pool = ctx.pool if ctx is not None else None
-                skill_registry = pool.skill_commands if pool is not None else None
-                if skill_registry is not None and hasattr(
-                    skill_registry, "_command_change_handlers"
-                ):
-                    with suppress(ValueError):
-                        skill_registry._command_change_handlers.remove(self._skill_command_callback)
 
             # Note: Individual agents are managed by the pool's lifecycle
             # The pool will handle agent cleanup when it's closed

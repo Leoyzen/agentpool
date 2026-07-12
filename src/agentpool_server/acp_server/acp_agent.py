@@ -40,7 +40,6 @@ from acp.schema import (
 from agentpool.log import get_logger
 from agentpool.utils.tasks import TaskManager
 from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnectionManager
-from agentpool_server.acp_server.commands.skill_commands import ACPSkillBridge
 from agentpool_server.acp_server.converters import to_session_config_option, to_session_info
 from agentpool_server.acp_server.provider_router import ProviderRouter
 from agentpool_server.acp_server.session_manager import ACPSessionManager
@@ -241,9 +240,6 @@ class AgentPoolACPAgent(ACPAgent):
     ``close_all_sessions_for_connection()``.
     """
 
-    _skill_bridge: ACPSkillBridge | None = field(init=False, default=None)
-    """Bridge for exposing skill commands as ACP slash commands."""
-
     _mcp_manager: AcpMcpConnectionManager = field(init=False)
     """Manager for MCP-over-ACP connection lifecycle."""
 
@@ -266,8 +262,6 @@ class AgentPoolACPAgent(ACPAgent):
         self._sessions_cache_time: float = 0.0
         # Connect to title generation signal to notify clients of session updates
         ctx.storage.metadata_generated.connect(self._on_metadata_generated)
-        # Setup skill command bridge if pool has skill commands configured
-        self._setup_skill_bridge()
 
         # Initialize MCP-over-ACP connection manager
         self._mcp_manager = AcpMcpConnectionManager()
@@ -326,40 +320,6 @@ class AgentPoolACPAgent(ACPAgent):
 
         if isinstance(self.client, AgentSideConnection):
             return self.client.connection_id
-        return None
-
-    def _setup_skill_bridge(self) -> None:
-        """Initialize skill command bridge and subscribe to registry changes.
-
-        Wire up the ACPSkillBridge to the pool's SkillCommandRegistry if available.
-        This enables skill commands to be exposed as ACP slash commands.
-        Gracefully handles cases where no skill commands are configured.
-        """
-        ctx = self.host_context
-        if ctx is None or ctx.pool is None:
-            return
-
-        # Check if pool has skill_commands registry
-        skill_commands = ctx.pool.skill_commands
-        if skill_commands is None:
-            return
-
-        self._skill_bridge = ACPSkillBridge()
-        skill_commands.on_command_change(self._skill_bridge.handle_change)
-        logger.debug(
-            "Skill bridge setup complete",
-            command_count=len(skill_commands),
-        )
-
-    def get_skill_commands(self) -> list[Any] | None:
-        """Get available skill commands for ACP capabilities.
-
-        Returns:
-            List of AvailableCommand objects for skill commands,
-            or None if no skill bridge is configured.
-        """
-        if self._skill_bridge is not None:
-            return self._skill_bridge.get_available_commands()
         return None
 
     async def _on_metadata_generated(self, event: SessionMetadataGeneratedEvent) -> None:

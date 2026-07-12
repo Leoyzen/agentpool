@@ -437,7 +437,6 @@ def _make_mock_state_with_session_agent(
     pool.manifest.config_file_path = "/tmp/test"
     pool.manifest.model_variants = {}
     pool.manifest.agents = {shared_agent.name: shared_agent}
-    pool.skill_commands = None
 
     storage = Mock()
     storage.save_session = AsyncMock()

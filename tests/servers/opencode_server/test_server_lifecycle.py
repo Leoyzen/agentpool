@@ -40,7 +40,6 @@ def mock_pool() -> Mock:
     pool = Mock()
     pool.manifest = Mock()
     pool.manifest.agents = {}
-    pool.skill_commands = None
     return pool
 
 
