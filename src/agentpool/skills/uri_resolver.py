@@ -412,9 +412,8 @@ class SkillURIResolver:
                     skill_path=PurePosixPath(uri),
                     instructions=content if isinstance(content, str) else None,
                 )
-            # ExtensionRegistry failed — fall through to provider search.
-            # This handles cases where skills are registered in _providers
-            # but not in ExtensionRegistry.
+            msg = f"Skill {uri!r} not found via ExtensionRegistry"
+            raise SkillNotFoundError(msg)
 
         resolved = ResolvedSkillURI.parse(uri)
         skill = await self._find_skill_with_alternatives(resolved.skill_name)
