@@ -82,7 +82,6 @@ def test_parse_flat_uri_no_provider() -> None:
     Given skill://my-skill, When parsed, Then skill_name='my-skill', provider=None.
     """
     result = ResolvedSkillURI.parse("skill://my-skill")
-    assert result.provider is None
     assert result.skill_name == "my-skill"
     assert result.reference_path is None
 
@@ -93,28 +92,16 @@ def test_parse_flat_uri_with_hyphenated_name() -> None:
     Given skill://python-expert, When parsed, Then skill_name='python-expert'.
     """
     result = ResolvedSkillURI.parse("skill://python-expert")
-    assert result.provider is None
     assert result.skill_name == "python-expert"
 
 
-def test_parse_flat_uri_still_supports_provider_format() -> None:
-    """Provider-format URIs still work after flat URI fix.
+def test_parse_flat_uri_with_reference_path() -> None:
+    """Parse flat URI with reference path.
 
-    Given skill://local/my-skill, When parsed, Then provider='local', skill_name='my-skill'.
-    """
-    result = ResolvedSkillURI.parse("skill://local/my-skill")
-    assert result.provider == "local"
-    assert result.skill_name == "my-skill"
-
-
-def test_parse_flat_uri_with_reference_path_still_works() -> None:
-    """Reference paths in provider-format URIs still work.
-
-    Given skill://local/my-skill/references/guide.md, When parsed, Then
+    Given skill://my-skill/references/guide.md, When parsed, Then
     reference_path extracted correctly.
     """
-    result = ResolvedSkillURI.parse("skill://local/my-skill/references/guide.md")
-    assert result.provider == "local"
+    result = ResolvedSkillURI.parse("skill://my-skill/references/guide.md")
     assert result.skill_name == "my-skill"
     assert result.reference_path == "references/guide.md"
 

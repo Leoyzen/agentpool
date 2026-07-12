@@ -386,10 +386,6 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
         parts = [header]
         parts.append(instructions)
         parts.append(f"Skill URI: {skill.safe_uri}")
-        if resolved.provider:
-            parts.append(
-                f"URI: skill://{resolved.provider}/{resolved.skill_name}/{effective_ref_path}"
-            )
     else:
         # Full skill load: include description, metadata, and instructions
         header = f"# {skill.name}\n\n{skill.description}"
@@ -404,10 +400,6 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
             parts.append(meta)
         parts.append(instructions)
         parts.append(f"Skill URI: {skill.safe_uri}")
-
-        # Add URI information if loaded via URI
-        if is_uri and resolved.provider:
-            parts.append(f"URI: skill://{resolved.provider}/{resolved.skill_name}")
 
     # Append activated MCP servers section
     if mcp_lines:

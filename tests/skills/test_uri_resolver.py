@@ -3,7 +3,6 @@
 This module provides comprehensive tests for:
 - ResolvedSkillURI.parse() with various URI formats
 - Path traversal detection and security checks
-- Provider name validation
 - Skill name validation
 - URL decoding
 - SkillURIResolver provider registration and resolution
@@ -20,8 +19,6 @@ from agentpool.skills.exceptions import SecurityError, SkillNotFoundError
 from agentpool.skills.uri_resolver import (
     ResolvedSkillURI,
     SkillURIResolver,
-    _is_valid_provider_name,
-    _validate_provider_name,
     _validate_skill_name,
 )
 
@@ -31,32 +28,29 @@ from agentpool.skills.uri_resolver import (
 # =============================================================================
 
 
-def test_parse_basic_uri() -> None:
-    """Test parsing basic skill://provider/skill-name URI."""
-    uri = "skill://local/python-expert"
+def test_parse_basic_flat_uri() -> None:
+    """Test parsing basic skill://skill-name URI."""
+    uri = "skill://python-expert"
     result = ResolvedSkillURI.parse(uri)
 
-    assert result.provider == "local"
     assert result.skill_name == "python-expert"
     assert result.reference_path is None
 
 
 def test_parse_uri_with_reference_path() -> None:
     """Test parsing URI with reference path."""
-    uri = "skill://local/python-expert/references/guide.md"
+    uri = "skill://python-expert/references/guide.md"
     result = ResolvedSkillURI.parse(uri)
 
-    assert result.provider == "local"
     assert result.skill_name == "python-expert"
     assert result.reference_path == "references/guide.md"
 
 
 def test_parse_uri_with_deep_reference_path() -> None:
     """Test parsing URI with deeply nested reference path."""
-    uri = "skill://local/my-skill/a/b/c/d/file.md"
+    uri = "skill://my-skill/a/b/c/d/file.md"
     result = ResolvedSkillURI.parse(uri)
 
-    assert result.provider == "local"
     assert result.skill_name == "my-skill"
     assert result.reference_path == "a/b/c/d/file.md"
 
@@ -66,7 +60,6 @@ def test_parse_bare_skill_name() -> None:
     uri = "my-skill"
     result = ResolvedSkillURI.parse(uri)
 
-    assert result.provider is None
     assert result.skill_name == "my-skill"
     assert result.reference_path is None
 
@@ -76,7 +69,6 @@ def test_parse_bare_skill_name_with_hyphens() -> None:
     uri = "my-test-skill-name"
     result = ResolvedSkillURI.parse(uri)
 
-    assert result.provider is None
     assert result.skill_name == "my-test-skill-name"
     assert result.reference_path is None
 
@@ -88,28 +80,41 @@ def test_parse_bare_skill_name_with_hyphens() -> None:
 
 def test_parse_uri_with_encoded_characters() -> None:
     """Test parsing URI with URL-encoded characters (hyphen decoded)."""
-    uri = "skill://local/my%2Dskill"
-    result = ResolvedSkillURI.parse(uri)
-
-    assert result.provider == "local"
-    assert result.skill_name == "my-skill"
-
-
-def test_parse_uri_with_encoded_hyphen() -> None:
-    """Test parsing URI with encoded hyphen."""
-    uri = "skill://local/my%2Dskill"
+    uri = "skill://my%2Dskill"
     result = ResolvedSkillURI.parse(uri)
 
     assert result.skill_name == "my-skill"
 
 
-def test_parse_uri_with_multiple_encoded_chars() -> None:
-    """Test parsing URI with multiple encoded characters."""
-    uri = "skill://provider-name/skill%2Dname"
+def test_parse_uri_with_encoded_reference_path() -> None:
+    """Test parsing URI with URL-encoded reference path."""
+    uri = "skill://my-skill/references/%66ile.md"  # %66 = 'f'
     result = ResolvedSkillURI.parse(uri)
 
-    assert result.provider == "provider-name"
-    assert result.skill_name == "skill-name"
+    assert result.skill_name == "my-skill"
+    assert result.reference_path == "references/file.md"
+
+
+# =============================================================================
+# ResolvedSkillURI.parse() - Trailing Slash / Empty Forms
+# =============================================================================
+
+
+def test_parse_flat_uri_with_trailing_slash() -> None:
+    """Test that flat URI with trailing slash parses correctly."""
+    uri = "skill://local/"
+    result = ResolvedSkillURI.parse(uri)
+
+    assert result.skill_name == "local"
+    assert result.reference_path is None
+
+
+def test_parse_uri_with_only_scheme() -> None:
+    """Test that URI with only scheme raises ValueError."""
+    uri = "skill://"
+
+    with pytest.raises(ValueError, match="URI is empty"):
+        ResolvedSkillURI.parse(uri)
 
 
 # =============================================================================
@@ -117,17 +122,17 @@ def test_parse_uri_with_multiple_encoded_chars() -> None:
 # =============================================================================
 
 
-def test_parse_uri_with_path_traversal_in_skill_name() -> None:
-    """Test that path traversal in skill name raises SecurityError."""
-    uri = "skill://local/../etc/passwd"
+def test_parse_uri_with_path_traversal_in_reference() -> None:
+    """Test that path traversal in URI reference raises SecurityError."""
+    uri = "skill://my-skill/../etc/passwd"
 
     with pytest.raises(SecurityError, match="Path traversal"):
         ResolvedSkillURI.parse(uri)
 
 
-def test_parse_uri_with_path_traversal_in_reference_path() -> None:
-    """Test that path traversal in reference path raises SecurityError."""
-    uri = "skill://local/my-skill/../../../etc/passwd"
+def test_parse_uri_with_path_traversal_in_deep_reference() -> None:
+    """Test that path traversal in deep reference path raises SecurityError."""
+    uri = "skill://my-skill/../../../etc/passwd"
 
     with pytest.raises(SecurityError, match="Path traversal"):
         ResolvedSkillURI.parse(uri)
@@ -135,7 +140,7 @@ def test_parse_uri_with_path_traversal_in_reference_path() -> None:
 
 def test_parse_uri_with_encoded_path_traversal() -> None:
     """Test that encoded path traversal raises SecurityError."""
-    uri = "skill://local/my-skill/%2e%2e/%2e%2e/secret"
+    uri = "skill://my-skill/%2e%2e/%2e%2e/secret"
 
     with pytest.raises(SecurityError, match="Path traversal"):
         ResolvedSkillURI.parse(uri)
@@ -143,7 +148,7 @@ def test_parse_uri_with_encoded_path_traversal() -> None:
 
 def test_parse_uri_with_single_dot_is_allowed() -> None:
     """Test that single dot in path is allowed."""
-    uri = "skill://local/my-skill/./file.md"
+    uri = "skill://my-skill/./file.md"
     result = ResolvedSkillURI.parse(uri)
 
     assert result.skill_name == "my-skill"
@@ -157,7 +162,7 @@ def test_parse_uri_with_single_dot_is_allowed() -> None:
 
 def test_parse_uri_with_null_byte() -> None:
     """Test that null byte in URI raises SecurityError."""
-    uri = "skill://local/my-skill\x00"
+    uri = "skill://my-skill\x00"
 
     with pytest.raises(SecurityError, match="null bytes"):
         ResolvedSkillURI.parse(uri)
@@ -165,7 +170,7 @@ def test_parse_uri_with_null_byte() -> None:
 
 def test_parse_uri_with_encoded_null_byte() -> None:
     """Test that encoded null byte raises SecurityError."""
-    uri = "skill://local/my-skill%00"
+    uri = "skill://my-skill%00"
 
     with pytest.raises(SecurityError, match="null bytes"):
         ResolvedSkillURI.parse(uri)
@@ -178,88 +183,10 @@ def test_parse_uri_with_encoded_null_byte() -> None:
 
 def test_parse_uri_with_invalid_scheme() -> None:
     """Test that invalid scheme raises ValueError."""
-    uri = "http://local/my-skill"
+    uri = "http://my-skill"
 
     with pytest.raises(ValueError, match="Invalid URI scheme"):
         ResolvedSkillURI.parse(uri)
-
-
-def test_parse_uri_with_empty_path() -> None:
-    """Test that empty path raises ValueError."""
-    uri = "skill://local/"
-
-    with pytest.raises(ValueError, match="path is empty"):
-        ResolvedSkillURI.parse(uri)
-
-
-def test_parse_uri_with_only_scheme() -> None:
-    """Test that URI with only scheme raises ValueError."""
-    uri = "skill://"
-
-    with pytest.raises(ValueError, match="path is empty"):
-        ResolvedSkillURI.parse(uri)
-
-
-# =============================================================================
-# Provider Name Validation
-# =============================================================================
-
-
-def test_is_valid_provider_name_with_valid_names() -> None:
-    """Test valid provider names are accepted."""
-    valid_names = [
-        "local",
-        "my-provider",
-        "my_provider",
-        "provider123",
-        "Provider",
-        "a",
-        "a" * 63,  # Max length
-    ]
-
-    for name in valid_names:
-        assert _is_valid_provider_name(name) is True, f"{name!r} should be valid"
-
-
-def test_is_valid_provider_name_with_invalid_names() -> None:
-    """Test invalid provider names are rejected."""
-    invalid_names = [
-        "",
-        "a" * 64,  # Too long
-        "my.provider",  # Dot not allowed
-        "my/provider",  # Slash not allowed
-        "my:provider",  # Colon not allowed
-        "my provider",  # Space not allowed
-    ]
-
-    for name in invalid_names:
-        assert _is_valid_provider_name(name) is False, f"{name!r} should be invalid"
-
-
-def test_validate_provider_name_with_valid_name() -> None:
-    """Test that valid provider name is returned unchanged."""
-    name = "my-provider"
-    result = _validate_provider_name(name)
-
-    assert result == name
-
-
-def test_validate_provider_name_with_invalid_name_raises() -> None:
-    """Test that invalid provider name raises SecurityError."""
-    with pytest.raises(SecurityError, match="Invalid provider name"):
-        _validate_provider_name("invalid.name")
-
-
-def test_validate_provider_name_with_empty_name() -> None:
-    """Test that empty provider name raises SecurityError."""
-    with pytest.raises(SecurityError, match="Invalid provider name"):
-        _validate_provider_name("")
-
-
-def test_validate_provider_name_with_too_long_name() -> None:
-    """Test that too long provider name raises SecurityError."""
-    with pytest.raises(SecurityError, match="Invalid provider name"):
-        _validate_provider_name("a" * 64)
 
 
 # =============================================================================
@@ -431,57 +358,36 @@ def test_resolver_list_providers() -> None:
     assert len(providers) == 2
 
 
-def test_resolver_register_with_invalid_provider_name() -> None:
-    """Test that invalid provider name raises SecurityError."""
-    resolver = SkillURIResolver()
-    provider = _make_skill_resource()
-
-    with pytest.raises(SecurityError, match="Invalid provider name"):
-        resolver.register_provider("invalid.name", provider)
-
-
 # =============================================================================
 # SkillURIResolver - Skill Resolution
 # =============================================================================
 
 
 @pytest.mark.asyncio
-async def test_resolver_resolve_with_explicit_provider() -> None:
-    """Test resolving skill with explicit provider."""
+async def test_resolver_resolve_by_bare_name() -> None:
+    """Test resolving skill by bare name across all providers."""
     resolver = SkillURIResolver()
-    entry = SkillEntry(name="my-skill", description="desc", uri="skill://local/my-skill")
-    provider = _make_skill_resource(entries=[entry], content="instructions")
-
-    resolver.register_provider("local", provider)
-    result = await resolver.resolve("skill://local/my-skill")
-
-    assert result.name == "my-skill"
-    assert result.description == "desc"
-
-
-@pytest.mark.asyncio
-async def test_resolver_resolve_with_bare_skill_name() -> None:
-    """Test resolving bare skill name across all providers."""
-    resolver = SkillURIResolver()
-    entry = SkillEntry(name="my-skill", description="desc", uri="skill://local/my-skill")
+    entry = SkillEntry(name="my-skill", description="desc", uri="skill://my-skill")
     provider = _make_skill_resource(entries=[entry], content="instructions")
 
     resolver.register_provider("local", provider)
     result = await resolver.resolve("my-skill")
 
     assert result.name == "my-skill"
+    assert result.description == "desc"
 
 
 @pytest.mark.asyncio
-async def test_resolver_resolve_not_found_in_provider() -> None:
-    """Test that SkillNotFoundError is raised when skill not in provider."""
+async def test_resolver_resolve_by_flat_uri() -> None:
+    """Test resolving skill by flat skill:// URI."""
     resolver = SkillURIResolver()
-    provider = _make_skill_resource(entries=[])
+    entry = SkillEntry(name="my-skill", description="desc", uri="skill://my-skill")
+    provider = _make_skill_resource(entries=[entry], content="instructions")
 
     resolver.register_provider("local", provider)
+    result = await resolver.resolve("skill://my-skill")
 
-    with pytest.raises(SkillNotFoundError, match="not found"):
-        await resolver.resolve("skill://local/missing-skill")
+    assert result.name == "my-skill"
 
 
 @pytest.mark.asyncio
@@ -497,20 +403,11 @@ async def test_resolver_resolve_not_found_any_provider() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolver_resolve_unregistered_provider() -> None:
-    """Test that ValueError is raised for unregistered provider."""
-    resolver = SkillURIResolver()
-
-    with pytest.raises(ValueError, match="not registered"):
-        await resolver.resolve("skill://unregistered/my-skill")
-
-
-@pytest.mark.asyncio
 async def test_resolver_resolve_searches_multiple_providers() -> None:
     """Test that resolver searches all providers for bare skill name."""
     resolver = SkillURIResolver()
 
-    entry2 = SkillEntry(name="skill-2", description="desc", uri="skill://provider2/skill-2")
+    entry2 = SkillEntry(name="skill-2", description="desc", uri="skill://skill-2")
     provider1 = _make_skill_resource(entries=[])
     provider2 = _make_skill_resource(entries=[entry2], content="instructions")
 
@@ -527,8 +424,8 @@ async def test_resolver_resolve_first_match_wins() -> None:
     """Test that first matching skill is returned when duplicates exist."""
     resolver = SkillURIResolver()
 
-    entry1 = SkillEntry(name="my-skill", description="desc1", uri="skill://provider1/my-skill")
-    entry2 = SkillEntry(name="my-skill", description="desc2", uri="skill://provider2/my-skill")
+    entry1 = SkillEntry(name="my-skill", description="desc1", uri="skill://skill1")
+    entry2 = SkillEntry(name="my-skill", description="desc2", uri="skill://skill2")
     provider1 = _make_skill_resource(entries=[entry1], content="instructions1")
     provider2 = _make_skill_resource(entries=[entry2], content="instructions2")
 
@@ -576,7 +473,7 @@ async def test_unregister_provider_prevents_resolution() -> None:
     """Test that skills from unregistered provider are no longer resolved."""
     resolver = SkillURIResolver()
 
-    entry = SkillEntry(name="my-skill", description="desc", uri="skill://test_provider/my-skill")
+    entry = SkillEntry(name="my-skill", description="desc", uri="skill://my-skill")
     provider = _make_skill_resource(entries=[entry], content="instructions")
 
     resolver.register_provider("test_provider", provider)
