@@ -212,26 +212,31 @@ async def _load_visible_bare_skill(
             provider_entries = await provider.list_skills()
         except Exception:  # noqa: BLE001
             continue
-        matching_entry = next(
-            (entry for entry in provider_entries if entry.name == skill_name),
+        # Map SkillEntry objects to Skill instances and apply visibility
+        # filtering before selecting the matching skill (defense-in-depth).
+        provider_skills = [
+            Skill(
+                name=entry.name,
+                description=entry.description,
+                skill_path=PurePosixPath(entry.uri),
+                instructions="",
+            )
+            for entry in provider_entries
+        ]
+        visible_skills = _visible_model_skills(ctx, provider_skills, node_name)
+        matching_skill = next(
+            (s for s in visible_skills if s.name == skill_name),
             None,
         )
-        if matching_entry is not None:
+        if matching_skill is not None:
             try:
-                instructions = await provider.read_skill(matching_entry.name)
+                instructions = await provider.read_skill(matching_skill.name)
             except Exception:  # noqa: BLE001
                 instructions = None
             if instructions is None:
                 instructions = ""
-            # Construct a Skill object from SkillEntry + read_skill() result
-            # so downstream code can access Skill-specific attributes.
-            skill = Skill(
-                name=matching_entry.name,
-                description=matching_entry.description,
-                skill_path=PurePosixPath(matching_entry.uri),
-                instructions=instructions,
-            )
-            return skill, instructions
+            matching_skill.instructions = instructions
+            return matching_skill, instructions
 
     return None
 
