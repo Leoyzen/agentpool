@@ -43,19 +43,6 @@ DEFAULT_MAX_COMPOSITION_DEPTH = 3
 """Default maximum composition depth (root-inclusive)."""
 
 
-def _get_cap_name(cap: Any) -> str:
-    """Get a capability's serialization name, falling back to class name.
-
-    Uses ``get_serialization_name()`` if available (defined on
-    ``AbstractCapability``), otherwise falls back to the type name.
-    """
-    try:
-        name: str = cap.get_serialization_name()
-    except (AttributeError, TypeError):
-        return type(cap).__name__
-    return name
-
-
 class ScopeLevel(Enum):
     """Capability scope level.
 
@@ -434,26 +421,13 @@ class ExtensionRegistry:
             the URI cannot be resolved.
         """
         if uri.startswith("skill://"):
-            # Extract skill name and optional provider from URI
-            # Format: skill://provider/skill-name or skill://skill-name
-            path = uri[len("skill://") :]
-            parts = path.split("/", 1)
-            if len(parts) == 2:  # noqa: PLR2004
-                provider_name = parts[0]
-                skill_name = parts[1].split("/")[0]
-            else:
-                provider_name = None
-                skill_name = parts[0].split("/")[0] if parts[0] else ""
+            # Flat URI (D9): parse via ResolvedSkillURI for consistency.
+            from agentpool.skills.uri_resolver import ResolvedSkillURI
 
-            if not skill_name:
-                skill_name = parts[0] if parts[0] else ""
+            resolved = ResolvedSkillURI.parse(uri)
+            skill_name = resolved.skill_name
 
             for cap in self.get_skill_resources(scope):
-                # If provider is specified, skip non-matching capabilities.
-                if provider_name is not None:
-                    cap_name = _get_cap_name(cap)
-                    if cap_name != provider_name:
-                        continue
                 try:
                     if await cap.skill_exists(skill_name):
                         content = await cap.read_skill(skill_name)
