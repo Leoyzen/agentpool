@@ -231,6 +231,8 @@ class TestMatcherFnBackwardCompat:
         skill.description = "Test skill"
         skill.disable_model_invocation = False
         skill.load_instructions.return_value = "instructions here"
+        skill.mcp_servers = None
+        skill.tools = None
 
         received_args: list[Any] = []
 
@@ -266,6 +268,8 @@ class TestMatcherFnBackwardCompat:
         skill.description = "Test skill"
         skill.disable_model_invocation = False
         skill.load_instructions.return_value = "instructions here"
+        skill.mcp_servers = None
+        skill.tools = None
 
         received_messages: list[Any] = []
 

@@ -1,8 +1,7 @@
 """Skill command dataclass for protocol-agnostic command representation.
 
 This is a lightweight dataclass used by protocol server skill bridges
-to wrap skills as slash commands. It is NOT the same as the deleted
-``SkillCommandRegistry`` — command discovery is now handled by
+to wrap skills as slash commands. Command discovery is handled by
 ``ExtensionRegistry.get_command_resources()``.
 """
 

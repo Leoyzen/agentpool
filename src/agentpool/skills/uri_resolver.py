@@ -129,6 +129,16 @@ class ResolvedSkillURI:
         if path.startswith("/"):
             path = path[1:]  # Remove leading slash
 
+        # Flat URI: skill://my-skill — urlparse puts the name in netloc,
+        # leaving path completely empty (no slash). Treat netloc as the
+        # skill name with provider=None.  When path is "/" (provider-format
+        # with missing skill name like skill://local/), parsed.path is "/"
+        # which is non-empty, so this branch is skipped and the empty-path
+        # ValueError fires below.
+        if not path and not parsed.path and parsed.netloc:
+            skill_name = _validate_skill_name(unquote(parsed.netloc))
+            return cls(provider=None, skill_name=skill_name, reference_path=None)
+
         if not path:
             msg = "URI path is empty"
             raise ValueError(msg)
@@ -306,9 +316,8 @@ class SkillURIResolver:
     """Resolver for skill:// URIs using registered providers.
 
     Manages a registry of resource providers and resolves skill URIs
-    to actual skill instances. Accepts both legacy ``SkillProvider``
-    (with ``get_skills()``) and new ``SkillResource`` (with
-    ``list_skills()``/``read_skill()``) providers.
+    to actual skill instances. Providers implement the ``SkillResource``
+    protocol (with ``list_skills()``/``read_skill()``).
 
     When an ``ExtensionRegistry`` is provided, URI resolution is
     delegated to ``ExtensionRegistry.resolve_uri()`` instead of
@@ -340,7 +349,7 @@ class SkillURIResolver:
 
         Args:
             name: Provider name (must be valid per _is_valid_provider_name)
-            provider: The resource provider instance (SkillProvider or SkillResource)
+            provider: The resource provider instance (SkillResource)
 
         Raises:
             SecurityError: If provider name is invalid
@@ -362,9 +371,8 @@ class SkillURIResolver:
     ) -> Skill | None:
         """Search all providers for a skill by name.
 
-        Handles both legacy ``SkillProvider`` (with ``get_skills()``) and
-        new ``SkillResource`` (with ``list_skills()``/``read_skill()``)
-        providers. For ``SkillResource`` providers, constructs a lightweight
+        Handles ``SkillResource`` providers (with ``list_skills()``/``read_skill()``).
+        For ``SkillResource`` providers, constructs a lightweight
         ``Skill`` object from the ``SkillEntry`` metadata and content.
 
         Args:

@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agentpool.capabilities.resource_protocols import SkillEntry
 from agentpool.skills.skill import Skill
 from agentpool_toolsets.builtin.skills import list_skills, load_skill
 
@@ -27,7 +28,7 @@ def mock_agent_context():
     ctx.pool.skills.list_skills.return_value = []
     ctx.pool.skills.get_skill_instructions.return_value = ""
 
-    # Mock MCP-based skills (underscores are normalized to hyphens per Agent Skills Spec)
+    # Mock MCP-based skills as SkillEntry objects (returned by SkillResource.list_skills())
     mcp_skill_hyphen = Skill(
         name="systematic-troubleshooting",
         description="Systematic troubleshooting guide",
@@ -35,29 +36,38 @@ def mock_agent_context():
         instructions="# Troubleshooting Guide\n\nFollow these steps...",
         metadata={"skill_type": "resource", "provider": "mcp_provider"},
     )
-    # Underscore names are normalized to hyphens at Skill creation time
     mcp_skill_from_underscore = Skill(
-        name="equipment_operation_assistant",
+        name="equipment-operation-assistant",
         description="Equipment operation assistant guide",
         skill_path=PurePosixPath("skill://mcp_provider/equipment-operation-assistant"),
         instructions="# Equipment Operation\n\nFollow these procedures...",
         metadata={"skill_type": "resource", "provider": "mcp_provider"},
     )
 
-    # Mock skill_provider
+    # SkillEntry objects returned by SkillResource.list_skills()
+    mcp_entries = [
+        SkillEntry(
+            name="systematic-troubleshooting",
+            description="Systematic troubleshooting guide",
+            uri="skill://mcp_provider/systematic-troubleshooting",
+            source="remote",
+        ),
+        SkillEntry(
+            name="equipment-operation-assistant",
+            description="Equipment operation assistant guide",
+            uri="skill://mcp_provider/equipment-operation-assistant",
+            source="remote",
+        ),
+    ]
+
+    # Mock skill_provider with child capabilities implementing SkillResource
     mock_provider = MagicMock()
-    mock_provider.get_skills = AsyncMock(return_value=[mcp_skill_hyphen, mcp_skill_from_underscore])
-    mock_provider.get_skill_instructions = AsyncMock(
-        return_value="# Troubleshooting Guide\n\nFollow these steps..."
-    )
-    # Set up capabilities as a list with a child provider that has get_skills
     mock_child_provider = MagicMock()
-    mock_child_provider.get_skills = AsyncMock(
-        return_value=[mcp_skill_hyphen, mcp_skill_from_underscore]
-    )
-    mock_child_provider.get_skill_instructions = AsyncMock(
+    mock_child_provider.list_skills = AsyncMock(return_value=mcp_entries)
+    mock_child_provider.read_skill = AsyncMock(
         return_value="# Troubleshooting Guide\n\nFollow these steps..."
     )
+    mock_child_provider.skill_exists = AsyncMock(return_value=True)
     mock_provider.capabilities = [mock_child_provider]
     ctx.pool.skill_provider = mock_provider
 
@@ -65,9 +75,11 @@ def mock_agent_context():
     mock_resolver = MagicMock()
     mock_resolver.list_providers.return_value = ["mcp_provider"]
     mock_provider_from_resolver = MagicMock()
-    mock_provider_from_resolver.get_skills = AsyncMock(
-        return_value=[mcp_skill_hyphen, mcp_skill_from_underscore]
+    mock_provider_from_resolver.list_skills = AsyncMock(return_value=mcp_entries)
+    mock_provider_from_resolver.read_skill = AsyncMock(
+        return_value="# Troubleshooting Guide\n\nFollow these steps..."
     )
+    mock_provider_from_resolver.skill_exists = AsyncMock(return_value=True)
     mock_resolver.get_provider.return_value = mock_provider_from_resolver
 
     # Mock resolve method to return appropriate skill based on name

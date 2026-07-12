@@ -1,7 +1,7 @@
 """ExtensionRegistry — unified capability registry with 4-level scope storage.
 
 Replaces fragmented infrastructure (SkillURIResolver._providers,
-SkillCommandRegistry, AggregatedResourceSource) with a single registry
+AggregatedResourceSource) with a single registry
 that supports pool, session, agent, and turn-level capability scoping.
 
 Scope hierarchy (outer → inner):
