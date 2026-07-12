@@ -110,7 +110,6 @@ def cancellable_mock_agent():
 
     pool.todos = Mock()
     pool.todos.on_change = None
-    pool.skill_commands = None
     pool.manifest.agents = {agent.name: agent}
 
     agent.agent_pool = pool

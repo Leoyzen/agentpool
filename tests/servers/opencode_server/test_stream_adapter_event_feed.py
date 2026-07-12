@@ -100,7 +100,6 @@ def mock_agent_with_event_bus(tmp_project_dir):
     pool.storage = agent.storage
     pool.todos = Mock()
     pool.todos.on_change = None
-    pool.skill_commands = None
     pool.manifest.agents = {agent.name: agent}
 
     # Real EventBus so _feed_adapter can subscribe and receive events

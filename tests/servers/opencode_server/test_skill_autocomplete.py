@@ -287,10 +287,6 @@ async def test_session_command_store_takes_priority(
     mock_command_store.get_command = MagicMock(return_value=mock_command)
     server_state.command_store = mock_command_store
 
-    # skill_commands should NOT have the command — the CommandStore dispatch is
-    # tested independently of the internal skill delegation inside _execute_slashed_command
-    mock_agent.host_context.skill_commands = None  # type: ignore[attr-defined]
-
     # Mock empty MCP prompts
     mock_agent.list_prompts = AsyncMock(return_value=[])
 
@@ -310,7 +306,7 @@ async def test_session_skill_commands_fallback(
     server_state: ServerState,
     mock_agent: MagicMock,
 ) -> None:
-    """When command is NOT in CommandStore but IS in pool.skill_commands, fallback works."""
+    """When command is in CommandStore, execution works."""
     _setup_pool_sessions(mock_agent.host_context)
 
     # Create session
@@ -318,20 +314,13 @@ async def test_session_skill_commands_fallback(
     assert response.status_code == 200
     session_id = response.json()["id"]
 
-    # CommandStore doesn't have it
+    # CommandStore has the command
+    mock_command = MagicMock()
+    mock_command.execute = AsyncMock()
     mock_command_store = MagicMock()
-    mock_command_store.get_command = MagicMock(return_value=None)
+    mock_command_store.get_command = MagicMock(return_value=mock_command)
     server_state.command_store = mock_command_store
 
-    # Add skill to pool.skill_commands with pre-set instructions
-    skill = Skill(
-        name="late-skill",
-        description="Late registered",
-        skill_path=UPath("/tmp/late"),
-        instructions="Late skill instructions $1",
-    )
-    skill_cmd = SkillCommand(name="late-skill", description="Late registered", skill=skill)
-    mock_agent.host_context.skill_commands = {"late-skill": skill_cmd}  # type: ignore[attr-defined]
     mock_agent.host_context.skill_provider = None  # type: ignore[attr-defined]
 
     # Mock empty MCP prompts
@@ -343,7 +332,7 @@ async def test_session_skill_commands_fallback(
         json={"command": "late-skill", "arguments": "some args"},
     )
 
-    # Fallback to skill_commands should work — returns 200
+    # Command should execute successfully — returns 200
     assert response.status_code == 200
     result = response.json()
     assert "info" in result
@@ -367,9 +356,6 @@ async def test_session_unknown_command_falls_back_to_mcp_or_404(
     mock_command_store = MagicMock()
     mock_command_store.get_command = MagicMock(return_value=None)
     server_state.command_store = mock_command_store
-
-    # skill_commands empty/None
-    mock_agent.host_context.skill_commands = None  # type: ignore[attr-defined]
 
     # No MCP prompts either
     mock_agent.list_prompts = AsyncMock(return_value=[])
@@ -401,9 +387,6 @@ async def test_session_skill_commands_fallback_then_mcp(
     mock_command_store = MagicMock()
     mock_command_store.get_command = MagicMock(return_value=None)
     server_state.command_store = mock_command_store
-
-    # skill_commands exists but doesn't have this command
-    mock_agent.host_context.skill_commands = {}  # type: ignore[attr-defined]
 
     # MCP prompt exists
     mock_prompt = MagicMock()

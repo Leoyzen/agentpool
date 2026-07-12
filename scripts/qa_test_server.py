@@ -31,7 +31,6 @@ def create_test_app() -> FastAPI:  # noqa: PLR0915
     pool.manifest = Mock()
     pool.manifest.agents = {}
     pool.manifest.opencode = Mock()
-    pool.skill_commands = None
 
     # Storage
     from agentpool_config.storage import MemoryStorageConfig, StorageConfig

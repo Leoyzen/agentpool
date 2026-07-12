@@ -121,7 +121,6 @@ def slow_mock_agent():  # noqa: PLR0915
 
     pool.todos = Mock()
     pool.todos.on_change = None
-    pool.skill_commands = None
 
     pool.sessions = Mock()
     pool.sessions.store = None

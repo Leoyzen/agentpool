@@ -10,10 +10,6 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
-from upathtools import UPath
-
-from agentpool.skills.command import SkillCommand
-from agentpool.skills.skill import Skill
 
 
 if TYPE_CHECKING:
@@ -376,20 +372,13 @@ async def test_skill_command_routes_through_session_pool(
     assert response.status_code == 200
     session_id = response.json()["id"]
 
-    # CommandStore doesn't have it
+    # CommandStore has the command
+    mock_command = MagicMock()
+    mock_command.execute = AsyncMock()
     mock_command_store = MagicMock()
-    mock_command_store.get_command = MagicMock(return_value=None)
+    mock_command_store.get_command = MagicMock(return_value=mock_command)
     server_state.command_store = mock_command_store
 
-    # Add skill to pool.skill_commands
-    skill = Skill(
-        name="direct-skill",
-        description="Direct skill",
-        skill_path=UPath("/tmp/direct"),
-        instructions="Direct skill instructions",
-    )
-    skill_cmd = SkillCommand(name="direct-skill", description="Direct skill", skill=skill)
-    mock_agent.host_context.skill_commands = {"direct-skill": skill_cmd}  # type: ignore[attr-defined]
     mock_agent.host_context.skill_provider = None  # type: ignore[attr-defined]
 
     # Track agent.run_stream calls
@@ -420,7 +409,7 @@ async def test_skill_command_routes_through_session_pool(
         json={"command": "direct-skill", "arguments": "some args"},
     )
 
-    # Fallback to skill_commands should work — returns 200
+    # Command should execute successfully — returns 200
     assert response.status_code == 200
     result = response.json()
     assert "info" in result

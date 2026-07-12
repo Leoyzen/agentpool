@@ -242,7 +242,6 @@ def _make_pool_mock(agent: Any) -> Mock:
     pool.storage = storage
     pool.todos = Mock()
     pool.todos.on_change = None
-    pool.skill_commands = None
     pool.manifest.agents = {agent.name: agent}
 
     # Set up SessionPool mock for new architecture

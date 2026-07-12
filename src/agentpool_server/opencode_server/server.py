@@ -15,7 +15,6 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, Response
-from slashed import CommandStore
 
 from agentpool import log
 from agentpool_server.opencode_server.routes import (
@@ -32,7 +31,6 @@ from agentpool_server.opencode_server.routes import (
     session_router,
     tui_router,
 )
-from agentpool_server.opencode_server.skill_bridge import OpenCodeSkillBridge
 from agentpool_server.opencode_server.state import ServerState
 from agentpool_server.opencode_server.todo_utils import build_opencode_todos
 
@@ -138,29 +136,6 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
         state.session_pool_integration = OpenCodeSessionPoolIntegration(
             session_pool=state.pool.session_pool,
             server_state=state,
-        )
-
-    # Setup skill command bridge if pool has skill commands configured
-    if state.pool.skill_commands is not None:
-        state.skill_bridge = OpenCodeSkillBridge(skill_provider=state.pool.skill_provider)
-        state.pool.skill_commands.on_command_change(state.skill_bridge.handle_change)
-
-        # Initialize CommandStore with skill commands
-        state.command_store = CommandStore(commands=state.skill_bridge.get_commands())
-
-        # Register callback to update CommandStore when skills change dynamically
-        def update_command_store() -> None:
-            """Update the CommandStore when skills change."""
-            if state.command_store is not None:
-                # Re-register all skill commands (replace=True to handle updates)
-                for cmd in state.skill_bridge.get_commands():
-                    state.command_store.register_command(cmd, replace=True)
-
-        state.skill_bridge.on_commands_changed(update_command_store)
-
-        logger.debug(
-            "OpenCode skill bridge setup complete",
-            command_count=len(state.pool.skill_commands),
         )
 
     # Set up todo change callback to broadcast events
