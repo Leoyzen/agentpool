@@ -927,7 +927,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 # Collect skill config entries from visible capabilities.
                 skill_entries: list[McpConfigEntry] = []
                 visibility_checker = getattr(ctx.pool, "is_skill_visible_to_node", None)
+                from agentpool.capabilities.skill_manager_cap import SkillManagerCap
+
                 for cap in pool_capabilities:
+                    # SkillManagerCap doesn't have per-skill _skill or
+                    # build_config_entries(). It holds multiple skills and
+                    # doesn't register individual MCP config entries.
+                    # SkillCapability (deprecated) has _skill and build_config_entries().
+                    if isinstance(cap, SkillManagerCap):
+                        tool_capabilities.append(cap)
+                        continue
                     if visibility_checker is not None and not visibility_checker(
                         cap._skill, self.name
                     ):

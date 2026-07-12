@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from anyenv import ProcessManager
     from upathtools import UPath
 
+    from agentpool.capabilities.extension_registry import ExtensionRegistry
     from agentpool.delegation.pool import AgentPool
     from agentpool.mcp_server.manager import MCPManager
     from agentpool.models.manifest import AgentsManifest
@@ -83,3 +84,4 @@ class HostContext:
     model_cache: ModelCache = field(default_factory=ModelCache)
     main_agent_name: str | None = None
     pool: AgentPool[Any] | None = None
+    extension_registry: ExtensionRegistry | None = None

@@ -28,8 +28,13 @@ class ChangeEvent:
 
     Attributes:
         capability_name: Name of the capability that emitted the event.
-        kind: Which resource type changed. Defaults to ``"tools_changed"``.
+        kind: Which resource type changed. Widened to ``str`` to allow
+            future event types without protocol changes. Use
+            ``ChangeKind`` Literal for known values.
+        source_uri: Optional URI of the source that changed, for
+            URI-level routing.
     """
 
     capability_name: str
-    kind: ChangeKind = "tools_changed"
+    kind: str = "tools_changed"
+    source_uri: str = ""

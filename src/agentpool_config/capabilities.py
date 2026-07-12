@@ -28,7 +28,7 @@ IMPORT_MAP: dict[str, str] = {
     "token_budget": "agentpool.capabilities.token_budget.TokenBudgetCapability",
     "tool_output_budget": ("agentpool.capabilities.tool_output_budget.ToolOutputBudgetCapability"),
     "dynamic_context": "agentpool.capabilities.dynamic_context.DynamicContextCapability",
-    "skill_activation": "agentpool.capabilities.skill_activation.SkillActivationCapability",
+    "skill_activation": "agentpool.capabilities.skill_manager_cap:SkillManagerCap",
     "memory": "agentpool.capabilities.memory.MemoryCapability",
 }
 

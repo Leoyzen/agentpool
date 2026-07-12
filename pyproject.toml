@@ -105,10 +105,10 @@ agentpool = "agentpool.utils:setup_env"
 acp = "acp.filesystem:ACPPath"
 
 [project.entry-points."agentpool.capabilities"]
-mcp = "agentpool.capabilities.mcp_capability:MCPCapability"
+mcp = "agentpool.capabilities.mcp_server_cap:McpServerCap"
 function_tools = "agentpool.capabilities.function_toolset:FunctionToolsetCapability"
 subagent = "agentpool.capabilities.subagent_capability:SubagentCapability"
-skill = "agentpool.skills.capability:SkillCapability"
+skill = "agentpool.capabilities.skill_manager_cap:SkillManagerCap"
 combined = "agentpool.capabilities.combined_toolset:CombinedToolsetCapability"
 code_mode = "agentpool.capabilities.code_mode_capability:CodeModeCapability"
 
@@ -157,6 +157,7 @@ tiktoken = ["tiktoken"]  # Exact token counting
 tts = [
   "anyvoice[tts-edge,openai]>=0.0.2"
 ]  # Text-to-Speech using AnyVoice (disabled: cffi doesn't support free-threaded 3.13)
+watchdog = ["watchdog>=4.0.0"]  # Filesystem watcher for skill hot-reload
 zed = ["zstandard>=0.23.0"]  # Zed IDE storage provider
 
 [dependency-groups]

@@ -955,7 +955,6 @@ class SessionController:
             )
 
         host_ctx = self.pool.get_context()
-        factory = self.pool._factory
         # Build an AgentRegistry with agent names from the manifest.
         # Agents are created lazily, so the registry stores names only.
         # The DelegationService uses session_pool to spawn actual instances.
@@ -977,7 +976,6 @@ class SessionController:
             _comm_channel=comm_channel,
             _host_context=host_ctx,
             _agent_registry=agent_registry,
-            _resource_source=factory.resource_sources.get(session.agent_name),
         )
         self._runs[run_handle.run_id] = run_handle
         session.current_run_id = run_handle.run_id

@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import contextlib
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
-from agentpool.skills.skill_mcp_manager import SkillMcpManager
 from agentpool.skills.skill_tool_manager import SkillToolManager
 from agentpool.skills.uri_resolver import ResolvedSkillURI
 
@@ -345,9 +344,8 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
     tool_lines: list[str] = []
 
     if skill.mcp_servers:
-        mcp_manager = SkillMcpManager()
+        # MCP server preparation is now handled by SkillManagerCap.
         for server_name, config in skill.mcp_servers.items():
-            mcp_manager.prepare(server_name, config)
             server_desc = config.command or config.url or "configured"
             mcp_lines.append(f"- `{server_name}`: {server_desc}")
 
@@ -556,22 +554,15 @@ class SkillsTools(FunctionToolsetCapability):
         self,
         name: str = "skills",
         *,
-        injection_mode: Literal["off", "metadata", "full"] | None = None,
         max_skills: int | None = None,
     ) -> None:
         """Initialize the SkillsTools provider.
 
         Args:
             name: Provider name for resource identification
-            injection_mode: Skill injection mode for agent-specific overrides:
-                - "off": No skill injection
-                - "metadata": Inject skill metadata only
-                - "full": Inject full skill instructions
-                Defaults to None (use global/default settings)
             max_skills: Maximum number of skills to inject. Defaults to None (no limit)
         """
         super().__init__(name=name)
-        self.injection_mode = injection_mode
         self.max_skills = max_skills
         self._tools = [
             self.create_tool(load_skill, category="read", read_only=True, idempotent=True),

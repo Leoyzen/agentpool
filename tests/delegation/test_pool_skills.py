@@ -13,12 +13,39 @@ from upathtools import UPath
 
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
 from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
+from agentpool.capabilities.resource_protocols import SkillResource
+from agentpool.skills.exceptions import SkillNotFoundError
 from agentpool.skills.uri_resolver import SkillURIResolver
 from agentpool_config.skills import SkillsConfig
 
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+# =============================================================================
+# Test helpers
+# =============================================================================
+
+
+class _FakeSkillResourceProvider(SkillResource):
+    """Fake provider implementing SkillResource for testing registration."""
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    async def list_skills(self):
+        return []
+
+    async def read_skill(self, name: str) -> str | None:
+        return None
+
+    async def skill_exists(self, name: str) -> bool:
+        return False
 
 
 # =============================================================================
@@ -354,7 +381,7 @@ class TestProviderRegistration:
             resolver = pool.skill_resolver
             assert resolver is not None
 
-            with pytest.raises(ValueError, match="Provider 'mcp' not registered"):
+            with pytest.raises(SkillNotFoundError, match="not found via ExtensionRegistry"):
                 await resolver.resolve("skill://mcp/some-skill")
 
 
@@ -399,14 +426,8 @@ class TestRegisterUnregisterSkillProvider:
         manifest_with_skills: AgentsManifest,
     ) -> None:
         """Test that register_skill_provider() adds provider to URI resolver."""
-        from unittest.mock import AsyncMock, MagicMock
-
-        from pydantic_ai.capabilities import AbstractCapability
-
         async with AgentPool(manifest_with_skills) as pool:
-            mock_provider = MagicMock(spec=AbstractCapability)
-            mock_provider.name = "resolver_provider"
-            mock_provider.get_skills = AsyncMock(return_value=[])
+            mock_provider = _FakeSkillResourceProvider("resolver_provider")
 
             pool.register_skill_provider(mock_provider)
 
@@ -418,14 +439,8 @@ class TestRegisterUnregisterSkillProvider:
         manifest_with_skills: AgentsManifest,
     ) -> None:
         """Test that unregister_skill_provider() removes from URI resolver."""
-        from unittest.mock import AsyncMock, MagicMock
-
-        from pydantic_ai.capabilities import AbstractCapability
-
         async with AgentPool(manifest_with_skills) as pool:
-            mock_provider = MagicMock(spec=AbstractCapability)
-            mock_provider.name = "rm_provider"
-            mock_provider.get_skills = AsyncMock(return_value=[])
+            mock_provider = _FakeSkillResourceProvider("rm_provider")
 
             pool.register_skill_provider(mock_provider)
             assert pool._skill_resolver is not None

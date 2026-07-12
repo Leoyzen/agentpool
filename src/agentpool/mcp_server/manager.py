@@ -14,7 +14,7 @@ import anyio
 from pydantic_ai.capabilities import AbstractCapability
 
 from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
-from agentpool.capabilities.mcp_capability import MCPCapability
+from agentpool.capabilities.mcp_server_cap import McpServerCap
 from agentpool.log import get_logger
 from agentpool.mcp_server.global_pool import GlobalConnectionPool
 from agentpool_config.mcp_server import AcpMCPServerConfig, BaseMCPServerConfig
@@ -165,7 +165,7 @@ class MCPManager:
         self.servers: list[MCPServerConfig] = []
         for server in servers or []:
             self.add_server_config(server)
-        self.providers: list[MCPCapability] = []
+        self.providers: list[McpServerCap] = []
         self.sampling_model = sampling_model
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
@@ -292,7 +292,7 @@ class MCPManager:
 
     async def setup_server(
         self, config: MCPServerConfig, *, add_to_config: bool = False
-    ) -> MCPCapability | None:
+    ) -> McpServerCap | None:
         """Set up a single MCP server resource provider.
 
         Args:
@@ -315,7 +315,7 @@ class MCPManager:
             self.add_server_config(config)
 
         # Deduplication: skip if a provider with the same client_id already exists
-        if any(p.client.config.client_id == config.client_id for p in self.providers):
+        if any(p.config.client_id == config.client_id for p in self.providers):
             logger.debug(
                 "MCP server already registered, skipping",
                 client_id=config.client_id,
@@ -329,15 +329,16 @@ class MCPManager:
             sampling_callback=self._sampling_callback,
             accessible_roots=self._accessible_roots,
         )
-        provider = MCPCapability(
-            client=client,
+        provider = McpServerCap(
+            config=config,
             name=f"{self.name}_{config.display_name}",
+            client=client,
         )
         provider = await self.exit_stack.enter_async_context(provider)
         self.providers.append(provider)
         return provider
 
-    def get_mcp_providers(self) -> list[MCPCapability]:
+    def get_mcp_providers(self) -> list[McpServerCap]:
         """Get all MCP resource providers managed by this manager."""
         return list(self.providers)
 
@@ -351,7 +352,7 @@ class MCPManager:
             True if a provider was removed, False otherwise
         """
         for i, provider in enumerate(self.providers):
-            if provider._client.config.client_id == client_id:
+            if provider.config.client_id == client_id:
                 # Note: We don't remove from exit_stack here because
                 # the provider was entered into the stack; cleanup() handles that
                 self.providers.pop(i)
@@ -378,9 +379,7 @@ class MCPManager:
         Non-ACP providers are excluded because they are handled separately
         by :meth:`get_capabilities()`.
         """
-        acp_providers = [
-            p for p in self.providers if isinstance(p._client.config, AcpMCPServerConfig)
-        ]
+        acp_providers = [p for p in self.providers if isinstance(p.config, AcpMCPServerConfig)]
         return CombinedToolsetCapability(
             capabilities=cast(list[AbstractCapability], acp_providers),
             name=f"{self.name}_acp_aggregated",

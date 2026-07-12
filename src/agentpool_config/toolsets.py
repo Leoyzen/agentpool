@@ -326,19 +326,6 @@ class SkillsToolsetConfig(BaseToolsetConfig):
     )
     """Optional tool filter to enable/disable specific tools."""
 
-    injection_mode: Literal["off", "metadata", "full"] | None = Field(
-        default=None,
-        title="Injection mode",
-        examples=["off", "metadata", "full"],
-    )
-    """Dynamic skill injection mode.
-
-    If set, overrides the global SkillsInstructionConfig.mode for this toolset:
-    - "off": No skill injection (default, backward compatible)
-    - "metadata": Inject skill names and descriptions only
-    - "full": Inject complete skill content including prompts
-    """
-
     max_skills: int | None = Field(
         default=None,
         ge=1,
@@ -358,7 +345,6 @@ class SkillsToolsetConfig(BaseToolsetConfig):
 
         provider = SkillsTools(
             name="skills",
-            injection_mode=self.injection_mode,
             max_skills=self.max_skills,
         )
         if self.tools is not None:

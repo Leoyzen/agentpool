@@ -43,7 +43,6 @@ if TYPE_CHECKING:
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.agents.events.events import RichAgentStreamEvent
-    from agentpool.capabilities.resource_source import AggregatedResourceSource
     from agentpool.host.context import HostContext
     from agentpool.host.registry import AgentRegistry
     from agentpool.lifecycle.protocols import CommChannel
@@ -247,8 +246,6 @@ class RunHandle:
     """
     _agent_registry: AgentRegistry | None = None
     """Read-only registry of compiled agents for delegation."""
-    _resource_source: AggregatedResourceSource | None = None
-    """Per-agent aggregated resource source, or None if agent has none."""
 
     def __post_init__(self) -> None:
         """Initialize default lifecycle dimensions.
@@ -391,7 +388,9 @@ class RunHandle:
             session=self.session,  # type: ignore[arg-type]
             scope=scope,
             host=self._host_context,
-            resources=self._resource_source,
+            extension_registry=(
+                self._host_context.extension_registry if self._host_context is not None else None
+            ),
         )
         self.run_ctx.deps = ctx
 

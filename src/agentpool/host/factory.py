@@ -50,10 +50,6 @@ if TYPE_CHECKING:
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.agents.native_agent import Agent as NativeAgent
     from agentpool.capabilities.change_event import ChangeEvent
-    from agentpool.capabilities.resource_source import (
-        AggregatedResourceSource,
-        ResourceSource,
-    )
     from agentpool.delegation.pool import AgentPool
     from agentpool.host.context import HostContext
     from agentpool.host.registry import AgentRegistry
@@ -92,7 +88,6 @@ class AgentFactory:
         """
         self._pool = pool
         self._capability_registry: dict[str, list[AbstractCapability[Any]]] = {}
-        self._resource_sources: dict[str, AggregatedResourceSource | None] = {}
         self._hot_swap_tasks: list[asyncio.Task[None]] = []
         self._entry_point_capabilities: dict[str, type[AbstractCapability[object]]] = {}
 
@@ -110,16 +105,6 @@ class AgentFactory:
         inject capabilities into per-session agents.
         """
         return self._capability_registry
-
-    @property
-    def resource_sources(self) -> dict[str, AggregatedResourceSource | None]:
-        """Return the per-agent aggregated resource sources.
-
-        Maps agent names to their ``AggregatedResourceSource`` (or
-        ``None`` if the agent has no resource sources). Populated by
-        ``compile()``.
-        """
-        return self._resource_sources
 
     @property
     def entry_point_capabilities(self) -> dict[str, type[AbstractCapability[object]]]:
@@ -161,14 +146,18 @@ class AgentFactory:
         from agentpool.host.registry import AgentRegistry
 
         self._capability_registry = {}
-        self._resource_sources = {}
         self._entry_point_capabilities = discover_entry_point_capabilities()
 
         for agent_name, cfg in manifest.agents.items():
             caps = self._compile_agent_capabilities(agent_name, cfg, host_context)
             self._capability_registry[agent_name] = caps
 
-            self._resource_sources[agent_name] = self._collect_resource_sources(caps)
+            # Register capabilities with the pool-level ExtensionRegistry.
+            from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+
+            pool_scope = Scope(level=ScopeLevel.POOL)
+            for cap in caps:
+                self._pool.extension_registry.register(cap, pool_scope)
 
         return AgentRegistry()
 
@@ -223,6 +212,14 @@ class AgentFactory:
         if isinstance(cfg, NativeAgentConfig):
             caps.extend(cfg.get_tool_providers())
 
+        # MCP servers are NOT compiled here — they are handled by MCPManager
+        # which creates MCPCapability instances. MCPCapability is now
+        # deprecated; McpServerCap (agentpool.capabilities.mcp_server_cap)
+        # is the replacement. Full migration to McpServerCap with
+        # SessionConnectionPool injection happens in Phase 2/4.
+        # Phase 4 task 4.13 will migrate MCPManager to use McpServerCap
+        # via ExtensionRegistry.
+
         from agentpool.capabilities.combined_toolset import _NamedCapability
 
         logger.debug(
@@ -273,34 +270,6 @@ class AgentFactory:
         from agentpool.capabilities.registry import resolve_capability_type
 
         return resolve_capability_type(type_name, self._entry_point_capabilities)
-
-    def _collect_resource_sources(
-        self,
-        caps: list[AbstractCapability[Any]],
-    ) -> AggregatedResourceSource | None:
-        """Collect ResourceSource instances from compiled capabilities.
-
-        Iterates the capability list and collects instances that
-        structurally conform to the ``ResourceSource`` Protocol via
-        ``isinstance`` check. Constructs an ``AggregatedResourceSource``
-        if any are found.
-
-        Args:
-            caps: The compiled capability list.
-
-        Returns:
-            An ``AggregatedResourceSource`` if any capabilities
-            implement ``ResourceSource``, otherwise ``None``.
-        """
-        from agentpool.capabilities.resource_source import (
-            AggregatedResourceSource,
-            ResourceSource,
-        )
-
-        sources: list[ResourceSource] = [cap for cap in caps if isinstance(cap, ResourceSource)]
-        if not sources:
-            return None
-        return AggregatedResourceSource(sources)
 
     async def create_session_agent(
         self,

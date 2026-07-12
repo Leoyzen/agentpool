@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agentpool.capabilities.delegation import DelegationService
-    from agentpool.capabilities.resource_source import ResourceSource
+    from agentpool.capabilities.extension_registry import ExtensionRegistry
     from agentpool.host.context import HostContext, RunScope
     from agentpool.host.registry import AgentRegistry
     from agentpool.orchestrator.session_controller import SessionState
@@ -35,7 +35,7 @@ class AgentContext:
         session: Current session state (message history, metadata).
         scope: Run scope (config_id, tenant_id, user_id, session_id).
         host: Infrastructure handles (mcp, storage, skills, etc.).
-        resources: Aggregated resource access, or None if agent has none.
+        extension_registry: ExtensionRegistry for scoped capability access.
     """
 
     agent_registry: AgentRegistry
@@ -43,4 +43,4 @@ class AgentContext:
     session: SessionState
     scope: RunScope
     host: HostContext
-    resources: ResourceSource | None = None
+    extension_registry: ExtensionRegistry | None = None
