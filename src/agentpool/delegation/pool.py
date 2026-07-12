@@ -651,35 +651,13 @@ class AgentPool[TPoolDeps = None]:
                 self._extension_registry.unregister(existing_cap, pool_scope)
 
         # Create a single SkillManagerCap holding all local skills + MCP children.
-        if local_skills or not self._skill_capabilities or mcp_children:
-            cap = SkillManagerCap(
-                local_skills=local_skills,
-                children=mcp_children,
-                name="pool-skills",
-                tool_manager=tool_manager,
-            )
-            self._skill_capabilities = [cap]
-        else:
-            # Update existing SkillManagerCap's local skills.
-            existing = self._skill_capabilities[0]
-            if isinstance(existing, SkillManagerCap):
-                # Unregister old, create new with updated skills.
-                self._extension_registry.unregister(existing, pool_scope)
-                cap = SkillManagerCap(
-                    local_skills=local_skills,
-                    children=mcp_children,
-                    name="pool-skills",
-                    tool_manager=tool_manager,
-                )
-                self._skill_capabilities = [cap]
-            else:
-                cap = SkillManagerCap(
-                    local_skills=local_skills,
-                    children=mcp_children,
-                    name="pool-skills",
-                    tool_manager=tool_manager,
-                )
-                self._skill_capabilities = [cap]
+        cap = SkillManagerCap(
+            local_skills=local_skills,
+            children=mcp_children,
+            name="pool-skills",
+            tool_manager=tool_manager,
+        )
+        self._skill_capabilities = [cap]
 
         # Register the new SkillManagerCap with ExtensionRegistry at POOL scope.
         self._extension_registry.register(cap, pool_scope)

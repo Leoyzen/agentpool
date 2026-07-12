@@ -319,11 +319,11 @@ class SkillManagerCap(
         ) -> bool:
             tool_name = tool_def.name
             for skill_name, allowed_set in skill_filters.items():
-                prefix = f"{skill_name}__"
-                if tool_name.startswith(prefix):
-                    # Strip prefix: "my-skill__tool__read" → "read"
-                    bare = tool_name[len(prefix) :].rsplit("__", 1)[-1]
-                    return bare in allowed_set
+                for category in ("tool", "mcp"):
+                    prefix = f"{skill_name}__{category}__"
+                    if tool_name.startswith(prefix):
+                        bare = tool_name[len(prefix) :]
+                        return bare in allowed_set
             return True  # Non-skill tools always pass.
 
         return FilteredToolset(wrapped=toolset, filter_func=_filter)

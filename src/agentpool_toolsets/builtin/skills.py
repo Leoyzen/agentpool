@@ -9,12 +9,12 @@ from typing import TYPE_CHECKING, Any, cast
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.capabilities.resource_protocols import SkillResource
+from agentpool.skills.skill import Skill
 from agentpool.skills.skill_tool_manager import SkillToolManager
 from agentpool.skills.uri_resolver import ResolvedSkillURI
 
 
 if TYPE_CHECKING:
-    from agentpool.skills.skill import Skill
     from agentpool.skills.uri_resolver import SkillURIResolver
 
 
@@ -225,10 +225,6 @@ async def _load_visible_bare_skill(
                 instructions = ""
             # Construct a Skill object from SkillEntry + read_skill() result
             # so downstream code can access Skill-specific attributes.
-            from pathlib import PurePosixPath
-
-            from agentpool.skills.skill import Skill
-
             skill = Skill(
                 name=matching_entry.name,
                 description=matching_entry.description,
@@ -435,9 +431,17 @@ async def _available_skill_names(ctx: AgentContext, node_name: str | None) -> st
                     continue
                 with contextlib.suppress(Exception):
                     entries = await cap.list_skills()
-                    # SkillEntry has .name and .description, compatible with
-                    # _visible_model_skills which uses getattr with defaults.
-                    provider_skills.extend(cast("list[Skill]", entries))
+                    # Map SkillEntry objects to Skill instances for
+                    # downstream compatibility with _visible_model_skills.
+                    provider_skills.extend(
+                        Skill(
+                            name=entry.name,
+                            description=entry.description,
+                            skill_path=PurePosixPath(entry.uri),
+                            instructions="",
+                        )
+                        for entry in entries
+                    )
         except Exception:  # noqa: BLE001
             provider_skills = []
 
@@ -476,7 +480,15 @@ async def list_skills(ctx: AgentContext) -> str:  # noqa: PLR0915
                     continue
                 with contextlib.suppress(Exception):
                     entries = await cap.list_skills()
-                    provider_skills.extend(cast("list[Skill]", entries))
+                    provider_skills.extend(
+                        Skill(
+                            name=entry.name,
+                            description=entry.description,
+                            skill_path=PurePosixPath(entry.uri),
+                            instructions="",
+                        )
+                        for entry in entries
+                    )
 
     visible_provider_skills = _visible_model_skills(ctx, provider_skills, requested_node_name)
     seen: set[str] = {s.name for s in visible_skills}
