@@ -3,7 +3,7 @@
 - [x] 1.1 Register `SkillManagerCap` with `ExtensionRegistry` at `ScopeLevel.POOL` in `_rebuild_skill_capabilities()` (pool.py)
 - [x] 1.2 Unregister old `SkillManagerCap` from `ExtensionRegistry` before registering new one on rebuild
 - [x] 1.3 Verify `SkillURIResolver.resolve()` → `ExtensionRegistry.resolve_uri()` → `SkillManagerCap.read_skill()` chain works end-to-end
-- [ ] 1.4 Add end-to-end test: `skill://` URI resolution through pool initialization → skill registration → URI resolution
+- [x] 1.4 Add end-to-end test: `skill://` URI resolution through pool initialization → skill registration → URI resolution
 
 ## 2. Restore Per-Skill Python Tool Registration
 
@@ -13,7 +13,7 @@
 - [x] 2.4 Fully override `get_toolset()` in `SkillManagerCap` (do NOT call `super().get_toolset()`). The override SHALL: (a) create `PrefixedToolset("{skill_name}__tool__")` for each skill with Python tools, (b) create `PrefixedToolset("{skill_name}__mcp__")` for each per-skill McpServerCap child (from `_skill_mcp_children`), (c) include non-skill children from `_capabilities` (excluding skill children) unprefixed, (d) combine all into `CombinedToolset`
 - [x] 2.5 Update `_rebuild_skill_capabilities()` in pool.py to create/pass `SkillToolManager` to `SkillManagerCap`
 - [x] 2.6 Update `for_run()` in `SkillManagerCap` to pass `tool_manager=self._tool_manager` to the new instance (D7)
-- [ ] 2.7 Add end-to-end test: SKILL.md with `tools: [{import_path: "json:loads"}]` → agent toolset contains `{skill_name}__tool__loads`
+- [x] 2.7 Add end-to-end test: SKILL.md with `tools: [{import_path: "json:loads"}]` → agent toolset contains `{skill_name}__tool__loads`
 
 ## 3. Restore Per-Skill MCP Tool Registration
 
@@ -21,14 +21,14 @@
 - [x] 3.2 Verify `get_toolset()` override (task 2.4) correctly wraps per-skill McpServerCap children in `PrefixedToolset("{skill_name}__mcp__")` — this was already implemented in 2.4 but needs verification with actual McpServerCap instances
 - [x] 3.3 Verify `McpServerCap.__aenter__()`/`__aexit__()` lifecycle is managed by `CombinedToolsetCapability` parent (children in `_capabilities`)
 - [x] 3.4 Verify `McpServerCap.for_run()` returns `self` (inherited default) — shared MCP connection across runs is acceptable
-- [ ] 3.5 Add end-to-end test: SKILL.md with `mcp_servers` → agent toolset contains prefixed MCP tools
+- [x] 3.5 Add end-to-end test: SKILL.md with `mcp_servers` → agent toolset contains prefixed MCP tools
 
 ## 4. Restore allowed_tools Filtering
 
 - [x] 4.1 Implement `get_wrapper_toolset()` override in `SkillManagerCap`: build composite filter from all skills' `allowed_tools`, create `FilteredToolset` with a single filter function that handles multiple skills (non-skill tools always pass, skill tools checked against their skill's allowed set)
-- [ ] 4.2 Add test: skill with `allowed_tools: ["read", "list"]` → `restricted__tool__write` filtered out, `restricted__tool__read` accessible
-- [ ] 4.3 Add test: `allowed_tools` not declared → all tools accessible (no filter applied)
-- [ ] 4.4 Add test: `allowed_tools: []` (explicitly empty) → all skill tools filtered out (none accessible)
+- [x] 4.2 Add test: skill with `allowed_tools: ["read", "list"]` → `restricted__tool__write` filtered out, `restricted__tool__read` accessible
+- [x] 4.3 Add test: `allowed_tools` not declared → all tools accessible (no filter applied)
+- [x] 4.4 Add test: `allowed_tools: []` (explicitly empty) → all skill tools filtered out (none accessible)
 
 ## 5. Fix load_skill Tool Propagation
 
@@ -47,11 +47,11 @@
 
 ## 7. Spec Updates
 
-- [ ] 7.1 Verify `specs/skill-tool-registration/spec.md` is complete and matches implementation
-- [ ] 7.2 Verify `specs/skill-tools/spec.md` is complete and matches implementation
-- [ ] 7.3 Verify `specs/skill-manager-cap/spec.md` delta correctly modifies existing spec
-- [ ] 7.4 Verify `specs/extension-registry/spec.md` delta correctly adds to existing spec
-- [ ] 7.5 Verify `specs/agent-factory/spec.md` delta correctly adds to existing spec
+- [x] 7.1 Verify `specs/skill-tool-registration/spec.md` is complete and matches implementation
+- [x] 7.2 Verify `specs/skill-tools/spec.md` is complete and matches implementation
+- [x] 7.3 Verify `specs/skill-manager-cap/spec.md` delta correctly modifies existing spec
+- [x] 7.4 Verify `specs/extension-registry/spec.md` delta correctly adds to existing spec
+- [x] 7.5 Verify `specs/agent-factory/spec.md` delta correctly adds to existing spec
 
 ## 8. Unit Tests — SkillManagerCap Methods
 
@@ -65,7 +65,7 @@
 - [x] 8.8 `get_wrapper_toolset()`: skill with `allowed_tools: ["read", "list"]` → `FilteredToolset` filters non-allowed tools
 - [x] 8.9 `get_wrapper_toolset()`: skill without `allowed_tools` → all tools accessible (no filter applied)
 - [x] 8.10 `get_wrapper_toolset()`: skill with empty `allowed_tools: []` → all skill tools filtered out
-- [ ] 8.11 `get_wrapper_toolset()`: multiple skills each with different `allowed_tools` → composite filter handles all
+- [x] 8.11 `get_wrapper_toolset()`: multiple skills each with different `allowed_tools` → composite filter handles all
 - [x] 8.12 `SkillManagerCap.__init__()`: skill with `mcp_servers` → `McpServerCap` instances created, stored in `_skill_mcp_children`, and added to `_capabilities`
 - [x] 8.13 `SkillManagerCap.__init__()`: skill without `mcp_servers` → no `McpServerCap` children created
 - [x] 8.14 `for_run()`: new instance receives `tool_manager` and has `_skill_tools` populated
@@ -101,28 +101,28 @@
 
 ## 12. Edge Case Tests
 
-- [ ] 12.1 Skill with both `tools` AND `mcp_servers` → both `{name}__tool__*` and `{name}__mcp__*` tools registered
-- [ ] 12.2 Skill with invalid `import_path` (nonexistent module) → graceful error, other skills unaffected
-- [ ] 12.3 `McpServerCap` creation failure (bad config) → other skills' tools still registered, error logged
-- [ ] 12.4 Pool rebuild with skill removal → removed skill's tools no longer in agent toolset
-- [ ] 12.5 `allowed_tools` empty list `[]` → all skill tools filtered out (distinct from `None` = no filter)
+- [x] 12.1 Skill with both `tools` AND `mcp_servers` → both `{name}__tool__*` and `{name}__mcp__*` tools registered
+- [x] 12.2 Skill with invalid `import_path` (nonexistent module) → graceful error, other skills unaffected
+- [x] 12.3 `McpServerCap` creation failure (bad config) → other skills' tools still registered, error logged
+- [x] 12.4 Pool rebuild with skill removal → removed skill's tools no longer in agent toolset
+- [x] 12.5 `allowed_tools` empty list `[]` → all skill tools filtered out (distinct from `None` = no filter)
 
 ## 13. Integration Tests
 
-- [ ] 13.1 End-to-end: SKILL.md with `tools: [{import_path: "json:loads"}]` → agent toolset contains `{skill_name}__tool__loads`
-- [ ] 13.2 End-to-end: SKILL.md with `mcp_servers` → agent toolset contains `{skill_name}__mcp__*` tools
-- [ ] 13.3 End-to-end: `load_skill` available in standalone `Agent.from_config()` (non-SessionPool path)
-- [ ] 13.4 End-to-end: `load_skill` available in child session agent via `_inject_pool_providers()`
-- [ ] 13.5 End-to-end: `skill://` URI resolution (pool init → skill registration → URI resolve → content returned)
-- [ ] 13.6 End-to-end: `allowed_tools` filtering (skill with `allowed_tools` → non-allowed tools filtered from agent toolset)
-- [ ] 13.7 End-to-end: multiple skills with same `import_path` → isolated by `{skill_name}__tool__` prefix
-- [ ] 13.8 End-to-end: pool rebuild re-imports tools and re-creates McpServerCap children
-- [ ] 13.9 `SkillManagerCap` + `McpServerCap` child `__aenter__`/`__aexit__` lifecycle (enter all, exit in reverse)
-- [ ] 13.10 Agent via TestModel calls prefixed skill tool → tool executes and returns result
-- [ ] 13.11 Agent via TestModel calls `load_skill` → skill instructions returned in tool result
-- [ ] 13.12 `load_skill` return value includes tool/MCP server status info after protocol migration
-- [ ] 13.13 Multiple skills each with MCP servers → isolation by prefix, independent lifecycle
-- [ ] 13.14 `for_run()` on SkillManagerCap → new instance has `tool_manager` and `_skill_tools` populated
+- [x] 13.1 End-to-end: SKILL.md with `tools: [{import_path: "json:loads"}]` → agent toolset contains `{skill_name}__tool__loads`
+- [x] 13.2 End-to-end: SKILL.md with `mcp_servers` → agent toolset contains `{skill_name}__mcp__*` tools
+- [x] 13.3 End-to-end: `load_skill` available in standalone `Agent.from_config()` (non-SessionPool path)
+- [x] 13.4 End-to-end: `load_skill` available in child session agent via `_inject_pool_providers()`
+- [x] 13.5 End-to-end: `skill://` URI resolution (pool init → skill registration → URI resolve → content returned)
+- [x] 13.6 End-to-end: `allowed_tools` filtering (skill with `allowed_tools` → non-allowed tools filtered from agent toolset)
+- [x] 13.7 End-to-end: multiple skills with same `import_path` → isolated by `{skill_name}__tool__` prefix
+- [x] 13.8 End-to-end: pool rebuild re-imports tools and re-creates McpServerCap children
+- [x] 13.9 `SkillManagerCap` + `McpServerCap` child `__aenter__`/`__aexit__` lifecycle (enter all, exit in reverse)
+- [x] 13.10 Agent via TestModel calls prefixed skill tool → tool executes and returns result
+- [x] 13.11 Agent via TestModel calls `load_skill` → skill instructions returned in tool result
+- [x] 13.12 `load_skill` return value includes tool/MCP server status info after protocol migration
+- [x] 13.13 Multiple skills each with MCP servers → isolation by prefix, independent lifecycle
+- [x] 13.14 `for_run()` on SkillManagerCap → new instance has `tool_manager` and `_skill_tools` populated
 
 ## 14. Migration Regression Tests
 
