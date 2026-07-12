@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from upathtools import UPath
 
+from agentpool.capabilities.resource_protocols import SkillEntry
 from agentpool.skills.skill import Skill
 from agentpool_toolsets.builtin.skills import list_skills, load_skill, load_skill_for_node
 
@@ -39,6 +40,26 @@ class _FakeSkillProvider:
     def capabilities(self) -> list[_FakeSkillProvider]:
         """Return self as the sole capability, matching real provider interface."""
         return [self]
+
+    async def list_skills(self) -> list[SkillEntry]:
+        return [
+            SkillEntry(
+                name=skill.name,
+                description=skill.description,
+                uri=f"skill://scratchpad/{skill.name}",
+                source="provider",
+            )
+            for skill in self._skills
+        ]
+
+    async def read_skill(self, skill_name: str) -> str | None:
+        skill = next((s for s in self._skills if s.name == skill_name), None)
+        if skill is None:
+            return None
+        return f"{skill_name} provider instructions"
+
+    async def skill_exists(self, skill_name: str) -> bool:
+        return any(s.name == skill_name for s in self._skills)
 
     async def get_skills(self) -> list[Skill]:
         return self._skills

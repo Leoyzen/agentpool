@@ -78,7 +78,6 @@ class SkillsManager:
         exc_tb: TracebackType | None,
     ) -> None:
         """Clean up the skills manager."""
-        pass
 
     @overload
     async def add_skills_directory(self, path: JoinablePathLike) -> None: ...

@@ -917,9 +917,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             if pool_capabilities:
                 from agentpool.capabilities.skill_manager_cap import SkillManagerCap
 
-                for cap in pool_capabilities:
-                    if isinstance(cap, SkillManagerCap):
-                        tool_capabilities.append(cap)
+                tool_capabilities.extend(
+                    cap for cap in pool_capabilities if isinstance(cap, SkillManagerCap)
+                )
 
         # Collect pydantic-ai compatible instructions from SystemPrompts and providers
         all_instructions: list[Any] = []
