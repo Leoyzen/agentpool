@@ -6,6 +6,7 @@ to interact with AgentPool agents.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -170,18 +171,18 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
         ) -> None:
             """Reconcile bridge and store with the latest skill commands."""
             new_names = {cmd.name for cmd in cmds}
-            old_names = set(bridge._skill_cmds.keys())
+            old_names = {sc.name for sc in bridge.get_skill_commands()}
 
-            # Remove stale commands.
+            # Remove stale commands from bridge and store.
             for stale in old_names - new_names:
                 bridge.handle_change(stale, None)
+                store.unregister_command(stale)
 
-            # Add/update commands.
+            # Add/update commands in bridge and store.
             for cmd in cmds:
                 bridge.handle_change(cmd.name, cmd)
 
-            # Rebuild store commands.
-            store._commands.clear()
+            # Register all current commands in the store.
             for slashed_cmd in bridge.get_commands():
                 store.register_command(slashed_cmd, replace=True)
 
@@ -230,8 +231,6 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
                             )
                     except Exception:
                         logger.exception("Failed to rebuild CommandStore after skill change")
-
-            import asyncio
 
             state._skill_change_task = asyncio.create_task(_watch_skill_changes())
 
@@ -380,6 +379,12 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
         # Cancel skill change watcher
         if state._skill_change_task is not None:
             state._skill_change_task.cancel()
+            try:
+                await state._skill_change_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Error during skill change task cleanup")
             state._skill_change_task = None
         # Then clean up background tasks
         await state.cleanup_tasks()

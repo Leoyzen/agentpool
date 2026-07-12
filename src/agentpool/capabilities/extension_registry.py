@@ -438,7 +438,7 @@ class ExtensionRegistry:
                         entry = next((e for e in entries if e.name == alt), None)
                     if entry is None:
                         continue
-                    content = await cap.read_skill(skill_name)
+                    content = await cap.read_skill(entry.name)
                     if content is None:
                         continue
                     return Skill(

@@ -644,11 +644,16 @@ class AgentPool[TPoolDeps = None]:
         # Create a SkillToolManager for importing Python tools from skill frontmatter.
         tool_manager = SkillToolManager()
 
-        # Unregister old SkillManagerCap from ExtensionRegistry if present.
+        # Unregister and close old SkillManagerCap from ExtensionRegistry if present.
         pool_scope = Scope(level=ScopeLevel.POOL)
         for existing_cap in list(self._skill_capabilities):
             if isinstance(existing_cap, SkillManagerCap):
                 self._extension_registry.unregister(existing_cap, pool_scope)
+                # Close child McpServerCap instances to release MCP connections.
+                try:
+                    await existing_cap.__aexit__(None, None, None)
+                except Exception:  # noqa: BLE001
+                    logger.warning("Error closing old SkillManagerCap", exc_info=True)
 
         # Create a single SkillManagerCap holding all local skills + MCP children.
         cap = SkillManagerCap(

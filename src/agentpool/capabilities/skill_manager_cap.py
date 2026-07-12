@@ -128,9 +128,9 @@ class SkillManagerCap(
         self._create_skill_mcp_children()
 
         # Build the full children list: original children + skill MCP children.
-        all_children: list[AbstractCapability[Any]] = list(self._children)
+        all_children: list[AbstractCapability[AgentDepsT]] = list(self._children)
         for caps in self._skill_mcp_children.values():
-            all_children.extend(caps)
+            all_children.extend(caps)  # type: ignore[arg-type]  # McpServerCap[None] vs AgentDepsT
 
         # Initialize CombinedToolsetCapability with all child capabilities.
         super().__init__(all_children, name=name or "skill-manager")

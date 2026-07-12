@@ -193,6 +193,10 @@ async def _load_visible_bare_skill(
         return None
     local_skills = _visible_model_skills(ctx, ctx.pool.skills.list_skills(), node_name)
     local_skill = next((skill for skill in local_skills if skill.name == skill_name), None)
+    if local_skill is None:
+        # Fuzzy match: try underscore↔hyphen alternatives.
+        alt = skill_name.replace("-", "_").replace("_", "-")
+        local_skill = next((skill for skill in local_skills if skill.name == alt), None)
     if local_skill is not None:
         return local_skill, ctx.pool.skills.get_skill_instructions(skill_name)
 
@@ -228,6 +232,13 @@ async def _load_visible_bare_skill(
             (s for s in visible_skills if s.name == skill_name),
             None,
         )
+        if matching_skill is None:
+            # Fuzzy match: try underscore↔hyphen alternatives.
+            alt = skill_name.replace("-", "_").replace("_", "-")
+            matching_skill = next(
+                (s for s in visible_skills if s.name == alt),
+                None,
+            )
         if matching_skill is not None:
             try:
                 instructions = await provider.read_skill(matching_skill.name)
