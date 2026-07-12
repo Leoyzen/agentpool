@@ -196,6 +196,8 @@ class SkillManagerCap(
         ``to_mcp_server_config()``, creates a ``McpServerCap``, and stores
         it in ``_skill_mcp_children[skill_name]``.
         """
+        from agentpool.capabilities.mcp_server_cap import McpServerCap
+
         for name, skill in self._local_skills.items():
             if not skill.mcp_servers:
                 continue
@@ -212,8 +214,6 @@ class SkillManagerCap(
                     )
                     continue
                 try:
-                    from agentpool.capabilities.mcp_server_cap import McpServerCap
-
                     cap = McpServerCap(config=mcp_config)
                     caps.append(cap)
                 except Exception:  # noqa: BLE001
@@ -243,6 +243,7 @@ class SkillManagerCap(
         4. Combines all into a ``CombinedToolset``.
         """
         toolsets: list[AbstractToolset[AgentDepsT]] = []
+        from pydantic_ai.toolsets._dynamic import DynamicToolset
 
         # 1. Python tools: PrefixedToolset per skill.
         for skill_name, tools in self._skill_tools.items():
@@ -279,8 +280,6 @@ class SkillManagerCap(
                 if isinstance(ts, AbstractToolset):
                     toolsets.append(ts)
                 else:
-                    from pydantic_ai.toolsets._dynamic import DynamicToolset
-
                     toolsets.append(DynamicToolset(toolset_func=ts))
 
         if not toolsets:
@@ -307,7 +306,7 @@ class SkillManagerCap(
         skill_filters: dict[str, set[str]] = {}
         for name, skill in self._local_skills.items():
             allowed = skill.parsed_allowed_tools()
-            if allowed:
+            if allowed is not None:
                 skill_filters[name] = set(allowed)
 
         if not skill_filters:

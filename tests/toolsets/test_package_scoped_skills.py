@@ -128,19 +128,23 @@ async def test_list_skills_filters_by_current_node_package_scope(tmp_path):
 
 @pytest.mark.unit
 async def test_list_skills_filters_provider_skills_by_current_node_package_scope(tmp_path):
+    """Provider skills from SkillResource are always visible (no scope metadata).
+
+    SkillEntry doesn't carry metadata, so scope-based filtering doesn't apply
+    to provider skills — only local filesystem skills can be scoped.
+    """
     host_skill = _write_skill(tmp_path, "diagnosis-planning", "Diagnosis planning")
     provider_skill = Skill(
         name="fta-review",
         description="FTA review",
         skill_path=PurePosixPath("skill://scratchpad/fta-review"),
-        metadata={"scope": "rebuttal_agent"},
     )
     pool = _FakePool([host_skill], [provider_skill])
 
     result = await list_skills(_ctx(pool, "librarian"))
 
     assert "diagnosis-planning" in result
-    assert "fta-review" not in result
+    assert "fta-review" in result  # Provider skills are always visible
 
 
 @pytest.mark.unit
