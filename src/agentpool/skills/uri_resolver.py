@@ -133,7 +133,7 @@ class ResolvedSkillURI:
         # leaving path empty or just "/". Treat netloc as the skill name
         # with provider=None. When path has actual content (e.g.
         # skill://local/my-skill), this branch is skipped.
-        if not path and parsed.path in ("", "/") and parsed.netloc:
+        if not path and parsed.path == "" and parsed.netloc:
             skill_name = _validate_skill_name(unquote(parsed.netloc))
             return cls(provider=None, skill_name=skill_name, reference_path=None)
 
