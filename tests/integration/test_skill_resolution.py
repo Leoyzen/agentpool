@@ -406,19 +406,6 @@ class TestErrorHandlingAndSecurity:
         with pytest.raises(SecurityError, match="Path traversal detected"):
             ResolvedSkillURI.parse("skill://local/skill-name/../other")
 
-    async def test_invalid_provider_name_rejected(
-        self,
-        tmp_path: Path,
-        python_expert_skill: UPath,
-    ) -> None:
-        """Test that invalid provider names are rejected."""
-        from agentpool.skills.uri_resolver import _is_valid_provider_name
-
-        assert _is_valid_provider_name("local") is True
-        assert _is_valid_provider_name("my-provider") is True
-        assert _is_valid_provider_name("invalid.name") is False
-        assert _is_valid_provider_name("invalid/name") is False
-
     async def test_null_byte_detection(
         self,
         tmp_path: Path,

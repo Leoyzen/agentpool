@@ -32,7 +32,6 @@ from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
 from agentpool.commands.base import NodeCommand
 from agentpool.log import get_logger
 from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
-from agentpool.skills.uri_resolver import MAX_PROVIDER_NAME_LENGTH
 from agentpool_server.acp_server.converters import (
     convert_acp_mcp_server_to_config,
     from_acp_content,
@@ -62,6 +61,10 @@ if TYPE_CHECKING:
     from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 logger = get_logger(__name__)
+
+# Maximum length for internal provider name keys (kept as local constant
+# after removing from uri_resolver — provider segment concept was removed in D9).
+_MAX_PROVIDER_NAME_LENGTH = 63
 SLASH_PATTERN = re.compile(r"^/([\w-]+)(?:\s+(.*))?$")
 
 # Zed-specific instructions for code references
@@ -381,7 +384,7 @@ class ACPSession:
         """
         prefix = "session_"
         suffix = f"_{display_name}"
-        budget = MAX_PROVIDER_NAME_LENGTH - len(prefix) - len(suffix)
+        budget = _MAX_PROVIDER_NAME_LENGTH - len(prefix) - len(suffix)
         if budget >= len(self.session_id):
             return f"{prefix}{self.session_id}{suffix}"
         # Truncate session_id to fit — use SHA-256 prefix for collision resistance
