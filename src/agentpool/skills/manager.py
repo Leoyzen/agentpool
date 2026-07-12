@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from fsspec import AbstractFileSystem
-    from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.skills.skill import Skill
 
@@ -54,7 +53,6 @@ class SkillsManager:
         self._initialized = False
         self._config = config
         self._config_file_path = config_file_path
-        self._resource_provider: AbstractCapability | None = None
 
     def __repr__(self) -> str:
         skill_count = len(self.registry.list_items()) if self._initialized else "?"
@@ -80,21 +78,7 @@ class SkillsManager:
         exc_tb: TracebackType | None,
     ) -> None:
         """Clean up the skills manager."""
-        self._resource_provider = None
-
-    @property
-    def resource_provider(self) -> AbstractCapability:
-        """Get the resource provider for accessing skills.
-
-        Raises:
-            RuntimeError: Always — resource provider is no longer created
-                by SkillsManager. Use ``AgentPool._rebuild_skill_capabilities()``
-                to create individual ``SkillCapability`` instances per skill.
-        """
-        raise RuntimeError(
-            "Resource provider is no longer created by SkillsManager. "
-            "SkillCapability instances are created by AgentPool._rebuild_skill_capabilities()."
-        )
+        pass
 
     @overload
     async def add_skills_directory(self, path: JoinablePathLike) -> None: ...
@@ -154,7 +138,7 @@ class SkillsManager:
             default_paths = [p.expanduser() for p in DEFAULT_SKILLS_PATHS]
 
         # Sync registry's skills_dirs to reflect actual effective paths.
-        # This ensures downstream consumers (e.g. SkillCapability)
+        # This ensures downstream consumers (e.g. SkillManagerCap)
         # do not re-discover default paths when include_default=False.
         self.registry.skills_dirs = [to_upath(p).expanduser() for p in paths]
 

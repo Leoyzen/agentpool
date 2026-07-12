@@ -910,50 +910,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         )
         tool_capabilities.extend(mcp_capabilities)
         # 5. Skill capabilities — from pool-scoped instances created during __aenter__.
-        #    Each SkillCapability provides tools and MCP servers.
-        #    Skill MCP configs are registered in the snapshot for SessionConnectionPool.
+        #    Each SkillManagerCap provides tools and MCP servers.
         ctx = self.host_context
         if ctx is not None and ctx.pool is not None:
             pool_capabilities = ctx.pool.skill_capabilities
             if pool_capabilities:
-                # Ensure a snapshot exists for skill config registration.
-                session_id = run_ctx.session_id if run_ctx else None
-                if session_id is not None:
-                    ctx_mcp = self.mcp.get_or_create_session(session_id)
-                    if ctx_mcp.snapshot is None:
-                        from agentpool.mcp_server.config_snapshot import McpConfigSnapshot
-
-                        self.mcp.update_session_snapshot(session_id, McpConfigSnapshot())
-                # Collect skill config entries from visible capabilities.
-                skill_entries: list[McpConfigEntry] = []
-                visibility_checker = getattr(ctx.pool, "is_skill_visible_to_node", None)
                 from agentpool.capabilities.skill_manager_cap import SkillManagerCap
 
                 for cap in pool_capabilities:
-                    # SkillManagerCap doesn't have per-skill _skill or
-                    # build_config_entries(). It holds multiple skills and
-                    # doesn't register individual MCP config entries.
-                    # SkillCapability (deprecated) has _skill and build_config_entries().
                     if isinstance(cap, SkillManagerCap):
                         tool_capabilities.append(cap)
-                        continue
-                    if visibility_checker is not None and not visibility_checker(
-                        cap._skill, self.name
-                    ):
-                        continue
-                    tool_capabilities.append(cap)
-                    skill_entries.extend(cap.build_config_entries())
-                # Register skill configs in the snapshot.
-                if skill_entries and session_id is not None:
-                    mcp_ctx = self.mcp.get_or_create_session(session_id)
-                    existing = mcp_ctx.snapshot
-                    if existing is not None:
-                        self.mcp.update_session_snapshot(
-                            session_id,
-                            existing.with_skill_configs(
-                                tuple(skill_entries),
-                            ),
-                        )
 
         # Collect pydantic-ai compatible instructions from SystemPrompts and providers
         all_instructions: list[Any] = []

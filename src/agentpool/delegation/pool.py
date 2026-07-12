@@ -183,12 +183,9 @@ class AgentPool[TPoolDeps = None]:
                 max_skills=self.manifest.skills.instruction.max_skills,
             )
             self._tasks = TaskRegistry()
-            self._skill_commands: Any | None = None  # Deprecated — use extension_registry
             self._skill_resolver: SkillURIResolver | None = None
             self._skill_provider: CombinedToolsetCapability | None = None
-            self._skill_mcp_manager: Any | None = None  # SkillMcpManager — pool-scoped
-            self._skill_tool_manager: Any | None = None  # SkillToolManager — pool-scoped
-            self._skill_capabilities: list[Any] = []  # SkillCapability instances
+            self._skill_capabilities: list[Any] = []  # SkillManagerCap instances
             # Pool-level ExtensionRegistry for global capability scoping.
             self._extension_registry: ExtensionRegistry = ExtensionRegistry()
             skill_scopes = getattr(self.manifest, "model_extra", None) or {}
@@ -290,8 +287,7 @@ class AgentPool[TPoolDeps = None]:
                 # Initialize skill provider and resolver BEFORE skill capabilities
                 # so that skill_provider is available when syncing commands
                 await self._setup_skills_provider()
-                # SkillCommandRegistry is deleted — command discovery is now
-                # handled by ExtensionRegistry.get_command_resources().
+                # Command discovery is handled by ExtensionRegistry.get_command_resources().
                 # Create pool-scoped capabilities for all discovered skills
                 await self._rebuild_skill_capabilities()
                 # Initialize storage and sessions sequentially (they share the same DB)
@@ -461,15 +457,6 @@ class AgentPool[TPoolDeps = None]:
         return self._session_pool.get_run(run_id)
 
     @property
-    def skill_commands(self) -> Any | None:
-        """Get the skill command registry (deprecated).
-
-        Returns None — SkillCommandRegistry is deleted. Use
-        ``extension_registry.get_command_resources()`` instead.
-        """
-        return self._skill_commands
-
-    @property
     def extension_registry(self) -> ExtensionRegistry:
         """Get the pool-level ExtensionRegistry.
 
@@ -500,7 +487,7 @@ class AgentPool[TPoolDeps = None]:
         """Register a skill provider dynamically.
 
         Adds the provider to the URI resolver so that its skills
-        become visible to SkillCapability and load_skill.
+        become visible to SkillManagerCap and load_skill.
         If called before _setup_skills_provider(), the provider is buffered
         and added when the resolver is created.
 
@@ -587,7 +574,7 @@ class AgentPool[TPoolDeps = None]:
         """Initialize the skill provider and resolver.
 
         Creates a CombinedToolsetCapability that combines MCP capabilities
-        for skill URI resolution. Individual SkillCapability instances are
+        for skill URI resolution. Individual SkillManagerCap instances are
         created separately by ``_rebuild_skill_capabilities()``.
         """
         providers: list[AbstractCapability] = []
@@ -628,12 +615,18 @@ class AgentPool[TPoolDeps = None]:
         that implement ``SkillResource`` into the ``SkillManagerCap`` so
         remote skills are accessible (Phase 3, task 3.4).
 
+        Registers the ``SkillManagerCap`` with ``ExtensionRegistry`` at
+        ``ScopeLevel.POOL`` so that ``skill://`` URI resolution works
+        end-to-end.
+
         Skills with ``disable_model_invocation=True`` are skipped.
 
         This method is called:
         - During ``__aenter__`` after skill discovery completes.
         """
+        from agentpool.capabilities.extension_registry import Scope, ScopeLevel
         from agentpool.capabilities.skill_manager_cap import SkillManagerCap
+        from agentpool.skills.skill_tool_manager import SkillToolManager
 
         # Build local skills dict from SkillsManager.
         local_skills: dict[str, Any] = {}
@@ -644,11 +637,18 @@ class AgentPool[TPoolDeps = None]:
                 local_skills[skill.name] = skill
 
         # Collect McpServerCap children that implement SkillResource.
-        # In Phase 3, iterate the pool's MCP providers directly.
-        # ExtensionRegistry.get_skill_resources() will be used in Phase 4.
         mcp_children: list[Any] = [
             provider for provider in self.mcp.providers if isinstance(provider, SkillResource)
         ]
+
+        # Create a SkillToolManager for importing Python tools from skill frontmatter.
+        tool_manager = SkillToolManager()
+
+        # Unregister old SkillManagerCap from ExtensionRegistry if present.
+        pool_scope = Scope(level=ScopeLevel.POOL)
+        for existing_cap in list(self._skill_capabilities):
+            if isinstance(existing_cap, SkillManagerCap):
+                self._extension_registry.unregister(existing_cap, pool_scope)
 
         # Create a single SkillManagerCap holding all local skills + MCP children.
         if local_skills or not self._skill_capabilities or mcp_children:
@@ -656,13 +656,33 @@ class AgentPool[TPoolDeps = None]:
                 local_skills=local_skills,
                 children=mcp_children,
                 name="pool-skills",
+                tool_manager=tool_manager,
             )
             self._skill_capabilities = [cap]
         else:
             # Update existing SkillManagerCap's local skills.
             existing = self._skill_capabilities[0]
             if isinstance(existing, SkillManagerCap):
-                existing._local_skills = local_skills
+                # Unregister old, create new with updated skills.
+                self._extension_registry.unregister(existing, pool_scope)
+                cap = SkillManagerCap(
+                    local_skills=local_skills,
+                    children=mcp_children,
+                    name="pool-skills",
+                    tool_manager=tool_manager,
+                )
+                self._skill_capabilities = [cap]
+            else:
+                cap = SkillManagerCap(
+                    local_skills=local_skills,
+                    children=mcp_children,
+                    name="pool-skills",
+                    tool_manager=tool_manager,
+                )
+                self._skill_capabilities = [cap]
+
+        # Register the new SkillManagerCap with ExtensionRegistry at POOL scope.
+        self._extension_registry.register(cap, pool_scope)
 
         logger.debug(
             "Rebuilt skill capabilities",
@@ -672,7 +692,7 @@ class AgentPool[TPoolDeps = None]:
 
     @property
     def skill_capabilities(self) -> list[Any]:
-        """Get pool-scoped SkillCapability instances.
+        """Get pool-scoped SkillManagerCap instances.
 
         These are created once in ``__aenter__`` and rebuilt on
         dynamic skill registration/unregistration.
@@ -683,9 +703,9 @@ class AgentPool[TPoolDeps = None]:
         """Handle skills changed events from the skill provider.
 
         This method is called when the skill provider detects changes to skills
-        from any source (local filesystem or MCP servers). Skill command
-        registry changes are handled by SkillCommandRegistry which listens to
-        ``_skill_provider`` directly. We rebuild skill capabilities to keep
+        from any source (local filesystem or MCP servers). Command discovery
+        is handled by ExtensionRegistry.get_command_resources().
+        We rebuild skill capabilities to keep
         them in sync with the latest skill list.
 
         Args:

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentpool.capabilities.resource_protocols import SkillResource
 from agentpool.skills.skill_tool_manager import SkillToolManager
 from agentpool.skills.uri_resolver import ResolvedSkillURI
 
@@ -183,7 +184,7 @@ def _visible_model_skills(
     ]
 
 
-async def _load_visible_bare_skill(  # noqa: PLR0911
+async def _load_visible_bare_skill(
     ctx: AgentContext,
     skill_name: str,
     node_name: str | None,
@@ -204,24 +205,37 @@ async def _load_visible_bare_skill(  # noqa: PLR0911
     if capabilities is None:
         return None
     for provider in capabilities:
-        # Try get_skills() if the capability supports it (e.g. MCPCapability)
-        get_skills_fn = getattr(provider, "get_skills", None)
-        if get_skills_fn is None:
+        # Use SkillResource protocol check instead of getattr duck-typing.
+        if not isinstance(provider, SkillResource):
             continue
         try:
-            provider_skills = await get_skills_fn()
+            provider_entries = await provider.list_skills()
         except Exception:  # noqa: BLE001
             continue
-        visible_provider_skills = _visible_model_skills(ctx, provider_skills, node_name)
-        provider_skill = next(
-            (skill for skill in visible_provider_skills if skill.name == skill_name),
+        matching_entry = next(
+            (entry for entry in provider_entries if entry.name == skill_name),
             None,
         )
-        if provider_skill is not None:
-            get_instructions_fn = getattr(provider, "get_skill_instructions", None)
-            if get_instructions_fn is not None:
-                return provider_skill, await get_instructions_fn(provider_skill.name)
-            return provider_skill, ""
+        if matching_entry is not None:
+            try:
+                instructions = await provider.read_skill(matching_entry.name)
+            except Exception:  # noqa: BLE001
+                instructions = None
+            if instructions is None:
+                instructions = ""
+            # Construct a Skill object from SkillEntry + read_skill() result
+            # so downstream code can access Skill-specific attributes.
+            from pathlib import PurePosixPath
+
+            from agentpool.skills.skill import Skill
+
+            skill = Skill(
+                name=matching_entry.name,
+                description=matching_entry.description,
+                skill_path=PurePosixPath(matching_entry.uri),
+                instructions=instructions,
+            )
+            return skill, instructions
 
     return None
 
@@ -414,18 +428,16 @@ async def _available_skill_names(ctx: AgentContext, node_name: str | None) -> st
     provider_skills: list[Skill] = []
     if ctx.pool.skill_provider is not None:
         try:
-            # Try get_skills on skill_provider or its child capabilities
-            get_skills_fn = getattr(ctx.pool.skill_provider, "get_skills", None)
-            if get_skills_fn is not None:
-                provider_skills = await get_skills_fn()
-            else:
-                # Try iterating child capabilities
-                capabilities = getattr(ctx.pool.skill_provider, "capabilities", [])
-                for cap in capabilities:
-                    cap_get_skills = getattr(cap, "get_skills", None)
-                    if cap_get_skills is not None:
-                        with contextlib.suppress(Exception):
-                            provider_skills.extend(await cap_get_skills())
+            # Iterate child capabilities and use SkillResource protocol check.
+            capabilities = getattr(ctx.pool.skill_provider, "capabilities", [])
+            for cap in capabilities:
+                if not isinstance(cap, SkillResource):
+                    continue
+                with contextlib.suppress(Exception):
+                    entries = await cap.list_skills()
+                    # SkillEntry has .name and .description, compatible with
+                    # _visible_model_skills which uses getattr with defaults.
+                    provider_skills.extend(cast("list[Skill]", entries))
         except Exception:  # noqa: BLE001
             provider_skills = []
 
@@ -457,17 +469,14 @@ async def list_skills(ctx: AgentContext) -> str:  # noqa: PLR0915
     provider_skills: list[Skill] = []
     if ctx.pool.skill_provider is not None:
         with contextlib.suppress(Exception):
-            get_skills_fn = getattr(ctx.pool.skill_provider, "get_skills", None)
-            if get_skills_fn is not None:
-                provider_skills = await get_skills_fn()
-            else:
-                # Try iterating child capabilities
-                capabilities = getattr(ctx.pool.skill_provider, "capabilities", [])
-                for cap in capabilities:
-                    cap_get_skills = getattr(cap, "get_skills", None)
-                    if cap_get_skills is not None:
-                        with contextlib.suppress(Exception):
-                            provider_skills.extend(await cap_get_skills())
+            # Iterate child capabilities and use SkillResource protocol check.
+            capabilities = getattr(ctx.pool.skill_provider, "capabilities", [])
+            for cap in capabilities:
+                if not isinstance(cap, SkillResource):
+                    continue
+                with contextlib.suppress(Exception):
+                    entries = await cap.list_skills()
+                    provider_skills.extend(cast("list[Skill]", entries))
 
     visible_provider_skills = _visible_model_skills(ctx, provider_skills, requested_node_name)
     seen: set[str] = {s.name for s in visible_skills}
@@ -494,15 +503,12 @@ async def list_skills(ctx: AgentContext) -> str:  # noqa: PLR0915
             # Try to find which provider this skill belongs to
             for provider_name in resolver.list_providers():
                 provider = resolver.get_provider(provider_name)
-                if provider:
-                    get_skills_fn = getattr(provider, "get_skills", None)
-                    if get_skills_fn is None:
-                        continue
+                if provider and isinstance(provider, SkillResource):
                     try:
-                        provider_skills = await get_skills_fn()
+                        entries = await provider.list_skills()
                     except Exception:  # noqa: BLE001
                         continue
-                    if any(s.name == skill.name for s in provider_skills):
+                    if any(e.name == skill.name for e in entries):
                         lines.append(f"  - URI: `skill://{provider_name}/{skill.name}`")
                         break
             else:
