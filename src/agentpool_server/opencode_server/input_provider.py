@@ -60,6 +60,7 @@ class OpenCodeInputProvider(InputProvider):
         self._pending_permissions: dict[str, PendingPermission] = {}
         self._tool_approvals: dict[str, str] = {}  # tool_name -> "always" | "reject"
         self._id_counter = 0
+        self._fallback_pending_questions: dict[str, Any] = {}
 
     @property
     def supports_durable_elicitation(self) -> bool:
@@ -81,13 +82,14 @@ class OpenCodeInputProvider(InputProvider):
         """Get the pending questions dict for this session.
 
         Returns SessionState.pending_questions for per-session isolation.
-        Returns empty dict if no session_controller or session not found.
+        Falls back to an instance-level dict if no session_controller or
+        session not found, ensuring writes persist across accesses.
         """
         if self.state.session_controller is not None:
             session = self.state.session_controller.get_session(self.session_id)
             if session is not None:
                 return session.pending_questions
-        return {}
+        return self._fallback_pending_questions
 
     def _generate_permission_id(self) -> str:
         """Generate a unique permission ID."""
@@ -597,6 +599,82 @@ class OpenCodeInputProvider(InputProvider):
             # Clean up pending question
             self._pending_questions_dict.pop(question_id, None)
 
+    async def broadcast_elicitation_question(
+        self,
+        handle: str,
+        params: types.ElicitRequestParams,
+        shared_future: asyncio.Future[Any] | None = None,
+    ) -> bool:
+        """Broadcast a QuestionAskedEvent for a durable elicitation.
+
+        Called by ``handle_elicitation`` Path 3 after the elicitation future
+        is registered. This populates the pending questions dict and
+        broadcasts the event so the OpenCode TUI can render the question UI.
+        When the user answers via the REST endpoint, ``resolve_question``
+        fires and the caller resolves the elicitation future.
+
+        Args:
+            handle: The elicitation handle (tool_call_id) used as question ID.
+            params: The elicitation request parameters.
+            shared_future: Optional future from the ElicitationFutureRegistry
+                to share so ``resolve_question`` resolves both.
+
+        Returns:
+            True if the question was broadcast successfully, False if
+            the schema type is not supported.
+        """
+        from agentpool_server.opencode_server.models.events import QuestionAskedEvent
+        from agentpool_server.opencode_server.state import PendingQuestion
+
+        match params:
+            case types.ElicitRequestFormParams(
+                requestedSchema=({"enum": _} | {"type": "array", "items": {"enum": _}}) as schema,
+                message=msg,
+            ):
+                questions = [self._property_to_question("value", schema)]
+            case types.ElicitRequestFormParams(
+                requestedSchema={"type": "object", "properties": dict() as props},
+                message=msg,
+            ) if len(props) >= 1:
+                questions = [self._property_to_question(k, s) for k, s in list(props.items())[:10]]
+            case types.ElicitRequestFormParams(message=msg, requestedSchema=schema):
+                logger.info(
+                    "Durable elicitation schema not supported for question UI",
+                    message=msg,
+                    schema=schema,
+                )
+                return False
+            case _:
+                logger.info(
+                    "Durable elicitation params type not supported",
+                    params=str(params),
+                )
+                return False
+
+        if shared_future is not None:
+            future: asyncio.Future[list[list[str]]] = shared_future
+        else:
+            future = asyncio.get_event_loop().create_future()
+        self._pending_questions_dict[handle] = PendingQuestion(
+            session_id=self.session_id,
+            questions=questions,
+            future=future,
+        )
+
+        event = QuestionAskedEvent.create(
+            request_id=handle,
+            session_id=self.session_id,
+            questions=questions,
+        )
+        await self.state.broadcast_event(event)
+        logger.info(
+            "Durable elicitation question broadcast",
+            handle=handle,
+            message=msg,
+            question_count=len(questions),
+        )
+        return True
+
     def clear_tool_approvals(self) -> None:
         """Clear all stored tool approval decisions."""
         approval_count = len(self._tool_approvals)
@@ -660,3 +738,7 @@ class OpenCodeInputProvider(InputProvider):
                 self._pending_questions_dict.pop(question_id, None)
         logger.info("Cancelled all pending questions", count=count, session_id=self.session_id)
         return count
+
+    def cleanup_elicitation_question(self, handle: str) -> None:
+        """Remove a pending elicitation question after timeout or cancellation."""
+        self._pending_questions_dict.pop(handle, None)

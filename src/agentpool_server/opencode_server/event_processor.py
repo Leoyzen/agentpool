@@ -737,7 +737,7 @@ class EventProcessor:
         if existing is None:
             return
 
-        result_str = str(result) if result else ""
+        result_str = _format_tool_output(result)
         tool_input = ctx.get_tool_input(tool_call_id) or {}
         is_error = isinstance(result, dict) and result.get("error")
         start = ctx.stream_start_ms
@@ -873,6 +873,32 @@ def _extract_title_from_tool_state(state: ToolState) -> str:
             return title or ""
         case ToolStateError() | _:
             return ""
+
+
+def _format_tool_output(result: Any) -> str:
+    """Format a tool result for display in OpenCode ToolStateCompleted.output.
+
+    Mirrors the type-branch logic in ``chat_message_to_opencode`` so streaming
+    and persistence paths produce identical output.
+
+    Args:
+        result: The raw tool result (str, dict, list, or other).
+
+    Returns:
+        A display-ready string.
+    """
+    import anyenv
+
+    if result is None:
+        return ""
+    if isinstance(result, str):
+        return result
+    if isinstance(result, (dict, list)):
+        try:
+            return anyenv.dump_json(result, indent=True)
+        except Exception:  # noqa: BLE001
+            return str(result)
+    return str(result)
 
 
 def _message_content_to_text(content: Any) -> str:

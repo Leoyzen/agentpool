@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from unittest.mock import Mock
 
 import pytest
@@ -329,7 +328,7 @@ class TestInputProviderStoresQuestionsOnSessionState:
         self,
         session_controller: SessionController,
     ) -> None:
-        """When no session_controller, questions are not stored on ServerState."""
+        """When no session_controller, questions use instance-level fallback dict."""
         mock_agent = Mock()
         mock_agent.agent_pool = None
         mock_agent.host_context = None
@@ -351,13 +350,15 @@ class TestInputProviderStoresQuestionsOnSessionState:
         task = asyncio.create_task(provider.get_elicitation(params))
         await asyncio.sleep(0.1)
 
-        # Question should NOT be visible via provider; provider uses empty dict fallback
-        assert len(provider.get_pending_questions()) == 0
+        # Question is stored on the provider's fallback dict, not on ServerState
+        assert len(provider.get_pending_questions()) == 1
+        # ServerState itself should not have a session_controller set
+        assert state.session_controller is None
 
-        # Cancel the task since there's no question to resolve
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        # Clean up via the provider's fallback dict
+        question_id = next(iter(provider._fallback_pending_questions.keys()))
+        provider.resolve_question(question_id, [["a"]])
+        await task
 
 
 class TestSSEDisconnectViaSessionController:

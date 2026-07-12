@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 from agentpool.log import get_logger
 
+
 logger = get_logger(__name__)
 
 DEBOUNCE_MS = 500

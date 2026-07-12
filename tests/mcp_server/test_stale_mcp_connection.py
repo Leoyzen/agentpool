@@ -128,7 +128,7 @@ async def test_session_resume_returns_fresh_toolset() -> None:
 
         # --- Clean up session 1 ---
         await manager.cleanup_session("s1")
-        assert "s1" not in manager._session_contexts
+        assert manager.get_session_context("s1") is None
 
         # --- Session 2 (resume) ---
         ctx2 = manager.get_or_create_session("s2")
@@ -161,7 +161,7 @@ async def test_session_resume_returns_fresh_toolset() -> None:
         assert client_id in ctx2.toolset_cache
     finally:
         await manager.cleanup()
-        if "s2" in manager._session_contexts:
+        if manager.get_session_context("s2") is not None:
             await manager.cleanup_session("s2")
 
 
@@ -269,7 +269,7 @@ async def test_multiple_acp_servers_get_fresh_toolsets() -> None:
 
         # --- Clean up session 1 ---
         await manager.cleanup_session("s1")
-        assert "s1" not in manager._session_contexts
+        assert manager.get_session_context("s1") is None
 
         # --- Session 2 (resume) ---
         ctx2 = manager.get_or_create_session("s2")
@@ -311,7 +311,7 @@ async def test_multiple_acp_servers_get_fresh_toolsets() -> None:
             )
     finally:
         await manager.cleanup()
-        if "s2" in manager._session_contexts:
+        if manager.get_session_context("s2") is not None:
             await manager.cleanup_session("s2")
 
 
@@ -326,7 +326,7 @@ async def test_cleanup_session_clears_per_session_cache() -> None:
 
     After T10-T12, ``cleanup_session()`` clears ``ctx.toolset_cache``,
     cleans the session connection pool, and removes the session context
-    from ``_session_contexts``.  This ensures stale toolsets are not
+    from the session registry.  This ensures stale toolsets are not
     reused when the session is resumed.
     """
     manager = MCPManager(name="pool_mcp")
@@ -360,8 +360,8 @@ async def test_cleanup_session_clears_per_session_cache() -> None:
         await manager.cleanup_session("s1")
 
         # Session context is removed from the registry
-        assert "s1" not in manager._session_contexts
+        assert manager.get_session_context("s1") is None
     finally:
         await manager.cleanup()
-        if "s1" in manager._session_contexts:
+        if manager.get_session_context("s1") is not None:
             await manager.cleanup_session("s1")

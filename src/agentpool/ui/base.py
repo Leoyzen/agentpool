@@ -89,3 +89,35 @@ class InputProvider(ABC):
             context: Current agent context
             params: MCP elicit request parameters
         """
+
+    async def broadcast_elicitation_question(
+        self,
+        handle: str,
+        params: types.ElicitRequestParams,
+        shared_future: Any = None,
+    ) -> bool:
+        """Broadcast a durable elicitation question to the UI.
+
+        Default implementation returns False (not supported). Providers
+        that support durable elicitation override this to broadcast the
+        question and store it for later resolution.
+
+        Args:
+            handle: The elicitation handle (tool_call_id).
+            params: The elicitation request parameters.
+            shared_future: Optional future to share for resolution.
+
+        Returns:
+            True if broadcast succeeded, False if not supported.
+        """
+        return False
+
+    def cleanup_elicitation_question(self, handle: str) -> None:  # noqa: B027
+        """Clean up a pending elicitation question after timeout or cancellation.
+
+        Default implementation does nothing. Providers that store pending
+        questions override this to remove the stale entry.
+
+        Args:
+            handle: The elicitation handle (tool_call_id) to clean up.
+        """

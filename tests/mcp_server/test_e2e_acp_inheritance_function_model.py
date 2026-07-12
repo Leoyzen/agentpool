@@ -187,15 +187,15 @@ async def test_initialize_mcp_servers_registers_transport_and_syncs_snapshot() -
     """initialize_mcp_servers() registers ACP transport and updates snapshot.
 
     Verifies Bug 1 fix: ``add_acp_transport()`` is called (transport
-    appears in ``_session_contexts[session_id].connection_pool``).
+    appears in ``get_session_context(session_id).connection_pool``).
 
     Verifies Bug 2 fix: ``update_session_snapshot()`` is called
-    (``_session_contexts[session_id].snapshot`` is not None and has
+    (``get_session_context(session_id).snapshot`` is not None and has
     non-empty ``session_configs``).
 
-    Also verifies ``agent._mcp_snapshot`` is set (both paths updated).
+    Also verifies the session context snapshot is set (both paths updated).
     """
-    mcp_manager, _acp_manager, agent, acp_agent, acp_session, _mock_client = _build_test_fixture(
+    mcp_manager, _acp_manager, _agent, acp_agent, acp_session, _mock_client = _build_test_fixture(
         "test1-session"
     )
 
@@ -203,7 +203,7 @@ async def test_initialize_mcp_servers_registers_transport_and_syncs_snapshot() -
         await acp_session.initialize_mcp_servers()
 
         session_id = acp_session.session_id
-        ctx = mcp_manager._session_contexts.get(session_id)
+        ctx = mcp_manager.get_session_context(session_id)
         assert ctx is not None, "Session context must exist after initialize_mcp_servers"
 
         # Bug 1: transport registered in connection_pool
@@ -217,10 +217,10 @@ async def test_initialize_mcp_servers_registers_transport_and_syncs_snapshot() -
         # Bug 2: snapshot synced to session context
         assert ctx.snapshot is not None, "Snapshot must be set on session context"
         assert len(ctx.snapshot.session_configs) > 0, "Snapshot must have session configs"
+        # Session context snapshot also updated
+        assert ctx.snapshot is not None, "Session context snapshot must be set"
+        assert len(ctx.snapshot.session_configs) > 0
 
-        # agent._mcp_snapshot also updated
-        assert agent._mcp_snapshot is not None, "agent._mcp_snapshot must be set"
-        assert len(agent._mcp_snapshot.session_configs) > 0
     finally:
         await mcp_manager.cleanup_session(acp_session.session_id)
         await acp_agent.close()
@@ -327,14 +327,14 @@ async def test_child_session_inherits_acp_configs_and_transports() -> None:
         child_agent = await session_pool.sessions.get_or_create_session_agent(child_session_id)
 
         # Assert child's snapshot.session_configs matches parent's (inherited)
-        child_ctx = child_agent.mcp._session_contexts.get(child_session_id)
+        child_ctx = child_agent.mcp.get_session_context(child_session_id)
         assert child_ctx is not None, "Child session context must exist"
         assert child_ctx.snapshot is not None, "Child snapshot must be set"
         assert len(child_ctx.snapshot.session_configs) > 0, (
             "Child must inherit parent's session configs"
         )
 
-        parent_ctx = mcp_manager._session_contexts.get(parent_session_id)
+        parent_ctx = mcp_manager.get_session_context(parent_session_id)
         assert parent_ctx is not None
         parent_config_count = len(parent_ctx.snapshot.session_configs) if parent_ctx.snapshot else 0
         assert len(child_ctx.snapshot.session_configs) == parent_config_count, (

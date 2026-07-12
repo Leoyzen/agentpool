@@ -468,7 +468,7 @@ async def test_acp_transport_failure_during_tool_execution_cleanup() -> None:
     6. Call cleanup_session() — must complete without hanging.
 
     Asserts:
-    - ``_session_contexts`` is empty.
+    - The session context is removed.
     - ``_session_connections`` is empty.
     - ``_connections`` is empty (connection removed because no active
       sessions remain).
@@ -524,11 +524,11 @@ async def test_acp_transport_failure_during_tool_execution_cleanup() -> None:
         with anyio.fail_after(5):
             await mcp_manager.cleanup_session(session_id)
 
-        assert session_id not in mcp_manager._session_contexts
+        assert mcp_manager.get_session_context(session_id) is None
         assert session_id not in acp_manager._session_connections
         assert connection_id not in acp_manager._connections
     finally:
-        if session_id in mcp_manager._session_contexts:
+        if mcp_manager.get_session_context(session_id) is not None:
             await mcp_manager.cleanup_session(session_id)
         await mcp_manager.cleanup()
 
