@@ -492,8 +492,7 @@ def test_uri_empty_path():
     component. This is not a security issue — it means "load the skill
     itself, no reference file." The parser should handle it gracefully.
     """
-    result = ResolvedSkillURI.parse("skill://provider/test-skill/")
-    assert result.provider == "provider"
+    result = ResolvedSkillURI.parse("skill://test-skill/")
     assert result.skill_name == "test-skill"
     assert result.reference_path is None
 

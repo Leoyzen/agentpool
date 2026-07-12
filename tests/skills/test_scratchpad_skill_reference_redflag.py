@@ -27,6 +27,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agentpool.skills.exceptions import SkillNotFoundError
 from agentpool.skills.skill import Skill
 from agentpool.skills.uri_resolver import SkillURIResolver
 from agentpool_toolsets.builtin.skills import load_skill
@@ -353,5 +354,5 @@ class TestScratchpadSkillReferenceLoading:
 
         uri = "skill://nonexistent-skill/references/guide.md"
 
-        with pytest.raises(ValueError, match="not registered"):
+        with pytest.raises(SkillNotFoundError, match="not found"):
             await resolver.resolve(uri)
