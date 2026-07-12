@@ -378,9 +378,8 @@ class SkillURIResolver:
     async def resolve(self, uri: str) -> Skill:
         """Resolve a skill URI to a Skill instance.
 
-        When an ``ExtensionRegistry`` is configured, delegates to
-        ``ExtensionRegistry.resolve_uri()`` for resolution.
-        Otherwise, searches all registered providers for the skill name.
+        Tries ``ExtensionRegistry`` first when configured. If it fails,
+        falls back to searching all registered providers for the skill name.
 
         Supports flat URIs (D9):
         - ``skill://my-skill`` — by name
@@ -413,8 +412,9 @@ class SkillURIResolver:
                     skill_path=PurePosixPath(uri),
                     instructions=content if isinstance(content, str) else None,
                 )
-            msg = f"Skill {uri!r} not found via ExtensionRegistry"
-            raise SkillNotFoundError(msg)
+            # ExtensionRegistry failed — fall through to provider search.
+            # This handles cases where skills are registered in _providers
+            # but not in ExtensionRegistry.
 
         resolved = ResolvedSkillURI.parse(uri)
         skill = await self._find_skill_with_alternatives(resolved.skill_name)
