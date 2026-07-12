@@ -27,7 +27,8 @@ if TYPE_CHECKING:
         SkillEntry,
         SkillResource,
     )
-    from agentpool.skills.skill import Skill
+
+from agentpool.skills.skill import Skill
 
 
 logger = logging.getLogger(__name__)
@@ -400,17 +401,16 @@ class SkillURIResolver:
         if self._extension_registry is not None:
             from agentpool.capabilities.extension_registry import Scope, ScopeLevel
 
-            content = await self._extension_registry.resolve_uri(uri, Scope(level=ScopeLevel.POOL))
-            if content is not None:
-                resolved = ResolvedSkillURI.parse(uri)
-
-                from agentpool.skills.skill import Skill
-
+            result = await self._extension_registry.resolve_uri(uri, Scope(level=ScopeLevel.POOL))
+            if result is not None:
+                if isinstance(result, Skill):
+                    return result
+                # str | bytes content — construct Skill with virtual path.
                 return Skill(
-                    name=resolved.skill_name,
-                    description=f"Skill {resolved.skill_name}",
+                    name=ResolvedSkillURI.parse(uri).skill_name,
+                    description=f"Skill {uri}",
                     skill_path=PurePosixPath(uri),
-                    instructions=content if isinstance(content, str) else None,
+                    instructions=result if isinstance(result, str) else None,
                 )
             msg = f"Skill {uri!r} not found via ExtensionRegistry"
             raise SkillNotFoundError(msg)

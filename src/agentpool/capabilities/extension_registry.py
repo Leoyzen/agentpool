@@ -20,6 +20,7 @@ import asyncio
 from dataclasses import dataclass
 from enum import Enum, auto
 import logging
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 
@@ -421,7 +422,8 @@ class ExtensionRegistry:
             the URI cannot be resolved.
         """
         if uri.startswith("skill://"):
-            # Flat URI (D9): parse via ResolvedSkillURI for consistency.
+              # Flat URI (D9): parse via ResolvedSkillURI for consistency.
+            from agentpool.skills.skill import Skill
             from agentpool.skills.uri_resolver import ResolvedSkillURI
 
             resolved = ResolvedSkillURI.parse(uri)
@@ -429,10 +431,24 @@ class ExtensionRegistry:
 
             for cap in self.get_skill_resources(scope):
                 try:
-                    if await cap.skill_exists(skill_name):
-                        content = await cap.read_skill(skill_name)
-                        if content is not None:
-                            return content
+                    # Try to find the SkillEntry for metadata and real path.
+                    entries = await cap.list_skills()
+                    entry = next((e for e in entries if e.name == skill_name), None)
+                    if entry is None:
+                        # Fuzzy match: try underscore↔hyphen alternatives.
+                        alt = skill_name.replace("-", "_").replace("_", "-")
+                        entry = next((e for e in entries if e.name == alt), None)
+                    if entry is None:
+                        continue
+                    content = await cap.read_skill(skill_name)
+                    if content is None:
+                        continue
+                    return Skill(
+                        name=entry.name,
+                        description=entry.description or f"Skill {entry.name}",
+                        skill_path=entry.skill_path or PurePosixPath(uri),
+                        instructions=content,
+                    )
                 except Exception:  # noqa: BLE001
                     logger.warning(
                         "Failed to resolve skill URI %r via %s",

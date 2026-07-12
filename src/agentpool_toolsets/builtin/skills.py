@@ -322,25 +322,9 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
                 instructions = ref_content
             except Exception as e:  # noqa: BLE001
                 return f"Failed to load reference {ref_path!r}: {e}"
-        # Full skill loading: get main instructions
-        # For virtual paths (PurePosixPath), fetch from provider
-        elif isinstance(skill.skill_path, PurePosixPath):
-            if ctx.pool.skill_provider is not None:
-                try:
-                    # Try get_skill_instructions on the skill_provider if available
-                    get_instructions_fn = getattr(
-                        ctx.pool.skill_provider, "get_skill_instructions", None
-                    )
-                    if get_instructions_fn is not None:
-                        instructions = await get_instructions_fn(skill.name)
-                    else:
-                        instructions = ""
-                except Exception as e:  # noqa: BLE001
-                    return f"Failed to load skill instructions for {skill.name!r}: {e}"
-            else:
-                instructions = ""
+        # Full skill loading: instructions already populated by resolver.
         else:
-            instructions = skill.load_instructions()
+            instructions = skill.instructions
     else:
         try:
             loaded = await _load_visible_bare_skill(ctx, resolved.skill_name, requested_node_name)

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
+    from pathlib import PurePosixPath
 
     from agentpool.capabilities.change_event import ChangeEvent
 
@@ -32,12 +33,15 @@ class SkillEntry:
         description: Short human-readable description.
         uri: Canonical URI (e.g., ``"skill://ponytail/SKILL.md"``).
         source: Where the skill comes from — ``"local"`` or ``"remote"``.
+        skill_path: Real filesystem path for local skills (``UPath``) or
+            ``None`` for virtual/MCP skills.
     """
 
     name: str
     description: str = ""
     uri: str = ""
     source: str = "local"
+    skill_path: PurePosixPath | None = None
 
 
 @dataclass(frozen=True, slots=True)
