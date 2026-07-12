@@ -81,15 +81,23 @@ def _sanitize_session_id(session_id: str) -> str:
     """Sanitize session_id for safe use in filenames.
 
     Removes any characters that are not alphanumeric, hyphen, or
-    underscore to prevent path traversal attacks.
+    underscore to prevent path traversal attacks. Raises ``ValueError``
+    if the result is empty, which would indicate an invalid session ID.
 
     Args:
         session_id: The raw session identifier.
 
     Returns:
         A sanitized string safe for use in filenames.
+
+    Raises:
+        ValueError: If the sanitized result is empty.
     """
-    return "".join(c for c in session_id if c.isalnum() or c in ("-", "_"))
+    sanitized = "".join(c for c in session_id if c.isalnum() or c in ("-", "_"))
+    if not sanitized:
+        msg = f"session_id {session_id!r} sanitizes to empty string"
+        raise ValueError(msg)
+    return sanitized
 
 
 def create_dimensions(

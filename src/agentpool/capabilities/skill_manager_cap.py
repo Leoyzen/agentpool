@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import html
 import inspect
-import logging
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai.tools import AgentDepsT, RunContext
@@ -33,6 +32,7 @@ from agentpool.capabilities.resource_protocols import (
     SkillEntry,
     SkillResource,
 )
+from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from agentpool.skills.skill import Skill
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SkillManagerCap(

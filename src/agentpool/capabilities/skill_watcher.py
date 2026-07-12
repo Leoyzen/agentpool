@@ -10,7 +10,6 @@ If ``watchdog`` is not installed, the watcher is a no-op.
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -22,7 +21,9 @@ if TYPE_CHECKING:
     from agentpool.capabilities.change_event import ChangeEvent
 
 
-logger = logging.getLogger(__name__)
+from agentpool.log import get_logger
+
+logger = get_logger(__name__)
 
 DEBOUNCE_MS = 500
 """Debounce time in milliseconds before emitting a change event."""

@@ -10,7 +10,6 @@ Both implementations conform to the ``SnapshotStore`` Protocol defined in
 from __future__ import annotations
 
 import json
-import logging
 import sqlite3
 import threading
 from typing import TYPE_CHECKING, Any
@@ -22,7 +21,9 @@ if TYPE_CHECKING:
     from typing import Self
 
 
-logger = logging.getLogger(__name__)
+from agentpool.log import get_logger
+
+logger = get_logger(__name__)
 
 
 class MemorySnapshotStore:

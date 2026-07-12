@@ -113,6 +113,7 @@ class CombinedToolsetCapability(AbstractCapability[AgentDepsT]):
         self._capabilities: list[AbstractCapability[AgentDepsT]] = list(capabilities)
         self._name = name or self._derive_name()
         self._exit_stack: AsyncExitStack = AsyncExitStack()
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     def _derive_name(self) -> str:
         """Derive a name from child capability names."""
@@ -259,7 +260,12 @@ class CombinedToolsetCapability(AbstractCapability[AgentDepsT]):
             finally:
                 await queue.put(None)
 
-        tasks = [asyncio.create_task(_consume(gen)) for gen in generators]
+        tasks: list[asyncio.Task[None]] = []
+        for gen in generators:
+            task = asyncio.create_task(_consume(gen))
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+            tasks.append(task)
 
         finished_count = 0
         try:
