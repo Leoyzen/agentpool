@@ -130,12 +130,10 @@ class ResolvedSkillURI:
             path = path[1:]  # Remove leading slash
 
         # Flat URI: skill://my-skill — urlparse puts the name in netloc,
-        # leaving path completely empty (no slash). Treat netloc as the
-        # skill name with provider=None.  When path is "/" (provider-format
-        # with missing skill name like skill://local/), parsed.path is "/"
-        # which is non-empty, so this branch is skipped and the empty-path
-        # ValueError fires below.
-        if not path and not parsed.path and parsed.netloc:
+        # leaving path empty or just "/". Treat netloc as the skill name
+        # with provider=None. When path has actual content (e.g.
+        # skill://local/my-skill), this branch is skipped.
+        if not path and parsed.path in ("", "/") and parsed.netloc:
             skill_name = _validate_skill_name(unquote(parsed.netloc))
             return cls(provider=None, skill_name=skill_name, reference_path=None)
 
