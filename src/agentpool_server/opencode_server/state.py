@@ -88,6 +88,7 @@ class ServerState:
     auth_service: ProviderAuthService = field(default_factory=create_default_auth_service)
     skill_bridge: Any = field(default=None)
     command_store: CommandStore | None = field(default=None)
+    _skill_change_task: Any = field(default=None, repr=False)
     session_pool_integration: Any = field(default=None)
     session_controller: SessionController | None = field(default=None)
     event_bridge: Any = field(default=None, repr=False)

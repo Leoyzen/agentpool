@@ -147,29 +147,93 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
         from agentpool.skills.command import SkillCommand
         from agentpool_server.opencode_server.skill_bridge import OpenCodeSkillBridge
 
-        skill_cmds: list[SkillCommand] = []
-        for skill in state.pool.skills.list_skills():
-            if not skill.user_invocable:
-                continue
-            skill_cmds.append(
-                SkillCommand(
-                    name=skill.name,
-                    description=skill.description,
-                    skill=skill,
-                    skill_uri=f"skill://{skill.name}",
+        def _build_skill_commands() -> list[SkillCommand]:
+            """Build SkillCommand list from current pool skills."""
+            cmds: list[SkillCommand] = []
+            for skill in state.pool.skills.list_skills():
+                if not skill.user_invocable:
+                    continue
+                cmds.append(
+                    SkillCommand(
+                        name=skill.name,
+                        description=skill.description,
+                        skill=skill,
+                        skill_uri=f"skill://{skill.name}",
+                    )
                 )
-            )
+            return cmds
+
+        def _sync_command_store(
+            bridge: OpenCodeSkillBridge,
+            store: CommandStore,
+            cmds: list[SkillCommand],
+        ) -> None:
+            """Reconcile bridge and store with the latest skill commands."""
+            new_names = {cmd.name for cmd in cmds}
+            old_names = set(bridge._skill_cmds.keys())
+
+            # Remove stale commands.
+            for stale in old_names - new_names:
+                bridge.handle_change(stale, None)
+
+            # Add/update commands.
+            for cmd in cmds:
+                bridge.handle_change(cmd.name, cmd)
+
+            # Rebuild store commands.
+            store._commands.clear()
+            for slashed_cmd in bridge.get_commands():
+                store.register_command(slashed_cmd, replace=True)
 
         bridge = OpenCodeSkillBridge(skill_provider=state.pool.skill_provider)
-        for cmd in skill_cmds:
+        initial_cmds = _build_skill_commands()
+        for cmd in initial_cmds:
             bridge.handle_change(cmd.name, cmd)
 
         state.skill_bridge = bridge
         state.command_store = CommandStore(commands=bridge.get_commands())
         logger.debug(
             "OpenCode skill bridge setup complete",
-            command_count=len(skill_cmds),
+            command_count=len(initial_cmds),
         )
+
+        # Subscribe to ChangeEvent stream for dynamic skill updates.
+        # ExtensionRegistry.merge_change_streams() yields ChangeEvent with
+        # kind="skills_changed" when capabilities emit change notifications.
+        extension_registry = state.pool.extension_registry
+        if extension_registry is not None:
+            from agentpool.capabilities.extension_registry import (
+                Scope,
+                ScopeLevel,
+            )
+
+            async def _watch_skill_changes() -> None:
+                """Watch for skill change events and update CommandStore."""
+                stream = extension_registry.merge_change_streams(Scope(level=ScopeLevel.POOL))
+                if stream is None:
+                    return
+                async for event in stream:
+                    if event.kind != "skills_changed":
+                        continue
+                    logger.info("Skill change detected, rebuilding CommandStore")
+                    try:
+                        new_cmds = _build_skill_commands()
+                        if state.command_store is not None and state.skill_bridge is not None:
+                            _sync_command_store(
+                                state.skill_bridge,
+                                state.command_store,
+                                new_cmds,
+                            )
+                            logger.debug(
+                                "CommandStore rebuilt",
+                                command_count=len(new_cmds),
+                            )
+                    except Exception:
+                        logger.exception("Failed to rebuild CommandStore after skill change")
+
+            import asyncio
+
+            state._skill_change_task = asyncio.create_task(_watch_skill_changes())
 
     # Set up todo change callback to broadcast events
     async def on_todo_change(tracker: TodoTracker) -> None:
@@ -313,6 +377,10 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
         # Shutdown - clean up session pool integration first
         if state.session_pool_integration is not None:
             await state.session_pool_integration.shutdown()
+        # Cancel skill change watcher
+        if state._skill_change_task is not None:
+            state._skill_change_task.cancel()
+            state._skill_change_task = None
         # Then clean up background tasks
         await state.cleanup_tasks()
         # Then tear down watchers and shared infrastructure
