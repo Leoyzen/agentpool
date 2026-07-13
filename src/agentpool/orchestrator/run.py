@@ -229,8 +229,9 @@ class RunHandle:
         """Initialize default lifecycle dimensions.
 
         Any dimension left as ``None`` is populated with the default
-        in-process implementation. The journal is injected into the
-        CommChannel to ensure the channel can persist events.
+        in-process implementation. Both ``DirectChannel`` and
+        ``ProtocolChannel`` receive the journal via their constructor,
+        so no post-hoc journal injection is needed.
         """
         if self._journal is None:
             self._journal = MemoryJournal()
@@ -238,14 +239,6 @@ class RunHandle:
             self._snapshot_store = MemorySnapshotStore()
         if self._comm_channel is None:
             self._comm_channel = DirectChannel(self._journal)
-        else:
-            # Inject journal into existing CommChannel if not already set.
-            try:
-                existing_journal: Journal | None = self._comm_channel._journal  # type: ignore[attr-defined]
-            except AttributeError:
-                existing_journal = None
-            if existing_journal is None:
-                self._comm_channel._journal = self._journal  # type: ignore[attr-defined]
         if self._event_transport is None:
             self._event_transport = InProcessTransport()
         if self._trigger_source is None:
@@ -259,26 +252,6 @@ class RunHandle:
             ``True`` if the lifecycle state is ``RunState.RUNNING``.
         """
         return self._run_state == RunState.RUNNING
-
-    @property
-    def _channel_publishes_to_event_bus(self) -> bool:
-        """Whether the CommChannel publishes events to the EventBus itself.
-
-        ``ProtocolChannel`` calls ``event_bus.publish(session_id, event)``
-        inside its own ``publish()`` method. When this is the case,
-        ``start()`` must NOT also call ``event_bus.publish()`` directly
-        to avoid double-publishing.
-
-        ``DirectChannel`` does not publish to the EventBus, so the
-        direct call in ``start()`` is required.
-
-        Returns:
-            ``True`` if the CommChannel publishes to the EventBus
-            internally, ``False`` otherwise.
-        """
-        from agentpool.lifecycle.comm_channel import ProtocolChannel
-
-        return isinstance(self._comm_channel, ProtocolChannel)
 
     @property
     def recovered_tool_executions(self) -> list[Any]:
@@ -419,12 +392,12 @@ class RunHandle:
         if resume_result is not None:
             if resume_result.is_inflight:
                 # In-flight crash recovery: replay journaled events.
-                self._comm_channel._replaying = True
+                self._comm_channel.set_replaying(True)
                 try:
                     for event in resume_result.events:
                         await self._comm_channel.publish(event)
                 finally:
-                    self._comm_channel._replaying = False
+                    self._comm_channel.set_replaying(False)
                 self._recovered_inflight_turn_id = resume_result.inflight_turn_id
                 # Apply recovery strategy.
                 if self._recover_strategy == "retry":
@@ -552,7 +525,7 @@ class RunHandle:
                         if session is not None
                         else None,
                     )
-                    if not self._channel_publishes_to_event_bus:
+                    if not self._comm_channel.publishes_to_event_bus:
                         await event_bus.publish(self.session_id, run_started)
                     await self._comm_channel.publish(run_started)
 
@@ -597,7 +570,7 @@ class RunHandle:
                     turn_failed = False
                     try:
                         async for event in turn.execute():
-                            if not self._channel_publishes_to_event_bus:
+                            if not self._comm_channel.publishes_to_event_bus:
                                 await event_bus.publish(self.session_id, event)
                             await self._comm_channel.publish(event)
                             # Save assistant final message to conversation BEFORE
@@ -622,7 +595,7 @@ class RunHandle:
                             run_id=self.run_id,
                             agent_name=self.agent_type,
                         )
-                        if not self._channel_publishes_to_event_bus:
+                        if not self._comm_channel.publishes_to_event_bus:
                             await event_bus.publish(self.session_id, error_event)
                         await self._comm_channel.publish(error_event)
                         yield error_event
@@ -638,7 +611,7 @@ class RunHandle:
                             session_id=self.session_id,
                             exception=RuntimeError("Run cancelled"),
                         )
-                        if not self._channel_publishes_to_event_bus:
+                        if not self._comm_channel.publishes_to_event_bus:
                             await event_bus.publish(self.session_id, cancelled_event)
                         await self._comm_channel.publish(cancelled_event)
                         # Capture cancelled state BEFORE setting _turn_complete_event.
@@ -792,20 +765,18 @@ class RunHandle:
         if self._closing:
             return False
 
-        # ProtocolChannel feedback path (bidirectional channels only).
-        if self._comm_channel is not None and not isinstance(
-            self._comm_channel, DirectChannel
-        ):
+        # Try CommChannel feedback path (ProtocolChannel returns True).
+        if self._comm_channel is not None:
             feedback = Feedback(content=message, is_steer=True)
-            self._comm_channel.deliver_feedback(feedback)
-            # Always set _idle_event when delivering via ProtocolChannel.
-            # If the loop is running, the event is cleared when entering
-            # idle, and the loop then drains CommChannel feedback. If the
-            # loop is transitioning to idle (e.g., after cancel), the
-            # event prevents blocking on _idle_event.wait() when the
-            # feedback is already in the CommChannel queue.
-            self._idle_event.set()
-            return True
+            if self._comm_channel.deliver_feedback(feedback):
+                # Always set _idle_event when delivering via ProtocolChannel.
+                # If the loop is running, the event is cleared when entering
+                # idle, and the loop then drains CommChannel feedback. If the
+                # loop is transitioning to idle (e.g., after cancel), the
+                # event prevents blocking on _idle_event.wait() when the
+                # feedback is already in the CommChannel queue.
+                self._idle_event.set()
+                return True
 
         # Fallback: DirectChannel path (existing logic).
         if self._run_state == RunState.IDLE:
@@ -836,15 +807,13 @@ class RunHandle:
         if self._closing:
             return False
 
-        # ProtocolChannel feedback path (bidirectional channels only).
-        if self._comm_channel is not None and not isinstance(
-            self._comm_channel, DirectChannel
-        ):
+        # Try CommChannel feedback path (ProtocolChannel returns True).
+        if self._comm_channel is not None:
             feedback = Feedback(content=message, is_steer=False)
-            self._comm_channel.deliver_feedback(feedback)
-            # Always set _idle_event (see steer() for rationale).
-            self._idle_event.set()
-            return True
+            if self._comm_channel.deliver_feedback(feedback):
+                # Always set _idle_event (see steer() for rationale).
+                self._idle_event.set()
+                return True
 
         # Fallback: DirectChannel path (existing logic).
         self._message_queue.append(message)

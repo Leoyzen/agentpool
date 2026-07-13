@@ -27,7 +27,6 @@ pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
 def test_checkpointed_status_exists() -> None:
     """RunOutcome.CHECKPOINTED must be a member of the enum."""
-    assert hasattr(RunOutcome, "checkpointed")
     assert RunOutcome.CHECKPOINTED is not None
     assert isinstance(RunOutcome.CHECKPOINTED, RunOutcome)
 
@@ -48,7 +47,6 @@ def test_checkpointed_is_distinct() -> None:
 def test_checkpoint_method_exists() -> None:
     """RunHandle must have a checkpoint() method."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
-    assert hasattr(handle, "checkpoint")
     assert callable(handle.checkpoint)
 
 
@@ -155,7 +153,7 @@ async def test_session_controller_skips_fail_on_checkpointed() -> None:
     """SessionController must skip fail() when RunHandle is checkpointed.
 
     This tests the guard in ``_run_turn_unlocked`` that checks
-    ``run_handle.status not in (RunOutcome.COMPLETED, RunOutcome.FAILED,
+    ``run_handle.outcome not in (RunOutcome.COMPLETED, RunOutcome.FAILED,
     RunOutcome.CHECKPOINTED)`` before calling ``run_handle.fail()``.
     """
     from agentpool import AgentsManifest
@@ -176,11 +174,11 @@ async def test_session_controller_skips_fail_on_checkpointed() -> None:
 
     # Simulate the guard in _run_turn_unlocked's except block
     # (line ~1354-1358 in core.py):
-    #   if run_handle.status not in (RunOutcome.COMPLETED, RunOutcome.FAILED):
+    #   if run_handle.outcome not in (RunOutcome.COMPLETED, RunOutcome.FAILED):
     #       run_handle.fail(...)
-    should_skip = handle.status in (RunOutcome.COMPLETED, RunOutcome.FAILED)
+    should_skip = handle.outcome in (RunOutcome.COMPLETED, RunOutcome.FAILED)
     # With RunOutcome.CHECKPOINTED added to the exclusion, fail() should NOT be called
-    should_fail = handle.status not in (
+    should_fail = handle.outcome not in (
         RunOutcome.COMPLETED,
         RunOutcome.FAILED,
         RunOutcome.CHECKPOINTED,
@@ -193,15 +191,15 @@ async def test_run_loop_finally_skips_complete_on_checkpointed() -> None:
     """Run loop must NOT call complete() when RunHandle is checkpointed.
 
     This tests the guard in ``_run_turn_unlocked``'s finally block that checks
-    ``run_handle.status not in (RunOutcome.COMPLETED, RunOutcome.FAILED)``
+    ``run_handle.outcome not in (RunOutcome.COMPLETED, RunOutcome.FAILED)``
     before calling ``run_handle.complete()``.
     """
     # The finally block logic is:
-    #   if run_handle.status not in (RunOutcome.COMPLETED, RunOutcome.FAILED):
+    #   if run_handle.outcome not in (RunOutcome.COMPLETED, RunOutcome.FAILED):
     #       run_handle.complete()
     #
     # When checkpointed, this guard should ALSO skip complete():
-    #   if run_handle.status not in (RunOutcome.COMPLETED, RunOutcome.FAILED, RunOutcome.CHECKPOINTED):
+    #   if run_handle.outcome not in (RunOutcome.COMPLETED, RunOutcome.FAILED, RunOutcome.CHECKPOINTED):
     #       if run_ctx.checkpointed:
     #           run_handle.checkpoint()
     #       else:
@@ -218,8 +216,8 @@ async def test_run_loop_finally_skips_complete_on_checkpointed() -> None:
 
     # If the guard only checks (completed, failed), it would call complete()
     # and change the status. Verify the guard must include checkpointed:
-    guard_ok = handle.status in (RunOutcome.COMPLETED, RunOutcome.FAILED)
-    guard_with_checkpointed = handle.status in (
+    guard_ok = handle.outcome in (RunOutcome.COMPLETED, RunOutcome.FAILED)
+    guard_with_checkpointed = handle.outcome in (
         RunOutcome.COMPLETED,
         RunOutcome.FAILED,
         RunOutcome.CHECKPOINTED,
