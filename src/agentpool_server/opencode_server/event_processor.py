@@ -674,8 +674,10 @@ class EventProcessor:
             if existing is not None:
                 existing_title = _extract_title_from_tool_state(existing.state)
                 current_input = ctx.get_tool_input(tool_call_id) or {}
-                if event_tool_input and event_tool_input != current_input:
-                    ctx.set_tool_input(tool_call_id, _convert_params_for_ui(event_tool_input))
+                if event_tool_input:
+                    ui_input = _convert_params_for_ui(event_tool_input)
+                    if ui_input != current_input:
+                        ctx.set_tool_input(tool_call_id, ui_input)
                 tool_input = ctx.get_tool_input(tool_call_id) or {}
                 accumulated_output = ctx.get_tool_output(tool_call_id)
                 tool_state = ToolStateRunning(
