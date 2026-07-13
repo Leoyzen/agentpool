@@ -42,9 +42,14 @@ from agentpool_server.opencode_server.models import (
     PartDeltaEvent,
     PartUpdatedEvent,
     SessionErrorEvent,
+    SessionStatusEvent,
     TokenCache,
     Tokens,
 )
+
+# Cross-layer import: McpToolsChangedEvent is an OpenCode SSE event that
+# EventProcessor creates from core-layer ChangeEvent(kind="tools_changed").
+from agentpool_server.opencode_server.models.events import McpToolsChangedEvent
 from agentpool_server.opencode_server.models.parts import (
     ReasoningPart,
     StepFinishPart,
@@ -87,6 +92,23 @@ class EventProcessor:
 
     def __init__(self) -> None:
         """Initialize the event processor."""
+
+    @staticmethod
+    def create_mcp_tools_changed_event(server: str) -> McpToolsChangedEvent:
+        """Create an McpToolsChangedEvent for tool list refresh notification.
+
+        Called by the server's ``_watch_mcp_tool_changes`` task when a
+        ``ChangeEvent(kind="tools_changed")`` is received from
+        ``McpServerCap.on_change()``. The resulting event is broadcast
+        to connected OpenCode clients so they can refresh their tool lists.
+
+        Args:
+            server: Name of the MCP server whose tools changed.
+
+        Returns:
+            ``McpToolsChangedEvent`` ready for broadcasting.
+        """
+        return McpToolsChangedEvent.create(server=server)
 
     async def process(
         self,
@@ -186,9 +208,14 @@ class EventProcessor:
                 for e in self._process_tool_complete(ctx, tool_call_id, result, event_metadata):
                     yield e
 
-            case StreamCompleteEvent(message=msg) if msg:
+            case StreamCompleteEvent(message=msg, cancelled=cancelled) if msg:
                 for e in self._process_stream_complete(ctx, msg):
                     yield e
+                status: str = "cancelled" if cancelled else "idle"
+                yield SessionStatusEvent.create(
+                    session_id=ctx.session_id,
+                    status_type=status,
+                )
 
             case RunErrorEvent() as run_error_event:
                 yield SessionErrorEvent.create(

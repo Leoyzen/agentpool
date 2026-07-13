@@ -848,10 +848,14 @@ class McpToolsChangedProperties(OpenCodeBaseModel):
 
 
 class McpToolsChangedEvent(OpenCodeBaseModel):
-    """MCP tools changed event - emitted when an MCP server's tool list changes.
+    """MCP tools changed event — emitted when an MCP server's tool list changes.
 
-    TODO: Hook into MCP SDK's ToolListChangedNotification to emit this event.
-    OpenCode only emits this from the notification handler, not on connect/disconnect.
+    Wired via: ``McpServerCap._on_tools_changed()`` → ``ChangeEvent(kind="tools_changed")``
+    → ``ExtensionRegistry.merge_change_streams()`` → ``server._watch_mcp_tool_changes()``
+    → ``EventProcessor.create_mcp_tools_changed_event()`` → ``state.broadcast_event()``.
+
+    The ``ChangeEvent`` (core capability layer) is converted to this OpenCode SSE event
+    by the server layer, keeping the event type in OpenCode server models only.
     """
 
     type: Literal["mcp.tools.changed"] = Field(default="mcp.tools.changed", init=False)

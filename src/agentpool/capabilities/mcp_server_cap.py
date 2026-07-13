@@ -160,6 +160,10 @@ class McpServerCap(
 
             # Success — set up change notification callbacks.
             async def _on_tools_changed() -> None:
+                # Cross-layer wiring: this ChangeEvent(kind="tools_changed") is
+                # consumed by the OpenCode server's _watch_mcp_tool_changes task
+                # (server.py) which converts it to McpToolsChangedEvent and
+                # broadcasts it as an SSE event to connected clients.
                 event = ChangeEvent(
                     capability_name=self._name,
                     kind="tools_changed",

@@ -13,7 +13,7 @@ from agentpool_server.opencode_server.models.common import (  # noqa: TC001
 )
 
 
-SessionStatusType = Literal["idle", "busy", "retry"]
+SessionStatusType = Literal["idle", "busy", "retry", "cancelled"]
 TodoStatus = Literal["pending", "in_progress", "completed"]
 TodoPriority = Literal["high", "medium", "low"]
 

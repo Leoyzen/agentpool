@@ -137,6 +137,35 @@ The `try/except AttributeError` pattern for `deliver_feedback` was needed becaus
 - Pattern follows T10's `deliver_feedback` approach: add to protocol, implement in both classes, replace caller checks.
 - Pre-existing test failures (unrelated): `test_acp_turn_prompt_error_yields_run_error_event` (ACP connection refused) and `test_role_swap_success` (ACP server test) — both fail on base branch.
 
+## T20: Wire McpToolsChangedEvent emission and handling
+
+### Architecture
+The wiring follows the existing `_watch_skill_changes` pattern in `server.py`:
+1. `McpServerCap._on_tools_changed()` (core capability layer) emits `ChangeEvent(kind="tools_changed")` via `on_change()` stream
+2. `ExtensionRegistry.merge_change_streams()` merges all capability change streams
+3. `server._watch_mcp_tool_changes()` (OpenCode server layer) subscribes to the merged stream, filters for `kind="tools_changed"`, and calls `EventProcessor.create_mcp_tools_changed_event()` to convert to `McpToolsChangedEvent`
+4. The `McpToolsChangedEvent` is broadcast via `state.broadcast_event()` as an SSE event to connected clients
+
+### Files modified
+- **`src/agentpool/capabilities/mcp_server_cap.py`**: Added cross-layer wiring comment on `_on_tools_changed()` callback documenting the ChangeEvent → McpToolsChangedEvent conversion path.
+- **`src/agentpool_server/opencode_server/models/events.py`**: Updated `McpToolsChangedEvent` docstring — removed TODO, documented the full wiring path.
+- **`src/agentpool_server/opencode_server/event_processor.py`**: Added `create_mcp_tools_changed_event(server: str)` static method and `McpToolsChangedEvent` import.
+- **`src/agentpool_server/opencode_server/server.py`**: Added `_watch_mcp_tool_changes()` async task (parallel to `_watch_skill_changes()`) that subscribes to the merged change stream and broadcasts `McpToolsChangedEvent`. Added cleanup in the lifespan shutdown.
+- **`src/agentpool_server/opencode_server/state.py`**: Added `_mcp_tool_change_task` field to `ServerState`.
+- **`tests/servers/opencode_server/test_event_processor.py`**: Added `test_create_mcp_tools_changed_event` (unit test) and `test_mcp_tools_changed_event_from_change_event` (integration test verifying the ChangeEvent → McpToolsChangedEvent flow).
+
+### Key design decisions
+- The `McpToolsChangedEvent` stays in OpenCode server models (not promoted to core events), as required.
+- The `EventProcessor` doesn't process `McpToolsChangedEvent` as an input (it only handles `RichAgentStreamEvent`). Instead, `create_mcp_tools_changed_event()` is a factory method that the server's watcher task calls.
+- The watcher reuses the same `extension_registry.merge_change_streams()` call as `_watch_skill_changes()`, consuming the same merged stream but filtering for `kind="tools_changed"`.
+- Pre-existing ruff error: `F821 Undefined name 'SessionStatusEvent'` at line 213 of `event_processor.py` — this is from T18.3's changes (StreamCompleteEvent cancelled handling), not from T20.
+
+### Pre-existing test failures (NOT caused by T20)
+- `test_stream_complete_emits_idle_status` and `test_stream_complete_emits_cancelled_status` — from T18.3's `SessionStatusEvent` usage without import
+- `test_model_switch_targets_per_session_agent`, `test_model_switch_affects_only_target_session`, `test_other_sessions_retain_original_model` — model switching tests
+- `test_background_task_inject_prompt_wakes_lead_agent` — subagent completion test
+- `test_child_done_events_items_wrapped_with_list` — flaky under parallel execution, passes in isolation
+
 ## T9: Remove _mcp_snapshot and _session_connection_pool from NativeAgent
 
 ### Summary
@@ -181,3 +210,15 @@ Decomposed `RunHandle.start()` (~397 SLOC) into 5 composable sub-methods, each <
 - `grep -n 'PLR0915' src/agentpool/orchestrator/run.py` — 0 matches
 - `uv run ruff check src/agentpool/orchestrator/run.py` — All checks passed
 - `uv run pytest tests/orchestrator/ tests/lifecycle/ -x -q` — 793 passed, 10 deselected
+
+## Task T22: Remove deprecated stream_adapter._handle_event
+
+### What was done
+- Removed `OpenCodeStreamAdapter._handle_event()` method (lines 213-226) from `stream_adapter.py`. This was a deprecated backward-compat shim that delegated to `self.processor.process(event, self.main_context)` without StepFinishPart tracking.
+- Updated `tests/servers/opencode_server/test_reasoning.py` (5 tests) to use `EventProcessor` + `EventProcessorContext` directly instead of going through `OpenCodeStreamAdapter._handle_event`.
+- The `stream_adapter.py` file was NOT deleted — it still has active functionality: `OpenCodeStreamAdapter` class with `process_stream()`, `convert_event()`, `finalize()`, and property accessors.
+
+### Key finding
+- `_handle_event` was functionally identical to `convert_event` except it lacked StepFinishPart tracking. Tests didn't rely on that difference.
+- Tests now create `EventProcessor` and `EventProcessorContext` directly via helper `_make_processor_and_ctx()`, eliminating the need for the full `OpenCodeStreamAdapter` in test setup.
+- Pre-existing test failures in the worktree (`test_model_switch_targets_per_session_agent` — NameError, `test_child_done_events_items_wrapped_with_list`) are unrelated to this change.

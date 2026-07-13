@@ -89,6 +89,7 @@ class ServerState:
     skill_bridge: Any = field(default=None)
     command_store: CommandStore | None = field(default=None)
     _skill_change_task: Any = field(default=None, repr=False)
+    _mcp_tool_change_task: Any = field(default=None, repr=False)
     session_pool_integration: Any = field(default=None)
     session_controller: SessionController | None = field(default=None)
     event_bridge: Any = field(default=None, repr=False)

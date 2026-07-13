@@ -234,6 +234,37 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
 
             state._skill_change_task = asyncio.create_task(_watch_skill_changes())
 
+            # Watch for MCP tool list changes and broadcast McpToolsChangedEvent.
+            # McpServerCap.on_change() yields ChangeEvent(kind="tools_changed")
+            # when an MCP server's tool list changes (via notifications/tools/list_changed).
+            # This watcher converts that to McpToolsChangedEvent and broadcasts it
+            # so connected OpenCode clients can refresh their tool lists.
+            from agentpool_server.opencode_server.event_processor import EventProcessor
+
+            processor = EventProcessor()
+
+            async def _watch_mcp_tool_changes() -> None:
+                """Watch for MCP tool change events and broadcast notifications."""
+                stream = extension_registry.merge_change_streams(Scope(level=ScopeLevel.POOL))
+                if stream is None:
+                    return
+                async for event in stream:
+                    if event.kind != "tools_changed":
+                        continue
+                    logger.info(
+                        "MCP tools changed, broadcasting notification",
+                        server=event.capability_name,
+                    )
+                    try:
+                        oc_event = processor.create_mcp_tools_changed_event(
+                            server=event.capability_name,
+                        )
+                        await state.broadcast_event(oc_event)
+                    except Exception:
+                        logger.exception("Failed to broadcast McpToolsChangedEvent")
+
+            state._mcp_tool_change_task = asyncio.create_task(_watch_mcp_tool_changes())
+
     # Set up todo change callback to broadcast events
     async def on_todo_change(tracker: TodoTracker) -> None:
         """Broadcast todo updates to all active sessions."""
@@ -386,6 +417,16 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
             except Exception:
                 logger.exception("Error during skill change task cleanup")
             state._skill_change_task = None
+        # Cancel MCP tool change watcher
+        if state._mcp_tool_change_task is not None:
+            state._mcp_tool_change_task.cancel()
+            try:
+                await state._mcp_tool_change_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Error during MCP tool change task cleanup")
+            state._mcp_tool_change_task = None
         # Then clean up background tasks
         await state.cleanup_tasks()
         # Then tear down watchers and shared infrastructure
