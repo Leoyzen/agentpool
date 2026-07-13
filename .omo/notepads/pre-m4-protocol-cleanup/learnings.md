@@ -222,3 +222,15 @@ Decomposed `RunHandle.start()` (~397 SLOC) into 5 composable sub-methods, each <
 - `_handle_event` was functionally identical to `convert_event` except it lacked StepFinishPart tracking. Tests didn't rely on that difference.
 - Tests now create `EventProcessor` and `EventProcessorContext` directly via helper `_make_processor_and_ctx()`, eliminating the need for the full `OpenCodeStreamAdapter` in test setup.
 - Pre-existing test failures in the worktree (`test_model_switch_targets_per_session_agent` — NameError, `test_child_done_events_items_wrapped_with_list`) are unrelated to this change.
+
+## Task 21: Distinguish StreamCompleteEvent cancellation in EventProcessor
+
+### Changes
+- `event_processor.py`: `StreamCompleteEvent` handler now captures `cancelled` field and emits `SessionStatusEvent(status="cancelled")` for cancelled runs, `SessionStatusEvent(status="idle")` for completed runs.
+- `models/session.py`: Added `"cancelled"` to `SessionStatusType` Literal (was `Literal["idle", "busy", "retry"]`).
+- `test_event_processor.py`: Added `test_stream_complete_emits_idle_status` and `test_stream_complete_emits_cancelled_status` tests.
+
+### Key finding
+- `StreamCompleteEvent.cancelled` field already existed (default `False`) but `EventProcessor` ignored it, treating all completions the same.
+- `SessionStatusType` needed extending to include `"cancelled"` — this is a model-level change but necessary for the feature.
+- Pre-existing test failures (`test_model_switch_targets_per_session_agent`, `test_model_switch_affects_only_target_session`, `test_background_task_inject_prompt_wakes_lead_agent`) are unrelated to this change.
