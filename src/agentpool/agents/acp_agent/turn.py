@@ -13,6 +13,9 @@ import time
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
+from pydantic import ValidationError
+
+from acp.exceptions import RequestError
 from agentpool.agents.events import (
     RunErrorEvent,
     StreamCompleteEvent,
@@ -177,7 +180,7 @@ class ACPTurn(HookAwareTurn, Turn):
                 response = await self._acp_client.prompt(self._session_id, content)
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except (RequestError, ConnectionError, ValidationError) as exc:
                 yield RunErrorEvent(
                     message=str(exc),
                     run_id=run_id,
@@ -218,7 +221,7 @@ class ACPTurn(HookAwareTurn, Turn):
                         yield native_event
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except (RequestError, ConnectionError, RuntimeError, ValueError) as exc:
                 yield RunErrorEvent(
                     message=str(exc),
                     run_id=run_id,
@@ -231,7 +234,7 @@ class ACPTurn(HookAwareTurn, Turn):
                 raw_updates = await self._acp_client.get_messages(self._session_id)
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except (RequestError, ConnectionError, ValidationError) as exc:
                 yield RunErrorEvent(
                     message=str(exc),
                     run_id=run_id,
