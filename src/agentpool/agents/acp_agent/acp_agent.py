@@ -34,7 +34,7 @@ from dataclasses import replace
 from datetime import datetime
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 import uuid
 
 import anyio
@@ -453,7 +453,8 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             self.log.debug("Forked session", parent=self._sdk_session_id, fork=acp_session_id)
 
         # Create ACPTurn and delegate to execute()
-        _acp_client: ACPClientProtocol = cast(ACPClientProtocol, self._api)
+        assert self._api is not None
+        _acp_client: ACPClientProtocol = self._api
         turn = ACPTurn(
             acp_client=_acp_client,
             prompts=prompts,
@@ -596,7 +597,8 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         Returns:
             An ACPTurn instance for single-cycle execution.
         """
-        _acp_client: ACPClientProtocol = cast(ACPClientProtocol, self._api)
+        assert self._api is not None
+        _acp_client: ACPClientProtocol = self._api
         return ACPTurn(
             acp_client=_acp_client,
             prompts=prompts,

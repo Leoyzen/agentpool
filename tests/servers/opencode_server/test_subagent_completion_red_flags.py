@@ -113,6 +113,6 @@ async def test_background_task_inject_prompt_wakes_lead_agent(
     )
 
     # Verify the fallback path for shared agents (no fixed session_id)
-    assert "agent_pool" in source, (
-        "inject_prompt must check agent_pool as fallback for shared agents"
+    assert "find_sessions_by_agent_name" in source, (
+        "inject_prompt must use find_sessions_by_agent_name as fallback for shared agents"
     )
