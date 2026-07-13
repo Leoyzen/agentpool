@@ -398,6 +398,12 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                     return
 
         try:
+            # Restart event consumer before resume — the original consumer
+            # stopped after the turn ended (StreamCompleteEvent → consumer
+            # loop exit → _after_consumer_loop cleanup). Without this, events
+            # from the resumed agent run are published to EventBus but nobody
+            # is listening, so the ACP client never receives them.
+            await self.start_event_consumer(session_id)
             await session_pool.resume_session(
                 session_id,
                 deferred_tool_results={},

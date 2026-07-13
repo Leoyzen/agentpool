@@ -259,8 +259,8 @@ class NativeTurn(HookAwareTurn, Turn):
                     self._message_history = agent_run.all_messages()
                     logger.info("After while loop — building final message")
 
-            except RunAbortedError:
-                logger.info("RunAbortedError caught")
+            except RunAbortedError as exc:
+                logger.info("RunAbortedError caught", reason=str(exc))
                 if agent_run is not None:
                     try:
                         self._message_history = agent_run.all_messages()
@@ -268,6 +268,28 @@ class NativeTurn(HookAwareTurn, Turn):
                         logger.debug(
                             "Could not retrieve agent_run messages after RunAbortedError",
                         )
+                # Build a minimal final message so turn.final_message is
+                # accessible to callers (e.g. for partial output preservation).
+                self._final_message = ChatMessage(
+                    content="",
+                    role="assistant",
+                    name=self._agent.name,
+                    message_id=self._message_id,
+                    session_id=self._run_ctx.session_id,
+                    parent_id=self._parent_id,
+                    messages=self._message_history or [],
+                )
+                # Yield RunErrorEvent, NOT StreamCompleteEvent —
+                # StreamCompleteEvent makes the ACP client think the turn
+                # completed normally (stop_reason="end_turn"), causing it to
+                # create a new session instead of waiting for the user's
+                # elicitation response.
+                yield RunErrorEvent(
+                    message=str(exc),
+                    agent_name=self._agent.name,
+                    run_id=self._run_ctx.run_id,
+                )
+                return
 
             except UndrainedPendingMessagesError as exc:
                 logger.info("UndrainedPendingMessagesError caught", error=str(exc))

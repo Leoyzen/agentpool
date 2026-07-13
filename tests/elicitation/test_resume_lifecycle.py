@@ -344,3 +344,83 @@ async def test_stream_complete_via_run_handle_event_bus() -> None:
             "after future resolution. "
             f"Events received: {[type(e).__name__ for e in received_events]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Bug 11: Elicitation timeout should yield RunErrorEvent, not StreamCompleteEvent
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_elicitation_timeout_yields_run_error_not_stream_complete() -> None:
+    """RunAbortedError from elicitation timeout yields RunErrorEvent, not StreamCompleteEvent.
+
+    When the elicitation timeout fires, handle_elicitation() raises
+    RunAbortedError. NativeTurn catches it but currently falls through to
+    yield StreamCompleteEvent — which makes the ACP client think the turn
+    completed normally (stop_reason="end_turn"). The client then creates a
+    new session instead of waiting for the user's elicitation response.
+
+    Expected behavior: yield RunErrorEvent with a clear "elicitation timed
+    out" message so the client knows the turn was interrupted, not completed.
+    """
+    from agentpool.agents.events.events import RunErrorEvent
+
+    agent = _make_agent()
+
+    async with agent:
+        run_ctx = AgentRunContext(session_id="test-timeout-error")
+        run_ctx.elicitation_timeout = 0.1  # 100ms timeout
+
+        turn = NativeTurn(
+            agent=agent,
+            prompts=["Call the elicit tool"],
+            run_ctx=run_ctx,
+            message_history=[],
+        )
+
+        events: list[RichAgentStreamEvent[Any]] = []
+
+        async def collect_events() -> None:
+            async for event in turn.execute():
+                events.append(event)  # noqa: PERF401
+
+        collector = asyncio.create_task(collect_events())
+
+        # Wait for the elicitation future to be registered (registry is
+        # set by get_agentlet() inside NativeTurn.execute()).
+        while not collector.done():
+            registry = run_ctx.elicitation_registry
+            if registry is not None and len(registry) > 0:
+                break
+            await asyncio.sleep(0.01)
+
+        # Wait for the turn to complete (timeout should fire quickly).
+        try:
+            await asyncio.wait_for(collector, timeout=10.0)
+        except TimeoutError:
+            collector.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await collector
+            pytest.fail(
+                "Turn did not complete within 10s. "
+                f"Events: {[type(e).__name__ for e in events]}"
+            )
+
+        # Assert: RunErrorEvent should be yielded, NOT StreamCompleteEvent.
+        stream_complete_events = [e for e in events if isinstance(e, StreamCompleteEvent)]
+        run_error_events = [e for e in events if isinstance(e, RunErrorEvent)]
+
+        assert len(stream_complete_events) == 0, (
+            "StreamCompleteEvent should NOT be yielded on elicitation timeout. "
+            "This makes the ACP client think the turn completed normally. "
+            f"Events: {[type(e).__name__ for e in events]}"
+        )
+        assert len(run_error_events) >= 1, (
+            "RunErrorEvent should be yielded on elicitation timeout. "
+            f"Events: {[type(e).__name__ for e in events]}"
+        )
+        assert "elicitation" in run_error_events[0].message.lower() or "timeout" in run_error_events[0].message.lower(), (
+            f"RunErrorEvent message should mention elicitation/timeout, got: {run_error_events[0].message}"
+        )
