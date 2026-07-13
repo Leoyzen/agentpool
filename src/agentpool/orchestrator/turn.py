@@ -91,17 +91,35 @@ class HookAwareTurn:
     - Implement the three abstract properties: :attr:`_hook_env`,
       :attr:`_hook_agent_name`, and :attr:`_hook_prompt`.
 
-    All methods are no-ops when ``self._hooks`` is ``None``. The
-    ``hooks_fired`` set on :attr:`_run_ctx` prevents double-firing when both
-    the old (capability-based) and new (mixin-based) code paths are active
-    during migration.
+    All methods are no-ops when ``self._hooks`` is ``None``.
+
+    Tool execution logging idempotency is tracked via :attr:`_logged_tools`,
+    a per-Turn-instance set. A new Turn is created for each turn, so the set
+    does not need cross-turn reset.
     """
 
     _hooks: AgentHooks | None
     """Hooks container, set by host class ``__init__``. ``None`` = no hooks."""
 
     _run_ctx: AgentRunContext
-    """Per-run context, set by host class ``__init__``. Provides ``hooks_fired``."""
+    """Per-run context, set by host class ``__init__``."""
+
+    _logged_tools: set[str]
+    """Per-Turn set of tool log keys already logged to the journal.
+
+    This Turn instance is not reused across turns — _logged_tools does not
+    need reset. If Turn instances are ever reused (e.g., for retry), add a
+    ``reset()`` method to clear this set.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the HookAwareTurn mixin.
+
+        Host classes must call ``super().__init__()`` in their own
+        ``__init__`` to ensure ``_logged_tools`` is initialized.
+        """
+        super().__init__()
+        self._logged_tools: set[str] = set()
 
     @property
     @abstractmethod
@@ -134,9 +152,6 @@ class HookAwareTurn:
         """
         if self._hooks is None:
             return None
-        if "pre_turn" in self._run_ctx.hooks_fired:
-            return None
-        self._run_ctx.hooks_fired.add("pre_turn")
         return await self._hooks.run_pre_turn_hooks(
             agent_name=self._hook_agent_name,
             prompt=self._hook_prompt,
@@ -164,9 +179,6 @@ class HookAwareTurn:
         """
         if self._hooks is None:
             return None
-        if "post_turn" in self._run_ctx.hooks_fired:
-            return None
-        self._run_ctx.hooks_fired.add("post_turn")
         return await self._hooks.run_post_turn_hooks(
             agent_name=self._hook_agent_name,
             prompt=self._hook_prompt,
@@ -195,13 +207,6 @@ class HookAwareTurn:
         """
         if self._hooks is None:
             return None
-        if tool_call_id is not None:
-            guard_key = f"pre_tool_use:{tool_call_id}"
-        else:
-            guard_key = f"pre_tool_use:{tool_name}"
-        if guard_key in self._run_ctx.hooks_fired:
-            return None
-        self._run_ctx.hooks_fired.add(guard_key)
         return await self._hooks.run_pre_tool_hooks(
             agent_name=self._hook_agent_name,
             tool_name=tool_name,
@@ -220,9 +225,8 @@ class HookAwareTurn:
         """Log a tool execution record to the journal for crash recovery.
 
         Creates a :class:`ToolExecutionRecord` and stores it via
-        ``journal.log_tool_execution()``. Uses a separate guard key
-        (``"tool_log:{tool_call_id}"``) to prevent double-logging when
-        both old and new code paths are active.
+        ``journal.log_tool_execution()``. Uses :attr:`_logged_tools` to
+        prevent double-logging within a single Turn instance.
 
         Skips silently if any of the following are missing:
         - ``run_ctx._run_handle`` (not running inside a pooled session)
@@ -237,14 +241,16 @@ class HookAwareTurn:
         """
         from agentpool.lifecycle.types import ToolExecutionRecord
 
-        # Separate guard to prevent double-logging.
+        # Per-Turn idempotency guard using _logged_tools set.
+        # This Turn instance is not reused across turns — _logged_tools
+        # does not need reset.
         if tool_call_id is not None:
-            log_guard = f"tool_log:{tool_call_id}"
+            log_key = f"tool_log:{tool_call_id}"
         else:
-            log_guard = f"tool_log:{tool_name}"
-        if log_guard in self._run_ctx.hooks_fired:
+            log_key = f"tool_log:{tool_name}"
+        if log_key in self._logged_tools:
             return
-        self._run_ctx.hooks_fired.add(log_guard)
+        self._logged_tools.add(log_key)
 
         run_handle = self._run_ctx._run_handle
         if run_handle is None:
@@ -293,13 +299,6 @@ class HookAwareTurn:
 
         if self._hooks is None:
             return None
-        if tool_call_id is not None:
-            guard_key = f"post_tool_use:{tool_call_id}"
-        else:
-            guard_key = f"post_tool_use:{tool_name}"
-        if guard_key in self._run_ctx.hooks_fired:
-            return None
-        self._run_ctx.hooks_fired.add(guard_key)
         return await self._hooks.run_post_tool_hooks(
             agent_name=self._hook_agent_name,
             tool_name=tool_name,

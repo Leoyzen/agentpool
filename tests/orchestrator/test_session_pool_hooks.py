@@ -5,7 +5,8 @@ when going through SessionPool (RunHandle.start() → turn.execute()).
 
 The test verifies:
 1. Hooks fire when going through RunHandle.start() (the SessionPool path)
-2. hooks_fired is cleared between turns so turn 2 hooks still fire
+2. Hooks fire in turn 2 without needing to clear any per-turn state
+   (new Turn instances have fresh _logged_tools sets)
 """
 
 from __future__ import annotations
@@ -129,13 +130,11 @@ async def test_hooks_fire_through_run_handle_start() -> None:
 async def test_hooks_fired_cleared_between_turns() -> None:
     """Given two sequential turns, turn 2 hooks still fire.
 
-    RunHandle.start() clears hooks_fired at the start of each turn.
-    Without this, turn 1's 'pre_turn' guard key would block turn 2's
-    pre_turn from firing.
-
-    This test runs turn 1 through RunHandle.start(), then manually
-    creates a second turn with the same run_ctx (after clearing
-    hooks_fired) to verify hooks fire again.
+    Previously, ``hooks_fired`` on ``AgentRunContext`` needed to be cleared
+    between turns to prevent turn 1's guard keys from blocking turn 2. With
+    the ``hooks_fired`` guard removed (replaced by per-Turn ``_logged_tools``
+    set), a new Turn instance is created for each turn with a fresh set,
+    so no explicit clearing is needed.
     """
     _reset_calls()
     hooks = AgentHooks(
@@ -167,10 +166,8 @@ async def test_hooks_fired_cleared_between_turns() -> None:
     pre_turn_count = sum(1 for name, _ in hook_calls if name == "pre_turn")
     assert pre_turn_count == 1, "pre_turn must fire in turn 1"
 
-    # Simulate RunHandle.start() clearing hooks_fired for turn 2
-    run_ctx.hooks_fired.clear()
-
-    # Turn 2: Create a new turn manually with the same run_ctx
+    # Turn 2: Create a new turn manually with the same run_ctx.
+    # No hooks_fired.clear() needed — new Turn has fresh _logged_tools.
     from agentpool.agents.native_agent.turn import NativeTurn
 
     turn = NativeTurn(
@@ -183,7 +180,7 @@ async def test_hooks_fired_cleared_between_turns() -> None:
     _ = [event async for event in turn.execute()]
 
     pre_turn_count = sum(1 for name, _ in hook_calls if name == "pre_turn")
-    assert pre_turn_count == 2, "pre_turn must fire again in turn 2 after clearing hooks_fired"
+    assert pre_turn_count == 2, "pre_turn must fire again in turn 2"
 
 
 # ---------------------------------------------------------------------------

@@ -552,9 +552,6 @@ class RunHandle:
                     self._turn_was_cancelled = False
                     if self.run_ctx.cancelled:
                         self.run_ctx.cancelled = False
-                    # Clear hooks_fired so the new turn's hooks can fire
-                    # even if the previous turn already fired them.
-                    self.run_ctx.hooks_fired.clear()
                     # Construct per-turn AgentContext and inject as deps
                     # so capabilities (SubagentCapability, etc.) can access
                     # the delegation service, resource sources, and host.
@@ -819,23 +816,20 @@ class RunHandle:
         if self._closing:
             return False
 
-        # Try ProtocolChannel feedback path (deliver_feedback exists).
-        if self._comm_channel is not None:
-            try:
-                deliver: Any | None = self._comm_channel.deliver_feedback  # type: ignore[attr-defined]
-            except AttributeError:
-                deliver = None
-            if deliver is not None:
-                feedback = Feedback(content=message, is_steer=True)
-                self._comm_channel.deliver_feedback(feedback)  # type: ignore[attr-defined]
-                # Always set _idle_event when delivering via ProtocolChannel.
-                # If the loop is running, the event is cleared when entering
-                # idle, and the loop then drains CommChannel feedback. If the
-                # loop is transitioning to idle (e.g., after cancel), the
-                # event prevents blocking on _idle_event.wait() when the
-                # feedback is already in the CommChannel queue.
-                self._idle_event.set()
-                return True
+        # ProtocolChannel feedback path (bidirectional channels only).
+        if self._comm_channel is not None and not isinstance(
+            self._comm_channel, DirectChannel
+        ):
+            feedback = Feedback(content=message, is_steer=True)
+            self._comm_channel.deliver_feedback(feedback)
+            # Always set _idle_event when delivering via ProtocolChannel.
+            # If the loop is running, the event is cleared when entering
+            # idle, and the loop then drains CommChannel feedback. If the
+            # loop is transitioning to idle (e.g., after cancel), the
+            # event prevents blocking on _idle_event.wait() when the
+            # feedback is already in the CommChannel queue.
+            self._idle_event.set()
+            return True
 
         # Fallback: DirectChannel path (existing logic).
         if self._status == RunStatus.idle:
@@ -866,18 +860,15 @@ class RunHandle:
         if self._closing:
             return False
 
-        # Try ProtocolChannel feedback path (deliver_feedback exists).
-        if self._comm_channel is not None:
-            try:
-                deliver: Any | None = self._comm_channel.deliver_feedback  # type: ignore[attr-defined]
-            except AttributeError:
-                deliver = None
-            if deliver is not None:
-                feedback = Feedback(content=message, is_steer=False)
-                self._comm_channel.deliver_feedback(feedback)  # type: ignore[attr-defined]
-                # Always set _idle_event (see steer() for rationale).
-                self._idle_event.set()
-                return True
+        # ProtocolChannel feedback path (bidirectional channels only).
+        if self._comm_channel is not None and not isinstance(
+            self._comm_channel, DirectChannel
+        ):
+            feedback = Feedback(content=message, is_steer=False)
+            self._comm_channel.deliver_feedback(feedback)
+            # Always set _idle_event (see steer() for rationale).
+            self._idle_event.set()
+            return True
 
         # Fallback: DirectChannel path (existing logic).
         self._message_queue.append(message)

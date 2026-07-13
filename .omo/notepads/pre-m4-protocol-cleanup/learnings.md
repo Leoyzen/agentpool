@@ -223,3 +223,34 @@ Deleted the two `AGENT_TYPE != "native"` branches in `_run_stream_once()` that f
 - `uv run ruff check` on all 10 modified test files — All checks passed
 - AST verification confirmed: `McpSessionContext` class at line 120, `add_transport` method at line 237, `get_session_context` at line 212, `update_session_snapshot` at line 219
 - Full test suite could not run due to pre-existing `ImportError: cannot import name 'RunStatus'` from other worktree changes in `run.py`
+
+---
+
+## Task 1.4: Remove hooks_fired double-fire guard
+
+### Summary
+Removed the `hooks_fired` set from `AgentRunContext` and replaced the tool-log idempotency guard in `HookAwareTurn._log_tool_execution` with a per-Turn-instance `_logged_tools: set[str]` set.
+
+### Files Modified
+- `src/agentpool/agents/context.py` — Removed `hooks_fired` field from `AgentRunContext`
+- `src/agentpool/orchestrator/turn.py` — Added `__init__` to `HookAwareTurn` initializing `_logged_tools`; removed all `hooks_fired` guards from `_fire_pre_turn_hooks`, `_fire_post_turn_hooks`, `_fire_pre_tool_hooks`, `_fire_post_tool_hooks`; replaced `_log_tool_execution` idempotency with `_logged_tools`
+- `src/agentpool/agents/base_agent.py` — Removed `run_ctx.hooks_fired.clear()` from `_run_stream_once()`
+- `src/agentpool/orchestrator/run.py` — Removed `self.run_ctx.hooks_fired.clear()` from `start()`
+- `tests/agents/native_agent/test_native_turn_hooks.py` — Updated `test_tool_hooks_not_fired_by_hook_aware_turn_for_native` to check `_logged_tools` instead of `hooks_fired`; updated `test_hooks_fired_prevents_double_firing_via_old_path` to reflect guard removal
+- `tests/orchestrator/test_session_pool_hooks.py` — Updated `test_hooks_fired_cleared_between_turns` to remove `hooks_fired.clear()` call
+
+### Key Decisions
+- `_logged_tools` is a per-Turn-instance set, not on `AgentRunContext`. A new Turn is created for each turn, so the set is naturally fresh. No cross-turn reset needed.
+- `HookAwareTurn.__init__` calls `super().__init__()` for cooperative MRO chain. Both `NativeTurn.__init__` and `ACPTurn.__init__` already call `super().__init__()`, so `_logged_tools` is initialized correctly.
+- The double-fire guard for hooks (`pre_turn`, `post_turn`, `pre_tool_use`, `post_tool_use`) was removed entirely — not replaced. T3 eliminated the old ACP standalone path that caused double-firing, so the guard is no longer needed.
+- The tool-log idempotency guard was REPLACED (not removed) with `_logged_tools` to prevent double-logging within a single Turn instance.
+
+### Pre-existing Issues (NOT caused by this task)
+- `test_run_handle_steer_for_acp_path` fails due to `DirectChannel.deliver_feedback()` (added by a previous task) causing `steer()` to route through the no-op feedback path instead of queuing to `queued_steer_messages`.
+- `RunStatus` was removed from `run.py` by a previous task but `orchestrator/__init__.py` still imports it, causing collection errors in `test_run_lifecycle.py` and `test_runhandle_checkpoint.py`.
+
+### Verification
+- `grep -rn 'hooks_fired' src/` returns 0 matches
+- `uv run ruff check` on all modified files — All checks passed
+- 862 tests passed (agents + orchestrator, excluding pre-existing failures)
+- ACP snapshot tests: 2 passed
