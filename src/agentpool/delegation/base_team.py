@@ -408,6 +408,9 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
         shared_pool: AgentPool | None = None
 
         for agent in self.iter_agents():
+            # TODO(m4): Migrate to `agent.host_context` once NodeContext.pool
+            # is replaced with NodeContext.host: HostContext | None.
+            # Requires adding `input_provider` to HostContext (see M4 task 14.8).
             pool = agent._agent_pool
             if pool:
                 pool_id = id(pool)

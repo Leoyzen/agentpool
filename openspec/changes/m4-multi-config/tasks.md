@@ -119,6 +119,20 @@
 - [ ] 14.5 Implement `AgentPool.from_registry(registry: ConfigRegistry, config_id: str = "default") -> AgentPool` classmethod — retrieves config from registry, initializes infrastructure from HostConfig, constructs HostContext with `config_id`, compiles agents via AgentFactory
 - [ ] 14.6 Verify `async with AgentPool("config.yml")` still works: internally creates ConfigRegistry, registers file with `config_id="default"`, delegates to `from_registry()`
 - [ ] 14.7 Write unit tests: `from_registry` produces correct HostContext with config_id, file-path constructor preserves all behavior, HostContext model_cache is per-Host scoped, HostContext reconstruction preserves config_id/tenant_id
+- [ ] 14.8 Remove pool-level `input_provider` fallback in `NodeContext.get_input_provider()` (step 3 of 4 in `src/agentpool/messaging/context.py:60-61`). This fallback accesses `self.pool._input_provider` (private field on `AgentPool`), which is already deprecated — `BaseAgent._input_provider` warns to "Use SessionState.input_provider instead". The session-level provider (step 2) and ContextVar fallback (step 4) already cover all cases. After removal, `NodeContext.pool` is only used for `prompt_manager` (which `HostContext` already has), enabling the `NodeContext.pool` → `NodeContext.host` migration in task 14.9.
+  - Verify: `grep -n 'pool\._input_provider' src/agentpool/messaging/context.py` returns 0
+  - Verify: `uv run pytest tests/ -x` passes (no test relies on pool-level input_provider fallback)
+- [ ] 14.9 Migrate `NodeContext.pool: AgentPool | None` → `NodeContext.host: HostContext | None` in `src/agentpool/messaging/context.py`:
+  - Update `get_input_provider()` to use `self.host.input_provider` instead of `self.pool._input_provider`
+  - Update `prompt_manager` property to use `self.host.prompt_manager` instead of `self.pool.prompt_manager`
+  - Update `TeamContext(pool=...)` → `TeamContext(host=...)` in `base_team.py:get_context()`
+  - Update `AgentContext(pool=...)` → `AgentContext(host=...)` in `base_agent.py:get_context()`
+  - Verify: `grep -rn 'NodeContext.*pool' src/` returns 0 (field renamed)
+  - Verify: `grep -rn '\.pool\b' src/agentpool/messaging/context.py` returns 0
+- [ ] 14.10 Move `get_skill_instructions_for_node()` from `AgentPool` to `SkillsManager` — update `base_team.py:_load_skill_instructions()` to use `self.host_context.skills_registry.get_skill_instructions_for_node()` instead of `self._agent_pool.get_skill_instructions_for_node()`. Also move `skill_provider` property if needed.
+  - Verify: `grep -rn 'get_skill_instructions_for_node' src/agentpool/delegation/` uses `skills_registry` not `_agent_pool`
+- [ ] 14.11 Audit remaining `_agent_pool` references in protocol servers (`acp_server/acp_agent.py:254,1114`, `opencode_server/state.py:119`, `opencode_server/routes/agent_routes.py:162`) and migrate to `host_context` accessors where possible. References that need the agent registry (for `get_agent()` / `register()`) should use `AgentRegistry` interface from `AgentContext.agent_registry`. Defer any `from_callback(agent_pool=)` refactoring to M5.
+  - Verify: `grep -rn '\._agent_pool' src/agentpool_server/` returns 0 (or only M5-deferred `from_callback` sites)
 
 ## 15. Hot Reload: Triggers and Turn-Level Snapshot
 
