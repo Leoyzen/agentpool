@@ -98,6 +98,7 @@ class TestSwapSessionAgent:
         session._task_lock = MagicMock()
         session._task_lock.locked.return_value = False
         session.switch_active_agent = AsyncMock()
+        session.is_busy = False
         acp_agent.session_manager._acp_sessions = {"sess_1": session}
         acp_agent.session_manager.get_session = lambda sid: session
 
@@ -127,6 +128,7 @@ class TestSwapSessionAgent:
         session.agent.name = "default"
         session._task_lock = MagicMock()
         session._task_lock.locked.return_value = False
+        session.is_busy = False
         session.switch_active_agent = AsyncMock(side_effect=ValueError("Agent not found"))
         acp_agent.session_manager.get_session = lambda sid: session
 
@@ -142,6 +144,7 @@ class TestSwapSessionAgent:
         session.agent.name = "default"
         session._task_lock = MagicMock()
         session._task_lock.locked.return_value = False
+        session.is_busy = False
         session.switch_active_agent = AsyncMock()
         acp_agent.session_manager.get_session = lambda sid: session
 
