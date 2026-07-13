@@ -262,7 +262,8 @@ class AgentPoolACPAgent(ACPAgent):
         self._sessions_cache: ListSessionsResponse | None = None
         self._sessions_cache_time: float = 0.0
         # Connect to title generation signal to notify clients of session updates
-        ctx.storage.metadata_generated.connect(self._on_metadata_generated)
+        if ctx is not None:
+            ctx.storage.metadata_generated.connect(self._on_metadata_generated)
 
         # Initialize MCP-over-ACP connection manager
         self._mcp_manager = AcpMcpConnectionManager()
