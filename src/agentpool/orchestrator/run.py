@@ -581,6 +581,8 @@ class RunHandle:
             session: The per-session state.
             current_prompts: Prompts for this turn.
         """
+        assert self._comm_channel is not None
+        assert self._snapshot_store is not None
         # Lifecycle state transition: IDLE -> RUNNING.
         await self._transition(RunState.RUNNING)
         # Generate a unique turn_id for this Turn.
@@ -702,6 +704,8 @@ class RunHandle:
         if turn is None:
             return "break"
 
+        assert self._comm_channel is not None
+
         if self.run_ctx.cancelled:
             # Turn was cancelled -- publish RunFailedEvent, set turn
             # complete, clear prompts, and continue to idle for next
@@ -764,6 +768,7 @@ class RunHandle:
         turn_id = self._current_turn_id
         assert turn is not None
         assert turn_id is not None
+        assert self._snapshot_store is not None
 
         # Lifecycle state transition: RUNNING -> IDLE.
         await self._transition(RunState.IDLE)
