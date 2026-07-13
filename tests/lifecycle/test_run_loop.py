@@ -30,7 +30,7 @@ from agentpool.lifecycle import (
 )
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
 
 
@@ -494,7 +494,7 @@ async def test_crash_recovery_normal_resume() -> None:
     await consumer
 
     # Should have completed normally.
-    assert handle._status == RunStatus.done
+    assert handle._run_state == RunState.DONE
 
 
 # ---------------------------------------------------------------------------
@@ -694,7 +694,7 @@ async def test_run_started_event_published_to_both_channels() -> None:
 async def test_steer_when_idle_direct_channel() -> None:
     """steer() when IDLE with DirectChannel appends to _message_queue and sets _idle_event."""
     handle = _make_run_handle()
-    handle._status = RunStatus.idle
+    handle._run_state = RunState.IDLE
 
     result = handle.steer("steer message")
 
@@ -707,7 +707,7 @@ async def test_steer_when_idle_direct_channel() -> None:
 async def test_steer_when_running_direct_channel_with_agent_run() -> None:
     """steer() when RUNNING with DirectChannel injects via active_agent_run.enqueue()."""
     handle = _make_run_handle()
-    handle._status = RunStatus.running
+    handle._run_state = RunState.RUNNING
 
     mock_agent_run = MagicMock()
     mock_agent_run.enqueue = MagicMock()
@@ -724,7 +724,7 @@ async def test_steer_when_running_direct_channel_with_agent_run() -> None:
 async def test_steer_when_running_direct_channel_without_agent_run() -> None:
     """steer() when RUNNING without active_agent_run queues to queued_steer_messages."""
     handle = _make_run_handle()
-    handle._status = RunStatus.running
+    handle._run_state = RunState.RUNNING
     handle.active_agent_run = None
 
     result = handle.steer("steer message")
@@ -737,7 +737,7 @@ async def test_steer_when_running_direct_channel_without_agent_run() -> None:
 async def test_followup_during_active_turn() -> None:
     """followup() during RUNNING appends to _message_queue without interrupting."""
     handle = _make_run_handle()
-    handle._status = RunStatus.running
+    handle._run_state = RunState.RUNNING
     handle._idle_event.clear()
 
     result = handle.followup("followup message")
@@ -752,7 +752,7 @@ async def test_followup_during_active_turn() -> None:
 async def test_followup_when_idle() -> None:
     """followup() when IDLE appends to _message_queue and sets _idle_event."""
     handle = _make_run_handle()
-    handle._status = RunStatus.idle
+    handle._run_state = RunState.IDLE
 
     result = handle.followup("followup message")
 
@@ -765,7 +765,7 @@ async def test_followup_when_idle() -> None:
 async def test_close_while_idle_transitions_to_done() -> None:
     """close() while idle schedules transition to RunState.DONE."""
     handle = _make_run_handle()
-    handle._status = RunStatus.idle
+    handle._run_state = RunState.IDLE
     handle._run_state = RunState.IDLE
 
     handle.close()
@@ -781,7 +781,7 @@ async def test_close_while_idle_transitions_to_done() -> None:
 async def test_close_twice_is_noop() -> None:
     """close() called twice: second call is a no-op."""
     handle = _make_run_handle()
-    handle._status = RunStatus.idle
+    handle._run_state = RunState.IDLE
 
     handle.close()
     first_closing = handle._closing
@@ -892,7 +892,7 @@ async def test_close_with_pending_messages_processed() -> None:
 
     # Two turns should have been created: initial + followup.
     assert agent.create_turn.call_count == 2
-    assert handle._status == RunStatus.done
+    assert handle._run_state == RunState.DONE
 
 
 @pytest.mark.unit
@@ -904,7 +904,7 @@ async def test_steer_with_protocol_channel_routes_via_deliver_feedback() -> None
     event_bus = EventBus()
     channel = ProtocolChannel(journal, event_bus, "test-session")
     handle = _make_run_handle(_comm_channel=channel)
-    handle._status = RunStatus.running
+    handle._run_state = RunState.RUNNING
 
     result = handle.steer("protocol steer")
 
@@ -925,7 +925,7 @@ async def test_followup_with_protocol_channel_routes_via_deliver_feedback() -> N
     event_bus = EventBus()
     channel = ProtocolChannel(journal, event_bus, "test-session")
     handle = _make_run_handle(_comm_channel=channel)
-    handle._status = RunStatus.running
+    handle._run_state = RunState.RUNNING
 
     result = handle.followup("protocol followup")
 
@@ -945,7 +945,7 @@ async def test_steer_protocol_channel_when_idle_sets_idle_event() -> None:
     event_bus = EventBus()
     channel = ProtocolChannel(journal, event_bus, "test-session")
     handle = _make_run_handle(_comm_channel=channel)
-    handle._status = RunStatus.idle
+    handle._run_state = RunState.IDLE
     handle._idle_event.clear()
 
     result = handle.steer("idle steer")
@@ -1012,7 +1012,7 @@ async def test_multi_turn_with_protocol_trigger() -> None:
     await consumer
 
     assert agent.create_turn.call_count == 2
-    assert handle._status == RunStatus.done
+    assert handle._run_state == RunState.DONE
 
 
 @pytest.mark.unit
@@ -1046,7 +1046,7 @@ async def test_steer_direct_channel_does_not_use_deliver_feedback() -> None:
     )
     assert feedback_result is False
 
-    handle._status = RunStatus.idle
+    handle._run_state = RunState.IDLE
     result = handle.steer("direct steer")
 
     assert result is True
@@ -1057,7 +1057,7 @@ async def test_steer_direct_channel_does_not_use_deliver_feedback() -> None:
 async def test_followup_direct_channel_does_not_use_deliver_feedback() -> None:
     """followup() with DirectChannel does NOT call deliver_feedback."""
     handle = _make_run_handle()
-    handle._status = RunStatus.idle
+    handle._run_state = RunState.IDLE
 
     result = handle.followup("direct followup")
 
@@ -1074,7 +1074,7 @@ async def test_steer_protocol_channel_does_not_touch_message_queue() -> None:
     event_bus = EventBus()
     channel = ProtocolChannel(journal, event_bus, "test-session")
     handle = _make_run_handle(_comm_channel=channel)
-    handle._status = RunStatus.running
+    handle._run_state = RunState.RUNNING
 
     result = handle.steer("protocol steer")
 
@@ -1094,7 +1094,7 @@ async def test_followup_protocol_channel_does_not_touch_message_queue() -> None:
     event_bus = EventBus()
     channel = ProtocolChannel(journal, event_bus, "test-session")
     handle = _make_run_handle(_comm_channel=channel)
-    handle._status = RunStatus.running
+    handle._run_state = RunState.RUNNING
 
     result = handle.followup("protocol followup")
 
@@ -1148,7 +1148,7 @@ async def test_close_while_running_lets_turn_finish() -> None:
     await asyncio.sleep(0.05)
     await consumer
 
-    assert handle._status == RunStatus.done
+    assert handle._run_state == RunState.DONE
     assert handle._closed is True
 
 
@@ -1211,7 +1211,7 @@ async def test_followup_protocol_channel_wakes_idle_loop() -> None:
     event_bus = EventBus()
     channel = ProtocolChannel(journal, event_bus, "test-session")
     handle = _make_run_handle(_comm_channel=channel)
-    handle._status = RunStatus.idle
+    handle._run_state = RunState.IDLE
     handle._idle_event.clear()
 
     result = handle.followup("idle followup")
