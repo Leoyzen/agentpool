@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import uuid4
 
 from agentpool.agents.events import (
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from agentpool.messaging import ChatMessage
 
 
+@runtime_checkable
 class ACPClientProtocol(Protocol):
     """Protocol defining the ACP client interface expected by ACPTurn.
 

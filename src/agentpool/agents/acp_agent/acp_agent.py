@@ -34,7 +34,7 @@ from dataclasses import replace
 from datetime import datetime
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 import uuid
 
 import anyio
@@ -90,7 +90,6 @@ if TYPE_CHECKING:
     from acp.schema.capabilities import AgentCapabilities
     from acp.schema.mcp import McpServer
     from agentpool.agents.acp_agent.client_handler import ACPClientHandler
-    from agentpool.agents.acp_agent.turn import ACPClientProtocol
     from agentpool.agents.context import AgentRunContext
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
@@ -350,6 +349,10 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             output_stream=self._process.stdout,
         )
         self._api = ACPAgentAPI(self._connection)
+        self._api._attach_state(
+            state=self._state,
+            update_event=self._client_handler._update_event,
+        )
         init_response = await self._connection.initialize(self._init_request)
         self._agent_info = init_response.agent_info
         self._caps = init_response.agent_capabilities
@@ -645,13 +648,8 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         Returns:
             An ACPTurn instance for single-cycle execution.
         """
-        # TODO: ACPAgentAPI does not implement ACPClientProtocol fully —
-        # it lacks stream_events() and get_messages(). At runtime this will raise
-        # AttributeError when ACPTurn.execute() calls those methods. An adapter
-        # wrapping ACPAgentAPI with async futures / notification registry is needed
-        # for full integration.
         return ACPTurn(
-            acp_client=cast("ACPClientProtocol", self._api),
+            acp_client=self._api,
             prompts=prompts,  # type: ignore[arg-type]
             run_ctx=run_ctx,
             message_history=message_history,
