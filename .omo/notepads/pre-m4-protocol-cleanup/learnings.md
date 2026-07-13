@@ -164,3 +164,23 @@ Deleted the two `AGENT_TYPE != "native"` branches in `_run_stream_once()` that f
 - `tests/integration/test_acp_streaming.py -m acp_snapshot`: 2 passed (V10 snapshots unchanged)
 - Ruff: All checks passed
 - `grep -n 'AGENT_TYPE.*native' base_agent.py`: Only 2 remaining (both `== "native"`, non-hook-related)
+
+## Task 5: Remove deprecated queue_prompt/inject_prompt ACP branching
+
+### What changed
+- `src/agentpool/agents/base_agent.py`: Removed `AGENT_TYPE == "native"` check from both `queue_prompt` and `inject_prompt` methods
+- ACP agents now use the same `session_pool.followup()`/`steer()` path as native agents
+- Removed ACP-specific legacy fallback paths in `inject_prompt` (SessionPool.inject_prompt fallback, shared agent receive_request fallback, warning log)
+- Standalone agents (no session_pool) still use `injection_manager` as fallback
+- ~30 lines removed
+
+### Key observations
+- The `AGENT_TYPE == "native"` check was the only thing preventing ACP agents from using the session_pool delegation path
+- The removed ACP legacy paths (lines 1141-1174) were redundant with the session_pool.steer() delegation path — they handled the same "no active run context" case but through a different code path
+- The `test_non_native_inject_prompt_no_deprecation` test still passes because it tests a standalone ACP agent (no session_pool), which doesn't trigger the deprecation warning
+- The test name is now slightly misleading (implies ACP agents never get warnings) but the test itself is correct (standalone agents don't get warnings)
+- Deprecation warnings updated from "pooled native agents" to "pooled agents" to reflect the unified behavior
+
+### Files touched
+- `src/agentpool/agents/base_agent.py` (modified)
+- `.omo/evidence/task-5-pre-m4-protocol-cleanup.log` (created)

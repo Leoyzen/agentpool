@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 import os
 from pathlib import Path
 import re
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, assert_never, cast, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, assert_never, overload
 import warnings
 
 from anyenv import MultiEventHandler, method_spawner
@@ -1079,11 +1079,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         iteration completes, the message is automatically queued for the
         next iteration.
 
-        !!! warning "Deprecated for pooled native agents"
-            Use ``agent_pool.session_pool.steer()`` instead.
+        !!! warning "Deprecated for pooled agents"
+            Use ``host_context.session_pool.steer()`` instead.
 
-        For non-native agents and standalone native agents, the existing
-        injection_manager-based path remains unchanged.
+        For standalone agents (no session pool), the injection_manager-based
+        path is used as a fallback.
 
         Args:
             message: Message to inject
@@ -1099,10 +1099,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         run_ctx = self.get_active_run_context(session_id=session_id)
         ctx = self.host_context
 
-        # Pooled native agents: delegate to session_pool.steer().
-        if self.AGENT_TYPE == "native" and ctx is not None and ctx.session_pool is not None:
+        # Pooled agents: delegate to session_pool.steer().
+        if ctx is not None and ctx.session_pool is not None:
             warnings.warn(
-                "inject_prompt() is deprecated for pooled native agents. "
+                "inject_prompt() is deprecated for pooled agents. "
                 "Use host_context.session_pool.steer() instead.",
                 DeprecationWarning,
                 stacklevel=2,
@@ -1126,51 +1126,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     session_pool.steer(most_recent.session_id, message)
                 )
                 return
-            # Standalone native agents: fall through to legacy path
 
-        # Legacy path for non-native agents and standalone native agents
-        # CRITICAL: Check run_ctx.completed to avoid injecting into a turn that
-        # has already finished (e.g., after end_turn).  If the turn is complete,
-        # the message would be stuck in injection_manager.pending forever.
-        # In that case, delegate to SessionPool for auto-resume.
+        # Standalone agents: use injection_manager
         if run_ctx is not None and not run_ctx.completed and run_ctx.injection_manager is not None:
             run_ctx.injection_manager.inject(message)
-            return
-
-        # No active run context — delegate to SessionPool for auto-resume
-        effective_session_id = session_id or (run_ctx.session_id if run_ctx else None)
-        if ctx is not None and effective_session_id is not None:
-            _session_pool = ctx.session_pool
-            if _session_pool is None:
-                return
-            # Fire-and-forget: delegate to SessionPool for auto-resume.
-            # Use task_manager to prevent GC of the task mid-execution.
-            self.task_manager.fire_and_forget(
-                _session_pool.inject_prompt(effective_session_id, message)
-            )
-            return
-
-        # FALLBACK for shared agents: effective_session_id is None but session_pool exists.
-        # This handles the case where BackgroundTaskProvider calls inject_prompt
-        # after background task completion when the agent has no fixed session_id.
-        if ctx is not None:
-            _session_pool = ctx.session_pool
-            if _session_pool is not None:
-                sessions = _session_pool.sessions.find_sessions_by_agent_name(self.name)
-                if sessions:
-                    most_recent = max(sessions, key=lambda s: s.last_active_at)
-                    self.task_manager.fire_and_forget(
-                        _session_pool.receive_request(
-                            most_recent.session_id, message, priority="asap"
-                        )
-                    )
-                    return
-
-        # No pool or session_id available — log warning
-        self.log.warning(
-            "inject_prompt called but no active run context or session pool available",
-            agent_name=self.name,
-        )
 
     def has_pending_injections(self, session_id: str | None = None) -> bool:
         """Check if there are pending injections.

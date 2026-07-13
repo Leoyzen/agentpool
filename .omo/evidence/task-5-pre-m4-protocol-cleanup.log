@@ -1,0 +1,50 @@
+Task 5: Remove deprecated queue_prompt/inject_prompt ACP branching
+Date: 2026-07-13
+Worktree: agentpool-pre-m4-protocol-cleanup
+
+## Changes Made
+
+File modified: src/agentpool/agents/base_agent.py
+
+### queue_prompt (was lines 1024-1074)
+- Removed `self.AGENT_TYPE == "native"` check from session_pool delegation condition
+- Changed deprecation warning from "deprecated for pooled native agents" to "deprecated for pooled agents"
+- Updated docstring: "Deprecated for pooled native agents" → "Deprecated for pooled agents"
+- Updated docstring: "For non-native agents and standalone native agents" → "For standalone agents (no session pool)"
+- Updated comment: "Pooled native agents" → "Pooled agents"
+- Updated comment: "Legacy path for non-native agents and standalone native agents" → "Standalone agents"
+
+### inject_prompt (was lines 1075-1174)
+- Removed `self.AGENT_TYPE == "native"` check from session_pool delegation condition
+- Changed deprecation warning from "deprecated for pooled native agents" to "deprecated for pooled agents"
+- Updated docstring: "Deprecated for pooled native agents" → "Deprecated for pooled agents"
+- Updated docstring: "For non-native agents and standalone native agents" → "For standalone agents (no session pool)"
+- Updated comment: "Pooled native agents" → "Pooled agents"
+- Removed "Standanlone native agents: fall through to legacy path" comment
+- Removed ACP-specific legacy fallback paths (was lines 1141-1168):
+  - Removed SessionPool.inject_prompt() fallback for no-active-run-context case
+  - Removed shared agent find_sessions_by_agent_name + receive_request fallback
+- Removed "inject_prompt called but no active run context or session pool available" warning log
+- Updated comment: "Legacy path for non-native agents and standalone native agents" → "Standalone agents"
+
+## Net effect
+- ~30 lines removed (ACP-specific legacy fallback paths and warning)
+- ACP agents now use the same session_pool.steer()/followup() path as native agents
+- Standalone agents (no session_pool) still use injection_manager as fallback
+- Both methods retained for external callers
+
+## Verification
+
+### Grep checks
+- `grep -n 'inject_prompt called but no active run context' src/agentpool/agents/base_agent.py` → 0 matches ✅
+- `grep -n 'AGENT_TYPE.*native' src/agentpool/agents/base_agent.py` → 0 matches ✅
+
+### Tests
+- `uv run pytest tests/agents/ tests/orchestrator/test_integration_redflags.py tests/orchestrator/test_session_pool.py -x -q`
+- Result: 449 passed, 1 skipped, 6 deselected in 45.25s ✅
+
+### Key tests verified
+- test_deprecation_warnings.py: All 4 tests passed (pooled native warning, standalone no warning, non-native standalone no warning)
+- test_inject_prompt_cross_task.py: All 6 tests passed (cross-task injection with session_pool)
+- test_session_pool.py: All session_pool tests passed (inject/queue/steer/followup delegation)
+- test_integration_redflags.py: TestInjectPromptWithSessionPool passed
