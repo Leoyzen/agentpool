@@ -232,18 +232,17 @@ class SkillManagerCap(
         """Return a unified toolset with per-skill prefixed tools.
 
         Fully overrides :meth:`CombinedToolsetCapability.get_toolset` — does
-        NOT call ``super().get_toolset()``. The override:
+        NOT call ``super().get_toolset()``. Only skill-specific tools are
+        provided; pool-level MCP server tools are handled by
+        :meth:`MCPManager.get_capabilities` to avoid duplicate registration.
 
         1. Creates ``PrefixedToolset("{skill_name}__tool__")`` for each skill
            with imported Python tools.
         2. Creates ``PrefixedToolset("{skill_name}__mcp__")`` for each
            per-skill ``McpServerCap`` child.
-        3. Includes non-skill children from ``_capabilities`` (excluding
-           skill MCP children) unprefixed.
-        4. Combines all into a ``CombinedToolset``.
+        3. Combines all into a ``CombinedToolset``.
         """
         toolsets: list[AbstractToolset[AgentDepsT]] = []
-        from pydantic_ai.toolsets._dynamic import DynamicToolset
 
         # 1. Python tools: PrefixedToolset per skill.
         for skill_name, tools in self._skill_tools.items():
@@ -267,20 +266,6 @@ class SkillManagerCap(
                             prefix=f"{skill_name}__mcp__",
                         )
                     )
-
-        # 3. Non-skill children from _capabilities (excluding skill MCP children).
-        skill_child_ids: set[int] = {
-            id(c) for caps in self._skill_mcp_children.values() for c in caps
-        }
-        for cap in self._capabilities:
-            if id(cap) in skill_child_ids:
-                continue
-            ts = cap.get_toolset()
-            if ts is not None:
-                if isinstance(ts, AbstractToolset):
-                    toolsets.append(ts)
-                else:
-                    toolsets.append(DynamicToolset(toolset_func=ts))
 
         if not toolsets:
             return None
