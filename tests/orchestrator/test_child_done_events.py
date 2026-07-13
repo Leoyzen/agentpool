@@ -337,7 +337,7 @@ def test_child_done_events_items_wrapped_with_list() -> None:
     """
     import agentpool.orchestrator.run as run_module
 
-    source = inspect.getsource(run_module.RunHandle.start)
+    source = inspect.getsource(run_module.RunHandle._drain_events)
     # Check that items() is wrapped with list()
     assert "list(self.run_ctx.child_done_events.items())" in source, (
         "child_done_events.items() must be wrapped with list() for concurrent safety"
@@ -352,7 +352,7 @@ def test_child_done_events_values_wrapped_with_list() -> None:
     """
     import agentpool.orchestrator.run as run_module
 
-    source = inspect.getsource(run_module.RunHandle.start)
+    source = inspect.getsource(run_module.RunHandle._drain_events)
     assert "list(self.run_ctx.child_done_events.values())" in source, (
         "child_done_events.values() must be wrapped with list() for concurrent safety"
     )

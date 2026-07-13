@@ -136,3 +136,48 @@ The `try/except AttributeError` pattern for `deliver_feedback` was needed becaus
 - Tests in `test_session_migration.py` updated to assert on `run_handle._comm_channel.publishes_to_event_bus` instead of the removed method.
 - Pattern follows T10's `deliver_feedback` approach: add to protocol, implement in both classes, replace caller checks.
 - Pre-existing test failures (unrelated): `test_acp_turn_prompt_error_yields_run_error_event` (ACP connection refused) and `test_role_swap_success` (ACP server test) — both fail on base branch.
+
+## T9: Remove _mcp_snapshot and _session_connection_pool from NativeAgent
+
+### Summary
+Removed two stale fields from `NativeAgent.__init__()` that were only used as passthrough storage for MCP lifecycle management. All access was migrated to `MCPManager` methods in T8.
+
+### Changes
+- **`src/agentpool/agents/native_agent/agent.py`**:
+  - Removed `McpConfigSnapshot` from the `McpConfigEntry, McpConfigSnapshot` import (kept `McpConfigEntry`)
+  - Removed the entire `SessionConnectionPool` import line
+  - Removed the comment block + 2 field definitions (`_mcp_snapshot` and `_session_connection_pool`)
+- **Net**: -6 LOC (7 deleted, 1 inserted)
+
+### Verification
+- `grep -rn '_mcp_snapshot\|_session_connection_pool' src/` — only pyc cache remains, zero source references
+- `uv run pytest tests/agents/native_agent/ -x -q` — 191 passed
+- `uv run --no-group docs mypy src/agentpool/agents/native_agent/` — Success: no issues found
+- `uv run ruff check src/agentpool/agents/native_agent/agent.py` — All checks passed
+- Pre-existing failures: `test_inject_prompt_from_different_task_with_session_pool` (deprecated inject_prompt API), `test_model_switch_targets_per_session_agent` (unrelated OpenCode server test)
+
+### Commit
+- `f582e2f86` — `refactor(agent): remove _mcp_snapshot and _session_connection_pool from NativeAgent`
+
+## Task T19 (T20 in tasks.md): Decompose RunHandle.start() into 5 sub-methods
+
+### What was done
+Decomposed `RunHandle.start()` (~397 SLOC) into 5 composable sub-methods, each < 100 SLOC:
+1. `_handle_recovery()` — crash recovery + dimension subscription (48 SLOC)
+2. `_idle_loop()` — idle wait, feedback drain, prompt collection (37 SLOC)
+3. `_execute_turn()` — turn execution, event streaming as async generator (96 SLOC)
+4. `_handle_turn_result()` — cancel handling, error handling, returns action string (40 SLOC)
+5. `_drain_events()` — post-turn snapshot, child events, feedback drain (64 SLOC)
+`start()` itself is now ~59 SLOC (coordinator only).
+
+### Key decisions
+- **State sharing**: Added 3 instance fields (`_current_turn`, `_current_turn_id`, `_current_turn_failed`) to `RunHandle` dataclass since `_execute_turn()` is an async generator and can't return values. Set in `_execute_turn()`, read by `_handle_turn_result()` and `_drain_events()`.
+- **Async generator delegation**: `_execute_turn()` is an async generator that `yield`s events. `start()` delegates via `async for event in self._execute_turn(...): yield event`.
+- **Cancel path `current_prompts` clearing**: In original code, `current_prompts = []` was set before `continue` in the cancel handler. Since `current_prompts` is a local in `start()`, added `current_prompts = []` in `start()` when `_handle_turn_result` returns `"continue"`.
+- **Test fix**: `test_child_done_events_items_wrapped_with_list` and `test_child_done_events_values_wrapped_with_list` inspected `RunHandle.start` source for `list(self.run_ctx.child_done_events.items())`. Updated to inspect `RunHandle._drain_events` since that's where the code now lives.
+- Replaced arrow characters (→) with ASCII equivalents (->) in docstrings/comments to avoid encoding issues.
+
+### Verification
+- `grep -n 'PLR0915' src/agentpool/orchestrator/run.py` — 0 matches
+- `uv run ruff check src/agentpool/orchestrator/run.py` — All checks passed
+- `uv run pytest tests/orchestrator/ tests/lifecycle/ -x -q` — 793 passed, 10 deselected
