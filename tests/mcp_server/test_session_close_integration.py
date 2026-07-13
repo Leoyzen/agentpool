@@ -58,7 +58,7 @@ async def test_integration_create_run_close() -> None:
 async def test_integration_close_recreate_fresh() -> None:
     """After closing a session and recreating with the same ID, the new context is fresh.
 
-    Verifies that ``cleanup_session`` fully removes the old ``_SessionContext``
+    Verifies that ``cleanup_session`` fully removes the old ``McpSessionContext``
     and a subsequent ``get_or_create_session`` with the same session ID creates
     a brand-new context with fresh resource objects (different toolset_cache,
     different connection_pool, and a ``None`` snapshot).
@@ -89,7 +89,7 @@ async def test_integration_close_recreate_fresh() -> None:
         new_ctx = manager.get_or_create_session(session_id)
         assert session_id in manager._session_contexts
 
-        # 6. The new _SessionContext is a different object
+        # 6. The new McpSessionContext is a different object
         assert new_ctx is not original_ctx
 
         # 7. Fresh toolset_cache — different object, empty

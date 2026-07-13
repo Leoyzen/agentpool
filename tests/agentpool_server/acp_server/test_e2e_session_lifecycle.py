@@ -173,7 +173,7 @@ async def test_e2e_session_lifecycle() -> None:  # noqa: PLR0915
         # Phase 7: VERIFY - Fresh resources, no stale references
         # ================================================================
 
-        # 7a: New _SessionContext is a different object
+        # 7a: New McpSessionContext is a different object
         assert new_ctx is not old_ctx
 
         # 7b: New toolset_cache is fresh (different object, empty)

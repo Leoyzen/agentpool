@@ -8,7 +8,7 @@ invalidated between sessions.  On session resume, a new
 the dead transport from the previous WebSocket session).
 
 After T10-T12, ``get_capabilities()`` accepts ``session_id`` and routes
-session-scoped configs through per-session ``_SessionContext`` objects
+session-scoped configs through per-session ``McpSessionContext`` objects
 with their own ``toolset_cache``.  ``cleanup_session()`` clears the
 per-session cache, ensuring the next session gets a fresh toolset.
 
@@ -81,7 +81,7 @@ async def test_session_resume_returns_fresh_toolset() -> None:
     """get_capabilities() returns a fresh toolset after session cleanup+recreate.
 
     After T10-T12, session-scoped toolsets are cached on the per-session
-    ``_SessionContext.toolset_cache`` rather than the global
+    ``McpSessionContext.toolset_cache`` rather than the global
     ``MCPManager._toolset_cache``.  When ``cleanup_session()`` is called
     between sessions, the per-session context (including its toolset
     cache) is removed, so the next session gets a brand-new toolset with

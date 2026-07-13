@@ -2,7 +2,7 @@
 
 Verifies that resume_session() closes the old session (removing it from
 _acp_sessions) and creates a fresh session with new MCP resources
-(different _SessionContext in MCPManager's session context).
+(different McpSessionContext in MCPManager's session context).
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ async def test_resume_closes_old_session() -> None:
     4. Call resume_session() with the same session_id.
     5. Verify old session was closed (popped from _acp_sessions, close called).
     6. Verify new session is a different object in _acp_sessions.
-    7. Verify MCPManager's session context has a fresh _SessionContext
+    7. Verify MCPManager's session context has a fresh McpSessionContext
        (different object, different toolset_cache, different connection_pool).
     """
     session_id = "test-resume-lifecycle-1"

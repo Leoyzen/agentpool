@@ -1,6 +1,6 @@
 """Unit tests for MCPManager session context lifecycle.
 
-Covers ``_SessionContext`` creation, snapshot storage, ACP transport
+Covers ``McpSessionContext`` creation, snapshot storage, ACP transport
 registration, and cleanup (including idempotency and concurrency safety).
 """
 
@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from agentpool.mcp_server.config_snapshot import McpConfigSnapshot
-from agentpool.mcp_server.manager import MCPManager, _SessionContext
+from agentpool.mcp_server.manager import MCPManager, McpSessionContext
 
 
 # ---------------------------------------------------------------------------
@@ -53,12 +53,12 @@ def manager() -> MCPManager:
 def test_get_or_create_session_creates_and_returns_same(
     manager: MCPManager,
 ) -> None:
-    """Two calls with the same session_id return the same _SessionContext."""
+    """Two calls with the same session_id return the same McpSessionContext."""
     ctx1 = manager.get_or_create_session("sess-1")
     ctx2 = manager.get_or_create_session("sess-1")
 
     assert ctx1 is ctx2
-    assert isinstance(ctx1, _SessionContext)
+    assert isinstance(ctx1, McpSessionContext)
     assert manager.get_session_context("sess-1") is not None
 
 
@@ -71,7 +71,7 @@ def test_get_or_create_session_creates_and_returns_same(
 def test_get_or_create_session_creates_fresh_for_different_ids(
     manager: MCPManager,
 ) -> None:
-    """Different session_ids produce distinct _SessionContext objects."""
+    """Different session_ids produce distinct McpSessionContext objects."""
     ctx_a = manager.get_or_create_session("sess-a")
     ctx_b = manager.get_or_create_session("sess-b")
 

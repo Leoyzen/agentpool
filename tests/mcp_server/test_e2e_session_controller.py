@@ -5,7 +5,7 @@ instances, verifying that the full create/close chain populates and cleans
 per-session MCP state correctly.
 
 Tests:
-    G1  - Full create-session chain populates MCP _SessionContext with snapshot
+    G1  - Full create-session chain populates MCP McpSessionContext with snapshot
     G5  - close_session cleans agent.mcp session context and exits agent context
     G6  - resume_session creates real ACPSession with _acp_mcp_manager wired
     G13 - MCPManager.cleanup() cleans all session contexts
@@ -64,11 +64,11 @@ def _make_mock_client() -> MagicMock:
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_full_create_session_chain_populates_mcp_session_context() -> None:
-    """SessionController.get_or_create_session_agent() populates MCPManager _SessionContext.
+    """SessionController.get_or_create_session_agent() populates MCPManager McpSessionContext.
 
     Verifies that the real SessionController, when given a NativeAgentConfig,
     calls agent.mcp.get_or_create_session() and agent.mcp.update_session_snapshot()
-    so that the agent's MCPManager has a _SessionContext with a non-None snapshot.
+    so that the agent's MCPManager has a McpSessionContext with a non-None snapshot.
     """
     from agentpool.agents.native_agent import Agent
     from agentpool.models.agents import NativeAgentConfig
@@ -119,9 +119,9 @@ async def test_full_create_session_chain_populates_mcp_session_context() -> None
             session_id, agent_name="test_agent"
         )
 
-        # Assert: agent's MCPManager has a _SessionContext with non-None snapshot
+        # Assert: agent's MCPManager has a McpSessionContext with non-None snapshot
         ctx = result_agent.mcp.get_session_context(session_id)
-        assert ctx is not None, "get_or_create_session_agent() must create a _SessionContext"
+        assert ctx is not None, "get_or_create_session_agent() must create a McpSessionContext"
         assert ctx.snapshot is not None, (
             "get_or_create_session_agent() must call update_session_snapshot()"
         )

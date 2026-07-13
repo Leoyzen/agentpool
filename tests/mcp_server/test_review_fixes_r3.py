@@ -3,7 +3,7 @@
 Fix #3/#4 (REAL BUG): get_or_create_session_agent() calls
 parent_agent.mcp.get_or_create_session(parent_session_id) to read the
 parent's snapshot. If the parent session was already cleaned up,
-get_or_create_session() CREATES a new phantom _SessionContext that
+get_or_create_session() CREATES a new phantom McpSessionContext that
 will NEVER be cleaned up — memory leak.
 
 Fix #2 (IMPROVEMENT): on_disconnect callback in _handle_websocket_client()
@@ -40,7 +40,7 @@ async def test_get_or_create_session_agent_does_not_recreate_cleaned_parent_sess
 
     Bug: The method calls parent_agent.mcp.get_or_create_session(parent_id)
     to read the parent's snapshot. If the parent was already cleaned up,
-    get_or_create_session() creates a phantom _SessionContext that leaks.
+    get_or_create_session() creates a phantom McpSessionContext that leaks.
 
     Steps:
     1. Create a real Agent with a real MCPManager.
@@ -135,7 +135,7 @@ async def test_get_or_create_session_agent_reads_parent_snapshot_without_leaking
     """get_or_create_session_agent() reads parent snapshot without recreating context.
 
     When the parent session is still active (not cleaned up), the method
-    should read the existing _SessionContext, not create a new one.
+    should read the existing McpSessionContext, not create a new one.
 
     This test passes both before and after the fix — it guards against
     regressions where the parent context is accidentally recreated.

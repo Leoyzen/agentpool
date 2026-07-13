@@ -42,7 +42,7 @@ async def test_get_capabilities_does_not_recreate_cleaned_session() -> None:
     """get_capabilities(session_id=...) must not recreate a cleaned-up context.
 
     Bug: ``get_capabilities(session_id=...)`` calls ``get_or_create_session()``
-    which recreates an empty ``_SessionContext`` if cleanup already popped it.
+    which recreates an empty ``McpSessionContext`` if cleanup already popped it.
     This is a memory leak — the dead context lingers forever with an empty
     snapshot, and the ``KeyError`` fallback code is dead.
 

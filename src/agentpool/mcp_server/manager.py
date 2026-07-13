@@ -117,7 +117,7 @@ def _make_timeout_logger(
 
 
 @dataclass
-class _SessionContext:
+class McpSessionContext:
     """Per-session MCP state container for the :class:`MCPManager`.
 
     Holds all session-scoped MCP resources so that each session has its own
@@ -177,7 +177,7 @@ class MCPManager:
         self._accessible_roots = accessible_roots
         self._global_pool = GlobalConnectionPool()
         self._toolset_cache: dict[str, Any] = {}
-        self._session_contexts: dict[str, _SessionContext] = {}
+        self._session_contexts: dict[str, McpSessionContext] = {}
         self._acp_mcp_manager: AcpMcpConnectionManager | None = None
 
     def add_server_config(self, cfg: MCPServerConfig | str) -> None:
@@ -185,10 +185,10 @@ class MCPManager:
         resolved = BaseMCPServerConfig.from_string(cfg) if isinstance(cfg, str) else cfg
         self.servers.append(resolved)
 
-    def get_or_create_session(self, session_id: str) -> _SessionContext:
+    def get_or_create_session(self, session_id: str) -> McpSessionContext:
         """Get or create the per-session MCP context for ``session_id``.
 
-        If no context exists for ``session_id``, a new ``_SessionContext``
+        If no context exists for ``session_id``, a new ``McpSessionContext``
         is created with a fresh ``SessionConnectionPool``, empty toolset
         cache, no snapshot, and an empty ACP connection list.  Subsequent
         calls with the same ``session_id`` return the same object.
@@ -197,19 +197,19 @@ class MCPManager:
             session_id: Unique identifier for the session.
 
         Returns:
-            The ``_SessionContext`` for this session.
+            The ``McpSessionContext`` for this session.
         """
         from agentpool.mcp_server.session_pool import SessionConnectionPool
 
         ctx = self._session_contexts.get(session_id)
         if ctx is None:
-            ctx = _SessionContext(
+            ctx = McpSessionContext(
                 connection_pool=SessionConnectionPool(session_id=session_id),
             )
             self._session_contexts[session_id] = ctx
         return ctx
 
-    def get_session_context(self, session_id: str) -> _SessionContext | None:
+    def get_session_context(self, session_id: str) -> McpSessionContext | None:
         """Get the session context for ``session_id`` without creating one.
 
         Returns ``None`` if no context exists for the session.
@@ -233,6 +233,29 @@ class MCPManager:
         """
         ctx = self.get_or_create_session(session_id)
         ctx.snapshot = snapshot
+
+    async def add_transport(
+        self,
+        session_id: str,
+        client_id: str,
+        transport: ClientTransport,
+        skill_name: str | None = None,
+    ) -> None:
+        """Add a pre-created transport to the session's connection pool.
+
+        Delegates to the internal :class:`SessionConnectionPool` for the
+        given session.  If no session context exists yet, one is created
+        via ``get_or_create_session()``.
+
+        Args:
+            session_id: Unique identifier for the session.
+            client_id: Client identifier for the MCP server.
+            transport: Pre-created fastmcp ``ClientTransport``.
+            skill_name: Optional skill name for skill-scoped MCP isolation.
+        """
+        ctx = self.get_or_create_session(session_id)
+        if ctx.connection_pool is not None:
+            await ctx.connection_pool.add_transport(client_id, transport, skill_name)
 
     def __repr__(self) -> str:
         return f"MCPManager(name={self.name!r}, servers={len(self.servers)})"
@@ -397,7 +420,7 @@ class MCPManager:
         skipped in global configs since pydantic-ai does not support ACP
         directly. Disabled servers are also skipped.
 
-        When ``session_id`` is provided, the session's ``_SessionContext`` is
+        When ``session_id`` is provided, the session's ``McpSessionContext`` is
         looked up via ``get_or_create_session()``.  If a snapshot is stored
         on the context, configs are partitioned:
 
