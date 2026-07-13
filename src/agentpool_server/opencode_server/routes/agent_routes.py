@@ -159,7 +159,8 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
 
     # 1. Get MCP provider skills from skill resolver first
     # These will be overridden by local skills if names conflict
-    skill_resolver = ctx.pool.skill_resolver if ctx.pool is not None else None
+    pool = state.agent._agent_pool
+    skill_resolver = pool.skill_resolver if pool is not None else None
     if skill_resolver is not None:
         try:
             for provider_name in skill_resolver.list_providers():

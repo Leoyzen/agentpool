@@ -308,10 +308,10 @@ def mock_agent(mock_env: Mock, mock_pool: Mock, storage_manager: StorageManager)
     agent._input_provider = None
     agent.run = AsyncMock(return_value=Mock(data="test response"))
     agent.agent_pool = mock_pool
-    # host_context is accessed by ServerState.__post_init__ instead of agent_pool
-    # state.py resolves _pool via _ctx.pool, so mock_pool.pool must return itself
+    # host_context is accessed by ServerState.__post_init__ for manifest etc.
+    # state.py resolves _pool via agent._agent_pool, so set it directly.
+    agent._agent_pool = mock_pool
     agent.host_context = mock_pool
-    mock_pool.pool = mock_pool
     # Real storage manager (accessed via state.storage -> agent.storage)
     agent.storage = storage_manager
 

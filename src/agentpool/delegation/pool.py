@@ -253,7 +253,6 @@ class AgentPool[TPoolDeps = None]:
                 session_pool=self._session_pool,
                 config_file_path=self._config_file_path,
                 main_agent_name=self._safe_main_agent_name(),
-                pool=self,
                 extension_registry=self._extension_registry,
             )
         return self._host_context

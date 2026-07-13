@@ -26,7 +26,6 @@ def _make_host_context(
 ) -> Any:
     """Build a mock HostContext with common defaults."""
     ctx = MagicMock()
-    ctx.pool = pool if pool is not None else MagicMock()
     ctx.config_file_path = config_file_path
     ctx.skills_tools_provider = skills_tools_provider
     ctx.mcp = mcp if mcp is not None else MagicMock()

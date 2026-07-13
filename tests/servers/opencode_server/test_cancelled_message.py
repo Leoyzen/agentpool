@@ -114,7 +114,7 @@ def cancellable_mock_agent():
 
     agent.agent_pool = pool
     agent.host_context = pool
-    pool.pool = pool  # state.py resolves _pool via _ctx.pool
+    agent._agent_pool = pool  # state.py resolves _pool via agent._agent_pool
 
     # Set up SessionPool mock for new architecture
     from agentpool.lifecycle import RunState

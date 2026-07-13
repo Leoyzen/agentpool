@@ -115,8 +115,7 @@ class ServerState:
         # Cache non-session-scoped dependencies directly so they remain
         # accessible even after the shared ``self.agent`` is removed in a
         # later migration step.
-        _ctx = self.agent.host_context
-        self._pool: AgentPool[Any] | None = _ctx.pool if _ctx is not None else None
+        self._pool: AgentPool[Any] | None = self.agent._agent_pool
         self._storage: StorageManager | None = self.agent.storage
 
         # Create a standalone execution environment for shell commands.

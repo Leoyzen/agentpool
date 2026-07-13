@@ -1,7 +1,7 @@
 """Unit tests for HostContext frozen dataclass.
 
 Covers immutability, construction with required fields,
-default factory values, and pool back-reference default.
+and default factory values.
 """
 
 from __future__ import annotations
@@ -71,12 +71,6 @@ def test_default_factory_fields_have_correct_defaults():
     assert isinstance(ctx.model_cache, ModelCache)
     assert ctx.config_id is None
     assert ctx.tenant_id is None
-
-
-def test_pool_back_reference_defaults_to_none():
-    """Given no pool argument, when constructing HostContext, then pool is None."""
-    ctx = _make_context()
-    assert ctx.pool is None
 
 
 def test_session_pool_defaults_to_none():

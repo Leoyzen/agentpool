@@ -408,7 +408,7 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
         shared_pool: AgentPool | None = None
 
         for agent in self.iter_agents():
-            pool = agent.host_context.pool if agent.host_context else None
+            pool = agent._agent_pool
             if pool:
                 pool_id = id(pool)
                 if pool_id not in pool_ids:
@@ -772,7 +772,7 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
         self,
         member_skills: dict[str, list[str]],
     ) -> dict[str, str]:
-        if not member_skills or self.host_context is None:
+        if not member_skills or self._agent_pool is None:
             return {}
 
         result: dict[str, str] = {}
@@ -787,8 +787,7 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
         return result
 
     async def _load_skill_instructions(self, skill_name: str, member_name: str) -> str:
-        ctx = self.host_context
-        pool = ctx.pool if ctx is not None else None
+        pool = self._agent_pool
         if pool is None or pool.skill_provider is None:
             from agentpool.skills.exceptions import SkillNotFoundError
 

@@ -45,14 +45,6 @@ def test_get_context_is_cached(pool: AgentPool[None]) -> None:
 
 
 @pytest.mark.unit
-def test_get_context_pool_back_reference(pool: AgentPool[None]) -> None:
-    """HostContext.pool back-reference points to the originating pool."""
-    ctx = pool.get_context()
-
-    assert ctx.pool is pool
-
-
-@pytest.mark.unit
 def test_factory_returns_agent_factory(pool: AgentPool[None]) -> None:
     """_factory property returns an AgentFactory instance."""
     factory = pool._factory

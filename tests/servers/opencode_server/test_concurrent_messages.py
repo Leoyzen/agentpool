@@ -182,7 +182,7 @@ from agentpool.orchestrator.run import RunHandle
 
     agent.agent_pool = pool
     agent.host_context = pool
-    pool.pool = pool  # state.py resolves _pool via _ctx.pool
+    agent._agent_pool = pool  # state.py resolves _pool via agent._agent_pool
 
     # Set up env mock
     env = Mock()

@@ -8,7 +8,7 @@ factory and registry layers will consume.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from agentpool.host.stubs import CapabilityCache, ModelCache, ModelRegistry
 
@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from upathtools import UPath
 
     from agentpool.capabilities.extension_registry import ExtensionRegistry
-    from agentpool.delegation.pool import AgentPool
     from agentpool.mcp_server.manager import MCPManager
     from agentpool.models.manifest import AgentsManifest
     from agentpool.orchestrator import SessionPool
@@ -83,5 +82,4 @@ class HostContext:
     model_registry: ModelRegistry = field(default_factory=ModelRegistry)
     model_cache: ModelCache = field(default_factory=ModelCache)
     main_agent_name: str | None = None
-    pool: AgentPool[Any] | None = None
     extension_registry: ExtensionRegistry | None = None

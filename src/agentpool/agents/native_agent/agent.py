@@ -911,9 +911,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         tool_capabilities.extend(mcp_capabilities)
         # 5. Skill capabilities — from pool-scoped instances created during __aenter__.
         #    Each SkillManagerCap provides tools and MCP servers.
-        ctx = self.host_context
-        if ctx is not None and ctx.pool is not None:
-            pool_capabilities = ctx.pool.skill_capabilities
+        pool = self._agent_pool
+        if pool is not None:
+            pool_capabilities = pool.skill_capabilities
             if pool_capabilities:
                 from agentpool.capabilities.skill_manager_cap import SkillManagerCap
 

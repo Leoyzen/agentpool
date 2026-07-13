@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
-
 import pytest
 
 from agentpool import BaseTeam
@@ -14,13 +12,6 @@ class _Pool:
 
     async def get_skill_instructions_for_node(self, skill_name: str, node_name: str) -> str:
         return f"# {skill_name}\nUse this skill for {node_name}."
-
-    def get_context(self) -> MagicMock:
-        """Return a HostContext-like mock for host_context property."""
-        ctx = MagicMock()
-        ctx.pool = self  # pool points back to _Pool for skill_provider + methods
-        return ctx
-
 
 def test_team_loads_member_skills_from_pool_provider() -> None:
     team = BaseTeam([], mode="parallel", name="review_team")
