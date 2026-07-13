@@ -150,6 +150,16 @@ class DirectChannel:
         """
         return None
 
+    def deliver_feedback(self, feedback: Feedback) -> None:
+        """No-op for DirectChannel.
+
+        DirectChannel is unidirectional and does not support feedback
+        delivery. This method exists solely for Protocol conformance.
+
+        Args:
+            feedback: The feedback (ignored).
+        """
+
     def close(self) -> None:
         """Drain the queue and mark the channel as closed.
 

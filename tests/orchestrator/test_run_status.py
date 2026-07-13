@@ -1,59 +1,59 @@
-"""Tests for the RunStatus enum in agentpool.orchestrator.run."""
+"""Tests for the RunState and RunOutcome enums in agentpool.lifecycle.types."""
 
 from __future__ import annotations
 
 from enum import Enum
 
-import pytest
-
-from agentpool.orchestrator.run import RunStatus
+from agentpool.lifecycle import RunOutcome, RunState
 
 
-@pytest.mark.unit
-def test_run_status_enum_values() -> None:
-    """Given the RunStatus enum, it should define exactly 7 lifecycle states."""
-    expected_values: set[str] = {
-        "pending",
-        "running",
-        "completed",
-        "failed",
-        "checkpointed",
-        "idle",
-        "done",
-    }
-    actual_values: set[str] = {m.name for m in RunStatus}
+def test_run_state_defines_exactly_3_states() -> None:
+    """Given the RunState enum, it should define exactly 3 lifecycle states."""
+    actual_values: set[str] = {m.name for m in RunState}
+    expected_values = {"IDLE", "RUNNING", "DONE"}
     assert actual_values == expected_values
 
 
-@pytest.mark.unit
-def test_run_status_is_enum() -> None:
-    """Given RunStatus, it should be a proper Enum subclass."""
-    assert issubclass(RunStatus, Enum)
+def test_run_state_is_enum() -> None:
+    """Given RunState, it should be a proper Enum subclass."""
+    assert issubclass(RunState, Enum)
 
 
-@pytest.mark.unit
-def test_run_status_idle_and_done_are_distinct() -> None:
-    """Given RunStatus has idle and done, they should be distinct from all existing states."""
-    assert RunStatus.idle is not RunStatus.done
-    assert RunStatus.idle is not RunStatus.pending
-    assert RunStatus.idle is not RunStatus.running
-    assert RunStatus.idle is not RunStatus.completed
-    assert RunStatus.idle is not RunStatus.failed
-    assert RunStatus.idle is not RunStatus.checkpointed
-    assert RunStatus.done is not RunStatus.pending
-    assert RunStatus.done is not RunStatus.running
-    assert RunStatus.done is not RunStatus.completed
-    assert RunStatus.done is not RunStatus.failed
-    assert RunStatus.done is not RunStatus.checkpointed
+def test_run_state_distinctness() -> None:
+    """Given RunState, all states should be distinct."""
+    assert RunState.IDLE is not RunState.DONE
+    assert RunState.IDLE is not RunState.RUNNING
+    assert RunState.RUNNING is not RunState.DONE
 
 
-@pytest.mark.unit
-def test_run_status_idle_name() -> None:
-    """Given the idle member, its name should be 'idle'."""
-    assert RunStatus.idle.name == "idle"
+def test_run_state_value_strings() -> None:
+    """Given RunState, the value strings should match the expected names."""
+    assert RunState.IDLE.value == "idle"
+    assert RunState.RUNNING.value == "running"
+    assert RunState.DONE.value == "done"
 
 
-@pytest.mark.unit
-def test_run_status_done_name() -> None:
-    """Given the done member, its name should be 'done'."""
-    assert RunStatus.done.name == "done"
+def test_run_outcome_defines_exactly_3_outcomes() -> None:
+    """Given the RunOutcome enum, it should define exactly 3 terminal outcomes."""
+    actual_values: set[str] = {m.name for m in RunOutcome}
+    expected_values = {"COMPLETED", "FAILED", "CHECKPOINTED"}
+    assert actual_values == expected_values
+
+
+def test_run_outcome_is_enum() -> None:
+    """Given RunOutcome, it should be a proper Enum subclass."""
+    assert issubclass(RunOutcome, Enum)
+
+
+def test_run_outcome_distinctness() -> None:
+    """Given RunOutcome, all outcomes should be distinct."""
+    assert RunOutcome.COMPLETED is not RunOutcome.FAILED
+    assert RunOutcome.COMPLETED is not RunOutcome.CHECKPOINTED
+    assert RunOutcome.FAILED is not RunOutcome.CHECKPOINTED
+
+
+def test_run_outcome_value_strings() -> None:
+    """Given RunOutcome, the value strings should match the expected names."""
+    assert RunOutcome.COMPLETED.value == "completed"
+    assert RunOutcome.FAILED.value == "failed"
+    assert RunOutcome.CHECKPOINTED.value == "checkpointed"

@@ -29,7 +29,8 @@ from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import StreamCompleteEvent
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, SessionState
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.lifecycle import RunState
+from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
 
 
@@ -135,7 +136,7 @@ async def test_empty_child_done_events_no_wait() -> None:
     assert len(events) == 1
     assert isinstance(events[0], StreamCompleteEvent)
     assert run_ctx.child_done_events == {}
-    assert handle._status == RunStatus.done
+    assert handle._run_state == RunState.DONE
 
 
 @pytest.mark.unit

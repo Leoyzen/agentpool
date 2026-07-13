@@ -20,7 +20,7 @@ from agentpool.agents.events import (
 )
 from agentpool.log import get_logger
 from agentpool.orchestrator.event_bus import EventBus
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.session_controller import (
     CheckpointMismatchError,
     SessionBusyError,
@@ -1064,7 +1064,7 @@ class SessionPool:
     @property
     def active_runs(self) -> list[RunHandle]:
         """Get all currently active (running) RunHandles."""
-        return [rh for rh in self.sessions._runs.values() if rh.status == RunStatus.running]
+        return [rh for rh in self.sessions._runs.values() if rh.is_running]
 
     def get_run(self, run_id: str) -> RunHandle | None:
         """Get a RunHandle by ID.

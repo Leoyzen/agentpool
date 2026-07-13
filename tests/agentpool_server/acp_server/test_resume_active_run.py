@@ -15,7 +15,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.lifecycle import RunState
+from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.session_controller import SessionController, SessionState
 
 
@@ -51,7 +52,7 @@ async def test_resume_with_active_run() -> None:
         agent_type="native",
     )
     # Simulate a running run: status is running, complete_event NOT set.
-    run_handle.status = RunStatus.running
+    run_handle._run_state = RunState.RUNNING
     controller._runs[run_id] = run_handle
 
     # close_session should complete within 30s (internal 2s timeout + cleanup).

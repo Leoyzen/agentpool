@@ -254,3 +254,48 @@ Removed the `hooks_fired` set from `AgentRunContext` and replaced the tool-log i
 - `uv run ruff check` on all modified files — All checks passed
 - 862 tests passed (agents + orchestrator, excluding pre-existing failures)
 - ACP snapshot tests: 2 passed
+
+## Task 2.4: Remove RunStatus enum, add RunOutcome
+
+### Summary
+Removed the legacy RunStatus enum (7 values) from orchestrator/run.py and replaced it with the existing RunState enum (3 values: IDLE, RUNNING, DONE) plus a new RunOutcome enum (3 values: COMPLETED, FAILED, CHECKPOINTED) in lifecycle/types.py.
+
+### Migration Mapping
+- pending -> IDLE, None
+- running -> RUNNING, None
+- idle -> IDLE, None
+- completed -> DONE, COMPLETED
+- failed -> DONE, FAILED
+- checkpointed -> DONE, CHECKPOINTED
+- done -> DONE, None
+
+### Files Modified (src/ - 9 files)
+1. lifecycle/types.py - Added RunOutcome enum + __all__
+2. lifecycle/__init__.py - Added RunOutcome to imports and __all__
+3. orchestrator/run.py - Removed RunStatus enum, removed status/_status fields, added outcome field, migrated all internal references, updated legacy methods, removed hooks_fired.clear() (pre-existing issue), added RunState.IDLE transition in cancel path
+4. orchestrator/session_controller.py - Updated import, replaced _status check with _run_state == RunState.DONE
+5. orchestrator/__init__.py - Removed RunStatus from imports and __all__
+6. orchestrator/core.py - Removed RunStatus from imports and __all__
+7. orchestrator/session_pool.py - Updated import, replaced status == RunStatus.running with is_running
+8. opencode_server/session_pool_integration.py - Updated import, replaced status checks with _run_state checks
+9. opencode_server/routes/message_routes.py - Updated import, replaced status != RunStatus.failed with outcome != RunOutcome.FAILED
+
+### Files Modified (tests/ - 20+ files)
+All test files updated. test_run_status.py completely rewritten for RunState + RunOutcome.
+
+### Key Design Decisions
+1. RunOutcome placed in lifecycle/types.py alongside RunState
+2. outcome field on RunHandle: RunOutcome | None = None
+3. Cancel path needed explicit RunState.IDLE transition (was missing)
+4. Removed stale hooks_fired.clear() reference from run.py
+5. Used is_running property in session_pool.py for cleaner API
+
+### Pre-existing Failures (NOT caused by this task)
+- test_steer_direct_channel_does_not_use_deliver_feedback (DirectChannel.deliver_feedback from previous task)
+- test_question_abort_regression.py (_agent_pool attribute error)
+- test_hook_aware_turn.py and test_crash_recovery.py (_logged_tools attribute error)
+
+### Test Results
+- 181/182 targeted tests passed (1 pre-existing failure)
+- ruff check src/ - All checks passed
+- mypy src/ - 4 pre-existing errors (not from our changes)

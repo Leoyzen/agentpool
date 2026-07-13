@@ -22,7 +22,7 @@ import pytest
 from agentpool.agents.events import RunFailedEvent, RunStartedEvent, StreamCompleteEvent
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventEnvelope, SessionPool
-from agentpool.orchestrator.run import RunStatus
+from agentpool.lifecycle import RunState
 from agentpool.orchestrator.turn import Turn
 
 
@@ -244,8 +244,8 @@ async def test_acp_cancel_then_prompt_no_hang(
             "New RunHandle should be a different instance if old one was cleaned up"
         )
 
-    assert first_handle._status in (RunStatus.idle, RunStatus.done), (
-        f"First RunHandle should be idle or done, got: {first_handle._status}"
+    assert first_handle._run_state in (RunState.IDLE, RunState.DONE), (
+        f"First RunHandle should be idle or done, got: {first_handle._run_state}"
     )
 
     # Cleanup: close the RunHandle first so the start() loop exits and
@@ -345,8 +345,8 @@ async def test_cancel_does_not_start_spontaneous_turn(
     )
 
     # RunHandle should be idle, waiting for the next prompt
-    assert first_handle._status == RunStatus.idle, (
-        f"Expected RunHandle status idle after cancel, got {first_handle._status}"
+    assert first_handle._run_state == RunState.IDLE, (
+        f"Expected RunHandle status idle after cancel, got {first_handle._run_state}"
     )
 
     # No new events should have been published between cancel and idle

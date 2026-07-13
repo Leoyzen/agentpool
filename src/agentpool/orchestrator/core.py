@@ -25,7 +25,7 @@ from agentpool.orchestrator.event_bus import (
     _rebind,  # noqa: F401
     drain_and_merge,
 )
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.session_controller import (
     DEFAULT_SESSION_TTL_SECONDS,
     CheckpointMismatchError,
@@ -50,7 +50,6 @@ __all__ = [
     "EventBus",
     "EventEnvelope",
     "RunHandle",
-    "RunStatus",
     "SessionBusyError",
     "SessionClosedError",
     "SessionController",

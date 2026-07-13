@@ -252,6 +252,17 @@ class CommChannel(Protocol):
         """
         ...
 
+    def deliver_feedback(self, feedback: Feedback) -> None:
+        """Enqueue feedback from SessionController.
+
+        This is how steer/followup messages arrive at the RunLoop.
+        For unidirectional channels, this is a no-op.
+
+        Args:
+            feedback: The feedback to enqueue.
+        """
+        ...
+
     def close(self) -> None:
         """Release all resources held by the CommChannel."""
         ...

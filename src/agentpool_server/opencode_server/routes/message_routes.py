@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any, assert_never
 
 from fastapi import APIRouter, HTTPException, Query, status
 
+from agentpool.lifecycle import RunOutcome
 from agentpool.log import get_logger
-from agentpool.orchestrator.run import RunStatus
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.converters import (
@@ -583,7 +583,7 @@ async def _process_message_locked(  # noqa: PLR0915
                 await session_pool.event_bus.unsubscribe(session_id, event_stream)
 
             # Finalize based on run outcome
-            if run_handle.status != RunStatus.failed:
+            if run_handle.outcome != RunOutcome.FAILED:
                 for oc_event in adapter.finalize():
                     await state.broadcast_event(oc_event)
 

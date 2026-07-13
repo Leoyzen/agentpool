@@ -4,7 +4,7 @@ Modules:
 - event_bus: EventBus, EventEnvelope, drain_and_merge
 - session_controller: SessionController, SessionState, exceptions
 - session_pool: SessionPool
-- run: RunHandle, RunStatus
+- run: RunHandle
 - metrics: MetricsCollector, SessionPoolMetrics
 - runtime_registry: RuntimeAgentRegistry
 """
@@ -18,7 +18,7 @@ from agentpool.orchestrator.event_bus import (
     drain_and_merge,
 )
 from agentpool.orchestrator.metrics import MetricsCollector, SessionPoolMetrics
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.runtime_registry import RuntimeAgentRegistry
 from agentpool.orchestrator.session_controller import (
     DEFAULT_SESSION_TTL_SECONDS,
@@ -43,7 +43,6 @@ __all__ = [
     "EventEnvelope",
     "MetricsCollector",
     "RunHandle",
-    "RunStatus",
     "RuntimeAgentRegistry",
     "SessionBusyError",
     "SessionController",

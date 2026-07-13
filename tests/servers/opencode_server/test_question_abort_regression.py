@@ -265,11 +265,11 @@ def _make_pool_mock(agent: Any) -> Mock:
         priority: str = "when_idle",
         input_provider: Any = None,
     ) -> Any:
-        from agentpool.orchestrator.run import RunStatus
+        from agentpool.lifecycle import RunOutcome, RunState
 
         complete_event = asyncio.Event()
         run_handle = Mock()
-        run_handle.status = RunStatus.running
+        run_handle._run_state = RunState.RUNNING
         run_handle.complete_event = complete_event
 
         async def _background_run():
@@ -277,9 +277,11 @@ def _make_pool_mock(agent: Any) -> Mock:
                 stream = agent.run_stream(content, session_id=session_id)
                 async for _ in stream:
                     pass
-                run_handle.status = RunStatus.completed
+                run_handle._run_state = RunState.DONE
+    run_handle.outcome = RunOutcome.COMPLETED
             except Exception:  # noqa: BLE001
-                run_handle.status = RunStatus.failed
+                run_handle._run_state = RunState.DONE
+    run_handle.outcome = RunOutcome.FAILED
             finally:
                 complete_event.set()
 

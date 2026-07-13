@@ -21,7 +21,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.lifecycle import RunState
+from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.session_controller import SessionController, SessionState
 from agentpool_server.acp_server.session_manager import ACPSessionManager
 
@@ -58,7 +59,7 @@ async def test_websocket_disconnect_during_run() -> None:
         session_id=session_id,
         agent_type="native",
     )
-    run_handle.status = RunStatus.running
+    run_handle._run_state = RunState.RUNNING
     controller._runs[run_id] = run_handle
 
     mock_acp_session = Mock()

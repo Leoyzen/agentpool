@@ -30,7 +30,8 @@ from agentpool.agents.events import (
 )
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, SessionState
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.lifecycle import RunState
+from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
 
 
@@ -154,14 +155,14 @@ async def test_idle_wake_execute_idle_cycle() -> None:
     await asyncio.sleep(0.05)
 
     # After consuming the single turn, handle should be idle
-    assert handle._status == RunStatus.idle
+    assert handle._run_state == RunState.IDLE
 
     # Close to unblock the idle wait
     handle.close()
     await asyncio.sleep(0.05)
     await consumer_task
 
-    assert handle._status == RunStatus.done
+    assert handle._run_state == RunState.DONE
     assert len(events) == 1
     assert isinstance(events[0], StreamCompleteEvent)
     assert handle._message_history == ["msg1"]
@@ -192,7 +193,7 @@ async def test_steer_while_idle_queues_and_wakes() -> None:
     await asyncio.sleep(0.05)
 
     # Handle should be idle after first turn
-    assert handle._status == RunStatus.idle
+    assert handle._run_state == RunState.IDLE
     assert not handle._idle_event.is_set()  # cleared when entering idle
 
     # Steer while idle
@@ -207,7 +208,7 @@ async def test_steer_while_idle_queues_and_wakes() -> None:
     await asyncio.sleep(0.05)
     await consumer_task
 
-    assert handle._status == RunStatus.done
+    assert handle._run_state == RunState.DONE
     # Two turns should have executed
     assert agent.create_turn.call_count == 2
 
@@ -229,7 +230,7 @@ async def test_followup_while_idle_queues() -> None:
     consumer_task = asyncio.create_task(_consume())
     await asyncio.sleep(0.05)
 
-    assert handle._status == RunStatus.idle
+    assert handle._run_state == RunState.IDLE
 
     result = handle.followup("followup message")
     assert result is True
@@ -261,7 +262,7 @@ async def test_close_during_idle_sets_closing_and_wakes() -> None:
     consumer_task = asyncio.create_task(_consume())
     await asyncio.sleep(0.05)
 
-    assert handle._status == RunStatus.idle
+    assert handle._run_state == RunState.IDLE
     assert not handle._closing
 
     handle.close()
@@ -271,7 +272,7 @@ async def test_close_during_idle_sets_closing_and_wakes() -> None:
     await asyncio.sleep(0.05)
     await consumer_task
 
-    assert handle._status == RunStatus.done
+    assert handle._run_state == RunState.DONE
 
 
 @pytest.mark.unit
@@ -298,7 +299,7 @@ async def test_followup_returns_false_when_closing() -> None:
 async def test_steer_while_running_with_agent_run() -> None:
     """Given a running RunHandle with active_agent_run, steer() enqueues."""
     handle = _make_run_handle()
-    handle._status = RunStatus.running
+    handle._run_state = RunState.RUNNING
     mock_agent_run = MagicMock()
     handle.active_agent_run = mock_agent_run
 
@@ -311,7 +312,7 @@ async def test_steer_while_running_with_agent_run() -> None:
 async def test_steer_while_running_without_agent_run() -> None:
     """Given a running RunHandle without active_agent_run, steer() queues to run_ctx."""
     handle = _make_run_handle()
-    handle._status = RunStatus.running
+    handle._run_state = RunState.RUNNING
     handle.active_agent_run = None
 
     result = handle.steer("queue me")
@@ -363,7 +364,7 @@ async def test_start_publishes_run_error_on_turn_exception() -> None:
 async def test_followup_while_running_does_not_set_idle_event() -> None:
     """Given a running RunHandle, followup() queues but does not set idle event."""
     handle = _make_run_handle()
-    handle._status = RunStatus.running
+    handle._run_state = RunState.RUNNING
     handle._idle_event.clear()
 
     result = handle.followup("queued")
@@ -376,7 +377,7 @@ async def test_followup_while_running_does_not_set_idle_event() -> None:
 async def test_initial_status_is_idle() -> None:
     """Given a freshly created RunHandle, _status is idle and _idle_event is set."""
     handle = RunHandle(run_id="r", session_id="s", agent_type="native")
-    assert handle._status == RunStatus.idle
+    assert handle._run_state == RunState.IDLE
     assert handle._idle_event.is_set()
     assert handle._closing is False
     assert handle._message_queue == []
@@ -498,7 +499,7 @@ async def test_multiple_followups_queued_all_become_next_turn_prompts() -> None:
     consumer_task = asyncio.create_task(_consume())
     await asyncio.sleep(0.05)
 
-    assert handle._status == RunStatus.idle
+    assert handle._run_state == RunState.IDLE
 
     # Queue two followups
     assert handle.followup("first followup") is True
@@ -545,7 +546,7 @@ async def test_close_is_idempotent() -> None:
 async def test_steer_returns_false_when_done_status() -> None:
     """Given a RunHandle with _status=done (post-close), steer() returns False."""
     handle = _make_run_handle()
-    handle._status = RunStatus.done
+    handle._run_state = RunState.DONE
     handle._closing = True
 
     result = handle.steer("message")
@@ -556,7 +557,7 @@ async def test_steer_returns_false_when_done_status() -> None:
 async def test_followup_returns_false_when_done_status() -> None:
     """Given a RunHandle with _status=done (post-close), followup() returns False."""
     handle = _make_run_handle()
-    handle._status = RunStatus.done
+    handle._run_state = RunState.DONE
     handle._closing = True
 
     result = handle.followup("message")
@@ -1032,7 +1033,7 @@ async def test_cancel_returns_to_idle() -> None:
     handle.cancel()
     await asyncio.sleep(0.1)
 
-    assert handle._status == RunStatus.idle
+    assert handle._run_state == RunState.IDLE
     assert handle._turn_complete_event.is_set()
 
     handle.close()
@@ -1070,7 +1071,7 @@ async def test_cancel_during_llm_call() -> None:
     assert any(isinstance(e, RunFailedEvent) for e in published)
 
     # Returns to idle
-    assert handle._status == RunStatus.idle
+    assert handle._run_state == RunState.IDLE
 
     handle.close()
     await asyncio.sleep(0.05)
@@ -1135,7 +1136,7 @@ async def test_turn_complete_event_reset_between_turns() -> None:
     await asyncio.sleep(0.05)
 
     # After first turn: idle, event set, was cleared at start
-    assert handle._status == RunStatus.idle
+    assert handle._run_state == RunState.IDLE
     assert handle._turn_complete_event.is_set()
     assert turn1.captured_start is False
 
@@ -1144,7 +1145,7 @@ async def test_turn_complete_event_reset_between_turns() -> None:
     await asyncio.sleep(0.1)
 
     # After second turn: idle, event set, was cleared at start (was set between turns)
-    assert handle._status == RunStatus.idle
+    assert handle._run_state == RunState.IDLE
     assert handle._turn_complete_event.is_set()
     assert turn2.captured_start is False
 

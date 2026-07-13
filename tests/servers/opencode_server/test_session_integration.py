@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 from agentpool.orchestrator.core import RunHandle, SessionPool
-from agentpool.orchestrator.run import RunStatus
+from agentpool.lifecycle import RunState
 from agentpool.sessions.models import SessionData
 from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 from agentpool_server.opencode_server.state import ServerState
@@ -611,7 +611,7 @@ class TestSessionAbort:
 
         # Give the background task time to start and transition to running
         await asyncio.sleep(0.05)
-        assert run_handle._status == RunStatus.running
+        assert run_handle._run_state == RunState.RUNNING
 
         await integration.abort_session("test-session-011")
 

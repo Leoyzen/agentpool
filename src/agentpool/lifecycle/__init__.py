@@ -38,6 +38,7 @@ from agentpool.lifecycle.types import (
     Feedback,
     Prompt,
     ResumeResult,
+    RunOutcome,
     RunState,
     ToolExecutionRecord,
 )
@@ -60,6 +61,7 @@ __all__ = [
     "ProtocolChannel",
     "ProtocolTrigger",
     "ResumeResult",
+    "RunOutcome",
     "RunState",
     "ScheduledTrigger",
     "SnapshotStore",

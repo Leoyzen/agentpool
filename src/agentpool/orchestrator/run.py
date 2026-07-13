@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from dataclasses import dataclass, field
-from enum import Enum, auto
 from typing import TYPE_CHECKING, Any, Self
 import uuid
 
@@ -26,6 +25,7 @@ from agentpool.lifecycle import (
     Journal,
     MemoryJournal,
     MemorySnapshotStore,
+    RunOutcome,
     RunState,
     SnapshotStore,
     TriggerSource,
@@ -127,28 +127,6 @@ def inject_cancelled_tool_results(messages: list[ModelMessage]) -> list[ModelMes
     return result
 
 
-class RunStatus(Enum):
-    """Lifecycle states for an agent run.
-
-    Values:
-        pending: RunHandle created but not yet started.
-        running: Actively executing.
-        completed: Finished normally.
-        failed: Finished with an error.
-        checkpointed: Run state persisted for later resumption.
-        idle: RunHandle created but no active turn.
-        done: RunHandle closed or cancelled.
-    """
-
-    pending = auto()
-    running = auto()
-    completed = auto()
-    failed = auto()
-    checkpointed = auto()
-    idle = auto()
-    done = auto()
-
-
 @dataclass
 class RunHandle:
     """Ephemeral runtime handle for a single agent run.
@@ -168,7 +146,9 @@ class RunHandle:
         run_id: Unique identifier for this run.
         session_id: Session this run belongs to.
         agent_type: Type of agent running (e.g. ``"native"``, ``"claude"``).
-        status: Legacy lifecycle state (used by old code paths).
+        outcome: Terminal outcome (``RunOutcome.COMPLETED``, ``FAILED``,
+            ``CHECKPOINTED``) set when the run reaches ``RunState.DONE``.
+            ``None`` while the run is active or was closed without outcome.
         agent: The agent instance driving turns.
         event_bus: Event bus for publishing stream events.
         session: Per-session state containing the turn lock.
@@ -177,7 +157,6 @@ class RunHandle:
         _cleanup_callback: Optional callback invoked with run_id during cleanup.
         active_agent_run: Reference to PydanticAI AgentRun, set by
             NativeTurn during execution and cleared in ``finally``.
-        _status: New primary lifecycle state (idle/running/done).
         _closing: Flag indicating :meth:`close` has been called.
         _idle_event: asyncio.Event that is set when idle (for wake-up).
         _message_queue: Queued prompts for the next turn.
@@ -190,7 +169,7 @@ class RunHandle:
     run_id: str
     session_id: str
     agent_type: str
-    status: RunStatus = RunStatus.pending
+    outcome: RunOutcome | None = None
     agent: BaseAgent[Any, Any] | None = None
     event_bus: EventBus | None = None
     session: SessionState | None = None
@@ -199,7 +178,6 @@ class RunHandle:
     _cleanup_callback: Callable[[str], None] | None = None
     active_agent_run: AgentRun[Any, Any] | None = None
     _cancel_fn: Callable[[], None] | None = None
-    _status: RunStatus = RunStatus.idle
     _closing: bool = False
     _closed: bool = False
     _idle_event: asyncio.Event = field(default_factory=_create_set_event)
@@ -490,7 +468,6 @@ class RunHandle:
                     current_prompts = [initial_prompt]
                 while not self._closing:
                     if not current_prompts:
-                        self._status = RunStatus.idle
                         self._idle_event.clear()
                         # Drain CommChannel feedback queue (ProtocolChannel)
                         # BEFORE deciding to block. Feedback may have been
@@ -540,7 +517,6 @@ class RunHandle:
                         if not current_prompts:
                             continue
 
-                    self._status = RunStatus.running
                     # Lifecycle state transition: IDLE → RUNNING.
                     await self._transition(RunState.RUNNING)
                     # Generate a unique turn_id for this Turn.
@@ -689,6 +665,8 @@ class RunHandle:
                                 self._message_history = turn.message_history
                         # Do NOT reset cancelled here — handle_prompt() needs to
                         # observe it. It will be reset at the start of the next turn.
+                        # Lifecycle state transition: RUNNING → IDLE (cancel path).
+                        await self._transition(RunState.IDLE)
                         continue
 
                     if turn_failed:
@@ -773,9 +751,7 @@ class RunHandle:
                     self._turn_was_cancelled = False
                     self._turn_complete_event.set()
 
-                self._status = RunStatus.done
         finally:
-            self._status = RunStatus.done
             self._closed = True
             # Lifecycle state transition: → DONE.
             with contextlib.suppress(Exception):
@@ -832,12 +808,12 @@ class RunHandle:
             return True
 
         # Fallback: DirectChannel path (existing logic).
-        if self._status == RunStatus.idle:
+        if self._run_state == RunState.IDLE:
             self._message_queue.append(message)
             self._idle_event.set()
             return True
 
-        if self._status == RunStatus.running:
+        if self._run_state == RunState.RUNNING:
             agent_run = self.active_agent_run
             if agent_run is not None:
                 agent_run.enqueue(message, priority="asap")
@@ -872,7 +848,7 @@ class RunHandle:
 
         # Fallback: DirectChannel path (existing logic).
         self._message_queue.append(message)
-        if self._status == RunStatus.idle:
+        if self._run_state == RunState.IDLE:
             self._idle_event.set()
         return True
 
@@ -947,17 +923,19 @@ class RunHandle:
         Args:
             task: The asyncio.Task driving this run, if any.
         """
-        self.status = RunStatus.running
+        self._run_state = RunState.RUNNING
         self.run_ctx.current_task = task
 
     def complete(self) -> None:
         """Transition the run to completed and trigger cleanup."""
-        self.status = RunStatus.completed
+        self._run_state = RunState.DONE
+        self.outcome = RunOutcome.COMPLETED
         self._cleanup_run()
 
     def checkpoint(self) -> None:
         """Transition the run to checkpointed and trigger cleanup."""
-        self.status = RunStatus.checkpointed
+        self._run_state = RunState.DONE
+        self.outcome = RunOutcome.CHECKPOINTED
         self._cleanup_run()
 
     def fail(
@@ -972,7 +950,8 @@ class RunHandle:
             exception: Optional exception that caused the failure.
             event_bus: Optional event bus to publish RunFailedEvent on.
         """
-        self.status = RunStatus.failed
+        self._run_state = RunState.DONE
+        self.outcome = RunOutcome.FAILED
         if exception is not None:
             self.run_ctx.cancelled = True
         if event_bus is not None:

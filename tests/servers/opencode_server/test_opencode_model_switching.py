@@ -423,7 +423,7 @@ def _make_mock_state_with_session_agent(
     """Create a ServerState wired so get_or_create_session_agent returns per-session mocks."""
     from unittest.mock import AsyncMock, Mock
 
-    from agentpool.orchestrator.run import RunStatus
+    from agentpool.lifecycle import RunOutcome, RunState
     from agentpool.utils.time_utils import now_ms
     from agentpool_server.opencode_server.state import ServerState
 
@@ -465,7 +465,8 @@ def _make_mock_state_with_session_agent(
 
     # RunHandle that completes immediately
     run_handle = Mock()
-    run_handle.status = RunStatus.completed
+    run_handle._run_state = RunState.DONE
+    run_handle.outcome = RunOutcome.COMPLETED
     run_handle.complete_event = Mock()
     run_handle.complete_event.wait = AsyncMock(return_value=None)
     session_pool.receive_request = AsyncMock(return_value=run_handle)

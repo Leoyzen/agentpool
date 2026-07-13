@@ -149,12 +149,13 @@ def slow_mock_agent():  # noqa: PLR0915
 
     # Mock receive_request to actually call agent.run_stream and publish events
     async def _mock_receive_request(*, session_id, content, priority, input_provider):
-        from agentpool.orchestrator.run import RunHandle, RunStatus
+        from agentpool.lifecycle import RunOutcome, RunState
+from agentpool.orchestrator.run import RunHandle
 
         handle = Mock(spec=RunHandle)
         handle.run_id = "test-run"
         handle.session_id = session_id
-        handle.status = RunStatus.running
+        handle._run_state = RunState.RUNNING
         complete_event = asyncio.Event()
         handle.complete_event = complete_event
 
@@ -163,9 +164,11 @@ def slow_mock_agent():  # noqa: PLR0915
                 stream = agent.run_stream(content, session_id=session_id)
                 async for event in stream:
                     await event_bus.publish(session_id, event)
-                handle.status = RunStatus.completed
+                handle._run_state = RunState.DONE
+    run_handle.outcome = RunOutcome.COMPLETED
             except Exception:  # noqa: BLE001
-                handle.status = RunStatus.failed
+                handle._run_state = RunState.DONE
+    run_handle.outcome = RunOutcome.FAILED
             finally:
                 complete_event.set()
 

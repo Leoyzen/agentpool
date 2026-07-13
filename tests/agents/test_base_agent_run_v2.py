@@ -16,7 +16,8 @@ from agentpool.agents.events import RunErrorEvent, RunStartedEvent, StreamComple
 from agentpool.agents.native_agent.agent import Agent
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.lifecycle import RunState
+from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
 
 
@@ -101,7 +102,7 @@ async def test_create_run_returns_run_handle_without_executing() -> None:
     )
 
     assert isinstance(handle, RunHandle)
-    assert handle._status == RunStatus.idle
+    assert handle._run_state == RunState.IDLE
     assert handle._closing is False
 
 

@@ -22,8 +22,9 @@ from agentpool.agents.events import (
     RunFailedEvent,
     StreamCompleteEvent,
 )
+from agentpool.lifecycle import RunState
 from agentpool.log import get_logger
-from agentpool.orchestrator.run import RunHandle, RunStatus, inject_cancelled_tool_results
+from agentpool.orchestrator.run import RunHandle, inject_cancelled_tool_results
 from agentpool.orchestrator.runtime_registry import RuntimeAgentRegistry
 from agentpool.sessions.models import PendingDeferredCall, SessionData
 from agentpool_server.opencode_server.models.session_info import SessionInfo
@@ -1047,11 +1048,7 @@ class SessionController:
             # or terminal run, clear it and start a new run.
             if session.current_run_id is not None:
                 existing_run = self._runs.get(session.current_run_id)
-                if existing_run is None or existing_run._status in (
-                    RunStatus.failed,
-                    RunStatus.completed,
-                    RunStatus.done,
-                ):
+                if existing_run is None or existing_run._run_state == RunState.DONE:
                     session.current_run_id = None
             if session.current_run_id is None:
                 return self._start_run_handle(session, agent, session_id, content_str, deps=deps)

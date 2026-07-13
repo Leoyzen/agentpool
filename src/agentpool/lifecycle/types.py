@@ -25,6 +25,23 @@ class RunState(Enum):
     DONE = "done"
 
 
+class RunOutcome(Enum):
+    """Terminal outcome for a completed RunLoop.
+
+    Set on ``RunHandle.outcome`` when the run reaches ``RunState.DONE``.
+    ``None`` means the run has not yet terminated (still ``IDLE`` or
+    ``RUNNING``) or was closed without a specific outcome.
+
+    - ``COMPLETED`` — Run finished normally.
+    - ``FAILED`` — Run finished with an error.
+    - ``CHECKPOINTED`` — Run state persisted for later resumption.
+    """
+
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CHECKPOINTED = "checkpointed"
+
+
 @dataclass
 class Prompt:
     """Incoming prompt delivered to the RunLoop by a TriggerSource.
@@ -128,6 +145,7 @@ __all__ = [
     "Feedback",
     "Prompt",
     "ResumeResult",
+    "RunOutcome",
     "RunState",
     "ToolExecutionRecord",
 ]

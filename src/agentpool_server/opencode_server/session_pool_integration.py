@@ -19,8 +19,8 @@ from agentpool.agents.events.events import (
     SpawnSessionStart,
     StreamCompleteEvent,
 )
+from agentpool.lifecycle import RunState
 from agentpool.log import get_logger
-from agentpool.orchestrator.run import RunStatus
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.mixins import ProtocolEventConsumerMixin
@@ -822,9 +822,9 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
             run_id = session.current_run_id
             if run_id is not None:
                 run_handle = self.session_pool.sessions._runs.get(run_id)
-                if run_handle is not None and run_handle.status in (
-                    RunStatus.pending,
-                    RunStatus.running,
+                if run_handle is not None and run_handle._run_state in (
+                    RunState.IDLE,
+                    RunState.RUNNING,
                 ):
                     return SessionStatus(type="busy")
 

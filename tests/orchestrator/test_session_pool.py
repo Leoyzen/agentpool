@@ -358,7 +358,8 @@ async def test_cache_copy_messages_invalidates_target_cache(
 # RunHandle delegation tests (feature-flag gated)
 # ---------------------------------------------------------------------------
 
-from agentpool.orchestrator.run import RunHandle, RunStatus  # noqa: E402
+from agentpool.lifecycle import RunState
+from agentpool.orchestrator.run import RunHandle  # noqa: E402
 
 
 def _make_mock_agent() -> MagicMock:
@@ -399,7 +400,7 @@ def _setup_active_run(
     run_handle.steer = MagicMock(return_value=True)
     run_handle.followup = MagicMock(return_value=True)
     run_handle.run_id = "test-run-id"
-    run_handle.status = RunStatus.running
+    run_handle._run_state = RunState.RUNNING
     session_pool.sessions._runs["test-run-id"] = run_handle
     session = session_pool.sessions.get_session(session_id)
     assert session is not None
