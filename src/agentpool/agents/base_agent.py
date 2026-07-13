@@ -1028,11 +1028,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         processed in a continuation loop without exiting the stream. This
         allows tools or external code to schedule follow-up work.
 
-        !!! warning "Deprecated for pooled native agents"
-            Use ``agent_pool.session_pool.followup()`` instead.
+        !!! warning "Deprecated for pooled agents"
+            Use ``host_context.session_pool.followup()`` instead.
 
-        For non-native agents and standalone native agents, the existing
-        injection_manager-based path remains unchanged.
+        For standalone agents (no session pool), the injection_manager-based
+        path is used as a fallback.
 
         Args:
             *prompts: Prompts to queue (same format as run/run_stream)
@@ -1046,11 +1046,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
         run_ctx = self.get_active_run_context(session_id=session_id)
 
-        # Pooled native agents: delegate to session_pool.followup().
+        # Pooled agents: delegate to session_pool.followup().
         ctx = self.host_context
-        if self.AGENT_TYPE == "native" and ctx is not None and ctx.session_pool is not None:
+        if ctx is not None and ctx.session_pool is not None:
             warnings.warn(
-                "queue_prompt() is deprecated for pooled native agents. "
+                "queue_prompt() is deprecated for pooled agents. "
                 "Use host_context.session_pool.followup() instead.",
                 DeprecationWarning,
                 stacklevel=2,
@@ -1065,9 +1065,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     session_pool.followup(effective_session_id, combined)
                 )
                 return
-            # Standalone native agents: fall through to legacy path
 
-        # Legacy path for non-native agents and standalone native agents
+        # Standalone agents: use injection_manager
         if run_ctx is not None and run_ctx.injection_manager is not None:
             combined = "\n".join(str(p) for p in prompts)
             run_ctx.injection_manager.inject(combined)
@@ -1587,31 +1586,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             conversation.add_chat_messages([user_msg])
 
         try:
-            # Execute pre-turn hooks (guarded against double-firing with HookAwareTurn)
-            # Native agents fire hooks via HookAwareTurn in NativeTurn.execute();
-            # only ACP standalone path still uses this old hook firing.
-            if self.AGENT_TYPE != "native" and self.hooks and "pre_turn" not in run_ctx.hooks_fired:
-                run_ctx.hooks_fired.add("pre_turn")
-                pre_turn_result = await self.hooks.run_pre_turn_hooks(
-                    agent_name=self.name,
-                    prompt=user_msg.content
-                    if isinstance(user_msg.content, str)
-                    else str(user_msg.content),
-                    session_id=session_id,
-                )
-                if pre_turn_result.get("decision") == "deny":
-                    run_ctx.cancelled = True
-                    cancel_msg = ChatMessage(
-                        content="",
-                        role="assistant",
-                        name=self.name,
-                        session_id=session_id,
-                    )
-                    yield StreamCompleteEvent(
-                        message=cast("ChatMessage[TResult]", cancel_msg), cancelled=True
-                    )
-                    return
-
             async for event in self._stream_events(
                 run_ctx,
                 [*pending_parts, *converted_prompts],
@@ -1648,27 +1622,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # TaskGroup cancellation from interrupting hooks/routing/persistence
         if final_message is not None:
             with anyio.CancelScope(shield=True):
-                # Execute post-turn hooks (guarded against double-firing with HookAwareTurn)
-                # Native agents fire hooks via HookAwareTurn in NativeTurn.execute();
-                # only ACP standalone path still uses this old hook firing.
-                if (
-                    self.AGENT_TYPE != "native"
-                    and self.hooks
-                    and "post_turn" not in run_ctx.hooks_fired
-                ):
-                    run_ctx.hooks_fired.add("post_turn")
-                    prompt_str = (
-                        user_msg.content
-                        if isinstance(user_msg.content, str)
-                        else str(user_msg.content)
-                    )
-                    await self.hooks.run_post_turn_hooks(
-                        agent_name=self.name,
-                        prompt=prompt_str,
-                        result=final_message.content,
-                        session_id=session_id,
-                    )
-
                 # Emit signal (always - for event handlers).
                 # Skip when run_ctx was provided by SessionPool (Path A);
                 # the Path A wrapper in run_stream() handles emission in that case.

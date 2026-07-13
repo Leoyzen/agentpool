@@ -1,0 +1,87 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.14, pytest-9.0.3, pluggy-1.6.0
+rootdir: /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup
+configfile: pyproject.toml
+plugins: docker-3.2.5, syrupy-5.2.0, logfire-4.33.0, cov-7.1.0, xdist-3.8.0, devtools-0.12.2, typeguard-4.5.2, timeout-2.4.0, rerunfailures-16.3, asyncio-1.3.0, anyio-4.13.0
+timeout: 180.0s
+timeout method: signal
+timeout func_only: False
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collected 413 items / 411 deselected / 2 selected
+
+tests/integration/test_acp_streaming.py::test_acp_streaming_event_sequence_with_tool_metadata[asyncio] PASSED [ 50%]
+tests/integration/test_acp_streaming.py::test_acp_streaming_text_only_sequence[asyncio] PASSED [100%]
+
+=============================== warnings summary ===============================
+.venv/lib/python3.13/site-packages/pydantic_ai/models/test.py:311
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/lib/python3.13/site-packages/pydantic_ai/models/test.py:311: PytestCollectionWarning: cannot collect test class 'TestStreamedResponse' because it has a __init__ constructor (from: tests/agents/native_agent/test_inject_prompt_cross_task.py)
+    @dataclass
+
+.venv/lib/python3.13/site-packages/pydantic_ai/models/test.py:311
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/lib/python3.13/site-packages/pydantic_ai/models/test.py:311: PytestCollectionWarning: cannot collect test class 'TestStreamedResponse' because it has a __init__ constructor (from: tests/agents/native_agent/test_interrupt.py)
+    @dataclass
+
+.venv/lib/python3.13/site-packages/pydantic_ai/models/test.py:311
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/lib/python3.13/site-packages/pydantic_ai/models/test.py:311: PytestCollectionWarning: cannot collect test class 'TestStreamedResponse' because it has a __init__ constructor (from: tests/agents/test_native_agent_streaming_cancellation.py)
+    @dataclass
+
+tests/integration/test_acp_streaming.py::test_acp_streaming_event_sequence_with_tool_metadata[asyncio]
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/lib/python3.13/site-packages/llmling_models/models/input_model/model.py:81: GenericBeforeBaseModelWarning: Classes should inherit from `BaseModel` before generic classes (e.g. `typing.Generic[T]`) for pydantic generics to work properly.
+    class InputModel(Model, Schema):
+
+tests/integration/test_acp_streaming.py::test_acp_streaming_event_sequence_with_tool_metadata[asyncio]
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/lib/python3.13/site-packages/llmling_models/models/claude_code_model.py:13: PydanticAIDeprecationWarning: `pydantic_ai.BuiltinToolCallPart` is deprecated, use `pydantic_ai.NativeToolCallPart` instead.
+    from pydantic_ai import (
+
+tests/integration/test_acp_streaming.py::test_acp_streaming_event_sequence_with_tool_metadata[asyncio]
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/lib/python3.13/site-packages/llmling_models/models/claude_code_model.py:13: PydanticAIDeprecationWarning: `pydantic_ai.BuiltinToolReturnPart` is deprecated, use `pydantic_ai.NativeToolReturnPart` instead.
+    from pydantic_ai import (
+
+tests/integration/test_acp_streaming.py::test_acp_streaming_event_sequence_with_tool_metadata[asyncio]
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/lib/python3.13/site-packages/llmling_models/builtin_tools.py:30: PydanticAIDeprecationWarning: `pydantic_ai.builtin_tools.AbstractBuiltinTool` is deprecated, use `pydantic_ai.native_tools.AbstractNativeTool` instead.
+    from pydantic_ai.builtin_tools import AbstractBuiltinTool
+
+tests/integration/test_acp_streaming.py::test_acp_streaming_event_sequence_with_tool_metadata[asyncio]
+  <frozen abc>:106: PydanticAIDeprecationWarning: ClaudeCodeModel overrides `supported_builtin_tools()`, which is deprecated — override `supported_native_tools()` instead.
+
+tests/integration/test_acp_streaming.py::test_acp_streaming_event_sequence_with_tool_metadata[asyncio]
+tests/integration/test_acp_streaming.py::test_acp_streaming_text_only_sequence[asyncio]
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/src/agentpool/messaging/messagenode.py:111: DeprecationWarning: TaskManager is deprecated. Use anyio.TaskGroup for structured concurrency.
+    self.task_manager = TaskManager()
+
+tests/integration/test_acp_streaming.py::test_acp_streaming_event_sequence_with_tool_metadata[asyncio]
+tests/integration/test_acp_streaming.py::test_acp_streaming_text_only_sequence[asyncio]
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/src/agentpool/messaging/event_manager.py:68: DeprecationWarning: TaskManager is deprecated. Use anyio.TaskGroup for structured concurrency.
+    self.task_manager = TaskManager()
+
+tests/integration/test_acp_streaming.py::test_acp_streaming_event_sequence_with_tool_metadata[asyncio]
+tests/integration/test_acp_streaming.py::test_acp_streaming_text_only_sequence[asyncio]
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/src/agentpool/storage/manager.py:94: DeprecationWarning: TaskManager is deprecated. Use anyio.TaskGroup for structured concurrency.
+    self.task_manager = TaskManager()
+
+tests/integration/test_acp_streaming.py::test_acp_streaming_event_sequence_with_tool_metadata[asyncio]
+tests/integration/test_acp_streaming.py::test_acp_streaming_text_only_sequence[asyncio]
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/src/agentpool_storage/base.py:62: DeprecationWarning: TaskManager is deprecated. Use anyio.TaskGroup for structured concurrency.
+    self.task_manager = TaskManager()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+--------------------------- snapshot report summary ----------------------------
+2 snapshots passed.
+================ 2 passed, 411 deselected, 16 warnings in 2.17s ================
+--- ruff check ---
+F401 [*] `typing.cast` imported but unused
+  --> src/agentpool/agents/base_agent.py:14:73
+   |
+12 | from pathlib import Path
+13 | import re
+14 | from typing import TYPE_CHECKING, Any, ClassVar, Literal, assert_never, cast, overload
+   |                                                                         ^^^^
+15 | import warnings
+   |
+help: Remove unused import: `typing.cast`
+
+Found 1 error.
+[*] 1 fixable with the `--fix` option.
+--- grep AGENT_TYPE native ---
+1051:        if self.AGENT_TYPE == "native" and ctx is not None and ctx.session_pool is not None:
+1104:        if self.AGENT_TYPE == "native" and ctx is not None and ctx.session_pool is not None:

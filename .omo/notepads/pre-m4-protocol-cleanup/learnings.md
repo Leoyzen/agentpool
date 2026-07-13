@@ -140,3 +140,27 @@ Replaced the inline 200-LOC `_stream_events()` implementation with a thin delega
 - ACP agent tests: 58/58 passed
 - Stream tests: 35/35 passed
 - Ruff: All checks passed (source files)
+
+## Task 3: Remove _run_stream_once() hook firing for ACP agents
+
+### Summary
+Deleted the two `AGENT_TYPE != "native"` branches in `_run_stream_once()` that fired pre-turn and post-turn hooks for ACP agents. Hooks now fire exclusively through `HookAwareTurn` in `Turn.execute()`.
+
+### What was done
+1. **Pre-turn hook firing** (was at line ~1593): Removed the entire `if self.AGENT_TYPE != "native" and self.hooks and "pre_turn" not in run_ctx.hooks_fired:` block that called `run_pre_turn_hooks()` and handled deny by yielding a cancelled `StreamCompleteEvent`. ~24 lines deleted.
+2. **Post-turn hook firing** (was at line ~1655): Removed the `if self.AGENT_TYPE != "native" and self.hooks and "post_turn" not in run_ctx.hooks_fired:` block that called `run_post_turn_hooks()`. ~18 lines deleted.
+3. Kept the `hooks_fired` guard on `run_ctx` (T4 will remove it).
+4. Kept `AGENT_TYPE` field itself — only non-hook `== "native"` branches remain (lines 1051, 1104 for session_pool access).
+
+### Key design decisions
+- No changes needed to `HookAwareTurn` or `ACPTurn` — they already fire hooks via `Turn.execute()`, and the `hooks_fired` double-fire guard was preventing duplicates. With the old path removed, the guard becomes a no-op (T4 will clean it up).
+- The pre-turn deny path (yielding cancelled StreamCompleteEvent) is now handled by `HookAwareTurn.fire_pre_turn_hooks()` which raises on deny, caught by `ACPTurn.execute()`.
+
+### Files modified
+- `src/agentpool/agents/base_agent.py` — Removed ~42 lines of ACP hook firing code
+
+### Test results
+- `tests/agents/`: 404 passed, 1 skipped, 6 deselected
+- `tests/integration/test_acp_streaming.py -m acp_snapshot`: 2 passed (V10 snapshots unchanged)
+- Ruff: All checks passed
+- `grep -n 'AGENT_TYPE.*native' base_agent.py`: Only 2 remaining (both `== "native"`, non-hook-related)
