@@ -318,7 +318,7 @@ async def test_protocol_channel_publishes_to_event_bus() -> None:
 async def test_no_double_publish_with_protocol_channel() -> None:
     """When ProtocolChannel is the comm_channel, events are not double-published to EventBus.
 
-    The publishes_to_event_bus property returns True for
+    The _channel_publishes_to_event_bus property returns True for
     ProtocolChannel, so start() skips the direct event_bus.publish()
     call and lets ProtocolChannel.publish() handle EventBus delivery.
     """
@@ -346,7 +346,7 @@ async def test_no_double_publish_with_protocol_channel() -> None:
     )
 
     # The property should return True.
-    assert run_handle._comm_channel.publishes_to_event_bus is True
+    assert run_handle._channel_publishes_to_event_bus is True
 
     # Cleanup
     run_handle.close()
@@ -354,7 +354,7 @@ async def test_no_double_publish_with_protocol_channel() -> None:
 
 @pytest.mark.unit
 async def test_double_publish_with_direct_channel() -> None:
-    """With DirectChannel, publishes_to_event_bus is False.
+    """With DirectChannel, _channel_publishes_to_event_bus is False.
 
     DirectChannel does not publish to EventBus, so start() must
     call event_bus.publish() directly.
@@ -381,7 +381,7 @@ async def test_double_publish_with_direct_channel() -> None:
     )
 
     # The property should return False.
-    assert run_handle._comm_channel.publishes_to_event_bus is False
+    assert run_handle._channel_publishes_to_event_bus is False
 
     # Cleanup
     run_handle.close()
