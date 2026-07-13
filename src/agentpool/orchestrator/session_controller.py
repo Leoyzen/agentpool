@@ -481,14 +481,6 @@ class SessionController:
 
             logger.info("Created session agent", session_id=session_id, agent_name=agent_name)
             return agent
-            available_manifest = list(self.pool.manifest.agents.keys())
-            available_runtime = self._runtime_registry.names()
-            msg = (
-                f"Agent config not found: {agent_name!r}. "
-                f"Available in manifest: {available_manifest}. "
-                f"Available in runtime registry: {available_runtime}."
-            )
-            raise RuntimeError(msg)
 
     def list_sessions(self) -> list[SessionInfo]:
         """List all active sessions.
