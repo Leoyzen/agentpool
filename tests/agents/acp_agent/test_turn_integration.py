@@ -96,7 +96,6 @@ async def test_acp_turn_full_cycle_with_mock_client() -> None:
         acp_client=client,
         prompts=["Say hello"],
         run_ctx=run_ctx,
-        message_history=[],
         session_id="test-session",
     )
 

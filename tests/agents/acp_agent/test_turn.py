@@ -85,7 +85,6 @@ async def test_acp_turn_prompt_stream_complete_cycle() -> None:
         acp_client=client,
         prompts=["Say hello"],
         run_ctx=run_ctx,
-        message_history=[],
         session_id="test-session",
     )
 
@@ -119,7 +118,6 @@ async def test_acp_turn_prompt_error_yields_run_error_event() -> None:
         acp_client=client,
         prompts=["Hello"],
         run_ctx=run_ctx,
-        message_history=[],
         session_id="test-session",
     )
 
@@ -147,7 +145,6 @@ async def test_acp_turn_stream_error_yields_run_error_event() -> None:
         acp_client=client,
         prompts=["Hello"],
         run_ctx=run_ctx,
-        message_history=[],
         session_id="test-session",
     )
 
@@ -173,7 +170,6 @@ async def test_acp_turn_message_history_and_final_message_after_execute() -> Non
         acp_client=client,
         prompts=["Hello"],
         run_ctx=run_ctx,
-        message_history=[],
         session_id="test-session",
     )
 
@@ -203,7 +199,6 @@ async def test_acp_turn_properties_raise_before_execute() -> None:
         acp_client=client,
         prompts=["Hello"],
         run_ctx=run_ctx,
-        message_history=[],
         session_id="test-session",
     )
 
@@ -224,7 +219,6 @@ async def test_acp_turn_cancelled_error_propagates() -> None:
         acp_client=client,
         prompts=["Hello"],
         run_ctx=run_ctx,
-        message_history=[],
         session_id="test-session",
     )
 
@@ -246,7 +240,6 @@ async def test_acp_turn_cancelled_error_during_stream_propagates() -> None:
         acp_client=client,
         prompts=["Hello"],
         run_ctx=run_ctx,
-        message_history=[],
         session_id="test-session",
     )
 
@@ -268,7 +261,6 @@ async def test_acp_turn_empty_prompts_uses_empty_string() -> None:
         acp_client=client,
         prompts=[],
         run_ctx=run_ctx,
-        message_history=[],
         session_id="test-session",
     )
 

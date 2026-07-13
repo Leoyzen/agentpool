@@ -46,6 +46,7 @@ from agentpool_server.opencode_server.models import (
     TokenCache,
     Tokens,
 )
+from agentpool_server.opencode_server.models.session import SessionStatusType
 
 # Cross-layer import: McpToolsChangedEvent is an OpenCode SSE event that
 # EventProcessor creates from core-layer ChangeEvent(kind="tools_changed").
@@ -211,7 +212,7 @@ class EventProcessor:
             case StreamCompleteEvent(message=msg, cancelled=cancelled) if msg:
                 for e in self._process_stream_complete(ctx, msg):
                     yield e
-                status: str = "cancelled" if cancelled else "idle"
+                status: SessionStatusType = "cancelled" if cancelled else "idle"
                 yield SessionStatusEvent.create(
                     session_id=ctx.session_id,
                     status_type=status,

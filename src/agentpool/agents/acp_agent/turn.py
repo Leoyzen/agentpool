@@ -106,9 +106,8 @@ class ACPTurn(HookAwareTurn, Turn):
     def __init__(
         self,
         acp_client: ACPClientProtocol,
-        prompts: list[str],
+        prompts: list[UserContent],
         run_ctx: AgentRunContext,
-        message_history: list[ModelMessage],
         session_id: str,
         agent_name: str | None = None,
         hooks: AgentHooks | None = None,

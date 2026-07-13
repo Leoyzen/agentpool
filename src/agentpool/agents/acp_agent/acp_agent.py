@@ -34,7 +34,7 @@ from dataclasses import replace
 from datetime import datetime
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
 import uuid
 
 import anyio
@@ -50,7 +50,7 @@ from pydantic_ai import (
 from acp import InitializeRequest
 from acp.agent import ACPAgentAPI
 from agentpool.agents.acp_agent.session_state import ACPSessionState
-from agentpool.agents.acp_agent.turn import ACPTurn
+from agentpool.agents.acp_agent.turn import ACPClientProtocol, ACPTurn
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.events import (
     RunStartedEvent,
@@ -453,11 +453,11 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             self.log.debug("Forked session", parent=self._sdk_session_id, fork=acp_session_id)
 
         # Create ACPTurn and delegate to execute()
+        _acp_client: ACPClientProtocol = cast(ACPClientProtocol, self._api)
         turn = ACPTurn(
-            acp_client=self._api,
-            prompts=prompts,  # type: ignore[arg-type]
+            acp_client=_acp_client,
+            prompts=prompts,
             run_ctx=run_ctx,
-            message_history=message_history,
             session_id=acp_session_id,
             agent_name=self.name,
             hooks=self.hooks,
@@ -599,11 +599,11 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         Returns:
             An ACPTurn instance for single-cycle execution.
         """
+        _acp_client: ACPClientProtocol = cast(ACPClientProtocol, self._api)
         return ACPTurn(
-            acp_client=self._api,
-            prompts=prompts,  # type: ignore[arg-type]
+            acp_client=_acp_client,
+            prompts=prompts,
             run_ctx=run_ctx,
-            message_history=message_history,
             session_id=self._sdk_session_id or run_ctx.session_id,
             agent_name=self.name,
             hooks=self.hooks,
