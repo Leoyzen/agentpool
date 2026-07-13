@@ -278,10 +278,10 @@ def _make_pool_mock(agent: Any) -> Mock:
                 async for _ in stream:
                     pass
                 run_handle._run_state = RunState.DONE
-    run_handle.outcome = RunOutcome.COMPLETED
+                run_handle.outcome = RunOutcome.COMPLETED
             except Exception:  # noqa: BLE001
                 run_handle._run_state = RunState.DONE
-    run_handle.outcome = RunOutcome.FAILED
+                run_handle.outcome = RunOutcome.FAILED
             finally:
                 complete_event.set()
 

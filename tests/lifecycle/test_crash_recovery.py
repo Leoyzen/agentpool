@@ -604,6 +604,7 @@ class _TestableHookAwareTurn(HookAwareTurn):
     """Concrete HookAwareTurn for testing _log_tool_execution."""
 
     def __init__(self, run_ctx: AgentRunContext) -> None:
+        super().__init__()
         self._hooks = None
         self._run_ctx = run_ctx
 
