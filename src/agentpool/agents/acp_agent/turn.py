@@ -183,7 +183,7 @@ class ACPTurn(HookAwareTurn, Turn):
                 self._prompt_response = response
             except asyncio.CancelledError:
                 raise
-            except (RequestError, ConnectionError, ValidationError) as exc:
+            except (RequestError, ConnectionError, RuntimeError, ValidationError) as exc:
                 yield RunErrorEvent(
                     message=str(exc),
                     run_id=run_id,
