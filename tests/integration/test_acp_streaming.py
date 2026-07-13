@@ -51,7 +51,7 @@ from agentpool.messaging import ChatMessage
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncIterator
 
     from syrupy import SnapshotAssertion
 
@@ -206,10 +206,23 @@ class _MockACPClientHandler:
 
 
 class _MockAPI:
-    """Mock ACPAgentAPI that returns a PromptResponse after a short delay."""
+    """Mock ACPAgentAPI that returns a PromptResponse after a short delay.
 
-    def __init__(self, delay: float = 0.01) -> None:
+    Implements stream_events() and get_messages() with the same polling
+    logic as ACPAgentAPI so ACPTurn.execute() can use it as an
+    ACPClientProtocol.
+    """
+
+    def __init__(
+        self,
+        delay: float = 0.01,
+        state: Any | None = None,
+        update_event: Any | None = None,
+    ) -> None:
         self._delay = delay
+        self._state = state
+        self._update_event = update_event
+        self._consumed_updates: list[Any] = []
 
     async def prompt(self, session_id: str, content: list[Any]) -> PromptResponse:
         await asyncio.sleep(self._delay)
@@ -217,6 +230,28 @@ class _MockAPI:
 
     async def fork_session(self, session_id: str, cwd: str) -> Any:
         raise NotImplementedError
+
+    async def stream_events(self, response: Any) -> AsyncIterator[Any]:
+        """Poll state queue for updates, same as ACPAgentAPI.stream_events()."""
+        self._consumed_updates.clear()
+        if self._state is None or self._update_event is None:
+            return
+        while True:
+            try:
+                await self._update_event.wait_with_timeout(0.05)
+                self._update_event.clear()
+            except TimeoutError:
+                pass
+            drained_any = False
+            while (update := self._state.pop_update()) is not None:
+                self._consumed_updates.append(update)
+                yield update
+                drained_any = True
+            if not drained_any:
+                break
+
+    async def get_messages(self, session_id: str) -> list[Any]:
+        return list(self._consumed_updates)
 
 
 # ---------------------------------------------------------------------------
@@ -262,8 +297,11 @@ def _make_acp_agent_with_mocks(
     # Set up mocked client handler
     agent._client_handler = _MockACPClientHandler()
 
-    # Set up mocked API
-    agent._api = _MockAPI()
+    # Set up mocked API with state/event for stream_events() and get_messages()
+    agent._api = _MockAPI(
+        state=state,
+        update_event=agent._client_handler._update_event,
+    )
 
     # Set up mocked session ID
     agent._sdk_session_id = "test-session-id"

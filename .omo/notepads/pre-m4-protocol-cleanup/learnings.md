@@ -100,3 +100,43 @@ Updated 10 test files to replace `_run_stream_once` references with `_stream_eve
 - V10 snapshot tests pass (2/2).
 - `grep -rn '_run_stream_once' tests/` returns 0 matches.
 - 65 tests pass across all modified files.
+
+## Task 2: Refactor _stream_events() to delegate to ACPTurn.execute()
+
+### Summary
+Replaced the inline 200-LOC `_stream_events()` implementation with a thin delegate that creates an `ACPTurn` and iterates `turn.execute()`, intercepting events for enrichment.
+
+### What was done
+1. **`turn.py`**: Added `self._prompt_response: PromptResponse | None = None` to `ACPTurn.__init__` and stored the response after `await self._acp_client.prompt()` so the delegate can access `stop_reason` for `finish_reason`.
+2. **`acp_agent.py`**: Replaced lines 415-614 (inline `_stream_events`) with a thin delegate that:
+   - Yields `RunStartedEvent` (ACPTurn doesn't yield this)
+   - Handles session forking for `store_history=False`
+   - Creates an `ACPTurn` with the correct (possibly forked) `session_id`
+   - Iterates `turn.execute()`, intercepting:
+     - `ToolResultMetadataEvent` → captured for enrichment, not yielded
+     - `ToolCallCompleteEvent` → enriched with `agent_name` and `metadata`
+     - `StreamCompleteEvent` → intercepted (not yielded); replaced with enriched version after iteration
+   - Catches `CancelledError` for cancellation handling
+   - After iteration: builds enriched `StreamCompleteEvent` with `finish_reason`, `usage`, `cost_info`, `name`, `model_name`, `message_id`, `session_id`, `parent_id`
+3. **`acp_agent.py`**: Cleaned up unused imports (`ModelRequest`, `ModelResponse`, `UserPromptPart`, `EventEnvelope`, duplicate `ThinkingPart`/`ToolCallPart`/`UserContent` in TYPE_CHECKING).
+4. **`test_acp_streaming.py`**: Updated `_MockAPI` to accept `state` and `update_event` parameters and implement `stream_events()` and `get_messages()` with the same polling logic as `ACPAgentAPI`. Updated `_make_acp_agent_with_mocks()` to pass state/event to `_MockAPI`.
+
+### Key design decisions
+1. **RunStartedEvent stays in delegate** — ACPTurn.execute() doesn't yield it (it's published by RunHandle.start() in the protocol-server path). The standalone `_stream_events` path needs it.
+2. **StreamCompleteEvent intercepted and replaced** — ACPTurn's `StreamCompleteEvent` lacks `finish_reason`, `name`, `usage`, `cost_info`. The delegate intercepts it (breaks the loop) and builds a replacement using `turn._prompt_response.stop_reason` and `turn.message_history`.
+3. **ToolResultMetadataEvent enrichment in delegate** — ACPTurn doesn't do this enrichment. The delegate captures `ToolResultMetadataEvent` events (not yielded) and uses them to enrich subsequent `ToolCallCompleteEvent` metadata.
+4. **Session forking before ACPTurn creation** — The delegate handles `store_history=False` by forking the session before creating ACPTurn, passing the forked `acp_session_id` to the constructor. `create_turn()` doesn't support forked sessions (uses `self._sdk_session_id`), so the delegate creates ACPTurn directly.
+5. **`self._prompt_task` no longer set** — The inline implementation created a background `prompt_task` for concurrent polling. ACPTurn awaits `prompt()` directly. `self._prompt_task` is only set to `None` on cancellation. Interrupt support (`_interrupt()`) will need updating in a future task.
+6. **Tool bridge context preserved** — The delegate wraps `turn.execute()` with `self._tool_bridge.set_run_context()` just like the inline implementation.
+7. **Event ordering equivalent** — V10 snapshot tests pass unchanged: `RunStartedEvent → PartDeltaEvent(s) → ToolCallStartEvent → ToolCallCompleteEvent (enriched) → PartDeltaEvent(s) → StreamCompleteEvent`.
+
+### Files modified
+- `src/agentpool/agents/acp_agent/turn.py` — Added `_prompt_response` field and storage
+- `src/agentpool/agents/acp_agent/acp_agent.py` — Replaced inline `_stream_events` with delegate; cleaned imports
+- `tests/integration/test_acp_streaming.py` — Updated `_MockAPI` with `stream_events()`/`get_messages()`
+
+### Test results
+- V10 snapshot tests: 2/2 passed (snapshot baseline unchanged)
+- ACP agent tests: 58/58 passed
+- Stream tests: 35/35 passed
+- Ruff: All checks passed (source files)

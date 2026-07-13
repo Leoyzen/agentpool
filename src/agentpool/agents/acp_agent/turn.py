@@ -119,6 +119,7 @@ class ACPTurn(HookAwareTurn, Turn):
         self._agent_name = agent_name
         self._hooks = hooks
         self._agent_env = env
+        self._prompt_response: PromptResponse | None = None
 
     @property
     def _hook_env(self) -> Any | None:
@@ -176,6 +177,7 @@ class ACPTurn(HookAwareTurn, Turn):
             # --- Phase 1: Send prompt ---
             try:
                 response = await self._acp_client.prompt(self._session_id, content)
+                self._prompt_response = response
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
