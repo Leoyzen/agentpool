@@ -46,7 +46,6 @@ from agentpool_server.opencode_server.models import (
     TokenCache,
     Tokens,
 )
-from agentpool_server.opencode_server.models.session import SessionStatusType
 
 # Cross-layer import: McpToolsChangedEvent is an OpenCode SSE event that
 # EventProcessor creates from core-layer ChangeEvent(kind="tools_changed").
@@ -77,6 +76,7 @@ if TYPE_CHECKING:
     )
     from agentpool_server.opencode_server.models.events import Event
     from agentpool_server.opencode_server.models.parts import ToolState
+    from agentpool_server.opencode_server.models.session import SessionStatusType
 
 logger = get_logger(__name__)
 

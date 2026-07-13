@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Sequence
     from typing import Any
 
-    from pydantic_ai import ModelMessage
+    from pydantic_ai import ModelMessage, UserContent
 
     from acp.schema import ContentBlock, PromptResponse, SessionUpdate
     from agentpool.agents.context import AgentRunContext
@@ -173,7 +173,7 @@ class ACPTurn(HookAwareTurn, Turn):
                 return
             # Convert all user prompts to ACP ContentBlock list.
             # Join all prompts instead of taking only the last one.
-            full_prompt = "\n\n".join(self._prompts) if self._prompts else ""
+            full_prompt = "\n\n".join(str(p) for p in self._prompts) if self._prompts else ""
             content = convert_to_acp_content([full_prompt])
 
             # --- Phase 1: Send prompt ---

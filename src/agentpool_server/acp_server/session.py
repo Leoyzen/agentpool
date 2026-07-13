@@ -17,7 +17,6 @@ import anyio
 from exxec.acp_provider import ACPExecutionEnvironment
 import logfire
 from pydantic_ai import UsageLimitExceeded
-from agentpool_config.commands import BaseCommandConfig
 from slashed import CommandStore
 from tokonomics.model_discovery.model_info import ModelInfo
 
@@ -33,6 +32,7 @@ from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
 from agentpool.commands.base import NodeCommand
 from agentpool.log import get_logger
 from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
+from agentpool_config.commands import BaseCommandConfig
 from agentpool_server.acp_server.converters import (
     convert_acp_mcp_server_to_config,
     from_acp_content,
