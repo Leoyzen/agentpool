@@ -95,6 +95,25 @@ class DirectChannel:
         """The internal event queue, accessible for RunLoop draining."""
         return self._queue
 
+    @property
+    def publishes_to_event_bus(self) -> bool:
+        """DirectChannel does not publish to the EventBus.
+
+        Returns:
+            Always ``False``.
+        """
+        return False
+
+    def set_replaying(self, flag: bool) -> None:
+        """Set the replaying flag.
+
+        When ``True``, journaling is skipped during ``publish()``.
+
+        Args:
+            flag: ``True`` to enable replaying mode, ``False`` to disable.
+        """
+        self._replaying = flag
+
     def attach(self, run_loop: Any) -> None:
         """Store a reference to the RunLoop.
 
@@ -150,6 +169,20 @@ class DirectChannel:
         """
         return None
 
+    def deliver_feedback(self, feedback: Feedback) -> bool:
+        """Reject feedback (unidirectional channel).
+
+        DirectChannel does not support feedback delivery. Returns
+        ``False`` so the caller can fall back to the queue-based path.
+
+        Args:
+            feedback: Ignored.
+
+        Returns:
+            Always ``False``.
+        """
+        return False
+
     def close(self) -> None:
         """Drain the queue and mark the channel as closed.
 
@@ -196,6 +229,25 @@ class ProtocolChannel:
         self._closed: bool = False
         self._run_loop: Any = None
         self._state: RunState | None = None
+
+    def set_replaying(self, flag: bool) -> None:
+        """Set the replaying flag.
+
+        When ``True``, journaling is skipped during ``publish()``.
+
+        Args:
+            flag: ``True`` to enable replaying mode, ``False`` to disable.
+        """
+        self._replaying = flag
+
+    @property
+    def publishes_to_event_bus(self) -> bool:
+        """ProtocolChannel publishes to the EventBus internally.
+
+        Returns:
+            Always ``True``.
+        """
+        return True
 
     def attach(self, run_loop: Any) -> None:
         """Store a reference to the RunLoop for feedback routing.
@@ -260,15 +312,19 @@ class ProtocolChannel:
         except asyncio.QueueEmpty:
             return None
 
-    def deliver_feedback(self, feedback: Feedback) -> None:
+    def deliver_feedback(self, feedback: Feedback) -> bool:
         """Enqueue feedback from SessionController.
 
         This is how steer/followup messages arrive at the RunLoop.
 
         Args:
             feedback: The feedback to enqueue.
+
+        Returns:
+            Always ``True`` (ProtocolChannel supports feedback delivery).
         """
         self._feedback_queue.put_nowait(feedback)
+        return True
 
     def close(self) -> None:
         """Clean up the feedback queue and mark as closed.

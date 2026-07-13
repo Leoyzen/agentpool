@@ -210,7 +210,33 @@ class CommChannel(Protocol):
     (append for deltas, upsert for entity-state events).
     """
 
-    _replaying: bool
+    def set_replaying(self, flag: bool) -> None:
+        """Set the replaying flag.
+
+        When ``True``, the channel skips journaling on ``publish()``.
+        Used during crash recovery replay to avoid duplicate entries.
+
+        Args:
+            flag: ``True`` to enable replaying mode, ``False`` to disable.
+        """
+        ...
+
+    @property
+    def publishes_to_event_bus(self) -> bool:
+        """Whether this channel publishes events to the EventBus internally.
+
+        ``ProtocolChannel`` publishes to the EventBus inside its own
+        ``publish()`` method, so the RunLoop must NOT also call
+        ``event_bus.publish()`` directly to avoid double-publishing.
+
+        ``DirectChannel`` does not publish to the EventBus, so the
+        direct call in the RunLoop is required.
+
+        Returns:
+            ``True`` if the channel publishes to the EventBus
+            internally, ``False`` otherwise.
+        """
+        ...
 
     def attach(self, run_loop: Any) -> None:
         """Store a reference to the RunLoop, enabling the feedback loop.
@@ -249,6 +275,22 @@ class CommChannel(Protocol):
 
         For unidirectional channels, always returns ``None``.
         Must not block.
+        """
+        ...
+
+    def deliver_feedback(self, feedback: Feedback) -> bool:
+        """Deliver feedback (steer/followup) to the RunLoop.
+
+        Bidirectional channels (``ProtocolChannel``) enqueue the
+        feedback and return ``True``. Unidirectional channels
+        (``DirectChannel``) do not support feedback and return
+        ``False`` so the caller can fall back to the queue-based path.
+
+        Args:
+            feedback: The feedback message to deliver.
+
+        Returns:
+            ``True`` if the feedback was handled, ``False`` otherwise.
         """
         ...
 
