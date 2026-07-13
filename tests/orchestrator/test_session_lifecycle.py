@@ -54,7 +54,7 @@ class MockAgent:
         session_id: str | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[Any]:
-        """Mock run_stream that delegates to _stream_impl via _run_stream_once."""
+        """Mock run_stream that delegates to _stream_impl via _stream_events."""
         if self._stream_impl is None:
             raise RuntimeError("No stream impl set")
         run_ctx = MagicMock()
@@ -66,7 +66,7 @@ class MockAgent:
         # Yield at least one event so the run doesn't hang
         yield RunStartedEvent(session_id=session_id or "", run_id="run-mock")
 
-    async def _run_stream_once(
+    async def _stream_events(
         self,
         run_ctx: AgentRunContext,
         *prompts: Any,

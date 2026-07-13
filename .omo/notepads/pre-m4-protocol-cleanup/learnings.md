@@ -70,3 +70,33 @@
 - `tests/integration/test_acp_streaming.py -m acp_snapshot`: 2 passed (V10 baseline preserved)
 - `test_create_turn.py`: 3 passed (including 2 new isinstance tests)
 - Ruff: All checks passed
+
+## Task 6: Update tests mocking _run_stream_once for new execution path
+
+### Summary
+Updated 10 test files to replace `_run_stream_once` references with `_stream_events`.
+`_stream_events` is the public entry point that will survive T2's refactor.
+
+### Files Modified (test files only)
+
+**Active mock updates (5 files):**
+1. `tests/agents/test_run_stream_direct_gating.py` — Moved spy from `_run_stream_once` to `_stream_events`. Removed `_run_stream_once` override entirely.
+2. `tests/servers/opencode_server/test_auto_resume_message_redflag.py` — Renamed mock fn + attribute.
+3. `tests/servers/opencode_server/test_session_scoped_consumer.py` — Same pattern.
+4. `tests/orchestrator/test_session_pool_input_provider.py` — Updated mock, docstring, test name.
+5. `tests/orchestrator/test_session_lifecycle.py` — Renamed MockAgent method.
+
+**Comment/name-only updates (5 files):**
+6. `tests/orchestrator/test_run_lifecycle.py` 7. `tests/agents/test_base_agent_run_v2.py`
+8. `tests/agents/native_agent/test_inject_prompt_cross_task.py`
+9. `tests/agents/test_capability_hooks_standalone.py`
+10. `tests/servers/opencode_server/test_cancelled_message.py`
+
+### Key Findings
+- 10 files had references (vs 4 in the plan).
+- For Mock objects, attribute name is cosmetic but ensures consistency.
+- `test_run_stream_direct_gating.py` works because `run_stream()` → `_run_stream_once()` → `_stream_events()` preserves call count.
+- Pre-existing failure: `test_acp_adapter_has_todo_comment` fails due to T1's source changes (removed TODO comment from acp_agent_api.py). Not caused by T6.
+- V10 snapshot tests pass (2/2).
+- `grep -rn '_run_stream_once' tests/` returns 0 matches.
+- 65 tests pass across all modified files.

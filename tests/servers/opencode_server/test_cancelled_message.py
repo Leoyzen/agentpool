@@ -448,7 +448,7 @@ class TestCancelledMessageHandling:
         """After cancellation, the agent's in-memory conversation must include the aborted response.
 
         The agent's `conversation.chat_messages` is what gets sent to the LLM as
-        conversation history. When a run is cancelled, `_run_stream_once` adds the
+        conversation history. When a run is cancelled, `_stream_events` adds the
         user message but never adds the assistant response (the post-processing
         code at base_agent.py:857-858 is skipped due to the exception).
 
@@ -472,9 +472,9 @@ class TestCancelledMessageHandling:
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
 
-        # In the real flow, _run_stream_once adds the user message to conversation
+        # In the real flow, _stream_events adds the user message to conversation
         # (base_agent.py:784), and our CancelledError handler adds the aborted
-        # assistant message. Since CancellableAgentMock doesn't run _run_stream_once,
+        # assistant message. Since CancellableAgentMock doesn't run _stream_events,
         # only our handler's addition is reflected. What matters is that the
         # aborted assistant message IS present in the conversation.
         final_count = len(state.agent.conversation.chat_messages)

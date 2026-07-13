@@ -300,7 +300,7 @@ async def test_inject_prompt_triggers_continuation(slow_agent: Agent[None]) -> N
     """inject_prompt from a different task should cause run_stream to continue.
 
     The run_stream() loop checks for pending injections
-    after each _run_stream_once iteration. If inject_prompt() successfully
+    after each _stream_events iteration. If inject_prompt() successfully
     delivers to the injection manager (via SessionPool fallback), and the
     injection gets flushed, the loop should run another iteration.
     """

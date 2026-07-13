@@ -1,7 +1,7 @@
 """Tests verifying pdai Capability hooks fire on standalone run path.
 
 Phase 2 of thin-wrapper refactor: BaseAgent.run_stream() now delegates
-directly to _run_stream_once() → _stream_events() → NativeTurn.execute()
+directly to _stream_events() → NativeTurn.execute()
 which calls agent_run.next(node) explicitly, ensuring all pdai Capability
 hooks fire on every run path.
 

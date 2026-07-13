@@ -277,8 +277,8 @@ def ctxvar_agent() -> Agent[None]:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_contextvar_set_during_run_stream_once(ctxvar_agent: Agent[None]) -> None:
-    """_current_run_ctx_var must be non-None during _run_stream_once and None after."""
+async def test_contextvar_set_during_stream_events(ctxvar_agent: Agent[None]) -> None:
+    """_current_run_ctx_var must be non-None during _stream_events and None after."""
     # Before stream starts
     assert _current_run_ctx_var.get() is None
 
@@ -286,11 +286,11 @@ async def test_contextvar_set_during_run_stream_once(ctxvar_agent: Agent[None]) 
 
     # Fully consume the stream so the generator's finally block runs naturally
     async for _event in ctxvar_agent.run_stream("Test prompt"):
-        # During the stream _run_stream_once is active
+        # During the stream _stream_events is active
         if captured_ctx is None:
             captured_ctx = _current_run_ctx_var.get()
             assert captured_ctx is not None, (
-                "_current_run_ctx_var must be set during _run_stream_once"
+                "_current_run_ctx_var must be set during _stream_events"
             )
             assert isinstance(captured_ctx, AgentRunContext)
 

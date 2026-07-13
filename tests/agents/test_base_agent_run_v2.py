@@ -319,7 +319,7 @@ def test_no_duplicate_stream_complete_in_run_once() -> None:
     )
 
 
-def test_no_duplicate_stream_complete_in_run_stream_once() -> None:
+def test_no_duplicate_stream_complete_in_stream_events() -> None:
     """_stream_events must not publish StreamCompleteEvent after turn.execute().
 
     NativeTurn.execute() already yields StreamCompleteEvent as its terminal

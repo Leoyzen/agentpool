@@ -1,0 +1,243 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.14, pytest-9.0.3, pluggy-1.6.0 -- /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup
+configfile: pyproject.toml
+plugins: docker-3.2.5, syrupy-5.2.0, logfire-4.33.0, cov-7.1.0, xdist-3.8.0, devtools-0.12.2, typeguard-4.5.2, timeout-2.4.0, rerunfailures-16.3, asyncio-1.3.0, anyio-4.13.0
+timeout: 180.0s
+timeout method: signal
+timeout func_only: False
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collecting ... collected 67 items / 65 deselected / 2 selected
+
+tests/integration/test_acp_streaming.py::test_acp_streaming_event_sequence_with_tool_metadata[asyncio] PASSED [ 50%]
+tests/integration/test_acp_streaming.py::test_acp_streaming_text_only_sequence[asyncio] PASSED [100%]
+
+=============================== warnings summary ===============================
+.venv/lib/python3.13/site-packages/llmling_models/models/input_model/model.py:81
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/lib/python3.13/site-packages/llmling_models/models/input_model/model.py:81: GenericBeforeBaseModelWarning: Classes should inherit from `BaseModel` before generic classes (e.g. `typing.Generic[T]`) for pydantic generics to work properly.
+    class InputModel(Model, Schema):
+
+.venv/lib/python3.13/site-packages/llmling_models/models/claude_code_model.py:13
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/lib/python3.13/site-packages/llmling_models/models/claude_code_model.py:13: PydanticAIDeprecationWarning: `pydantic_ai.BuiltinToolCallPart` is deprecated, use `pydantic_ai.NativeToolCallPart` instead.
+    from pydantic_ai import (
+
+.venv/lib/python3.13/site-packages/llmling_models/models/claude_code_model.py:13
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/lib/python3.13/site-packages/llmling_models/models/claude_code_model.py:13: PydanticAIDeprecationWarning: `pydantic_ai.BuiltinToolReturnPart` is deprecated, use `pydantic_ai.NativeToolReturnPart` instead.
+    from pydantic_ai import (
+
+.venv/lib/python3.13/site-packages/llmling_models/builtin_tools.py:30
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/lib/python3.13/site-packages/llmling_models/builtin_tools.py:30: PydanticAIDeprecationWarning: `pydantic_ai.builtin_tools.AbstractBuiltinTool` is deprecated, use `pydantic_ai.native_tools.AbstractNativeTool` instead.
+    from pydantic_ai.builtin_tools import AbstractBuiltinTool
+
+<frozen abc>:106
+  <frozen abc>:106: PydanticAIDeprecationWarning: ClaudeCodeModel overrides `supported_builtin_tools()`, which is deprecated — override `supported_native_tools()` instead.
+
+.venv/lib/python3.13/site-packages/pydantic_ai/models/test.py:311
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/lib/python3.13/site-packages/pydantic_ai/models/test.py:311: PytestCollectionWarning: cannot collect test class 'TestStreamedResponse' because it has a __init__ constructor (from: tests/agents/native_agent/test_inject_prompt_cross_task.py)
+    @dataclass
+
+tests/integration/test_acp_streaming.py::test_acp_streaming_event_sequence_with_tool_metadata[asyncio]
+tests/integration/test_acp_streaming.py::test_acp_streaming_text_only_sequence[asyncio]
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/src/agentpool/messaging/messagenode.py:111: DeprecationWarning: TaskManager is deprecated. Use anyio.TaskGroup for structured concurrency.
+    self.task_manager = TaskManager()
+
+tests/integration/test_acp_streaming.py::test_acp_streaming_event_sequence_with_tool_metadata[asyncio]
+tests/integration/test_acp_streaming.py::test_acp_streaming_text_only_sequence[asyncio]
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/src/agentpool/messaging/event_manager.py:68: DeprecationWarning: TaskManager is deprecated. Use anyio.TaskGroup for structured concurrency.
+    self.task_manager = TaskManager()
+
+tests/integration/test_acp_streaming.py::test_acp_streaming_event_sequence_with_tool_metadata[asyncio]
+tests/integration/test_acp_streaming.py::test_acp_streaming_text_only_sequence[asyncio]
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/src/agentpool/storage/manager.py:94: DeprecationWarning: TaskManager is deprecated. Use anyio.TaskGroup for structured concurrency.
+    self.task_manager = TaskManager()
+
+tests/integration/test_acp_streaming.py::test_acp_streaming_event_sequence_with_tool_metadata[asyncio]
+tests/integration/test_acp_streaming.py::test_acp_streaming_text_only_sequence[asyncio]
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/src/agentpool_storage/base.py:62: DeprecationWarning: TaskManager is deprecated. Use anyio.TaskGroup for structured concurrency.
+    self.task_manager = TaskManager()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+--------------------------- snapshot report summary ----------------------------
+2 snapshots passed.
+================ 2 passed, 65 deselected, 14 warnings in 1.98s =================
+============================= test session starts ==============================
+platform darwin -- Python 3.13.14, pytest-9.0.3, pluggy-1.6.0 -- /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup
+configfile: pyproject.toml
+plugins: docker-3.2.5, syrupy-5.2.0, logfire-4.33.0, cov-7.1.0, xdist-3.8.0, devtools-0.12.2, typeguard-4.5.2, timeout-2.4.0, rerunfailures-16.3, asyncio-1.3.0, anyio-4.13.0
+timeout: 180.0s
+timeout method: signal
+timeout func_only: False
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collecting ... collected 67 items / 2 deselected / 65 selected
+
+tests/agents/test_run_stream_direct_gating.py::test_native_agent_skips_manual_loop PASSED [  1%]
+tests/servers/opencode_server/test_auto_resume_message_redflag.py::test_auto_resume_events_create_message_in_state PASSED [  3%]
+tests/servers/opencode_server/test_session_scoped_consumer.py::test_get_messages_prefers_live_opencode_messages PASSED [  4%]
+tests/servers/opencode_server/test_session_scoped_consumer.py::test_event_consumer_started_on_session_creation PASSED [  6%]
+tests/servers/opencode_server/test_session_scoped_consumer.py::test_event_consumer_stopped_on_shutdown PASSED [  7%]
+tests/servers/opencode_server/test_session_scoped_consumer.py::test_session_scoped_consumer_receives_events PASSED [  9%]
+tests/servers/opencode_server/test_session_scoped_consumer.py::test_multiple_requests_share_one_consumer PASSED [ 10%]
+tests/servers/opencode_server/test_session_scoped_consumer.py::test_consumer_handles_spawn_session_start PASSED [ 12%]
+tests/orchestrator/test_session_pool_input_provider.py::TestSessionPoolRunStreamInputProvider::test_run_stream_without_input_provider_does_not_crash[asyncio] PASSED [ 13%]
+tests/orchestrator/test_session_pool_input_provider.py::TestSessionPoolRunStreamInputProvider::test_process_prompt_forwards_kwargs_to_run_turn[asyncio] PASSED [ 15%]
+tests/orchestrator/test_session_pool_input_provider.py::TestRunTurnInputProvider::test_run_turn_passes_input_provider_to_get_or_create_session_agent[asyncio] PASSED [ 16%]
+tests/orchestrator/test_session_pool_input_provider.py::TestRunTurnInputProvider::test_run_turn_passes_input_provider_to_stream_events[asyncio] PASSED [ 18%]
+tests/orchestrator/test_session_lifecycle.py::TestSessionLifecyclePolicy::test_default_is_cascade PASSED [ 20%]
+tests/orchestrator/test_session_lifecycle.py::TestSessionLifecyclePolicy::test_valid_policies PASSED [ 21%]
+tests/orchestrator/test_session_lifecycle.py::TestSessionStateParentChild::test_session_state_has_parent_and_policy PASSED [ 23%]
+tests/orchestrator/test_session_lifecycle.py::TestSessionStateParentChild::test_session_state_defaults PASSED [ 24%]
+tests/orchestrator/test_session_lifecycle.py::TestSessionControllerParentChild::test_creates_child_session[asyncio] PASSED [ 26%]
+tests/orchestrator/test_session_lifecycle.py::TestSessionControllerParentChild::test_close_session_cascade_closes_children[asyncio] PASSED [ 27%]
+tests/orchestrator/test_session_lifecycle.py::TestSessionControllerParentChild::test_close_session_independent_preserves_children[asyncio] PASSED [ 29%]
+tests/orchestrator/test_session_lifecycle.py::TestSessionControllerParentChild::test_lifecycle_policy_bound_closes_child_immediately[asyncio] PASSED [ 30%]
+tests/orchestrator/test_session_lifecycle.py::TestEventBusScopedSubscription::test_session_scope_receives_own_events[asyncio] PASSED [ 32%]
+tests/orchestrator/test_session_lifecycle.py::TestEventBusScopedSubscription::test_session_scope_excludes_child_events[asyncio] PASSED [ 33%]
+tests/orchestrator/test_session_lifecycle.py::TestEventBusScopedSubscription::test_descendants_scope_receives_child_events[asyncio] PASSED [ 35%]
+tests/orchestrator/test_session_lifecycle.py::TestEventBusScopedSubscription::test_subtree_scope_receives_sibling_events[asyncio] PASSED [ 36%]
+tests/orchestrator/test_session_lifecycle.py::test_close_session_no_active_run[asyncio] 
+-------------------------------- live log call ---------------------------------
+2026-07-13 11:26:55 ERROR [error    ] Failed to cleanup MCP session  session_id=sess-4
+Traceback (most recent call last):
+  File "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/src/agentpool/orchestrator/session_controller.py", line 766, in _close_session_run_turn
+    await agent.mcp.cleanup_session(session_id)
+          ^^^^^^^^^
+AttributeError: 'MockAgent' object has no attribute 'mcp'
+Traceback (most recent call last):
+  File "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/src/agentpool/orchestrator/session_controller.py", line 766, in _close_session_run_turn
+    await agent.mcp.cleanup_session(session_id)
+          ^^^^^^^^^
+AttributeError: 'MockAgent' object has no attribute 'mcp'
+PASSED                                                                   [ 38%]
+tests/orchestrator/test_session_lifecycle.py::test_close_session_acquires_request_lock[asyncio] 
+-------------------------------- live log call ---------------------------------
+2026-07-13 11:26:55 ERROR [error    ] Failed to cleanup MCP session  session_id=sess-8
+Traceback (most recent call last):
+  File "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/src/agentpool/orchestrator/session_controller.py", line 766, in _close_session_run_turn
+    await agent.mcp.cleanup_session(session_id)
+          ^^^^^^^^^
+AttributeError: 'MockAgent' object has no attribute 'mcp'
+Traceback (most recent call last):
+  File "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/src/agentpool/orchestrator/session_controller.py", line 766, in _close_session_run_turn
+    await agent.mcp.cleanup_session(session_id)
+          ^^^^^^^^^
+AttributeError: 'MockAgent' object has no attribute 'mcp'
+PASSED                                                                   [ 40%]
+tests/orchestrator/test_run_lifecycle.py::test_run_handle_defaults PASSED [ 41%]
+tests/orchestrator/test_run_lifecycle.py::test_start_transitions_to_running[asyncio] PASSED [ 43%]
+tests/orchestrator/test_run_lifecycle.py::test_cancel_sets_cancelled_flag[asyncio] PASSED [ 44%]
+tests/orchestrator/test_run_lifecycle.py::test_cancel_does_not_call_cleanup_callback[asyncio] PASSED [ 46%]
+tests/orchestrator/test_run_lifecycle.py::test_cancel_no_task_is_safe[asyncio] PASSED [ 47%]
+tests/orchestrator/test_run_lifecycle.py::test_cancel_done_task_is_safe[asyncio] PASSED [ 49%]
+tests/orchestrator/test_run_lifecycle.py::TestMetricsCollectorActiveRuns::test_get_metrics_returns_zero_initially[asyncio] PASSED [ 50%]
+tests/orchestrator/test_run_lifecycle.py::TestMetricsCollectorActiveRuns::test_get_metrics_counts_native_vs_non_native[asyncio] PASSED [ 52%]
+tests/orchestrator/test_run_lifecycle.py::test_contextvar_set_during_stream_events[asyncio] PASSED [ 53%]
+tests/orchestrator/test_run_lifecycle.py::test_start_without_task PASSED [ 55%]
+tests/orchestrator/test_run_lifecycle.py::test_complete_transitions_and_sets_event PASSED [ 56%]
+tests/orchestrator/test_run_lifecycle.py::test_complete_invokes_cleanup_callback PASSED [ 58%]
+tests/orchestrator/test_run_lifecycle.py::test_fail_transitions_and_sets_event PASSED [ 60%]
+tests/orchestrator/test_run_lifecycle.py::test_fail_with_exception_sets_cancelled PASSED [ 61%]
+tests/orchestrator/test_run_lifecycle.py::test_fail_invokes_cleanup_callback PASSED [ 63%]
+tests/agents/test_base_agent_run_v2.py::test_create_run_returns_run_handle_without_executing PASSED [ 64%]
+tests/agents/test_base_agent_run_v2.py::test_create_run_handle_fields_correctly_set PASSED [ 66%]
+tests/agents/test_base_agent_run_v2.py::test_create_run_does_not_call_create_turn PASSED [ 67%]
+tests/agents/test_base_agent_run_v2.py::test_create_run_stream_yields_events_and_closes PASSED [ 69%]
+tests/agents/test_base_agent_run_v2.py::test_create_run_stream_closes_handle_after_completion PASSED [ 70%]
+tests/agents/test_base_agent_run_v2.py::test_run_stream_breaks_on_stream_complete PASSED [ 72%]
+tests/agents/test_base_agent_run_v2.py::test_no_duplicate_stream_complete_in_run_once PASSED [ 73%]
+tests/agents/test_base_agent_run_v2.py::test_no_duplicate_stream_complete_in_stream_events PASSED [ 75%]
+tests/agents/test_base_agent_run_v2.py::test_base_agent_imports_are_runtime_available PASSED [ 76%]
+tests/agents/test_base_agent_run_v2.py::test_execute_node_handles_run_error_event PASSED [ 78%]
+tests/agents/test_base_agent_run_v2.py::test_stream_events_handles_run_error_event PASSED [ 80%]
+tests/agents/native_agent/test_inject_prompt_cross_task.py::test_inject_prompt_from_different_task_with_session_pool PASSED [ 81%]
+tests/agents/native_agent/test_inject_prompt_cross_task.py::test_queue_prompt_from_different_task_with_session_pool PASSED [ 83%]
+tests/agents/native_agent/test_inject_prompt_cross_task.py::test_has_pending_injections_from_different_task_with_session_pool PASSED [ 84%]
+tests/agents/native_agent/test_inject_prompt_cross_task.py::test_inject_prompt_triggers_continuation PASSED [ 86%]
+tests/agents/native_agent/test_inject_prompt_cross_task.py::test_inject_prompt_same_task_still_works PASSED [ 87%]
+tests/agents/native_agent/test_inject_prompt_cross_task.py::test_hook_manager_consumes_cross_task_injection_with_session_pool PASSED [ 89%]
+tests/agents/test_capability_hooks_standalone.py::test_capability_hooks_fire_on_standalone_run[asyncio] PASSED [ 90%]
+tests/servers/opencode_server/test_cancelled_message.py::TestCancelledMessageHandling::test_cancelled_message_sets_time_completed PASSED [ 92%]
+tests/servers/opencode_server/test_cancelled_message.py::TestCancelledMessageHandling::test_cancelled_message_sets_aborted_error PASSED [ 93%]
+tests/servers/opencode_server/test_cancelled_message.py::TestCancelledMessageHandling::test_cancelled_message_broadcasts_update_event PASSED [ 95%]
+tests/servers/opencode_server/test_cancelled_message.py::TestCancelledMessageHandling::test_cancelled_message_session_returns_to_idle PASSED [ 96%]
+tests/servers/opencode_server/test_cancelled_message.py::TestCancelledMessageHandling::test_message_after_cancel_is_not_queued PASSED [ 98%]
+tests/servers/opencode_server/test_cancelled_message.py::TestCancelledMessageHandling::test_cancelled_message_preserves_conversation_history PASSED [100%]
+
+=============================== warnings summary ===============================
+.venv/lib/python3.13/site-packages/llmling_models/models/input_model/model.py:81
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/lib/python3.13/site-packages/llmling_models/models/input_model/model.py:81: GenericBeforeBaseModelWarning: Classes should inherit from `BaseModel` before generic classes (e.g. `typing.Generic[T]`) for pydantic generics to work properly.
+    class InputModel(Model, Schema):
+
+.venv/lib/python3.13/site-packages/llmling_models/models/claude_code_model.py:13
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/lib/python3.13/site-packages/llmling_models/models/claude_code_model.py:13: PydanticAIDeprecationWarning: `pydantic_ai.BuiltinToolCallPart` is deprecated, use `pydantic_ai.NativeToolCallPart` instead.
+    from pydantic_ai import (
+
+.venv/lib/python3.13/site-packages/llmling_models/models/claude_code_model.py:13
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/lib/python3.13/site-packages/llmling_models/models/claude_code_model.py:13: PydanticAIDeprecationWarning: `pydantic_ai.BuiltinToolReturnPart` is deprecated, use `pydantic_ai.NativeToolReturnPart` instead.
+    from pydantic_ai import (
+
+.venv/lib/python3.13/site-packages/llmling_models/builtin_tools.py:30
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/lib/python3.13/site-packages/llmling_models/builtin_tools.py:30: PydanticAIDeprecationWarning: `pydantic_ai.builtin_tools.AbstractBuiltinTool` is deprecated, use `pydantic_ai.native_tools.AbstractNativeTool` instead.
+    from pydantic_ai.builtin_tools import AbstractBuiltinTool
+
+<frozen abc>:106
+  <frozen abc>:106: PydanticAIDeprecationWarning: ClaudeCodeModel overrides `supported_builtin_tools()`, which is deprecated — override `supported_native_tools()` instead.
+
+.venv/lib/python3.13/site-packages/pydantic_ai/models/test.py:311
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/.venv/lib/python3.13/site-packages/pydantic_ai/models/test.py:311: PytestCollectionWarning: cannot collect test class 'TestStreamedResponse' because it has a __init__ constructor (from: tests/agents/native_agent/test_inject_prompt_cross_task.py)
+    @dataclass
+
+tests/agents/test_run_stream_direct_gating.py: 1 warning
+tests/orchestrator/test_run_lifecycle.py: 1 warning
+tests/agents/test_base_agent_run_v2.py: 5 warnings
+tests/agents/native_agent/test_inject_prompt_cross_task.py: 6 warnings
+tests/agents/test_capability_hooks_standalone.py: 1 warning
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/src/agentpool/messaging/messagenode.py:111: DeprecationWarning: TaskManager is deprecated. Use anyio.TaskGroup for structured concurrency.
+    self.task_manager = TaskManager()
+
+tests/agents/test_run_stream_direct_gating.py: 1 warning
+tests/orchestrator/test_run_lifecycle.py: 1 warning
+tests/agents/test_base_agent_run_v2.py: 5 warnings
+tests/agents/native_agent/test_inject_prompt_cross_task.py: 6 warnings
+tests/agents/test_capability_hooks_standalone.py: 1 warning
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/src/agentpool/messaging/event_manager.py:68: DeprecationWarning: TaskManager is deprecated. Use anyio.TaskGroup for structured concurrency.
+    self.task_manager = TaskManager()
+
+tests/agents/test_run_stream_direct_gating.py: 1 warning
+tests/orchestrator/test_run_lifecycle.py: 2 warnings
+tests/agents/test_base_agent_run_v2.py: 10 warnings
+tests/agents/native_agent/test_inject_prompt_cross_task.py: 12 warnings
+tests/agents/test_capability_hooks_standalone.py: 2 warnings
+tests/servers/opencode_server/test_cancelled_message.py: 6 warnings
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/src/agentpool/storage/manager.py:94: DeprecationWarning: TaskManager is deprecated. Use anyio.TaskGroup for structured concurrency.
+    self.task_manager = TaskManager()
+
+tests/agents/test_run_stream_direct_gating.py: 1 warning
+tests/orchestrator/test_run_lifecycle.py: 2 warnings
+tests/agents/test_base_agent_run_v2.py: 10 warnings
+tests/agents/native_agent/test_inject_prompt_cross_task.py: 12 warnings
+tests/agents/test_capability_hooks_standalone.py: 2 warnings
+tests/servers/opencode_server/test_cancelled_message.py: 6 warnings
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/src/agentpool_storage/base.py:62: DeprecationWarning: TaskManager is deprecated. Use anyio.TaskGroup for structured concurrency.
+    self.task_manager = TaskManager()
+
+tests/agents/native_agent/test_inject_prompt_cross_task.py::test_inject_prompt_from_different_task_with_session_pool
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/tests/agents/native_agent/test_inject_prompt_cross_task.py:178: DeprecationWarning: inject_prompt() is deprecated for pooled native agents. Use host_context.session_pool.steer() instead.
+    slow_agent.inject_prompt("Background task completed", session_id="test-session")
+
+tests/agents/native_agent/test_inject_prompt_cross_task.py::test_queue_prompt_from_different_task_with_session_pool
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/tests/agents/native_agent/test_inject_prompt_cross_task.py:229: DeprecationWarning: queue_prompt() is deprecated for pooled native agents. Use host_context.session_pool.followup() instead.
+    slow_agent.queue_prompt("Follow-up prompt", session_id="test-session")
+
+tests/agents/native_agent/test_inject_prompt_cross_task.py::test_inject_prompt_triggers_continuation
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/tests/agents/native_agent/test_inject_prompt_cross_task.py:333: DeprecationWarning: inject_prompt() is deprecated for pooled native agents. Use host_context.session_pool.steer() instead.
+    slow_agent.inject_prompt("Follow-up from different task", session_id="test-session")
+
+tests/agents/native_agent/test_inject_prompt_cross_task.py::test_hook_manager_consumes_cross_task_injection_with_session_pool
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-pre-m4-protocol-cleanup/tests/agents/native_agent/test_inject_prompt_cross_task.py:416: DeprecationWarning: inject_prompt() is deprecated for pooled native agents. Use host_context.session_pool.steer() instead.
+    slow_agent.inject_prompt("Background task result notice", session_id="test-session")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============== 65 passed, 2 deselected, 104 warnings in 10.66s ================
