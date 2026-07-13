@@ -210,21 +210,6 @@ class OpenCodeStreamAdapter:
                 self._step_finish_emitted = True
             yield oc_event
 
-    async def _handle_event(self, event: RichAgentStreamEvent[Any]) -> AsyncIterator[Event]:
-        """Backward-compatible event handler that delegates to EventProcessor.
-
-        This method is deprecated but kept for tests that directly call it.
-        Use :meth:`convert_event` or :meth:`process_stream` instead for new code.
-
-        Args:
-            event: The agent stream event to process.
-
-        Yields:
-            OpenCode Event objects for broadcasting.
-        """
-        async for oc_event in self.processor.process(event, self.main_context):
-            yield oc_event
-
     def finalize(self) -> Iterator[Event]:
         """Yield final events after the stream has ended.
 

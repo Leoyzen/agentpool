@@ -1,4 +1,4 @@
-"""Tests for reasoning/thinking part behavior in OpenCode stream adapter."""
+"""Tests for reasoning/thinking part behavior in OpenCode event processor."""
 
 from unittest.mock import MagicMock
 
@@ -12,6 +12,10 @@ from pydantic_ai.messages import (
 )
 import pytest
 
+from agentpool_server.opencode_server.event_processor import EventProcessor
+from agentpool_server.opencode_server.event_processor_context import (
+    EventProcessorContext,
+)
 from agentpool_server.opencode_server.models import PartDeltaEvent, PartUpdatedEvent
 from agentpool_server.opencode_server.models.events import (
     PartDeltaEventProperties,
@@ -21,42 +25,56 @@ from agentpool_server.opencode_server.models.parts import (
     ReasoningPart,
     TextPart as OpenCodeTextPart,
 )
-from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
+
+
+def _make_processor_and_ctx(
+    mock_msg: MagicMock | None = None,
+) -> tuple[EventProcessor, EventProcessorContext]:
+    """Create an EventProcessor and EventProcessorContext for testing."""
+    if mock_msg is None:
+        mock_msg = MagicMock()
+        mock_msg.parts = []
+    mock_state = MagicMock()
+    processor = EventProcessor()
+    ctx = EventProcessorContext(
+        session_id="test-session",
+        assistant_msg_id="msg-1",
+        assistant_msg=mock_msg,
+        state=mock_state,
+        working_dir=".",
+    )
+    return processor, ctx
+
+
+async def _process_event(
+    processor: EventProcessor,
+    ctx: EventProcessorContext,
+    event: object,
+) -> list[object]:
+    """Process a single event and return the resulting events."""
+    return [e async for e in processor.process(event, ctx)]  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
 async def test_thinking_events_create_reasoning_part():
     """Verify ThinkingPart/ThinkingPartDelta events create ReasoningPart."""
-    # Create a mock MessageWithParts
     mock_msg = MagicMock()
     mock_msg.parts = []
 
-    mock_state = MagicMock()
+    processor, ctx = _make_processor_and_ctx(mock_msg)
 
-    adapter = OpenCodeStreamAdapter(
-        state=mock_state,
-        session_id="test-session",
-        assistant_msg_id="msg-1",
-        assistant_msg=mock_msg,
-        working_dir=".",
+    events = await _process_event(
+        processor, ctx, PartStartEvent(index=0, part=ThinkingPart(content="Thinking..."))
+    )
+    events.extend(
+        await _process_event(
+            processor,
+            ctx,
+            PydanticPartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=" more...")),
+        )
     )
 
-    # Use the adapter's _handle_event method directly
-    events = [
-        e
-        async for e in adapter._handle_event(
-            PartStartEvent(index=0, part=ThinkingPart(content="Thinking..."))
-        )
-    ]
-    events.extend([
-        e
-        async for e in adapter._handle_event(
-            PydanticPartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=" more..."))
-        )
-    ])
-
     # Assert reasoning part was created and content accumulated
-    # Check both PartUpdatedEvent (creation) and PartDeltaEvent (delta updates)
     reasoning_parts = []
     for e in events:
         if isinstance(e, PartUpdatedEvent):
@@ -65,16 +83,11 @@ async def test_thinking_events_create_reasoning_part():
                 props.part, ReasoningPart
             ):
                 reasoning_parts.append(props.part)
-        elif isinstance(e, PartDeltaEvent):
-            props = e.properties
-            if isinstance(props, PartDeltaEventProperties) and props.field == "text":
-                # Delta events don't have the full part, check adapter context
-                pass
 
-    # Also verify accumulation via adapter's main_context
-    assert adapter.main_context.reasoning_part is not None, "ReasoningPart should be created"
-    assert "Thinking..." in adapter.main_context.reasoning_part.text
-    assert " more..." in adapter.main_context.reasoning_part.text
+    # Verify accumulation via context
+    assert ctx.reasoning_part is not None, "ReasoningPart should be created"
+    assert "Thinking..." in ctx.reasoning_part.text
+    assert " more..." in ctx.reasoning_part.text
 
 
 @pytest.mark.asyncio
@@ -84,72 +97,66 @@ async def test_multi_turn_thinking_creates_separate_parts():
     This tests the fix for: "Multi-turn conversation thinking displayed in single block"
     Each thinking phase should be its own Part with its own ID.
     """
-    # Create a mock MessageWithParts
     mock_msg = MagicMock()
     mock_msg.parts = []
 
-    mock_state = MagicMock()
+    processor, ctx = _make_processor_and_ctx(mock_msg)
 
-    adapter = OpenCodeStreamAdapter(
-        state=mock_state,
-        session_id="test-session",
-        assistant_msg_id="msg-1",
-        assistant_msg=mock_msg,
-        working_dir=".",
-    )
-
-    events = []
+    events: list[object] = []
 
     # Simulate multi-turn conversation with thinking in each turn:
     # Turn 1: Thinking -> Text
-    events.extend([
-        e
-        async for e in adapter._handle_event(
-            PartStartEvent(index=0, part=ThinkingPart(content="First thinking..."))
+    events.extend(
+        await _process_event(
+            processor, ctx, PartStartEvent(index=0, part=ThinkingPart(content="First thinking..."))
         )
-    ])
-    events.extend([
-        e
-        async for e in adapter._handle_event(
-            PydanticPartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=" more thinking"))
+    )
+    events.extend(
+        await _process_event(
+            processor,
+            ctx,
+            PydanticPartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=" more thinking")),
         )
-    ])
+    )
     # End of thinking - text response starts
-    events.extend([
-        e
-        async for e in adapter._handle_event(
-            PartStartEvent(index=1, part=TextPart(content="First response"))
+    events.extend(
+        await _process_event(
+            processor, ctx, PartStartEvent(index=1, part=TextPart(content="First response"))
         )
-    ])
+    )
 
     # Turn 2: Thinking -> Text (new turn, should be separate Part)
-    events.extend([
-        e
-        async for e in adapter._handle_event(
-            PartStartEvent(index=2, part=ThinkingPart(content="Second turn thinking..."))
+    events.extend(
+        await _process_event(
+            processor,
+            ctx,
+            PartStartEvent(index=2, part=ThinkingPart(content="Second turn thinking...")),
         )
-    ])
-    events.extend([
-        e
-        async for e in adapter._handle_event(
-            PydanticPartDeltaEvent(index=2, delta=ThinkingPartDelta(content_delta=" more"))
+    )
+    events.extend(
+        await _process_event(
+            processor,
+            ctx,
+            PydanticPartDeltaEvent(index=2, delta=ThinkingPartDelta(content_delta=" more")),
         )
-    ])
+    )
     # End of thinking - text response starts
-    events.extend([
-        e
-        async for e in adapter._handle_event(
-            PydanticPartDeltaEvent(index=3, delta=TextPartDelta(content_delta="Second response"))
+    events.extend(
+        await _process_event(
+            processor,
+            ctx,
+            PydanticPartDeltaEvent(index=3, delta=TextPartDelta(content_delta="Second response")),
         )
-    ])
+    )
 
     # Turn 3: Thinking (should be third separate Part)
-    events.extend([
-        e
-        async for e in adapter._handle_event(
-            PartStartEvent(index=4, part=ThinkingPart(content="Third turn thinking..."))
+    events.extend(
+        await _process_event(
+            processor,
+            ctx,
+            PartStartEvent(index=4, part=ThinkingPart(content="Third turn thinking...")),
         )
-    ])
+    )
 
     # Extract ReasoningParts from events
     reasoning_parts = []
@@ -174,7 +181,7 @@ async def test_multi_turn_thinking_creates_separate_parts():
     # Assertions
     # We need to check that there are 3 unique reasoning phases (unique Part IDs)
     # Each thinking start creates a new Part, and deltas update the same Part
-    unique_reasoning_parts = {}
+    unique_reasoning_parts: dict[str, ReasoningPart] = {}
     for p in reasoning_parts:
         unique_reasoning_parts[p.id] = p
 
@@ -222,44 +229,37 @@ async def test_single_thinking_phase_accumulates_correctly():
     mock_msg = MagicMock()
     mock_msg.parts = []
 
-    mock_state = MagicMock()
+    processor, ctx = _make_processor_and_ctx(mock_msg)
 
-    adapter = OpenCodeStreamAdapter(
-        state=mock_state,
-        session_id="test-session",
-        assistant_msg_id="msg-1",
-        assistant_msg=mock_msg,
-        working_dir=".",
-    )
-
-    events = []
+    events: list[object] = []
 
     # Single thinking phase with multiple deltas
-    events.extend([
-        e
-        async for e in adapter._handle_event(
-            PartStartEvent(index=0, part=ThinkingPart(content="Start "))
+    events.extend(
+        await _process_event(
+            processor, ctx, PartStartEvent(index=0, part=ThinkingPart(content="Start "))
         )
-    ])
-    events.extend([
-        e
-        async for e in adapter._handle_event(
-            PydanticPartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta="middle "))
+    )
+    events.extend(
+        await _process_event(
+            processor,
+            ctx,
+            PydanticPartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta="middle ")),
         )
-    ])
-    events.extend([
-        e
-        async for e in adapter._handle_event(
-            PydanticPartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta="end"))
+    )
+    events.extend(
+        await _process_event(
+            processor,
+            ctx,
+            PydanticPartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta="end")),
         )
-    ])
+    )
 
-    # Verify accumulation via adapter context (not just events)
+    # Verify accumulation via context (not just events)
     # PartDeltaEvent yields deltas, not full parts, so check context directly
-    assert adapter.main_context.reasoning_part is not None, "ReasoningPart should be created"
+    assert ctx.reasoning_part is not None, "ReasoningPart should be created"
 
     # The content should be accumulated in the context
-    final_content = adapter.main_context.reasoning_part.text
+    final_content = ctx.reasoning_part.text
     expected = "Start middle end"
     assert final_content == expected, f"Expected '{expected}', got '{final_content}'"
 
@@ -271,33 +271,23 @@ async def test_reasoning_part_gets_end_time_when_text_starts():
     mock_msg.parts = []
     mock_msg.update_part = MagicMock()
 
-    mock_state = MagicMock()
+    processor, ctx = _make_processor_and_ctx(mock_msg)
 
-    adapter = OpenCodeStreamAdapter(
-        state=mock_state,
-        session_id="test-session",
-        assistant_msg_id="msg-1",
-        assistant_msg=mock_msg,
-        working_dir=".",
-    )
-
-    events = []
+    events: list[object] = []
 
     # Thinking phase
-    events.extend([
-        e
-        async for e in adapter._handle_event(
-            PartStartEvent(index=0, part=ThinkingPart(content="Thinking..."))
+    events.extend(
+        await _process_event(
+            processor, ctx, PartStartEvent(index=0, part=ThinkingPart(content="Thinking..."))
         )
-    ])
+    )
 
     # Text starts - this should close out the reasoning part
-    events.extend([
-        e
-        async for e in adapter._handle_event(
-            PartStartEvent(index=1, part=TextPart(content="Response"))
+    events.extend(
+        await _process_event(
+            processor, ctx, PartStartEvent(index=1, part=TextPart(content="Response"))
         )
-    ])
+    )
 
     # The reasoning part should have been updated with an end time
     reasoning_final_events = [
@@ -315,7 +305,7 @@ async def test_reasoning_part_gets_end_time_when_text_starts():
     )
 
     # The context should have cleared the reasoning_part reference
-    assert adapter.main_context.reasoning_part is None, (
+    assert ctx.reasoning_part is None, (
         "reasoning_part should be cleared from context after text starts"
     )
 
@@ -327,32 +317,22 @@ async def test_reasoning_part_gets_end_time_on_stream_complete():
     mock_msg.parts = []
     mock_msg.update_part = MagicMock()
 
-    mock_state = MagicMock()
+    processor, ctx = _make_processor_and_ctx(mock_msg)
 
-    adapter = OpenCodeStreamAdapter(
-        state=mock_state,
-        session_id="test-session",
-        assistant_msg_id="msg-1",
-        assistant_msg=mock_msg,
-        working_dir=".",
-    )
-
-    events = []
+    events: list[object] = []
 
     # Thinking phase only (no text follows)
-    events.extend([
-        e
-        async for e in adapter._handle_event(
-            PartStartEvent(index=0, part=ThinkingPart(content="Thinking..."))
+    events.extend(
+        await _process_event(
+            processor, ctx, PartStartEvent(index=0, part=ThinkingPart(content="Thinking..."))
         )
-    ])
+    )
 
     # Stream completes without any text starting
-    # Simulate what happens when _process_stream_complete is called
     from agentpool.messaging import ChatMessage
 
     chat_msg = ChatMessage(content="", role="assistant")
-    events.extend(list(adapter.processor._process_stream_complete(adapter.main_context, chat_msg)))
+    events.extend(list(processor._process_stream_complete(ctx, chat_msg)))
 
     # The reasoning part should have been finalized with an end time
     reasoning_final_events = [
@@ -370,6 +350,6 @@ async def test_reasoning_part_gets_end_time_on_stream_complete():
     )
 
     # The context should have cleared the reasoning_part reference
-    assert adapter.main_context.reasoning_part is None, (
+    assert ctx.reasoning_part is None, (
         "reasoning_part should be cleared from context after stream complete"
     )
