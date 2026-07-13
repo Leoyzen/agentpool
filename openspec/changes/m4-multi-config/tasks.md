@@ -137,6 +137,41 @@
 - [ ] 16.6 Write unit tests for CLI argument parsing: single config (backward compat), multiple configs, `--name` flag pairs with configs, missing `--name` derives from filename
 - [ ] 16.7 Write integration test: `agentpool serve-acp config-a.yml config-b.yml` registers both configs, HostRegistry creates separate Hosts, requests route to correct Host by config_id
 
+## 18. OpenCode Server Hardening (from pre-M4 cleanup)
+
+These tasks were merged from the `pre-m4-protocol-cleanup` change (formerly Phase 3 + Phase 5) because they touch the same OpenCode route files that M4's RunScope routing modifies. Doing them together avoids two rounds of changes to the same files.
+
+### 18.1 Public API for Private Attributes
+
+- [ ] 18.1 Add public API methods to replace private attribute access:
+  - `Agent.get_capabilities() -> list[AbstractCapability]` (replaces `agent._all_capabilities`)
+  - `Agent.get_all_tools() -> list[Tool]` (make `_get_all_tools` public)
+  - `SessionController.get_session(session_id) -> SessionState | None` (replaces `session_controller._sessions[id]`)
+  - `LspManager.get_server(name) -> LspServer | None` (replaces `lsp_manager._servers[name]`)
+  - `SessionPool.get_runs(session_id) -> dict` (replaces `session_pool.sessions._runs`)
+  Verify: `grep -rn '_all_capabilities\|_get_all_tools\|_sessions\[' src/agentpool_server/opencode_server/` returns 0.
+
+### 18.2 state.pool Migration to HostContext
+
+- [ ] 18.2 Migrate 68 `state.pool.*` accesses to `state.host_context.*` across OpenCode server routes. Key clusters: `session_pool` (~40), `manifest` (8), `todos` (5), `skill_*` (10), `storage` (3), `file_ops` (6), `extension_registry` (2). Add missing accessors on `HostContext` as needed. Verify: `grep -rn 'state\.pool\.' src/agentpool_server/opencode_server/` returns 0.
+
+### 18.3 Event Processor Hardening
+
+- [ ] 18.3 Handle `RunStartedEvent` in `EventProcessor._handle_event()` — emit `SessionStatusEvent(status="busy")`. Currently only handled in `session_pool_integration.py:1132`.
+- [ ] 18.4 Remove `typing.Any` propagation in OpenCode event adapter. Type all event fields explicitly.
+
+### 18.4 Legacy Path Removal
+
+- [ ] 18.5 Remove dual abort paths in `session_routes.py`: delete legacy `state.agent.interrupt()` fallback at lines 936-947. All aborts go through `SessionController.abort()`. Also remove `state.agent.run()` bypass at line 1954.
+- [ ] 18.6 Remove legacy `agent.list_sessions()` fallback at `session_routes.py:660-665`. All session listing goes through `SessionPool`.
+
+### 18.5 Session/Pool Identity Abstraction
+
+- [ ] 18.7 Abstract session identity from `state.agent.name` to `run_scope.session_id` in 5 OpenCode files: `message_routes.py:94`, `session_routes.py:86,868`, `server.py:267`, `session_pool_integration.py:415`. Uses `RunScope` from task group 7.
+- [ ] 18.8 Abstract pool identity from `config_file_path` to `run_scope.config_id` in 3 files: `server.py:268`, `session_routes.py:867`, `session_pool_integration.py:414`. Uses `RunScope` from task group 7.
+- [ ] 18.9 Remove single-config hardcoding in `session_controller.py`: replace `self.pool.manifest.agents` at lines 436, 442, 502, 964 with `host_context.manifest.agents` or `host_registry.get_agents(config_id)`.
+- [ ] 18.10 Abstract `state.agent.env` access through `HostContext`: `state.agent.env.cwd` (8 occurrences in `agent_routes.py`), `state.agent.env.get_pty_manager()` (`pty_routes.py:54`).
+
 ## 17. Integration Verification
 
 - [ ] 17.1 Run full test suite: `uv run pytest` — all tests must pass without modification to existing tests
