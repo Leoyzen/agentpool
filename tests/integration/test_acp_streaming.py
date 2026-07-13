@@ -61,7 +61,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-def _serialize_event(event: Any) -> dict[str, Any]:
+def _serialize_event(event: Any) -> dict[str, Any]:  # noqa: PLR0911
     """Serialize a RichAgentStreamEvent to a dict suitable for snapshot.
 
     Strips non-deterministic fields (uuids, timestamps) and converts
@@ -193,7 +193,7 @@ class _MockToolBridge:
         self,
         context: Any,
         prompt: Any = None,
-    ) -> AsyncIterator["_MockToolBridge"]:
+    ) -> AsyncIterator[_MockToolBridge]:
         yield self
 
 
@@ -398,20 +398,21 @@ async def test_acp_streaming_event_sequence_with_tool_metadata(
     # Patch acp_to_native_event to allow ToolResultMetadataEvent passthrough
     from agentpool.agents.acp_agent import acp_converters as converters_mod
 
-    global _original_acp_to_native_event
+    global _original_acp_to_native_event  # noqa: PLW0603
     _original_acp_to_native_event = converters_mod.acp_to_native_event
 
     with patch.object(converters_mod, "acp_to_native_event", _patched_acp_to_native_event):
-        events: list[Any] = []
-        async for event in agent._stream_events(
-            run_ctx,
-            ["test prompt"],
-            user_msg=user_msg,
-            message_history=[],
-            effective_parent_id=None,
-            session_id="test-session-id",
-        ):
-            events.append(event)
+        events: list[Any] = [
+            event
+            async for event in agent._stream_events(
+                run_ctx,
+                ["test prompt"],
+                user_msg=user_msg,
+                message_history=[],
+                effective_parent_id=None,
+                session_id="test-session-id",
+            )
+        ]
 
     # Serialize events for snapshot comparison
     serialized = [_serialize_event(e) for e in events]
@@ -474,7 +475,7 @@ async def test_acp_streaming_text_only_sequence(
         effective_parent_id=None,
         session_id="test-session-id",
     ):
-        events.append(event)
+        events.append(event)  # noqa: PERF401
 
     serialized = [_serialize_event(e) for e in events]
     assert serialized == snapshot

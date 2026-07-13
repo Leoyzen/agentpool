@@ -358,7 +358,7 @@ async def test_cache_copy_messages_invalidates_target_cache(
 # RunHandle delegation tests (feature-flag gated)
 # ---------------------------------------------------------------------------
 
-from agentpool.lifecycle import RunState
+from agentpool.lifecycle import RunState  # noqa: E402
 from agentpool.orchestrator.run import RunHandle  # noqa: E402
 
 

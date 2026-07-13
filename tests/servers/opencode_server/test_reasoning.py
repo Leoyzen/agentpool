@@ -16,9 +16,8 @@ from agentpool_server.opencode_server.event_processor import EventProcessor
 from agentpool_server.opencode_server.event_processor_context import (
     EventProcessorContext,
 )
-from agentpool_server.opencode_server.models import PartDeltaEvent, PartUpdatedEvent
+from agentpool_server.opencode_server.models import PartUpdatedEvent
 from agentpool_server.opencode_server.models.events import (
-    PartDeltaEventProperties,
     PartUpdatedEventProperties,
 )
 from agentpool_server.opencode_server.models.parts import (
@@ -115,7 +114,9 @@ async def test_multi_turn_thinking_creates_separate_parts():
         await _process_event(
             processor,
             ctx,
-            PydanticPartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=" more thinking")),
+            PydanticPartDeltaEvent(
+                index=0, delta=ThinkingPartDelta(content_delta=" more thinking")
+            ),
         )
     )
     # End of thinking - text response starts

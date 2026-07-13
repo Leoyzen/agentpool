@@ -486,10 +486,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                         enriched = event
                         if not enriched.agent_name:
                             enriched = replace(enriched, agent_name=self.name)
-                        if (
-                            enriched.metadata is None
-                            and enriched.tool_call_id in tool_metadata
-                        ):
+                        if enriched.metadata is None and enriched.tool_call_id in tool_metadata:
                             enriched = replace(
                                 enriched,
                                 metadata=tool_metadata[enriched.tool_call_id],

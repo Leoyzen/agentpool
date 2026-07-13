@@ -28,9 +28,9 @@ from agentpool.agents.events import (
     RunStartedEvent,
     StreamCompleteEvent,
 )
+from agentpool.lifecycle import RunState
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, SessionState
-from agentpool.lifecycle import RunState
 from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
 

@@ -56,7 +56,8 @@ def test_checkpoint_transitions_from_running() -> None:
     handle._start_task()
     assert handle.is_running
     handle.checkpoint()
-    assert handle._run_state == RunState.DONE and handle.outcome == RunOutcome.CHECKPOINTED
+    assert handle._run_state == RunState.DONE
+    assert handle.outcome == RunOutcome.CHECKPOINTED
 
 
 def test_checkpoint_sets_complete_event() -> None:
@@ -104,7 +105,8 @@ def test_checkpoint_does_not_emit_run_failed_event() -> None:
 
     # RunHandle.checkpoint() does not accept event_bus parameter,
     # so RunFailedEvent cannot be emitted
-    assert handle._run_state == RunState.DONE and handle.outcome == RunOutcome.CHECKPOINTED
+    assert handle._run_state == RunState.DONE
+    assert handle.outcome == RunOutcome.CHECKPOINTED
     assert handle.complete_event.is_set()
 
 
@@ -135,7 +137,8 @@ def test_resume_creates_fresh_run_handle() -> None:
     old_handle = RunHandle(run_id="old-run", session_id="s1", agent_type="native")
     old_handle._start_task()
     old_handle.checkpoint()
-    assert old_handle._run_state == RunState.DONE and old_handle.outcome == RunOutcome.CHECKPOINTED
+    assert old_handle._run_state == RunState.DONE
+    assert old_handle.outcome == RunOutcome.CHECKPOINTED
 
     # Simulate resume: create a completely new handle
     new_handle = RunHandle(run_id="new-run", session_id="s1", agent_type="native")
@@ -170,7 +173,8 @@ async def test_session_controller_skips_fail_on_checkpointed() -> None:
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     handle._start_task()
     handle.checkpoint()
-    assert handle._run_state == RunState.DONE and handle.outcome == RunOutcome.CHECKPOINTED
+    assert handle._run_state == RunState.DONE
+    assert handle.outcome == RunOutcome.CHECKPOINTED
 
     # Simulate the guard in _run_turn_unlocked's except block
     # (line ~1354-1358 in core.py):
@@ -199,7 +203,9 @@ async def test_run_loop_finally_skips_complete_on_checkpointed() -> None:
     #       run_handle.complete()
     #
     # When checkpointed, this guard should ALSO skip complete():
-    #   if run_handle.outcome not in (RunOutcome.COMPLETED, RunOutcome.FAILED, RunOutcome.CHECKPOINTED):
+    #   if run_handle.outcome not in (
+    #       RunOutcome.COMPLETED, RunOutcome.FAILED, RunOutcome.CHECKPOINTED,
+    #   ):
     #       if run_ctx.checkpointed:
     #           run_handle.checkpoint()
     #       else:
@@ -212,7 +218,8 @@ async def test_run_loop_finally_skips_complete_on_checkpointed() -> None:
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     handle._start_task()
     handle.checkpoint()
-    assert handle._run_state == RunState.DONE and handle.outcome == RunOutcome.CHECKPOINTED
+    assert handle._run_state == RunState.DONE
+    assert handle.outcome == RunOutcome.CHECKPOINTED
 
     # If the guard only checks (completed, failed), it would call complete()
     # and change the status. Verify the guard must include checkpointed:

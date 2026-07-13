@@ -345,7 +345,9 @@ def blocking_real_question_state(tmp_project_dir):
     placeholder_agent = RunAbortedAgentMock()
     placeholder_agent.agent_pool = _make_pool_mock(placeholder_agent)
     placeholder_agent.host_context = placeholder_agent.agent_pool
-    placeholder_agent._agent_pool = placeholder_agent.agent_pool  # state.py resolves _pool via agent._agent_pool
+    placeholder_agent._agent_pool = (
+        placeholder_agent.agent_pool
+    )  # state.py resolves _pool via agent._agent_pool
     placeholder_agent.env = _make_env_mock(str(tmp_project_dir))
     placeholder_agent.storage = placeholder_agent.agent_pool.storage
     state = ServerState(working_dir=str(tmp_project_dir), agent=placeholder_agent)

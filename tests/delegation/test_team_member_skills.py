@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+
 import pytest
 
 from agentpool import BaseTeam
@@ -12,6 +13,7 @@ class _Pool:
 
     async def get_skill_instructions_for_node(self, skill_name: str, node_name: str) -> str:
         return f"# {skill_name}\nUse this skill for {node_name}."
+
 
 def test_team_loads_member_skills_from_pool_provider() -> None:
     team = BaseTeam([], mode="parallel", name="review_team")

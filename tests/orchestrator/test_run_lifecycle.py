@@ -18,9 +18,9 @@ import pytest
 from agentpool import Agent
 from agentpool.agents.base_agent import _current_run_ctx_var
 from agentpool.agents.context import AgentRunContext
+from agentpool.lifecycle import RunOutcome, RunState
 from agentpool.orchestrator.core import SessionPool
 from agentpool.orchestrator.metrics import MetricsCollector
-from agentpool.lifecycle import RunOutcome, RunState
 from agentpool.orchestrator.run import RunHandle
 
 
@@ -66,7 +66,8 @@ def test_complete_transitions_and_sets_event() -> None:
     """complete() transitions to completed and sets complete_event."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     handle.complete()
-    assert handle._run_state == RunState.DONE and handle.outcome == RunOutcome.COMPLETED
+    assert handle._run_state == RunState.DONE
+    assert handle.outcome == RunOutcome.COMPLETED
     assert handle.complete_event.is_set()
 
 
@@ -94,7 +95,8 @@ def test_fail_transitions_and_sets_event() -> None:
     """fail() transitions to failed and sets complete_event."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     handle.fail()
-    assert handle._run_state == RunState.DONE and handle.outcome == RunOutcome.FAILED
+    assert handle._run_state == RunState.DONE
+    assert handle.outcome == RunOutcome.FAILED
     assert handle.complete_event.is_set()
 
 
@@ -103,7 +105,8 @@ def test_fail_with_exception_sets_cancelled() -> None:
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     exc = RuntimeError("boom")
     handle.fail(exc)
-    assert handle._run_state == RunState.DONE and handle.outcome == RunOutcome.FAILED
+    assert handle._run_state == RunState.DONE
+    assert handle.outcome == RunOutcome.FAILED
     assert handle.run_ctx.cancelled is True
 
 

@@ -481,7 +481,7 @@ def _make_mock_state_with_session_agent(
     pool.session_pool = session_pool
     shared_agent.agent_pool = pool
     shared_agent.host_context = pool
-    agent._agent_pool = pool  # state.py resolves _pool via agent._agent_pool
+    shared_agent._agent_pool = pool  # state.py resolves _pool via agent._agent_pool
 
     state = ServerState(
         working_dir=str(tmp_project_dir),

@@ -1041,9 +1041,7 @@ async def test_steer_direct_channel_does_not_use_deliver_feedback() -> None:
     handle = _make_run_handle()
     # DirectChannel.deliver_feedback returns False (no-op).
     assert handle._comm_channel is not None
-    feedback_result = handle._comm_channel.deliver_feedback(
-        Feedback(content="test", is_steer=True)
-    )
+    feedback_result = handle._comm_channel.deliver_feedback(Feedback(content="test", is_steer=True))
     assert feedback_result is False
 
     handle._run_state = RunState.IDLE

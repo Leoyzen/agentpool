@@ -15,9 +15,9 @@ from pydantic_ai import RequestUsage
 import pytest
 
 from agentpool.agents.events import StreamCompleteEvent
+from agentpool.lifecycle import RunOutcome, RunState
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus
-from agentpool.lifecycle import RunOutcome, RunState
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.models import (

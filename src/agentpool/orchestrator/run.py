@@ -406,7 +406,10 @@ class RunHandle:
                             continue
 
                     async for event in self._execute_turn(
-                        agent, event_bus, session, current_prompts,
+                        agent,
+                        event_bus,
+                        session,
+                        current_prompts,
                     ):
                         yield event
 
@@ -609,9 +612,7 @@ class RunHandle:
             run_id=self.run_id,
             session_id=self.session_id,
             agent_name=self.agent_type,
-            parent_session_id=session.parent_session_id
-            if session is not None
-            else None,
+            parent_session_id=session.parent_session_id if session is not None else None,
         )
         if not self._comm_channel.publishes_to_event_bus:
             await event_bus.publish(self.session_id, run_started)

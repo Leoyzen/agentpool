@@ -21,8 +21,8 @@ from agentpool.agents.events import (
     PartDeltaEvent,
     StreamCompleteEvent,
 )
-from agentpool.messaging import ChatMessage
 from agentpool.lifecycle import RunState
+from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
 

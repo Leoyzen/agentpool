@@ -27,9 +27,9 @@ import pytest
 from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import StreamCompleteEvent
+from agentpool.lifecycle import RunState
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, SessionState
-from agentpool.lifecycle import RunState
 from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
 

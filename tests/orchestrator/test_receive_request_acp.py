@@ -13,8 +13,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agentpool.agents.acp_agent import ACPAgent
-from agentpool.orchestrator.core import EventBus, SessionController
 from agentpool.lifecycle import RunState
+from agentpool.orchestrator.core import EventBus, SessionController
 from agentpool.orchestrator.run import RunHandle
 
 
