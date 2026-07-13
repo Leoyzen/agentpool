@@ -299,6 +299,8 @@ class _DummyCommChannel:
     def recv(self) -> Feedback | None:
         return None
 
+    def deliver_feedback(self, feedback: Feedback) -> None: ...
+
     def close(self) -> None: ...
 
 

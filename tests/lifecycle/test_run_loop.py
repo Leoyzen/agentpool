@@ -1037,14 +1037,14 @@ async def test_idempotency_skip_when_turn_result_exists() -> None:
 
 @pytest.mark.unit
 async def test_steer_direct_channel_does_not_use_deliver_feedback() -> None:
-    """steer() with DirectChannel does NOT call deliver_feedback (it doesn't exist)."""
+    """steer() with DirectChannel does NOT route via deliver_feedback (uses isinstance check)."""
+    from agentpool.lifecycle.comm_channel import DirectChannel
+
     handle = _make_run_handle()
-    # DirectChannel does not have deliver_feedback.
-    try:
-        _ = handle._comm_channel.deliver_feedback  # type: ignore[union-attr]
-        raise AssertionError("DirectChannel should not have deliver_feedback")
-    except AttributeError:
-        pass  # Expected
+    # DirectChannel now has deliver_feedback (no-op for protocol conformance),
+    # but steer() skips the feedback path via isinstance check.
+    assert isinstance(handle._comm_channel, DirectChannel)
+    assert callable(handle._comm_channel.deliver_feedback)
 
     handle._run_state = RunState.IDLE
     result = handle.steer("direct steer")
