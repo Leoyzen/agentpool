@@ -118,7 +118,7 @@
 - **WHEN** `RunHandle.revoke(message_id)` is called with a `message_id` that does not exist in pending or delivered
 - **THEN** the return value SHALL be `True` (idempotent — safe to retry after transport loss)
 
-### Requirement: SessionController.receive_request() accepts steer/followup priority aliases
+### Requirement: SessionController.receive_request() accepts steer/followup priority aliases and returns message_id
 
 `SessionController.receive_request()` SHALL accept `priority="steer"` and `priority="followup"` as aliases for `"asap"` and `"when_idle"` respectively. The existing `"asap"`/`"when_idle"` values SHALL continue to work for backward compatibility.
 
@@ -126,7 +126,8 @@
 - `priority="followup"` SHALL be internally mapped to `"when_idle"` for routing
 - The method SHALL accept all four values (`"steer"`, `"followup"`, `"asap"`, `"when_idle"`)
 - The method SHALL accept an optional `message_id: str | None = None` keyword parameter. When provided, it SHALL be passed to `steer()` or `followup()`. When `None`, the called method SHALL auto-generate.
-- The return type SHALL change from `RunHandle | None` to `RunHandle | str | None` — `RunHandle` for new runs (idle session), `str` for steer/followup success (the `message_id`), `None` for failure or rejection.
+- The method SHALL accept `content: str | list[Any]` — `str` for plain text, `list[Any]` for structured content. The pipeline preserves the content type without stringification.
+- The return type SHALL change from `RunHandle | None` to `str | None` — `str` (the `message_id`) for success (both new runs and steer/followup), `None` for failure or rejection. Initial prompts for new runs route through `followup()` (D17), which returns `str`.
 - `SessionController.revoke_inject(session_id: str, message_id: str) -> bool` SHALL revoke a pending inject by `message_id` on the session's active run. Returns `False` if no active run or revoke fails.
 
 #### Scenario: Protocol handler sends steer request
@@ -169,13 +170,22 @@
 
 - **WHEN** `receive_request(session_id, content, priority="steer", message_id="msg_001")` is called on a busy session
 - **THEN** the return value SHALL be `"msg_001"` (the message_id string)
-- **AND** the return type SHALL be `str`, not `RunHandle` or `None`
+- **AND** the return type SHALL be `str`, not `None`
 
-#### Scenario: receive_request returns RunHandle for new run on idle session
+#### Scenario: receive_request returns message_id for new run on idle session (D17)
 
 - **WHEN** `receive_request(session_id, content, priority="when_idle")` is called on an idle session
-- **THEN** the return value SHALL be a `RunHandle` instance
-- **AND** the `message_id` (if auto-generated) SHALL be available on the `RunHandle` for future reference
+- **THEN** the system SHALL call `run_handle.followup(content, message_id=...)` before starting the run
+- **AND** the return value SHALL be the `message_id` string (auto-generated or provided)
+- **AND** the return type SHALL be `str`, not `RunHandle` or `None`
+- **AND** `start(initial_prompt="")` SHALL be called — the first `_idle_loop()` drains the followup feedback as the first turn's prompt
+
+#### Scenario: receive_request with list content (multimodal)
+
+- **WHEN** `receive_request(session_id, [{"type": "image", ...}, "caption"], priority="when_idle")` is called
+- **THEN** the `list` content SHALL be preserved as-is (not stringified)
+- **AND** `followup()` SHALL store the list in `Feedback.content_blocks` with `content=""`
+- **AND** the return value SHALL be the `message_id` string
 
 #### Scenario: receive_request returns None on failure
 

@@ -143,3 +143,31 @@ The `CommChannel` Protocol in `lifecycle/protocols.py` SHALL declare `revoke(mes
 - **WHEN** `DirectChannel.replace(message_id, new_content)` is called
 - **THEN** the return value SHALL be `False`
 - **AND** no exception SHALL be raised
+
+### Requirement: RunHandle idle loop and drain carry content_blocks from Feedback
+
+The `_idle_loop()` and `_drain_events()` methods in `RunHandle` SHALL read both `content` and `content_blocks` from `Feedback` when draining `ProtocolChannel.recv()`. The `_message_queue` type SHALL change from `list[str]` to `list[str | list[Any]]` to support structured content.
+
+- `_idle_loop()` SHALL append `fb.content_blocks` to `_message_queue` when `content_blocks` is not `None`, else append `fb.content`
+- `_drain_events()` SHALL append `fb.content_blocks` to `_message_queue` (for non-steer feedback) or to `feedback_steer` (for steer feedback) when `content_blocks` is not `None`, else append `fb.content`
+- `_execute_turn()` SHALL accept `current_prompts: list[str | list[Any]]` — each prompt is either a plain text string or a list of structured content blocks
+- For native agents: when a prompt is `list[Any]`, `_execute_turn()` SHALL pass it to the agent's turn as structured content (e.g. `enqueue(*content_blocks)`); when `str`, pass as plain text
+
+#### Scenario: _idle_loop drains Feedback with content_blocks
+
+- **WHEN** `_idle_loop()` calls `recv()` and gets a `Feedback` with `content_blocks=[{"type": "image", ...}, "caption"]`
+- **THEN** `_message_queue` SHALL receive `[{"type": "image", ...}, "caption"]` (the list, not the string)
+- **AND** `fb.content` (the text fallback) SHALL NOT be appended
+
+#### Scenario: _idle_loop drains Feedback with content only
+
+- **WHEN** `_idle_loop()` calls `recv()` and gets a `Feedback` with `content="hello"` and `content_blocks=None`
+- **THEN** `_message_queue` SHALL receive `"hello"` (the string)
+- **AND** the behavior SHALL be identical to the current implementation (backward compatible)
+
+#### Scenario: _execute_turn receives list prompt
+
+- **WHEN** `_execute_turn()` receives `current_prompts=[{"type": "image", ...}, "caption"]` (a list)
+- **THEN** for native agents, the turn SHALL pass the list items to `agent_run` as structured content
+- **AND** for non-native agents, the turn SHALL pass the list to the injection path as-is
+- **AND** no exception SHALL be raised

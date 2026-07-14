@@ -100,13 +100,13 @@ The `recv()` method changes from `asyncio.Queue.get_nowait()` to `deque.popleft(
 
 **Rationale**: Making these part of the Protocol ensures any future `CommChannel` implementation must consider revoke/replace semantics. `DirectChannel` returning `False` is consistent with its existing `deliver_feedback() -> False` pattern.
 
-### D8: `SessionController.receive_request()` gains `message_id` parameter and updated return type
+### D8: `SessionController.receive_request()` gains `message_id` parameter, return type simplifies to `str | None`
 
-**Decision**: `receive_request()` gains `message_id: str | None = None` keyword parameter. When provided, it's passed to `steer()`/`followup()`. When `None`, `steer()`/`followup()` auto-generates. The return type changes from `RunHandle | None` to `RunHandle | str | None` — `RunHandle` for new runs (idle session), `str` for steer/followup success (the `message_id`), `None` for failure or rejection.
+**Decision**: `receive_request()` gains `message_id: str | None = None` keyword parameter. The return type changes from `RunHandle | None` to `str | None` — `str` (the `message_id`) for success (both new runs and steer/followup), `None` for failure or rejection. The `RunHandle` case is eliminated because initial prompts now route through `followup()` (see D17), which returns `str`.
 
-**Rationale**: Protocol handlers that have a client-provided message ID (from v2 `session/inject` request) can pass it through. Internal callers (auto-resume, background tasks) don't need to provide it. The return type change is necessary because v2 `session/inject` requires the protocol handler to return the `message_id` to the client — without it, the handler cannot fulfill the v2 response contract. `RunHandle | str | None` is chosen over a `RequestResult` dataclass for simplicity; if more fields are needed later, a dataclass can be introduced without breaking the `str` case.
+**Rationale**: Protocol handlers that have a client-provided message ID (from v2 `session/inject` or `session/prompt` request) can pass it through. Internal callers (auto-resume, background tasks) don't need to provide it. The return type simplifies because every code path (new run, steer, followup) now goes through `Feedback` → `message_id` → `str` return. The protocol handler subscribes to the `EventBus` and filters by `session_id` — it does not need the `RunHandle` directly.
 
-**Backward compatibility**: Existing callers that check `if receive_request(...)` still work — `RunHandle` and truthy `str` are both truthy, `None` is falsy.
+**Backward compatibility**: Existing callers that check `if receive_request(...)` still work — truthy `str` is truthy, `None` is falsy. Callers that type-check the return as `RunHandle` need updating, but all current callers use the return value in boolean context only.
 
 ### D9: `RunHandle.replace()` deferred to future change
 
@@ -161,11 +161,11 @@ The `recv()` method changes from `asyncio.Queue.get_nowait()` to `deque.popleft(
 
 **Decision**: OpenCode's `delivery: "steer" | "queue"` maps directly to AgentPool's priority system. `receive_request()` SHALL accept `delivery` as an alias for `priority`: `"steer"` → `"asap"`, `"queue"` → `"when_idle"`. OpenCode route handlers SHALL pass `delivery` from `MessageRequest` to `receive_request()` instead of hardcoding `priority="when_idle"`.
 
-**Rationale**: OpenCode's protocol already has the steer/queue distinction (`SessionDelivery.Delivery = ["steer", "queue"]`), but AgentPool's OpenCode routes currently ignore it. Wiring it through enables mid-turn steer via OpenCode HTTP, matching ACP v2's `session/inject` semantics.
+**Rationale**: OpenCode's protocol already has the steer/queue distinction (`SessionDelivery.Delivery = ["steer", "queue"]`), but AgentPool's OpenCode routes currently ignore it. Wiring it through enables mid-turn steer via OpenCode HTTP, matching ACP v2's `session/inject` semantics. This is a protocol completeness fix — the server respects the client's `delivery` field value regardless of whether the frontend currently uses `delivery: "steer"`.
 
 ### D14: Resolve dual `assistant_msg_id` in OpenCode server
 
-**Decision**: The OpenCode server currently has TWO independent `assistant_msg_id` generation paths (REST path in `message_routes.py:370` and EventBus consumer in `session_pool_integration.py:932`), creating a split-message issue. The fix: the REST path generates the canonical `assistant_msg_id` using `identifier.ascending("message", request.message_id)`, passes it to `receive_request(message_id=...)`, and the EventBus consumer reads `message_id` from `PartStartEvent` instead of generating its own.
+**Decision**: The OpenCode server currently has TWO independent `assistant_msg_id` generation paths (REST path in `message_routes.py:370` and EventBus consumer in `session_pool_integration.py:932`), creating a split-message issue. Additionally, at least 4 other files (`session_routes.py`, `stream_adapter.py`, etc.) generate independent IDs. **All** `assistant_msg_id` generation sites SHALL be unified in this change — no technical debt left behind. The fix: the REST path generates the canonical `assistant_msg_id` using `identifier.ascending("message", request.message_id)`, passes it to `receive_request(message_id=...)`, and ALL consumers (EventBus consumer, stream adapter, session routes, etc.) read `message_id` from events instead of generating their own.
 
 **Rationale**: Content parts (text, tools, reasoning) are currently broadcast linked to the consumer's `assistant_msg_id_B`, while step-start/finish is linked to the REST path's `assistant_msg_id_A`. This creates a split-message issue in the frontend. Reading from events ensures a single coherent message ID.
 
@@ -180,6 +180,44 @@ The `recv()` method changes from `asyncio.Queue.get_nowait()` to `deque.popleft(
 **Decision**: OpenCode's `POST /abort` is session-level — it cancels the entire run via `RunHandle.cancel()` (existing behavior). ACP v2's `session/revoke_inject` is message-level — it cancels a specific pending inject via `RunHandle.revoke(message_id)`. These are different operations and OpenCode does not need a message-level revoke endpoint in this change.
 
 **Rationale**: OpenCode's protocol has no message-level revoke concept. The `revoke()` infrastructure is built internally for ACP v2 to use, but OpenCode clients continue to use session-level abort.
+
+### D17: Initial prompt reuses `followup()` — unified code path with `message_id`
+
+**Decision**: When `receive_request()` starts a new run (idle session), the initial prompt SHALL be delivered via `run_handle.followup(content, message_id=message_id)` BEFORE `start()` is called. `start()` is called with `initial_prompt=""` — the first `_idle_loop()` iteration drains the `followup()` feedback from `ProtocolChannel._pending` and uses it as the first turn's prompt.
+
+**Current flow** (eliminated):
+```
+receive_request() → _start_run_handle(content)
+  → start(initial_prompt=content)
+    → current_prompts = [content]  ← no Feedback, no message_id
+```
+
+**New flow**:
+```
+receive_request() → _start_run_handle(content, message_id)
+  → run_handle.followup(content, message_id=msg_id)  ← Feedback in _pending
+  → start(initial_prompt="")
+    → current_prompts = []
+      → _idle_loop() → recv() → fb  ← Feedback with message_id
+        → current_prompts = [fb.content or fb.content_blocks]
+```
+
+**Behavioral equivalence**: Both flows result in `_execute_turn(prompts=[content])`. The end state is identical — the first turn processes the same prompt content.
+
+**Advantages**:
+- Initial prompt gets a `message_id` automatically — ACP v2 `session/prompt` can return `user_message_id`
+- Revoke works on the initial prompt (before `start()` picks it up from `_idle_loop()`)
+- No special-casing for "initial prompt" — all prompts go through the same `Feedback` → `ProtocolChannel` → `_idle_loop` path
+- `content_blocks` (multimodal) flows through the same `Feedback` path
+- `receive_request()` return type simplifies to `str | None` (always `message_id` on success)
+
+**Implementation changes**:
+1. `_start_run_handle()`: call `followup(content, message_id=...)` before `asyncio.create_task(start(""))`, return `message_id`
+2. `start()`: `initial_prompt: str = ""` (default empty, falls through to `_idle_loop()`)
+3. `_idle_loop()` and `_drain_events()`: read `fb.content` AND `fb.content_blocks` from `Feedback` — `_message_queue` type changes from `list[str]` to `list[str | list[Any]]`
+4. `_execute_turn()`: `current_prompts` type changes from `list[str]` to `list[str | list[Any]]`
+
+**Race safety**: `followup()` is called synchronously before `asyncio.create_task()`. The `Feedback` is in `ProtocolChannel._pending` before `start()` runs. `_idle_loop()` clears `_idle_event` then immediately calls `recv()` — finds the feedback without blocking. No race.
 
 ## Risks / Trade-offs
 
@@ -197,6 +235,8 @@ The `recv()` method changes from `asyncio.Queue.get_nowait()` to `deque.popleft(
 
 - **[Multi-message turns with external ACP agents]** → If an external ACP agent sends multiple `AgentMessageChunk` with different `message_id` values without a role switch, the accumulator must detect the `message_id` change and finalize the previous message. Mitigation: `ACPMessageAccumulator.process()` compares incoming `message_id` with `_current_message_id` and triggers `_finalize_current_message()` on change.
 
-- **[`receive_request` return type change]** → Return type changes from `RunHandle | None` to `RunHandle | str | None`. Existing callers using `if receive_request(...):` still work (truthy). Mitigation: grep all call sites and verify none use `isinstance(result, RunHandle)` exclusively.
+- **[`receive_request` return type change]** → Return type changes from `RunHandle | None` to `str | None`. Existing callers using `if receive_request(...):` still work (truthy str). Mitigation: grep all call sites and verify none use `isinstance(result, RunHandle)` or access `RunHandle`-specific attributes on the return value.
 
-- **[AG-UI and OpenAI API servers]** → These servers also consume `PartStartEvent`/`PartDeltaEvent` and may have independent `message_id` generation. Mitigation: Task 8.4 audits these servers for independent generation and updates if found.
+- **[Initial prompt via followup]** → `_idle_loop()` and `_drain_events()` currently read only `fb.content` (string). Must also pass `fb.content_blocks` through. `_message_queue` type changes from `list[str]` to `list[str | list[Any]]`. Mitigation: `_execute_turn()` already receives prompts as a list — type widening is backward compatible.
+
+- **[AG-UI and OpenAI API servers]** → These servers also consume `PartStartEvent`/`PartDeltaEvent` and may have independent `message_id` generation. Mitigation: Task 8.7 audits these servers for independent generation and updates if found.

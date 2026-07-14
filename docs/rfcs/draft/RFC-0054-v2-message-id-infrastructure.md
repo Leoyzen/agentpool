@@ -176,13 +176,13 @@ Additionally, the `Feedback` dataclass lacks `message_id`, the `ProtocolChannel`
 1. Unify message ID generation into a single source of truth per message, flowing through events, CommChannel, and protocol conversion
 2. Extend `Feedback` with `message_id` (auto-generated UUID), `content_blocks` (structured content, activated), and `mode` ("steer" | "queue")
 3. Add `revoke(message_id)` and `replace(message_id, content)` to `ProtocolChannel` with pending/delivered/revoked tracking — revoke operates at two layers (CommChannel queue + PydanticAI `pending_messages` list)
-4. Extend `RunHandle.steer()`/`followup()` to accept `str | list[Any]` (multimodal) and return `message_id`; add `RunHandle.revoke()`
-5. Extend `SessionController.receive_request()` to accept and propagate `message_id`; add `revoke_inject()`
+4. Extend `RunHandle.steer()`/`followup()` to accept `str | list[Any]` (multimodal) and return `message_id`; add `RunHandle.revoke()` with two-layer semantics (CommChannel queue + PydanticAI `pending_messages`)
+5. Extend `SessionController.receive_request()` to accept and propagate `message_id`, return `str | None` (message_id on success); add `revoke_inject()`. Initial prompts for new runs route through `followup()` (D17) for unified code path.
 6. Fix `ACPMessageAccumulator` to preserve incoming `message_id` from external ACP agents
 7. Wire `ACPEventConverter` to read `message_id` from events instead of generating independently
 8. Add `message_id` field to `PartStartEvent` and `PartDeltaEvent`
-9. Map OpenCode `delivery: "steer" | "queue"` to `SessionController.receive_request()` priority routing
-10. Resolve the dual `assistant_msg_id` problem in the OpenCode server — event processor reads `message_id` from events instead of generating independently
+9. Map OpenCode `delivery: "steer" | "queue"` to `SessionController.receive_request()` priority routing — server respects client's `delivery` field
+10. Unify ALL `assistant_msg_id` generation sites in the OpenCode server (6+ files) — no technical debt left behind
 11. Wire OpenCode `MessageRequest.message_id` through to `receive_request(message_id=...)` for client-provided ID propagation
 
 ### Non-Goals (Out of Scope)
@@ -204,6 +204,9 @@ Additionally, the `Feedback` dataclass lacks `message_id`, the `ProtocolChannel`
 - [ ] `steer()` returns a `message_id` string that can be used with `revoke()` to cancel a pending message
 - [ ] `revoke()` returns `False` for delivered messages and `True` for pending/enqueued/unknown (idempotent)
 - [ ] `revoke()` can remove a steer message from PydanticAI's `pending_messages` list after `enqueue()` but before drain
+- [ ] `receive_request()` returns `str` (message_id) for both new runs and steer/followup, `None` for failure — `RunHandle` is never returned to protocol handlers
+- [ ] Initial prompts for new runs route through `followup()` (D17) — same code path as subsequent prompts
+- [ ] All `assistant_msg_id` generation sites in OpenCode server read from events — zero independent generation
 - [ ] All existing steer/followup callers continue to work without modification (backward compatible)
 - [ ] All existing tests pass without regression
 
@@ -481,9 +484,9 @@ For external ACP agents, `ACPMessageAccumulator` detects `message_id` changes: i
 
 Both methods added to the Protocol. `DirectChannel` implements as no-ops returning `False`. `ProtocolChannel` implements with real tracking logic.
 
-#### D8: `receive_request()` return type changes to `RunHandle | str | None`
+#### D8: `receive_request()` return type simplifies to `str | None`
 
-`RunHandle` for new runs, `str` for steer/followup success (the `message_id`), `None` for failure.
+`str` (the `message_id`) for success (both new runs via followup D17 and steer/followup on busy sessions), `None` for failure. The `RunHandle` case is eliminated — initial prompts route through `followup()` which returns `str`.
 
 #### D9-D12: Deferred items and constraints
 
@@ -626,16 +629,16 @@ OpenCode's `delivery: "steer" | "queue"` maps directly to AgentPool's priority s
 
 `receive_request()` SHALL accept `delivery` as an alias for `priority`. OpenCode route handlers SHALL pass `delivery` from `MessageRequest` to `receive_request()`. Currently, OpenCode routes hardcode `priority="when_idle"` — this must be updated to respect the client's `delivery` field.
 
-#### D14: Resolve dual `assistant_msg_id` in OpenCode server
+#### D14: Unify ALL `assistant_msg_id` generation in OpenCode server
 
-The OpenCode server currently has TWO independent `assistant_msg_id` generation paths (REST and EventBus consumer), creating a split-message issue. The fix:
+The OpenCode server currently has multiple independent `assistant_msg_id` generation paths (REST, EventBus consumer, stream adapter, session routes, etc.), creating a split-message issue. **All** generation sites SHALL be unified — no technical debt left behind. The fix:
 
 1. The REST path (`message_routes.py`) generates the canonical `assistant_msg_id` using `identifier.ascending("message", request.message_id)`
 2. This ID is passed to `receive_request(message_id=...)` and propagates through events
-3. The EventBus consumer (`session_pool_integration.py`) reads `message_id` from `PartStartEvent` instead of generating its own `assistant_msg_id` in `_before_consumer_loop()`
+3. ALL consumers (EventBus consumer, stream adapter, session routes, etc.) read `message_id` from `PartStartEvent` instead of generating their own
 4. All parts (text, tools, reasoning, step-start/finish) link to the same `message_id`
 
-This eliminates the split-message issue and ensures the frontend sees a single coherent message.
+This eliminates the split-message issue and ensures the frontend sees a single coherent message. Task 8.6 audits all remaining sites.
 
 #### D15: OpenCode `message_id` format is opaque to internal pipeline
 
@@ -652,6 +655,19 @@ OpenCode's `POST /abort` is session-level — it cancels the entire run, not a s
 
 OpenCode does not need a message-level revoke endpoint in this change. The `revoke()` infrastructure is built internally so that ACP v2 can use it, but OpenCode clients continue to use session-level abort.
 
+#### D17: Initial prompt reuses `followup()` — unified code path
+
+When `receive_request()` starts a new run (idle session), the initial prompt SHALL be delivered via `run_handle.followup(content, message_id=message_id)` BEFORE `start()` is called. `start()` is called with `initial_prompt=""` — the first `_idle_loop()` iteration drains the followup feedback from `ProtocolChannel._pending` and uses it as the first turn's prompt.
+
+This unifies the code path: all prompts (initial, steer, followup) go through `Feedback` → `ProtocolChannel` → `_idle_loop`/`recv()`. Benefits:
+
+- Initial prompt gets a `message_id` automatically — ACP v2 `session/prompt` can return `user_message_id`
+- Revoke works on the initial prompt (before `start()` picks it up)
+- `content_blocks` (multimodal) flows through the same `Feedback` path
+- `receive_request()` return type simplifies to `str | None` (always `message_id` on success)
+
+Implementation: `_idle_loop()` and `_drain_events()` read both `fb.content` and `fb.content_blocks`; `_message_queue` type changes from `list[str]` to `list[str | list[Any]]`.
+
 ### API Design
 
 ```python
@@ -659,13 +675,14 @@ OpenCode does not need a message-level revoke endpoint in this change. The `revo
 def steer(self, message: str | list[Any], *, message_id: str | None = None) -> str | None: ...
 def followup(self, message: str | list[Any], *, message_id: str | None = None) -> str | None: ...
 def revoke(self, message_id: str) -> bool: ...  # two-layer: _pending + _enqueued
+async def start(self, initial_prompt: str = "") -> AsyncGenerator[...]: ...  # D17: empty → _idle_loop drains followup
 
 # SessionController
 async def receive_request(
     self, session_id: str, content: str | list[Any],
     priority: str = "when_idle",
     *, message_id: str | None = None,
-) -> RunHandle | str | None: ...  # no stringification — preserves list[Any]
+) -> str | None: ...  # always returns message_id on success (new runs via followup D17), None on failure
 def revoke_inject(self, session_id: str, message_id: str) -> bool: ...
 
 # CommChannel Protocol
@@ -780,25 +797,19 @@ All changes are additive (new fields with defaults, new methods). Rolling back m
 
 ## Open Questions
 
-1. **Should `receive_request` return the `message_id` for newly created runs (idle session)?**
-   - Context: When a new run is created, `receive_request` returns `RunHandle`. The auto-generated `message_id` is on the `RunHandle` but not directly returned as a string.
-   - Owner: Implementer
-   - Status: Open — current design returns `RunHandle` for new runs; the `message_id` is accessible via the run's first event
+All open questions have been resolved:
 
-2. **Should the OpenCode server's `assistant_msg_id` generation be fully unified or left as-is for now?**
-   - Context: The OpenCode server generates `assistant_msg_id` in at least 6 files (`message_routes.py`, `session_pool_integration.py`, `session_routes.py`, `stream_adapter.py`, etc.). D14 proposes reading from events as the fix. The full scope of the dual-ID problem (REST path vs EventBus consumer path) needs to be resolved.
-   - Owner: Implementer
-   - Status: Addressed in D14 — REST path generates canonical ID, EventBus consumer reads from events
+1. **Should `receive_request` return the `message_id` for newly created runs (idle session)?**
+   - **Resolved**: Yes — initial prompts now route through `followup()` (D17), so `receive_request()` always returns `str | None` (the `message_id` on success, `None` on failure). The `RunHandle` case is eliminated. Protocol handlers subscribe to the `EventBus` and filter by `session_id`; they do not need the `RunHandle` directly.
+
+2. **Should the OpenCode server's `assistant_msg_id` generation be fully unified?**
+   - **Resolved**: Yes — all 6+ `assistant_msg_id` generation sites in the OpenCode server SHALL be unified in this change. No technical debt left behind. The REST path generates the canonical ID; all consumers (EventBus consumer, stream adapter, session routes, etc.) read `message_id` from events. Task 8.6 audits all remaining sites.
 
 3. **Should `Feedback.content_blocks` use a typed model instead of `list[dict[str, Any]]`?**
-   - Context: Using `dict` keeps the type version-agnostic but loses type safety. A typed model would be better but couples to the ACP ContentBlock schema.
-   - Owner: Future v2 adapter change
-   - Status: `content_blocks` is **activated** in this change (D11) — pipeline carries `list[Any]` through without stringification. Protocol-specific type mapping (ACP `ContentBlock` ↔ PydanticAI `UserContent`) is deferred to the v2 protocol adapter. A stronger typed union is future work.
+   - **Resolved**: No — `list[dict[str, Any]]` is the correct type for the internal pipeline. The pipeline is content-agnostic by design — it carries structured content through without interpreting it. Protocol-specific type mapping (ACP `ContentBlock` ↔ PydanticAI `UserContent`) belongs in the v2 protocol adapter, not the internal pipeline.
 
 4. **Should OpenCode expose `delivery: "steer"` via HTTP routes?**
-   - Context: OpenCode's schema has `delivery: "steer" | "queue"` but AgentPool's routes hardcode `priority="when_idle"`. D13 proposes mapping `delivery` to `priority`. However, mid-turn steer via OpenCode HTTP is a new behavior that may need frontend support.
-   - Owner: Implementer
-   - Status: Addressed in D13 — routes pass `delivery` through to `receive_request()`
+   - **Resolved**: Yes — `delivery` is wired through in this change (D13). This is a protocol completeness fix — the server respects the client's `delivery` field value. Whether the frontend uses `delivery: "steer"` is a separate concern; the server must handle it correctly when sent.
 
 ---
 

@@ -44,11 +44,23 @@
 ## 5. SessionController Extension
 
 - [ ] 5.1 Add `message_id: str | None = None` keyword parameter to `SessionController.receive_request()` in `orchestrator/session_controller.py`
-- [ ] 5.2 Remove the `content_str = " ".join(str(c) for c in content)` stringification in `receive_request()` — preserve `content` as `str | list[Any]` and pass through to `steer()`/`followup()`/`_start_run_handle()` as-is
-- [ ] 5.3 Pass `message_id` to `run.steer()` and `run.followup()` calls in `receive_request()`; return the `message_id` string (from steer/followup) or `RunHandle` (for new runs) or `None` (failure)
-- [ ] 5.4 Update `receive_request()` return type annotation from `RunHandle | None` to `RunHandle | str | None`
-- [ ] 5.5 Add `SessionController.revoke_inject(session_id: str, message_id: str) -> bool` method that delegates to active `RunHandle.revoke()`
-- [ ] 5.6 Add unit tests for `receive_request` with `message_id` propagation, `list` content preservation (no stringification), return type verification, and `revoke_inject` on active/idle sessions
+- [ ] 5.2 Remove the `content_str = " ".join(str(c) for c in content)` stringification in `receive_request()` — preserve `content` as `str | list[Any]` and pass through to `steer()`/`followup()` as-is
+- [ ] 5.3 Update `_start_run_handle()` to call `run_handle.followup(content, message_id=message_id)` BEFORE `asyncio.create_task(self._consume_run(run_handle, ""))` — initial prompt routes through followup (D17). Return the `message_id` string from `followup()`.
+- [ ] 5.4 Update `receive_request()` return type annotation from `RunHandle | None` to `str | None` — `str` (message_id) for success (both new runs and steer/followup), `None` for failure
+- [ ] 5.5 Pass `message_id` to `run.steer()` and `run.followup()` calls in `receive_request()`; return the `message_id` string from `steer()`/`followup()`
+- [ ] 5.6 Add `SessionController.revoke_inject(session_id: str, message_id: str) -> bool` method that delegates to active `RunHandle.revoke()`
+- [ ] 5.7 Add unit tests for: `receive_request` with `message_id` propagation, `list` content preservation (no stringification), return type `str | None` verification, initial prompt via followup (D17), `revoke_inject` on active/idle sessions
+
+## 5.5. RunHandle Start/Idle Loop Update
+
+- [ ] 5.5.1 Change `RunHandle.start()` signature from `start(self, initial_prompt: str)` to `start(self, initial_prompt: str = "")` in `orchestrator/run.py`
+- [ ] 5.5.2 When `initial_prompt` is empty, `start()` SHALL fall through to `_idle_loop()` which drains `ProtocolChannel` feedback (including the followup-delivered initial prompt)
+- [ ] 5.5.3 Update `_idle_loop()`: when `fb.content_blocks` is not `None`, append `fb.content_blocks` to `_message_queue`; else append `fb.content`
+- [ ] 5.5.4 Update `_drain_events()`: same content_blocks handling as `_idle_loop()` for both steer and non-steer feedback
+- [ ] 5.5.5 Change `_message_queue` type from `list[str]` to `list[str | list[Any]]`
+- [ ] 5.5.6 Change `_execute_turn()` parameter `current_prompts` type from `list[str]` to `list[str | list[Any]]`
+- [ ] 5.5.7 For native agents in `_execute_turn()`: when a prompt is `list[Any]`, pass as structured content to the agent turn (e.g. `enqueue(*prompt)`); when `str`, pass as plain text
+- [ ] 5.5.8 Add unit tests for: start with empty initial_prompt (followup path), _idle_loop with content_blocks, _drain_events with content_blocks, _execute_turn with list prompt
 
 ## 6. ACPMessageAccumulator Fix
 
@@ -74,16 +86,21 @@
 - [ ] 8.3 Update `opencode_server/routes/message_routes.py` to pass `delivery` from `MessageRequest` to `receive_request(priority=delivery)` instead of hardcoding `priority="when_idle"` (D13)
 - [ ] 8.4 Update `opencode_server/routes/message_routes.py` to pass `message_id` from `MessageRequest` to `receive_request(message_id=...)` for client-provided ID propagation
 - [ ] 8.5 Update `opencode_server/routes/session_routes.py` to pass `delivery` and `message_id` for command, fork, and compact routes
-- [ ] 8.6 Verify OpenCode server event flow produces consistent `message_id` with ACP server — single coherent message ID per turn
-- [ ] 8.7 Audit `agui_server/` and `openai_api_server/` for independent `message_id` generation; update to read from events if found
+- [ ] 8.6 Audit ALL remaining `assistant_msg_id` generation sites in OpenCode server (`stream_adapter.py`, `session_routes.py`, and any other files) — ALL sites SHALL read `message_id` from events instead of generating independently (D14 full unification, no technical debt)
+- [ ] 8.7 Verify OpenCode server event flow produces consistent `message_id` with ACP server — single coherent message ID per turn across ALL files
+- [ ] 8.8 Audit `agui_server/` and `openai_api_server/` for independent `message_id` generation; update to read from events if found
 
 ## 9. Integration Testing
 
 - [ ] 9.1 End-to-end test: native agent steer → message_id returned → revoke before delivery → no user_message emitted
-- [ ] 9.2 End-to-end test: native agent followup → message_id returned → revoke after delivery → returns False
-- [ ] 9.3 End-to-end test: external ACP agent sends AgentMessageChunk with message_id → ChatMessage preserves it
-- [ ] 9.4 End-to-end test: ACPEventConverter produces AgentMessageChunk with message_id matching the native turn's _message_id
-- [ ] 9.5 Regression test: existing steer/followup calls without message_id still work (auto-generated UUID)
-- [ ] 9.6 Regression test: existing Feedback construction without new fields still works
-- [ ] 9.7 End-to-end test: external ACP agent sends multiple AgentMessageChunk with different message_ids → each preserved as separate ChatMessage
-- [ ] 9.8 End-to-end test: receive_request returns message_id string for steer on busy session, RunHandle for idle session, None for failure
+- [ ] 9.2 End-to-end test: native agent steer → message_id returned → revoke after enqueue but before drain → PendingMessage removed from pending_messages → True
+- [ ] 9.3 End-to-end test: native agent followup → message_id returned → revoke after delivery → returns False
+- [ ] 9.4 End-to-end test: external ACP agent sends AgentMessageChunk with message_id → ChatMessage preserves it
+- [ ] 9.5 End-to-end test: ACPEventConverter produces AgentMessageChunk with message_id matching the native turn's _message_id
+- [ ] 9.6 Regression test: existing steer/followup calls without message_id still work (auto-generated UUID)
+- [ ] 9.7 Regression test: existing Feedback construction without new fields still works
+- [ ] 9.8 End-to-end test: external ACP agent sends multiple AgentMessageChunk with different message_ids → each preserved as separate ChatMessage
+- [ ] 9.9 End-to-end test: receive_request returns message_id string for both new runs (idle session via followup D17) and steer/followup (busy session), None for failure
+- [ ] 9.10 End-to-end test: receive_request with list content (multimodal) → content_blocks preserved through pipeline → agent_run.enqueue(*content_blocks) for native agents
+- [ ] 9.11 End-to-end test: OpenCode server with delivery="steer" → mid-turn injection via enqueue("asap")
+- [ ] 9.12 End-to-end test: OpenCode server single assistant_msg_id per turn across all event types (text, tools, reasoning, step-start/finish)
