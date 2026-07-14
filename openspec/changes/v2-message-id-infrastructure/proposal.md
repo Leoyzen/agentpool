@@ -28,7 +28,7 @@ AgentPool's internal architecture has four independent, non-communicating messag
 
 ## Impact
 
-- **`lifecycle/types.py`**: `Feedback` dataclass gains 3 fields with defaults (backward compatible). `content_blocks: list[dict[str, Any]] | None` carries structured content.
+- **`lifecycle/types.py`**: `Feedback` dataclass gains 3 fields with defaults (backward compatible). `content_blocks: list[Any] | None` carries structured content (can include dicts, strings, ImageUrl objects, etc.).
 - **`lifecycle/comm_channel.py`**: `ProtocolChannel` feedback queue restructured; new `revoke()` and `replace()` methods.
 - **`lifecycle/protocols.py`**: `CommChannel` Protocol gains `revoke()` and `replace()` method signatures.
 - **`orchestrator/run.py`**: `steer()` and `followup()` signature/return-type changes (accept `str | list[Any]`, return `str | None`); new `revoke()` method. When `content_blocks` is present, `steer()` calls `agent_run.enqueue(*content_blocks)` for multimodal support.

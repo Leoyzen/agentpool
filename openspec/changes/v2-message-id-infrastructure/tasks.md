@@ -15,14 +15,14 @@
 
 ## 3. CommChannel Revoke/Replace
 
-- [ ] 3.1 Add `revoke(message_id: str) -> bool` and `replace(message_id: str, new_content: str) -> bool` method signatures to `CommChannel` Protocol in `lifecycle/protocols.py`
+- [ ] 3.1 Add `revoke(message_id: str) -> bool` and `replace(message_id: str, new_content: str | list[Any]) -> bool` method signatures to `CommChannel` Protocol in `lifecycle/protocols.py`
 - [ ] 3.2 Implement `DirectChannel.revoke()` returning `False` and `DirectChannel.replace()` returning `False` in `lifecycle/comm_channel.py`
 - [ ] 3.3 Replace `ProtocolChannel._feedback_queue` from `asyncio.Queue[Feedback]` to `collections.deque[Feedback]` in `lifecycle/comm_channel.py`
 - [ ] 3.4 Add `_pending: dict[str, Feedback]`, `_revoked: set[str]`, `_delivered: set[str]`, `_enqueued: dict[str, list]` to `ProtocolChannel.__init__` (`_enqueued` stores `PendingMessage` references for PydanticAI-layer revoke)
 - [ ] 3.5 Implement `ProtocolChannel.deliver_feedback()` with `_revoked` check and `_pending` tracking
 - [ ] 3.6 Implement `ProtocolChannel.recv()` with `_pending` → `_delivered` transition on dequeue
 - [ ] 3.7 Implement `ProtocolChannel.revoke()` with two-layer logic: (1) check `_pending` — remove from queue, add to `_revoked`, return `True`; (2) check `_enqueued` — remove each `PendingMessage` from `agent_run.pending_messages` via `list.remove(pm)`, catch `ValueError` (already drained), return `True`; (3) check `_delivered` — return `False`; (4) otherwise return `True` (idempotent unknown)
-- [ ] 3.8 Implement `ProtocolChannel.replace()` with in-place content update preserving queue position. Return `False` if `message_id` is in `_enqueued` (already past CommChannel layer) or `_delivered`
+- [ ] 3.8 Implement `ProtocolChannel.replace()` with in-place content update preserving queue position. Accepts `new_content: str | list[Any]` — when `list[Any]`, updates `Feedback.content_blocks`; when `str`, updates `Feedback.content`. Return `False` if `message_id` is in `_enqueued` (already past CommChannel layer) or `_delivered`
 - [ ] 3.9 Implement `ProtocolChannel._track_enqueued(message_id: str, items: list) -> None` — stores `PendingMessage` references in `_enqueued[message_id]`. Called by `RunHandle.steer()` after `agent_run.enqueue()`
 - [ ] 3.10 Update `ProtocolChannel.close()`: replace `while not self._feedback_queue.empty(): self._feedback_queue.get_nowait()` with `self._feedback_queue.clear()` and clear `_pending`, `_revoked`, `_delivered`, `_enqueued`
 - [ ] 3.11 Add unit tests for: revoke before delivery (CommChannel layer), revoke after enqueue (PydanticAI layer), revoke after drain (ValueError caught), revoke after delivery (`False`), revoke unknown (`True`), revoke already-revoked (`True`), replace pending, replace enqueued (`False`), replace delivered (`False`), deliver after revoke rejection, recv marks delivered, _track_enqueued stores references
@@ -54,19 +54,21 @@
 ## 5.5. RunHandle Start/Idle Loop Update
 
 - [ ] 5.5.1 Change `RunHandle.start()` signature from `start(self, initial_prompt: str)` to `start(self, initial_prompt: str = "")` in `orchestrator/run.py`
-- [ ] 5.5.2 When `initial_prompt` is empty, `start()` SHALL fall through to `_idle_loop()` which drains `ProtocolChannel` feedback (including the followup-delivered initial prompt)
-- [ ] 5.5.3 Update `_idle_loop()`: when `fb.content_blocks` is not `None`, append `fb.content_blocks` to `_message_queue`; else append `fb.content`
-- [ ] 5.5.4 Update `_drain_events()`: same content_blocks handling as `_idle_loop()` for both steer and non-steer feedback
+- [ ] 5.5.2 **CRITICAL**: Change `current_prompts = [initial_prompt]` (line 405) to `current_prompts = [initial_prompt] if initial_prompt else []` — empty string MUST produce `[]` to trigger `_idle_loop()`. Without this, `[""]` is a non-empty list and bypasses `_idle_loop()`, executing a spurious empty-prompt turn.
+- [ ] 5.5.3 Update `followup()`: construct `Feedback` object BEFORE calling `deliver_feedback()`. If `deliver_feedback()` returns `False` (DirectChannel), append `fb.content` or `fb.content_blocks` to `_message_queue` and return `fb.message_id` — preserves `message_id` for standalone execution (BLOCKER 2 fix)
+- [ ] 5.5.4 Update all 5 `fb.content` append sites in `_idle_loop()` (lines 533, 549, 561) and `_drain_events()` (lines 864, 866): when `fb.content_blocks` is not `None`, append `fb.content_blocks`; else append `fb.content`. Also update `feedback_steer` type at line 857 from `list[str]` to `list[str | list[Any]]`
 - [ ] 5.5.5 Change `_message_queue` type from `list[str]` to `list[str | list[Any]]`
-- [ ] 5.5.6 Change `_execute_turn()` parameter `current_prompts` type from `list[str]` to `list[str | list[Any]]`
-- [ ] 5.5.7 For native agents in `_execute_turn()`: when a prompt is `list[Any]`, pass as structured content to the agent turn (e.g. `enqueue(*prompt)`); when `str`, pass as plain text
-- [ ] 5.5.8 Add unit tests for: start with empty initial_prompt (followup path), _idle_loop with content_blocks, _drain_events with content_blocks, _execute_turn with list prompt
+- [ ] 5.5.6 Change `_execute_turn()` parameter `current_prompts` type from `list[str]` to `list[str | list[Any]]`. Handle `"\n".join(current_prompts)` at line 645: when prompts contain `list` items, extract text from `content_blocks` for `ChatMessage.content` or use `content_blocks` directly
+- [ ] 5.5.7 Widen `NativeTurn.prompts` type annotation from `list[str]` to `list[str | list[Any]]` (or `list[UserContent]`) to match the base class `BaseAgent.create_turn()` which already accepts `list[UserContent]`
+- [ ] 5.5.8 For native agents in `_execute_turn()`: when a prompt is `list[Any]`, pass as structured content to the agent turn (e.g. `enqueue(*prompt)`); when `str`, pass as plain text
+- [ ] 5.5.9 Add `_enqueued` cleanup: after each turn's drain cycle, remove `_enqueued` entries whose `PendingMessage` references are no longer in `agent_run.pending_messages` (identity check). Prevents unbounded memory growth in long-running sessions.
+- [ ] 5.5.10 Add unit tests for: start with empty initial_prompt (followup path), start with empty string producing `[]` not `[""]`, followup DirectChannel fallback preserving message_id, _idle_loop with content_blocks (all 3 sites), _drain_events with content_blocks (both sites), _execute_turn with list prompt, _enqueued cleanup after drain
 
 ## 6. ACPMessageAccumulator Fix
 
 - [ ] 6.1 Add `self._current_message_id: str | None = None` to `ACPMessageAccumulator.__init__` in `agents/acp_agent/acp_converters.py`
 - [ ] 6.2 Update `ACPMessageAccumulator.process()` to read `update.message_id` from `AgentMessageChunk`, `UserMessageChunk`, `AgentThoughtChunk` and store in `self._current_message_id`
-- [ ] 6.3 Add `message_id` change detection in `process()`: if incoming `update.message_id` differs from `self._current_message_id` and both are non-empty, trigger `_finalize_current_message()` for the previous message before starting the new one
+- [ ] 6.3 Add `message_id` change detection in `process()`: if incoming `update.message_id` differs from `self._current_message_id` and both are non-empty, trigger `_finalize_current_message()` for the previous message before starting the new one. Edge case: when first chunk has `message_id=None`, `_current_message_id` stays `None`; subsequent chunk with `message_id="msg_001"` does NOT trigger finalize (None is empty) — content merges forward into the named message. This is correct behavior: unnamed chunks are absorbed into the next named message.
 - [ ] 6.4 Update `_finalize_current_message()` to use `self._current_message_id` if non-empty, else fall back to `str(uuid4())`
 - [ ] 6.5 Reset `self._current_message_id = None` after `_finalize_current_message()` to avoid stale IDs across messages
 - [ ] 6.6 Add unit tests for preserving incoming `message_id`, falling back to UUID when `None`, `message_id` change triggers finalize, and resetting between messages
@@ -86,7 +88,7 @@
 - [ ] 8.3 Update `opencode_server/routes/message_routes.py` to pass `delivery` from `MessageRequest` to `receive_request(priority=delivery)` instead of hardcoding `priority="when_idle"` (D13)
 - [ ] 8.4 Update `opencode_server/routes/message_routes.py` to pass `message_id` from `MessageRequest` to `receive_request(message_id=...)` for client-provided ID propagation
 - [ ] 8.5 Update `opencode_server/routes/session_routes.py` to pass `delivery` and `message_id` for command, fork, and compact routes
-- [ ] 8.6 Audit ALL remaining `assistant_msg_id` generation sites in OpenCode server (`stream_adapter.py`, `session_routes.py`, and any other files) — ALL sites SHALL read `message_id` from events instead of generating independently (D14 full unification, no technical debt)
+- [ ] 8.6 Audit and update ALL 9 `assistant_msg_id` generation sites in OpenCode server: (1) `message_routes.py:370` — canonical, (2) `session_pool_integration.py:498` — checkpoint, (3) `session_pool_integration.py:781` — subscribe_to_events, (4) `session_pool_integration.py:932` — _before_consumer_loop, (5) `session_routes.py:204` — slash command, (6) `session_routes.py:432` — skill command, (7) `session_routes.py:1266` — shell command, (8) `session_routes.py:1439` — summarization, (9) `session_routes.py:1876` — MCP prompt. All SHALL read `message_id` from events instead of generating independently (D14 full unification, no technical debt)
 - [ ] 8.7 Verify OpenCode server event flow produces consistent `message_id` with ACP server — single coherent message ID per turn across ALL files
 - [ ] 8.8 Audit `agui_server/` and `openai_api_server/` for independent `message_id` generation; update to read from events if found
 

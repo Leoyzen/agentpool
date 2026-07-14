@@ -427,7 +427,7 @@ graph TB
         PDE["PartDeltaEvent<br/>message_id"]
         PC["ProtocolChannel<br/>deque + pending + revoked + delivered + enqueued"]
         RH["RunHandle<br/>steer/followup: str or list -> str or None<br/>revoke: two-layer -> bool"]
-        SC["SessionController<br/>receive_request: str or list, message_id<br/>returns RunHandle or str or None"]
+        SC["SessionController<br/>receive_request: str or list, message_id<br/>returns str or None"]
     end
 
     subgraph Adapter["Protocol Adapter Layer thin"]
@@ -518,7 +518,7 @@ class Feedback:
     content: str
     is_steer: bool
     message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    content_blocks: list[dict[str, Any]] | None = None  # activated: multimodal content
+    content_blocks: list[Any] | None = None  # activated: multimodal content (dicts, strings, ImageUrl, etc.)
     mode: str | None = None  # "steer" | "queue", derived from is_steer
 
     def __post_init__(self) -> None:
@@ -805,8 +805,8 @@ All open questions have been resolved:
 2. **Should the OpenCode server's `assistant_msg_id` generation be fully unified?**
    - **Resolved**: Yes — all 6+ `assistant_msg_id` generation sites in the OpenCode server SHALL be unified in this change. No technical debt left behind. The REST path generates the canonical ID; all consumers (EventBus consumer, stream adapter, session routes, etc.) read `message_id` from events. Task 8.6 audits all remaining sites.
 
-3. **Should `Feedback.content_blocks` use a typed model instead of `list[dict[str, Any]]`?**
-   - **Resolved**: No — `list[dict[str, Any]]` is the correct type for the internal pipeline. The pipeline is content-agnostic by design — it carries structured content through without interpreting it. Protocol-specific type mapping (ACP `ContentBlock` ↔ PydanticAI `UserContent`) belongs in the v2 protocol adapter, not the internal pipeline.
+3. **Should `Feedback.content_blocks` use a typed model instead of `list[Any]`?**
+   - **Resolved**: No — `list[Any]` is the correct type for the internal pipeline. The pipeline is content-agnostic by design — it carries structured content through without interpreting it. Protocol-specific type mapping (ACP `ContentBlock` ↔ PydanticAI `UserContent`) belongs in the v2 protocol adapter, not the internal pipeline.
 
 4. **Should OpenCode expose `delivery: "steer"` via HTTP routes?**
    - **Resolved**: Yes — `delivery` is wired through in this change (D13). This is a protocol completeness fix — the server respects the client's `delivery` field value. Whether the frontend uses `delivery: "steer"` is a separate concern; the server must handle it correctly when sent.

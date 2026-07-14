@@ -100,7 +100,7 @@ The system SHALL maintain a single `message_id` per logical message that flows f
 
 - **WHEN** ACP `ContentBlock[]` or OpenCode `parts` arrive at the protocol boundary
 - **THEN** conversion to PydanticAI `UserContent` (ImageUrl, BinaryContent, TextContent) SHALL be performed by the v2 protocol adapter (future work)
-- **AND** the internal pipeline treats `content_blocks` as opaque `list[dict[str, Any]]` — no type enforcement
+- **AND** the internal pipeline treats `content_blocks` as opaque `list[Any]` — no type enforcement
 - **AND** no assertion or error SHALL occur when `content_blocks` contains protocol-specific dict shapes
 
 ### Requirement: OpenCode delivery mode maps to receive_request priority

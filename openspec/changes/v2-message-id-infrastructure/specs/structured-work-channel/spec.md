@@ -38,7 +38,7 @@ Tools that spawn background tasks SHALL increment `run_ctx.pending_background_ta
   2. Check `_enqueued` — if found, remove each `PendingMessage` from `agent_run.pending_messages` via `list.remove(pm)` (identity comparison). Catch `ValueError` (already drained). Remove from `_enqueued`, return `True`
   3. Check `_delivered` — if found, return `False` (already delivered and consumed)
   4. Otherwise return `True` (idempotent unknown)
-- `replace(message_id: str, new_content: str) -> bool` SHALL update the `content` of the pending `Feedback` in-place, preserving queue position. Return `True` on success, `False` if already delivered, enqueued, or unknown. Replace only works at the CommChannel layer (before `enqueue()`).
+- `replace(message_id: str, new_content: str | list[Any]) -> bool` SHALL update the `content` (when `new_content` is `str`) or `content_blocks` (when `new_content` is `list[Any]`) of the pending `Feedback` in-place, preserving queue position. Return `True` on success, `False` if already delivered, enqueued, or unknown. Replace only works at the CommChannel layer (before `enqueue()`).
 - `deliver_feedback(feedback)` SHALL check `_revoked` before enqueuing — if the `message_id` is in `_revoked`, return `False`.
 - `recv()` SHALL move the `message_id` from `_pending` to `_delivered` when dequeuing.
 - `_track_enqueued(message_id: str, items: list[PendingMessage])` SHALL store the `PendingMessage` references in `_enqueued[message_id]`. Called by `RunHandle.steer()` after `agent_run.enqueue()`.

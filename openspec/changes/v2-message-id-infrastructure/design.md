@@ -133,7 +133,7 @@ The `recv()` method changes from `asyncio.Queue.get_nowait()` to `deque.popleft(
 - ACP `ContentBlock` (TextContentBlock, ImageContentBlock, AudioContentBlock, etc.) → PydanticAI `UserContent` (str, ImageUrl, BinaryContent) type mapping. This belongs in the v2 ACP protocol adapter.
 - OpenCode `parts` (TextPartInput, FilePartInput) → internal `content_blocks` mapping. This belongs in the OpenCode v2 route handler.
 - Protocol converter consumption of `content_blocks` for wire serialization (ACP outbound `ContentBlock[]`). Deferred to v2 protocol adapter.
-- `Feedback.content_blocks` typed as `list[dict[str, Any]]` (generic dicts) in this change. A stronger typed union (`list[ContentBlock] | list[UserContent]`) is deferred to avoid leaking protocol-specific types into the internal layer.
+- `Feedback.content_blocks` typed as `list[Any]` (opaque to internal pipeline) in this change. A stronger typed union (`list[ContentBlock] | list[UserContent]`) is deferred to avoid leaking protocol-specific types into the internal layer.
 
 ### D12: Thread safety — single event loop thread only
 
@@ -157,6 +157,8 @@ The `recv()` method changes from `asyncio.Queue.get_nowait()` to `deque.popleft(
 
 **Limitation**: Once the drain has consumed the `PendingMessage` and appended its `ModelMessage`s to `ctx.messages` (the conversation history), the message is irreversible. `revoke()` returns `True` (idempotent) but cannot undo the injection. This matches ACP v2 semantics — revoke is best-effort, not guaranteed.
 
+**Cleanup**: `_enqueued` entries SHALL be cleaned up after each turn's drain cycle. When `_drain_by_priority()` consumes `PendingMessage`s from `agent_run.pending_messages`, the corresponding `_enqueued` entries SHALL be removed. This prevents unbounded memory growth in long-running sessions. Implementation: after `_idle_loop()` or `_drain_events()` completes, iterate `_enqueued` and remove entries whose `PendingMessage` references are no longer in `agent_run.pending_messages` (identity check). Alternatively, clean up in `revoke()` after the drain check (catch `ValueError` → remove from `_enqueued`).
+
 ### D13: Map OpenCode `delivery` to `receive_request` priority
 
 **Decision**: OpenCode's `delivery: "steer" | "queue"` maps directly to AgentPool's priority system. `receive_request()` SHALL accept `delivery` as an alias for `priority`: `"steer"` → `"asap"`, `"queue"` → `"when_idle"`. OpenCode route handlers SHALL pass `delivery` from `MessageRequest` to `receive_request()` instead of hardcoding `priority="when_idle"`.
@@ -165,7 +167,20 @@ The `recv()` method changes from `asyncio.Queue.get_nowait()` to `deque.popleft(
 
 ### D14: Resolve dual `assistant_msg_id` in OpenCode server
 
-**Decision**: The OpenCode server currently has TWO independent `assistant_msg_id` generation paths (REST path in `message_routes.py:370` and EventBus consumer in `session_pool_integration.py:932`), creating a split-message issue. Additionally, at least 4 other files (`session_routes.py`, `stream_adapter.py`, etc.) generate independent IDs. **All** `assistant_msg_id` generation sites SHALL be unified in this change — no technical debt left behind. The fix: the REST path generates the canonical `assistant_msg_id` using `identifier.ascending("message", request.message_id)`, passes it to `receive_request(message_id=...)`, and ALL consumers (EventBus consumer, stream adapter, session routes, etc.) read `message_id` from events instead of generating their own.
+**Decision**: The OpenCode server currently has multiple independent `assistant_msg_id` generation paths, creating a split-message issue. **All** generation sites SHALL be unified in this change — no technical debt left behind. The fix: the REST path generates the canonical `assistant_msg_id` using `identifier.ascending("message", request.message_id)`, passes it to `receive_request(message_id=...)`, and ALL consumers read `message_id` from events instead of generating their own.
+
+**Known generation sites** (9 total, to be verified during implementation):
+1. `message_routes.py:370` — REST message handler (canonical, generates the ID)
+2. `session_pool_integration.py:498` — checkpoint reconstruction
+3. `session_pool_integration.py:781` — `subscribe_to_events()` (test/utility)
+4. `session_pool_integration.py:932` — `_before_consumer_loop()` (the critical dual-ID issue)
+5. `session_routes.py:204` — slash command execution
+6. `session_routes.py:432` — skill command execution
+7. `session_routes.py:1266` — shell command execution
+8. `session_routes.py:1439` — session summarization
+9. `session_routes.py:1876` — MCP prompt command execution
+
+Sites 1 and 4 are the standard message flow (split-message problem). Sites 2, 5-9 serve different endpoints (slash commands, shell, summarize, MCP commands) — they SHALL also pass `message_id` to `receive_request()` and let the ID propagate through events. Task 8.6 SHALL verify all 9 sites are updated.
 
 **Rationale**: Content parts (text, tools, reasoning) are currently broadcast linked to the consumer's `assistant_msg_id_B`, while step-start/finish is linked to the REST path's `assistant_msg_id_A`. This creates a split-message issue in the frontend. Reading from events ensures a single coherent message ID.
 
@@ -195,14 +210,18 @@ receive_request() → _start_run_handle(content)
 **New flow**:
 ```
 receive_request() → _start_run_handle(content, message_id)
-  → run_handle.followup(content, message_id=msg_id)  ← Feedback in _pending
+  → run_handle.followup(content, message_id=msg_id)  ← Feedback in _pending (ProtocolChannel) or _message_queue (DirectChannel fallback)
   → start(initial_prompt="")
-    → current_prompts = []
-      → _idle_loop() → recv() → fb  ← Feedback with message_id
+    → current_prompts = [] if not initial_prompt else [initial_prompt]  ← CRITICAL: empty string must produce []
+      → _idle_loop() → recv() → fb  (ProtocolChannel) or _message_queue already has content (DirectChannel)
         → current_prompts = [fb.content or fb.content_blocks]
 ```
 
 **Behavioral equivalence**: Both flows result in `_execute_turn(prompts=[content])`. The end state is identical — the first turn processes the same prompt content.
+
+**CRITICAL implementation detail**: The current code at `run.py:405` does `current_prompts = [initial_prompt]` unconditionally. When `initial_prompt=""`, this produces `[""]` — a non-empty list with one empty string element. The `if not current_prompts:` check at line 407 tests list emptiness, not element truthiness, so `[""]` passes through to `_execute_turn()` with an empty prompt. The fix: change line 405 to `current_prompts = [initial_prompt] if initial_prompt else []` — only create the list when `initial_prompt` is truthy (non-empty).
+
+**DirectChannel fallback**: For standalone execution (`DirectChannel`), `deliver_feedback()` returns `False` and `recv()` returns `None`. The `followup()` method falls back to `_message_queue.append(message)`. In the updated `followup()`, a `Feedback` object SHALL be constructed **before** the fallback to preserve `message_id` generation. The `Feedback` content (or `content_blocks`) is appended to `_message_queue`, and `followup()` returns `fb.message_id`. The `_idle_loop()` checks `_message_queue` directly (lines 533, 549, 561) and will find the content without calling `recv()`.
 
 **Advantages**:
 - Initial prompt gets a `message_id` automatically — ACP v2 `session/prompt` can return `user_message_id`
@@ -213,9 +232,11 @@ receive_request() → _start_run_handle(content, message_id)
 
 **Implementation changes**:
 1. `_start_run_handle()`: call `followup(content, message_id=...)` before `asyncio.create_task(start(""))`, return `message_id`
-2. `start()`: `initial_prompt: str = ""` (default empty, falls through to `_idle_loop()`)
-3. `_idle_loop()` and `_drain_events()`: read `fb.content` AND `fb.content_blocks` from `Feedback` — `_message_queue` type changes from `list[str]` to `list[str | list[Any]]`
-4. `_execute_turn()`: `current_prompts` type changes from `list[str]` to `list[str | list[Any]]`
+2. `start()`: `initial_prompt: str = ""` (default empty). **CRITICAL**: change `current_prompts = [initial_prompt]` to `current_prompts = [initial_prompt] if initial_prompt else []` — ensures empty string produces `[]` which triggers `_idle_loop()`
+3. `followup()`: construct `Feedback` object BEFORE the `deliver_feedback()` call. If `deliver_feedback()` returns `False` (DirectChannel), append `fb.content` or `fb.content_blocks` to `_message_queue` and return `fb.message_id` — preserves `message_id` for standalone execution
+4. `_idle_loop()` and `_drain_events()`: read `fb.content` AND `fb.content_blocks` from `Feedback` — `_message_queue` type changes from `list[str]` to `list[str | list[Any]]`. **5 append sites** in `run.py` need updating: lines 533, 549, 561 (in `_idle_loop`), 864, 866 (in `_drain_events`). Also `feedback_steer` type at line 857 changes from `list[str]` to `list[str | list[Any]]`.
+5. `_execute_turn()`: `current_prompts` type changes from `list[str]` to `list[str | list[Any]]`. The `"\n".join(current_prompts)` at line 645 MUST handle `list` items — extract text from `content_blocks` for the `ChatMessage.content` field, or use `content_blocks` directly.
+6. `NativeTurn.prompts` type annotation: widen from `list[str]` to `list[str | list[Any]]` (or `list[UserContent]`) to match the base class `BaseAgent.create_turn()` which already accepts `list[UserContent]`.
 
 **Race safety**: `followup()` is called synchronously before `asyncio.create_task()`. The `Feedback` is in `ProtocolChannel._pending` before `start()` runs. `_idle_loop()` clears `_idle_event` then immediately calls `recv()` — finds the feedback without blocking. No race.
 
