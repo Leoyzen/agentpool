@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from llmling_models_config import (
+from agentpool.log import get_logger
+from agentpool.models.model_configs import (
     AnthropicModelConfig,
     AnyModelConfig,
     FallbackModelConfig,
@@ -17,8 +18,6 @@ from llmling_models_config import (
     OpenAIModelConfig,
     StringModelConfig,
 )
-
-from agentpool.log import get_logger
 from agentpool_server.shared.constants import (
     DEFAULT_MODEL_CONTEXT_LIMIT,
     DEFAULT_MODEL_INPUT_COST,

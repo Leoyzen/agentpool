@@ -167,10 +167,9 @@ def remap_hardcoded_test_models():
     """
     from unittest.mock import patch
 
-    import llmling_models
-    from llmling_models.models import helpers
+    from agentpool.utils import model_helpers
 
-    original = helpers.infer_model
+    original = model_helpers.infer_model
 
     def _patched_infer(model):
         if isinstance(model, str) and model in _MODEL_REMAP:
@@ -178,8 +177,7 @@ def remap_hardcoded_test_models():
         return original(model)
 
     with (
-        patch.object(helpers, "infer_model", _patched_infer),
-        patch.object(llmling_models, "infer_model", _patched_infer),
+        patch.object(model_helpers, "infer_model", _patched_infer),
     ):
         yield
 

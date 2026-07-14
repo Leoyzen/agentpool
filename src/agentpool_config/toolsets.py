@@ -6,7 +6,6 @@ import os
 from typing import TYPE_CHECKING, Annotated, Any, Literal, assert_never, cast
 
 from exxec_config import ExecutionEnvironmentConfig
-from llmling_models_config import AnyModelConfig
 from pydantic import ConfigDict, EmailStr, Field, HttpUrl, SecretStr
 from schemez import Schema
 from searchly_config import (
@@ -22,6 +21,7 @@ from upathtools_config import FilesystemConfigType
 from upathtools_config.base import FileSystemConfig
 
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentpool.models.model_configs import AnyModelConfig
 from agentpool_config.converters import ConversionConfig
 from agentpool_config.tools import ImportToolConfig
 from agentpool_config.workers import AgentWorkerConfig, WorkerConfig

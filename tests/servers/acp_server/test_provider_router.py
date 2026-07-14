@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 
-from llmling_models_config import StringModelConfig
 import pytest
 
+from agentpool.models.model_configs import StringModelConfig
 from agentpool_server.acp_server.provider_router import ProviderRouter
 
 

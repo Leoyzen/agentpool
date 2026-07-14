@@ -561,7 +561,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         merged_handlers: list[AnyEventHandlerType] = [*config_handlers, *(event_handlers or [])]
 
         # Handle model configuration - resolve model_variants reference if needed
-        from llmling_models_config import StringModelConfig
+        from agentpool.models.model_configs import StringModelConfig
 
         model_config = config.model
         if (
@@ -669,9 +669,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             name: Optional name for the agent
             kwargs: Additional arguments for agent
         """
-        from llmling_models import function_to_model
-
         from agentpool.utils.inspection import get_fn_name
+        from agentpool.utils.model_helpers import function_to_model
         from agentpool.utils.signatures import get_return_type
 
         name = name or get_fn_name(callback) or "processor"
@@ -699,7 +698,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             Tuple of (Model instance, ModelSettings or None)
             Settings are only returned for variants.
         """
-        from llmling_models import infer_model
+        from agentpool.utils.model_helpers import infer_model
 
         # Check if it's a variant
         ctx = self.host_context

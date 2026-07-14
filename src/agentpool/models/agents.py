@@ -6,7 +6,6 @@ from collections.abc import Callable, Sequence  # noqa: TC003
 from typing import TYPE_CHECKING, Annotated, Any, Literal, assert_never
 from uuid import UUID
 
-from llmling_models_config import AnyModelConfig  # noqa: TC002
 from pydantic import ConfigDict, Field, model_validator
 from pydantic_ai import UsageLimits  # noqa: TC002
 from schemez import InlineSchemaDef
@@ -18,6 +17,7 @@ from agentpool import log
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.common_types import EndStrategy  # noqa: TC001
 from agentpool.models.fields import OutputTypeField, SystemPromptField  # noqa: TC001
+from agentpool.models.model_configs import AnyModelConfig  # noqa: TC001
 from agentpool.prompts.prompts import PromptMessage, StaticPrompt
 from agentpool_config import BaseToolConfig, NativeAgentToolConfig
 from agentpool_config.builtin_tools import BaseBuiltinToolConfig

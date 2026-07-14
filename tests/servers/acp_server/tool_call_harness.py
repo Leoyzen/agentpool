@@ -28,7 +28,6 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock
 
 from exxec import MockExecutionEnvironment
-from llmling_models_config import TestModelConfig
 
 from acp import ClientCapabilities
 from acp.client.implementations import HeadlessACPClient
@@ -36,6 +35,7 @@ from acp.schema import TextContentBlock
 from agentpool import AgentsManifest
 from agentpool.delegation import AgentPool
 from agentpool.models.agents import NativeAgentConfig
+from agentpool.models.model_configs import TestModelConfig
 from agentpool.utils.tasks import TaskManager
 from agentpool_server.acp_server.session import ACPSession
 

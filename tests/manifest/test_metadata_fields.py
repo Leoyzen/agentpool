@@ -11,11 +11,11 @@ from __future__ import annotations
 import re
 
 import jsonschema
-from llmling_models_config import StringModelConfig
 import yamling
 
 from agentpool import AgentsManifest
 from agentpool.models.agents import NativeAgentConfig
+from agentpool.models.model_configs import StringModelConfig
 
 
 # Valid config with allowed metadata fields

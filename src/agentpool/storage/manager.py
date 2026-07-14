@@ -753,9 +753,8 @@ class StorageManager:
         Returns:
             SessionMetadata with title, emoji, and icon, or None if generation fails.
         """
-        from llmling_models.models.helpers import infer_model
-
         from agentpool import Agent
+        from agentpool.utils.model_helpers import infer_model
 
         logger.info("_generate_title_core called", session_id=session_id)
         if not self.config.title_generation_model:

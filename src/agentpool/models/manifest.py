@@ -7,7 +7,6 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Self
 
-from llmling_models_config import AnyModelConfig, StringModelConfig
 from pydantic import ConfigDict, Field, model_validator
 from schemez import Schema
 from upathtools_config import FilesystemConfigType
@@ -17,6 +16,7 @@ from agentpool import log
 from agentpool.models.acp_agents import ACPAgentConfigTypes
 from agentpool.models.agents import NativeAgentConfig
 from agentpool.models.file_agents import FileAgentConfig
+from agentpool.models.model_configs import AnyModelConfig, StringModelConfig
 from agentpool_config.commands import CommandConfig, StaticCommandConfig
 from agentpool_config.compaction import CompactionConfig
 from agentpool_config.context import ConfigContextManager
@@ -841,7 +841,7 @@ class AgentsManifest(Schema):
 
 
 if __name__ == "__main__":
-    from llmling_models_config import InputModelConfig
+    from agentpool.models.model_configs import InputModelConfig
 
     model = InputModelConfig()
     agent_cfg = NativeAgentConfig(name="test_agent", model=model)

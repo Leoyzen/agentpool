@@ -78,8 +78,7 @@ class TestCrossProtocolAlignment:
 
     async def test_cross_protocol_model_alignment(self):
         """Both protocols reflect same underlying model state."""
-        from llmling_models_config import StringModelConfig
-
+        from agentpool.models.model_configs import StringModelConfig
         from agentpool_server.acp_server.provider_router import ProviderRouter
         from agentpool_server.shared.model_utils import build_model_state_for_acp
 
