@@ -180,7 +180,7 @@ class CombinedToolsetCapability(AbstractCapability[AgentDepsT]):
         for cap in self._capabilities:
             instr = cap.get_instructions()
             if instr is not None:
-                parts.append(instr)  # type: ignore[arg-type]
+                parts.append(instr)
         if not parts:
             return None
         return "\n\n".join(parts)
