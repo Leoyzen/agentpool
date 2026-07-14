@@ -96,7 +96,7 @@ The `recv()` method changes from `asyncio.Queue.get_nowait()` to `deque.popleft(
 
 ### D7: `CommChannel` Protocol gains `revoke()` and `replace()` methods
 
-**Decision**: The `CommChannel` Protocol in `lifecycle/protocols.py` gains `revoke(message_id: str) -> bool` and `replace(message_id: str, new_content: str) -> bool` method signatures. `DirectChannel` implements both as no-ops returning `False` (no feedback queue). `ProtocolChannel` implements them with real logic.
+**Decision**: The `CommChannel` Protocol in `lifecycle/protocols.py` gains `revoke(message_id: str) -> bool` and `replace(message_id: str, new_content: str | list[Any]) -> bool` method signatures. `DirectChannel` implements both as no-ops returning `False` (no feedback queue). `ProtocolChannel` implements them with real logic.
 
 **Rationale**: Making these part of the Protocol ensures any future `CommChannel` implementation must consider revoke/replace semantics. `DirectChannel` returning `False` is consistent with its existing `deliver_feedback() -> False` pattern.
 

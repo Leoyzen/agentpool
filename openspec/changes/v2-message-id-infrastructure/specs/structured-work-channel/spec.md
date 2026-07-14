@@ -126,7 +126,7 @@ Tools that spawn background tasks SHALL increment `run_ctx.pending_background_ta
 
 ### Requirement: CommChannel Protocol declares revoke and replace methods
 
-The `CommChannel` Protocol in `lifecycle/protocols.py` SHALL declare `revoke(message_id: str) -> bool` and `replace(message_id: str, new_content: str) -> bool` method signatures.
+The `CommChannel` Protocol in `lifecycle/protocols.py` SHALL declare `revoke(message_id: str) -> bool` and `replace(message_id: str, new_content: str | list[Any]) -> bool` method signatures.
 
 - `DirectChannel` SHALL implement `revoke()` returning `False` (no feedback queue)
 - `DirectChannel` SHALL implement `replace()` returning `False` (no feedback queue)
