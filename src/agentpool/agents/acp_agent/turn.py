@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import uuid4
 
+from pydantic import ValidationError
+
+from acp.exceptions import RequestError
 from agentpool.agents.events import (
     RunErrorEvent,
     StreamCompleteEvent,
@@ -24,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Sequence
     from typing import Any
 
-    from pydantic_ai import ModelMessage
+    from pydantic_ai import ModelMessage, UserContent
 
     from acp.schema import ContentBlock, PromptResponse, SessionUpdate
     from agentpool.agents.context import AgentRunContext
@@ -33,6 +36,7 @@ if TYPE_CHECKING:
     from agentpool.messaging import ChatMessage
 
 
+@runtime_checkable
 class ACPClientProtocol(Protocol):
     """Protocol defining the ACP client interface expected by ACPTurn.
 
@@ -102,9 +106,8 @@ class ACPTurn(HookAwareTurn, Turn):
     def __init__(
         self,
         acp_client: ACPClientProtocol,
-        prompts: list[str],
+        prompts: list[UserContent],
         run_ctx: AgentRunContext,
-        message_history: list[ModelMessage],
         session_id: str,
         agent_name: str | None = None,
         hooks: AgentHooks | None = None,
@@ -118,6 +121,7 @@ class ACPTurn(HookAwareTurn, Turn):
         self._agent_name = agent_name
         self._hooks = hooks
         self._agent_env = env
+        self._prompt_response: PromptResponse | None = None
 
     @property
     def _hook_env(self) -> Any | None:
@@ -169,15 +173,16 @@ class ACPTurn(HookAwareTurn, Turn):
                 return
             # Convert all user prompts to ACP ContentBlock list.
             # Join all prompts instead of taking only the last one.
-            full_prompt = "\n\n".join(self._prompts) if self._prompts else ""
+            full_prompt = "\n\n".join(str(p) for p in self._prompts) if self._prompts else ""
             content = convert_to_acp_content([full_prompt])
 
             # --- Phase 1: Send prompt ---
             try:
                 response = await self._acp_client.prompt(self._session_id, content)
+                self._prompt_response = response
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except (RequestError, ConnectionError, RuntimeError, ValidationError) as exc:
                 yield RunErrorEvent(
                     message=str(exc),
                     run_id=run_id,
@@ -218,7 +223,7 @@ class ACPTurn(HookAwareTurn, Turn):
                         yield native_event
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except (RequestError, ConnectionError, RuntimeError, ValueError) as exc:
                 yield RunErrorEvent(
                     message=str(exc),
                     run_id=run_id,
@@ -231,7 +236,7 @@ class ACPTurn(HookAwareTurn, Turn):
                 raw_updates = await self._acp_client.get_messages(self._session_id)
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except (RequestError, ConnectionError, ValidationError) as exc:
                 yield RunErrorEvent(
                     message=str(exc),
                     run_id=run_id,

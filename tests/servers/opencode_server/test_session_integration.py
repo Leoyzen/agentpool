@@ -26,8 +26,8 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+from agentpool.lifecycle import RunState
 from agentpool.orchestrator.core import RunHandle, SessionPool
-from agentpool.orchestrator.run import RunStatus
 from agentpool.sessions.models import SessionData
 from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 from agentpool_server.opencode_server.state import ServerState
@@ -100,6 +100,11 @@ def mock_agent_pool() -> Mock:
     mock_cfg.get_mcp_servers = Mock(return_value=[])
     pool.manifest.agents = {"test-agent": mock_cfg}
     pool.get_agent = Mock(return_value=mock_agent)
+
+    # Wire AgentFactory mock so SessionController.get_or_create_session_agent()
+    # can delegate to pool._factory.create_session_agent().
+    pool._factory.create_session_agent = AsyncMock(return_value=mock_agent)
+    pool.get_context = Mock(return_value=Mock())
 
     return pool
 
@@ -606,7 +611,7 @@ class TestSessionAbort:
 
         # Give the background task time to start and transition to running
         await asyncio.sleep(0.05)
-        assert run_handle._status == RunStatus.running
+        assert run_handle._run_state == RunState.RUNNING
 
         await integration.abort_session("test-session-011")
 

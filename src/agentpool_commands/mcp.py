@@ -162,11 +162,13 @@ class ListMCPServersCommand(NodeCommand):
 
         rows = []
         for server in servers:
-            server_type = type(server.server).__name__.replace("MCPServerConfig", "")
+            server_type = type(server.config).__name__.replace("MCPServerConfig", "")
             rows.append({
                 "Name": server.name,
                 "Type": server_type,
-                "Status": "connected" if server.client.connected else "disconnected",
+                "Status": "connected"
+                if (server.client is not None and server.client.connected)
+                else "disconnected",
             })
 
         headers = ["Name", "Type", "Status"]

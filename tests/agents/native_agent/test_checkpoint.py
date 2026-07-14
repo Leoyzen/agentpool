@@ -530,3 +530,121 @@ class TestCheckpointAtomicConsistency:
         assert args[0] == "session-args-001"  # session_id
         assert isinstance(args[1], str)  # messages_json
         assert isinstance(args[2], str)  # pending_calls_json
+
+
+class TestCheckpointFailureLogging:
+    """Tests for checkpoint failure logging.
+
+    When StorageManager.save_checkpoint() fails (all providers fail),
+    CheckpointManager.checkpoint() should log an error, not log
+    "Checkpoint saved". The checkpoint call should still not raise
+    (agent continues running), but the failure must be visible in logs.
+    """
+
+    @pytest.mark.anyio
+    async def test_failure_logs_error_not_saved(
+        self,
+        storage_manager: StorageManager,
+        sample_messages: list[ModelMessage],
+        sample_pending_calls: list[PendingDeferredCall],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """When all providers fail, 'Checkpoint save FAILED' is logged, not 'Checkpoint saved'."""
+        import logging
+
+        manager = CheckpointManager(storage_manager)
+
+        mock_provider = MagicMock()
+        mock_provider.can_load_history = True
+        mock_provider.save_checkpoint = AsyncMock(side_effect=RuntimeError("disk full"))
+        storage_manager.providers = [mock_provider]  # type: ignore[assignment]
+
+        with caplog.at_level(logging.DEBUG):
+            await manager.checkpoint(
+                session_id="session-fail-001",
+                message_history=sample_messages,
+                pending_calls=sample_pending_calls,
+            )
+
+        # Should NOT contain "Checkpoint saved" on failure
+        saved_logs = [r for r in caplog.records if "Checkpoint saved" in r.message]
+        assert len(saved_logs) == 0, "Should not log 'Checkpoint saved' when save failed"
+
+        # Should contain an error-level log about checkpoint failure
+        error_logs = [
+            r
+            for r in caplog.records
+            if r.levelno >= logging.ERROR and "checkpoint" in r.message.lower()
+        ]
+        assert len(error_logs) >= 1, "Should log an error when checkpoint save fails"
+
+    @pytest.mark.anyio
+    async def test_success_logs_saved(
+        self,
+        storage_manager: StorageManager,
+        sample_messages: list[ModelMessage],
+        sample_pending_calls: list[PendingDeferredCall],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """When save succeeds, 'Checkpoint saved' is logged normally."""
+        import logging
+
+        manager = CheckpointManager(storage_manager)
+
+        mock_provider = MagicMock()
+        mock_provider.can_load_history = True
+        mock_provider.save_checkpoint = AsyncMock()
+        storage_manager.providers = [mock_provider]  # type: ignore[assignment]
+
+        with caplog.at_level(logging.DEBUG):
+            await manager.checkpoint(
+                session_id="session-ok-001",
+                message_history=sample_messages,
+                pending_calls=sample_pending_calls,
+            )
+
+        saved_logs = [r for r in caplog.records if "Checkpoint saved" in r.message]
+        assert len(saved_logs) == 1
+
+    @pytest.mark.anyio
+    async def test_storage_manager_returns_success_flag(self) -> None:
+        """StorageManager.save_checkpoint() returns True when any provider succeeds."""
+        from agentpool_config.storage import StorageConfig
+
+        config = StorageConfig(providers=[])
+        mgr = StorageManager(config=config)
+
+        mock_provider = MagicMock()
+        mock_provider.can_load_history = True
+        mock_provider.save_checkpoint = AsyncMock()
+        mgr.providers = [mock_provider]  # type: ignore[assignment]
+
+        result = await mgr.save_checkpoint("s1", "[]", [])
+        assert result is True
+
+    @pytest.mark.anyio
+    async def test_storage_manager_returns_failure_flag(self) -> None:
+        """StorageManager.save_checkpoint() returns False when all providers fail."""
+        from agentpool_config.storage import StorageConfig
+
+        config = StorageConfig(providers=[])
+        mgr = StorageManager(config=config)
+
+        mock_provider = MagicMock()
+        mock_provider.can_load_history = True
+        mock_provider.save_checkpoint = AsyncMock(side_effect=RuntimeError("disk full"))
+        mgr.providers = [mock_provider]  # type: ignore[assignment]
+
+        result = await mgr.save_checkpoint("s1", "[]", [])
+        assert result is False
+
+    @pytest.mark.anyio
+    async def test_storage_manager_returns_false_no_providers(self) -> None:
+        """StorageManager.save_checkpoint() returns False when no providers configured."""
+        from agentpool_config.storage import StorageConfig
+
+        config = StorageConfig(providers=[])
+        mgr = StorageManager(config=config)
+
+        result = await mgr.save_checkpoint("s1", "[]", [])
+        assert result is False

@@ -165,7 +165,7 @@ async def test_get_wrapper_toolset_per_tool_wraps_with_approval_required(
     mock_tool2.name = "safe_tool"
     mock_tool2.requires_confirmation = False
 
-    mock_hook_manager._agent.tools._tools = [mock_tool1, mock_tool2]
+    mock_hook_manager._agent._builtin_provider._tools = [mock_tool1, mock_tool2]
 
     with patch.object(type(cap), "_get_confirmation_mode", return_value="per_tool"):
         result = cap.get_wrapper_toolset(mock_toolset)
@@ -715,8 +715,8 @@ async def test_no_double_firing_when_old_agenthooks_active(
 ) -> None:
     """No double-firing when old AgentHooks is active AND capability chain is active.
 
-    Verifies that as_capability() returns a ToolInterceptCapability directly
-    (not a CombinedCapability wrapping AgentHooks.as_capability()). This
+    Verifies that get_capabilities() returns a ToolInterceptCapability directly
+    (not a CombinedCapability wrapping AgentHooks.get_capabilities()). This
     prevents double-firing because the legacy Hooks callbacks are never
     registered in the capability chain — only ToolInterceptCapability fires
     tool hooks, delegating to AgentHooks.run_pre_tool_hooks() /

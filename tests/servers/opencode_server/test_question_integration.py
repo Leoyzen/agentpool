@@ -38,6 +38,7 @@ async def test_question_elicitation_single_select():
     # Create minimal mock agent (pool not needed for this test)
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
     # Create minimal state
     state = ServerState(working_dir="/tmp", agent=mock_agent)
     state.session_controller = _make_mock_session_controller("test_session")
@@ -83,6 +84,7 @@ async def test_question_elicitation_multi_select():
     """Test multi-select question via elicitation."""
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
     state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
@@ -111,6 +113,7 @@ async def test_question_cancellation():
     """Test question cancellation."""
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
     state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
@@ -133,6 +136,7 @@ async def test_question_with_descriptions():
     """Test question with option descriptions."""
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
     state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
@@ -177,6 +181,7 @@ async def test_multi_question_rfc0010_example():
     """
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
     state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
@@ -253,6 +258,7 @@ async def test_multi_question_cancellation():
     """Test cancellation during multi-question flow."""
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
     state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
@@ -298,6 +304,7 @@ async def test_question_reply_can_resolve_permission_request():
     """Permission replies routed through /question should still resolve."""
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
     state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
@@ -339,6 +346,7 @@ async def test_question_reject_can_resolve_permission_request():
     """Permission rejects routed through /question should still resolve."""
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
     state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
@@ -376,6 +384,7 @@ async def test_permission_request_uses_permission_prefix():
     """Permission requests should keep the permission ID namespace."""
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
     state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
@@ -410,6 +419,7 @@ async def test_multi_question_partial_answers():
     """Test multi-question with partial answers (fewer than questions)."""
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
     state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
@@ -448,6 +458,7 @@ async def test_multi_question_empty_object_declines():
     """Test that empty object schema returns decline."""
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
 
@@ -467,6 +478,7 @@ async def test_multi_question_rfc0010_backward_compat():
     """Test RFC-0010 schema maintains backward compatibility with single questions."""
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
     state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
@@ -572,6 +584,7 @@ async def test_multi_question_max_limit():
     """Test that multi-questions are capped at 10."""
     mock_agent = Mock()
     mock_agent.agent_pool = None
+    mock_agent.host_context = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
     state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")

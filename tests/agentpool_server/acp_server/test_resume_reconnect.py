@@ -11,7 +11,7 @@ Simulates the full disconnect → reconnect → resume cycle:
 4. Verify old ACP connections are cleaned up (``_session_connections`` no
    longer has the session_id, the ``AcpMcpConnection`` is removed).
 5. Simulate reconnect + resume by calling ``get_or_create_session`` again
-   (creates a fresh ``_SessionContext``) and registering a new ACP
+   (creates a fresh ``McpSessionContext``) and registering a new ACP
    connection with a new ``connection_id``.
 6. Verify the new connection is fresh — different object, different
    ``connection_id``, no stale references from the pre-disconnect session.
@@ -111,10 +111,10 @@ async def test_resume_after_reconnect() -> None:  # noqa: PLR0915
     await mcp_manager.cleanup_session(session_id)
 
     # MCPManager session context should be removed
-    assert session_id not in mcp_manager._session_contexts
+    assert mcp_manager.get_session_context(session_id) is None
 
     # --- Step 5: Reconnect + resume — create fresh session context ---
-    # get_or_create_session creates a NEW _SessionContext with fresh state
+    # get_or_create_session creates a NEW McpSessionContext with fresh state
     new_ctx = mcp_manager.get_or_create_session(session_id)
 
     # Create a fresh ACP connection (new connection_id, new session_key)
@@ -135,7 +135,7 @@ async def test_resume_after_reconnect() -> None:  # noqa: PLR0915
 
     # --- Step 6: Verify fresh connections, no stale references ---
 
-    # 6a: New _SessionContext is a different object from the old one
+    # 6a: New McpSessionContext is a different object from the old one
     assert new_ctx is not old_ctx
 
     # 6b: New context has fresh toolset_cache (empty, different object)

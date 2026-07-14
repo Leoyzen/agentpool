@@ -4,10 +4,9 @@ Consolidated from:
 - test_backward_compat.py (deprecated classes still work with _warn=False)
 - test_deprecation_warnings.py (DeprecationWarning emitted correctly)
 
-Note: DeprecationWarning tests for ToolManager, AgentHooks, MCPManager,
-and wrap_instruction were removed because those APIs no longer emit
-warnings (the _warn parameter is kept for backward compatibility but
-the warning was removed in a refactor). Only _resolve_history_processors
+Note: ToolManager was removed in M3. DeprecationWarning tests for
+AgentHooks, MCPManager, and wrap_instruction were removed because those
+APIs no longer emit warnings. Only _resolve_history_processors
 still emits its deprecation warning.
 """
 
@@ -16,30 +15,12 @@ from __future__ import annotations
 import pytest
 
 from agentpool.hooks.agent_hooks import AgentHooks
-from agentpool.tools.manager import ToolManager
 from agentpool.utils.context_wrapping import wrap_instruction
 
 
 # ============================================================================
 # Backward compatibility (_warn=False)
 # ============================================================================
-
-
-@pytest.mark.anyio
-async def test_tool_manager_still_works() -> None:
-    """ToolManager with _warn=False initializes and provides tools."""
-    tm = ToolManager(_warn=False)
-    assert tm.providers is not None
-    tools = await tm.get_tools()
-    assert isinstance(tools, list)
-
-
-@pytest.mark.anyio
-async def test_tool_manager_get_tools_warn_false() -> None:
-    """ToolManager.get_tools() with _warn=False returns list."""
-    tm = ToolManager(_warn=False)
-    tools = await tm.get_tools()
-    assert isinstance(tools, list)
 
 
 def test_agent_hooks_still_works() -> None:

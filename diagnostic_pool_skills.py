@@ -41,7 +41,6 @@ async def main():
             print("Pool entered successfully")
             print(f"  skill_resolver: {pool.skill_resolver is not None}")
             print(f"  skill_provider: {pool.skill_provider is not None}")
-            print(f"  skill_commands: {pool.skill_commands is not None}")
             print()
 
             if pool.skill_resolver:

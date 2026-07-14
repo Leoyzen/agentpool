@@ -10,10 +10,6 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
-from upathtools import UPath
-
-from agentpool.skills.command import SkillCommand
-from agentpool.skills.skill import Skill
 
 
 if TYPE_CHECKING:
@@ -47,7 +43,7 @@ async def test_execute_slashed_command_success(
     server_state.command_store = mock_command_store
 
     # Mock empty MCP prompts (no collision)
-    mock_agent.tools.list_prompts = AsyncMock(return_value=[])
+    mock_agent.list_prompts = AsyncMock(return_value=[])
 
     # Execute command
     response = await async_client.post(
@@ -92,7 +88,7 @@ async def test_mcp_prompt_fallback(
     mock_prompt.name = "test-cmd"
     mock_prompt.arguments = [{"name": "arg1"}]
     mock_prompt.get_components = AsyncMock(return_value=[])
-    mock_agent.tools.list_prompts = AsyncMock(return_value=[mock_prompt])
+    mock_agent.list_prompts = AsyncMock(return_value=[mock_prompt])
     mock_agent.run = AsyncMock(return_value=MagicMock(data="MCP prompt result"))
 
     # Execute command via MCP fallback
@@ -108,7 +104,7 @@ async def test_mcp_prompt_fallback(
     assert "parts" in result
 
     # Verify MCP prompt was used
-    mock_agent.tools.list_prompts.assert_called()
+    mock_agent.list_prompts.assert_called()
     mock_prompt.get_components.assert_called_once()
 
 
@@ -136,7 +132,7 @@ async def test_precedence_slashed_over_mcp(
     # Mock MCP prompt with same name
     mock_prompt = MagicMock()
     mock_prompt.name = "test-cmd"
-    mock_agent.tools.list_prompts = AsyncMock(return_value=[mock_prompt])
+    mock_agent.list_prompts = AsyncMock(return_value=[mock_prompt])
 
     # Execute command
     response = await async_client.post(
@@ -174,7 +170,7 @@ async def test_unknown_command_returns_404(
     server_state.command_store = mock_command_store
 
     # Mock empty MCP prompts
-    mock_agent.tools.list_prompts = AsyncMock(return_value=[])
+    mock_agent.list_prompts = AsyncMock(return_value=[])
 
     # Execute unknown command
     response = await async_client.post(
@@ -209,7 +205,7 @@ async def test_none_command_store_graceful(
     mock_prompt.name = "fallback-cmd"
     mock_prompt.arguments = []
     mock_prompt.get_components = AsyncMock(return_value=[])
-    mock_agent.tools.list_prompts = AsyncMock(return_value=[mock_prompt])
+    mock_agent.list_prompts = AsyncMock(return_value=[mock_prompt])
     mock_agent.run = AsyncMock(return_value=MagicMock(data="Fallback result"))
 
     # Execute command
@@ -224,7 +220,7 @@ async def test_none_command_store_graceful(
     assert "info" in result
 
     # Verify MCP was checked and used
-    mock_agent.tools.list_prompts.assert_called()
+    mock_agent.list_prompts.assert_called()
 
 
 async def test_command_execution_error(
@@ -249,7 +245,7 @@ async def test_command_execution_error(
     server_state.command_store = mock_command_store
 
     # Mock empty MCP prompts
-    mock_agent.tools.list_prompts = AsyncMock(return_value=[])
+    mock_agent.list_prompts = AsyncMock(return_value=[])
 
     # Execute command that will fail
     response = await async_client.post(
@@ -283,7 +279,7 @@ async def test_collision_warning_logged(
 
     mock_prompt = MagicMock()
     mock_prompt.name = "collision-cmd"
-    mock_agent.tools.list_prompts = AsyncMock(return_value=[mock_prompt])
+    mock_agent.list_prompts = AsyncMock(return_value=[mock_prompt])
 
     with patch("agentpool_server.opencode_server.routes.session_routes.logger") as mock_logger:
         response = await async_client.post(
@@ -337,7 +333,7 @@ async def test_concurrent_slash_commands_same_session_are_serialized(
     server_state.command_store = mock_command_store
 
     # Mock empty MCP prompts
-    mock_agent.tools.list_prompts = AsyncMock(return_value=[])
+    mock_agent.list_prompts = AsyncMock(return_value=[])
 
     # Send two commands concurrently to the same session
     async def send_command(cmd: str):
@@ -376,21 +372,14 @@ async def test_skill_command_routes_through_session_pool(
     assert response.status_code == 200
     session_id = response.json()["id"]
 
-    # CommandStore doesn't have it
+    # CommandStore has the command
+    mock_command = MagicMock()
+    mock_command.execute = AsyncMock()
     mock_command_store = MagicMock()
-    mock_command_store.get_command = MagicMock(return_value=None)
+    mock_command_store.get_command = MagicMock(return_value=mock_command)
     server_state.command_store = mock_command_store
 
-    # Add skill to pool.skill_commands
-    skill = Skill(
-        name="direct-skill",
-        description="Direct skill",
-        skill_path=UPath("/tmp/direct"),
-        instructions="Direct skill instructions",
-    )
-    skill_cmd = SkillCommand(name="direct-skill", description="Direct skill", skill=skill)
-    mock_agent.agent_pool.skill_commands = {"direct-skill": skill_cmd}  # type: ignore[attr-defined]
-    mock_agent.agent_pool.skill_provider = None  # type: ignore[attr-defined]
+    mock_agent.host_context.skill_provider = None  # type: ignore[attr-defined]
 
     # Track agent.run_stream calls
     agent_calls: list[tuple[Any, Any]] = []
@@ -410,17 +399,17 @@ async def test_skill_command_routes_through_session_pool(
         if False:
             yield MagicMock()
 
-    mock_agent.agent_pool.session_pool.run_stream = _mock_session_run_stream  # type: ignore[attr-defined]
+    mock_agent.host_context.session_pool.run_stream = _mock_session_run_stream  # type: ignore[attr-defined]
 
     # Mock empty MCP prompts
-    mock_agent.tools.list_prompts = AsyncMock(return_value=[])
+    mock_agent.list_prompts = AsyncMock(return_value=[])
 
     response = await async_client.post(
         f"/session/{session_id}/command",
         json={"command": "direct-skill", "arguments": "some args"},
     )
 
-    # Fallback to skill_commands should work — returns 200
+    # Command should execute successfully — returns 200
     assert response.status_code == 200
     result = response.json()
     assert "info" in result
@@ -470,10 +459,10 @@ async def test_slash_command_routes_through_session_pool(
         if False:
             yield MagicMock()
 
-    mock_agent.agent_pool.session_pool.run_stream = _mock_session_run_stream  # type: ignore[attr-defined]
+    mock_agent.host_context.session_pool.run_stream = _mock_session_run_stream  # type: ignore[attr-defined]
 
     # Mock empty MCP prompts
-    mock_agent.tools.list_prompts = AsyncMock(return_value=[])
+    mock_agent.list_prompts = AsyncMock(return_value=[])
 
     response = await async_client.post(
         f"/session/{session_id}/command",
@@ -518,7 +507,7 @@ async def test_mcp_prompt_routes_through_session_pool(
     mock_prompt.name = "direct-prompt"
     mock_prompt.arguments = []
     mock_prompt.get_components = AsyncMock(return_value=[])
-    mock_agent.tools.list_prompts = AsyncMock(return_value=[mock_prompt])
+    mock_agent.list_prompts = AsyncMock(return_value=[mock_prompt])
     mock_agent.run = AsyncMock(return_value=MagicMock(data="Direct result"))
 
     # Track session_pool.receive_request calls
@@ -528,7 +517,7 @@ async def test_mcp_prompt_routes_through_session_pool(
         receive_request_calls.append((args, kwargs))
         return None
 
-    mock_agent.agent_pool.session_pool.receive_request = _mock_receive_request  # type: ignore[attr-defined]
+    mock_agent.host_context.session_pool.receive_request = _mock_receive_request  # type: ignore[attr-defined]
 
     response = await async_client.post(
         f"/session/{session_id}/command",

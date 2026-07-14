@@ -62,18 +62,43 @@ def test_acp_turn_joins_all_prompts_not_just_last() -> None:
     assert "third prompt" in new_result
 
 
-def test_acp_adapter_has_todo_comment() -> None:
-    """ACP agent adapter gap must be documented with TODO, not just NOTE.
+def test_acp_adapter_satisfies_protocol() -> None:
+    """ACP agent adapter must satisfy ACPClientProtocol (no TODO/cast needed).
 
-    The TODO comment must describe the required infrastructure
-    (async futures / notification registry) to prevent runtime crashes.
+    T1 built stream_events() and get_messages() on ACPAgentAPI, so the
+    create_turn method passes self._api directly without cast. This test
+    verifies the adapter is complete by checking that ACPAgentAPI has the
+    required methods and that create_turn does not use cast.
     """
+    import inspect
+
+    from acp.agent.acp_agent_api import ACPAgentAPI
+    from agentpool.agents.acp_agent.turn import ACPClientProtocol
+
+    # ACPAgentAPI must have stream_events and get_messages methods
+    assert hasattr(ACPAgentAPI, "stream_events"), "ACPAgentAPI must have stream_events()"
+    assert hasattr(ACPAgentAPI, "get_messages"), "ACPAgentAPI must have get_messages()"
+
+    # create_turn must not contain cast or TODO
     import agentpool.agents.acp_agent.acp_agent as acp_module
 
     source = inspect.getsource(acp_module.ACPAgent.create_turn)
-    assert "TODO" in source, "ACP adapter gap must be documented with TODO comment, not just NOTE"
-    assert "AttributeError" in source or "adapter" in source.lower(), (
-        "TODO comment must describe the gap and required infrastructure"
+    assert "cast" not in source, "create_turn must not use cast — adapter is complete"
+    assert "TODO" not in source, "create_turn must not have TODO — adapter is complete"
+
+    # ACPAgentAPI must satisfy ACPClientProtocol at runtime
+    from unittest.mock import MagicMock
+
+    from agentpool.agents.acp_agent.client_handler import TimeoutableEvent
+    from agentpool.agents.acp_agent.session_state import ACPSessionState
+
+    api = ACPAgentAPI(
+        MagicMock(),
+        state=ACPSessionState(session_id="test"),
+        update_event=TimeoutableEvent(),
+    )
+    assert isinstance(api, ACPClientProtocol), (
+        "ACPAgentAPI must satisfy ACPClientProtocol without cast"
     )
 
 

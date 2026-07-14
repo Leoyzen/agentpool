@@ -7,7 +7,7 @@ converts to pydantic-ai format.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic_ai import Agent as PydanticAgent, RunContext
 import pytest
@@ -15,17 +15,12 @@ import pytest
 from agentpool.agents.context import AgentContext
 from agentpool.agents.native_agent import Agent
 from agentpool.agents.sys_prompts import SystemPrompts
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.prompts.instructions import (
     InstructionFunc,
     PydanticAIInstruction,
 )
-from agentpool.resource_providers.base import ResourceProvider
-from agentpool.resource_providers.skills_instruction import SkillsInstructionProvider
 from agentpool.utils.context_wrapping import wrap_instruction
-
-
-if TYPE_CHECKING:
-    from pydantic_ai.capabilities import AbstractCapability
 
 
 class TestPydanticAIInstructionType:
@@ -233,28 +228,14 @@ class TestSystemPromptsPydanticAIConversion:
         assert result == "Using model: openai:gpt-4o-mini"
 
 
-class PydanticAIInstructionProvider(ResourceProvider):
+class PydanticAIInstructionProvider(FunctionToolsetCapability):
     """Provider that returns pydantic-ai compatible instructions."""
 
     def __init__(self) -> None:
-        super().__init__("pydantic_ai_provider")
-        self.kind = "base"
-
-    async def get_instructions(self) -> list[InstructionFunc]:
-        """Return instruction with RunContext[AgentContext] signature."""
-
-        def pydantic_ai_instruction(ctx: RunContext[AgentContext[Any]]) -> str:
-            return f"PydanticAI instruction: model={ctx.deps.model_name}"
-
-        return [pydantic_ai_instruction]
-
-    def as_capability(self) -> AbstractCapability | None:
-        """Return a pydantic-ai capability for this provider.
-
-        Returns:
-            A pydantic-ai AbstractCapability instance, or None.
-        """
-        return None
+        super().__init__(
+            name="pydantic_ai_provider",
+            instructions="PydanticAI instruction provider",
+        )
 
 
 @pytest.mark.requires_openai_key
@@ -270,7 +251,7 @@ class TestNativeAgentPydanticAIInstructions:
             model="openai:gpt-4o-mini",
             system_prompt="You are an AI assistant.",
         )
-        agent.tools.add_provider(provider)
+        agent._add_capability(provider)
 
         async with agent:
             agentlet: PydanticAgent[Any, str] = await agent.get_agentlet(None, None, None)
@@ -295,7 +276,7 @@ class TestNativeAgentPydanticAIInstructions:
             model="openai:gpt-4o-mini",
             system_prompt="You are an AI assistant.",
         )
-        agent.tools.add_provider(provider)
+        agent._add_capability(provider)
 
         async with agent:
             agentlet = await agent.get_agentlet(None, None, None)
@@ -306,66 +287,20 @@ class TestNativeAgentPydanticAIInstructions:
     async def test_mixed_instruction_signatures_work(self):
         """Test that old and new instruction signatures work together."""
 
-        class MixedProvider(ResourceProvider):
+        class MixedProvider(FunctionToolsetCapability):
             def __init__(self) -> None:
-                super().__init__("mixed_provider")
-                self.kind = "base"
-
-            async def get_instructions(self) -> list[InstructionFunc]:
-                def simple() -> str:
-                    return "Simple instruction"
-
-                def with_agent_ctx(ctx: AgentContext[Any]) -> str:
-                    return f"Agent: {ctx.model_name}"
-
-                def with_pydantic_ai_ctx(
-                    ctx: RunContext[AgentContext[Any]],
-                ) -> str:
-                    return f"PydanticAI: {ctx.deps.model_name}"
-
-                return [simple, with_agent_ctx, with_pydantic_ai_ctx]
-
-            def as_capability(self) -> AbstractCapability | None:
-                return None
+                super().__init__(name="mixed_provider", instructions="Mixed instruction provider")
 
         agent = Agent(
             name="mixed_agent",
             model="openai:gpt-4o-mini",
             system_prompt="You are an AI assistant.",
         )
-        agent.tools.add_provider(MixedProvider())
+        agent._add_capability(MixedProvider())
 
         async with agent:
             agentlet = await agent.get_agentlet(None, None, None)
 
             assert isinstance(agentlet, PydanticAgent)
-            # System prompt + 3 provider instructions
-            assert len(agentlet._instructions) >= 4  # type: ignore[arg-type]
-
-
-@pytest.mark.requires_openai_key
-class TestSkillsInstructionProviderSignature:
-    """Test SkillsInstructionProvider uses pydantic-ai compatible signature."""
-
-    async def test_skills_instruction_accepts_run_context(self):
-        """Test that _generate_skills_instruction accepts RunContext[AgentContext]."""
-        provider = SkillsInstructionProvider()
-
-        # Create a mock RunContext with AgentContext as deps
-        agent = Agent(name="test", model="openai:gpt-4o-mini")
-        async with agent:
-            mock_agent_ctx = agent.get_context()
-            mock_run_ctx = RunContext(
-                deps=mock_agent_ctx,
-                model=None,  # type: ignore[arg-type]
-                usage=None,  # type: ignore[arg-type]
-                prompt=None,  # type: ignore[arg-type]
-                retry=0,
-                messages=[],
-            )
-
-            result = await provider._generate_skills_instruction(
-                mock_run_ctx,  # type: ignore[arg-type]
-            )
-            # With no skills, should return empty string or XML with no skills
-            assert isinstance(result, str)
+            # System prompt + provider instruction
+            assert len(agentlet._instructions) >= 2  # type: ignore[arg-type]

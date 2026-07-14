@@ -35,11 +35,11 @@ async def test_on_disconnect_full_cleanup_chain_with_real_components() -> None: 
     -> ``SessionController.close_session()`` (pops _sessions, _session_agents,
        calls ``agent.mcp.cleanup_session()``)
     -> ``ACPSession.close()`` (calls ``cleanup_session()`` idempotently)
-    -> ``MCPManager.cleanup_session()`` (pops the session context, delegates to
+    -> ``MCPManager.cleanup_session()`` (pops _session_contexts, delegates to
        ``AcpMcpConnectionManager.cleanup_session()``)
 
     After cleanup, ALL registries must be empty:
-    session contexts, session connections, connections,
+    _session_contexts, _session_connections, _connections,
     _acp_sessions, _connection_sessions, _sessions, _session_agents.
     """
     # --- Real MCP + ACP managers ---
@@ -123,7 +123,7 @@ async def test_on_disconnect_full_cleanup_chain_with_real_components() -> None: 
         assert session_id in acp_manager._acp_sessions
         assert "conn-1" in acp_manager._connection_sessions
         assert session_id in acp_manager._connection_sessions["conn-1"]
-        assert mcp_manager.get_session_context(session_id) is not None
+        assert session_id in mcp_manager._session_contexts
         assert session_id in acp_mcp_manager._session_connections
         assert "acp-conn-1" in acp_mcp_manager._connections
         assert session_id in session_controller._sessions
@@ -135,7 +135,7 @@ async def test_on_disconnect_full_cleanup_chain_with_real_components() -> None: 
         # --- Assert all registries empty ---
         assert len(acp_manager._acp_sessions) == 0
         assert "conn-1" not in acp_manager._connection_sessions
-        assert mcp_manager.get_session_context(session_id) is None
+        assert len(mcp_manager._session_contexts) == 0
         assert len(acp_mcp_manager._session_connections) == 0
         assert len(acp_mcp_manager._connections) == 0
         assert session_id not in session_controller._sessions
@@ -214,23 +214,23 @@ async def test_connection_id_propagation_create_session_populates_connection_ses
 
 
 # ============================================================================
-# G9: as_capability() during concurrent cleanup_session()
+# G9: get_capabilities() during concurrent cleanup_session()
 # ============================================================================
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_as_capability_during_concurrent_cleanup() -> None:
-    """as_capability() called concurrently with cleanup_session() must not crash.
+async def test_get_capabilities_during_concurrent_cleanup() -> None:
+    """get_capabilities() called concurrently with cleanup_session() must not crash.
 
-    Verifies the GAP-11 race condition: ``as_capability(session_id)`` uses
-    ``self.get_session_context(session_id)`` which returns None if
+    Verifies the GAP-11 race condition: ``get_capabilities(session_id)`` uses
+    ``self._session_contexts.get(session_id)`` which returns None if
     ``cleanup_session()`` has already popped the context. The method must
     handle this gracefully by falling back to global-only capabilities.
 
     Either:
-    - as_capability runs first: returns capabilities from snapshot (empty)
-    - cleanup runs first: as_capability gets None, falls back to global-only
+    - get_capabilities runs first: returns capabilities from snapshot (empty)
+    - cleanup runs first: get_capabilities gets None, falls back to global-only
     Both outcomes are acceptable; no exception should be raised.
     """
     manager = MCPManager(name="test-g9")
@@ -241,11 +241,11 @@ async def test_as_capability_during_concurrent_cleanup() -> None:
         manager.get_or_create_session(session_id)
         manager.update_session_snapshot(session_id, McpConfigSnapshot())
 
-        assert manager.get_session_context(session_id) is not None
+        assert session_id in manager._session_contexts
 
         # Fire both concurrently
         results: list[object] = await asyncio.gather(
-            manager.as_capability(session_id=session_id),
+            manager.get_capabilities(session_id=session_id),
             manager.cleanup_session(session_id),
             return_exceptions=True,
         )
@@ -253,11 +253,11 @@ async def test_as_capability_during_concurrent_cleanup() -> None:
         # Neither should have raised
         for result in results:
             assert not isinstance(result, Exception), (
-                f"Concurrent as_capability/cleanup raised: {result!r}"
+                f"Concurrent get_capabilities/cleanup raised: {result!r}"
             )
 
-        # Session must be removed from session context after both complete
-        assert manager.get_session_context(session_id) is None
+        # Session must be removed from _session_contexts after both complete
+        assert session_id not in manager._session_contexts
     finally:
         await manager.cleanup()
 

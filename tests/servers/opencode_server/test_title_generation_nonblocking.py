@@ -60,6 +60,8 @@ def _make_state(tmp_path: Any) -> ServerState:
     pool.manifest.agents = {}
 
     agent.agent_pool = pool
+    agent.host_context = pool
+    agent._agent_pool = pool  # state.py resolves _pool via agent._agent_pool
     agent.storage = storage_mgr
 
     env = Mock()

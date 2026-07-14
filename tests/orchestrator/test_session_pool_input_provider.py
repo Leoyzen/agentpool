@@ -61,7 +61,7 @@ def session_pool(mock_pool: MagicMock) -> SessionPool:
 
 @pytest.fixture
 def mock_agent() -> MagicMock:
-    """Return a mocked BaseAgent that captures kwargs passed to _run_stream_once."""
+    """Return a mocked BaseAgent that captures kwargs passed to _stream_events."""
     agent = MagicMock()
     agent.get_active_run_context.return_value = None
     agent.AGENT_TYPE = "native"
@@ -78,7 +78,7 @@ def mock_agent() -> MagicMock:
         msg = ChatMessage(content="test response", role="assistant")
         yield StreamCompleteEvent(message=msg)
 
-    agent._run_stream_once = _fake_stream
+    agent._stream_events = _fake_stream
     return agent
 
 
@@ -222,7 +222,7 @@ class TestRunTurnInputProvider:
         )
 
     @pytest.mark.anyio
-    async def test_run_turn_passes_input_provider_to_run_stream_once(
+    async def test_run_turn_passes_input_provider_to_stream_events(
         self,
         session_pool: SessionPool,
         mock_pool: MagicMock,

@@ -74,6 +74,7 @@ class NativeTurn(HookAwareTurn, Turn):
         message_history: list[ModelMessage],
         parent_id: str | None = None,
         hooks: AgentHooks | None = None,
+        **pydantic_ai_kwargs: Any,
     ) -> None:
         """Initialize the turn.
 
@@ -85,6 +86,8 @@ class NativeTurn(HookAwareTurn, Turn):
                 ModelMessage list.
             parent_id: Optional parent message ID for threading.
             hooks: Optional AgentHooks for pre_turn/post_turn hook firing.
+            **pydantic_ai_kwargs: Extra kwargs forwarded to
+                ``agentlet.iter()`` (e.g. ``deferred_tool_results``).
         """
         super().__init__()
         self._agent = agent
@@ -95,6 +98,7 @@ class NativeTurn(HookAwareTurn, Turn):
         self._message_id = uuid4().hex
         self._parent_id = parent_id
         self._hooks = hooks
+        self._pydantic_ai_kwargs = pydantic_ai_kwargs
 
     @property
     def _hook_env(self) -> Any | None:
@@ -146,10 +150,10 @@ class NativeTurn(HookAwareTurn, Turn):
             try:
                 # Use timeout to prevent hang when MCP providers are still
                 # connecting (e.g. ACP session/load hasn't arrived yet).
-                # MCP tools are handled via snapshot/as_capability path,
+                # MCP tools are handled via snapshot/get_capabilities path,
                 # so get_tools() here is only for building tool kind map.
                 all_tools = await asyncio.wait_for(
-                    self._agent.tools.get_tools(),
+                    self._agent._get_all_tools(),
                     timeout=5.0,
                 )
                 for tool in all_tools:
@@ -187,11 +191,15 @@ class NativeTurn(HookAwareTurn, Turn):
 
             agent_run: Any = None
             try:
-                async with agentlet.iter(
-                    effective_prompts,
+                iter_kwargs: dict[str, Any] = dict(
                     deps=agent_deps,
                     message_history=self._message_history_input,
                     usage_limits=self._agent._default_usage_limits,
+                    **self._pydantic_ai_kwargs,
+                )
+                async with agentlet.iter(
+                    effective_prompts,
+                    **iter_kwargs,
                 ) as agent_run:
                     if self._run_ctx._run_handle is not None:
                         self._run_ctx._run_handle.active_agent_run = agent_run
@@ -251,8 +259,8 @@ class NativeTurn(HookAwareTurn, Turn):
                     self._message_history = agent_run.all_messages()
                     logger.info("After while loop — building final message")
 
-            except RunAbortedError:
-                logger.info("RunAbortedError caught")
+            except RunAbortedError as exc:
+                logger.info("RunAbortedError caught", reason=str(exc))
                 if agent_run is not None:
                     try:
                         self._message_history = agent_run.all_messages()
@@ -260,6 +268,34 @@ class NativeTurn(HookAwareTurn, Turn):
                         logger.debug(
                             "Could not retrieve agent_run messages after RunAbortedError",
                         )
+                # Build a minimal final message so turn.final_message is
+                # accessible to callers (e.g. for partial output preservation).
+                self._final_message = ChatMessage(
+                    content="",
+                    role="assistant",
+                    name=self._agent.name,
+                    message_id=self._message_id,
+                    session_id=self._run_ctx.session_id,
+                    parent_id=self._parent_id,
+                    messages=self._message_history or [],
+                )
+                # Yield StreamCompleteEvent with cancelled=True so that:
+                # 1. _execute_turn saves the final message to
+                #    agent.conversation (the StreamCompleteEvent branch
+                #    handles this), preserving history for the next turn.
+                # 2. The ACP event converter emits
+                #    TurnCompleteUpdate(stop_reason="cancelled") instead
+                #    of "refusal", so clients know the turn was
+                #    cancelled, not failed.
+                # 3. _consume_run breaks on StreamCompleteEvent and
+                #    closes the generator, setting _turn_complete_event
+                #    in start()'s finally block — unblocking legacy
+                #    clients waiting on the PromptResponse.
+                yield StreamCompleteEvent(
+                    message=self._final_message,
+                    cancelled=True,
+                )
+                return
 
             except UndrainedPendingMessagesError as exc:
                 logger.info("UndrainedPendingMessagesError caught", error=str(exc))
@@ -289,6 +325,32 @@ class NativeTurn(HookAwareTurn, Turn):
                 raise
 
             except Exception as exc:
+                # If the while loop completed and _message_history is set,
+                # the error is from agentlet.iter() exit (e.g. MCP toolset
+                # double-cleanup when session close already cleaned up MCP
+                # connections). In this case, build the final message from
+                # the collected history and yield StreamCompleteEvent
+                # instead of RunErrorEvent, so history is preserved.
+                if self._message_history is not None:
+                    logger.warning(
+                        "agentlet.iter() exit failed after turn completion, "
+                        "preserving history",
+                        error=str(exc),
+                    )
+                    # Build a minimal final message from _message_history.
+                    new_messages = self._message_history[self._input_history_len :]
+                    fallback_content: Any = extract_text_from_messages(new_messages)
+                    self._final_message = ChatMessage(
+                        content=fallback_content,
+                        role="assistant",
+                        name=self._agent.name,
+                        message_id=self._message_id,
+                        session_id=self._run_ctx.session_id,
+                        parent_id=self._parent_id,
+                        messages=new_messages,
+                    )
+                    yield StreamCompleteEvent(message=self._final_message)
+                    return
                 logger.exception("NativeTurn execution failed")
                 yield RunErrorEvent(
                     message=str(exc),

@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# Test helper: minimal BaseAgent subclass that spies on _run_stream_once
+# Test helper: minimal BaseAgent subclass that spies on _stream_events
 # ---------------------------------------------------------------------------
 
 
@@ -31,10 +31,10 @@ class _FakeEvent:
 
 
 class _GatingTestAgent(BaseAgent[None, str]):
-    """Test agent that tracks _run_stream_once calls.
+    """Test agent that tracks _stream_events calls.
 
     Subclasses override AGENT_TYPE to test native vs non-native gating.
-    ``_run_stream_once`` records every call and queues an extra prompt on the first
+    ``_stream_events`` records every call and queues an extra prompt on the first
     invocation, allowing the test to distinguish single-call (native) from
     multi-call (non-native) behaviour.
     """
@@ -63,9 +63,14 @@ class _GatingTestAgent(BaseAgent[None, str]):
         user_msg: Any = None,
         **kwargs: Any,
     ) -> AsyncIterator[RichAgentStreamEvent[str]]:
-        # Not called because _run_stream_once is overridden below.
-        return
-        yield  # pragma: no cover (make generator)
+        # Spy: record prompts passed to _stream_events.
+        self._call_log.append(tuple(prompts))
+        # On the very first call, mark that an extra prompt was queued so
+        # the test can distinguish single-call (native) from multi-call
+        # (non-native) behaviour.
+        if not self._has_queued_extra:
+            self._has_queued_extra = True
+        yield _FakeEvent()  # type: ignore[return-value]
 
     def create_turn(
         self,
@@ -99,22 +104,6 @@ class _GatingTestAgent(BaseAgent[None, str]):
     async def load_session(self, session_id: str) -> Any:
         return None
 
-    # -- spied method --------------------------------------------------------
-
-    async def _run_stream_once(
-        self,
-        run_ctx: AgentRunContext,
-        *prompts: Any,
-        **kwargs: Any,
-    ) -> AsyncIterator[RichAgentStreamEvent[str]]:
-        self._call_log.append(prompts)
-        # On the very first call, mark that an extra prompt was queued so
-        # the test can distinguish single-call (native) from multi-call
-        # (non-native) behaviour.
-        if not self._has_queued_extra:
-            self._has_queued_extra = True
-        yield _FakeEvent()  # type: ignore[return-value]
-
 
 class _NativeTestAgent(_GatingTestAgent):
     """Agent with AGENT_TYPE = 'native' (skips manual loop)."""
@@ -137,7 +126,7 @@ async def test_native_agent_skips_manual_loop() -> None:
     """Native AGENT_TYPE should cause run_stream() to skip the while loop.
 
     When AGENT_TYPE == 'native', the extra prompt queued during
-    _run_stream_once must NOT be processed -- the method uses a simple
+    _stream_events must NOT be processed -- the method uses a simple
     ``async for`` and exits without re-checking the injection queue.
     """
     call_log: list[tuple[Any, ...]] = []
@@ -146,9 +135,9 @@ async def test_native_agent_skips_manual_loop() -> None:
     events: list[object] = []
     events.extend([event async for event in agent.run_stream("test prompt")])
 
-    # Native path: _run_stream_once is called exactly once
+    # Native path: _stream_events is called exactly once
     assert len(call_log) == 1, (
-        f"Expected 1 call to _run_stream_once for native agent, got {len(call_log)}"
+        f"Expected 1 call to _stream_events for native agent, got {len(call_log)}"
     )
     # The queued extra prompt should still be in the injection manager
     assert agent._has_queued_extra, "Extra prompt should have been queued"

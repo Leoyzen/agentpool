@@ -66,7 +66,7 @@ def mock_agent_pool() -> Mock:
     pool.manifest.agents = {}
     pool._config_file_path = None
 
-    async def _mock_run_stream_once(*args: Any, **kwargs: Any) -> Any:
+    async def _mock_stream_events(*args: Any, **kwargs: Any) -> Any:
         """Yield a minimal run event sequence for testing."""
         session_id = kwargs.get("session_id", "unknown")
         run_id = "run-mock-001"
@@ -76,7 +76,7 @@ def mock_agent_pool() -> Mock:
         )
 
     mock_agent = Mock()
-    mock_agent._run_stream_once = _mock_run_stream_once
+    mock_agent._stream_events = _mock_stream_events
     mock_agent._input_provider = None
     mock_agent.conversation = Mock()
     mock_agent.conversation.add_chat_messages = Mock()

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.log import get_logger
-from agentpool.resource_providers import StaticResourceProvider
 
 
 if TYPE_CHECKING:
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class MessageTools(StaticResourceProvider):
+class MessageTools(FunctionToolsetCapability):
     """Provider that gives agents the ability to send messages to chat channels.
 
     Wraps a ``MessageBus`` and exposes a ``send_message`` tool.  When the

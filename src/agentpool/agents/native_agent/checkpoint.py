@@ -150,6 +150,8 @@ class CheckpointManager:
         Serializes message_history via ModelMessagesTypeAdapter and stores
         both messages and pending_calls atomically via StorageManager.
         Emits a ToolCallDeferredEvent for each pending call.
+        Logs an error if the storage save fails (but does not raise,
+        so the agent can continue running).
 
         Args:
             session_id: Session identifier.
@@ -160,7 +162,6 @@ class CheckpointManager:
 
         Raises:
             MidStreamCheckpointError: If checkpoint is attempted mid-stream.
-            RuntimeError: If storage write fails (checkpoint aborted).
         """
         if self._is_mid_stream:
             raise MidStreamCheckpointError(
@@ -206,7 +207,7 @@ class CheckpointManager:
                 )
 
         # Store atomically via StorageManager (messages + pending_calls together)
-        await self._storage.save_checkpoint(
+        save_success = await self._storage.save_checkpoint(
             session_id=session_id,
             messages_json=messages_json_for_save or "[]",
             pending_calls=pending_calls,
@@ -225,13 +226,22 @@ class CheckpointManager:
                 )
             )
 
-        logger.info(
-            "Checkpoint saved",
-            session_id=session_id,
-            message_count=len(message_history),
-            pending_call_count=len(pending_calls),
-            agent_config_hash=agent_config_hash,
-        )
+        if save_success:
+            logger.info(
+                "Checkpoint saved",
+                session_id=session_id,
+                message_count=len(message_history),
+                pending_call_count=len(pending_calls),
+                agent_config_hash=agent_config_hash,
+            )
+        else:
+            logger.error(
+                "Checkpoint save FAILED — no provider succeeded",
+                session_id=session_id,
+                message_count=len(message_history),
+                pending_call_count=len(pending_calls),
+                agent_config_hash=agent_config_hash,
+            )
 
     async def load_checkpoint(self, session_id: str) -> CheckpointData | None:
         """Load and deserialize a checkpoint from storage.

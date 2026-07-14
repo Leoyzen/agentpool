@@ -229,4 +229,4 @@ class PromptLibraryConfig(Schema):
         from jinja2 import Template
 
         template = Template(self.template or DEFAULT_TEMPLATE)
-        return template.render(**by_type)
+        return str(template.render(**by_type))

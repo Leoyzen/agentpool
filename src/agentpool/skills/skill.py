@@ -68,6 +68,11 @@ class Skill(BaseModel):
     # Tool configurations for skill-provided functionality
     tools: list[SkillToolConfig] | None = Field(default=None)
 
+    # Resolved reference path set by SkillURIResolver when the URI contains
+    # a reference file path (e.g., skill://skill-name/path/to/ref.md).
+    # Not a frontmatter field — set programmatically during resolution.
+    resolved_reference_path: str | None = Field(default=None, exclude=True)
+
     @field_validator("name")
     @classmethod
     def _validate_name(cls, v: str) -> str:

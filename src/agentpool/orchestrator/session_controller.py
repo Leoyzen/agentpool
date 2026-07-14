@@ -22,8 +22,9 @@ from agentpool.agents.events import (
     RunFailedEvent,
     StreamCompleteEvent,
 )
+from agentpool.lifecycle import RunState
 from agentpool.log import get_logger
-from agentpool.orchestrator.run import RunHandle, RunStatus, inject_cancelled_tool_results
+from agentpool.orchestrator.run import RunHandle, inject_cancelled_tool_results
 from agentpool.orchestrator.runtime_registry import RuntimeAgentRegistry
 from agentpool.sessions.models import PendingDeferredCall, SessionData
 from agentpool_server.opencode_server.models.session_info import SessionInfo
@@ -36,7 +37,6 @@ if TYPE_CHECKING:
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.delegation import AgentPool
-    from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
     from agentpool.models.pending_interaction import PendingPermission
     from agentpool.orchestrator.event_bus import EventBus
     from agentpool.sessions.store import SessionStore
@@ -394,7 +394,7 @@ class SessionController:
         logger.info("Created session", session_id=session_id, agent_name=state.agent_name)
         return state, True
 
-    async def get_or_create_session_agent(  # noqa: PLR0915
+    async def get_or_create_session_agent(
         self,
         session_id: str,
         agent_name: str | None = None,
@@ -402,8 +402,8 @@ class SessionController:
     ) -> BaseAgent[Any, Any]:
         """Get or create a dedicated agent for a session.
 
-        Creates per-session agent for NativeAgentConfig only.
-        Falls back to shared agent for other agent types.
+        Delegates agent creation to ``AgentFactory.create_session_agent()``,
+        handling caching, session lookup, and config resolution locally.
 
         NOTE: Always acquires self._lock to prevent races with close_session().
 
@@ -434,251 +434,54 @@ class SessionController:
             session, _was_created = await self._get_or_create_session_locked(session_id, agent_name)
             agent_name = agent_name or session.agent_name
 
-            from agentpool.models.agents import NativeAgentConfig
-            from agentpool_config.context import ConfigContextManager
-
             cfg = self.pool.manifest.agents.get(agent_name)
             if cfg is None:
                 cfg = self._runtime_registry.lookup(agent_name)
 
-            if isinstance(cfg, NativeAgentConfig):
-                if session.parent_session_id:
-                    # Child session: create lightweight agent inheriting
-                    # from parent session's agent.  Shares MCP manager
-                    # to avoid duplicate subprocess spawning.
-                    parent_state = self._sessions.get(session.parent_session_id)
-                    parent_agent = parent_state.agent if parent_state else None
-
-                    if cfg.name is None:
-                        cfg = cfg.model_copy(update={"name": agent_name})
-
-                    with ConfigContextManager(self.pool._config_file_path):
-                        agent = cfg.get_agent(
-                            input_provider=input_provider,
-                            pool=self.pool,
-                        )
-
-                    # Preserve runtime resources from parent agent.
-                    # Model is NOT inherited — each agent uses its own configured
-                    # model from the manifest. Inheriting the parent's model would
-                    # cause e.g. TestModel with call_tools=['task'] to override
-                    # the child's own model configuration.
-                    if parent_agent is not None:
-                        if parent_agent.env is not None:
-                            agent.env = parent_agent.env
-                        agent._internal_fs = parent_agent._internal_fs
-
-                    await agent.__aenter__()
-
-                    # Build MCP config snapshot from parent's snapshot and
-                    # child's own agent configs. pool_configs and
-                    # session_configs are inherited from the parent so that
-                    # child agents share the same pool-level MCP servers and
-                    # any session-scoped injections. agent_configs come from
-                    # the child's own YAML. skill_configs are empty at
-                    # creation time (populated later by skill loading).
-                    from agentpool.agents.native_agent import Agent as _NativeAgent
-                    from agentpool.mcp_server.config_snapshot import (
-                        McpConfigSnapshot as _McpConfigSnapshot,
-                    )
-
-                    parent_snapshot: McpConfigSnapshot | None = None
-                    if (
-                        parent_agent is not None
-                        and isinstance(parent_agent, _NativeAgent)
-                        and session.parent_session_id
-                    ):
-                        parent_ctx = parent_agent.mcp.get_session_context(session.parent_session_id)
-                        parent_snapshot = parent_ctx.snapshot if parent_ctx is not None else None
-
-                    snapshot = _McpConfigSnapshot(
-                        pool_configs=(
-                            parent_snapshot.pool_configs if parent_snapshot is not None else ()
-                        ),
-                        agent_configs=agent._build_agent_configs(),
-                        session_configs=(
-                            parent_snapshot.session_configs if parent_snapshot is not None else ()
-                        ),
-                        skill_configs=(),
-                    )
-                    child_ctx = agent.mcp.get_or_create_session(session_id)
-                    if snapshot is not None:
-                        agent.mcp.update_session_snapshot(session_id, snapshot)
-
-                    # Share pre-created ACP transports from parent.
-                    # AcpMcpTransport now supports concurrent connect_session()
-                    # calls — each creates an independent per-session stream
-                    # pair, so parent and child can share the same transport.
-                    if (
-                        parent_agent is not None
-                        and isinstance(parent_agent, _NativeAgent)
-                        and session.parent_session_id
-                        and child_ctx.connection_pool is not None
-                    ):
-                        parent_ctx = parent_agent.mcp.get_session_context(session.parent_session_id)
-                        if parent_ctx is not None and parent_ctx.connection_pool is not None:
-                            await child_ctx.connection_pool.copy_pre_created_transports(
-                                parent_ctx.connection_pool
-                            )
-
-                    # Wire ACP MCP manager from parent so child's cleanup_session()
-                    # can delegate to AcpMcpConnectionManager.cleanup_session().
-                    if (
-                        parent_agent is not None
-                        and isinstance(parent_agent, _NativeAgent)
-                        and parent_agent.mcp._acp_mcp_manager is not None
-                    ):
-                        agent.mcp._acp_mcp_manager = parent_agent.mcp._acp_mcp_manager
-
-                    # Add non-MCP pool-level providers (skills instruction
-                    # and skills tools). MCP no longer goes through providers —
-                    # it uses the snapshot-based capability path in
-                    # get_agentlet() instead.
-                    # ACP MCP servers still need the aggregating provider
-                    # so ACP agents can serialize MCP configs to child
-                    # sessions via mcp_config_to_acp().
-                    if self.pool is not None:
-                        if self.pool.skills_instruction_provider:
-                            agent.tools.add_provider(self.pool.skills_instruction_provider)
-                        agent.tools.add_provider(self.pool.skills_tools_provider)
-                        agent.tools.add_provider(self.pool.mcp.get_aggregating_provider())
-
-                    if input_provider is not None:
-                        session.input_provider = input_provider
-                    self._session_agents[session_id] = agent
-                    session.agent = agent
-                    # is_per_session_agent=False: close_session() skips
-                    # agent.__aexit__() since parent manages lifecycle
-                    session.is_per_session_agent = False
-                    logger.info(
-                        "Created child session agent",
-                        session_id=session_id,
-                        agent_name=agent_name,
-                        parent_session_id=session.parent_session_id,
-                    )
-                    return agent
-
-                # Main path: create fresh per-session agent from config
-                if cfg.name is None:
-                    cfg = cfg.model_copy(update={"name": agent_name})
-
-                with ConfigContextManager(self.pool._config_file_path):
-                    agent = cfg.get_agent(
-                        input_provider=input_provider,
-                        pool=self.pool,
-                    )
-
-                await agent.__aenter__()
-
-                # Load conversation history into per-session agent from storage
-                try:
-                    await agent.load_session(session_id)
-                except Exception:
-                    logger.exception(
-                        "Failed to load session for per-session agent",
-                        session_id=session_id,
-                    )
-
-                # Build MCP config snapshot at agent creation time.
-                # pool_configs come from the pool's MCPManager, agent_configs
-                # from the agent's own MCPManager. session_configs and
-                # skill_configs are empty at creation time.
-                from agentpool.mcp_server.config_snapshot import (
-                    McpConfigSnapshot as _McpConfigSnapshot,
+            if cfg is None:
+                # Config not found
+                available_manifest = list(self.pool.manifest.agents.keys())
+                available_runtime = self._runtime_registry.names()
+                msg = (
+                    f"Agent config not found: {agent_name!r}. "
+                    f"Available in manifest: {available_manifest}. "
+                    f"Available in runtime registry: {available_runtime}."
                 )
+                raise RuntimeError(msg)
 
-                snapshot = _McpConfigSnapshot(
-                    pool_configs=agent._build_pool_configs(),
-                    agent_configs=agent._build_agent_configs(),
-                    session_configs=(),
-                    skill_configs=(),
-                )
-                agent.mcp.get_or_create_session(session_id)
-                if snapshot is not None:
-                    agent.mcp.update_session_snapshot(session_id, snapshot)
+            # Resolve parent agent for child sessions.
+            parent_agent: BaseAgent[Any, Any] | None = None
+            if session.parent_session_id:
+                parent_state = self._sessions.get(session.parent_session_id)
+                parent_agent = parent_state.agent if parent_state else None
 
-                # Add non-MCP pool-level providers (skills instruction
-                # and skills tools). MCP no longer goes through providers.
-                if self.pool is not None:
-                    if self.pool.skills_instruction_provider:
-                        agent.tools.add_provider(self.pool.skills_instruction_provider)
-                    agent.tools.add_provider(self.pool.skills_tools_provider)
-
-                self._session_agents[session_id] = agent
-                session.agent = agent
-                session.is_per_session_agent = True
-                self._increment_mcp_count(agent)
-                logger.info("Created session agent", session_id=session_id, agent_name=agent_name)
-                return agent
-
-            # Non-native agents (ACP, etc.): create per-session agent from config
-            if cfg is not None:
-                if cfg.name is None:
-                    cfg = cfg.model_copy(update={"name": agent_name})
-
-                with ConfigContextManager(self.pool._config_file_path):
-                    agent = cfg.get_agent(
-                        input_provider=input_provider,
-                        pool=self.pool,
-                    )
-
-                await agent.__aenter__()
-
-                # Build MCP config snapshot directly for non-native agents.
-                # Non-native agents (ACP, etc.) don't have _build_pool_configs
-                # or _build_agent_configs methods, so we construct the entries
-                # from the pool's MCPManager and the agent config's
-                # get_mcp_servers() method.
-                from agentpool.mcp_server.config_snapshot import (
-                    McpConfigEntry as _McpConfigEntry,
-                    McpConfigSnapshot as _McpConfigSnapshot,
-                )
-
-                pool_configs: tuple[McpConfigEntry, ...] = ()
-                if self.pool is not None:
-                    pool_configs = tuple(
-                        _McpConfigEntry(server_config=server, source="pool")
-                        for server in self.pool.mcp.servers
-                        if server.enabled
-                    )
-                agent_configs: tuple[McpConfigEntry, ...] = tuple(
-                    _McpConfigEntry(server_config=server, source="agent")
-                    for server in cfg.get_mcp_servers()
-                    if server.enabled
-                )
-                snapshot = _McpConfigSnapshot(
-                    pool_configs=pool_configs,
-                    agent_configs=agent_configs,
-                    session_configs=(),
-                    skill_configs=(),
-                )
-                agent.mcp.get_or_create_session(session_id)
-                if snapshot is not None:
-                    agent.mcp.update_session_snapshot(session_id, snapshot)
-
-                # Add non-MCP pool-level providers (skills instruction
-                # and skills tools). MCP no longer goes through providers.
-                if self.pool is not None:
-                    if self.pool.skills_instruction_provider:
-                        agent.tools.add_provider(self.pool.skills_instruction_provider)
-                    agent.tools.add_provider(self.pool.skills_tools_provider)
-
-                self._session_agents[session_id] = agent
-                session.agent = agent
-                session.is_per_session_agent = True
-                self._increment_mcp_count(agent)
-                logger.info("Created session agent", session_id=session_id, agent_name=agent_name)
-                return agent
-
-            # Config not found
-            available_manifest = list(self.pool.manifest.agents.keys())
-            available_runtime = self._runtime_registry.names()
-            msg = (
-                f"Agent config not found: {agent_name!r}. "
-                f"Available in manifest: {available_manifest}. "
-                f"Available in runtime registry: {available_runtime}."
+            # Delegate creation to AgentFactory.
+            agent = await self.pool._factory.create_session_agent(
+                agent_name=agent_name,
+                session_id=session_id,
+                host_context=self.pool.get_context(),
+                session=session,
+                cfg=cfg,
+                input_provider=input_provider,
+                parent_agent=parent_agent,
             )
-            raise RuntimeError(msg)
+
+            # Cache and session state.
+            if input_provider is not None:
+                session.input_provider = input_provider
+            self._session_agents[session_id] = agent
+            session.agent = agent
+
+            # Path A (child): False — parent manages lifecycle.
+            # Paths B/C (main/non-native): True — close_session calls __aexit__.
+            if session.parent_session_id:
+                session.is_per_session_agent = False
+            else:
+                session.is_per_session_agent = True
+                self._increment_mcp_count(agent)
+
+            logger.info("Created session agent", session_id=session_id, agent_name=agent_name)
+            return agent
 
     def list_sessions(self) -> list[SessionInfo]:
         """List all active sessions.
@@ -1091,6 +894,13 @@ class SessionController:
     ) -> RunHandle:
         """Create, register, and launch a RunHandle via the new path.
 
+        Creates the RunHandle with ProtocolTrigger and ProtocolChannel
+        lifecycle dimensions when an EventBus is available. The
+        ProtocolChannel publishes events to the EventBus (replacing
+        the direct ``event_bus.publish()`` calls in ``start()``),
+        and the ProtocolTrigger allows steer/followup delivery via
+        ``trigger.deliver()``.
+
         Args:
             session: The session state.
             agent: The agent instance (native or ACP).
@@ -1102,6 +912,12 @@ class SessionController:
         Returns:
             The newly created RunHandle.
         """
+        from agentpool.lifecycle import (
+            MemoryJournal,
+            ProtocolChannel,
+            ProtocolTrigger,
+        )
+
         event_bus = self._event_bus
         run_ctx = AgentRunContext(session_id=session_id, event_bus=event_bus, deps=deps)
         # Bridge agent.conversation (ChatMessage list) → list[ModelMessage]
@@ -1119,6 +935,27 @@ class SessionController:
         # (e.g. from a cancelled turn). Without this, PydanticAI rejects
         # the next user prompt with "unprocessed tool calls" error.
         model_messages = inject_cancelled_tool_results(model_messages)
+
+        # Create lifecycle dimensions for protocol server integration.
+        trigger = ProtocolTrigger()
+        comm_channel: ProtocolChannel | None = None
+        if event_bus is not None:
+            journal = MemoryJournal()
+            comm_channel = ProtocolChannel(
+                journal=journal,
+                event_bus=event_bus,
+                session_id=session_id,
+            )
+
+        host_ctx = self.pool.get_context()
+        # Build an AgentRegistry with agent names from the manifest.
+        # Agents are created lazily, so the registry stores names only.
+        # The DelegationService uses session_pool to spawn actual instances.
+        from agentpool.host.registry import AgentRegistry
+
+        agent_registry = AgentRegistry(
+            dict.fromkeys(self.pool.manifest.agents),  # type: ignore[arg-type]
+        )
         run_handle = RunHandle(
             run_id=uuid.uuid4().hex,
             session_id=session_id,
@@ -1128,6 +965,10 @@ class SessionController:
             session=session,
             run_ctx=run_ctx,
             _message_history=model_messages,
+            _trigger_source=trigger,
+            _comm_channel=comm_channel,
+            _host_context=host_ctx,
+            _agent_registry=agent_registry,
         )
         self._runs[run_handle.run_id] = run_handle
         session.current_run_id = run_handle.run_id
@@ -1207,11 +1048,7 @@ class SessionController:
             # or terminal run, clear it and start a new run.
             if session.current_run_id is not None:
                 existing_run = self._runs.get(session.current_run_id)
-                if existing_run is None or existing_run._status in (
-                    RunStatus.failed,
-                    RunStatus.completed,
-                    RunStatus.done,
-                ):
+                if existing_run is None or existing_run._run_state == RunState.DONE:
                     session.current_run_id = None
             if session.current_run_id is None:
                 return self._start_run_handle(session, agent, session_id, content_str, deps=deps)

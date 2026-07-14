@@ -25,21 +25,20 @@ from acp.agent.notifications import ACPNotifications
 from acp.filesystem import ACPFileSystem
 from acp.schema import AvailableCommand, ClientCapabilities
 from acp.schema.mcp import AcpMcpServer
-from agentpool import Agent, AgentPool
+from agentpool import Agent
 from agentpool.agents.acp_agent import ACPAgent
 from agentpool.agents.events.events import ToastInfo
 from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
 from agentpool.commands.base import NodeCommand
 from agentpool.log import get_logger
 from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
-from agentpool.skills.uri_resolver import MAX_PROVIDER_NAME_LENGTH
+from agentpool_config.commands import BaseCommandConfig
 from agentpool_server.acp_server.converters import (
     convert_acp_mcp_server_to_config,
     from_acp_content,
 )
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.input_provider import ACPInputProvider
-from agentpool_server.opencode_server.skill_bridge import create_skill_command
 
 
 if TYPE_CHECKING:
@@ -58,10 +57,15 @@ if TYPE_CHECKING:
     )
     from agentpool.agents.base_agent import BaseAgent, StateUpdate
     from agentpool.common_types import PathReference
+    from agentpool.host.context import HostContext
     from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
     from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 logger = get_logger(__name__)
+
+# Maximum length for internal provider name keys (kept as local constant
+# after removing from uri_resolver — provider segment concept was removed in D9).
+_MAX_PROVIDER_NAME_LENGTH = 63
 SLASH_PATTERN = re.compile(r"^/([\w-]+)(?:\s+(.*))?$")
 
 # Zed-specific instructions for code references
@@ -96,7 +100,6 @@ Query params must be URL-encoded (spaces → `%20`). Paths must be absolute.
 def get_all_commands() -> Sequence[BaseCommand]:
     """Return empty command list to align with OpenCode behavior.
 
-    Only skill commands are exposed via _register_skill_commands().
     All built-in framework commands are hidden to keep ACP consistent
     with OpenCode, which does not register agentpool_commands at all.
     """
@@ -165,7 +168,7 @@ class ACPSession:
     agent: BaseAgent[Any, Any]
     """Currently active agent instance.
 
-    The agent carries its own pool reference via agent.agent_pool,
+    The agent carries its own pool reference via agent.host_context,
     which is used for agent switching and pool-level operations.
     """
 
@@ -269,73 +272,19 @@ class ACPSession:
         with suppress(Exception):
             self.agent.state_updated.disconnect(self._on_state_updated)
         self.agent.state_updated.connect(self._on_state_updated)
-        # Register skill commands from pool's SkillCommandRegistry
-        self._register_skill_commands()
         # Register global commands from manifest.commands (e.g., static commands like start_eval)
         self._register_manifest_commands()
 
         self.log.info("Created ACP session", current_agent=self.agent.name)
 
-    def _register_skill_commands(self) -> None:
-        """Register skill commands from pool's SkillCommandRegistry to command_store.
+    @property
+    def is_busy(self) -> bool:
+        """Whether the session is currently processing a prompt.
 
-        Bridges skill commands into the session's command_store so they are
-        included in available_commands_update notifications per ACP spec.
+        Returns:
+            True if the task lock is held (active prompt processing).
         """
-        pool = self.agent_pool
-        skill_registry = getattr(pool, "skill_commands", None)
-        if skill_registry is None:
-            return
-
-        self._skill_command_callback = self._on_skill_command_changed
-        # Skip scheduling updates during initial registration;
-        # the caller of create_session already schedules a consolidated update.
-        self._skill_commands_initializing = True
-        try:
-            skill_registry.on_command_change(self._skill_command_callback)
-        finally:
-            self._skill_commands_initializing = False
-
-        self.log.debug(
-            "Subscribed to skill command changes",
-            skill_count=len(skill_registry.list_items()),
-        )
-
-    def _on_skill_command_changed(self, name: str, command: Any | None) -> None:
-        """Handle skill command add/remove changes from SkillCommandRegistry.
-
-        Args:
-            name: The name of the skill command.
-            command: The SkillCommand if added, None if removed.
-        """
-        if command is None:
-            # Command removed
-            try:
-                self.command_store.unregister_command(name)
-                self.log.debug("Unregistered skill command", skill_name=name)
-            except Exception:
-                self.log.exception("Failed to unregister skill command", skill_name=name)
-        else:
-            # Command added/updated
-            try:
-                from agentpool.skills.command import SkillCommand
-
-                if isinstance(command, SkillCommand):
-                    slashed_cmd = create_skill_command(command)
-                    self.command_store.register_command(slashed_cmd, replace=True)
-                    self.log.debug("Registered skill command", skill_name=name)
-            except Exception:
-                self.log.exception("Failed to register skill command", skill_name=name)
-
-        # Skip notification during initial registration
-        if getattr(self, "_skill_commands_initializing", False):
-            return
-
-        # Schedule update via TaskManager for proper lifecycle tracking
-        try:
-            self.acp_agent.tasks.create_task(self.send_available_commands_update())
-        except Exception:
-            self.log.exception("Failed to schedule command update")
+        return self._task_lock.locked()
 
     def _register_manifest_commands(self) -> None:
         """Register global commands from manifest to command_store.
@@ -344,8 +293,8 @@ class ACPSession:
         and registers them as slashed commands in the session's command_store
         so they are included in available_commands_update notifications to ACP clients.
         """
-        pool = self.agent_pool
-        commands = pool.manifest.get_command_configs()
+        ctx = self.host_context
+        commands = ctx.manifest.get_command_configs()
         if commands is None:
             self.log.debug("No manifest commands to register")
             return
@@ -368,7 +317,7 @@ class ACPSession:
                     "Failed to register manifest command",
                     name=cmd_name,
                     config_type=type(cmd_config).__name__
-                    if hasattr(cmd_config, "type")
+                    if isinstance(cmd_config, BaseCommandConfig)
                     else "unknown",
                 )
 
@@ -449,7 +398,7 @@ class ACPSession:
         """
         prefix = "session_"
         suffix = f"_{display_name}"
-        budget = MAX_PROVIDER_NAME_LENGTH - len(prefix) - len(suffix)
+        budget = _MAX_PROVIDER_NAME_LENGTH - len(prefix) - len(suffix)
         if budget >= len(self.session_id):
             return f"{prefix}{self.session_id}{suffix}"
         # Truncate session_id to fit — use SHA-256 prefix for collision resistance
@@ -461,10 +410,11 @@ class ACPSession:
         """Initialize MCP servers if any are configured.
 
         Session-level MCP servers are converted to :class:`McpConfigEntry`
-        objects and merged into the agent's MCPManager session context.
-        For ACP-transport servers, the transport is registered via
-        ``MCPManager.add_acp_transport()`` so that snapshot-aware
-        capability building can discover it.
+        objects and merged into the session's MCP config snapshot via
+        :meth:`MCPManager.update_session_snapshot`.  For ACP-transport
+        servers, the transport is registered via
+        :meth:`MCPManager.add_acp_transport` so that snapshot-aware
+        capability building can reuse it.
         """
         if not self.mcp_servers:
             return
@@ -498,10 +448,10 @@ class ACPSession:
 
                         transport = AcpMcpTransport(conn, timeout=600.0)
                         if isinstance(self.agent, Agent):
-                            # Register the ACP transport on the
-                            # MCPManager's session context so that
-                            # as_capability() can find it and child sessions
-                            # can inherit it via copy_pre_created_transports().
+                            # Register the ACP transport on the MCPManager's
+                            # session context so that get_capabilities() can
+                            # find it and child sessions can inherit it via
+                            # copy_pre_created_transports().
                             await self.agent.mcp.add_acp_transport(
                                 self.session_id,
                                 cfg.client_id,
@@ -538,8 +488,8 @@ class ACPSession:
         # Merge new session configs into the agent's MCP snapshot, deduplicating
         # by client_id so that re-initialisation does not duplicate entries.
         if entries and isinstance(self.agent, Agent):
-            existing_ctx = self.agent.mcp.get_session_context(self.session_id)
-            existing = existing_ctx.snapshot if existing_ctx else None
+            ctx = self.agent.mcp.get_session_context(self.session_id)
+            existing = ctx.snapshot if ctx is not None else None
             existing_session = existing.session_configs if existing is not None else ()
             seen_ids: set[str] = {e.server_config.client_id for e in existing_session}
             merged: list[McpConfigEntry] = list(existing_session)
@@ -548,10 +498,9 @@ class ACPSession:
                     merged.append(entry)
                     seen_ids.add(entry.server_config.client_id)
             new_snapshot = (existing or McpConfigSnapshot()).with_session_configs(tuple(merged))
-            # Persist the updated snapshot to the MCPManager's session
-            # context so that as_capability(session_id) can discover ACP
-            # MCP configs and child sessions can inherit them via
-            # copy_pre_created_transports().
+            # Sync the updated snapshot to the MCPManager's session context
+            # so that get_capabilities(session_id) can discover ACP MCP configs
+            # and child sessions can inherit them via copy_pre_created_transports().
             self.agent.mcp.update_session_snapshot(self.session_id, new_snapshot)
             self.log.info(
                 "Updated agent MCP snapshot with session configs",
@@ -568,20 +517,22 @@ class ACPSession:
     async def init_client_skills(self) -> None:
         """Discover and load skills from client-side .claude/skills directory."""
         try:
-            await self.agent_pool.skills.add_skills_directory(".claude/skills", fs=self.fs)
-            skills = self.agent_pool.skills.list_skills()
+            await self.host_context.skills_registry.add_skills_directory(
+                ".claude/skills", fs=self.fs
+            )
+            skills = self.host_context.skills_registry.list_skills()
             self.log.info("Collected client-side skills", skill_count=len(skills))
         except Exception as e:
             self.log.exception("Failed to discover client-side skills", error=e)
 
     @property
-    def agent_pool(self) -> AgentPool[Any]:
-        """Get the agent pool from the current agent."""
-        pool = self.agent.agent_pool
-        if pool is None:
+    def host_context(self) -> HostContext:
+        """Get the host context from the current agent."""
+        ctx = self.agent.host_context
+        if ctx is None:
             msg = "Agent has no associated pool"
             raise RuntimeError(msg)
-        return pool
+        return ctx
 
     def get_cwd_context(self) -> str:
         """Get current working directory context for prompts."""
@@ -594,7 +545,7 @@ class ACPSession:
         Pool-level agents were removed — all agents are now session-scoped.
         """
         # Validate agent exists in config (not runtime instances)
-        available = list(self.agent_pool.agent_configs.keys())
+        available = list(self.host_context.manifest.agents.keys())
         if agent_name not in available:
             raise ValueError(f"Agent {agent_name!r} not found. Available: {available}")
 
@@ -609,11 +560,11 @@ class ACPSession:
             self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
         # Create new session agent via SessionPool (pool-level agents removed)
-        pool = self.agent_pool
-        if pool.session_pool is not None:
+        ctx = self.host_context
+        if ctx.session_pool is not None:
             # Invalidate cache so get_or_create_session_agent creates a fresh agent
-            pool.session_pool.sessions._session_agents.pop(self.session_id, None)
-            self.agent = await pool.session_pool.sessions.get_or_create_session_agent(
+            ctx.session_pool.sessions._session_agents.pop(self.session_id, None)
+            self.agent = await ctx.session_pool.sessions.get_or_create_session_agent(
                 self.session_id, agent_name=agent_name, input_provider=self.input_provider
             )
         else:
@@ -703,10 +654,10 @@ class ACPSession:
             self._current_converter = converter  # Track for cancellation
 
             # Route through SessionPool for unified session management.
-            # MCP tools are handled via McpConfigSnapshot → as_capability() →
+            # MCP tools are handled via McpConfigSnapshot → get_capabilities() →
             # MCPToolset, not through agent.tools.providers.
-            agent_pool_ref = getattr(self.agent, "agent_pool", None)
-            session_pool = agent_pool_ref.session_pool if agent_pool_ref is not None else None
+            agent_ctx = self.agent.host_context
+            session_pool = agent_ctx.session_pool if agent_ctx is not None else None
             try:
                 if session_pool is not None:
                     stream = session_pool.run_stream(
@@ -833,15 +784,6 @@ class ACPSession:
             ):
                 self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
-            # Unregister skill command callback to prevent memory leak
-            if hasattr(self, "_skill_command_callback"):
-                skill_registry = getattr(self.agent_pool, "skill_commands", None)
-                if skill_registry is not None and hasattr(
-                    skill_registry, "_command_change_handlers"
-                ):
-                    with suppress(ValueError):
-                        skill_registry._command_change_handlers.remove(self._skill_command_callback)
-
             # Note: Individual agents are managed by the pool's lifecycle
             # The pool will handle agent cleanup when it's closed
             self.log.info("Closed ACP session")
@@ -862,7 +804,7 @@ class ACPSession:
 
     async def _register_mcp_prompts_as_commands(self) -> None:
         """Register MCP prompts as slash commands."""
-        if all_prompts := await self.agent.tools.list_prompts():
+        if all_prompts := await self.agent.list_prompts():
             for prompt in all_prompts:
                 command = prompt.create_mcp_command(self.agent.staged_content)
                 self.command_store.register_command(command)
@@ -872,7 +814,7 @@ class ACPSession:
 
     async def _register_prompt_hub_commands(self) -> None:
         """Register prompt hub prompts as slash commands."""
-        manager = self.agent_pool.prompt_manager
+        manager = self.host_context.prompt_manager
         cmd_count = 0
         all_prompts = await manager.list_prompts()
         for provider_name, prompt_names in all_prompts.items():

@@ -27,9 +27,9 @@ from sublime_search import replace_content
 from upathtools import is_directory
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.log import get_logger
 from agentpool.mime_utils import guess_type, is_binary_content, is_binary_mime
-from agentpool.resource_providers import ResourceProvider
 from agentpool.tool_impls.delete_path import create_delete_path_tool
 from agentpool.tool_impls.download_file import create_download_file_tool
 from agentpool.tool_impls.grep import create_grep_tool
@@ -59,7 +59,6 @@ if TYPE_CHECKING:
     import fsspec
     from fsspec.asyn import AsyncFileSystem
     from pydantic_ai import ModelRequest
-    from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.common_types import ModelType
@@ -72,7 +71,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class FSSpecTools(ResourceProvider):
+class FSSpecTools(FunctionToolsetCapability):
     """Provider for fsspec filesystem tools.
 
     NOTE: The ACP execution environment used handles the Terminal events of the protocol,
@@ -136,7 +135,6 @@ class FSSpecTools(ResourceProvider):
         self.max_file_size = max_file_size_kb * 1024  # Convert KB to bytes
         self.max_grep_output = max_grep_output_kb * 1024  # Convert KB to bytes
         self.use_subprocess_grep = use_subprocess_grep
-        self._tools: list[Tool] | None = None
         self._grep_backend: GrepBackend | None = None
         self._enable_diagnostics = enable_diagnostics
         self._diagnostics: DiagnosticsManager | None = None
@@ -145,14 +143,62 @@ class FSSpecTools(ResourceProvider):
         self._edit_tool = edit_tool
         self._max_image_size = max_image_size
         self._max_image_bytes = max_image_bytes
+        # Eagerly create tools so get_toolset() (sync) returns a non-None toolset.
+        self._setup_tools()
 
-    def as_capability(self) -> AbstractCapability | None:
-        """Return a pydantic-ai capability for this provider.
+    def _setup_tools(self) -> None:
+        """Create all filesystem tools synchronously.
 
-        Returns:
-            A pydantic-ai AbstractCapability instance, or None.
+        Called from __init__ to populate self._tools so that
+        FunctionToolsetCapability.get_toolset() can build a FunctionToolset
+        without needing the async get_tools() call.
         """
-        return None
+        if self._tools:
+            return
+        list_dir_tool = create_list_directory_tool(env=self.execution_env, cwd=self.cwd)
+        read_tool = create_read_tool(
+            env=self.execution_env,
+            converter=self.converter,
+            cwd=self.cwd,
+            max_file_size_kb=self.max_file_size // 1024,
+            max_image_size=self._max_image_size,
+            max_image_bytes=self._max_image_bytes,
+            large_file_tokens=self._large_file_tokens,
+            map_max_tokens=self._map_max_tokens,
+        )
+
+        grep_tool = create_grep_tool(
+            env=self.execution_env,
+            cwd=self.cwd,
+            max_output_kb=self.max_grep_output // 1024,
+            use_subprocess_grep=self.use_subprocess_grep,
+        )
+
+        delete_tool = create_delete_path_tool(env=self.execution_env, cwd=self.cwd)
+        download_tool = create_download_file_tool(env=self.execution_env, cwd=self.cwd)
+        # Start with pre-built tools (create_tool appends to self._tools, so
+        # we set the list first, then use create_tool for the rest)
+        self._tools = [
+            list_dir_tool,
+            read_tool,
+            grep_tool,
+            delete_tool,
+            download_tool,
+        ]
+
+        # create_tool appends to self._tools internally
+        self.create_tool(self.write, category="edit")
+
+        # Add edit tool based on config - mutually exclusive
+        if self._edit_tool == "agentic":
+            self.create_tool(self.agentic_edit, category="edit")
+        elif self._edit_tool == "batch":
+            self.create_tool(self.edit_batch, category="edit", name_override="edit")
+        else:  # simple
+            self.create_tool(self.edit, category="edit")
+
+        # Add regex line editing tool
+        self.create_tool(self.regex_replace_lines, category="edit")
 
     def _get_fs(self, agent_ctx: AgentContext) -> AsyncFileSystem:
         """Get filesystem, falling back to agent's env if not set."""
@@ -224,53 +270,11 @@ class FSSpecTools(ResourceProvider):
         return path
 
     async def get_tools(self) -> Sequence[Tool]:
-        """Get filesystem tools."""
-        if self._tools is not None:
-            return self._tools
-        # Create standalone tools with toolset's configuration
-        list_dir_tool = create_list_directory_tool(env=self.execution_env, cwd=self.cwd)
-        read_tool = create_read_tool(
-            env=self.execution_env,
-            converter=self.converter,  # Pass converter for automatic markdown conversion
-            cwd=self.cwd,
-            max_file_size_kb=self.max_file_size // 1024,
-            max_image_size=self._max_image_size,
-            max_image_bytes=self._max_image_bytes,
-            large_file_tokens=self._large_file_tokens,
-            map_max_tokens=self._map_max_tokens,
-        )
+        """Get filesystem tools.
 
-        grep_tool = create_grep_tool(
-            env=self.execution_env,
-            cwd=self.cwd,
-            max_output_kb=self.max_grep_output // 1024,
-            use_subprocess_grep=self.use_subprocess_grep,
-        )
-
-        delete_tool = create_delete_path_tool(env=self.execution_env, cwd=self.cwd)
-        download_tool = create_download_file_tool(env=self.execution_env, cwd=self.cwd)
-        self._tools = [
-            list_dir_tool,
-            read_tool,
-            grep_tool,
-            self.create_tool(self.write, category="edit"),
-            delete_tool,
-            download_tool,
-        ]
-
-        # Add edit tool based on config - mutually exclusive
-        if self._edit_tool == "agentic":
-            self._tools.append(self.create_tool(self.agentic_edit, category="edit"))
-        elif self._edit_tool == "batch":
-            self._tools.append(
-                self.create_tool(self.edit_batch, category="edit", name_override="edit")
-            )
-        else:  # simple
-            self._tools.append(self.create_tool(self.edit, category="edit"))
-
-        # Add regex line editing tool
-        self._tools.append(self.create_tool(self.regex_replace_lines, category="edit"))
-
+        Tools are eagerly created in __init__ via _setup_tools().
+        This method exists for backward compat with the async get_tools() protocol.
+        """
         return self._tools
 
     async def list_directory(  # noqa: D417
@@ -1309,7 +1313,7 @@ class FSSpecTools(ResourceProvider):
 
         # FIXME: agent.run_stream() requires SessionPool after migrate-to-runexecutor migration.
         # Use SessionPool.run_stream() with message_history support.
-        async for node in agent.run_stream(
+        async for node in agent.run_stream(  # type: ignore[attr-defined]
             prompt,
             message_history=fork_history,
             store_history=False,
@@ -1439,7 +1443,7 @@ class FSSpecTools(ResourceProvider):
 
         # FIXME: agent.run_stream() requires SessionPool after migrate-to-runexecutor migration.
         # Use SessionPool.run_stream() with message_history support.
-        async for node in agent.run_stream(
+        async for node in agent.run_stream(  # type: ignore[attr-defined]
             prompt,
             message_history=fork_history,
             store_history=False,
@@ -1527,7 +1531,7 @@ class FSSpecTools(ResourceProvider):
 
         # FIXME: agent.run_stream() requires SessionPool after migrate-to-runexecutor migration.
         # Use SessionPool.run_stream() with message_history support.
-        async for node in agent.run_stream(
+        async for node in agent.run_stream(  # type: ignore[attr-defined]
             prompt,
             message_history=fork_history,
             store_history=False,

@@ -27,9 +27,10 @@ import pytest
 from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import StreamCompleteEvent
+from agentpool.lifecycle import RunState
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, SessionState
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
 
 
@@ -135,7 +136,7 @@ async def test_empty_child_done_events_no_wait() -> None:
     assert len(events) == 1
     assert isinstance(events[0], StreamCompleteEvent)
     assert run_ctx.child_done_events == {}
-    assert handle._status == RunStatus.done
+    assert handle._run_state == RunState.DONE
 
 
 @pytest.mark.unit
@@ -336,7 +337,7 @@ def test_child_done_events_items_wrapped_with_list() -> None:
     """
     import agentpool.orchestrator.run as run_module
 
-    source = inspect.getsource(run_module.RunHandle.start)
+    source = inspect.getsource(run_module.RunHandle._drain_events)
     # Check that items() is wrapped with list()
     assert "list(self.run_ctx.child_done_events.items())" in source, (
         "child_done_events.items() must be wrapped with list() for concurrent safety"
@@ -351,7 +352,7 @@ def test_child_done_events_values_wrapped_with_list() -> None:
     """
     import agentpool.orchestrator.run as run_module
 
-    source = inspect.getsource(run_module.RunHandle.start)
+    source = inspect.getsource(run_module.RunHandle._drain_events)
     assert "list(self.run_ctx.child_done_events.values())" in source, (
         "child_done_events.values() must be wrapped with list() for concurrent safety"
     )

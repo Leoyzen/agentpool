@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from upathtools import UPath
 
+from agentpool.capabilities.resource_protocols import SkillEntry
 from agentpool.skills.skill import Skill
 from agentpool_toolsets.builtin.skills import list_skills, load_skill, load_skill_for_node
 
@@ -34,6 +35,31 @@ class _FakeSkills:
 class _FakeSkillProvider:
     def __init__(self, skills: list[Skill]) -> None:
         self._skills = skills
+
+    @property
+    def capabilities(self) -> list[_FakeSkillProvider]:
+        """Return self as the sole capability, matching real provider interface."""
+        return [self]
+
+    async def list_skills(self) -> list[SkillEntry]:
+        return [
+            SkillEntry(
+                name=skill.name,
+                description=skill.description,
+                uri=f"skill://scratchpad/{skill.name}",
+                source="provider",
+            )
+            for skill in self._skills
+        ]
+
+    async def read_skill(self, skill_name: str) -> str | None:
+        skill = next((s for s in self._skills if s.name == skill_name), None)
+        if skill is None:
+            return None
+        return f"{skill_name} provider instructions"
+
+    async def skill_exists(self, skill_name: str) -> bool:
+        return any(s.name == skill_name for s in self._skills)
 
     async def get_skills(self) -> list[Skill]:
         return self._skills
@@ -102,19 +128,23 @@ async def test_list_skills_filters_by_current_node_package_scope(tmp_path):
 
 @pytest.mark.unit
 async def test_list_skills_filters_provider_skills_by_current_node_package_scope(tmp_path):
+    """Provider skills from SkillResource are always visible (no scope metadata).
+
+    SkillEntry doesn't carry metadata, so scope-based filtering doesn't apply
+    to provider skills — only local filesystem skills can be scoped.
+    """
     host_skill = _write_skill(tmp_path, "diagnosis-planning", "Diagnosis planning")
     provider_skill = Skill(
         name="fta-review",
         description="FTA review",
         skill_path=PurePosixPath("skill://scratchpad/fta-review"),
-        metadata={"scope": "rebuttal_agent"},
     )
     pool = _FakePool([host_skill], [provider_skill])
 
     result = await list_skills(_ctx(pool, "librarian"))
 
     assert "diagnosis-planning" in result
-    assert "fta-review" not in result
+    assert "fta-review" in result  # Provider skills are always visible
 
 
 @pytest.mark.unit

@@ -11,11 +11,12 @@ from typing import TYPE_CHECKING, Any, Self, cast
 import warnings
 
 import anyio
+from pydantic_ai.capabilities import AbstractCapability
 
+from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
+from agentpool.capabilities.mcp_server_cap import McpServerCap
 from agentpool.log import get_logger
 from agentpool.mcp_server.global_pool import GlobalConnectionPool
-from agentpool.resource_providers import AggregatingResourceProvider, ResourceProvider
-from agentpool.resource_providers.mcp_provider import MCPResourceProvider
 from agentpool_config.mcp_server import AcpMCPServerConfig, BaseMCPServerConfig
 
 
@@ -116,7 +117,7 @@ def _make_timeout_logger(
 
 
 @dataclass
-class _SessionContext:
+class McpSessionContext:
     """Per-session MCP state container for the :class:`MCPManager`.
 
     Holds all session-scoped MCP resources so that each session has its own
@@ -148,7 +149,7 @@ class MCPManager:
 
     .. deprecated::
         This class is deprecated and will be removed in v0.5.0.
-        Use :meth:`as_capability()` instead.
+        Use :meth:`get_capabilities()` instead.
     """
 
     def __init__(
@@ -164,19 +165,19 @@ class MCPManager:
         self.servers: list[MCPServerConfig] = []
         for server in servers or []:
             self.add_server_config(server)
-        self.providers: list[MCPResourceProvider] = []
+        self.providers: list[McpServerCap] = []
         self.sampling_model = sampling_model
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
-            self.aggregating_provider = AggregatingResourceProvider(
-                providers=cast(list[ResourceProvider], self.providers),
+            self.aggregating_provider = CombinedToolsetCapability(
+                capabilities=cast(list[AbstractCapability], self.providers),
                 name=f"{name}_aggregated",
             )
         self.exit_stack = AsyncExitStack()
         self._accessible_roots = accessible_roots
         self._global_pool = GlobalConnectionPool()
         self._toolset_cache: dict[str, Any] = {}
-        self._session_contexts: dict[str, _SessionContext] = {}
+        self._session_contexts: dict[str, McpSessionContext] = {}
         self._acp_mcp_manager: AcpMcpConnectionManager | None = None
 
     def add_server_config(self, cfg: MCPServerConfig | str) -> None:
@@ -184,10 +185,10 @@ class MCPManager:
         resolved = BaseMCPServerConfig.from_string(cfg) if isinstance(cfg, str) else cfg
         self.servers.append(resolved)
 
-    def get_or_create_session(self, session_id: str) -> _SessionContext:
+    def get_or_create_session(self, session_id: str) -> McpSessionContext:
         """Get or create the per-session MCP context for ``session_id``.
 
-        If no context exists for ``session_id``, a new ``_SessionContext``
+        If no context exists for ``session_id``, a new ``McpSessionContext``
         is created with a fresh ``SessionConnectionPool``, empty toolset
         cache, no snapshot, and an empty ACP connection list.  Subsequent
         calls with the same ``session_id`` return the same object.
@@ -196,31 +197,22 @@ class MCPManager:
             session_id: Unique identifier for the session.
 
         Returns:
-            The ``_SessionContext`` for this session.
+            The ``McpSessionContext`` for this session.
         """
         from agentpool.mcp_server.session_pool import SessionConnectionPool
 
         ctx = self._session_contexts.get(session_id)
         if ctx is None:
-            ctx = _SessionContext(
+            ctx = McpSessionContext(
                 connection_pool=SessionConnectionPool(session_id=session_id),
             )
             self._session_contexts[session_id] = ctx
         return ctx
 
-    def get_session_context(self, session_id: str) -> _SessionContext | None:
-        """Return the per-session MCP context for ``session_id``, or ``None``.
+    def get_session_context(self, session_id: str) -> McpSessionContext | None:
+        """Get the session context for ``session_id`` without creating one.
 
-        Unlike :meth:`get_or_create_session`, this method does not create a
-        new context if one does not exist — it simply looks up the existing
-        context.
-
-        Args:
-            session_id: Unique identifier for the session.
-
-        Returns:
-            The ``_SessionContext`` for this session, or ``None`` if no
-            context has been created yet.
+        Returns ``None`` if no context exists for the session.
         """
         return self._session_contexts.get(session_id)
 
@@ -241,6 +233,29 @@ class MCPManager:
         """
         ctx = self.get_or_create_session(session_id)
         ctx.snapshot = snapshot
+
+    async def add_transport(
+        self,
+        session_id: str,
+        client_id: str,
+        transport: ClientTransport,
+        skill_name: str | None = None,
+    ) -> None:
+        """Add a pre-created transport to the session's connection pool.
+
+        Delegates to the internal :class:`SessionConnectionPool` for the
+        given session.  If no session context exists yet, one is created
+        via ``get_or_create_session()``.
+
+        Args:
+            session_id: Unique identifier for the session.
+            client_id: Client identifier for the MCP server.
+            transport: Pre-created fastmcp ``ClientTransport``.
+            skill_name: Optional skill name for skill-scoped MCP isolation.
+        """
+        ctx = self.get_or_create_session(session_id)
+        if ctx.connection_pool is not None:
+            await ctx.connection_pool.add_transport(client_id, transport, skill_name)
 
     def __repr__(self) -> str:
         return f"MCPManager(name={self.name!r}, servers={len(self.servers)})"
@@ -300,7 +315,7 @@ class MCPManager:
 
     async def setup_server(
         self, config: MCPServerConfig, *, add_to_config: bool = False
-    ) -> MCPResourceProvider | None:
+    ) -> McpServerCap | None:
         """Set up a single MCP server resource provider.
 
         Args:
@@ -323,26 +338,30 @@ class MCPManager:
             self.add_server_config(config)
 
         # Deduplication: skip if a provider with the same client_id already exists
-        if any(p.server.client_id == config.client_id for p in self.providers):
+        if any(p.config.client_id == config.client_id for p in self.providers):
             logger.debug(
                 "MCP server already registered, skipping",
                 client_id=config.client_id,
             )
             return None
 
-        provider = MCPResourceProvider(
-            server=config,
-            name=f"{self.name}_{config.display_name}",
-            owner=self.owner,
-            source="pool" if self.owner == "pool" else "node",
+        from agentpool.mcp_server.client import MCPClient
+
+        client = MCPClient(
+            config=config,
             sampling_callback=self._sampling_callback,
             accessible_roots=self._accessible_roots,
+        )
+        provider = McpServerCap(
+            config=config,
+            name=f"{self.name}_{config.display_name}",
+            client=client,
         )
         provider = await self.exit_stack.enter_async_context(provider)
         self.providers.append(provider)
         return provider
 
-    def get_mcp_providers(self) -> list[MCPResourceProvider]:
+    def get_mcp_providers(self) -> list[McpServerCap]:
         """Get all MCP resource providers managed by this manager."""
         return list(self.providers)
 
@@ -356,7 +375,7 @@ class MCPManager:
             True if a provider was removed, False otherwise
         """
         for i, provider in enumerate(self.providers):
-            if provider.server.client_id == client_id:
+            if provider.config.client_id == client_id:
                 # Note: We don't remove from exit_stack here because
                 # the provider was entered into the stack; cleanup() handles that
                 self.providers.pop(i)
@@ -377,19 +396,19 @@ class MCPManager:
         await self.cleanup()
         self.exit_stack = AsyncExitStack()
 
-    def get_aggregating_provider(self) -> AggregatingResourceProvider:
+    def get_aggregating_provider(self) -> CombinedToolsetCapability:
         """Get an aggregating provider containing only ACP providers.
 
         Non-ACP providers are excluded because they are handled separately
-        by :meth:`as_capability()`.
+        by :meth:`get_capabilities()`.
         """
-        acp_providers = [p for p in self.providers if isinstance(p.server, AcpMCPServerConfig)]
-        return AggregatingResourceProvider(
-            providers=cast(list[ResourceProvider], acp_providers),
+        acp_providers = [p for p in self.providers if isinstance(p.config, AcpMCPServerConfig)]
+        return CombinedToolsetCapability(
+            capabilities=cast(list[AbstractCapability], acp_providers),
             name=f"{self.name}_acp_aggregated",
         )
 
-    async def as_capability(  # noqa: PLR0915
+    async def get_capabilities(  # noqa: PLR0915
         self,
         session_id: str | None = None,
     ) -> list[MCP]:
@@ -401,7 +420,7 @@ class MCPManager:
         skipped in global configs since pydantic-ai does not support ACP
         directly. Disabled servers are also skipped.
 
-        When ``session_id`` is provided, the session's ``_SessionContext`` is
+        When ``session_id`` is provided, the session's ``McpSessionContext`` is
         looked up via ``get_or_create_session()``.  If a snapshot is stored
         on the context, configs are partitioned:
 
@@ -548,7 +567,7 @@ class MCPManager:
         else:
             if session_id is not None and ctx is None:
                 logger.warning(
-                    "Session %s context was removed during as_capability(); "
+                    "Session %s context was removed during get_capabilities(); "
                     "falling back to global-only MCP capabilities.",
                     session_id,
                 )

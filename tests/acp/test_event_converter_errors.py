@@ -89,7 +89,7 @@ async def test_run_error_event_yields_turn_complete_when_supported(
 
     d_turn = _dump(updates[1])
     assert d_turn["session_update"] == "turn_complete"
-    assert d_turn["stop_reason"] == "end_turn"
+    assert d_turn["stop_reason"] == "refusal"
 
 
 @pytest.mark.unit

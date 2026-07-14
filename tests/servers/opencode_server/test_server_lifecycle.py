@@ -40,7 +40,6 @@ def mock_pool() -> Mock:
     pool = Mock()
     pool.manifest = Mock()
     pool.manifest.agents = {}
-    pool.skill_commands = None
     return pool
 
 
@@ -52,6 +51,8 @@ def shared_agent(mock_env: Mock, mock_pool: Mock) -> Mock:
     agent.env = mock_env
     agent._input_provider = None
     agent.agent_pool = mock_pool
+    agent.host_context = mock_pool
+    agent._agent_pool = mock_pool  # state.py resolves _pool via agent._agent_pool
     agent.storage = None
     return agent
 

@@ -19,6 +19,7 @@ from agentpool_config.forward_targets import (
     NodeConnectionConfig,
 )
 from agentpool_config.hooks import HooksConfig
+from agentpool_config.lifecycle import LifecycleConfig
 from agentpool_config.mcp_server import (
     BaseMCPServerConfig,
     MCPServerConfig,
@@ -263,20 +264,42 @@ class BaseAgentConfig(NodeConfig):
     """
 
     elicitation_timeout: timedelta | None = Field(
-        default=timedelta(seconds=300),
+        default=None,
         title="Elicitation timeout",
         examples=["300s", "5m", "10m"],
     )
     """How long to wait for user elicitation responses before aborting the run.
 
     Accepts time strings (``"5m"``, ``"300s"``), numbers (seconds), or
-    ``timedelta``. Set to ``null`` for no timeout (infinite wait).
+    ``timedelta``. Set to ``null`` (the default) for no timeout (infinite
+    wait). Configure explicitly to enable a timeout.
 
     Example:
         ```yaml
         agents:
           my_agent:
             elicitation_timeout: 600s
+        ```
+    """
+
+    lifecycle: LifecycleConfig | None = Field(
+        default=None,
+        title="Lifecycle configuration",
+    )
+    """Configuration for the RunLoop lifecycle dimensions.
+
+    Controls storage backends (memory vs durable) and crash recovery
+    strategy for the agent's RunLoop. When ``None``, all defaults
+    (in-memory) are used.
+
+    Example:
+        ```yaml
+        agents:
+          my_agent:
+            lifecycle:
+              journal: durable
+              snapshot: durable
+              recover_strategy: retry
         ```
     """
 

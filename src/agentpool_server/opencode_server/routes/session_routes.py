@@ -199,14 +199,6 @@ async def _execute_slashed_command(  # noqa: PLR0915
     if command is None:
         raise HTTPException(status_code=404, detail=f"Command not found: {request.command}")
 
-    # Check if this is a skill command by looking it up in pool.skill_commands
-    skill_cmd = None
-    if state.pool.skill_commands:
-        skill_cmd = state.pool.skill_commands.get(request.command)
-
-    if skill_cmd:
-        return await _execute_skill_command(state, session_id, request)
-
     # Create assistant message (before execution)
     now = now_ms()
     assistant_msg_id = identifier.ascending("message")
@@ -304,7 +296,7 @@ async def _execute_slashed_command(  # noqa: PLR0915
             else:
                 # Fallback to direct agent if SessionPool not available
                 agent = state.agent
-                iterator = agent.run_stream(agent_prompt, session_id=session_id)
+                iterator = agent.run_stream(agent_prompt, session_id=session_id)  # type: ignore[assignment]
 
             async for oc_event in adapter.process_stream(iterator):
                 await state.broadcast_event(oc_event)
@@ -368,19 +360,18 @@ async def _execute_skill_command(  # noqa: PLR0915
 
     # Get skill command from pool
     skill_cmd = None
-    if state.pool.skill_commands:
-        skill_cmd = state.pool.skill_commands.get(skill_name)
 
     if not skill_cmd:
         raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
 
-    # Load skill instructions - use provider for virtual skills
+    # Load skill instructions - use resolver for virtual skills
     instructions = ""
-    if state.pool.skill_provider is not None:
+    if state.pool.skill_resolver is not None:
         try:
-            instructions = await state.pool.skill_provider.get_skill_instructions(skill_name)
+            skill = await state.pool.skill_resolver.resolve(skill_name)
+            instructions = skill.load_instructions()
         except Exception:  # noqa: BLE001
-            # Fall back to local load if provider fetch fails
+            # Fall back to local load if resolver fails
             try:
                 instructions = skill_cmd.skill.load_instructions()
             except ValueError:
@@ -1550,8 +1541,8 @@ async def summarize_session(  # noqa: PLR0915
                 try:
                     agent = state.agent
                     pipeline = None
-                    if agent.agent_pool is not None:
-                        pipeline = agent.agent_pool.compaction_pipeline
+                    if agent.host_context is not None:
+                        pipeline = agent.host_context.manifest.get_compaction_pipeline()
                     if pipeline is None:
                         pipeline = summarizing_context()
 
@@ -1852,7 +1843,7 @@ async def execute_command(  # noqa: PLR0915
         if state.command_store and state.command_store.get_command(request.command) is not None:
             # Check for collision with MCP prompts
             session_agent = state.agent
-            prompts = await session_agent.tools.list_prompts()
+            prompts = await session_agent.list_prompts()
             if any(p.name == request.command for p in prompts):
                 logger.warning(
                     "Both slashed command and prompt exist for '%s'. Using slashed command.",
@@ -1860,19 +1851,9 @@ async def execute_command(  # noqa: PLR0915
                 )
             return await _execute_slashed_command(state, session_id, request)
 
-        # Fallback: check pool.skill_commands directly when CommandStore misses
-        # This handles cases where skills were registered after CommandStore init
-        # or where the CommandStore sync callback hasn't fired yet
-        if state.pool.skill_commands and request.command in state.pool.skill_commands:
-            logger.debug(
-                "Command '%s' found in skill_commands but not CommandStore, executing as skill",
-                request.command,
-            )
-            return await _execute_skill_command(state, session_id, request)
-
         # Fall back to MCP prompts (existing code remains unchanged)
         session_agent = state.agent
-        prompts = await session_agent.tools.list_prompts()
+        prompts = await session_agent.list_prompts()
         # Find matching prompt by name
         prompt = next((p for p in prompts if p.name == request.command), None)
         if prompt is None:

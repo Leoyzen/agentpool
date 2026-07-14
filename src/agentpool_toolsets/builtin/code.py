@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Any
 from upathtools import is_directory
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.log import get_logger
-from agentpool.resource_providers import ResourceProvider
 from agentpool_toolsets.fsspec_toolset.diagnostics import (
     DiagnosticsManager,
     format_diagnostics_table,
@@ -81,7 +81,7 @@ def _detect_language(path: str) -> str | None:
     return EXTENSION_TO_LANGUAGE.get(suffix)
 
 
-class CodeTools(ResourceProvider):
+class CodeTools(FunctionToolsetCapability):
     """Provider for code analysis and transformation tools."""
 
     def __init__(
@@ -103,7 +103,6 @@ class CodeTools(ResourceProvider):
         self._explicit_env = env
         self._explicit_cwd = cwd
         self._diagnostics_config = diagnostics_config
-        self._tools: list[Tool] | None = None
 
     def _get_env(self, agent_ctx: AgentContext) -> ExecutionEnvironment:
         """Get execution environment (explicit or from agent)."""
@@ -135,16 +134,16 @@ class CodeTools(ResourceProvider):
 
     async def get_tools(self) -> Sequence[Tool]:
         """Get code analysis tools."""
-        if self._tools is not None:
+        if self._tools and len(self._tools) > 0:
             return self._tools
 
-        self._tools = [self.create_tool(self.format_code, category="execute")]
+        # create_tool already appends to self._tools, so we just call it
+        self._tools = []
+        self.create_tool(self.format_code, category="execute")
         if importlib.util.find_spec("ast_grep_py"):
-            self._tools.append(self.create_tool(self.ast_grep, category="search", idempotent=True))
+            self.create_tool(self.ast_grep, category="search", idempotent=True)
         # Always register - checks for env at runtime (self.execution_env or agent.env)
-        self._tools.append(
-            self.create_tool(self.run_diagnostics, category="search", idempotent=True)
-        )
+        self.create_tool(self.run_diagnostics, category="search", idempotent=True)
         return self._tools
 
     async def format_code(  # noqa: D417

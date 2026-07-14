@@ -303,9 +303,6 @@ class ToolInterceptCapability(AbstractCapability[Any]):
 
     def _get_confirmation_tool_names(self) -> set[str]:
         """Get the set of tool names that require confirmation."""
-        tool_manager = self.hook_manager._agent.tools
-        try:
-            tools = tool_manager._tools if hasattr(tool_manager, "_tools") else []
-        except Exception:  # noqa: BLE001
-            tools = []
+        agent = self.hook_manager._agent
+        tools = agent._builtin_provider._tools
         return {t.name for t in tools if t.requires_confirmation}

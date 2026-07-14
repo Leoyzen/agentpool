@@ -14,7 +14,6 @@ from agentpool.mcp_server.manager import MCPManager
 from agentpool.messaging import ChatMessage
 from agentpool.messaging.connection_manager import ConnectionManager
 from agentpool.messaging.messagenode import MessageNode
-from agentpool.tools.manager import ToolManager
 from agentpool.utils.context_wrapping import wrap_instruction
 
 
@@ -44,19 +43,6 @@ class _FakeMessageNode(MessageNode[Any, Any]):
 
 
 # ── Tests ──
-
-
-def test_toolmanager_no_deprecation_warning() -> None:
-    """ToolManager instantiation and get_tools() must not emit DeprecationWarning."""
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        ToolManager()
-
-    deprecation = _get_deprecation_warnings(w)
-    assert len(deprecation) == 0, (
-        f"ToolManager() emitted {len(deprecation)} DeprecationWarning(s): "
-        f"{[str(d.message) for d in deprecation]}"
-    )
 
 
 def test_mcpmanager_no_deprecation_warning() -> None:

@@ -1,8 +1,10 @@
 """Unit tests for HookAwareTurn mixin in isolation.
 
-Tests the mixin's hook firing logic, guard key deduplication, and no-op
-behavior when hooks are None. Uses a minimal host class that implements
-the three required abstract properties.
+Tests the mixin's hook firing logic and no-op behavior when hooks are None.
+The hooks_fired double-fire guard was removed in T4 — hooks now fire on
+every call without dedup. Tool execution logging idempotency is handled
+by the per-Turn ``_logged_tools`` set. Uses a minimal host class that
+implements the three required abstract properties.
 """
 
 from __future__ import annotations
@@ -58,6 +60,7 @@ class _MockHost(HookAwareTurn):
         agent_name: str = "test-agent",
         prompt: str = "hello",
     ) -> None:
+        super().__init__()
         self._hooks = hooks
         self._run_ctx = run_ctx
         self._agent_name = agent_name
@@ -117,13 +120,13 @@ async def test_all_four_hooks_fire_in_order() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test: hooks_fired prevents double-firing
+# Test: hooks fire on every call (hooks_fired guard removed in T4)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-async def test_pre_turn_hooks_dedup_on_double_call() -> None:
-    """Given two calls to _fire_pre_turn_hooks, only the first fires."""
+async def test_pre_turn_hooks_fire_on_double_call() -> None:
+    """Given two calls to _fire_pre_turn_hooks, both fire (no dedup guard)."""
     _reset_calls()
     hooks = AgentHooks(pre_turn=[_make_recording_hook("pre_turn")])
     host = _make_host(hooks=hooks)
@@ -132,22 +135,21 @@ async def test_pre_turn_hooks_dedup_on_double_call() -> None:
     result2 = await host._fire_pre_turn_hooks()
 
     assert result1 is not None
-    assert result2 is None
-    assert len(hook_calls) == 1
+    assert result2 is not None
+    assert len(hook_calls) == 2
 
 
 @pytest.mark.unit
-async def test_post_turn_hooks_dedup_on_double_call() -> None:
-    """Given two calls to _fire_post_turn_hooks, only the first fires."""
+async def test_post_turn_hooks_fire_on_double_call() -> None:
+    """Given two calls to _fire_post_turn_hooks, both fire (no dedup guard)."""
     _reset_calls()
     hooks = AgentHooks(post_turn=[_make_recording_hook("post_turn")])
     host = _make_host(hooks=hooks)
 
     await host._fire_post_turn_hooks(None)
-    result2 = await host._fire_post_turn_hooks(None)
+    await host._fire_post_turn_hooks(None)
 
-    assert result2 is None
-    assert len(hook_calls) == 1
+    assert len(hook_calls) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -193,8 +195,8 @@ async def test_post_tool_noop_when_hooks_none() -> None:
 
 
 @pytest.mark.unit
-async def test_pre_turn_fires_and_sets_guard_key() -> None:
-    """Given a pre_turn hook, firing it adds 'pre_turn' to hooks_fired."""
+async def test_pre_turn_fires_and_records_call() -> None:
+    """Given a pre_turn hook, firing it records the call."""
     _reset_calls()
     hooks = AgentHooks(pre_turn=[_make_recording_hook("pre_turn")])
     run_ctx = AgentRunContext(session_id="test-session")
@@ -202,8 +204,8 @@ async def test_pre_turn_fires_and_sets_guard_key() -> None:
 
     await host._fire_pre_turn_hooks()
 
-    assert "pre_turn" in run_ctx.hooks_fired
     assert len(hook_calls) == 1
+    assert hook_calls[0][0] == "pre_turn"
 
 
 # ---------------------------------------------------------------------------
@@ -238,12 +240,12 @@ async def test_post_turn_fires_in_finally_block() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test: tool_call_id-scoped guard keys prevent cross-call double-firing
+# Test: different tool_call_id allows both hooks to fire (no dedup guard)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-async def test_tool_guard_key_uses_tool_call_id() -> None:
+async def test_tool_hooks_fire_for_different_call_ids() -> None:
     """Given same tool_name but different tool_call_id, both pre_tool hooks fire."""
     _reset_calls()
     hooks = AgentHooks(pre_tool_use=[_make_recording_hook("pre_tool_use")])
@@ -254,13 +256,11 @@ async def test_tool_guard_key_uses_tool_call_id() -> None:
     await host._fire_pre_tool_hooks("same_tool", {"x": 2}, "call-B")
 
     assert len(hook_calls) == 2
-    assert "pre_tool_use:call-A" in run_ctx.hooks_fired
-    assert "pre_tool_use:call-B" in run_ctx.hooks_fired
 
 
 @pytest.mark.unit
-async def test_tool_guard_key_dedup_same_call_id() -> None:
-    """Given same tool_call_id twice, second pre_tool hook is skipped."""
+async def test_tool_hooks_fire_on_same_call_id() -> None:
+    """Given same tool_call_id twice, both pre_tool hooks fire (no dedup guard)."""
     _reset_calls()
     hooks = AgentHooks(pre_tool_use=[_make_recording_hook("pre_tool_use")])
     run_ctx = AgentRunContext(session_id="test-session")
@@ -269,12 +269,12 @@ async def test_tool_guard_key_dedup_same_call_id() -> None:
     await host._fire_pre_tool_hooks("tool", {}, "call-X")
     result2 = await host._fire_pre_tool_hooks("tool", {}, "call-X")
 
-    assert result2 is None
-    assert len(hook_calls) == 1
+    assert result2 is not None
+    assert len(hook_calls) == 2
 
 
 @pytest.mark.unit
-async def test_post_tool_guard_key_uses_tool_call_id() -> None:
+async def test_post_tool_hooks_fire_for_different_call_ids() -> None:
     """Given same tool_name but different tool_call_id, both post_tool hooks fire."""
     _reset_calls()
     hooks = AgentHooks(post_tool_use=[_make_recording_hook("post_tool_use")])
@@ -285,8 +285,6 @@ async def test_post_tool_guard_key_uses_tool_call_id() -> None:
     await host._fire_post_tool_hooks("tool", {}, "out2", 2.0, "call-B")
 
     assert len(hook_calls) == 2
-    assert "post_tool_use:call-A" in run_ctx.hooks_fired
-    assert "post_tool_use:call-B" in run_ctx.hooks_fired
 
 
 # ---------------------------------------------------------------------------
@@ -305,28 +303,3 @@ async def test_pre_turn_deny_returns_deny_result() -> None:
 
     assert result is not None
     assert result.get("decision") == "deny"
-
-
-# ---------------------------------------------------------------------------
-# Test: hooks_fired cleared between turns
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-async def test_hooks_fired_cleared_between_turns() -> None:
-    """Given hooks_fired populated in turn 1, clearing it allows turn 2 to fire."""
-    _reset_calls()
-    hooks = AgentHooks(pre_turn=[_make_recording_hook("pre_turn")])
-    run_ctx = AgentRunContext(session_id="test-session")
-    host = _make_host(hooks=hooks, run_ctx=run_ctx)
-
-    # Turn 1
-    await host._fire_pre_turn_hooks()
-    assert len(hook_calls) == 1
-
-    # Simulate RunHandle.start() clearing hooks_fired
-    run_ctx.hooks_fired.clear()
-
-    # Turn 2 (same run_ctx — new turn)
-    await host._fire_pre_turn_hooks()
-    assert len(hook_calls) == 2

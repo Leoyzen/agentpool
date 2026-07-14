@@ -270,15 +270,15 @@ async def test_handle_prompt_checkpointed_session_resumes(mocked_acp_agent, mock
 
     session_data = _make_session_data(status="checkpointed")
 
-    pool = mocked_acp_agent.agent_pool
-    pool._session_pool = MagicMock()
-    pool._session_pool.sessions = MagicMock()
-    pool._session_pool.sessions.store = MagicMock()
-    pool._session_pool.sessions.store.load = AsyncMock(return_value=session_data)
-    pool._session_pool.event_bus = MagicMock()
+    mock_ctx = MagicMock()
+    mock_ctx.session_pool = MagicMock()
+    mock_ctx.session_pool.sessions = MagicMock()
+    mock_ctx.session_pool.sessions.store = MagicMock()
+    mock_ctx.session_pool.sessions.store.load = AsyncMock(return_value=session_data)
+    mock_ctx.session_pool.event_bus = MagicMock()
 
     mock_session_manager = mocked_acp_agent.session_manager
-    mock_session_manager.session_store = pool._session_pool.sessions.store
+    mock_session_manager.session_store = mock_ctx.session_pool.sessions.store
     # Session is not active
     mock_session_manager.get_session = MagicMock(return_value=None)
     mock_session_manager.resume_session = AsyncMock()
@@ -291,7 +291,7 @@ async def test_handle_prompt_checkpointed_session_resumes(mocked_acp_agent, mock
     mock_client.session_update = AsyncMock()
 
     handler = ACPProtocolHandler(
-        agent_pool=pool,
+        host_context=mock_ctx,
         session_manager=mock_session_manager,
         event_converter=ACPEventConverter(subagent_display_mode="legacy"),
         client=mock_client,
@@ -303,9 +303,9 @@ async def test_handle_prompt_checkpointed_session_resumes(mocked_acp_agent, mock
     handler.start_event_consumer = AsyncMock()  # type: ignore[assignment]
 
     # Mock session_pool methods
-    pool._session_pool.create_session = AsyncMock()
-    pool._session_pool.receive_request = AsyncMock()
-    pool._session_pool.sessions.get_or_create_session_agent = AsyncMock()
+    mock_ctx.session_pool.create_session = AsyncMock()
+    mock_ctx.session_pool.receive_request = AsyncMock()
+    mock_ctx.session_pool.sessions.get_or_create_session_agent = AsyncMock()
 
     from acp.schema.content_blocks import TextContentBlock
 
@@ -316,7 +316,7 @@ async def test_handle_prompt_checkpointed_session_resumes(mocked_acp_agent, mock
     # For checkpointed sessions, resume_session should be called
     mock_session_manager.resume_session.assert_awaited_once()
     # create_session is still called (idempotent) to ensure SessionPool entry
-    pool._session_pool.create_session.assert_awaited()
+    mock_ctx.session_pool.create_session.assert_awaited()
 
 
 @pytest.mark.unit
@@ -327,20 +327,20 @@ async def test_handle_prompt_active_session_uses_create_session(mocked_acp_agent
 
     session_data = _make_session_data(status="active")
 
-    pool = mocked_acp_agent.agent_pool
-    pool._session_pool = MagicMock()
-    pool._session_pool.sessions = MagicMock()
-    pool._session_pool.sessions.store = MagicMock()
-    pool._session_pool.sessions.store.load = AsyncMock(return_value=session_data)
+    mock_ctx = MagicMock()
+    mock_ctx.session_pool = MagicMock()
+    mock_ctx.session_pool.sessions = MagicMock()
+    mock_ctx.session_pool.sessions.store = MagicMock()
+    mock_ctx.session_pool.sessions.store.load = AsyncMock(return_value=session_data)
     # Make event_bus.subscribe an AsyncMock
-    pool._session_pool.event_bus = MagicMock()
+    mock_ctx.session_pool.event_bus = MagicMock()
     _send, _recv = anyio.create_memory_object_stream(max_buffer_size=100)
     await _send.aclose()
-    pool._session_pool.event_bus.subscribe = AsyncMock(return_value=_recv)
-    pool._session_pool.event_bus.unsubscribe = AsyncMock()
+    mock_ctx.session_pool.event_bus.subscribe = AsyncMock(return_value=_recv)
+    mock_ctx.session_pool.event_bus.unsubscribe = AsyncMock()
 
     mock_session_manager = mocked_acp_agent.session_manager
-    mock_session_manager.session_store = pool._session_pool.sessions.store
+    mock_session_manager.session_store = mock_ctx.session_pool.sessions.store
     mock_session_manager.get_session = MagicMock(return_value=None)
     mock_session_manager.resume_session = AsyncMock()
 
@@ -352,7 +352,7 @@ async def test_handle_prompt_active_session_uses_create_session(mocked_acp_agent
     mock_client.session_update = AsyncMock()
 
     handler = ACPProtocolHandler(
-        agent_pool=pool,
+        host_context=mock_ctx,
         session_manager=mock_session_manager,
         event_converter=ACPEventConverter(subagent_display_mode="legacy"),
         client=mock_client,
@@ -363,9 +363,9 @@ async def test_handle_prompt_active_session_uses_create_session(mocked_acp_agent
     # Mock start_event_consumer to avoid creating real asyncio tasks
     handler.start_event_consumer = AsyncMock()  # type: ignore[assignment]
 
-    pool._session_pool.create_session = AsyncMock()
-    pool._session_pool.receive_request = AsyncMock()
-    pool._session_pool.sessions.get_or_create_session_agent = AsyncMock()
+    mock_ctx.session_pool.create_session = AsyncMock()
+    mock_ctx.session_pool.receive_request = AsyncMock()
+    mock_ctx.session_pool.sessions.get_or_create_session_agent = AsyncMock()
 
     from acp.schema.content_blocks import TextContentBlock
 
@@ -374,7 +374,7 @@ async def test_handle_prompt_active_session_uses_create_session(mocked_acp_agent
 
     # Sessions missing from memory are resumed to restore conversation history
     mock_session_manager.resume_session.assert_awaited()
-    pool._session_pool.create_session.assert_awaited()
+    mock_ctx.session_pool.create_session.assert_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -397,14 +397,18 @@ def _make_mock_session(session_id: str = "resume-test-session") -> MagicMock:
 
 
 def _setup_session_pool_mock(acp_agent: AgentPoolACPAgent) -> MagicMock:
-    pool = acp_agent.agent_pool
-    pool._session_pool = MagicMock()
-    pool._session_pool.create_session = AsyncMock()
-    pool._session_pool.receive_request = AsyncMock()
-    pool._session_pool.sessions = MagicMock()
-    pool._session_pool.sessions.get_or_create_session_agent = AsyncMock()
-    pool._session_pool.event_bus = MagicMock()
-    return pool._session_pool
+    mock_ctx = MagicMock()
+    session_pool = MagicMock()
+    session_pool.create_session = AsyncMock()
+    session_pool.receive_request = AsyncMock()
+    session_pool.sessions = MagicMock()
+    session_pool.sessions.get_or_create_session_agent = AsyncMock()
+    session_pool.event_bus = MagicMock()
+    mock_ctx.session_pool = session_pool
+    # Replace default_agent with a mock so host_context returns our mock_ctx
+    acp_agent.default_agent = MagicMock()
+    acp_agent.default_agent.host_context = mock_ctx
+    return session_pool
 
 
 @pytest.mark.unit
@@ -479,7 +483,7 @@ async def test_resume_injects_session_mcp_providers(mocked_acp_agent):
     await mocked_acp_agent.resume_session(request)
 
     # MCP providers are no longer added via add_provider — they go through
-    # McpConfigSnapshot → as_capability() → MCPToolset. We verify that the
+    # McpConfigSnapshot → get_capabilities() → MCPToolset. We verify that the
     # session agent was created (which internally builds the snapshot).
     session_pool.sessions.get_or_create_session_agent.assert_called_once_with("resume-test-session")
     mock_session_agent.tools.add_provider.assert_not_called()
@@ -542,7 +546,7 @@ async def test_resume_then_handle_prompt_no_duplicate_agent_creation(
     mock_client.session_update = AsyncMock()
 
     handler = ACPProtocolHandler(
-        agent_pool=mocked_acp_agent.agent_pool,
+        host_context=mocked_acp_agent.host_context,
         session_manager=mocked_acp_agent.session_manager,
         event_converter=ACPEventConverter(subagent_display_mode="legacy"),
         client=mock_client,

@@ -7,14 +7,12 @@ from typing import TYPE_CHECKING, Any
 
 from epregistry import EntryPointRegistry
 
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.log import get_logger
-from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-    from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.tools.base import Tool
 
@@ -22,19 +20,18 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class EntryPointTools(ResourceProvider):
+class EntryPointTools(FunctionToolsetCapability):
     """Provider for entry point based tools."""
 
     def __init__(self, module: str) -> None:
         super().__init__(name=module)
         self.module = module
-        self._tools: list[Tool] | None = None
         self.registry = EntryPointRegistry[Callable[..., Any]]("agentpool")
 
     async def get_tools(self) -> Sequence[Tool]:
         """Get tools from entry points."""
         # Return cached tools if available
-        if self._tools is not None:
+        if self._tools:
             return self._tools
 
         self._tools = []
@@ -49,11 +46,3 @@ class EntryPointTools(ResourceProvider):
             tool = self.create_tool(item, metadata=meta)
             self._tools.append(tool)
         return self._tools
-
-    def as_capability(self) -> AbstractCapability | None:
-        """Return a pydantic-ai capability for this provider.
-
-        Returns:
-            A pydantic-ai AbstractCapability instance, or None.
-        """
-        return None

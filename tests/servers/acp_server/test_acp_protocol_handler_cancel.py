@@ -58,7 +58,7 @@ def acp_handler(
 ) -> ACPProtocolHandler:
     """Return an ACPProtocolHandler with mocked dependencies."""
     return ACPProtocolHandler(
-        agent_pool=mock_pool,
+        host_context=mock_pool,
         session_manager=mock_session_manager,
         event_converter=mock_event_converter,
         client=mock_client,
@@ -111,7 +111,7 @@ async def test_cancel_session_handles_no_running_consumer(
 @pytest.mark.anyio
 async def test_cancel_session_without_session_pool(acp_handler: ACPProtocolHandler) -> None:
     """cancel_session should be a no-op when SessionPool is None."""
-    acp_handler.agent_pool.session_pool = None
+    acp_handler._host_context.session_pool = None
     session_id = "test-session-789"
 
     # Should not raise

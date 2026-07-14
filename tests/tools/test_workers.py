@@ -217,7 +217,7 @@ async def test_basic_worker_setup(tmp_path: Path):
         main_agent = _get_agent(pool, "main")
         async with main_agent:
             # Verify workers were registered as tools via toolset
-            tools = await main_agent.tools.get_tools()
+            tools = await main_agent._get_all_tools()
             tool_names = [t.name for t in tools]
             assert "ask_worker" in tool_names
             assert "ask_specialist" in tool_names
@@ -279,7 +279,7 @@ async def test_invalid_worker(tmp_path: Path):
         main_agent = _get_agent(pool, "main")
         async with main_agent:
             # Tool is created but will fail when called
-            tools = await main_agent.tools.get_tools()
+            tools = await main_agent._get_all_tools()
             tool_names = [t.name for t in tools]
             assert "ask_nonexistent" in tool_names
 

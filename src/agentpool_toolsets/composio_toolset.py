@@ -5,14 +5,12 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.log import get_logger
-from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-
-    from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.tools.base import Tool
 
@@ -20,7 +18,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class ComposioTools(ResourceProvider):
+class ComposioTools(FunctionToolsetCapability):
     """Provider for composio tools."""
 
     def __init__(self, user_id: str, toolsets: list[str], api_key: str | None = None) -> None:
@@ -33,16 +31,7 @@ class ComposioTools(ResourceProvider):
             self.composio = Composio(api_key=key)
         else:
             self.composio = Composio()
-        self._tools: list[Tool] | None = None
         self._toolkits = toolsets
-
-    def as_capability(self) -> AbstractCapability | None:
-        """Return a pydantic-ai capability for this provider.
-
-        Returns:
-            A pydantic-ai AbstractCapability instance, or None.
-        """
-        return None
 
     def _create_tool_handler(self, tool_slug: str) -> Callable[..., Any]:
         """Create a handler function for a specific tool."""
@@ -64,7 +53,7 @@ class ComposioTools(ResourceProvider):
     async def get_tools(self) -> Sequence[Tool]:
         """Get tools from composio."""
         # Return cached tools if available
-        if self._tools is not None:
+        if self._tools:
             return self._tools
 
         self._tools = []

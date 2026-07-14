@@ -35,10 +35,11 @@ from agentpool.agents.events import (
 )
 from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
 from agentpool.agents.native_agent.turn import NativeTurn
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.storage import StorageManager
-from agentpool.tools import Tool, ToolManager
+from agentpool.tools import Tool
 from agentpool.tools.exceptions import ToolError
 from agentpool.utils.result_utils import to_type
 
@@ -49,6 +50,7 @@ if TYPE_CHECKING:
 
     from exxec import ExecutionEnvironment
     from pydantic_ai import AgentBuiltinTool, UsageLimits, UserContent
+    from pydantic_ai.capabilities import AbstractCapability
     from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models import Model
     from pydantic_ai.output import OutputSpec
@@ -78,7 +80,6 @@ if TYPE_CHECKING:
     from agentpool.models.agents import NativeAgentConfig, ToolMode
     from agentpool.orchestrator.turn import Turn
     from agentpool.prompts.prompts import PromptType
-    from agentpool.resource_providers import ResourceProvider
     from agentpool.sessions import SessionData
     from agentpool.tools.base import FunctionTool
     from agentpool.ui.base import InputProvider
@@ -114,7 +115,7 @@ class AgentKwargs(TypedDict, total=False):
     model: ModelType
     system_prompt: str | Sequence[str]
     tools: Sequence[ToolType] | None
-    toolsets: Sequence[ResourceProvider] | None
+    toolsets: Sequence[AbstractCapability] | None
     mcp_servers: Sequence[str | MCPServerConfig] | None
     skills_paths: Sequence[JoinablePathLike] | None
     retries: int
@@ -154,7 +155,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         description: str | None = None,
         display_name: str | None = None,
         tools: Sequence[ToolType] | None = None,
-        toolsets: Sequence[ResourceProvider] | None = None,
+        toolsets: Sequence[AbstractCapability] | None = None,
         mcp_servers: Sequence[str | MCPServerConfig] | None = None,
         resources: Sequence[PromptType | str] = (),
         skills_paths: Sequence[JoinablePathLike] | None = None,
@@ -273,12 +274,15 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self.tool_confirmation_mode: ToolConfirmationMode = tool_confirmation_mode
         # Store builtin tools for pydantic-ai
         self._builtin_tools = list(builtin_tools) if builtin_tools else []
-        # Override tools with Agent-specific ToolManager (with tools and tool_mode)
-        self.tools = ToolManager(tools, tool_mode=tool_mode, _warn=False)
+        # Initialize built-in tools and tool mode (replaces deprecated ToolManager)
+        self._tool_mode = tool_mode
+        self._builtin_provider = FunctionToolsetCapability(name="builtin")
+        for tool in tools or []:
+            self._builtin_provider.add_tool(tool)
         for toolset_provider in toolsets or []:
-            self.tools.add_provider(toolset_provider)
+            self._external_capabilities.append(toolset_provider)
         aggregating_provider = self.mcp.get_aggregating_provider()
-        self.tools.add_provider(aggregating_provider)
+        self._external_capabilities.append(aggregating_provider)
         # Override conversation with Agent-specific MessageHistory (with storage, etc.)
         resources = list(resources)
         if knowledge:
@@ -309,7 +313,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             all_prompts.extend(system_prompt)
         elif system_prompt:
             all_prompts.append(system_prompt)
-        prompt_manager = self.agent_pool.prompt_manager if self.agent_pool else None
+        prompt_manager = self.host_context.prompt_manager if self.host_context else None
         self.sys_prompts = SystemPrompts(all_prompts, prompt_manager=prompt_manager)
         self._formatted_system_prompt: str | None = None  # Set in __aenter__
         self._hook_manager = NativeAgentHookManager(
@@ -326,7 +330,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self._providers = list(providers) if providers else None  # model discovery
         self._direct_history_processors = list(history_processors) if history_processors else None
         self._resolved_history_processors: list[Callable[..., Any]] | None = None
-
         self._extra_capabilities: list[Any] = capabilities or []
 
     def _build_pool_configs(self) -> tuple[McpConfigEntry, ...]:
@@ -340,9 +343,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         """
         from agentpool.mcp_server.config_snapshot import McpConfigEntry
 
-        if self.agent_pool is None:
+        if self.host_context is None:
             return ()
-        pool_mcp = self.agent_pool.mcp
+        pool_mcp = self.host_context.mcp
         return tuple(
             McpConfigEntry(server_config=server, source="pool")
             for server in pool_mcp.servers
@@ -699,8 +702,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         from llmling_models import infer_model
 
         # Check if it's a variant
-        if self.agent_pool and model in self.agent_pool.manifest.model_variants:
-            config = self.agent_pool.manifest.model_variants[model]
+        ctx = self.host_context
+        if ctx and model in ctx.manifest.model_variants:
+            config = ctx.manifest.model_variants[model]
             return config.get_model(), config.get_model_settings()
         # Regular model string - no settings
         return infer_model(model), None
@@ -786,8 +790,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         run_ctx: AgentRunContext | None = None,
     ) -> PydanticAgent[AgentContext[TDeps], AgentOutputType]:
         """Create pydantic-ai agent from current state."""
-        from agentpool.utils.context_wrapping import wrap_instruction
-
         final_type = to_type(output_type) if output_type not in [None, str] else self._output_type
         actual_model = model or self._model
         if isinstance(actual_model, str):
@@ -808,10 +810,13 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         tool_capabilities: list[Any] = []
         direct_tools: list[Any] = []
         # 1. Tool providers — collect capabilities or fall back to direct tools
-        for provider in self.tools.providers:
-            cap = provider.as_capability()
-            if cap is not None:
-                tool_capabilities.append(cap)
+        for provider in self._all_capabilities:
+            # M3: providers are now AbstractCapability instances directly.
+            # They don't have get_capabilities() — they ARE capabilities.
+            from pydantic_ai.capabilities import AbstractCapability as _AbstractCapability
+
+            if isinstance(provider, _AbstractCapability):
+                tool_capabilities.append(provider)
             else:
                 # Provider not yet migrated to capability system — register
                 # tools directly via the legacy `tools` parameter
@@ -828,7 +833,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 except Exception:
                     logger.exception(
                         "Failed to register tools from provider",
-                        provider=provider.name,
+                        provider=type(provider).__name__,
                     )
         # 2. Hooks capability — always registered (unified tool interception)
         from agentpool.agents.native_agent.tool_intercept import ToolInterceptCapability
@@ -847,7 +852,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         deferred_tools: dict[str, str] = {}
         try:
             # Timeout to prevent hang when ACP MCP providers are still connecting
-            all_tools = await asyncio.wait_for(self.tools.get_tools(), timeout=5.0)
+            all_tools = await asyncio.wait_for(self._get_all_tools(), timeout=5.0)
             for tool in all_tools:
                 if tool.deferred:
                     deferred_tools[tool.name] = tool.deferred_strategy
@@ -875,9 +880,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 td = self.config.elicitation_timeout
                 run_ctx.elicitation_timeout = td.total_seconds() if td is not None else None
         checkpoint_mgr: CheckpointManager | None = None
-        if self.agent_pool is not None:
+        if self.host_context is not None:
             checkpoint_mgr = CheckpointManager(
-                storage_manager=self.agent_pool.storage,
+                storage_manager=self.host_context.storage,
             )
         if run_ctx is not None:
             run_ctx.checkpoint_manager = checkpoint_mgr
@@ -894,46 +899,21 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         tool_capabilities.append(create_approval_bridge_capability(self, input_provider))
         # 4. MCP servers
-        mcp_capabilities = await self.mcp.as_capability(
+        mcp_capabilities = await self.mcp.get_capabilities(
             session_id=run_ctx.session_id if run_ctx else None
         )
         tool_capabilities.extend(mcp_capabilities)
         # 5. Skill capabilities — from pool-scoped instances created during __aenter__.
-        #    Each SkillCapability provides tools and MCP servers.
-        #    Instructions are handled by SkillsInstructionProvider (no double injection).
-        #    Skill MCP configs are registered in the snapshot for SessionConnectionPool.
-        if self.agent_pool is not None:
-            pool_capabilities = self.agent_pool.skill_capabilities
+        #    Each SkillManagerCap provides tools and MCP servers.
+        pool = self._agent_pool
+        if pool is not None:
+            pool_capabilities = pool.skill_capabilities
             if pool_capabilities:
-                # Ensure a snapshot exists for skill config registration.
-                session_id = run_ctx.session_id if run_ctx else None
-                if session_id is not None:
-                    ctx = self.mcp.get_or_create_session(session_id)
-                    if ctx.snapshot is None:
-                        from agentpool.mcp_server.config_snapshot import McpConfigSnapshot
+                from agentpool.capabilities.skill_manager_cap import SkillManagerCap
 
-                        self.mcp.update_session_snapshot(session_id, McpConfigSnapshot())
-                # Collect skill config entries from visible capabilities.
-                skill_entries: list[McpConfigEntry] = []
-                visibility_checker = getattr(self.agent_pool, "is_skill_visible_to_node", None)
-                for cap in pool_capabilities:
-                    if visibility_checker is not None and not visibility_checker(
-                        cap._skill, self.name
-                    ):
-                        continue
-                    tool_capabilities.append(cap)
-                    skill_entries.extend(cap.build_config_entries())
-                # Register skill configs in the snapshot.
-                if skill_entries and session_id is not None:
-                    ctx = self.mcp.get_or_create_session(session_id)
-                    existing = ctx.snapshot
-                    if existing is not None:
-                        self.mcp.update_session_snapshot(
-                            session_id,
-                            existing.with_skill_configs(
-                                tuple(skill_entries),
-                            ),
-                        )
+                tool_capabilities.extend(
+                    cap for cap in pool_capabilities if isinstance(cap, SkillManagerCap)
+                )
 
         # Collect pydantic-ai compatible instructions from SystemPrompts and providers
         all_instructions: list[Any] = []
@@ -942,30 +922,23 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         system_instructions = await self.sys_prompts.to_pydantic_ai_instructions(self)
         all_instructions.extend(system_instructions)
 
-        # Collect instructions from all providers
-        for provider in self.tools.providers:
+        # Collect instructions from all capabilities
+        for cap in self._all_capabilities:
             try:
-                provider_instructions = await provider.get_instructions()
-                # Wrap each instruction for pydantic-ai compatibility
-                for instruction_fn in provider_instructions:
-                    try:
-                        wrapped_instruction = wrap_instruction(
-                            instruction_fn, fallback="", _warn=False
-                        )
-                        all_instructions.append(wrapped_instruction)
-                    except Exception:
-                        # Wrap failure - log and skip this instruction
-                        logger.exception(
-                            "Failed to wrap instruction, skipping",
-                            provider=provider.name,
-                            instruction=instruction_fn,
-                        )
-                        continue
+                cap_instructions = cap.get_instructions()
+                # Handle both sync (returns str|None|list) and async (returns coroutine)
+                if hasattr(cap_instructions, "__await__"):
+                    cap_instructions = await cap_instructions
+                if cap_instructions is not None:
+                    if isinstance(cap_instructions, list):
+                        all_instructions.extend(cap_instructions)
+                    else:
+                        all_instructions.append(cap_instructions)
             except Exception as e:
-                # Provider failure - log and continue
+                # Capability failure - log and continue
                 logger.exception(
-                    "Failed to get instructions from provider",
-                    provider=provider.name,
+                    "Failed to get instructions from capability",
+                    capability=type(cap).__name__,
                     error=str(e),
                 )
                 continue
@@ -1121,6 +1094,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         input_provider: InputProvider | None = None,
         wait_for_connections: bool | None = None,
         deps: TDeps | None = None,
+        **pydantic_ai_kwargs: Any,
     ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
         """Stream agent events in real-time using NativeTurn.
 
@@ -1159,6 +1133,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             run_ctx=run_ctx,
             message_history=model_messages,
             parent_id=user_msg.message_id,
+            **pydantic_ai_kwargs,
         )
         turn_failed = False
         error_msg = ""
@@ -1184,7 +1159,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         pass_message_history: bool = False,
     ) -> Tool:
         """Register another agent as a worker tool."""
-        return self.tools.register_worker(
+        return self._worker_provider.register_worker(
             worker,
             name=name,
             reset_history_on_run=reset_history_on_run,
@@ -1205,6 +1180,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         prompts: list[UserContent],
         run_ctx: AgentRunContext,
         message_history: list[ModelMessage],
+        **pydantic_ai_kwargs: Any,
     ) -> Turn:
         """Create a NativeTurn for single-cycle execution.
 
@@ -1212,19 +1188,30 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             prompts: Pre-converted prompt strings for this turn.
             run_ctx: Per-run isolated context.
             message_history: Incoming message history.
+            **pydantic_ai_kwargs: Extra kwargs forwarded to
+                ``NativeTurn.__init__()`` → ``agentlet.iter()`` (e.g.
+                ``deferred_tool_results`` for crash recovery resume).
 
         Returns:
             A NativeTurn instance for single-cycle execution.
         """
-        from agentpool.orchestrator.run import inject_cancelled_tool_results
+        # Skip inject_cancelled_tool_results when resuming with
+        # deferred_tool_results — pydantic-ai's _handle_deferred_tool_results
+        # handles unprocessed tool calls directly. Adding RetryPromptPart
+        # via inject_cancelled_tool_results would conflict with the
+        # deferred_tool_results (same tool_call_id appears in both,
+        # causing "already executed" or mismatch errors).
+        if "deferred_tool_results" not in pydantic_ai_kwargs:
+            from agentpool.orchestrator.run import inject_cancelled_tool_results
 
-        message_history = inject_cancelled_tool_results(message_history)
+            message_history = inject_cancelled_tool_results(message_history)
         return NativeTurn(
             agent=self,
             prompts=prompts,  # type: ignore[arg-type]
             run_ctx=run_ctx,
             message_history=message_history,
             hooks=self.hooks,
+            **pydantic_ai_kwargs,
         )
 
     async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
@@ -1270,7 +1257,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         async with AsyncExitStack() as stack:
             if tools is not None:  # Tools
                 await stack.enter_async_context(
-                    self.tools.temporary_tools(tools, exclusive=replace_tools)
+                    self._temporary_tools(tools, exclusive=replace_tools)
                 )
 
             if history is not None:  # History
@@ -1326,11 +1313,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         mode_category = get_permission_category(self.tool_confirmation_mode)
         categories.append(mode_category)
         # Check configured model_variants first (RFC-0034: configured-first)
-        if self.agent_pool and self.agent_pool.manifest.model_variants:
+        ctx = self.host_context
+        if ctx and ctx.manifest.model_variants:
             # current_mode_id should be the actual model identifier to match option values
             current_model_id = self.model_name or ""
             model_modes = []
-            for variant_name, config in self.agent_pool.manifest.model_variants.items():
+            for variant_name, config in ctx.manifest.model_variants.items():
                 model = config.get_model()
                 mode_id = f"{model.system}:{model.model_name}"
                 model_modes.append(
@@ -1367,9 +1355,10 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             self.log.info("_set_mode called for model: %s", mode_id)
             # Resolve variant name from actual model identifier if needed
             variant_name = mode_id
-            if self.agent_pool and mode_id not in self.agent_pool.manifest.model_variants:
+            ctx = self.host_context
+            if ctx and mode_id not in ctx.manifest.model_variants:
                 # mode_id is an actual model identifier, find matching variant
-                for vn, config in self.agent_pool.manifest.model_variants.items():
+                for vn, config in ctx.manifest.model_variants.items():
                     model = config.get_model()
                     resolved = f"{model.system}:{model.model_name}"
                     if resolved == mode_id:
@@ -1388,11 +1377,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     is_valid = True
                     self.log.info("Model %s validated against tokonomics", mode_id)
             # Also check model_variants from manifest (by variant name or identifier)
-            if (
-                not is_valid
-                and self.agent_pool
-                and variant_name in self.agent_pool.manifest.model_variants
-            ):
+            if not is_valid and ctx and variant_name in ctx.manifest.model_variants:
                 is_valid = True
                 self.log.info(
                     "Model %s validated against model_variants (variant: %s)",
@@ -1400,11 +1385,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     variant_name,
                 )
             if not is_valid:
-                available = (
-                    list(self.agent_pool.manifest.model_variants.keys())
-                    if self.agent_pool
-                    else "N/A"
-                )
+                available = list(ctx.manifest.model_variants.keys()) if ctx else "N/A"
                 self.log.warning(
                     "Model %s validation failed. Available variants: %s",
                     mode_id,
@@ -1441,16 +1422,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         Returns:
             List of SessionData objects
         """
-        if not self.agent_pool:
+        if not self.host_context:
             return []
         # Get sessions from session store
         try:
             # Get session IDs from store — do NOT filter by agent_name so that
             # sessions from previous default_agents remain visible in the TUI.
             # Filter by cwd at the SQL level when provided.
-            session_ids = await self.agent_pool.storage.list_session_ids(cwd=cwd)
+            session_ids = await self.host_context.storage.list_session_ids(cwd=cwd)
             # Batch load all sessions in one query instead of N+1
-            sessions = await self.agent_pool.storage.load_sessions_batch(session_ids)
+            sessions = await self.host_context.storage.load_sessions_batch(session_ids)
             # Python-level cwd filter as secondary safeguard for path normalization
             # (resolve handles trailing slashes, symlinks, relative paths)
             resolved_filter = Path(cwd).resolve() if cwd is not None else None
@@ -1479,17 +1460,17 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         Returns:
             SessionData if session was found and loaded, None otherwise.
         """
-        if not self.agent_pool:
+        if not self.host_context:
             return None
 
         session_data: SessionData | None = None
         try:
-            session_data = await self.agent_pool.storage.load_session(session_id)
+            session_data = await self.host_context.storage.load_session(session_id)
         except Exception:
             self.log.exception("Failed to load session data", session_id=session_id)
 
         try:
-            messages = await self.agent_pool.storage.get_session_messages(session_id)
+            messages = await self.host_context.storage.get_session_messages(session_id)
             self.conversation.chat_messages.clear()
             self.conversation.chat_messages.extend(messages)
             self.log.info(

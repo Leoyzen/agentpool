@@ -881,7 +881,7 @@ class StorageManager:
         session_id: str,
         messages_json: str,
         pending_calls: list[PendingDeferredCall],
-    ) -> None:
+    ) -> bool:
         """Save checkpoint data to all capable providers.
 
         Serializes pending_calls and distributes messages_json and
@@ -891,14 +891,20 @@ class StorageManager:
             session_id: Session identifier.
             messages_json: Pre-serialized JSON of ModelMessage list.
             pending_calls: List of unresolved deferred tool calls.
+
+        Returns:
+            True if at least one provider successfully saved the checkpoint,
+            False if all providers failed or no providers are configured.
         """
         calls_adapter = TypeAdapter(list[PendingDeferredCall])
         pending_calls_json = calls_adapter.dump_json(pending_calls).decode()
 
+        any_success = False
         for provider in self.providers:
             try:
                 with anyio.CancelScope(shield=True):
                     await provider.save_checkpoint(session_id, messages_json, pending_calls_json)
+                any_success = True
             except NotImplementedError:
                 pass
             except Exception:
@@ -907,6 +913,13 @@ class StorageManager:
                     provider=provider.__class__.__name__,
                     session_id=session_id,
                 )
+        if not any_success:
+            logger.error(
+                "Checkpoint save failed — no provider succeeded",
+                session_id=session_id,
+                provider_count=len(self.providers),
+            )
+        return any_success
 
     async def load_checkpoint(
         self,

@@ -24,13 +24,13 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 
-async def _ok_gen(**kwargs: Any) -> Any:
+async def _ok_gen(*args: Any, **kwargs: Any) -> Any:
     """Async generator that yields nothing and completes silently."""
     return
     yield  # pragma: no cover
 
 
-async def _fail_gen(**kwargs: Any) -> Any:
+async def _fail_gen(*args: Any, **kwargs: Any) -> Any:
     """Async generator that raises RuntimeError during iteration."""
     raise RuntimeError("Boom")
     yield  # pragma: no cover
@@ -191,10 +191,10 @@ async def test_resume_session_concurrent_calls_serialize(
         pending_calls=[make_pending_call("call-1")],
     )
 
-    # A slow agent.run_stream() that blocks until an event is set
+    # A slow run_stream() that blocks until an event is set
     block_event = asyncio.Event()
 
-    async def slow_run_stream(**kwargs: Any) -> Any:
+    async def slow_run_stream(session_id: str, *prompts: Any, **kwargs: Any) -> Any:
         await block_event.wait()
         return  # StopAsyncIteration
         yield  # pragma: no cover
@@ -203,11 +203,6 @@ async def test_resume_session_concurrent_calls_serialize(
     mock_native.name = "test-agent"
     mock_native._model = None
     mock_native.model_settings = None
-    mock_agentlet = MagicMock()
-    mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run_stream = slow_run_stream
-
-    mock_pool.get_agent = MagicMock(return_value=mock_native)
 
     with (
         patch.object(
@@ -220,6 +215,7 @@ async def test_resume_session_concurrent_calls_serialize(
             "_reconstruct_native_agent",
             AsyncMock(return_value=mock_native),
         ),
+        patch.object(session_pool, "run_stream", slow_run_stream),
     ):
         results = make_deferred_tool_results(["call-1"])
 
@@ -276,11 +272,6 @@ async def test_resume_session_rejects_second_after_success(
     mock_native.name = "test-agent"
     mock_native._model = None
     mock_native.model_settings = None
-    mock_agentlet = MagicMock()
-    mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run_stream = _ok_gen
-
-    mock_pool.get_agent = MagicMock(return_value=mock_native)
 
     with (
         patch.object(
@@ -293,6 +284,7 @@ async def test_resume_session_rejects_second_after_success(
             "_reconstruct_native_agent",
             AsyncMock(return_value=mock_native),
         ),
+        patch.object(session_pool, "run_stream", _ok_gen),
     ):
         results = make_deferred_tool_results(["call-1"])
 
@@ -342,11 +334,6 @@ async def test_resume_session_does_not_clear_pending_on_failure(
     mock_native.name = "test-agent"
     mock_native._model = None
     mock_native.model_settings = None
-    mock_agentlet = MagicMock()
-    mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run_stream = _fail_gen
-
-    mock_pool.get_agent = MagicMock(return_value=mock_native)
 
     with (
         patch.object(
@@ -359,6 +346,7 @@ async def test_resume_session_does_not_clear_pending_on_failure(
             "_reconstruct_native_agent",
             AsyncMock(return_value=mock_native),
         ),
+        patch.object(session_pool, "run_stream", _fail_gen),
     ):
         results = make_deferred_tool_results(["call-1"])
         with pytest.raises(RuntimeError, match="Boom"):
@@ -414,19 +402,14 @@ async def test_resume_session_allows_retry_after_failure(
     mock_native.name = "test-agent"
     mock_native._model = None
     mock_native.model_settings = None
-    mock_agentlet = MagicMock()
-    mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
 
-    async def run_fail_then_succeed_stream(**kwargs: Any) -> Any:
+    async def run_fail_then_succeed_stream(session_id: str, *prompts: Any, **kwargs: Any) -> Any:
         nonlocal fail_run
         if fail_run:
             fail_run = False
             raise RuntimeError("First attempt fails")
         return  # StopAsyncIteration
         yield  # pragma: no cover
-
-    mock_native.run_stream = run_fail_then_succeed_stream
-    mock_pool.get_agent = MagicMock(return_value=mock_native)
 
     with (
         patch.object(
@@ -439,6 +422,7 @@ async def test_resume_session_allows_retry_after_failure(
             "_reconstruct_native_agent",
             AsyncMock(return_value=mock_native),
         ),
+        patch.object(session_pool, "run_stream", run_fail_then_succeed_stream),
     ):
         results = make_deferred_tool_results(["call-1"])
 
@@ -506,11 +490,6 @@ async def test_resume_session_status_transitions_checkpointed_to_resuming_to_act
     mock_native.name = "test-agent"
     mock_native._model = None
     mock_native.model_settings = None
-    mock_agentlet = MagicMock()
-    mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run_stream = _ok_gen
-
-    mock_pool.get_agent = MagicMock(return_value=mock_native)
 
     with (
         patch.object(
@@ -523,6 +502,7 @@ async def test_resume_session_status_transitions_checkpointed_to_resuming_to_act
             "_reconstruct_native_agent",
             AsyncMock(return_value=mock_native),
         ),
+        patch.object(session_pool, "run_stream", _ok_gen),
     ):
         results = make_deferred_tool_results(["call-1"])
         await session_pool.resume_session("sess-1", results)
@@ -572,11 +552,6 @@ async def test_resume_session_status_reverts_to_checkpointed_on_failure(
     mock_native.name = "test-agent"
     mock_native._model = None
     mock_native.model_settings = None
-    mock_agentlet = MagicMock()
-    mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run_stream = _fail_gen
-
-    mock_pool.get_agent = MagicMock(return_value=mock_native)
 
     with (
         patch.object(
@@ -589,6 +564,7 @@ async def test_resume_session_status_reverts_to_checkpointed_on_failure(
             "_reconstruct_native_agent",
             AsyncMock(return_value=mock_native),
         ),
+        patch.object(session_pool, "run_stream", _fail_gen),
     ):
         results = make_deferred_tool_results(["call-1"])
         with pytest.raises(RuntimeError, match="Boom"):

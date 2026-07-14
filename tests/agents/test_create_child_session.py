@@ -64,6 +64,8 @@ async def test_create_child_session_with_pool(mock_node: MagicMock) -> None:
     mock_pool.session_pool = _make_mock_session_pool(store)
 
     mock_node.agent_pool = mock_pool
+    # host_context is accessed instead of agent_pool after M2 migration
+    mock_node.host_context = mock_pool
 
     # Persist the parent session so the manager can inherit project_id/cwd
     parent = SessionData(
@@ -100,6 +102,8 @@ async def test_create_child_session_with_explicit_parent(mock_node: MagicMock) -
     mock_pool.session_pool = _make_mock_session_pool(store)
 
     mock_node.agent_pool = mock_pool
+    # host_context is accessed instead of agent_pool after M2 migration
+    mock_node.host_context = mock_pool
 
     # Persist a different parent
     other_parent = SessionData(
@@ -131,6 +135,8 @@ async def test_create_child_session_with_explicit_parent(mock_node: MagicMock) -
 async def test_create_child_session_no_pool(mock_node: MagicMock) -> None:
     """When no pool is available, create_child_session falls back to generate_session_id."""
     mock_node.agent_pool = None
+    # host_context is accessed instead of agent_pool after M2 migration
+    mock_node.host_context = None
 
     ctx = AgentContext(node=mock_node)
     child_id = await ctx.create_child_session(
@@ -154,6 +160,8 @@ async def test_create_child_session_no_node_session_id(mock_node: MagicMock) -> 
     mock_pool.session_pool = _make_mock_session_pool(store)
 
     mock_node.agent_pool = mock_pool
+    # host_context is accessed instead of agent_pool after M2 migration
+    mock_node.host_context = mock_pool
 
     ctx = AgentContext(node=mock_node)
     child_id = await ctx.create_child_session(

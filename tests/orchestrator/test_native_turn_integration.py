@@ -155,11 +155,15 @@ async def test_native_turn_events_reach_event_bus_consumer() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_aborted_error_yields_stream_complete() -> None:
-    """NativeTurn must yield StreamCompleteEvent even on RunAbortedError.
+async def test_run_aborted_error_yields_cancelled_stream_complete() -> None:
+    """NativeTurn must yield StreamCompleteEvent(cancelled=True) on RunAbortedError.
 
-    Without this, RunHandle.start() never sees StreamCompleteEvent,
-    the turn loop continues, and the handle hangs in idle.
+    RunAbortedError (from elicitation cancel/timeout) is converted to
+    StreamCompleteEvent(cancelled=True) so that:
+    1. _execute_turn saves the final message to agent.conversation
+       (the StreamCompleteEvent branch handles this).
+    2. The ACP event converter emits stop_reason="cancelled".
+    3. _consume_run breaks on StreamCompleteEvent and unblocks.
     """
     agent = Agent(
         name="test-abort-sc",
@@ -184,11 +188,22 @@ async def test_run_aborted_error_yields_stream_complete() -> None:
         with patch.object(agent, "get_agentlet", AsyncMock(return_value=mock_agentlet)):
             events.extend([event async for event in turn.execute()])
 
-        # Must have StreamCompleteEvent as last event
+        # Must yield StreamCompleteEvent(cancelled=True), NOT RunErrorEvent
+        from agentpool.agents.events.events import RunErrorEvent
+
+        run_errors = [e for e in events if isinstance(e, RunErrorEvent)]
         stream_complete = [e for e in events if isinstance(e, StreamCompleteEvent)]
+        assert len(run_errors) == 0, (
+            f"Should NOT yield RunErrorEvent on RunAbortedError. "
+            f"Events: {[type(e).__name__ for e in events]}"
+        )
         assert len(stream_complete) == 1, (
             f"Expected 1 StreamCompleteEvent after RunAbortedError, got "
             f"{len(stream_complete)}. Events: {[type(e).__name__ for e in events]}"
+        )
+        assert stream_complete[0].cancelled is True, (
+            f"StreamCompleteEvent should have cancelled=True. "
+            f"Got cancelled={stream_complete[0].cancelled}"
         )
 
 

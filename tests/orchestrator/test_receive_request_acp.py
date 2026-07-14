@@ -13,8 +13,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agentpool.agents.acp_agent import ACPAgent
+from agentpool.lifecycle import RunState
 from agentpool.orchestrator.core import EventBus, SessionController
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.orchestrator.run import RunHandle
 
 
 pytestmark = pytest.mark.unit
@@ -215,7 +216,7 @@ async def test_cancel_then_receive_request_starts_new_run(
         agent_type="acp",
         event_bus=event_bus,
     )
-    existing_run._status = RunStatus.failed
+    existing_run._run_state = RunState.DONE
     controller._runs["failed-run-id"] = existing_run
     controller.get_session("sess-cancel").current_run_id = "failed-run-id"  # type: ignore[union-attr]
 

@@ -6,6 +6,7 @@ to interact with AgentPool agents.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,7 +16,6 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, Response
-from slashed import CommandStore
 
 from agentpool import log
 from agentpool_server.opencode_server.routes import (
@@ -32,7 +32,6 @@ from agentpool_server.opencode_server.routes import (
     session_router,
     tui_router,
 )
-from agentpool_server.opencode_server.skill_bridge import OpenCodeSkillBridge
 from agentpool_server.opencode_server.state import ServerState
 from agentpool_server.opencode_server.todo_utils import build_opencode_todos
 
@@ -114,13 +113,14 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
     """
     import logfire
 
-    if agent.agent_pool is None:
-        msg = "Agent must have agent_pool set"
+    ctx = agent.host_context
+    if ctx is None:
+        msg = "Agent must have host_context set"
         raise ValueError(msg)
 
     session_controller = None
-    if agent.agent_pool is not None and agent.agent_pool.session_pool is not None:
-        session_controller = agent.agent_pool.session_pool.sessions
+    if ctx.session_pool is not None:
+        session_controller = ctx.session_pool.sessions
 
     state = ServerState(
         working_dir=working_dir or str(Path.cwd()),
@@ -139,28 +139,131 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
             server_state=state,
         )
 
-    # Setup skill command bridge if pool has skill commands configured
-    if state.pool.skill_commands is not None:
-        state.skill_bridge = OpenCodeSkillBridge(skill_provider=state.pool.skill_provider)
-        state.pool.skill_commands.on_command_change(state.skill_bridge.handle_change)
+    # Set up skill command bridge and CommandStore for slash commands.
+    # Builds SkillCommand objects from pool.skills and bridges them to
+    # slashed Commands for OpenCode's slash command execution endpoint.
+    if state.pool.skills is not None:
+        from slashed import CommandStore
 
-        # Initialize CommandStore with skill commands
-        state.command_store = CommandStore(commands=state.skill_bridge.get_commands())
+        from agentpool.skills.command import SkillCommand
+        from agentpool_server.opencode_server.skill_bridge import OpenCodeSkillBridge
 
-        # Register callback to update CommandStore when skills change dynamically
-        def update_command_store() -> None:
-            """Update the CommandStore when skills change."""
-            if state.command_store is not None:
-                # Re-register all skill commands (replace=True to handle updates)
-                for cmd in state.skill_bridge.get_commands():
-                    state.command_store.register_command(cmd, replace=True)
+        def _build_skill_commands() -> list[SkillCommand]:
+            """Build SkillCommand list from current pool skills."""
+            cmds: list[SkillCommand] = []
+            for skill in state.pool.skills.list_skills():
+                if not skill.user_invocable:
+                    continue
+                cmds.append(
+                    SkillCommand(
+                        name=skill.name,
+                        description=skill.description,
+                        skill=skill,
+                        skill_uri=f"skill://{skill.name}",
+                    )
+                )
+            return cmds
 
-        state.skill_bridge.on_commands_changed(update_command_store)
+        def _sync_command_store(
+            bridge: OpenCodeSkillBridge,
+            store: CommandStore,
+            cmds: list[SkillCommand],
+        ) -> None:
+            """Reconcile bridge and store with the latest skill commands."""
+            new_names = {cmd.name for cmd in cmds}
+            old_names = {sc.name for sc in bridge.get_skill_commands()}
 
+            # Remove stale commands from bridge and store.
+            for stale in old_names - new_names:
+                bridge.handle_change(stale, None)
+                store.unregister_command(stale)
+
+            # Add/update commands in bridge and store.
+            for cmd in cmds:
+                bridge.handle_change(cmd.name, cmd)
+
+            # Register all current commands in the store.
+            for slashed_cmd in bridge.get_commands():
+                store.register_command(slashed_cmd, replace=True)
+
+        bridge = OpenCodeSkillBridge(skill_provider=state.pool.skill_provider)
+        initial_cmds = _build_skill_commands()
+        for cmd in initial_cmds:
+            bridge.handle_change(cmd.name, cmd)
+
+        state.skill_bridge = bridge
+        state.command_store = CommandStore(commands=bridge.get_commands())
         logger.debug(
             "OpenCode skill bridge setup complete",
-            command_count=len(state.pool.skill_commands),
+            command_count=len(initial_cmds),
         )
+
+        # Subscribe to ChangeEvent stream for dynamic skill updates.
+        # ExtensionRegistry.merge_change_streams() yields ChangeEvent with
+        # kind="skills_changed" when capabilities emit change notifications.
+        extension_registry = state.pool.extension_registry
+        if extension_registry is not None:
+            from agentpool.capabilities.extension_registry import (
+                Scope,
+                ScopeLevel,
+            )
+
+            async def _watch_skill_changes() -> None:
+                """Watch for skill change events and update CommandStore."""
+                stream = extension_registry.merge_change_streams(Scope(level=ScopeLevel.POOL))
+                if stream is None:
+                    return
+                async for event in stream:
+                    if event.kind != "skills_changed":
+                        continue
+                    logger.info("Skill change detected, rebuilding CommandStore")
+                    try:
+                        new_cmds = _build_skill_commands()
+                        if state.command_store is not None and state.skill_bridge is not None:
+                            _sync_command_store(
+                                state.skill_bridge,
+                                state.command_store,
+                                new_cmds,
+                            )
+                            logger.debug(
+                                "CommandStore rebuilt",
+                                command_count=len(new_cmds),
+                            )
+                    except Exception:
+                        logger.exception("Failed to rebuild CommandStore after skill change")
+
+            state._skill_change_task = asyncio.create_task(_watch_skill_changes())
+
+            # Watch for MCP tool list changes and broadcast McpToolsChangedEvent.
+            # McpServerCap.on_change() yields ChangeEvent(kind="tools_changed")
+            # when an MCP server's tool list changes (via notifications/tools/list_changed).
+            # This watcher converts that to McpToolsChangedEvent and broadcasts it
+            # so connected OpenCode clients can refresh their tool lists.
+            from agentpool_server.opencode_server.event_processor import EventProcessor
+
+            processor = EventProcessor()
+
+            async def _watch_mcp_tool_changes() -> None:
+                """Watch for MCP tool change events and broadcast notifications."""
+                stream = extension_registry.merge_change_streams(Scope(level=ScopeLevel.POOL))
+                if stream is None:
+                    return
+                async for event in stream:
+                    if event.kind != "tools_changed":
+                        continue
+                    logger.info(
+                        "MCP tools changed, broadcasting notification",
+                        server=event.capability_name,
+                    )
+                    try:
+                        oc_event = processor.create_mcp_tools_changed_event(
+                            server=event.capability_name,
+                        )
+                        await state.broadcast_event(oc_event)
+                    except Exception:
+                        logger.exception("Failed to broadcast McpToolsChangedEvent")
+
+            state._mcp_tool_change_task = asyncio.create_task(_watch_mcp_tool_changes())
 
     # Set up todo change callback to broadcast events
     async def on_todo_change(tracker: TodoTracker) -> None:
@@ -304,6 +407,26 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
         # Shutdown - clean up session pool integration first
         if state.session_pool_integration is not None:
             await state.session_pool_integration.shutdown()
+        # Cancel skill change watcher
+        if state._skill_change_task is not None:
+            state._skill_change_task.cancel()
+            try:
+                await state._skill_change_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Error during skill change task cleanup")
+            state._skill_change_task = None
+        # Cancel MCP tool change watcher
+        if state._mcp_tool_change_task is not None:
+            state._mcp_tool_change_task.cancel()
+            try:
+                await state._mcp_tool_change_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Error during MCP tool change task cleanup")
+            state._mcp_tool_change_task = None
         # Then clean up background tasks
         await state.cleanup_tasks()
         # Then tear down watchers and shared infrastructure

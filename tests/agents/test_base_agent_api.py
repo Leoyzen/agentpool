@@ -123,6 +123,9 @@ def _mock_session_pool(agent: _TestAgent, run_ctx: AgentRunContext) -> None:
     session_pool.get_run.return_value = run_handle
     agent_pool = MagicMock()
     agent_pool.session_pool = session_pool
+    host_ctx = MagicMock()
+    host_ctx.session_pool = session_pool
+    agent_pool.get_context.return_value = host_ctx
     agent.agent_pool = agent_pool
 
 
@@ -283,6 +286,9 @@ def test_is_turn_active_false_after_clearing_session_run_ctx(agent: _TestAgent) 
     session_pool.get_run.return_value = run_handle
     agent_pool = MagicMock()
     agent_pool.session_pool = session_pool
+    host_ctx = MagicMock()
+    host_ctx.session_pool = session_pool
+    agent_pool.get_context.return_value = host_ctx
     agent.agent_pool = agent_pool
 
     assert agent.get_active_run_context(session_id="test-session") is not None
@@ -310,7 +316,7 @@ def test_is_turn_active_false_after_clearing_background_run_ctx(agent: _TestAgen
 async def test_baseagent_standalone_generates_ephemeral_session() -> None:
     """BaseAgent without an agent_pool generates an ephemeral session_id during run_stream."""
     agent = _TestAgent(name="standalone-test")
-    assert agent.agent_pool is None
+    assert agent.host_context is None
 
     async with agent:
         async for _event in agent.run_stream("hello"):

@@ -136,7 +136,7 @@ class TestSkillsIncludeDefault:
         # Create a mock agent with the pool
         mock_agent = MagicMock()
         mock_agent.name = "test_agent"
-        mock_agent.agent_pool = mock_pool
+        mock_agent.host_context = mock_pool
 
         # Create ACP agent with load_skills=None
         acp_agent = AgentPoolACPAgent(
@@ -148,8 +148,8 @@ class TestSkillsIncludeDefault:
         # The load_skills should be None, and when checking should_load_skills,
         # it should resolve to False based on manifest
         assert acp_agent.load_skills is None
-        assert acp_agent.agent_pool is not None
-        assert acp_agent.agent_pool.manifest.skills.include_default is False
+        assert acp_agent.host_context is not None
+        assert acp_agent.host_context.manifest.skills.include_default is False
 
     def test_serve_acp_cli_load_skills_defaults_to_none(self) -> None:
         """serve-acp CLI load_skills defaults to None.
@@ -215,10 +215,10 @@ class TestSkillsIncludeDefault:
 
     @pytest.mark.asyncio
     async def test_local_resource_provider_respects_include_default_false(self, tmp_path) -> None:
-        """LocalResourceProvider must not discover default skills when include_default=False.
+        """SkillsManager must not discover default skills when include_default=False.
 
         Regression: SkillsManager.discover_skills() did not sync registry.skills_dirs,
-        so LocalResourceProvider (created from those dirs) re-discovered default paths.
+        so default skill paths leaked into the registry.
         """
         import logging
 
@@ -262,33 +262,27 @@ class TestSkillsIncludeDefault:
 
         try:
             # Debug: print paths
-            from agentpool.resource_providers.local import LocalResourceProvider
-
             print(
                 f"DEBUG: skills_manager.registry.skills_dirs ="
                 f" {skills_manager.registry.skills_dirs}"
             )
-            provider = skills_manager.resource_provider
-            assert isinstance(provider, LocalResourceProvider)
-            print(f"DEBUG: provider.skills_dirs = {provider.skills_dirs}")
-            print(f"DEBUG: provider._registry.skills_dirs = {provider._registry.skills_dirs}")
 
             print(
                 f"DEBUG: skills_manager.registry.list_items() ="
                 f" {skills_manager.registry.list_items()}"
             )
 
-            skills = await provider.get_skills()
-            skill_names = {s.name for s in skills}
+            # Verify only custom skill was discovered, not default skill
+            skill_names = set(skills_manager.registry.list_items())
             print(f"DEBUG: skill_names = {skill_names}")
 
             # Should only have custom skill, not default skill
             assert "custom-skill" in skill_names, (
-                f"Custom skill missing from provider. Got: {skill_names}"
+                f"Custom skill missing from registry. Got: {skill_names}"
             )
             assert "default-skill" not in skill_names, (
-                f"Default skill leaked into provider despite include_default=False. "
-                f"Got: {skill_names}. This is the LocalResourceProvider regression."
+                f"Default skill leaked into registry despite include_default=False. "
+                f"Got: {skill_names}. This is the SkillsManager regression."
             )
         finally:
             await skills_manager.__aexit__(None, None, None)

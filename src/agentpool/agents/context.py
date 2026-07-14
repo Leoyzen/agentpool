@@ -94,14 +94,6 @@ class AgentRunContext:
     cancelled: bool = False
     """Whether the run has been cancelled."""
 
-    hooks_fired: set[str] = field(default_factory=set)
-    """Tracks which hook events have fired this turn to prevent double-firing.
-
-    Cleared at the start of each turn by ``RunHandle.start()`` and
-    ``_run_stream_once()``. Entries are event names like ``"pre_turn"``,
-    ``"post_turn"``, ``"pre_tool_use:{tool_call_id}"``.
-    """
-
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     """Unique identifier for this run."""
 
@@ -164,22 +156,13 @@ class AgentRunContext:
     before awaiting an elicitation future, enabling crash recovery.
     """
 
-    elicitation_timeout: float | None = 300.0
+    elicitation_timeout: float | None = None
     """Timeout in seconds for elicitation responses.
 
     Set from agent config (``BaseAgentConfig.elicitation_timeout``) by
-    ``get_agentlet()``. ``None`` means no timeout (infinite wait). Used
+    ``get_agentlet()``. ``None`` means no timeout (infinite wait, the
+    default). Configure explicitly in YAML to enable a timeout. Used
     by ``handle_elicitation()`` for ``asyncio.wait_for()``.
-    """
-
-    current_messages: list[Any] | None = None
-    """Current pydantic-ai message history snapshot.
-
-    Set by the tool wrapping layer (``wrap_tool``) before each tool call
-    from ``ctx.messages``. Used by ``handle_elicitation()`` to pass real
-    message history to ``CheckpointManager.checkpoint()`` for crash
-    recovery. Without this, crash recovery would re-execute all prior
-    tool calls, causing duplicate side effects.
     """
 
     _run_handle: RunHandle | None = None
@@ -193,6 +176,14 @@ class AgentRunContext:
 
     steer_callback: Callable[[str, str], Awaitable[bool]] | None = None
     """Set by RunHandle.start(), allows tools to call steer() via run_ctx."""
+
+    turn_id: str | None = None
+    """Unique identifier for the current Turn, set by RunHandle.start().
+
+    Generated as ``str(uuid.uuid4())`` before ``agent.create_turn()`` so
+    that all events, journal entries, and snapshots within a single Turn
+    share the same ``turn_id`` for idempotent crash recovery.
+    """
 
     async def complete_background_task(self, child_session_id: str, message: str) -> None:
         """Signal that a background child task has completed.
@@ -383,24 +374,39 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                         timeout_seconds=run_ctx.elicitation_timeout,
                     )
                     await run_ctx.event_bus.publish(run_ctx.session_id, event)
+                # Get message history for checkpoint from the active agent run.
+                # active_agent_run is the authoritative pydantic-ai AgentRun
+                # object, always available during tool execution (set in
+                # NativeTurn.execute() inside the `async with agentlet.iter()` block).
+                checkpoint_messages: list[Any] = []
+                if run_ctx._run_handle is not None:
+                    agent_run = run_ctx._run_handle.active_agent_run
+                    if agent_run is not None:
+                        checkpoint_messages = agent_run.all_messages()
                 await run_ctx.checkpoint_manager.checkpoint(
                     session_id=run_ctx.session_id,
-                    message_history=run_ctx.current_messages or [],
+                    message_history=checkpoint_messages,
                     pending_calls=[pending_call],
                     agent_config_hash="",
                 )
                 run_ctx.checkpointed = True
                 # Update session store status to "checkpointed" so
                 # resume_session() can find it without relying on the
-                # allow_active_run workaround.
-                pool = self.node.agent_pool
+                # allow_active_run workaround. Also set pending_deferred_calls
+                # so resume_session() knows which calls need resolution.
+                pool = self.node.host_context
                 if pool is not None and pool.session_pool is not None:
                     store = pool.session_pool.sessions.store
                     if store is not None:
                         try:
                             data = await store.load(run_ctx.session_id)
                             if data is not None and data.status == "active":
-                                data = data.model_copy(update={"status": "checkpointed"})
+                                data = data.model_copy(
+                                    update={
+                                        "status": "checkpointed",
+                                        "pending_deferred_calls": [pending_call],
+                                    }
+                                )
                                 data.touch()
                                 await store.save(data)
                         except Exception:  # noqa: BLE001
@@ -446,6 +452,12 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         except TimeoutError:
             from agentpool.tasks.exceptions import RunAbortedError
 
+            logger.warning(
+                "Elicitation timed out — aborting agent run",
+                session_id=run_ctx.session_id,
+                tool_call_id=handle,
+                timeout_seconds=timeout,
+            )
             raise RunAbortedError(
                 f"Elicitation timed out after {timeout}s"
                 if timeout is not None
@@ -546,7 +558,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         session_id = self.run_ctx.session_id
         if not session_id:
             return None
-        pool = self.node.agent_pool
+        pool = self.node.host_context
         if pool is None or pool.session_pool is None:
             return None
         return pool.session_pool.sessions.get_session(session_id)
@@ -668,7 +680,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             The child session ID string.
         """
         child_sid: str
-        pool = self.node.agent_pool
+        pool = self.node.host_context
         if pool is not None and pool.session_pool is not None:
             effective_parent = parent_session_id or self.node._events.session_id
             # Guard against MagicMock auto-generated attributes in tests:

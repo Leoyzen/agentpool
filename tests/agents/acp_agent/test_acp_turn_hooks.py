@@ -126,7 +126,6 @@ def _make_turn(
         acp_client=client,  # type: ignore[arg-type]
         prompts=["do something"],
         run_ctx=_make_run_ctx(),
-        message_history=[],
         session_id="test-acp-session",
         agent_name="test-acp-agent",
         hooks=hooks,

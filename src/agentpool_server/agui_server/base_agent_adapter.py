@@ -123,11 +123,11 @@ class BaseAgentAGUIAdapter:
             # message history to our format and use it as the conversation context.
             prompt = self._get_user_prompt()
 
-            async for agent_event in self.agent.run_stream(prompt, store_history=False):
+            async for agent_event in self.agent.run_stream(prompt, store_history=False):  # type: ignore[attr-defined]
                 # Transform compatible events through AGUIEventStream
                 # Our RichAgentStreamEvent is a superset - AGUIEventStream handles
                 # the pydantic-ai compatible events and ignores unknown types
-                async for agui_event in event_stream.handle_event(agent_event):  # type: ignore[arg-type]
+                async for agui_event in event_stream.handle_event(agent_event):
                     yield agui_event
 
         except Exception as e:  # noqa: BLE001

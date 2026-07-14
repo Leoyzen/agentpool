@@ -23,7 +23,7 @@ DEFAULT_SKILLS_PATHS = [
 
 
 class SkillsInstructionConfig(Schema):
-    """Configuration for dynamic skills injection via ResourceProvider.
+    """Configuration for dynamic skills injection via AbstractCapability.
 
     Controls how skills are dynamically injected into agent prompts as
     instructions. This enables agents to discover and use skills without
@@ -42,18 +42,6 @@ class SkillsInstructionConfig(Schema):
             "x-doc-title": "Skills Instruction Configuration",
         }
     )
-
-    mode: Literal["off", "metadata", "full"] = Field(
-        default="off",
-        title="Injection mode",
-        examples=["off", "metadata", "full"],
-    )
-    """Dynamic skill injection mode.
-
-    - "off": No skill injection (default, backward compatible)
-    - "metadata": Inject skill names and descriptions only
-    - "full": Inject complete skill content including prompts
-    """
 
     max_skills: int = Field(
         default=20,
@@ -123,7 +111,7 @@ class SkillsConfig(Schema):
     """
 
     instruction: SkillsInstructionConfig = Field(default_factory=SkillsInstructionConfig)
-    """Configuration for dynamic skills injection via ResourceProvider."""
+    """Configuration for dynamic skills injection via AbstractCapability."""
 
     def get_effective_paths(self, config_file_path: UPath | None = None) -> list[UPath]:
         """Get the effective list of paths for skill discovery.

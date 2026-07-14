@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from abc import abstractmethod
 import asyncio
-from collections.abc import Callable
-from contextlib import suppress
+from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
 import re
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, assert_never, cast, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, assert_never, overload
 import warnings
 
 from anyenv import MultiEventHandler, method_spawner
@@ -26,17 +26,17 @@ from agentpool.agents.events import (
     resolve_event_handlers,
 )
 from agentpool.agents.modes import ModeInfo
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.common_types import IndividualEventHandler
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory, MessageNode
 from agentpool.prompts.convert import convert_prompts
-from agentpool.tools.manager import ToolManager
 from agentpool.utils.inspection import call_with_context
 from agentpool.utils.time_utils import get_now
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator, Sequence
+    from collections.abc import AsyncGenerator
     from contextvars import Token
     from datetime import datetime
 
@@ -76,6 +76,7 @@ if TYPE_CHECKING:
     from agentpool.sessions import SessionData
     from agentpool.talk.stats import MessageStats
     from agentpool.ui.base import InputProvider
+    from agentpool_config.lifecycle import LifecycleConfig
     from agentpool_config.mcp_server import MCPServerConfig
 
     # Union type for state updates emitted via state_updated signal
@@ -129,7 +130,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
     """Base class for Agent and ACPAgent.
 
     Provides shared infrastructure:
-    - tools: ToolManager for tool registration and execution
+    - _builtin_provider: FunctionToolsetCapability for built-in tools
+    - _worker_provider: FunctionToolsetCapability for worker tools
+    - _external_capabilities: list of external capabilities
     - conversation: MessageHistory for conversation state
     - event_handler: MultiEventHandler for event distribution
     - _event_queue: Queue for streaming events
@@ -171,10 +174,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """Return the prompt used for title generation for this session."""
         if initial_prompt is None:
             return None
-        if self.agent_pool is None or self.agent_pool.session_pool is None:
+        ctx = self.host_context
+        if ctx is None or ctx.session_pool is None:
             return initial_prompt
 
-        session_controller = self.agent_pool.session_pool.sessions
+        session_controller = ctx.session_pool.sessions
         get_session = getattr(session_controller, "get_session", None)
         if not callable(get_session):
             return initial_prompt
@@ -203,6 +207,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
         commands: Sequence[BaseCommand] | None = None,
         hooks: AgentHooks | None = None,
+        lifecycle_config: LifecycleConfig | None = None,
     ) -> None:
         """Initialize base agent with shared infrastructure.
 
@@ -222,6 +227,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             event_handlers: Event handlers for this agent
             commands: Slash commands to register with this agent
             hooks: Agent hooks for intercepting agent behavior at run and tool events
+            lifecycle_config: Optional lifecycle configuration for the RunLoop.
+                When None, all defaults (in-memory) are used.
         """
         from exxec import ExecutionEnvironment, LocalExecutionEnvironment
         from slashed import CommandStore
@@ -258,7 +265,12 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 stacklevel=2,
             )
         self._output_type: type[TResult] = output_type
-        self.tools = ToolManager(_warn=False)
+        # Direct capability management (replaces deprecated ToolManager)
+        self._builtin_provider = FunctionToolsetCapability(name="builtin")
+        self._worker_provider = FunctionToolsetCapability(name="workers")
+        self._external_capabilities: list[Any] = []
+        self._session_capabilities: list[Any] = []
+        self._tool_mode: Any | None = None
         handlers = resolve_event_handlers(event_handlers)
         self.event_handler: MultiEventHandler[IndividualEventHandler] = MultiEventHandler(handlers)
         self.hooks = hooks
@@ -279,11 +291,36 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self._internal_fs = IsolatedMemoryFileSystem()
         self.staged_content = StagedContent()
         self.metadata: dict[str, Any] = {}
+        self._lifecycle_config: LifecycleConfig | None = lifecycle_config
+        self._lifecycle_dimensions: tuple[Any, Any, Any, Any, Any] | None = None
 
     @property
     def _current_run_ctx(self) -> AgentRunContext | None:
         """Get current run context (using ContextVar for concurrency safety)."""
         return _current_run_ctx_var.get()
+
+    @property
+    def lifecycle_config(self) -> LifecycleConfig | None:
+        """Lifecycle configuration for this agent's RunLoop.
+
+        Returns:
+            The LifecycleConfig if set, or ``None`` for all-defaults.
+        """
+        return self._lifecycle_config
+
+    @property
+    def lifecycle_dimensions(
+        self,
+    ) -> tuple[Any, Any, Any, Any, Any] | None:
+        """Pre-created lifecycle dimensions for the current run, if any.
+
+        Returns:
+            Tuple of ``(trigger_source, journal, snapshot_store,
+            comm_channel, event_transport)`` if dimensions were created
+            from ``lifecycle_config``, or ``None`` if defaults should be
+            used.
+        """
+        return self._lifecycle_dimensions
 
     @property
     def session_id(self) -> str | None:
@@ -315,7 +352,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         parts = [f"Agent: {self.name}", f"Type: {typ}", f"Model: {model}"]
         if self.description:
             parts.append(f"Description: {self.description}")
-        parts.extend([await self.tools.__prompt__(), self.conversation.__prompt__()])
+        parts.extend([await self._tools_prompt(), self.conversation.__prompt__()])
         return "\n".join(parts)
 
     @overload
@@ -342,7 +379,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             case BaseTeam():
                 return BaseTeam([self, *other.nodes], mode="parallel")
             case Callable():
-                agent_2 = Agent.from_callback(other, agent_pool=self.agent_pool)  # ty: ignore[no-matching-overload]
+                agent_2 = Agent.from_callback(other, agent_pool=self._agent_pool)  # ty: ignore[no-matching-overload]
                 return BaseTeam([self, agent_2], mode="parallel")
             case MessageNode():
                 return BaseTeam([self, other], mode="parallel")
@@ -364,7 +401,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         from agentpool.delegation.base_team import BaseTeam
 
         if callable(other):
-            other = Agent.from_callback(other, agent_pool=self.agent_pool)
+            other = Agent.from_callback(other, agent_pool=self._agent_pool)
 
         return BaseTeam([self, other], mode="sequential")
 
@@ -407,16 +444,231 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
         # Build layers: internal_fs on top, VFS resources below
         layers: list[AbstractFileSystem] = [self._internal_fs]
-        if self.agent_pool is not None and not self.agent_pool.vfs_registry.is_empty:
-            layers.append(self.agent_pool.vfs_registry.get_fs())
+        ctx = self.host_context
+        if ctx is not None and not ctx.vfs_registry.is_empty:
+            layers.append(ctx.vfs_registry.get_fs())
         return OverlayFileSystem(filesystems=layers)
 
     async def reset(self) -> None:
         """Reset agent state (conversation history and tool states)."""
         await self.conversation.clear()
-        await self.tools.reset_states()
+        await self._reset_tool_states()
         event = self.AgentReset(agent_name=self.name)
         await self.agent_reset.emit(event)
+
+    # ---- Capability management (replaces deprecated ToolManager) ----
+
+    @property
+    def _all_capabilities(self) -> list[Any]:
+        """Return all capabilities: external + session + worker + builtin.
+
+        When ``_tool_mode == "codemode"``, callers should handle wrapping
+        in :class:`CodeModeCapability` in an async context (e.g.,
+        ``get_agentlet()``) since tool collection is async.
+        """
+        return [
+            *self._external_capabilities,
+            *self._session_capabilities,
+            self._worker_provider,
+            self._builtin_provider,
+        ]
+
+    def _add_capability(self, capability: Any, owner: str | None = None) -> None:
+        """Add an external capability.
+
+        Args:
+            capability: AbstractCapability instance to add
+            owner: Optional owner string (set on capability if supported)
+        """
+        if owner is not None:
+            # FunctionToolsetCapability supports .owner
+            with suppress(AttributeError):
+                capability.owner = owner
+        self._external_capabilities.append(capability)
+
+    async def _get_all_tools(self) -> list[Any]:
+        """Collect tools from all capabilities concurrently."""
+        from typing import Protocol, runtime_checkable
+
+        @runtime_checkable
+        class _ToolProviding(Protocol):
+            async def get_tools(self) -> Sequence[Any]: ...
+
+        import asyncio
+
+        caps = self._all_capabilities
+        coros: list[Any] = []
+        caps_with_tools: list[Any] = []
+        for cap in caps:
+            if isinstance(cap, _ToolProviding):
+                coros.append(cap.get_tools())
+                caps_with_tools.append(cap)
+        if not coros:
+            return []
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        tools_map: dict[str, Any] = {}
+        for cap, result in zip(caps_with_tools, results, strict=False):
+            if isinstance(result, BaseException):
+                logger.warning(
+                    "Failed to get tools from capability",
+                    capability=type(cap).__name__,
+                    error=str(result),
+                )
+                continue
+            for tool in result:
+                tools_map[tool.name] = tool
+        return list(tools_map.values())
+
+    async def _tools_prompt(self) -> str:
+        """Generate a summary of available tools for prompts."""
+        all_tools = await self._get_all_tools()
+        enabled_tools = [t.name for t in all_tools if t.enabled]
+        if not enabled_tools:
+            return "No tools available"
+        return f"Available tools: {', '.join(enabled_tools)}"
+
+    async def _reset_tool_states(self) -> None:
+        """Reset all tools to their default enabled states."""
+        for tool in await self._get_all_tools():
+            tool.enabled = True
+
+    async def _get_mcp_server_info(self) -> dict[str, Any]:
+        """Get information about configured MCP servers.
+
+        MCP server status is not directly available from capabilities.
+        Subclasses can override to provide agent-specific MCP server info.
+        """
+        return {}
+
+    async def get_resource(self, name: str) -> Any:
+        """Get a specific MCP resource by name or URI.
+
+        Args:
+            name: Name or URI of the resource to find
+
+        Raises:
+            ToolError: If resource not found
+        """
+        from typing import Protocol, runtime_checkable
+
+        from agentpool.tools.exceptions import ToolError
+
+        @runtime_checkable
+        class _ResourceProviding(Protocol):
+            async def get_resources(self) -> Sequence[Any]: ...
+
+        all_resources: list[Any] = []
+        caps = self._all_capabilities
+        coros: list[Any] = []
+        caps_with_resources: list[Any] = []
+        for cap in caps:
+            if isinstance(cap, _ResourceProviding):
+                coros.append(cap.get_resources())
+                caps_with_resources.append(cap)
+        if coros:
+            import asyncio
+
+            results = await asyncio.gather(*coros, return_exceptions=True)
+            for _cap, result in zip(caps_with_resources, results, strict=False):
+                if isinstance(result, BaseException):
+                    continue
+                all_resources.extend(result)
+        resource = next(
+            (
+                r
+                for r in all_resources
+                if getattr(r, "name", None) == name or getattr(r, "uri", None) == name
+            ),
+            None,
+        )
+        if not resource:
+            raise ToolError(f"Resource not found: {name}")
+        return resource
+
+    async def list_prompts(self) -> list[Any]:
+        """Get all prompts from external capabilities.
+
+        Returns:
+            List of prompt objects from capabilities that provide prompts
+        """
+        from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+        from agentpool.prompts.prompts import MCPClientPrompt as MCPPrompt
+
+        all_prompts: list[Any] = []
+        for provider in self._external_capabilities:
+            if isinstance(provider, FunctionToolsetCapability):
+                try:
+                    prompts = await provider.get_prompts()
+                    mcp_prompts = [p for p in prompts if isinstance(p, MCPPrompt)]
+                    all_prompts.extend(mcp_prompts)
+                except Exception:
+                    logger.exception(
+                        "Failed to get prompts from provider",
+                        provider=provider,
+                    )
+        return all_prompts
+
+    @asynccontextmanager
+    async def _with_session_capabilities(
+        self,
+        capabilities: Sequence[Any],
+    ) -> AsyncIterator[None]:
+        """Temporarily inject session-level capabilities for the duration of a run.
+
+        Args:
+            capabilities: Session-level capabilities to inject
+        """
+        self._session_capabilities[:] = list(capabilities)
+        try:
+            yield
+        finally:
+            self._session_capabilities.clear()
+
+    @asynccontextmanager
+    async def _temporary_tools(
+        self,
+        tools: Any,
+        *,
+        exclusive: bool = False,
+    ) -> AsyncIterator[list[Any]]:
+        """Temporarily register tools on the builtin provider.
+
+        Args:
+            tools: Tool(s) to register (Tool, callable, str, or sequence thereof)
+            exclusive: Whether to temporarily disable all other tools
+
+        Yields:
+            List of registered tool infos
+        """
+        from agentpool.tools.base import Tool as ToolClass
+
+        match tools:
+            case str() | Callable() | ToolClass():
+                tools_list = [tools]
+            case _:
+                tools_list = list(tools)
+        # Store original tool states if exclusive
+        all_tools = await self._get_all_tools()
+        original_states: dict[str, bool] = {}
+        if exclusive:
+            original_states = {t.name: t.enabled for t in all_tools}
+            for t in all_tools:
+                t.enabled = False
+        registered_tools: list[Any] = []
+        try:
+            for tool in tools_list:
+                tool_info = self._builtin_provider.register_tool(tool)
+                registered_tools.append(tool_info)
+            yield registered_tools
+        finally:
+            for tool_info in registered_tools:
+                self._builtin_provider.remove_tool(tool_info.name)
+            if exclusive:
+                for name_, was_enabled in original_states.items():
+                    all_tools_local = await self._get_all_tools()
+                    for t_ in all_tools_local:
+                        if t_.name == name_:
+                            t_.enabled = was_enabled
 
     def get_context(
         self,
@@ -442,7 +694,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
         return AgentContext(
             node=self,
-            pool=self.agent_pool,
+            pool=self._agent_pool,
             input_provider=input_provider or self._input_provider,
             data=data,
             model_name=self.model_name,
@@ -697,8 +949,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Returns:
             The session's active run context, or None if not found.
         """
-        if self.agent_pool is not None:
-            session_pool = self.agent_pool.session_pool
+        if self.host_context is not None:
+            session_pool = self.host_context.session_pool
             if session_pool is None:
                 return None
             effective_session_id = session_id or getattr(self._events, "session_id", None)
@@ -738,8 +990,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             return run_ctx
 
         # Level 2: SessionPool lookup when pooled and session has active run
-        if self.agent_pool is not None:
-            session_pool = self.agent_pool.session_pool
+        ctx = self.host_context
+        if ctx is not None:
+            session_pool = ctx.session_pool
             if session_pool is not None:
                 effective_session_id = session_id or getattr(self._events, "session_id", None)
                 if effective_session_id is not None:
@@ -775,11 +1028,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         processed in a continuation loop without exiting the stream. This
         allows tools or external code to schedule follow-up work.
 
-        !!! warning "Deprecated for pooled native agents"
-            Use ``agent_pool.session_pool.followup()`` instead.
+        !!! warning "Deprecated for pooled agents"
+            Use ``host_context.session_pool.followup()`` instead.
 
-        For non-native agents and standalone native agents, the existing
-        injection_manager-based path remains unchanged.
+        For standalone agents (no session pool), the injection_manager-based
+        path is used as a fallback.
 
         Args:
             *prompts: Prompts to queue (same format as run/run_stream)
@@ -793,19 +1046,16 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
         run_ctx = self.get_active_run_context(session_id=session_id)
 
-        # Pooled native agents: delegate to session_pool.followup().
-        if (
-            self.AGENT_TYPE == "native"
-            and self.agent_pool is not None
-            and self.agent_pool.session_pool is not None
-        ):
+        # Pooled agents: delegate to session_pool.followup().
+        ctx = self.host_context
+        if ctx is not None and ctx.session_pool is not None:
             warnings.warn(
-                "queue_prompt() is deprecated for pooled native agents. "
-                "Use agent_pool.session_pool.followup() instead.",
+                "queue_prompt() is deprecated for pooled agents. "
+                "Use host_context.session_pool.followup() instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
-            session_pool = self.agent_pool.session_pool
+            session_pool = ctx.session_pool
             effective_session_id = session_id or (
                 run_ctx.session_id if run_ctx else self._events.session_id
             )
@@ -815,9 +1065,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     session_pool.followup(effective_session_id, combined)
                 )
                 return
-            # Standalone native agents: fall through to legacy path
 
-        # Legacy path for non-native agents and standalone native agents
+        # Standalone agents: use injection_manager
         if run_ctx is not None and run_ctx.injection_manager is not None:
             combined = "\n".join(str(p) for p in prompts)
             run_ctx.injection_manager.inject(combined)
@@ -830,11 +1079,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         iteration completes, the message is automatically queued for the
         next iteration.
 
-        !!! warning "Deprecated for pooled native agents"
-            Use ``agent_pool.session_pool.steer()`` instead.
+        !!! warning "Deprecated for pooled agents"
+            Use ``host_context.session_pool.steer()`` instead.
 
-        For non-native agents and standalone native agents, the existing
-        injection_manager-based path remains unchanged.
+        For standalone agents (no session pool), the injection_manager-based
+        path is used as a fallback.
 
         Args:
             message: Message to inject
@@ -848,20 +1097,17 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 return "Changes made"
         """
         run_ctx = self.get_active_run_context(session_id=session_id)
+        ctx = self.host_context
 
-        # Pooled native agents: delegate to session_pool.steer().
-        if (
-            self.AGENT_TYPE == "native"
-            and self.agent_pool is not None
-            and self.agent_pool.session_pool is not None
-        ):
+        # Pooled agents: delegate to session_pool.steer().
+        if ctx is not None and ctx.session_pool is not None:
             warnings.warn(
-                "inject_prompt() is deprecated for pooled native agents. "
-                "Use agent_pool.session_pool.steer() instead.",
+                "inject_prompt() is deprecated for pooled agents. "
+                "Use host_context.session_pool.steer() instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
-            session_pool = self.agent_pool.session_pool
+            session_pool = ctx.session_pool
             effective_session_id = session_id or (
                 run_ctx.session_id if run_ctx else self._events.session_id
             )
@@ -880,51 +1126,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     session_pool.steer(most_recent.session_id, message)
                 )
                 return
-            # Standalone native agents: fall through to legacy path
 
-        # Legacy path for non-native agents and standalone native agents
-        # CRITICAL: Check run_ctx.completed to avoid injecting into a turn that
-        # has already finished (e.g., after end_turn).  If the turn is complete,
-        # the message would be stuck in injection_manager.pending forever.
-        # In that case, delegate to SessionPool for auto-resume.
+        # Standalone agents: use injection_manager
         if run_ctx is not None and not run_ctx.completed and run_ctx.injection_manager is not None:
             run_ctx.injection_manager.inject(message)
-            return
-
-        # No active run context — delegate to SessionPool for auto-resume
-        effective_session_id = session_id or (run_ctx.session_id if run_ctx else None)
-        if self.agent_pool is not None and effective_session_id is not None:
-            _session_pool = self.agent_pool.session_pool
-            if _session_pool is None:
-                return
-            # Fire-and-forget: delegate to SessionPool for auto-resume.
-            # Use task_manager to prevent GC of the task mid-execution.
-            self.task_manager.fire_and_forget(
-                _session_pool.inject_prompt(effective_session_id, message)
-            )
-            return
-
-        # FALLBACK for shared agents: effective_session_id is None but session_pool exists.
-        # This handles the case where BackgroundTaskProvider calls inject_prompt
-        # after background task completion when the agent has no fixed session_id.
-        if self.agent_pool is not None:
-            _session_pool = self.agent_pool.session_pool
-            if _session_pool is not None:
-                sessions = _session_pool.sessions.find_sessions_by_agent_name(self.name)
-                if sessions:
-                    most_recent = max(sessions, key=lambda s: s.last_active_at)
-                    self.task_manager.fire_and_forget(
-                        _session_pool.receive_request(
-                            most_recent.session_id, message, priority="asap"
-                        )
-                    )
-                    return
-
-        # No pool or session_id available — log warning
-        self.log.warning(
-            "inject_prompt called but no active run context or session pool available",
-            agent_name=self.name,
-        )
 
     def has_pending_injections(self, session_id: str | None = None) -> bool:
         """Check if there are pending injections.
@@ -953,11 +1158,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
         if (
             not _skip_pool
-            and self.agent_pool is not None
-            and self.agent_pool.session_pool is not None
+            and self.host_context is not None
+            and self.host_context.session_pool is not None
             and not _in_turn_context.get()
         ):
-            session_pool = self.agent_pool.session_pool
+            session_pool = self.host_context.session_pool
             effective_session_id = session_id or generate_session_id()
             existing_session = session_pool.sessions.get_session(effective_session_id)
             if existing_session is None or existing_session.agent_name == self.name:
@@ -1009,7 +1214,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         final_message: ChatMessage[TResult] | None = None
         async for event in session_pool.run_stream(
             effective_session_id,
-            *prompts,  # type: ignore[arg-type]
+            *prompts,
             input_provider=input_provider,
             parent_session_id=parent_session_id,
             depth=depth,
@@ -1093,8 +1298,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         if self._run_context is run_ctx:
             self._run_context = None
 
-    @method_spawner
-    async def run_stream(
+    @method_spawner  # type: ignore[arg-type]
+    async def run_stream(  # type: ignore[override]  # noqa: PLR0915
         self,
         *prompts: PromptCompatible,
         store_history: bool = True,
@@ -1110,6 +1315,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         depth: int = 0,
         _run_ctx: AgentRunContext | None = None,
         _skip_pool: bool = False,
+        **pydantic_ai_kwargs: Any,
     ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
         """Run agent with streaming output (the react loop).
 
@@ -1140,6 +1346,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             deps: Optional dependencies
             event_handlers: Optional event handlers
             depth: Current delegation depth (0 = top-level run)
+            **pydantic_ai_kwargs: Extra kwargs forwarded to PydanticAI.
 
         Yields:
             Stream events during execution
@@ -1185,6 +1392,18 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         run_ctx.current_task = asyncio.current_task()
         self._run_context = run_ctx
 
+        # When lifecycle_config is set, pre-create dimensions so they're
+        # available for any RunHandle that wraps this run (e.g. via
+        # SessionController). When None or all-defaults, RunHandle's
+        # __post_init__ creates in-memory defaults automatically.
+        if self._lifecycle_config is not None and not self._lifecycle_config.is_all_defaults():
+            from agentpool.lifecycle.factory import create_dimensions
+
+            self._lifecycle_dimensions = create_dimensions(
+                self._lifecycle_config,
+                effective_session_id,
+            )
+
         token: Token[AgentRunContext | None] | None = None
         try:
             token = _current_run_ctx_var.set(run_ctx)
@@ -1208,6 +1427,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                         deps=deps,
                         event_handlers=event_handlers,
                         _owns_event_bus=_created_local_bus,
+                        **pydantic_ai_kwargs,
                     ):
                         await local_bus.publish(effective_session_id, event)
                 except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
@@ -1257,6 +1477,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         deps: TDeps | None = None,
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
         _owns_event_bus: bool = False,
+        **pydantic_ai_kwargs: Any,
     ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
         """Process a single prompt group with streaming output.
 
@@ -1279,15 +1500,12 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             _owns_event_bus: Whether the caller created a local EventBus
                 (standalone mode). When True, ``message_sent`` is emitted
                 here. When False, the caller (Path A) handles emission.
+            **pydantic_ai_kwargs: Extra kwargs forwarded to PydanticAI.
 
         Yields:
             Stream events during execution
         """
         from agentpool.messaging import ChatMessage
-
-        # Clear hooks_fired so the new turn's hooks can fire
-        # even if the previous turn already fired them.
-        run_ctx.hooks_fired.clear()
 
         # Convert prompts to standard UserContent format
         converted_prompts = await convert_prompts(prompts)
@@ -1328,31 +1546,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             conversation.add_chat_messages([user_msg])
 
         try:
-            # Execute pre-turn hooks (guarded against double-firing with HookAwareTurn)
-            # Native agents fire hooks via HookAwareTurn in NativeTurn.execute();
-            # only ACP standalone path still uses this old hook firing.
-            if self.AGENT_TYPE != "native" and self.hooks and "pre_turn" not in run_ctx.hooks_fired:
-                run_ctx.hooks_fired.add("pre_turn")
-                pre_turn_result = await self.hooks.run_pre_turn_hooks(
-                    agent_name=self.name,
-                    prompt=user_msg.content
-                    if isinstance(user_msg.content, str)
-                    else str(user_msg.content),
-                    session_id=session_id,
-                )
-                if pre_turn_result.get("decision") == "deny":
-                    run_ctx.cancelled = True
-                    cancel_msg = ChatMessage(
-                        content="",
-                        role="assistant",
-                        name=self.name,
-                        session_id=session_id,
-                    )
-                    yield StreamCompleteEvent(
-                        message=cast("ChatMessage[TResult]", cancel_msg), cancelled=True
-                    )
-                    return
-
             async for event in self._stream_events(
                 run_ctx,
                 [*pending_parts, *converted_prompts],
@@ -1367,6 +1560,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 input_provider=input_provider,
                 wait_for_connections=wait_for_connections,
                 deps=deps,
+                **pydantic_ai_kwargs,
             ):
                 yield event
                 # Capture final message from StreamCompleteEvent
@@ -1389,27 +1583,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # TaskGroup cancellation from interrupting hooks/routing/persistence
         if final_message is not None:
             with anyio.CancelScope(shield=True):
-                # Execute post-turn hooks (guarded against double-firing with HookAwareTurn)
-                # Native agents fire hooks via HookAwareTurn in NativeTurn.execute();
-                # only ACP standalone path still uses this old hook firing.
-                if (
-                    self.AGENT_TYPE != "native"
-                    and self.hooks
-                    and "post_turn" not in run_ctx.hooks_fired
-                ):
-                    run_ctx.hooks_fired.add("post_turn")
-                    prompt_str = (
-                        user_msg.content
-                        if isinstance(user_msg.content, str)
-                        else str(user_msg.content)
-                    )
-                    await self.hooks.run_post_turn_hooks(
-                        agent_name=self.name,
-                        prompt=prompt_str,
-                        result=final_message.content,
-                        session_id=session_id,
-                    )
-
                 # Emit signal (always - for event handlers).
                 # Skip when run_ctx was provided by SessionPool (Path A);
                 # the Path A wrapper in run_stream() handles emission in that case.
@@ -1547,7 +1720,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # If we have regular content, process it through the agent
         if regular_prompts:
             self.log.debug("Processing prompts through agent", num_prompts=len(regular_prompts))
-            async for event in self.run_stream(*regular_prompts, **kwargs):
+            async for event in self.run_stream(*regular_prompts, **kwargs):  # type: ignore[attr-defined]
                 yield event
 
     @abstractmethod
@@ -1567,6 +1740,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         deps: TDeps | None = None,
         wait_for_connections: bool | None = None,
         store_history: bool = True,
+        **pydantic_ai_kwargs: Any,
     ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
         """Agent-specific streaming implementation.
 
@@ -1587,6 +1761,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             deps: Optional dependencies
             wait_for_connections: Whether to wait for connected agents
             store_history: Whether to store in history
+            **pydantic_ai_kwargs: Extra kwargs forwarded to PydanticAI.
 
         Yields:
             Stream events during execution
@@ -1671,12 +1846,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             self._background_run_ctx.cancelled = True
 
         # When pooled, delegate to SessionPool for proper run cancellation.
-        if self.agent_pool is not None and self.agent_pool.session_pool is not None:
+        ctx = self.host_context
+        if ctx is not None and ctx.session_pool is not None:
             effective_session_id = session_id or (
                 effective_run_ctx.session_id if effective_run_ctx else self._events.session_id
             )
             if effective_session_id is not None:
-                session_pool = self.agent_pool.session_pool
+                session_pool = ctx.session_pool
                 session_pool.sessions.cancel_run_for_session(effective_session_id)
 
         await self._interrupt(effective_run_ctx)
@@ -1703,13 +1879,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Returns a dict mapping server names to their status info. Used by
         the OpenCode /mcp endpoint to display MCP servers in the UI.
 
-        The default implementation checks external_providers on the tool manager.
+        The default implementation checks external capabilities for MCP servers.
         Subclasses may override to provide agent-specific MCP server info.
 
         Returns:
             Dict mapping server name to MCPServerStatus
         """
-        return await self.tools.get_mcp_server_info()
+        return await self._get_mcp_server_info()
 
     @method_spawner
     async def run(
@@ -1761,7 +1937,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # directly, not this method.  run() is a convenience wrapper that collects
         # streaming events and returns the final message.
         final_message = None
-        async for event in self.run_stream(
+        async for event in self.run_stream(  # type: ignore[attr-defined]
             *prompts,
             store_history=store_history,
             message_id=message_id,

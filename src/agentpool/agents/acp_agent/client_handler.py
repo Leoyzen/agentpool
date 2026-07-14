@@ -474,7 +474,7 @@ class ACPClientHandler(Client):
                 kwargs_str = " ".join(f"{k}={v}" for k, v in kwargs.items())
                 args_str = f"{args_str} {kwargs_str}".strip()
             # Execute via agent run_stream - the slash command goes as a prompt
-            async for event in self._agent.run_stream(f"/{cmd.name} {args_str}".strip()):
+            async for event in self._agent.run_stream(f"/{cmd.name} {args_str}".strip()):  # type: ignore[attr-defined]
                 match event:
                     case PartDeltaEvent(delta=TextPartDelta(content_delta=delta)):
                         await ctx.print(delta)

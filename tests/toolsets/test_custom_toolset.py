@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentpool.resource_providers import ResourceProvider
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool_config.toolsets import CustomToolsetConfig
 
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from pydantic_ai.capabilities import AbstractCapability
 
 
-class MockProvider(ResourceProvider):
+class MockProvider(FunctionToolsetCapability):
     """Mock provider that accepts arbitrary kwargs."""
 
     def __init__(self, name: str, owner: str | None = None, **kwargs) -> None:
@@ -20,7 +20,7 @@ class MockProvider(ResourceProvider):
         super().__init__(name=name, owner=owner)
         self.custom_params = kwargs
 
-    def as_capability(self) -> AbstractCapability | None:
+    def get_capabilities(self) -> AbstractCapability | None:
         """Return a pydantic-ai capability for this provider.
 
         Returns:
@@ -29,7 +29,7 @@ class MockProvider(ResourceProvider):
         return None
 
 
-class StrictProvider(ResourceProvider):
+class StrictProvider(FunctionToolsetCapability):
     """Mock provider with strict parameter requirements."""
 
     def __init__(self, name: str, required_arg: int):
@@ -82,7 +82,7 @@ async def test_custom_toolset_invalid_parameters():
     assert "value" in error_msg
     assert "Original error:" in error_msg
 
-    def as_capability(self) -> AbstractCapability | None:
+    def get_capabilities(self) -> AbstractCapability | None:
         """Return a pydantic-ai capability for this provider.
 
         Returns:

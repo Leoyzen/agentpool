@@ -214,7 +214,7 @@ class FileConnectionConfig(ConnectionConfig):
         from jinja2 import Template
 
         template = Template(self.template)
-        return template.render(message=message)
+        return str(template.render(message=message))
 
     def resolve_path(self, context: dict[str, str]) -> UPath:
         """Resolve path template with context variables."""

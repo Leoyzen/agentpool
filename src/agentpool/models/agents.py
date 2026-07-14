@@ -15,10 +15,10 @@ from tokonomics.model_names import ModelId  # noqa: TC002
 from toprompt import render_prompt
 
 from agentpool import log
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.common_types import EndStrategy  # noqa: TC001
 from agentpool.models.fields import OutputTypeField, SystemPromptField  # noqa: TC001
 from agentpool.prompts.prompts import PromptMessage, StaticPrompt
-from agentpool.resource_providers import StaticResourceProvider
 from agentpool_config import BaseToolConfig, NativeAgentToolConfig
 from agentpool_config.builtin_tools import BaseBuiltinToolConfig
 from agentpool_config.knowledge import Knowledge  # noqa: TC001
@@ -31,11 +31,12 @@ from agentpool_config.workers import WorkerConfig  # noqa: TC001
 if TYPE_CHECKING:
     import builtins
 
+    from pydantic_ai.capabilities import AbstractCapability
+
     from agentpool.agents.native_agent import Agent
     from agentpool.common_types import AnyEventHandlerType
     from agentpool.delegation import AgentPool
     from agentpool.prompts.prompts import BasePrompt
-    from agentpool.resource_providers import ResourceProvider
     from agentpool.tools.base import Tool
     from agentpool.ui.base import InputProvider
     from agentpool_config.workers import AgentWorkerConfig
@@ -317,19 +318,19 @@ class NativeAgentConfig(BaseAgentConfig):
             deps_type=deps_type,
         )
 
-    def get_tool_providers(self) -> list[ResourceProvider]:
+    def get_tool_providers(self) -> list[AbstractCapability]:
         """Get all resource providers for this agent's tools.
 
         Processes the unified tools list, separating:
-        - Toolsets: Each becomes its own ResourceProvider
-        - Single tools: Aggregated into a single StaticResourceProvider
+        - Toolsets: Each becomes its own AbstractCapability
+        - Single tools: Aggregated into a single FunctionToolsetCapability
 
         Returns:
-            List of ResourceProvider instances
+            List of AbstractCapability instances
         """
         from agentpool.tools.base import Tool
 
-        providers: list[ResourceProvider] = []
+        providers: list[AbstractCapability] = []
         static_tools: list[Tool] = []
 
         for tool_config in self.tools:
@@ -348,23 +349,23 @@ class NativeAgentConfig(BaseAgentConfig):
 
         # Wrap all single tools in one provider
         if static_tools:
-            providers.append(StaticResourceProvider(name="tools", tools=static_tools))
+            providers.append(FunctionToolsetCapability(name="tools", tools=static_tools))
 
         return providers
 
     # Keep old methods for backward compatibility during transition
-    def get_toolsets(self) -> list[ResourceProvider]:
+    def get_toolsets(self) -> list[AbstractCapability]:
         """Get toolset providers. Deprecated: use get_tool_providers() instead."""
         return [
             p
             for p in self.get_tool_providers()
-            if not isinstance(p, StaticResourceProvider) or p.name != "tools"
+            if not isinstance(p, FunctionToolsetCapability) or p.name != "tools"
         ]
 
-    def get_tool_provider(self) -> ResourceProvider | None:
+    def get_tool_provider(self) -> AbstractCapability | None:
         """Get single tools provider. Deprecated: use get_tool_providers() instead."""
         for p in self.get_tool_providers():
-            if isinstance(p, StaticResourceProvider) and p.name == "tools":
+            if isinstance(p, FunctionToolsetCapability) and p.name == "tools":
                 return p
         return None
 

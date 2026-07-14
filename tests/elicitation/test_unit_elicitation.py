@@ -729,12 +729,17 @@ async def test_handle_elicitation_passes_current_messages_to_checkpoint(
     registry = ElicitationFutureRegistry()
     agent_ctx.run_ctx.elicitation_registry = registry
 
-    # Set current_messages — simulates what tool_wrapping.py does
+    # Set up active_agent_run with messages — this is what
+    # handle_elicitation() uses for checkpoint message history.
     fake_messages = [
         MagicMock(),
         MagicMock(),
     ]
-    agent_ctx.run_ctx.current_messages = fake_messages
+    mock_agent_run = MagicMock()
+    mock_agent_run.all_messages = MagicMock(return_value=fake_messages)
+    mock_run_handle = MagicMock()
+    mock_run_handle.active_agent_run = mock_agent_run
+    agent_ctx.run_ctx._run_handle = mock_run_handle
 
     mock_checkpoint = MagicMock()
     mock_checkpoint.checkpoint = AsyncMock()
@@ -886,7 +891,11 @@ async def test_handle_elicitation_updates_session_status_to_checkpointed(
     mock_sessions.store = mock_store
     mock_session_pool.sessions = mock_sessions
     mock_pool.session_pool = mock_session_pool
+    mock_host_ctx = MagicMock()
+    mock_host_ctx.session_pool = mock_session_pool
+    mock_pool.get_context.return_value = mock_host_ctx
     agent_ctx.node.agent_pool = mock_pool
+    agent_ctx.node.host_context = mock_host_ctx
 
     payload = ElicitationResumePayload(
         deferred_handle="tc-status-1",
@@ -960,7 +969,11 @@ async def test_handle_elicitation_skips_status_update_if_not_active(
     mock_sessions.store = mock_store
     mock_session_pool.sessions = mock_sessions
     mock_pool.session_pool = mock_session_pool
+    mock_host_ctx = MagicMock()
+    mock_host_ctx.session_pool = mock_session_pool
+    mock_pool.get_context.return_value = mock_host_ctx
     agent_ctx.node.agent_pool = mock_pool
+    agent_ctx.node.host_context = mock_host_ctx
 
     payload = ElicitationResumePayload(
         deferred_handle="tc-skip-1",
@@ -978,3 +991,130 @@ async def test_handle_elicitation_skips_status_update_if_not_active(
     # Store was loaded but NOT saved (status was already "checkpointed")
     mock_store.load.assert_awaited()
     mock_store.save.assert_not_awaited()
+
+
+# ============================================================================
+# Bug 15: checkpoint message history from active_agent_run
+# ============================================================================
+
+
+@pytest.mark.unit
+async def test_handle_elicitation_uses_active_agent_run_messages_for_checkpoint(
+    agent_ctx: AgentContext, form_params: ElicitRequestFormParams
+) -> None:
+    """handle_elicitation always uses active_agent_run.all_messages() for checkpoint.
+
+    Bug 15: Tools without AgentContext param (e.g. question_for_user) don't
+    trigger tool_wrapping.py's current_messages update. The fix removes
+    current_messages entirely and always reads from active_agent_run —
+    the authoritative pydantic-ai AgentRun object.
+    """
+    import asyncio
+
+    from agentpool.agents.native_agent.elicitation_bridge import (
+        ElicitationFutureRegistry,
+    )
+    from agentpool.sessions.models import ElicitationResumePayload
+
+    provider = MagicMock(spec=InputProvider)
+    provider.supports_durable_elicitation = True
+    agent_ctx.input_provider = provider
+    agent_ctx.in_mcp_callback = False
+    agent_ctx.tool_call_id = "tc-bug15-1"
+
+    assert agent_ctx.run_ctx is not None
+    registry = ElicitationFutureRegistry()
+    agent_ctx.run_ctx.elicitation_registry = registry
+
+    mock_checkpoint = MagicMock()
+    mock_checkpoint.checkpoint = AsyncMock()
+    agent_ctx.run_ctx.checkpoint_manager = mock_checkpoint
+
+    mock_bus = MagicMock()
+    mock_bus.publish = AsyncMock()
+    agent_ctx.run_ctx.event_bus = mock_bus
+
+    # Simulate active_agent_run with messages
+    fake_messages = [MagicMock(), MagicMock(), MagicMock()]
+    mock_agent_run = MagicMock()
+    mock_agent_run.all_messages = MagicMock(return_value=fake_messages)
+    mock_run_handle = MagicMock()
+    mock_run_handle.active_agent_run = mock_agent_run
+    agent_ctx.run_ctx._run_handle = mock_run_handle
+
+    payload = ElicitationResumePayload(
+        deferred_handle="tc-bug15-1",
+        action="accept",
+        content={"name": "test"},
+    )
+
+    async def resolve_later() -> None:
+        await asyncio.sleep(0.05)
+        registry.resolve("tc-bug15-1", payload)
+
+    task = asyncio.create_task(resolve_later())
+    await agent_ctx.handle_elicitation(form_params)
+    await task
+
+    mock_checkpoint.checkpoint.assert_awaited_once()
+    checkpoint_kwargs = mock_checkpoint.checkpoint.call_args.kwargs
+    assert checkpoint_kwargs["message_history"] is fake_messages
+    assert len(checkpoint_kwargs["message_history"]) == 3
+    mock_agent_run.all_messages.assert_called_once()
+
+
+@pytest.mark.unit
+async def test_handle_elicitation_empty_checkpoint_when_no_active_run(
+    agent_ctx: AgentContext, form_params: ElicitRequestFormParams
+) -> None:
+    """When no active_agent_run is available, checkpoint gets empty messages.
+
+    This is a safety net — active_agent_run should always be available
+    during tool execution, but if it's not, the checkpoint still saves
+    with empty messages rather than crashing.
+    """
+    import asyncio
+
+    from agentpool.agents.native_agent.elicitation_bridge import (
+        ElicitationFutureRegistry,
+    )
+    from agentpool.sessions.models import ElicitationResumePayload
+
+    provider = MagicMock(spec=InputProvider)
+    provider.supports_durable_elicitation = True
+    agent_ctx.input_provider = provider
+    agent_ctx.in_mcp_callback = False
+    agent_ctx.tool_call_id = "tc-no-run-1"
+
+    assert agent_ctx.run_ctx is not None
+    registry = ElicitationFutureRegistry()
+    agent_ctx.run_ctx.elicitation_registry = registry
+
+    mock_checkpoint = MagicMock()
+    mock_checkpoint.checkpoint = AsyncMock()
+    agent_ctx.run_ctx.checkpoint_manager = mock_checkpoint
+
+    mock_bus = MagicMock()
+    mock_bus.publish = AsyncMock()
+    agent_ctx.run_ctx.event_bus = mock_bus
+
+    # No active_agent_run — _run_handle is None
+    agent_ctx.run_ctx._run_handle = None
+
+    payload = ElicitationResumePayload(
+        deferred_handle="tc-no-run-1",
+        action="accept",
+        content={"name": "test"},
+    )
+
+    async def resolve_later() -> None:
+        await asyncio.sleep(0.05)
+        registry.resolve("tc-no-run-1", payload)
+
+    task = asyncio.create_task(resolve_later())
+    await agent_ctx.handle_elicitation(form_params)
+    await task
+
+    mock_checkpoint.checkpoint.assert_awaited_once()
+    checkpoint_kwargs = mock_checkpoint.checkpoint.call_args.kwargs
+    assert checkpoint_kwargs["message_history"] == []

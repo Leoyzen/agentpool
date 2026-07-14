@@ -41,7 +41,9 @@ if TYPE_CHECKING:
     from schemez import FunctionSchema, Property
 
     from agentpool.common_types import ToolSource
-    from agentpool.tools.manager import ToolState
+
+# Tool state filter type
+ToolState = Literal["all", "enabled", "disabled"]
 
 logger = get_logger(__name__)
 ToolKind = Literal[

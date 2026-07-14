@@ -9,9 +9,9 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, HttpUrl
 
+from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
 from agentpool.log import get_logger
 from agentpool.mcp_server.manager import MCPManager
-from agentpool.resource_providers import AggregatingResourceProvider
 from agentpool_config.mcp_server import (
     SSEMCPServerConfig,
     StdioMCPServerConfig,
@@ -105,12 +105,12 @@ def _find_mcp_manager(state: Any, session_id: str | None = None) -> MCPManager |
         # pool-level agent for MCP manager discovery.
         agent = state.agent
 
-    for provider in agent.tools.external_providers:
+    for provider in agent._all_capabilities:
         match provider:
             case MCPManager():
                 return provider
-            case AggregatingResourceProvider():
-                for nested in provider.providers:
+            case CombinedToolsetCapability():
+                for nested in provider.capabilities:
                     if isinstance(nested, MCPManager):
                         return nested
     return None
@@ -124,9 +124,9 @@ async def list_agents(state: StateDep) -> list[Agent]:
     switcher UI. All agents are marked as primary (visible in switcher).
     The default agent is always first in the returned list.
     """
-    pool = state.agent.agent_pool
-    assert pool is not None, "AgentPool is not initialized"
-    default_name = pool.main_agent_name
+    ctx = state.agent.host_context
+    assert ctx is not None, "AgentPool is not initialized"
+    default_name = ctx.main_agent_name
     agents = [
         Agent(
             name=name,
@@ -134,7 +134,7 @@ async def list_agents(state: StateDep) -> list[Agent]:
             mode="primary",
             default=(name == default_name),
         )
-        for name, agent in pool.manifest.agents.items()
+        for name, agent in ctx.manifest.agents.items()
     ]
     if not agents:
         return [Agent(name="default", description="Default agent", mode="primary", default=True)]
@@ -149,53 +149,46 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
     Skills are specialized capabilities available to agents.
     Returns skills from:
     1. Local filesystem (via SkillsManager)
-    2. MCP providers (via AggregatingResourceProvider)
+    2. MCP providers (via CombinedToolsetCapability)
     """
-    from pathlib import PurePosixPath
-
-    # Access the pool via the agent's agent_pool reference
-    pool = state.agent.agent_pool
-    if pool is None:
+    ctx = state.agent.host_context
+    if ctx is None:
         return []
 
     skills: list[SkillInfo] = []
 
-    # 1. Get MCP provider skills from AggregatingResourceProvider first
+    # 1. Get MCP provider skills from skill resolver first
     # These will be overridden by local skills if names conflict
-    if pool.skill_provider is not None:
+    pool = state.agent._agent_pool
+    skill_resolver = pool.skill_resolver if pool is not None else None
+    if skill_resolver is not None:
         try:
-            mcp_skills = await pool.skill_provider.get_skills()
-            for skill in mcp_skills:
-                # For MCP skills, get content via provider
-                # (load_instructions returns empty for PurePosixPath)
-                if isinstance(skill.skill_path, PurePosixPath):
+            for provider_name in skill_resolver.list_providers():
+                provider = skill_resolver.get_provider(provider_name)
+                if provider is None:
+                    continue
+                mcp_skills = await provider.list_skills()
+                for entry in mcp_skills:
                     try:
-                        content = await pool.skill_provider.get_skill_instructions(skill.name)
-                    except Exception as e:  # noqa: BLE001
-                        logger.debug(
-                            "Failed to get skill instructions",
-                            skill=skill.name,
-                            error=str(e),
-                        )
+                        content = await provider.read_skill(entry.name) or ""
+                    except Exception:  # noqa: BLE001
                         content = ""
-                else:
-                    content = skill.load_instructions()
 
-                skills.append(
-                    SkillInfo(
-                        name=skill.name,
-                        description=skill.description,
-                        location=skill.safe_uri,
-                        content=content,
+                    skills.append(
+                        SkillInfo(
+                            name=entry.name,
+                            description=entry.description,
+                            location=entry.uri,
+                            content=content,
+                        )
                     )
-                )
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to get MCP skills", error=str(e))
 
     # 2. Get local filesystem skills from SkillsManager (takes priority)
     # Local skills override MCP skills with the same name
-    if pool.skills is not None:
-        for skill in pool.skills.list_skills():
+    if ctx.skills_registry is not None:
+        for skill in ctx.skills_registry.list_skills():
             # Remove any existing MCP skill with the same name (local takes priority)
             existing = next((s for s in skills if s.name == skill.name), None)
             if existing:
@@ -225,7 +218,7 @@ async def list_commands(state: StateDep) -> list[Command]:
 
     # Add MCP prompts as commands (source="mcp")
     try:
-        prompts = await state.agent.tools.list_prompts()
+        prompts = await state.agent.list_prompts()
         commands.extend([
             Command(name=p.name, description=p.description, source="mcp", hints=[]) for p in prompts
         ])
@@ -240,15 +233,14 @@ async def list_commands(state: StateDep) -> list[Command]:
     )
     if state.skill_bridge is not None:
         for skill_cmd in state.skill_bridge.get_skill_commands():
-            # For virtual skills (from MCP), fetch instructions from provider
+            # For virtual skills (from MCP), fetch instructions from resolver
             template = ""
-            if state.pool.skill_provider is not None:
+            if state.pool.skill_resolver is not None:
                 try:
-                    template = await state.pool.skill_provider.get_skill_instructions(
-                        skill_cmd.name
-                    )
+                    resolved = await state.pool.skill_resolver.resolve(skill_cmd.name)
+                    template = resolved.load_instructions()
                 except Exception:  # noqa: BLE001
-                    # Fall back to local load if provider fetch fails
+                    # Fall back to local load if resolver fails
                     try:
                         template = skill_cmd.skill.load_instructions()
                     except ValueError:
@@ -267,26 +259,33 @@ async def list_commands(state: StateDep) -> list[Command]:
                     hints=_extract_hints(template),
                 )
             )
-    # Fallback: get skills directly from pool.skill_provider if skill_bridge not available
-    elif state.pool.skill_provider is not None:
+    # Fallback: get skills directly from skill_resolver if skill_bridge not available
+    elif state.pool.skill_resolver is not None:
         try:
-            provider_skills = await state.pool.skill_provider.get_skills()
-            logger.debug(
-                "Got skills from skill_provider",
-                skill_count=len(provider_skills),
-            )
-            for skill in provider_skills:
-                # Use provider's get_skill_instructions for proper handling of virtual skills
-                template = await state.pool.skill_provider.get_skill_instructions(skill.name)
-                commands.append(
-                    Command(
-                        name=skill.name,
-                        description=skill.description,
-                        source="command",
-                        template=template,
-                        hints=_extract_hints(template),
-                    )
+            for provider_name in state.pool.skill_resolver.list_providers():
+                provider = state.pool.skill_resolver.get_provider(provider_name)
+                if provider is None:
+                    continue
+                provider_skills = await provider.list_skills()
+                logger.debug(
+                    "Got skills from skill_resolver",
+                    skill_count=len(provider_skills),
                 )
+                for entry in provider_skills:
+                    # Use provider's read_skill for content
+                    try:
+                        template = await provider.read_skill(entry.name) or ""
+                    except Exception:  # noqa: BLE001
+                        template = ""
+                    commands.append(
+                        Command(
+                            name=entry.name,
+                            description=entry.description,
+                            source="command",
+                            template=template,
+                            hints=_extract_hints(template),
+                        )
+                    )
         except Exception:  # noqa: BLE001
             pass
 
@@ -469,17 +468,38 @@ async def list_mcp_resources(state: StateDep) -> dict[str, McpResource]:
     """
     try:
         result: dict[str, McpResource] = {}
-        for resource in await state.agent.tools.list_resources():
-            # Create unique key: sanitize client and resource names
-            client_name = (resource.client or "unknown").replace("/", "_")
-            resource_name = resource.name.replace("/", "_")
-            result[f"{client_name}:{resource_name}"] = McpResource(
-                name=resource.name,
-                uri=resource.uri,
-                description=resource.description,
-                mime_type=resource.mime_type,
-                client=resource.client or "unknown",
-            )
+        # Collect resources from all capabilities that provide them
+        from typing import Protocol, runtime_checkable
+
+        @runtime_checkable
+        class _ResourceProviding(Protocol):
+            async def get_resources(self) -> Any: ...
+
+        import asyncio
+
+        caps = state.agent._all_capabilities
+        coros: list[Any] = []
+        caps_with_resources: list[Any] = []
+        for cap in caps:
+            if isinstance(cap, _ResourceProviding):
+                coros.append(cap.get_resources())
+                caps_with_resources.append(cap)
+        if coros:
+            results = await asyncio.gather(*coros, return_exceptions=True)
+            for _cap, res in zip(caps_with_resources, results, strict=False):
+                if isinstance(res, BaseException):
+                    continue
+                for resource in res:
+                    # Create unique key: sanitize client and resource names
+                    client_name = (resource.client or "unknown").replace("/", "_")
+                    resource_name = resource.name.replace("/", "_")
+                    result[f"{client_name}:{resource_name}"] = McpResource(
+                        name=resource.name,
+                        uri=resource.uri,
+                        description=resource.description,
+                        mime_type=resource.mime_type,
+                        client=resource.client or "unknown",
+                    )
     except Exception:  # noqa: BLE001
         return {}
     else:
@@ -662,7 +682,7 @@ async def list_tool_ids(state: StateDep) -> list[str]:
     OpenCode expects: Array<string>
     """
     try:
-        tools = await state.agent.tools.get_tools()
+        tools = await state.agent._get_all_tools()
         return [tool.name for tool in tools]
     except Exception:  # noqa: BLE001
         return []
@@ -697,7 +717,7 @@ async def list_tools_with_schemas(  # noqa: D417
 
     try:
         result = []
-        for tool in await state.agent.tools.get_tools():
+        for tool in await state.agent._get_all_tools():
             # Extract parameters schema from the OpenAI function schema
             params = tool.schema["function"]["parameters"]
             item = ToolListItem(id=tool.name, description=tool.description or "", parameters=params)

@@ -313,14 +313,19 @@ async def _handle_elicitation_deferred(
         run_ctx.checkpointed = True
         # Update session store status to "checkpointed" so resume_session()
         # can find it without relying on the allow_active_run workaround.
-        pool = ctx.deps.node.agent_pool if ctx.deps is not None else None
+        pool = ctx.deps.node.host_context if ctx.deps is not None else None
         if pool is not None and pool.session_pool is not None:
             store = pool.session_pool.sessions.store
             if store is not None:
                 try:
                     data = await store.load(session_id)
                     if data is not None and data.status == "active":
-                        data = data.model_copy(update={"status": "checkpointed"})
+                        data = data.model_copy(
+                            update={
+                                "status": "checkpointed",
+                                "pending_deferred_calls": pending_calls,
+                            }
+                        )
                         data.touch()
                         await store.save(data)
                 except Exception:  # noqa: BLE001

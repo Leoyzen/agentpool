@@ -57,7 +57,7 @@ dependencies = [
   "psygnal>=0.11.1",
   "py-key-value-aio[disk]",
   "pydantic>=2.10.0",
-  "pydantic-ai-slim[openai,google,anthropic,mistral,retries]==1.102.0",
+  "pydantic-ai-slim[openai,google,anthropic,mistral,retries]>=1.102.0,<2.0",
   "pydantic-graph",
   # Only add below (Copier)
   "pydocket>=0.16.1",
@@ -104,6 +104,14 @@ agentpool = "agentpool.utils:setup_env"
 [project.entry-points."universal_pathlib.implementations"]
 acp = "acp.filesystem:ACPPath"
 
+[project.entry-points."agentpool.capabilities"]
+mcp = "agentpool.capabilities.mcp_server_cap:McpServerCap"
+function_tools = "agentpool.capabilities.function_toolset:FunctionToolsetCapability"
+subagent = "agentpool.capabilities.subagent_capability:SubagentCapability"
+skill = "agentpool.capabilities.skill_manager_cap:SkillManagerCap"
+combined = "agentpool.capabilities.combined_toolset:CombinedToolsetCapability"
+code_mode = "agentpool.capabilities.code_mode_capability:CodeModeCapability"
+
 [project.optional-dependencies]
 a2a = ["fasta2a", "starlette"]  # A2A Server
 bot = [
@@ -149,6 +157,7 @@ tiktoken = ["tiktoken"]  # Exact token counting
 tts = [
   "anyvoice[tts-edge,openai]>=0.0.2"
 ]  # Text-to-Speech using AnyVoice (disabled: cffi doesn't support free-threaded 3.13)
+watchdog = ["watchdog>=4.0.0"]  # Filesystem watcher for skill hot-reload
 zed = ["zstandard>=0.23.0"]  # Zed IDE storage provider
 
 [dependency-groups]
@@ -242,18 +251,6 @@ warn_unused_ignores = true
 warn_no_return = true
 # warn_unreachable = true
 strict_equality = true
-
-[[tool.mypy.overrides]]
-module = "tests.*"
-disallow_untyped_defs = false
-disallow_untyped_calls = false
-disallow_incomplete_defs = false
-disable_error_code = [
-  "no-untyped-def",
-  "no-untyped-call",
-  "no-any-return",
-  "unused-ignore"
-]
 
 [[tool.mypy.overrides]]
 module = ["fsspec.*"]
@@ -639,8 +636,9 @@ ignore_imports = [
     "agentpool_config.tools -> agentpool.tools.base",
     "agentpool_config.tools -> agentpool.utils.parse_time",
     "agentpool_config.toolsets -> agentpool.prompts.conversion_manager",
-    "agentpool_config.toolsets -> agentpool.resource_providers",
-    "agentpool_config.toolsets -> agentpool.resource_providers.codemode",
+    "agentpool_config.toolsets -> agentpool.capabilities.combined_toolset",
+    "agentpool_config.toolsets -> agentpool.capabilities.filtered_toolset",
+    "agentpool_config.toolsets -> agentpool.capabilities.function_toolset",
     "agentpool_config.toolsets -> agentpool.utils.importing",
     "agentpool_config.toolsets -> agentpool_toolsets.builtin",
     "agentpool_config.toolsets -> agentpool_toolsets.builtin.code",

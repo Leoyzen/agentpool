@@ -65,7 +65,7 @@ async def test_tool_context_injection():
 
     async with Agent(model=TestModel(call_tools=["test_tool"]), deps_type=bool) as agent:
         # Register our test tool
-        agent.tools.register_tool(test_tool, enabled=True)
+        agent._builtin_provider.register_tool(test_tool, enabled=True)
         # Run agent which should trigger tool
         await agent.run("Test", deps=True)
         assert context_received is not None, "Tool did not receive context"
@@ -86,7 +86,7 @@ async def test_plain_tool_no_context():
         return "Got arg"
 
     async with Agent(model=TestModel(call_tools=["plain_tool"])) as agent:
-        agent.tools.register_tool(plain_tool, enabled=True)
+        agent._builtin_provider.register_tool(plain_tool, enabled=True)
         # Should work without error
         await agent.run("Test")
         assert count == 1
@@ -126,9 +126,9 @@ async def test_context_compatibility():
     """Test that both context types work in tools."""
     model = TestModel(call_tools=["run_ctx_tool", "agent_ctx_tool", "no_ctx_tool"])
     async with Agent(model=model) as agent:
-        agent.tools.register_tool(run_ctx_tool)
-        agent.tools.register_tool(agent_ctx_tool)
-        agent.tools.register_tool(no_ctx_tool)
+        agent._builtin_provider.register_tool(run_ctx_tool)
+        agent._builtin_provider.register_tool(agent_ctx_tool)
+        agent._builtin_provider.register_tool(no_ctx_tool)
 
         # All should work
         result = await agent.run("Test")
@@ -142,8 +142,8 @@ async def test_context_sharing():
     shared_data = {"key": "value"}
     model = TestModel(call_tools=["data_with_run_ctx", "data_with_agent_ctx"])
     agent = Agent[dict[str, str]](name="test", model=model, deps_type=dict)
-    agent.tools.register_tool(data_with_run_ctx)
-    agent.tools.register_tool(data_with_agent_ctx)
+    agent._builtin_provider.register_tool(data_with_run_ctx)
+    agent._builtin_provider.register_tool(data_with_agent_ctx)
 
     async with agent:
         result = await agent.run("Test", deps=shared_data)
@@ -161,7 +161,7 @@ async def test_context_sharing():
 async def test_dual_context_tool():
     """Test tool that requires both RunContext and AgentContext."""
     async with Agent(model=TestModel(call_tools=["dual_ctx_tool"]), name="dual-agent") as agent:
-        agent.tools.register_tool(dual_ctx_tool)
+        agent._builtin_provider.register_tool(dual_ctx_tool)
         # This should work if dual context injection is implemented
         result = await agent.run("Test")
         # Should successfully call the tool with both contexts

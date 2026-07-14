@@ -44,7 +44,7 @@ async def test_pool(sql_provider):
         # Register subagent tools on parent
         parent: Any = pool.manifest.agents["parent"].get_agent(pool=pool)
         assert isinstance(parent, Agent)
-        parent.tools.add_provider(SubagentTools())
+        parent._add_capability(SubagentTools())
 
         # Mock models for both
         await parent.set_model(TestModel())

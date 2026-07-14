@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import contextlib
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
-from agentpool.resource_providers import StaticResourceProvider
-from agentpool.skills.skill_mcp_manager import SkillMcpManager
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentpool.capabilities.resource_protocols import SkillResource
+from agentpool.skills.skill import Skill
 from agentpool.skills.skill_tool_manager import SkillToolManager
-from agentpool.skills.uri_resolver import ResolvedSkillURI
+from agentpool.skills.uri_resolver import ResolvedSkillURI, _name_alternatives
 
 
 if TYPE_CHECKING:
-    from agentpool.skills.skill import Skill
     from agentpool.skills.uri_resolver import SkillURIResolver
 
 
@@ -27,8 +27,8 @@ Skills can be loaded using either a bare skill name or a skill:// URI:
 - `python-expert` - Load skill by name (searches all providers)
 
 ### URI Format
-- `skill://provider/skill-name` - Load skill from specific provider
-- `skill://provider/skill-name/references/file.md` - Load with reference file
+- `skill://skill-name` - Load skill by flat URI
+- `skill://skill-name/references/file.md` - Load with reference file
 
 ### Argument Substitution
 When providing arguments, the following substitutions are made:
@@ -36,7 +36,7 @@ When providing arguments, the following substitutions are made:
 - `$@` - Replaced with all arguments
 - `$ARGUMENTS` - Replaced with all arguments
 
-Example: `load_skill(ctx, "skill://local/python-expert", "arg1 arg2")`
+Example: `load_skill(ctx, "skill://python-expert", "arg1 arg2")`
 """
 
 BASE_DESC = f"""Load a Claude Code Skill and return its instructions.
@@ -193,6 +193,12 @@ async def _load_visible_bare_skill(
         return None
     local_skills = _visible_model_skills(ctx, ctx.pool.skills.list_skills(), node_name)
     local_skill = next((skill for skill in local_skills if skill.name == skill_name), None)
+    if local_skill is None:
+        # Fuzzy match: try underscore↔hyphen alternatives.
+        for alt_name in _name_alternatives(skill_name):
+            local_skill = next((skill for skill in local_skills if skill.name == alt_name), None)
+            if local_skill is not None:
+                break
     if local_skill is not None:
         return local_skill, ctx.pool.skills.get_skill_instructions(skill_name)
 
@@ -200,17 +206,52 @@ async def _load_visible_bare_skill(
     if skill_provider is None:
         return None
 
-    providers = getattr(skill_provider, "providers", None)
-    provider_list = list(providers) if isinstance(providers, (list, tuple)) else [skill_provider]
-    for provider in provider_list:
-        provider_skills = await provider.get_skills()
-        visible_provider_skills = _visible_model_skills(ctx, provider_skills, node_name)
-        provider_skill = next(
-            (skill for skill in visible_provider_skills if skill.name == skill_name),
+    # Use capabilities property (CombinedToolsetCapability) instead of old providers
+    capabilities = getattr(skill_provider, "capabilities", None)
+    if capabilities is None:
+        return None
+    for provider in capabilities:
+        # Use SkillResource protocol check instead of getattr duck-typing.
+        if not isinstance(provider, SkillResource):
+            continue
+        try:
+            provider_entries = await provider.list_skills()
+        except Exception:  # noqa: BLE001
+            continue
+        # Map SkillEntry objects to Skill instances and apply visibility
+        # filtering before selecting the matching skill (defense-in-depth).
+        provider_skills = [
+            Skill(
+                name=entry.name,
+                description=entry.description,
+                skill_path=PurePosixPath(entry.uri),
+                instructions="",
+            )
+            for entry in provider_entries
+        ]
+        visible_skills = _visible_model_skills(ctx, provider_skills, node_name)
+        matching_skill = next(
+            (s for s in visible_skills if s.name == skill_name),
             None,
         )
-        if provider_skill is not None:
-            return provider_skill, await provider.get_skill_instructions(provider_skill.name)
+        if matching_skill is None:
+            # Fuzzy match: try underscore↔hyphen alternatives.
+            for alt_name in _name_alternatives(skill_name):
+                matching_skill = next(
+                    (s for s in visible_skills if s.name == alt_name),
+                    None,
+                )
+                if matching_skill is not None:
+                    break
+        if matching_skill is not None:
+            try:
+                instructions = await provider.read_skill(matching_skill.name)
+            except Exception:  # noqa: BLE001
+                instructions = None
+            if instructions is None:
+                instructions = ""
+            matching_skill.instructions = instructions
+            return matching_skill, instructions
 
     return None
 
@@ -236,7 +277,7 @@ async def load_skill(
         ctx: Agent context providing access to pool and skills
         skill_name: Name of the skill to load, or a skill:// URI.
             Use skill:// URI to load a specific reference file:
-            skill://provider/skill-name/references/file.md
+            skill://skill-name/references/file.md
         arguments: Optional space-separated arguments for substitution
 
     Returns:
@@ -287,7 +328,7 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
         # for provider-less URIs like skill://skill-name/path), then parsed path.
         # The resolver's fallback correctly reconstructs the full reference path
         # when URI parsing misidentifies the skill name as a provider.
-        ref_path = getattr(skill, "_resolved_reference_path", None) or resolved.reference_path
+        ref_path = skill.resolved_reference_path or resolved.reference_path
 
         if ref_path:
             # Reference-only loading: skip main SKILL.md content
@@ -296,18 +337,9 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
                 instructions = ref_content
             except Exception as e:  # noqa: BLE001
                 return f"Failed to load reference {ref_path!r}: {e}"
-        # Full skill loading: get main instructions
-        # For virtual paths (PurePosixPath), fetch from provider
-        elif isinstance(skill.skill_path, PurePosixPath):
-            if ctx.pool.skill_provider is not None:
-                try:
-                    instructions = await ctx.pool.skill_provider.get_skill_instructions(skill.name)
-                except Exception as e:  # noqa: BLE001
-                    return f"Failed to load skill instructions for {skill.name!r}: {e}"
-            else:
-                instructions = ""
+        # Full skill loading: instructions already populated by resolver.
         else:
-            instructions = skill.load_instructions()
+            instructions = skill.instructions or ""
     else:
         try:
             loaded = await _load_visible_bare_skill(ctx, resolved.skill_name, requested_node_name)
@@ -326,9 +358,8 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
     tool_lines: list[str] = []
 
     if skill.mcp_servers:
-        mcp_manager = SkillMcpManager()
+        # MCP server preparation is now handled by SkillManagerCap.
         for server_name, config in skill.mcp_servers.items():
-            mcp_manager.prepare(server_name, config)
             server_desc = config.command or config.url or "configured"
             mcp_lines.append(f"- `{server_name}`: {server_desc}")
 
@@ -342,7 +373,7 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
     # Determine if this is a reference-only load
     # Priority: _resolved_reference_path first (resolver's fallback correction
     # for provider-less URIs), then parsed path.
-    effective_ref_path = getattr(skill, "_resolved_reference_path", None) or (
+    effective_ref_path = skill.resolved_reference_path or (
         resolved.reference_path if is_uri else None
     )
     is_reference_load = is_uri and effective_ref_path is not None
@@ -354,10 +385,6 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
         parts = [header]
         parts.append(instructions)
         parts.append(f"Skill URI: {skill.safe_uri}")
-        if resolved.provider:
-            parts.append(
-                f"URI: skill://{resolved.provider}/{resolved.skill_name}/{effective_ref_path}"
-            )
     else:
         # Full skill load: include description, metadata, and instructions
         header = f"# {skill.name}\n\n{skill.description}"
@@ -372,10 +399,6 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
             parts.append(meta)
         parts.append(instructions)
         parts.append(f"Skill URI: {skill.safe_uri}")
-
-        # Add URI information if loaded via URI
-        if is_uri and resolved.provider:
-            parts.append(f"URI: skill://{resolved.provider}/{resolved.skill_name}")
 
     # Append activated MCP servers section
     if mcp_lines:
@@ -397,7 +420,24 @@ async def _available_skill_names(ctx: AgentContext, node_name: str | None) -> st
     provider_skills: list[Skill] = []
     if ctx.pool.skill_provider is not None:
         try:
-            provider_skills = await ctx.pool.skill_provider.get_skills()
+            # Iterate child capabilities and use SkillResource protocol check.
+            capabilities = getattr(ctx.pool.skill_provider, "capabilities", [])
+            for cap in capabilities:
+                if not isinstance(cap, SkillResource):
+                    continue
+                with contextlib.suppress(Exception):
+                    entries = await cap.list_skills()
+                    # Map SkillEntry objects to Skill instances for
+                    # downstream compatibility with _visible_model_skills.
+                    provider_skills.extend(
+                        Skill(
+                            name=entry.name,
+                            description=entry.description,
+                            skill_path=PurePosixPath(entry.uri),
+                            instructions="",
+                        )
+                        for entry in entries
+                    )
         except Exception:  # noqa: BLE001
             provider_skills = []
 
@@ -408,7 +448,7 @@ async def _available_skill_names(ctx: AgentContext, node_name: str | None) -> st
     return ", ".join(sorted(all_skills))
 
 
-async def list_skills(ctx: AgentContext) -> str:
+async def list_skills(ctx: AgentContext) -> str:  # noqa: PLR0915
     """List all available skills.
 
     Returns:
@@ -429,7 +469,22 @@ async def list_skills(ctx: AgentContext) -> str:
     provider_skills: list[Skill] = []
     if ctx.pool.skill_provider is not None:
         with contextlib.suppress(Exception):
-            provider_skills = await ctx.pool.skill_provider.get_skills()
+            # Iterate child capabilities and use SkillResource protocol check.
+            capabilities = getattr(ctx.pool.skill_provider, "capabilities", [])
+            for cap in capabilities:
+                if not isinstance(cap, SkillResource):
+                    continue
+                with contextlib.suppress(Exception):
+                    entries = await cap.list_skills()
+                    provider_skills.extend(
+                        Skill(
+                            name=entry.name,
+                            description=entry.description,
+                            skill_path=PurePosixPath(entry.uri),
+                            instructions="",
+                        )
+                        for entry in entries
+                    )
 
     visible_provider_skills = _visible_model_skills(ctx, provider_skills, requested_node_name)
     seen: set[str] = {s.name for s in visible_skills}
@@ -456,10 +511,13 @@ async def list_skills(ctx: AgentContext) -> str:
             # Try to find which provider this skill belongs to
             for provider_name in resolver.list_providers():
                 provider = resolver.get_provider(provider_name)
-                if provider:
-                    provider_skills = await provider.get_skills()
-                    if any(s.name == skill.name for s in provider_skills):
-                        lines.append(f"  - URI: `skill://{provider_name}/{skill.name}`")
+                if provider and isinstance(provider, SkillResource):
+                    try:
+                        entries = await provider.list_skills()
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if any(e.name == skill.name for e in entries):
+                        lines.append(f"  - URI: `skill://{skill.name}`")
                         break
             else:
                 # Skill found but not in any registered provider
@@ -480,18 +538,18 @@ async def list_skills(ctx: AgentContext) -> str:
     if has_resolver:
         lines.append("Or use a skill:// URI:")
         lines.append("```python")
-        lines.append('await load_skill(ctx, "skill://provider/skill-name")')
+        lines.append('await load_skill(ctx, "skill://skill-name")')
         lines.append("```")
         lines.append("")
         lines.append("With arguments for substitution:")
         lines.append("```python")
-        lines.append('await load_skill(ctx, "skill://provider/skill-name", "arg1 arg2")')
+        lines.append('await load_skill(ctx, "skill://skill-name", "arg1 arg2")')
         lines.append("```")
 
     return "\n".join(lines)
 
 
-class SkillsTools(StaticResourceProvider):
+class SkillsTools(FunctionToolsetCapability):
     """Provider for skills and commands tools.
 
     Provides tools to:
@@ -510,22 +568,15 @@ class SkillsTools(StaticResourceProvider):
         self,
         name: str = "skills",
         *,
-        injection_mode: Literal["off", "metadata", "full"] | None = None,
         max_skills: int | None = None,
     ) -> None:
         """Initialize the SkillsTools provider.
 
         Args:
             name: Provider name for resource identification
-            injection_mode: Skill injection mode for agent-specific overrides:
-                - "off": No skill injection
-                - "metadata": Inject skill metadata only
-                - "full": Inject full skill instructions
-                Defaults to None (use global/default settings)
             max_skills: Maximum number of skills to inject. Defaults to None (no limit)
         """
         super().__init__(name=name)
-        self.injection_mode = injection_mode
         self.max_skills = max_skills
         self._tools = [
             self.create_tool(load_skill, category="read", read_only=True, idempotent=True),

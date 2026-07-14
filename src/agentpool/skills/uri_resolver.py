@@ -1,22 +1,21 @@
 """URI resolver for the skill:// scheme.
 
 Provides secure parsing and resolution of skill URIs with support for:
-- Explicit providers: skill://provider/skill-name
-- Reference paths: skill://provider/skill-name/references/file.md
+- Flat URIs: skill://skill-name or skill://skill-name/reference/path
 - Bare skill names: skill-name
 
 Security features:
 - Path traversal detection (rejects ".." in paths)
 - Null byte detection
-- Provider name validation
 - Skill name validation (follows Skill model rules)
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
-from typing import TYPE_CHECKING
+import logging
+from pathlib import PurePosixPath
+from typing import TYPE_CHECKING, Any
 import unicodedata
 from urllib.parse import unquote, urlparse
 
@@ -24,39 +23,41 @@ from agentpool.skills.exceptions import SecurityError, SkillNotFoundError
 
 
 if TYPE_CHECKING:
-    from agentpool.resource_providers.base import ResourceProvider
-    from agentpool.skills.skill import Skill
+    from agentpool.capabilities.resource_protocols import (
+        SkillEntry,
+        SkillResource,
+    )
+
+from agentpool.skills.skill import Skill
 
 
-# Maximum length for provider names (DNS label compatible)
-MAX_PROVIDER_NAME_LENGTH = 63
-
-# Valid provider name pattern: alphanumeric, hyphen, underscore
-PROVIDER_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class ResolvedSkillURI:
     """A resolved and validated skill:// URI.
 
+    Supports flat URI format only (D9):
+    - ``skill://my-skill`` — bare skill reference
+    - ``skill://my-skill/path/to/reference.md`` — skill with reference path
+    - ``my-skill`` — bare skill name (no scheme)
+
     Attributes:
-        provider: Provider name or None for bare skill names
         skill_name: The validated skill name
         reference_path: Optional path to reference file within skill
 
     Examples:
-        >>> ResolvedSkillURI.parse("skill://local/python-expert")
-        ResolvedSkillURI(provider='local', skill_name='python-expert', reference_path=None)
+        >>> ResolvedSkillURI.parse("skill://python-expert")
+        ResolvedSkillURI(skill_name='python-expert', reference_path=None)
 
-        >>> ResolvedSkillURI.parse("skill://local/python-expert/references/guide.md")
-        ResolvedSkillURI(provider='local', skill_name='python-expert',
-        reference_path='references/guide.md')
+        >>> ResolvedSkillURI.parse("skill://python-expert/references/guide.md")
+        ResolvedSkillURI(skill_name='python-expert', reference_path='references/guide.md')
 
         >>> ResolvedSkillURI.parse("python-expert")
-        ResolvedSkillURI(provider=None, skill_name='python-expert', reference_path=None)
+        ResolvedSkillURI(skill_name='python-expert', reference_path=None)
     """
 
-    provider: str | None
     skill_name: str
     reference_path: str | None
 
@@ -64,10 +65,10 @@ class ResolvedSkillURI:
     def parse(cls, uri: str) -> ResolvedSkillURI:
         """Parse and validate a skill URI.
 
-        Supports three formats:
-        1. skill://provider/skill-name - With explicit provider
-        2. skill://provider/skill-name/path - With reference path
-        3. skill-name - Bare skill name (provider=None)
+        Supports two formats:
+        1. ``skill://skill-name`` — Flat URI (D9). Netloc is the skill name,
+           optional path is the reference (``skill://my-skill/path/to/ref.md``).
+        2. ``skill-name`` — Bare skill name (no scheme).
 
         Args:
             uri: The URI to parse
@@ -80,11 +81,11 @@ class ResolvedSkillURI:
             ValueError: If URI format is invalid
 
         Examples:
-            >>> ResolvedSkillURI.parse("skill://local/my-skill")
-            ResolvedSkillURI(provider='local', skill_name='my-skill', reference_path=None)
+            >>> ResolvedSkillURI.parse("skill://my-skill")
+            ResolvedSkillURI(skill_name='my-skill', reference_path=None)
 
             >>> ResolvedSkillURI.parse("my-skill")
-            ResolvedSkillURI(provider=None, skill_name='my-skill', reference_path=None)
+            ResolvedSkillURI(skill_name='my-skill', reference_path=None)
         """
         # Check for null bytes first
         if "\x00" in uri:
@@ -101,7 +102,7 @@ class ResolvedSkillURI:
                 msg = "URI contains null bytes after decoding"
                 raise SecurityError(msg)
             skill_name = _validate_skill_name(decoded_name)
-            return cls(provider=None, skill_name=skill_name, reference_path=None)
+            return cls(skill_name=skill_name, reference_path=None)
 
         # Parse the URI first (before decoding) to correctly extract components
         parsed = urlparse(uri)
@@ -111,99 +112,35 @@ class ResolvedSkillURI:
             msg = f"Invalid URI scheme: {parsed.scheme!r}, expected 'skill'"
             raise ValueError(msg)
 
-        # Extract and decode provider from netloc
-        provider = parsed.netloc if parsed.netloc else None
-        if provider is not None:
-            provider = _validate_provider_name(unquote(provider))
+        # Flat URI (D9): skill://skill-name or skill://skill-name/reference/path
+        # netloc is ALWAYS the skill name — provider segment was removed in D9.
+        if not parsed.netloc:
+            msg = "URI is empty"
+            raise ValueError(msg)
 
-        # Parse and decode the path component
+        skill_name = _validate_skill_name(unquote(parsed.netloc))
+
+        # Parse and decode the path component as an optional reference
         path = unquote(parsed.path)
         if path.startswith("/"):
             path = path[1:]  # Remove leading slash
 
         if not path:
-            msg = "URI path is empty"
-            raise ValueError(msg)
+            return cls(skill_name=skill_name, reference_path=None)
 
-        # Split path into components
-        parts = path.split("/")
-
-        # Check for path traversal attempts
-        for part in parts:
+        # Path content is the reference — check for traversal
+        for part in path.split("/"):
             if part == "..":
                 msg = f"Path traversal detected in URI: {uri!r}"
                 raise SecurityError(msg)
 
-        # First part is the skill name
-        skill_name = _validate_skill_name(parts[0])
-
-        # Remaining parts form the reference path (if any)
-        reference_path = "/".join(parts[1:]) if len(parts) > 1 else None
-        if reference_path == "":
-            reference_path = None
-
-        # Validate reference path components if present
-        # Reject absolute paths (starting with /) for defense-in-depth
-        if reference_path is not None and (
-            ".." in reference_path.split("/") or reference_path.startswith("/")
-        ):
-            msg = f"Path traversal detected in reference path: {uri!r}"
-            raise SecurityError(msg)
-
-        return cls(provider=provider, skill_name=skill_name, reference_path=reference_path)
-
-
-def _is_valid_provider_name(name: str) -> bool:
-    """Check if a provider name is valid.
-
-    Provider names must:
-    - Be alphanumeric, hyphens, or underscores only
-    - Be at most 63 characters (DNS label compatible)
-    - Not be empty
-
-    Args:
-        name: Provider name to validate
-
-    Returns:
-        True if valid, False otherwise
-
-    Examples:
-        >>> _is_valid_provider_name("local")
-        True
-        >>> _is_valid_provider_name("my-provider_1")
-        True
-        >>> _is_valid_provider_name("invalid.name")
-        False
-        >>> _is_valid_provider_name("a" * 64)
-        False
-    """
-    if not name:
-        return False
-    if len(name) > MAX_PROVIDER_NAME_LENGTH:
-        return False
-    return bool(PROVIDER_NAME_PATTERN.match(name))
-
-
-def _validate_provider_name(name: str) -> str:
-    """Validate and normalize a provider name.
-
-    Args:
-        name: Provider name to validate
-
-    Returns:
-        Normalized provider name
-
-    Raises:
-        SecurityError: If provider name is invalid
-    """
-    if not _is_valid_provider_name(name):
-        msg = (
-            f"Invalid provider name: {name!r}. "
-            f"Provider names must be alphanumeric, hyphen, or underscore only, "
-            f"and at most {MAX_PROVIDER_NAME_LENGTH} characters."
+        return cls(
+            skill_name=skill_name,
+            reference_path=path,
         )
-        raise SecurityError(msg)
-    return name
+
+
+# ---- Skill Name Validation ----
 
 
 def _validate_skill_name(name: str) -> str:
@@ -287,11 +224,23 @@ def _name_alternatives(name: str) -> list[str]:
     return []
 
 
+# Type alias: providers implement SkillResource protocol.
+if TYPE_CHECKING:
+    ProviderLike = SkillResource
+else:
+    ProviderLike = Any
+
+
 class SkillURIResolver:
     """Resolver for skill:// URIs using registered providers.
 
     Manages a registry of resource providers and resolves skill URIs
-    to actual skill instances.
+    to actual skill instances. Providers implement the ``SkillResource``
+    protocol (with ``list_skills()``/``read_skill()``).
+
+    When an ``ExtensionRegistry`` is provided, URI resolution is
+    delegated to ``ExtensionRegistry.resolve_uri()`` instead of
+    using the internal ``_providers`` dict.
 
     Example:
         >>> resolver = SkillURIResolver()
@@ -299,22 +248,29 @@ class SkillURIResolver:
         >>> skill = await resolver.resolve("skill://local/python-expert")
     """
 
-    def __init__(self) -> None:
-        """Initialize the resolver with an empty provider registry."""
-        self._providers: dict[str, ResourceProvider] = {}
+    def __init__(
+        self,
+        extension_registry: Any | None = None,
+    ) -> None:
+        """Initialize the resolver with an empty provider registry.
 
-    def register_provider(self, name: str, provider: ResourceProvider) -> None:
+        Args:
+            extension_registry: Optional ``ExtensionRegistry`` for
+                URI resolution. When set, ``resolve()`` delegates to
+                ``extension_registry.resolve_uri()`` instead of using
+                the internal ``_providers`` dict.
+        """
+        self._providers: dict[str, ProviderLike] = {}
+        self._extension_registry = extension_registry
+
+    def register_provider(self, name: str, provider: ProviderLike) -> None:
         """Register a resource provider.
 
         Args:
-            name: Provider name (must be valid per _is_valid_provider_name)
-            provider: The resource provider instance
-
-        Raises:
-            SecurityError: If provider name is invalid
+            name: Internal provider name (used as dict key)
+            provider: The resource provider instance (SkillResource)
         """
-        validated_name = _validate_provider_name(name)
-        self._providers[validated_name] = provider
+        self._providers[name] = provider
 
     def unregister_provider(self, name: str) -> None:
         """Unregister a resource provider.
@@ -322,13 +278,16 @@ class SkillURIResolver:
         Args:
             name: Provider name to unregister
         """
-        validated_name = _validate_provider_name(name)
-        self._providers.pop(validated_name, None)
+        self._providers.pop(name, None)
 
     async def _find_skill_in_providers(
         self, skill_name: str, ref_path: str | None = None
     ) -> Skill | None:
         """Search all providers for a skill by name.
+
+        Handles ``SkillResource`` providers (with ``list_skills()``/``read_skill()``).
+        For ``SkillResource`` providers, constructs a lightweight
+        ``Skill`` object from the ``SkillEntry`` metadata and content.
 
         Args:
             skill_name: The skill name to search for.
@@ -337,14 +296,66 @@ class SkillURIResolver:
         Returns:
             The matching Skill or None if not found.
         """
+        from agentpool.capabilities.resource_protocols import SkillResource
+
         for provider in self._providers.values():
-            skills = await provider.get_skills()
-            for skill in skills:
-                if skill.name == skill_name:
-                    if ref_path is not None:
-                        skill._resolved_reference_path = ref_path  # type: ignore[attr-defined]
-                    return skill
+            # Check for new SkillResource protocol first.
+            if isinstance(provider, SkillResource):
+                try:
+                    entries = await provider.list_skills()
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to list skills from provider",
+                        exc_info=True,
+                    )
+                    continue
+                for entry in entries:
+                    if entry.name == skill_name:
+                        return await self._build_skill_from_entry(provider, entry, ref_path)
+                # Try name alternatives (underscore ↔ hyphen).
+                for alt_name in _name_alternatives(skill_name):
+                    for entry in entries:
+                        if entry.name == alt_name:
+                            return await self._build_skill_from_entry(provider, entry, ref_path)
+                continue
         return None
+
+    async def _build_skill_from_entry(
+        self,
+        provider: SkillResource,
+        entry: SkillEntry,
+        ref_path: str | None,
+    ) -> Skill | None:
+        """Construct a lightweight Skill from a SkillEntry.
+
+        Reads skill content from the given provider's ``read_skill()``
+        method and constructs a ``Skill`` object with the metadata and
+        content.
+
+        Args:
+            provider: The SkillResource that owns this entry.
+            entry: The SkillEntry with metadata.
+            ref_path: Optional reference path to attach.
+
+        Returns:
+            A Skill object, or None if content could not be read.
+        """
+        try:
+            content = await provider.read_skill(entry.name)
+        except Exception:  # noqa: BLE001
+            return None
+        if content is None:
+            return None
+
+        skill = Skill(
+            name=entry.name,
+            description=entry.description or f"Skill {entry.name}",
+            skill_path=PurePosixPath(entry.uri),
+            instructions=content,
+        )
+        if ref_path is not None:
+            skill.resolved_reference_path = ref_path
+        return skill
 
     async def _find_skill_with_alternatives(self, skill_name: str) -> Skill | None:
         """Search all providers for a skill, trying name alternatives.
@@ -367,10 +378,13 @@ class SkillURIResolver:
     async def resolve(self, uri: str) -> Skill:
         """Resolve a skill URI to a Skill instance.
 
-        Supports both full URIs with provider and provider-less URIs:
-        - skill://provider/skill-name - Full URI with explicit provider
-        - skill://provider/skill-name/references/file.md - Full URI with reference
-        - skill://skill-name/references/file.md - Provider-less URI (searches all providers)
+        Tries ``ExtensionRegistry`` first when configured. If it fails,
+        falls back to searching all registered providers for the skill name.
+
+        Supports flat URIs (D9):
+        - ``skill://my-skill`` — by name
+        - ``skill://my-skill/reference/path`` — by name (reference attached)
+        - ``my-skill`` — bare skill name
 
         Args:
             uri: The skill URI to resolve
@@ -380,72 +394,34 @@ class SkillURIResolver:
 
         Raises:
             SecurityError: If URI validation fails
-            SkillNotFoundError: If skill not found in provider
-            ValueError: If provider not registered for explicit URIs
+            SkillNotFoundError: If skill not found in any provider
         """
-        resolved = ResolvedSkillURI.parse(uri)
+        # Delegate to ExtensionRegistry when available.
+        if self._extension_registry is not None:
+            from agentpool.capabilities.extension_registry import Scope, ScopeLevel
 
-        # If no provider specified, search all providers
-        if resolved.provider is None:
-            skill = await self._find_skill_with_alternatives(resolved.skill_name)
-            if skill is not None:
-                return skill
-            msg = f"Skill {resolved.skill_name!r} not found in any provider"
+            result = await self._extension_registry.resolve_uri(uri, Scope(level=ScopeLevel.POOL))
+            if result is not None:
+                if isinstance(result, Skill):
+                    return result
+                # str | bytes content — construct Skill with virtual path.
+                return Skill(
+                    name=ResolvedSkillURI.parse(uri).skill_name,
+                    description=f"Skill {uri}",
+                    skill_path=PurePosixPath(uri),
+                    instructions=result if isinstance(result, str) else None,
+                )
+            msg = f"Skill {uri!r} not found via ExtensionRegistry"
             raise SkillNotFoundError(msg)
 
-        # Look up specific provider
-        if resolved.provider not in self._providers:
-            # Provider not found - try fallback for provider-less URIs
-            # This handles URIs like: skill://skill-name/references/file.md
-            # where user omitted the provider
-            potential_skill_name = resolved.provider
-            potential_ref_path = (
-                f"{resolved.skill_name}/{resolved.reference_path}"
-                if resolved.reference_path
-                else resolved.skill_name
-            )
-
-            # Search all providers for this skill
-            skill = await self._find_skill_in_providers(
-                potential_skill_name, ref_path=potential_ref_path
-            )
-            if skill is not None:
-                return skill
-
-            # Fallback: maybe the skill_name is actually the skill and reference is combined
-            # This handles: skill://skill-name/subdir/file.md (no "references" prefix)
-            if resolved.skill_name:
-                potential_ref_path2 = (
-                    f"{resolved.skill_name}/{resolved.reference_path}"
-                    if resolved.reference_path
-                    else resolved.skill_name
-                )
-                skill = await self._find_skill_in_providers(
-                    potential_skill_name, ref_path=potential_ref_path2
-                )
-                if skill is not None:
-                    return skill
-
-            msg = f"Provider {resolved.provider!r} not registered"
-            raise ValueError(msg)
-
-        provider = self._providers[resolved.provider]
-        skills = await provider.get_skills()
-
-        for skill in skills:
-            if skill.name == resolved.skill_name:
-                return skill
-
-        # Fuzzy match: try swapping - and _ in the skill name
-        for alt_name in _name_alternatives(resolved.skill_name):
-            for skill in skills:
-                if skill.name == alt_name:
-                    return skill
-
-        msg = f"Skill {resolved.skill_name!r} not found in provider {resolved.provider!r}"
+        resolved = ResolvedSkillURI.parse(uri)
+        skill = await self._find_skill_with_alternatives(resolved.skill_name)
+        if skill is not None:
+            return skill
+        msg = f"Skill {resolved.skill_name!r} not found in any provider"
         raise SkillNotFoundError(msg)
 
-    def get_provider(self, name: str) -> ResourceProvider | None:
+    def get_provider(self, name: str) -> ProviderLike | None:
         """Get a registered provider by name.
 
         Args:

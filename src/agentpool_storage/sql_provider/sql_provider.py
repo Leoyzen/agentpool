@@ -890,13 +890,15 @@ class SQLModelProvider(StorageProvider):
         Stores serialized messages and pending deferred calls together
         in the ``checkpoint_data`` JSON column so they can be restored on resume.
 
+        If no ``Conversation`` record exists for the given ``session_id``
+        (e.g. ACP sessions that use ``SessionStore`` but never call
+        ``save_session``), a minimal record is created automatically so
+        that checkpoint data has a row to attach to.
+
         Args:
             session_id: Session identifier
             messages_json: JSON-serialized list of ModelMessage
             pending_calls_json: JSON-serialized list of PendingDeferredCall
-
-        Raises:
-            ValueError: If no session exists with the given ID
         """
         async with AsyncSession(self.engine) as session:
             result = await session.execute(
@@ -904,8 +906,15 @@ class SQLModelProvider(StorageProvider):
             )
             conv = result.scalar_one_or_none()
             if conv is None:
-                msg = f"Session not found: {session_id}"
-                raise ValueError(msg)
+                conv = Conversation(
+                    id=session_id,
+                    agent_name="unknown",
+                    status="checkpointed",
+                )
+                logger.debug(
+                    "Created minimal Conversation for checkpoint",
+                    session_id=session_id,
+                )
             conv.checkpoint_data = {
                 "messages_json": messages_json,
                 "pending_calls": pending_calls_json,

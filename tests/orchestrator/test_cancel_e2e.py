@@ -20,9 +20,9 @@ from agentpool.agents.events import (
     StreamCompleteEvent,
     ToolCallStartEvent,
 )
+from agentpool.lifecycle import RunState
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventEnvelope, SessionPool
-from agentpool.orchestrator.run import RunStatus
 from agentpool.orchestrator.turn import Turn
 
 
@@ -55,7 +55,7 @@ class _BlockingTurn(Turn):
         while not self._run_ctx.cancelled:
             await asyncio.sleep(0.01)
         return
-        yield  # noqa: unreachable — makes this an async generator
+        yield  # unreachable — makes this an async generator
 
 
 class _StubTurn(Turn):
@@ -274,8 +274,8 @@ async def test_cancel_then_new_prompt_full_flow(
     # If second_handle is None, the existing RunHandle was steered (1:1 model).
 
     # Verify the first handle is not stuck in a running state
-    assert first_handle._status in (RunStatus.idle, RunStatus.done), (
-        f"First RunHandle should be idle or done, got: {first_handle._status}"
+    assert first_handle._run_state in (RunState.IDLE, RunState.DONE), (
+        f"First RunHandle should be idle or done, got: {first_handle._run_state}"
     )
 
     # Cleanup: close the RunHandle first so the start() loop exits and
@@ -421,8 +421,8 @@ async def test_double_cancel(mock_pool: MagicMock) -> None:
     assert RunFailedEvent in pre_types, f"Expected RunFailedEvent, got: {pre_types}"
 
     # RunHandle should be idle or done (not running)
-    assert first_handle._status in (RunStatus.idle, RunStatus.done), (
-        f"RunHandle should be idle/done after double cancel, got: {first_handle._status}"
+    assert first_handle._run_state in (RunState.IDLE, RunState.DONE), (
+        f"RunHandle should be idle/done after double cancel, got: {first_handle._run_state}"
     )
 
     # Send a new prompt — should not hang
@@ -603,8 +603,8 @@ async def test_cancel_during_tool_execution(mock_pool: MagicMock) -> None:
     )
 
     # RunHandle should be idle or done
-    assert first_handle._status in (RunStatus.idle, RunStatus.done), (
-        f"RunHandle should be idle/done after cancel, got: {first_handle._status}"
+    assert first_handle._run_state in (RunState.IDLE, RunState.DONE), (
+        f"RunHandle should be idle/done after cancel, got: {first_handle._run_state}"
     )
 
     first_handle.close()
@@ -765,8 +765,8 @@ async def test_runhandle_dies_in_idle_loop(mock_pool: MagicMock) -> None:
     assert crash_handle.complete_event.is_set(), (
         "complete_event should be set by finally block after error"
     )
-    assert crash_handle._status == RunStatus.done, (
-        f"RunHandle should be done after error, got: {crash_handle._status}"
+    assert crash_handle._run_state == RunState.DONE, (
+        f"RunHandle should be done after error, got: {crash_handle._run_state}"
     )
 
     # Verify _cleanup_run cleared current_run_id

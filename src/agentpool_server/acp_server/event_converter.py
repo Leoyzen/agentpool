@@ -665,7 +665,7 @@ class ACPEventConverter:
             case FinalResultEvent():
                 pass  # No notification needed
 
-            case StreamCompleteEvent(message=message):
+            case StreamCompleteEvent(message=message, cancelled=cancelled):
                 request_usage = message.usage
                 thought = request_usage.details.get("reasoning_tokens") or None
                 self.last_usage = Usage(
@@ -696,7 +696,9 @@ class ACPEventConverter:
                 async for cancel_update in self.cancel_pending_tools():
                     yield cancel_update
                 if self.client_supports_turn_complete:
-                    yield TurnCompleteUpdate(stop_reason="end_turn")
+                    yield TurnCompleteUpdate(
+                        stop_reason="cancelled" if cancelled else "end_turn",
+                    )
 
             case PlanUpdateEvent(entries=entries):
                 acp_entries = [
@@ -823,13 +825,15 @@ class ACPEventConverter:
             case RunErrorEvent(message=message, agent_name=agent_name):
                 # TurnCompleteUpdate is required here — without it, clients
                 # with turn_complete support stay stuck in "running" state.
+                # Use "refusal" stop reason so clients know the turn ended
+                # abnormally (e.g. elicitation timeout), not successfully.
                 agent_prefix = f"[{agent_name}] " if agent_name else ""
                 error_text = f"\n\n❌ **Error**: {agent_prefix}{message}\n\n"
                 yield AgentMessageChunk.text(error_text, message_id=self._current_message_id)
                 async for cancel_update in self.cancel_pending_tools():
                     yield cancel_update
                 if self.client_supports_turn_complete:
-                    yield TurnCompleteUpdate(stop_reason="end_turn")
+                    yield TurnCompleteUpdate(stop_reason="refusal")
 
             case RunFailedEvent(run_id=run_id, exception=exc):
                 # Display run failure as agent text and signal turn completion.

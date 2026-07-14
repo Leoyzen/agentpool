@@ -19,8 +19,8 @@ from pydantic_ai import ModelRetry
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.agents.events import StreamCompleteEvent
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.log import get_logger
-from agentpool.resource_providers import StaticResourceProvider
 from agentpool.tools.exceptions import ToolError
 
 
@@ -59,7 +59,7 @@ def _generate_task_id(description: str) -> str:
     return f"{timestamp}-{slug}"
 
 
-class SubagentTools(StaticResourceProvider):
+class SubagentTools(FunctionToolsetCapability):
     """Provider for task delegation tools with streaming progress."""
 
     def __init__(
@@ -67,13 +67,11 @@ class SubagentTools(StaticResourceProvider):
         name: str = "subagent_tools",
     ) -> None:
         super().__init__(name=name)
-        for tool in [
-            self.create_tool(
-                self.list_available_nodes, category="search", read_only=True, idempotent=True
-            ),
-            self.create_tool(self.task, category="other"),
-        ]:
-            self.add_tool(tool)
+        # create_tool already adds to _tools, no need to call add_tool
+        self.create_tool(
+            self.list_available_nodes, category="search", read_only=True, idempotent=True
+        )
+        self.create_tool(self.task, category="other")
 
     async def list_available_nodes(  # noqa: D417
         self,

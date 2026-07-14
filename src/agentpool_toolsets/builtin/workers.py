@@ -16,8 +16,8 @@ from agentpool.agents.events import (
     SubAgentEvent,
 )
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.log import get_logger
-from agentpool.resource_providers import ResourceProvider
 from agentpool.tools.exceptions import ToolError
 
 
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class WorkersTools(ResourceProvider):
+class WorkersTools(FunctionToolsetCapability):
     """Provider for worker agent tools.
 
     Creates tools for each configured worker that delegate to agents/teams in the pool.
@@ -49,8 +49,14 @@ class WorkersTools(ResourceProvider):
         self.workers = workers
 
     async def get_tools(self) -> Sequence[Tool]:
-        """Get tools for all configured workers."""
-        return [self._create_worker_tool(i) for i in self.workers]
+        """Get tools for all configured workers.
+
+        Tools are created once and cached. Subsequent calls return the
+        cached list to avoid duplicate tool registration.
+        """
+        if not self._tools:
+            self._tools = [self._create_worker_tool(i) for i in self.workers]
+        return self._tools
 
     def _create_worker_tool(self, worker_config: WorkerConfig) -> Tool:
         """Create a tool for a single worker configuration."""

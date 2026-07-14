@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
 from schemez import OpenAIFunctionDefinition
 
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.log import get_logger
-from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
@@ -18,14 +18,13 @@ if TYPE_CHECKING:
 
     from mcp import ClientSession
     from mcp.types import CallToolResult
-    from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.tools.base import Tool
 
 logger = get_logger(__name__)
 
 
-class McpRunTools(ResourceProvider):
+class McpRunTools(FunctionToolsetCapability):
     """Provider for MCP.run tools.
 
     Maintains a persistent SSE connection to MCP.run to receive tool change
@@ -45,7 +44,6 @@ class McpRunTools(ResourceProvider):
         id_ = session_id or os.environ.get("MCP_RUN_SESSION_ID")
         config = ClientConfig()
         self.client = Client(session_id=id_, config=config)
-        self._tools: list[Tool] | None = None
         self._session: ClientSession | None = None
         # Context manager for persistent connection
         self._mcp_client_ctx: AbstractAsyncContextManager[ClientSession] | None = None
@@ -87,13 +85,12 @@ class McpRunTools(ResourceProvider):
     async def _on_tools_changed(self) -> None:
         """Handle tool list change notification."""
         logger.info("MCP.run tools changed, refreshing cache")
-        self._tools = None
-        await self.tools_changed.emit(self.create_change_event("tools"))
+        self._tools = []
 
     async def get_tools(self) -> Sequence[Tool]:
         """Get tools from MCP.run."""
         # Return cached tools if available
-        if self._tools is not None:
+        if self._tools:
             return self._tools
 
         self._tools = []
@@ -121,9 +118,8 @@ class McpRunTools(ResourceProvider):
     async def refresh_tools(self) -> None:
         """Manually refresh tools from MCP.run and emit change event."""
         logger.info("Manually refreshing MCP.run tools")
-        self._tools = None
+        self._tools = []
         await self.get_tools()
-        await self.tools_changed.emit(self.create_change_event("tools"))
 
 
 if __name__ == "__main__":
@@ -135,11 +131,3 @@ if __name__ == "__main__":
         print(fns)
 
     anyio.run(main)
-
-    def as_capability(self: McpRunTools) -> AbstractCapability | None:
-        """Return a pydantic-ai capability for this provider.
-
-        Returns:
-            A pydantic-ai AbstractCapability instance, or None.
-        """
-        return None

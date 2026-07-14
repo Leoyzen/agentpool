@@ -239,7 +239,7 @@ async def test_close_session_after_cancel() -> None:
             while not self._run_ctx.cancelled:
                 await asyncio.sleep(0.01)
             return
-            yield  # noqa: unreachable — makes this an async generator
+            yield  # unreachable — makes this an async generator
 
     class _StubTurn(Turn):
         """Minimal Turn that yields StreamCompleteEvent."""

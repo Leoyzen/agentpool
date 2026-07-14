@@ -344,3 +344,89 @@ async def test_stream_complete_via_run_handle_event_bus() -> None:
             "after future resolution. "
             f"Events received: {[type(e).__name__ for e in received_events]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Bug 11: Elicitation timeout should yield StreamCompleteEvent(cancelled=True)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_elicitation_timeout_yields_cancelled_stream_complete() -> None:
+    """RunAbortedError from elicitation timeout yields StreamCompleteEvent(cancelled=True).
+
+    When the elicitation timeout fires, handle_elicitation() raises
+    RunAbortedError. NativeTurn catches it and yields
+    StreamCompleteEvent(cancelled=True) so that:
+
+    1. The ACP event converter emits TurnCompleteUpdate(stop_reason="cancelled")
+       — clients know the turn was cancelled, not completed normally.
+    2. _execute_turn saves the final message to agent.conversation
+       (the StreamCompleteEvent branch handles this), preserving history.
+    3. _consume_run breaks on StreamCompleteEvent and closes the generator,
+       setting _turn_complete_event — unblocking legacy clients.
+
+    Previously this yielded RunErrorEvent(stop_reason="refusal"), which
+    caused history loss because _execute_turn's StreamCompleteEvent branch
+    was never taken, leaving agent.conversation without the assistant message.
+    """
+    agent = _make_agent()
+
+    async with agent:
+        run_ctx = AgentRunContext(session_id="test-timeout-error")
+        run_ctx.elicitation_timeout = 0.1  # 100ms timeout
+
+        turn = NativeTurn(
+            agent=agent,
+            prompts=["Call the elicit tool"],
+            run_ctx=run_ctx,
+            message_history=[],
+        )
+
+        events: list[RichAgentStreamEvent[Any]] = []
+
+        async def collect_events() -> None:
+            async for event in turn.execute():
+                events.append(event)  # noqa: PERF401
+
+        collector = asyncio.create_task(collect_events())
+
+        # Wait for the elicitation future to be registered (registry is
+        # set by get_agentlet() inside NativeTurn.execute()).
+        while not collector.done():
+            registry = run_ctx.elicitation_registry
+            if registry is not None and len(registry) > 0:
+                break
+            await asyncio.sleep(0.01)
+
+        # Wait for the turn to complete (timeout should fire quickly).
+        try:
+            await asyncio.wait_for(collector, timeout=10.0)
+        except TimeoutError:
+            collector.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await collector
+            pytest.fail(
+                f"Turn did not complete within 10s. Events: {[type(e).__name__ for e in events]}"
+            )
+
+        # Assert: StreamCompleteEvent(cancelled=True) should be yielded.
+        from agentpool.agents.events.events import RunErrorEvent
+
+        stream_complete_events = [e for e in events if isinstance(e, StreamCompleteEvent)]
+        run_error_events = [e for e in events if isinstance(e, RunErrorEvent)]
+
+        assert len(run_error_events) == 0, (
+            "RunErrorEvent should NOT be yielded on elicitation timeout. "
+            "StreamCompleteEvent(cancelled=True) is the correct event. "
+            f"Events: {[type(e).__name__ for e in events]}"
+        )
+        assert len(stream_complete_events) >= 1, (
+            "StreamCompleteEvent should be yielded on elicitation timeout. "
+            f"Events: {[type(e).__name__ for e in events]}"
+        )
+        assert stream_complete_events[0].cancelled is True, (
+            "StreamCompleteEvent should have cancelled=True on elicitation timeout. "
+            f"Got cancelled={stream_complete_events[0].cancelled}"
+        )

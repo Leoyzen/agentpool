@@ -100,10 +100,15 @@ def wrap_tool[TReturn](
             if agent_ctx.data is None:
                 agent_ctx.data = ctx.deps
 
-            # Store current message history on run_ctx so handle_elicitation()
-            # can pass real messages to CheckpointManager for crash recovery.
-            if ctx.deps is not None and ctx.deps.run_ctx is not None:
-                ctx.deps.run_ctx.current_messages = list(ctx.messages)
+            # Always update tool_call_id and tool_name on the AgentContext,
+            # even when agent_ctx_key is None (e.g., when the tool function
+            # takes RunContext[AgentContext] instead of AgentContext directly).
+            # Without this, handle_elicitation() falls back to run_ctx.run_id
+            # as the elicitation handle, causing a mismatch between
+            # PendingDeferredCall.tool_call_id and ToolCallPart.tool_call_id.
+            if ctx.deps is not None:
+                ctx.deps.tool_call_id = ctx.tool_call_id or ""
+                ctx.deps.tool_name = ctx.tool_name or ""
 
             if agent_ctx_key:
                 model_name = f"{ctx.model.system}:{ctx.model.model_name}" if ctx.model else None

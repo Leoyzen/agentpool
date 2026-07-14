@@ -20,20 +20,19 @@ from pydantic import HttpUrl
 from pydantic_ai import RunContext  # noqa: TC002
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.log import get_logger
 from agentpool.mcp_server.client import MCPClient
 from agentpool.mcp_server.registries.official_registry_client import (
     MCPRegistryClient,
     MCPRegistryError,
 )
-from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from fastmcp.client.sampling import SamplingHandler
-    from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.mcp_server.registries.official_registry_client import RegistryServer
     from agentpool.tools.base import Tool
@@ -46,7 +45,7 @@ logger = get_logger(__name__)
 PARQUET_PATH = Path(__file__).parent / "data" / "mcp_servers.parquet"
 
 
-class MCPDiscoveryToolset(ResourceProvider):
+class MCPDiscoveryToolset(FunctionToolsetCapability):
     """Toolset for dynamic MCP server discovery and tool execution.
 
     This toolset allows agents to:
@@ -84,20 +83,11 @@ class MCPDiscoveryToolset(ResourceProvider):
         self._allowed_servers = set(allowed_servers) if allowed_servers else None
         self._blocked_servers = set(blocked_servers) if blocked_servers else set()
         self._sampling_callback = sampling_callback
-        self._tools: list[Tool] | None = None
         # Lazy-loaded semantic search components
         self._db: Any = None
         self._table: Any = None
         self._embed_model: Any = None
         self._tmpdir: str | None = None
-
-    def as_capability(self) -> AbstractCapability | None:
-        """Return a pydantic-ai capability for this provider.
-
-        Returns:
-            A pydantic-ai AbstractCapability instance, or None.
-        """
-        return None
 
     def _get_registry(self) -> MCPRegistryClient:
         """Get or create the registry client."""
@@ -226,28 +216,28 @@ class MCPDiscoveryToolset(ResourceProvider):
 
     async def get_tools(self) -> Sequence[Tool]:
         """Get the discovery tools."""
-        if self._tools is not None:
+        if self._tools:
             return self._tools
 
-        self._tools = [
-            self.create_tool(
-                self.search_mcp_servers,
-                category="search",
-                read_only=True,
-                idempotent=True,
-            ),
-            self.create_tool(
-                self.list_mcp_tools,
-                category="search",
-                read_only=True,
-                idempotent=True,
-            ),
-            self.create_tool(
-                self.call_mcp_tool,
-                category="execute",
-                open_world=True,
-            ),
-        ]
+        # Initialize before create_tool calls, which append to self._tools
+        self._tools = []
+        self.create_tool(
+            self.search_mcp_servers,
+            category="search",
+            read_only=True,
+            idempotent=True,
+        )
+        self.create_tool(
+            self.list_mcp_tools,
+            category="search",
+            read_only=True,
+            idempotent=True,
+        )
+        self.create_tool(
+            self.call_mcp_tool,
+            category="execute",
+            open_world=True,
+        )
         return self._tools
 
     async def search_mcp_servers(  # noqa: D417

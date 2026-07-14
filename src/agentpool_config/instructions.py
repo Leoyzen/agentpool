@@ -19,7 +19,7 @@ class ProviderInstructionConfig(BaseModel):
 
     import_path: str | None = Field(
         default=None,
-        description="Python import path to ResourceProvider class.",
+        description="Python import path to AbstractCapability class.",
     )
 
     kw_args: dict[str, Any] = Field(

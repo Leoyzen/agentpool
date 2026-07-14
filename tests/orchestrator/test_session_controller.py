@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -144,28 +143,19 @@ async def test_get_or_create_session_agent_creates_native_agent(
     mock_pool: MagicMock,
     mock_native_agent: MagicMock,
 ) -> None:
-    """NativeAgentConfig causes a dedicated per-session agent to be created."""
+    """Per-session agent creation delegates to AgentFactory."""
+    cfg = MagicMock()
+    cfg.name = "agent-a"
+    mock_pool.manifest.agents = {"agent-a": cfg}
+    mock_pool._factory.create_session_agent = AsyncMock(return_value=mock_native_agent)
 
-    class FakeNativeConfig:
-        def __init__(self, name: str, model: str) -> None:
-            self.name = name
-            self.model = model
-
-        def get_agent(self, **kwargs: Any) -> MagicMock:
-            return mock_native_agent
-
-    with patch("agentpool.models.agents.NativeAgentConfig", FakeNativeConfig):
-        cfg = FakeNativeConfig("agent-a", "openai:gpt-4o")
-        mock_pool.manifest.agents = {"agent-a": cfg}
-        mock_pool.get_agent.return_value = MagicMock()
-
-        agent = await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
+    agent = await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
 
     assert agent is mock_native_agent
     state = controller.get_session("sess-1")
     assert state is not None
     assert state.is_per_session_agent is True
-    mock_native_agent.__aenter__.assert_awaited_once()
+    mock_pool._factory.create_session_agent.assert_awaited_once()
 
 
 @pytest.mark.anyio
@@ -175,26 +165,17 @@ async def test_get_or_create_session_agent_returns_existing_agent(
     mock_native_agent: MagicMock,
 ) -> None:
     """A second call returns the cached per-session agent."""
+    cfg = MagicMock()
+    cfg.name = "agent-a"
+    mock_pool.manifest.agents = {"agent-a": cfg}
+    mock_pool._factory.create_session_agent = AsyncMock(return_value=mock_native_agent)
 
-    class FakeNativeConfig:
-        def __init__(self, name: str, model: str) -> None:
-            self.name = name
-            self.model = model
-
-        def get_agent(self, **kwargs: Any) -> MagicMock:
-            return mock_native_agent
-
-    with patch("agentpool.models.agents.NativeAgentConfig", FakeNativeConfig):
-        cfg = FakeNativeConfig("agent-a", "openai:gpt-4o")
-        mock_pool.manifest.agents = {"agent-a": cfg}
-        mock_pool.get_agent.return_value = MagicMock()
-
-        first = await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
-        second = await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
+    first = await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
+    second = await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
 
     assert first is second
-    # __aenter__ should only be called once
-    mock_native_agent.__aenter__.assert_awaited_once()
+    # Factory should only be called once (cached on second call)
+    mock_pool._factory.create_session_agent.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -209,23 +190,14 @@ async def test_mcp_count_incremented_and_decremented(
     mock_native_agent: MagicMock,
 ) -> None:
     """MCP count tracks per-session agent creation and destruction."""
+    cfg = MagicMock()
+    cfg.name = "agent-a"
+    mock_pool.manifest.agents = {"agent-a": cfg}
+    mock_pool._factory.create_session_agent = AsyncMock(return_value=mock_native_agent)
 
-    class FakeNativeConfig:
-        def __init__(self, name: str, model: str) -> None:
-            self.name = name
-            self.model = model
-
-        def get_agent(self, **kwargs: Any) -> MagicMock:
-            return mock_native_agent
-
-    with patch("agentpool.models.agents.NativeAgentConfig", FakeNativeConfig):
-        cfg = FakeNativeConfig("agent-a", "openai:gpt-4o")
-        mock_pool.manifest.agents = {"agent-a": cfg}
-        mock_pool.get_agent.return_value = MagicMock()
-
-        assert controller._mcp_process_count == 0
-        await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
-        assert controller._mcp_process_count == 1
+    assert controller._mcp_process_count == 0
+    await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
+    assert controller._mcp_process_count == 1
 
     await controller.close_session("sess-1")
     assert controller._mcp_process_count == 0
@@ -285,21 +257,12 @@ async def test_close_session_exits_per_session_agent(
     mock_native_agent: MagicMock,
 ) -> None:
     """A per-session agent has its async context exited on close."""
+    cfg = MagicMock()
+    cfg.name = "agent-a"
+    mock_pool.manifest.agents = {"agent-a": cfg}
+    mock_pool._factory.create_session_agent = AsyncMock(return_value=mock_native_agent)
 
-    class FakeNativeConfig:
-        def __init__(self, name: str, model: str) -> None:
-            self.name = name
-            self.model = model
-
-        def get_agent(self, **kwargs: Any) -> MagicMock:
-            return mock_native_agent
-
-    with patch("agentpool.models.agents.NativeAgentConfig", FakeNativeConfig):
-        cfg = FakeNativeConfig("agent-a", "openai:gpt-4o")
-        mock_pool.manifest.agents = {"agent-a": cfg}
-        mock_pool.get_agent.return_value = MagicMock()
-
-        await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
+    await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
 
     await controller.close_session("sess-1")
     mock_native_agent.__aexit__.assert_awaited_once()

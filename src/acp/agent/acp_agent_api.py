@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from acp.schema import (
     AuthenticateRequest,
@@ -22,7 +22,7 @@ from acp.schema import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import AsyncIterator, Sequence
 
     from acp.agent.protocol import Agent
     from acp.schema import (
@@ -35,6 +35,7 @@ if TYPE_CHECKING:
         NewSessionResponse,
         PromptResponse,
         ResumeSessionResponse,
+        SessionUpdate,
         SetSessionConfigOptionResponse,
         SetSessionModelResponse,
         SetSessionModeResponse,
@@ -42,19 +43,62 @@ if TYPE_CHECKING:
     from acp.schema.mcp import McpServer
 
 
+@runtime_checkable
+class _SessionStateProtocol(Protocol):
+    """Protocol for session state objects that ACPAgentAPI can poll for updates."""
+
+    def pop_update(self) -> SessionUpdate | None: ...
+    def clear(self) -> None: ...
+
+
+@runtime_checkable
+class _UpdateEventProtocol(Protocol):
+    """Protocol for update events that ACPAgentAPI can wait on."""
+
+    async def wait_with_timeout(self, timeout: float | None = None) -> bool: ...
+    def clear(self) -> None: ...
+
+
 class ACPAgentAPI:
     """Thin wrapper for client-to-agent ACP interactions.
 
     Avoids manual instantiation of request/notification objects.
+
+    When optional ``state`` and ``update_event`` are provided, the instance
+    also satisfies the :class:`~agentpool.agents.acp_agent.turn.ACPClientProtocol`
+    protocol by implementing :meth:`stream_events` and :meth:`get_messages`.
     """
 
-    def __init__(self, connection: Agent) -> None:
+    def __init__(
+        self,
+        connection: Agent,
+        *,
+        state: _SessionStateProtocol | None = None,
+        update_event: _UpdateEventProtocol | None = None,
+    ) -> None:
         """Initialize agent API helper.
 
         Args:
             connection: The Agent protocol connection (e.g., ClientSideConnection)
+            state: Optional session state for polling updates (enables stream_events)
+            update_event: Optional event signaled when new updates arrive
         """
         self.connection = connection
+        self._state: _SessionStateProtocol | None = state
+        self._update_event: _UpdateEventProtocol | None = update_event
+        self._consumed_updates: list[SessionUpdate] = []
+
+    def _attach_state(
+        self,
+        state: _SessionStateProtocol,
+        update_event: _UpdateEventProtocol,
+    ) -> None:
+        """Attach state and update event after construction.
+
+        Allows deferred wiring when state/event are created after the API.
+        """
+        self._state = state
+        self._update_event = update_event
 
     async def initialize(
         self,
@@ -224,3 +268,45 @@ class ACPAgentAPI:
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         """Send an extension notification to the agent."""
         await self.connection.ext_notification(method, params)
+
+    async def stream_events(
+        self,
+        response: PromptResponse,
+    ) -> AsyncIterator[SessionUpdate]:
+        """Yield raw ACP session updates from the state queue.
+
+        Polls :meth:`_SessionStateProtocol.pop_update` in a loop, waiting
+        up to 50 ms between drain cycles for new updates to arrive via
+        ``_update_event``.  Once a full drain cycle produces no updates,
+        the iterator ends.
+
+        Updates are also collected in ``_consumed_updates`` so that
+        :meth:`get_messages` can return them after streaming completes.
+
+        Args:
+            response: The prompt response (unused — updates come from state)
+        """
+        self._consumed_updates.clear()
+        if self._state is None or self._update_event is None:
+            return
+        while True:
+            try:
+                await self._update_event.wait_with_timeout(0.05)
+                self._update_event.clear()
+            except TimeoutError:
+                pass
+            drained_any = False
+            while (update := self._state.pop_update()) is not None:
+                self._consumed_updates.append(update)
+                yield update
+                drained_any = True
+            if not drained_any:
+                break
+
+    async def get_messages(self, session_id: str) -> list[SessionUpdate]:
+        """Return all session updates consumed during :meth:`stream_events`.
+
+        Args:
+            session_id: The ACP session ID (unused — updates are already collected)
+        """
+        return list(self._consumed_updates)

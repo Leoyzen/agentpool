@@ -132,7 +132,9 @@ The codebase is organized into focused packages under `src/`:
 
 - **`agentpool/`** - Core agent framework
   - `agents/` - Agent implementations (native, ACP)
+  - `capabilities/` - Native pydantic-ai capability implementations (MCPCapability, FunctionToolsetCapability, CombinedToolsetCapability, SubagentCapability, CodeModeCapability, FilteredToolsetCapability, AgentContext, DelegationService, ResourceSource, entry-point registry)
   - `delegation/` - AgentPool orchestration, Team coordination, message routing
+  - `lifecycle/` - RunLoop lifecycle dimensions (TriggerSource, Journal, SnapshotStore, CommChannel, EventTransport)
   - `messaging/` - Message processing, MessageNode abstraction, compaction
   - `tools/` - Tool framework and implementations
   - `tool_impls/` - Concrete tool implementations (bash, read, grep, etc.)
@@ -195,27 +197,38 @@ Skills are defined as `SKILL.md` files following the [Agent Skills Spec](https:/
 - `src/agentpool/skills/manager.py` — `SkillsManager` pool-level lifecycle
 - `src/agentpool/skills/uri_resolver.py` — `skill://` URI scheme resolver
 - `src/agentpool/skills/command.py` — `SkillCommand` wraps skills as protocol-agnostic slash commands
-- `src/agentpool/resource_providers/skills_instruction.py` — `SkillsInstructionProvider` injects skills as XML into prompts (metadata/full modes)
+- `src/agentpool/skills/instruction_provider.py` — `SkillsInstructionProvider` injects skills as XML into prompts (metadata/full modes) — migrated from `resource_providers/`
 
 **Injection Modes** (via YAML `skills.instruction`):
 - `off` — No injection
 - `metadata` — `<available-skills>` XML block (names + descriptions)
 - `full` — `<skill_content>` XML block with complete instructions + parameters
 
-### Resource Providers
+### Capabilities (M3 — replaces Resource Providers)
 
-`ResourceProvider` (abstract base in `src/agentpool/resource_providers/base.py`) abstracts tool/prompt/resource/skill access. Providers produce pydantic-ai `Toolset` capabilities via `as_capability()`.
+In M3, the old `ResourceProvider` hierarchy was replaced with native pydantic-ai `AbstractCapability` / `AbstractToolset` implementations. Each `AbstractCapability` produces tools, instructions, change notifications, and optionally implements `ResourceSource` for read-only data access. The old `src/agentpool/resource_providers/` directory (14 files, ~3860 LOC) was physically deleted after migration.
 
-| Provider | Purpose |
-|----------|---------|
-| `MCPResourceProvider` | Wraps MCP server (tools, prompts, resources, skills) |
-| `LocalResourceProvider` | Filesystem skill discovery via `SkillsRegistry` |
-| `PoolResourceProvider` | Exposes agents/teams as subagent delegation tools |
-| `StaticResourceProvider` | Pre-configured tools/prompts with `@tool` decorator |
-| `AggregatingResourceProvider` | Combines multiple providers, forwards change signals |
-| `FilteringResourceProvider` | Proxies another provider with tool filtering |
-| `CodeModeResourceProvider` | Wraps all tools into single Python execution meta-tool |
-| `PlanProvider` | Plan management tools (get/set plan entries) |
+| Capability | Replaces | Key File |
+|---|---|---|
+| `MCPCapability` | `MCPResourceProvider` | `capabilities/mcp_capability.py` |
+| `SkillCapability` | `LocalResourceProvider` | `skills/capability.py` |
+| `SubagentCapability` | `PoolResourceProvider` | `capabilities/subagent_capability.py` |
+| `FunctionToolsetCapability` | `StaticResourceProvider` | `capabilities/function_toolset.py` |
+| `CombinedToolsetCapability` | `AggregatingResourceProvider` | `capabilities/combined_toolset.py` |
+| `FilteredToolsetCapability` | `FilteringResourceProvider` | `capabilities/filtered_toolset.py` |
+| `CodeModeCapability` | `CodeModeResourceProvider` | `capabilities/code_mode_capability.py` |
+
+**Supporting types:**
+- `ResourceSource` (`capabilities/resource_source.py`) — `@runtime_checkable Protocol` for read-only data access (`list()`, `read(uri)`, `exists(uri)`, `on_change()`). Orthogonal to `AbstractCapability` — same object can implement both.
+- `AggregatedResourceSource` — Composes multiple `ResourceSource` instances, routes by URI scheme.
+- `AgentContext` (`capabilities/agent_context.py`) — Frozen dataclass carrying `agent_registry`, `delegation`, `session`, `scope`, `resources`, `host`. Constructed by RunLoop per-turn.
+- `DelegationService` (`capabilities/delegation.py`) — Protocol exposing `spawn_subagent(name, prompt)` and `get_available_agents()`. Limits tools to operations they need without exposing `AgentPool`.
+- `ChangeEvent` (`capabilities/change_event.py`) — Frozen dataclass for capability change notifications (`on_change()` stream).
+- Entry-point registry (`capabilities/registry.py`) — Discovers custom capabilities via `agentpool.capabilities` entry-point group.
+
+**Deleted alongside ResourceProviders:**
+- `src/agentpool/tools/factory.py` (194 LOC, 6 `ToolsetFactory` classes) — became dead code after all providers migrated.
+- `src/agentpool/tools/manager.py` (364 LOC, `ToolManager`) — all `agent.tools.X` access migrated to direct capability references.
 
 ### Hooks & Events System
 
@@ -332,6 +345,23 @@ All processing units (Agents, Teams) inherit from `MessageNode[TInputType, TOutp
 - Hook system for intercepting messages
 - Type-safe input/output handling
 
+!!! warning "Deprecation: `agent_pool` property"
+    `MessageNode.agent_pool` is deprecated since M2 with `DeprecationWarning`. M3.5 completed the migration of all ~64 remaining call sites across ACP server, OpenCode server, core agents, factory, and talk. The `agent_pool` property and setter remain as a deprecated shim for backward compatibility. `HostContext.pool` is kept as a temporary escape hatch for ~6 skill-related accesses (to be removed in the skill-service-extraction change). Full property removal is tracked as an optional task (T7.x) or will be done in M4.
+
+    **Migration**: Use `MessageNode.host_context` instead, which returns an immutable `HostContext` with the same infrastructure fields. `host_context` is sourced from `AgentPool.get_context()` and provides access to MCP manager, storage, and registry without exposing the full mutable pool object.
+
+    ```python
+    # OLD (M1) — deprecated
+    pool = node.agent_pool
+    mcp = node.agent_pool.mcp
+
+    # NEW (M2+) — recommended
+    ctx = node.host_context
+    mcp = ctx.mcp  # if ctx is not None
+    ```
+
+    The `_agent_pool` backing field and setter remain for internal wiring during pool registration, but all read access should migrate to `host_context`.
+
 ```python
 # Both agents and teams are MessageNodes
 agent: MessageNode[ChatMessage, ChatMessage]
@@ -375,9 +405,11 @@ See the Graph Architecture section below for full details.
 #### Tool System
 Tools follow PydanticAI's tool pattern with AgentPool extensions:
 - Tools are typed functions with Pydantic schemas
-- Can access `AgentContext` for agent-specific state
-- Support `subagent` tool for delegation
+- `AbstractCapability` is the primary abstraction for providing tools, instructions, and change notifications. Each capability wraps a pydantic-ai `Toolset` and contributes to the agent's compiled tool list.
+- Can access `AgentContext` (injected via `RunContext.deps`) for agent-specific state including `DelegationService` for subagent spawning
+- Support `subagent` tool for delegation (routes through `DelegationService`, not directly to `AgentPool`)
 - Built-in toolsets provide common functionality (code editing, bash, grep)
+- `ResourceSource` is a separate protocol for read-only data access (MCP resources, skill content), orthogonal to `AbstractCapability`
 
 #### Protocol Bridging
 AgentPool acts as a protocol adapter:
@@ -676,9 +708,17 @@ async def receive_request(session_id, content, priority="when_idle")
 
 Protocol handlers should subscribe to the `EventBus` before calling `receive_request()`, since the method is fire-and-forget. All events stream through the bus.
 
+When creating a new `RunHandle`, `SessionController` wires up two M2 lifecycle dimensions:
+
+- **`ProtocolTrigger`** — An `asyncio.Queue`-based trigger that bridges protocol handlers to the RunLoop. Protocol handlers call `trigger.deliver(content)` to enqueue prompts. The RunLoop drains them in its idle/wake loop via `trigger.poll()`.
+
+- **`ProtocolChannel`** — A bidirectional `CommChannel` that publishes events to the `EventBus` (so protocol servers can consume them) and maintains a feedback queue for steer/followup messages from `SessionController`. `StateUpdate` events are journaled but NOT published to the EventBus, preserving backward compatibility.
+
+For standalone execution (no `EventBus`), `RunHandle.__post_init__` falls back to `DirectChannel` and `ImmediateTrigger`, which deliver events to an internal `asyncio.Queue` that `start()` drains directly.
+
 #### Dual Queue Architecture
 
-AgentPool maintains two queue systems because native and non-native agents use different run loops.
+AgentPool uses two queue systems, with the M2 lifecycle adding a third channel-based path.
 
 **Native agents** rely on PydanticAI's `PendingMessageDrainCapability`. PydanticAI auto-injects this capability outermost. It handles message queuing at two hook points:
 
@@ -687,18 +727,13 @@ AgentPool maintains two queue systems because native and non-native agents use d
 
 Native agents drive execution through `RunExecutor`, which calls `agent_run.next(node)` in a loop. The bare `async for node in agent_run:` pattern does not fire `after_node_run` hooks, so `"when_idle"` messages would never drain. `RunExecutor` avoids this by using explicit `next()` calls.
 
-**Non-native agents** (ACP) do not use PydanticAI's agent loop. They communicate through subprocess JSON-RPC. These agents use `TurnRunner`, which preserves the manual queue system:
+**M2 RunLoop CommChannel** (protocol-server sessions): When `SessionController` creates a `RunHandle`, it injects a `ProtocolChannel` as the CommChannel dimension. `ProtocolChannel` publishes events to the `EventBus` and maintains a feedback queue. `SessionController` calls `channel.deliver_feedback(feedback)` for steer/followup messages. The RunLoop drains feedback via `channel.recv()` in its idle/wake loop.
 
-- `_post_turn_injections` for immediate injections.
-- `_post_turn_prompts` for follow-up prompts.
-- `_process_queued_work()` and `_trigger_auto_resume()` for the auto-resume loop.
-- `SessionState.turn_lock` for turn serialization.
+**DirectChannel** (standalone execution): When no `EventBus` is available, `RunHandle.__post_init__()` creates a `DirectChannel` that publishes events to an internal `asyncio.Queue`. The `start()` generator drains this queue via `get_nowait()`. Standalone execution also uses `ImmediateTrigger` (single-prompt delivery) and relies on `RunHandle._message_queue` for queued prompts between turns.
 
-`TurnRunner` creates `RunHandle` instances and registers them in `SessionController._runs` just like native runs. This gives the pool a unified view of all active execution.
+#### RunHandle Lifecycle (RunLoop)
 
-#### RunHandle Lifecycle
-
-`RunHandle` tracks the state of a single run from start to finish:
+In M2, `RunHandle` IS the RunLoop. It is modified in-place with dimension injection via six optional fields (all set in `__post_init__`):
 
 ```python
 @dataclass
@@ -706,18 +741,50 @@ class RunHandle:
     run_id: str
     session_id: str
     agent_type: str
-    status: RunStatus  # pending | running | completed | failed
-    complete_event: asyncio.Event
+    agent: BaseAgent[Any, Any] | None
+    event_bus: EventBus | None
+    session: SessionState | None
+    run_ctx: AgentRunContext
+
+    # Lifecycle dimensions (M2) — defaults set in __post_init__
+    _trigger_source: TriggerSource | None = None    # ImmediateTrigger("")
+    _journal: Journal | None = None                  # MemoryJournal()
+    _snapshot_store: SnapshotStore | None = None     # MemorySnapshotStore()
+    _comm_channel: CommChannel | None = None         # DirectChannel(journal)
+    _event_transport: EventTransport | None = None   # InProcessTransport()
+    _lifecycle_session_id: str = "default"
+    _run_state: RunState = RunState.IDLE
+    _state_lock: asyncio.Lock                        # guards state transitions
+    _recover_strategy: str = "mark_interrupted"
 ```
 
-The lifecycle flows through these states:
+**`__post_init__()`** initializes any dimension left as `None` to the default in-memory implementation. The journal is injected into the CommChannel so the channel can persist events. When `SessionController` creates a `RunHandle` for a protocol server session, it passes `ProtocolTrigger` and `ProtocolChannel` explicitly, bypassing the defaults.
 
-1. **pending** - Created when `receive_request()` sees an idle session.
-2. **running** - `start()` is called after the asyncio task begins.
-3. **completed** - `complete()` is called when the run finishes normally.
-4. **failed** - `fail()` is called when an exception escapes the run loop. It publishes `RunFailedEvent` to the EventBus.
+**State Machine**: `RunHandle._run_state` transitions through `RunState.IDLE`, `RUNNING`, and `DONE`. Transitions are guarded by `_state_lock` (an `asyncio.Lock`). The `on_state_change()` observer is called on the CommChannel on every transition. The old `RunStatus` enum (`pending`, `running`, `completed`, `failed`, `checkpointed`, `idle`, `done`) coexists for legacy code paths.
 
-`complete_event` is set only after all cleanup finishes. `close_session()` awaits this event with a timeout to allow graceful shutdown. If the timeout expires, it falls back to `cancel_run()`.
+**Lifecycle Flow** (equivalent to the old states):
+
+1. **IDLE** — `RunHandle` created, `_run_state = IDLE`. The `start()` async generator enters the idle/wake loop.
+2. **RUNNING** — `start()` receives a prompt and creates a `Turn`. It sets `_run_state = RUNNING` and yields events from `turn.execute()`.
+3. **DONE** — `close()` is called, `_run_state = DONE`, and the generator terminates.
+
+Between turns, the handle goes idle and waits on `_idle_event`. Messages arrive via two paths:
+- **`steer()`** — Injects a message into the active turn mid-execution (routes to PydanticAI's `PendingMessageDrainCapability`).
+- **`followup()`** — Queues a prompt for the next turn. Wakes the idle event.
+
+**Crash Recovery**: When a durable journal and snapshot store are configured, `start()` calls `journal.resume(snapshot_store)` at the beginning:
+
+```python
+resume_result = self._journal.resume(self._snapshot_store)
+```
+
+If `resume_result.is_inflight` is `True`:
+- `"mark_interrupted"` strategy: Marks the interrupted Turn's turn_id on `_recovered_inflight_turn_id`. The RunLoop continues from idle. The interrupted Turn's partial output is preserved in the journal but not re-executed.
+- `"retry"` strategy: Same detection, but the caller can check `run_handle.recovered_tool_executions` to see which tools already completed and skip them during re-execution.
+
+During recovery, events since the last snapshot are replayed through the CommChannel with `_replaying = True` (which skips journaling to avoid duplicating entries).
+
+**Legacy methods** (`complete()`, `fail()`, `checkpoint()`) remain for backward compatibility but emit no dimension-driven behavior. The old `RunStatus` enum coexists alongside `RunState`.
 
 #### Event Mapping (Native Agents)
 
@@ -736,15 +803,142 @@ The lifecycle flows through these states:
 
 The `RunExecutor` runs PydanticAI iteration in a background task and pushes events into an async queue. The consumer drains this queue and yields `RichAgentStreamEvent` tokens. This preserves CancelScope safety: cancelling the consumer does not immediately tear down the PydanticAI run.
 
+**M2 Dual Publishing Paths**: Events in the RunLoop are now published via two paths:
+
+- **`event_bus.publish(session_id, event)`** — Backward-compatible path, used by both the old `RunHandle.start()` code and `RunExecutor`. Protocol server `ProtocolEventConsumerMixin` instances subscribe to the EventBus and convert events for their respective protocols.
+- **`comm_channel.publish(event)`** — The M2 CommChannel path. `ProtocolChannel.publish()` journals the event (append or upsert) and then publishes to the EventBus. `DirectChannel.publish()` journals the event and enqueues it to an internal `asyncio.Queue`.
+
+When the CommChannel is a `ProtocolChannel`, `start()` avoids double-publishing by NOT calling `event_bus.publish()` directly (detected via `_channel_publishes_to_event_bus`). `StateUpdate` events are journaled but NOT published to the EventBus, since they are internal lifecycle signals that protocol servers do not need to receive.
+
 #### PromptInjectionManager
 
 `PromptInjectionManager` serves two purposes depending on the agent type.
 
 **For all agents**, `inject()` and `consume()` handle tool result augmentation. When a tool finishes, `after_tool_execute` hooks call `consume()` to inject additional context into the conversation. If no tool runs, `flush_pending_to_queue()` moves unconsumed injections into the queued prompts.
 
-**For non-native agents**, `queue()` and `pop_queued()` also handle follow-up prompts after a turn ends. `TurnRunner` drains these queues through `_process_queued_work()`.
+**For non-native agents**, `queue()` and `pop_queued()` also handle follow-up prompts after a turn ends. The manual queue system drains these through `_post_turn_injections` and `_post_turn_prompts`.
 
 **For native agents**, the follow-up prompt queue (`queue()` / `pop_queued()`) is replaced by PydanticAI's `PendingMessageDrainCapability`. `inject()` / `consume()` remain in use for tool augmentation.
+
+### Lifecycle Dimensions (M2)
+
+The M2 lifecycle subsystem introduces six pluggable dimensions that decouple the RunLoop from its infrastructure. Each dimension has a `@runtime_checkable` Protocol and default in-memory implementations.
+
+#### Dimension Reference
+
+| Dimension | Protocol | Default | Durable Alternative | Purpose |
+|---|---|---|---|---|
+| `TriggerSource` | `TriggerSource` | `ImmediateTrigger` | `ProtocolTrigger` | How prompts arrive at the RunLoop |
+| `Journal` | `Journal` | `MemoryJournal` | `DurableJournal` (SQLite WAL) | Event-layer persistence (append + upsert) |
+| `SnapshotStore` | `SnapshotStore` | `MemorySnapshotStore` | `DurableSnapshotStore` (SQLite) | Loop-layer state persistence at Turn boundaries |
+| `CommChannel` | `CommChannel` | `DirectChannel` | `ProtocolChannel` | Event delivery + feedback reception (owns Journal) |
+| `EventTransport` | `EventTransport` | `InProcessTransport` | MQ/gRPC (future) | Wire protocol abstraction for external consumers |
+| `session_id` | n/a | `"default"` | n/a | Logical session identifier |
+
+#### Default Implementations
+
+- **`ImmediateTrigger`** — Delivers a single prompt on the first `poll()` call, then returns `None`. Used for standalone `agent.run()` execution.
+- **`ProtocolTrigger`** — Bridges protocol handlers to the RunLoop via an `asyncio.Queue`. Callers use `trigger.deliver(content)` to enqueue prompts.
+- **`MemoryJournal`** — In-process journal using Python lists/dicts. Data is lost on process exit.
+- **`DurableJournal`** — SQLite-backed journal with WAL mode and `synschronous=NORMAL` for crash-safe writes. Schema: `lifecycle_journal` (seq, entry_type, upsert_key, event_json) and `lifecycle_tool_log` (turn_id, tool_name, args, result, status).
+- **`MemorySnapshotStore`** — In-memory snapshot store using plain dicts.
+- **`DurableSnapshotStore`** — SQLite-backed snapshot store with WAL mode and `synschronous=FULL`. Schema: `snapshots` (seq, state_blob) and `turn_results` (turn_id, result_blob).
+- **`DirectChannel`** — Unidirectional; publishes events to an internal `asyncio.Queue` that `start()` drains via `get_nowait()`. `recv()` always returns `None`.
+- **`ProtocolChannel`** — Bidirectional; publishes events to the `EventBus` and maintains a feedback queue for steer/followup. `StateUpdate` events are journaled but not published to the EventBus. `recv()` dequeues from the feedback queue.
+- **`InProcessTransport`** — In-process `EventTransport` using per-topic `asyncio.Queue` with optional replay buffer (disabled by default).
+
+#### Ownership Topology
+
+```
+RunLoop (RunHandle)
+  +-- _trigger_source: TriggerSource   (owned by RunLoop)
+  +-- _snapshot_store: SnapshotStore   (owned by RunLoop)
+  +-- _event_transport: EventTransport (owned by RunLoop)
+  +-- _comm_channel: CommChannel       (owned by RunLoop, but OWNS Journal)
+  |     +-- _journal: Journal          (owned by CommChannel)
+  |           +-- append/upsert        (delta / entity-state write semantics)
+  |           +-- log_tool_execution   (tool execution log for idempotency)
+```
+
+The Journal is owned by the CommChannel so that every event is persisted before delivery. The SnapshotStore sits beside the CommChannel (not behind it) because snapshot writes are batch operations at Turn boundaries, not event-by-event.
+
+#### Crash Recovery
+
+Recovery is triggered in `start()` when a durable journal and snapshot store are configured:
+
+1. `journal.resume(snapshot_store)` loads the latest snapshot, replays journal entries since the snapshot, and detects in-flight Turns via `_detect_inflight_turn()`.
+2. If a Turn was in-flight (turn appeared in journal but has no completed result in the snapshot store), the result determines behavior:
+   - `recover_strategy: "mark_interrupted"` — preserves partial output in the journal but continues from idle.
+   - `recover_strategy: "retry"` — checks `journal.get_tool_executions(turn_id)` to skip already-completed tools during re-execution.
+3. Events since the last snapshot are replayed through the CommChannel with `_replaying = True` (journaling skipped).
+
+#### Tool Execution Log
+
+The Journal maintains a tool execution log for idempotent crash recovery. Each `ToolExecutionRecord` stores `(turn_id, tool_name, args, result, status)`. The log is populated by `HookAwareTurn._fire_post_tool_hooks()`, which calls `_log_tool_execution()` after every tool completes. This is independent of the hooks system and always fires (even when `hooks:` is not configured).
+
+#### `lifecycle:` YAML Config Section
+
+```yaml
+agents:
+  my_agent:
+    type: native
+    model: openai:gpt-4o
+    lifecycle:
+      journal: durable           # "memory" (default) or "durable"
+      snapshot: durable          # "memory" (default) or "durable"
+      recover_strategy: retry    # "mark_interrupted" (default) or "retry"
+```
+
+When the `lifecycle:` section is omitted or all fields are at default, `create_dimensions()` returns `None` for all dimensions, and `RunHandle.__post_init__()` creates in-memory defaults.
+
+#### Factory Function
+
+```python
+from agentpool.lifecycle.factory import create_dimensions
+
+trigger, journal, snapshot, comm, transport = create_dimensions(
+    lifecycle_config, session_id="my_session",
+)
+run_handle = RunHandle(
+    run_id="run1",
+    session_id="my_session",
+    agent_type="native",
+    _trigger_source=trigger,
+    _journal=journal,
+    _snapshot_store=snapshot,
+    _comm_channel=comm,
+    _event_transport=transport,
+)
+```
+
+#### Lifecycle Package Structure
+
+```
+src/agentpool/lifecycle/
+  __init__.py         — Public exports for all types and implementations
+  types.py            — RunState, Prompt, Feedback, ResumeResult,
+                        ToolExecutionRecord, EventEnvelope (plain dataclasses;
+                        M6 upgrades to Pydantic)
+  protocols.py        — TriggerSource, Journal, SnapshotStore, CommChannel,
+                        EventTransport (@runtime_checkable Protocols)
+  triggers.py         — ImmediateTrigger, ProtocolTrigger, ScheduledTrigger
+                        (stub), ChannelTrigger (stub)
+  journal.py          — MemoryJournal, DurableJournal (SQLite WAL)
+  snapshot_store.py   — MemorySnapshotStore, DurableSnapshotStore (SQLite)
+  comm_channel.py     — DirectChannel, ProtocolChannel
+  event_transport.py  — InProcessTransport
+  factory.py          — create_dimensions() from LifecycleConfig
+```
+
+#### Conventions
+
+- **M2 uses dataclasses; M6 upgrades to Pydantic**: All types in `types.py` are plain dataclasses with the same field names and types that the M6 Pydantic models will use.
+- **`lifecycle.EventEnvelope` is separate** from `orchestrator.event_bus.EventEnvelope`. The lifecycle envelope (`EventEnvelope`) is the language-agnostic serialization format for event transport. The orchestrator envelope (`orchestrator.event_bus.EventEnvelope`) is the internal EventBus delivery envelope. These are distinct types with different responsibilities.
+- **CommChannel owns the Journal**: The Journal is injected into the CommChannel constructor. `CommChannel.publish()` journals (append or upsert) before delivery.
+- **`_replaying` flag**: Set to `True` during crash recovery replay to skip journaling and prevent duplicate entries.
+- **`ProtocolChannel` filters `StateUpdate`**: `StateUpdate` events are journaled but NOT published to the EventBus. They are internal lifecycle signals that protocol servers do not need to receive.
+- **`turn_id` on `AgentRunContext`**: Generated as `str(uuid.uuid4())` and stored on `AgentRunContext.turn_id` for tool execution log correlation.
+- **Recovery metadata preserved on `RunHandle`**: `_recovered_inflight_turn_id` and `recovered_tool_executions` property give downstream code (re-engagement flows) access to the interrupted state.
 
 ### Agent Types
 
@@ -908,16 +1102,33 @@ The project uses entry points for extensibility:
 
 - `src/agentpool/delegation/pool.py` - AgentPool orchestration
 - `src/agentpool/agents/agent.py` - Native agent implementation
-- `src/agentpool/messaging/messagenode.py` - Base abstraction
+- `src/agentpool/messaging/messagenode.py` - Base abstraction (agent_pool deprecation, host_context)
 - `src/agentpool/messaging/graph_adapter.py` - pydantic-graph step wrapping
 - `src/agentpool/models/manifest.py` - Configuration schema
 - `src/agentpool/tools/tool.py` - Tool framework
-- `src/agentpool/orchestrator/core.py` - EventBus, SessionController, TurnRunner
+- `src/agentpool/orchestrator/core.py` - EventBus, SessionController
+- `src/agentpool/orchestrator/run.py` - RunHandle (RunLoop) lifecycle with dimension injection
+- `src/agentpool/orchestrator/turn.py` - HookAwareTurn with _log_tool_execution
+- `src/agentpool/orchestrator/session_controller.py` - ProtocolTrigger/ProtocolChannel creation
+- `src/agentpool/lifecycle/protocols.py` - Five lifecycle Protocols (TriggerSource, Journal, SnapshotStore, CommChannel, EventTransport)
+- `src/agentpool/lifecycle/types.py` - RunState, Prompt, Feedback, ResumeResult, ToolExecutionRecord, EventEnvelope
+- `src/agentpool/lifecycle/triggers.py` - ImmediateTrigger, ProtocolTrigger
+- `src/agentpool/lifecycle/journal.py` - MemoryJournal, DurableJournal
+- `src/agentpool/lifecycle/snapshot_store.py` - MemorySnapshotStore, DurableSnapshotStore
+- `src/agentpool/lifecycle/comm_channel.py` - DirectChannel, ProtocolChannel
+- `src/agentpool/lifecycle/event_transport.py` - InProcessTransport
+- `src/agentpool/lifecycle/factory.py` - create_dimensions() from LifecycleConfig
+- `src/agentpool_config/lifecycle.py` - LifecycleConfig (journal/snapshot/recover_strategy)
 - `src/agentpool/skills/skill.py` - Skill model and parsing
 - `src/agentpool/skills/registry.py` - Skill discovery
-- `src/agentpool/resource_providers/base.py` - Resource provider interface
-- `src/agentpool/resource_providers/mcp_provider.py` - MCP server wrapping
-- `src/agentpool/resource_providers/skills_instruction.py` - Skill prompt injection
+- `src/agentpool/skills/capability.py` - `SkillCapability(AbstractCapability)` with `ResourceSource` implementation
+- `src/agentpool/skills/instruction_provider.py` - `SkillsInstructionProvider` injects skills as XML into prompts (metadata/full modes) — migrated from `resource_providers/`
+- `src/agentpool/capabilities/` - All native capability implementations (MCPCapability, FunctionToolsetCapability, CombinedToolsetCapability, SubagentCapability, CodeModeCapability, FilteredToolsetCapability)
+- `src/agentpool/capabilities/agent_context.py` - `AgentContext` frozen dataclass
+- `src/agentpool/capabilities/delegation.py` - `DelegationService` Protocol
+- `src/agentpool/capabilities/resource_source.py` - `ResourceSource` Protocol + `AggregatedResourceSource`
+- `src/agentpool/capabilities/registry.py` - Entry-point capability discovery
+- `src/agentpool/capabilities/runloop_delegation.py` - `RunLoopDelegationService` (M3, task group 15)
 - `src/agentpool/agents/events/events.py` - All event type definitions
 - `src/agentpool/hooks/agent_hooks.py` - Hook lifecycle management
 - `src/agentpool_server/acp_server/acp_agent.py` - ACP server agent wrapper

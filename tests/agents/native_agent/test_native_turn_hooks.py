@@ -166,10 +166,10 @@ async def test_tool_hooks_not_fired_by_hook_aware_turn_for_native() -> None:
     ``_fire_pre_tool_hooks`` / ``_fire_post_tool_hooks`` methods. The mixin
     methods are never called by ``NativeTurn.execute()``.
 
-    We verify this by checking that ``hooks_fired`` does NOT contain the
-    ``pre_tool_use:*`` or ``post_tool_use:*`` guard keys that HookAwareTurn
-    would set. The tool hooks themselves DO fire (via the capability), but
-    the mixin's guard mechanism is not used.
+    We verify this by checking that ``_logged_tools`` does NOT contain any
+    tool log keys. If the mixin's ``_fire_post_tool_hooks`` were called,
+    it would have invoked ``_log_tool_execution`` which adds keys to
+    ``_logged_tools``.
     """
     _reset_calls()
     hooks = AgentHooks(
@@ -201,30 +201,37 @@ async def test_tool_hooks_not_fired_by_hook_aware_turn_for_native() -> None:
 
         _ = [event async for event in turn.execute()]
 
-    # pre_turn and post_turn fire via HookAwareTurn (guard keys present)
-    assert "pre_turn" in run_ctx.hooks_fired
-    assert "post_turn" in run_ctx.hooks_fired
+    # pre_turn and post_turn fire via HookAwareTurn
+    event_names = [name for name, _ in hook_calls]
+    assert "pre_turn" in event_names
+    assert "post_turn" in event_names
 
     # Tool hooks fire via pydantic-ai Hooks capability, but HookAwareTurn's
-    # guard keys are NOT set because NativeTurn.execute() never calls
-    # _fire_pre_tool_hooks() / _fire_post_tool_hooks().
-    tool_guard_keys = [
-        k for k in run_ctx.hooks_fired if k.startswith(("pre_tool_use:", "post_tool_use:"))
-    ]
-    assert len(tool_guard_keys) == 0, (
-        f"HookAwareTurn should not set tool guard keys for native agents, "
-        f"but found: {tool_guard_keys}"
+    # _log_tool_execution is NOT called because NativeTurn.execute() never
+    # calls _fire_pre_tool_hooks() / _fire_post_tool_hooks().
+    assert len(turn._logged_tools) == 0, (
+        f"HookAwareTurn should not log tool executions for native agents, "
+        f"but found: {turn._logged_tools}"
     )
 
 
 # ---------------------------------------------------------------------------
-# Test: hooks_fired guard prevents double-firing through old code path
+# Test: hooks fire correctly without double-fire guard
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 async def test_hooks_fired_prevents_double_firing_via_old_path() -> None:
-    """Given hooks_fired already has 'pre_turn', a second fire returns None."""
+    """Given the removal of hooks_fired guard, hooks fire on each call.
+
+    The old ``hooks_fired`` double-fire guard was removed after T3 eliminated
+    the ACP standalone path that caused double-firing. With only the
+    ``Turn.execute()`` path active, hooks fire exactly once per turn.
+
+    This test verifies that calling ``_fire_pre_turn_hooks`` after
+    ``execute()`` completes fires hooks again (no guard to block them).
+    This is the expected behavior — the guard is no longer needed.
+    """
     _reset_calls()
     hooks = AgentHooks(pre_turn=[_make_recorder("pre_turn")])
     agent = Agent(
@@ -245,10 +252,10 @@ async def test_hooks_fired_prevents_double_firing_via_old_path() -> None:
         # Execute the turn (fires hooks once)
         _ = [event async for event in turn.execute()]
 
-        # Attempt to fire again — should be no-op
+        # Without the hooks_fired guard, calling again fires again.
         result = await turn._fire_pre_turn_hooks()
-        assert result is None
+        assert result is not None
 
-    # Only one pre_turn call despite the second attempt
+    # Two pre_turn calls: one from execute(), one from manual call
     pre_turn_count = sum(1 for name, _ in hook_calls if name == "pre_turn")
-    assert pre_turn_count == 1
+    assert pre_turn_count == 2

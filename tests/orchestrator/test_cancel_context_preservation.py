@@ -70,7 +70,7 @@ class _BlockingTurnWithHistory(Turn):
         while not self._run_ctx.cancelled:
             await asyncio.sleep(0.01)
         return
-        yield  # noqa: unreachable — makes this an async generator
+        yield  # unreachable — makes this an async generator
 
 
 class _StubTurn(Turn):
@@ -238,6 +238,14 @@ async def test_new_runhandle_bridges_conversation() -> None:
     controller._background_tasks = set()
     controller._sessions = {"test-bridge-session": session}
 
+    # Mock pool — _start_run_handle calls pool.get_context(), pool._factory,
+    # and pool.manifest.agents
+    mock_pool = MagicMock()
+    mock_pool.get_context.return_value = MagicMock()
+    mock_pool._factory.resource_sources = {}
+    mock_pool.manifest.agents = {"test-bridge": MagicMock()}
+    controller.pool = mock_pool  # type: ignore[attr-defined]
+
     # Call _start_run_handle directly
     run_handle = controller._start_run_handle(
         session=session,
@@ -400,6 +408,14 @@ async def test_multi_turn_preserves_context_via_consume_run() -> None:
     controller._background_tasks = set()
     controller._sessions = {"test-multi-session": session}
 
+    # Mock pool — _start_run_handle calls pool.get_context(), pool._factory,
+    # and pool.manifest.agents
+    mock_pool = MagicMock()
+    mock_pool.get_context.return_value = MagicMock()
+    mock_pool._factory.resource_sources = {}
+    mock_pool.manifest.agents = {"test-multi": MagicMock()}
+    controller.pool = mock_pool  # type: ignore[attr-defined]
+
     # First RunHandle (simulating prior turn that already completed)
     # Second RunHandle (new request on same session)
     second_handle = controller._start_run_handle(
@@ -485,6 +501,14 @@ async def test_bridged_history_injects_cancelled_tool_results() -> None:
     controller._runs = {}
     controller._background_tasks = set()
     controller._sessions = {"test-cancel-tool-session": session}
+
+    # Mock pool — _start_run_handle calls pool.get_context(), pool._factory,
+    # and pool.manifest.agents
+    mock_pool = MagicMock()
+    mock_pool.get_context.return_value = MagicMock()
+    mock_pool._factory.resource_sources = {}
+    mock_pool.manifest.agents = {"test-cancel-tool": MagicMock()}
+    controller.pool = mock_pool  # type: ignore[attr-defined]
 
     run_handle = controller._start_run_handle(
         session=session,

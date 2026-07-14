@@ -26,6 +26,7 @@ from agentpool_server.opencode_server.models import (
     MessageWithParts,
     PartDeltaEvent,
     PartUpdatedEvent,
+    SessionStatusEvent,
     TextPart,
 )
 
@@ -189,3 +190,114 @@ async def test_process_text_delta_without_start(server_state: ServerState) -> No
     first_part = assistant_msg.parts[0]
     assert isinstance(first_part, TextPart)
     assert first_part.text == "Some text"
+
+
+# =============================================================================
+# StreamCompleteEvent Cancellation Tests
+# =============================================================================
+
+
+def _make_stream_complete_context(server_state: ServerState) -> EventProcessorContext:
+    """Create a minimal EventProcessorContext for StreamCompleteEvent tests."""
+    assistant_msg = MessageWithParts.assistant(
+        message_id="msg-1",
+        session_id="test-session",
+        time=MessageTime(created=0),
+        agent_name="test-agent",
+        model_id="test-model",
+        parent_id="parent-1",
+        provider_id="agentpool",
+        path=MessagePath(cwd="/tmp", root="/tmp"),
+    )
+    return EventProcessorContext(
+        session_id="test-session",
+        assistant_msg_id="msg-1",
+        assistant_msg=assistant_msg,
+        state=server_state,
+        working_dir="/tmp",
+    )
+
+
+@pytest.mark.asyncio
+async def test_stream_complete_emits_idle_status(server_state: ServerState) -> None:
+    """Test that a completed StreamCompleteEvent emits SessionStatusEvent(idle)."""
+    from agentpool.agents.events import StreamCompleteEvent
+    from agentpool.messaging import ChatMessage
+
+    processor = EventProcessor()
+    ctx = _make_stream_complete_context(server_state)
+
+    msg = ChatMessage[str](content="done", role="assistant")
+    event = StreamCompleteEvent(message=msg, cancelled=False)
+
+    events = [e async for e in processor.process(event, ctx)]
+
+    status_events = [e for e in events if isinstance(e, SessionStatusEvent)]
+    assert len(status_events) == 1
+    assert status_events[0].properties.status.type == "idle"
+
+
+@pytest.mark.asyncio
+async def test_stream_complete_emits_cancelled_status(server_state: ServerState) -> None:
+    """Test that a cancelled StreamCompleteEvent emits SessionStatusEvent(cancelled)."""
+    from agentpool.agents.events import StreamCompleteEvent
+    from agentpool.messaging import ChatMessage
+
+    processor = EventProcessor()
+    ctx = _make_stream_complete_context(server_state)
+
+    msg = ChatMessage[str](content="partial", role="assistant")
+    event = StreamCompleteEvent(message=msg, cancelled=True)
+
+    events = [e async for e in processor.process(event, ctx)]
+
+    status_events = [e for e in events if isinstance(e, SessionStatusEvent)]
+    assert len(status_events) == 1
+    assert status_events[0].properties.status.type == "cancelled"
+
+
+# =============================================================================
+# McpToolsChangedEvent Tests
+# =============================================================================
+
+
+def test_create_mcp_tools_changed_event() -> None:
+    """EventProcessor.create_mcp_tools_changed_event creates correct event."""
+    from agentpool_server.opencode_server.models.events import McpToolsChangedEvent
+
+    processor = EventProcessor()
+    event = processor.create_mcp_tools_changed_event(server="my_mcp_server")
+
+    assert isinstance(event, McpToolsChangedEvent)
+    assert event.type == "mcp.tools.changed"
+    assert event.properties.server == "my_mcp_server"
+
+
+@pytest.mark.anyio
+async def test_mcp_tools_changed_event_from_change_event() -> None:
+    """Full wiring: ChangeEvent(kind='tools_changed') → McpToolsChangedEvent.
+
+    Simulates the flow:
+    1. McpServerCap.on_change() yields ChangeEvent(kind="tools_changed")
+    2. EventProcessor.create_mcp_tools_changed_event() converts to McpToolsChangedEvent
+    """
+    from agentpool.capabilities.change_event import ChangeEvent
+    from agentpool_server.opencode_server.models.events import McpToolsChangedEvent
+
+    processor = EventProcessor()
+
+    # Simulate a ChangeEvent from McpServerCap._on_tools_changed()
+    change_event = ChangeEvent(
+        capability_name="my_mcp_server",
+        kind="tools_changed",
+        source_uri="mcp://my_mcp_server",
+    )
+
+    # The server's _watch_mcp_tool_changes task would do this conversion
+    oc_event = processor.create_mcp_tools_changed_event(
+        server=change_event.capability_name,
+    )
+
+    assert isinstance(oc_event, McpToolsChangedEvent)
+    assert oc_event.properties.server == "my_mcp_server"
+    assert oc_event.type == "mcp.tools.changed"

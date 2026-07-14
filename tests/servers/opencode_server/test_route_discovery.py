@@ -51,7 +51,6 @@ def _server_state(tmp_path: Path) -> ServerState:
     pool.todos = todos
     pool.manifest = manifest
     pool.manifest.agents = {}
-    pool.skill_commands = None
     pool.skill_provider = None
     pool.skills = None
 
@@ -63,6 +62,8 @@ def _server_state(tmp_path: Path) -> ServerState:
     agent.env = env
     agent._input_provider = None
     agent.agent_pool = pool
+    agent.host_context = pool
+    agent._agent_pool = pool  # state.py resolves _pool via agent._agent_pool
     agent.storage = storage_manager
     agent.get_available_models = AsyncMock(return_value=[])
     agent.get_mcp_server_info = AsyncMock(return_value={})

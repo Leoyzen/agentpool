@@ -18,9 +18,10 @@ import pytest
 from agentpool import Agent
 from agentpool.agents.base_agent import _current_run_ctx_var
 from agentpool.agents.context import AgentRunContext
+from agentpool.lifecycle import RunOutcome, RunState
 from agentpool.orchestrator.core import SessionPool
 from agentpool.orchestrator.metrics import MetricsCollector
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.orchestrator.run import RunHandle
 
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
@@ -37,7 +38,7 @@ def test_run_handle_defaults() -> None:
     assert handle.run_id == "r1"
     assert handle.session_id == "s1"
     assert handle.agent_type == "native"
-    assert handle.status == RunStatus.pending
+    assert handle._run_state == RunState.IDLE
     assert handle.run_ctx.current_task is None
     assert not handle.complete_event.is_set()
 
@@ -48,7 +49,7 @@ async def test_start_transitions_to_running() -> None:
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     task: asyncio.Task[Any] = asyncio.create_task(asyncio.sleep(0))
     handle._start_task(task)
-    assert handle.status == RunStatus.running
+    assert handle.is_running
     assert handle.run_ctx.current_task is task
     await task
 
@@ -57,7 +58,7 @@ def test_start_without_task() -> None:
     """start() works when no task is provided."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     handle._start_task()
-    assert handle.status == RunStatus.running
+    assert handle.is_running
     assert handle.run_ctx.current_task is None
 
 
@@ -65,7 +66,8 @@ def test_complete_transitions_and_sets_event() -> None:
     """complete() transitions to completed and sets complete_event."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     handle.complete()
-    assert handle.status == RunStatus.completed
+    assert handle._run_state == RunState.DONE
+    assert handle.outcome == RunOutcome.COMPLETED
     assert handle.complete_event.is_set()
 
 
@@ -93,7 +95,8 @@ def test_fail_transitions_and_sets_event() -> None:
     """fail() transitions to failed and sets complete_event."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     handle.fail()
-    assert handle.status == RunStatus.failed
+    assert handle._run_state == RunState.DONE
+    assert handle.outcome == RunOutcome.FAILED
     assert handle.complete_event.is_set()
 
 
@@ -102,7 +105,8 @@ def test_fail_with_exception_sets_cancelled() -> None:
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     exc = RuntimeError("boom")
     handle.fail(exc)
-    assert handle.status == RunStatus.failed
+    assert handle._run_state == RunState.DONE
+    assert handle.outcome == RunOutcome.FAILED
     assert handle.run_ctx.cancelled is True
 
 
@@ -135,7 +139,7 @@ async def test_cancel_sets_cancelled_flag() -> None:
     handle.cancel()
     assert handle.run_ctx.cancelled is True
     # Status should remain running; cleanup is deferred
-    assert handle.status == RunStatus.running
+    assert handle.is_running
     assert not handle.complete_event.is_set()
 
     task.cancel()
@@ -238,7 +242,7 @@ class TestMetricsCollectorActiveRuns:
             run_id="run-1",
             session_id="sess-native",
             agent_type="native",
-            status=RunStatus.running,
+            _run_state=RunState.RUNNING,
         )
         session_pool.sessions._runs["run-1"] = handle_native
 
@@ -248,7 +252,7 @@ class TestMetricsCollectorActiveRuns:
             run_id="run-2",
             session_id="sess-non-native",
             agent_type="non-native",
-            status=RunStatus.running,
+            _run_state=RunState.RUNNING,
         )
         session_pool.sessions._runs["run-2"] = handle_non_native
 
@@ -277,8 +281,8 @@ def ctxvar_agent() -> Agent[None]:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_contextvar_set_during_run_stream_once(ctxvar_agent: Agent[None]) -> None:
-    """_current_run_ctx_var must be non-None during _run_stream_once and None after."""
+async def test_contextvar_set_during_stream_events(ctxvar_agent: Agent[None]) -> None:
+    """_current_run_ctx_var must be non-None during _stream_events and None after."""
     # Before stream starts
     assert _current_run_ctx_var.get() is None
 
@@ -286,11 +290,11 @@ async def test_contextvar_set_during_run_stream_once(ctxvar_agent: Agent[None]) 
 
     # Fully consume the stream so the generator's finally block runs naturally
     async for _event in ctxvar_agent.run_stream("Test prompt"):
-        # During the stream _run_stream_once is active
+        # During the stream _stream_events is active
         if captured_ctx is None:
             captured_ctx = _current_run_ctx_var.get()
             assert captured_ctx is not None, (
-                "_current_run_ctx_var must be set during _run_stream_once"
+                "_current_run_ctx_var must be set during _stream_events"
             )
             assert isinstance(captured_ctx, AgentRunContext)
 

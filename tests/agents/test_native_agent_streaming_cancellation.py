@@ -99,6 +99,9 @@ def _mock_session_pool(agent: Agent[Any], run_ctx: Any) -> None:
     session_pool.get_run.return_value = run_handle
     agent_pool = MagicMock()
     agent_pool.session_pool = session_pool
+    host_ctx = MagicMock()
+    host_ctx.session_pool = session_pool
+    agent_pool.get_context.return_value = host_ctx
     agent.agent_pool = agent_pool
 
 

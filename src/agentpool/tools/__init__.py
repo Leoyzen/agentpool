@@ -10,7 +10,7 @@ from __future__ import annotations
 from pydantic_ai.exceptions import ApprovalRequired, CallDeferred
 
 from agentpool.tools.base import FunctionTool, Tool
-from agentpool.tools.manager import ToolManager, ToolError
+from agentpool.tools.exceptions import ToolError
 from agentpool.tools.tool_call_info import ToolCallInfo
 from agentpool.skills.registry import SkillsRegistry
 
@@ -22,5 +22,4 @@ __all__ = [
     "Tool",
     "ToolCallInfo",
     "ToolError",
-    "ToolManager",
 ]

@@ -5,7 +5,7 @@ Exercises the complete session lifecycle that a real ACP client experiences:
 1. **Connect** - Create ``MCPManager`` + ``AcpMcpConnectionManager``, register
    an ACP connection, and create a per-session MCP context.
 2. **Session** - Store a config snapshot and build MCP capabilities via
-   ``as_capability(session_id=...)``.
+   ``get_capabilities(session_id=...)``.
 3. **MCP tool** - Verify the capability list is returned and the session
    context has the expected resources (connection pool, toolset cache,
    ACP connection tracking).
@@ -13,7 +13,7 @@ Exercises the complete session lifecycle that a real ACP client experiences:
    both managers, verify all resources are gone.
 5. **Reconnect** - Create a fresh ACP connection with a new connection_id
    and call ``get_or_create_session()`` again.
-6. **Resume** - Store a new snapshot and call ``as_capability()`` again.
+6. **Resume** - Store a new snapshot and call ``get_capabilities()`` again.
 7. **Verify** - New toolset objects are different from pre-disconnect ones,
    session context is fresh (empty toolset_cache, different connection_pool),
    and ACP connections are fully replaced.
@@ -108,13 +108,13 @@ async def test_e2e_session_lifecycle() -> None:  # noqa: PLR0915
         assert old_ctx.snapshot is snapshot
 
         # ================================================================
-        # Phase 3: MCP TOOL - as_capability returns toolsets
+        # Phase 3: MCP TOOL - get_capabilities returns toolsets
         # ================================================================
-        old_caps = await mcp_manager.as_capability(session_id=session_id)
+        old_caps = await mcp_manager.get_capabilities(session_id=session_id)
         # Empty snapshot → no servers → empty capability list
         assert old_caps == []
         # Session context still exists during the turn
-        assert session_id in mcp_manager._session_contexts
+        assert mcp_manager.get_session_context(session_id) is not None
 
         # Store references to pre-disconnect resources for later comparison
         old_toolset_cache = old_ctx.toolset_cache
@@ -134,7 +134,7 @@ async def test_e2e_session_lifecycle() -> None:  # noqa: PLR0915
         assert not old_conn.has_active_sessions()
 
         # Verify MCP session context is removed
-        assert session_id not in mcp_manager._session_contexts
+        assert mcp_manager.get_session_context(session_id) is None
 
         # ================================================================
         # Phase 5: RECONNECT - Create fresh ACP connection + session
@@ -167,13 +167,13 @@ async def test_e2e_session_lifecycle() -> None:  # noqa: PLR0915
         # ================================================================
         new_snapshot = McpConfigSnapshot()
         mcp_manager.update_session_snapshot(session_id, new_snapshot)
-        new_caps = await mcp_manager.as_capability(session_id=session_id)
+        new_caps = await mcp_manager.get_capabilities(session_id=session_id)
 
         # ================================================================
         # Phase 7: VERIFY - Fresh resources, no stale references
         # ================================================================
 
-        # 7a: New _SessionContext is a different object
+        # 7a: New McpSessionContext is a different object
         assert new_ctx is not old_ctx
 
         # 7b: New toolset_cache is fresh (different object, empty)
@@ -214,7 +214,7 @@ async def test_e2e_session_lifecycle() -> None:  # noqa: PLR0915
         assert new_caps == []
 
         # 7j: Session context still exists after resume
-        assert session_id in mcp_manager._session_contexts
+        assert mcp_manager.get_session_context(session_id) is not None
 
     finally:
         # Ensure cleanup even on assertion failure

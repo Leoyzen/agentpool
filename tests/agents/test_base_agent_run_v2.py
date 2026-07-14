@@ -14,9 +14,10 @@ import pytest
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunErrorEvent, RunStartedEvent, StreamCompleteEvent
 from agentpool.agents.native_agent.agent import Agent
+from agentpool.lifecycle import RunState
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
 
 
@@ -101,7 +102,7 @@ async def test_create_run_returns_run_handle_without_executing() -> None:
     )
 
     assert isinstance(handle, RunHandle)
-    assert handle._status == RunStatus.idle
+    assert handle._run_state == RunState.IDLE
     assert handle._closing is False
 
 
@@ -319,7 +320,7 @@ def test_no_duplicate_stream_complete_in_run_once() -> None:
     )
 
 
-def test_no_duplicate_stream_complete_in_run_stream_once() -> None:
+def test_no_duplicate_stream_complete_in_stream_events() -> None:
     """_stream_events must not publish StreamCompleteEvent after turn.execute().
 
     NativeTurn.execute() already yields StreamCompleteEvent as its terminal

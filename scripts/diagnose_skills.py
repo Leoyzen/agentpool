@@ -180,13 +180,6 @@ async def diagnose(config_path: str | None = None) -> None:  # noqa: PLR0915
                 else "NO skills found!",
             )
 
-            # Check resource_provider
-            try:
-                rp = manager.resource_provider
-                print_result("ResourceProvider available", True, f"type={type(rp).__name__}")
-            except RuntimeError as e:
-                print_result("ResourceProvider available", False, str(e))
-
     except Exception as e:  # noqa: BLE001
         print_result("SkillsManager initialization", False, str(e))
 
@@ -200,24 +193,6 @@ async def diagnose(config_path: str | None = None) -> None:  # noqa: PLR0915
             from agentpool.delegation import AgentPool
 
             async with AgentPool(config_path) as pool:
-                # Check skill_commands
-                sc = pool.skill_commands
-                print_result(
-                    "pool.skill_commands is not None",
-                    sc is not None,
-                    f"type={type(sc).__name__}"
-                    if sc
-                    else "This is the problem! Bridge won't be created.",
-                )
-
-                if sc is not None:
-                    cmd_names = list(sc._items.keys())
-                    print_result(
-                        "skill_commands has entries",
-                        len(cmd_names) > 0,
-                        f"Commands: {cmd_names}" if cmd_names else "NO commands registered!",
-                    )
-
                 # Check skill_provider
                 sp = pool.skill_provider
                 print_result(
@@ -265,40 +240,28 @@ async def diagnose(config_path: str | None = None) -> None:  # noqa: PLR0915
             from agentpool.delegation import AgentPool
 
             async with AgentPool(config_path) as pool:
-                sc = pool.skill_commands
-                if sc is not None:
-                    # Simulate what server.py does
-                    from agentpool_server.opencode_server.skill_bridge import OpenCodeSkillBridge
+                # Simulate what server.py does
+                from agentpool_server.opencode_server.skill_bridge import OpenCodeSkillBridge
 
-                    bridge = OpenCodeSkillBridge(skill_provider=pool.skill_provider)
-                    sc.on_command_change(bridge.handle_change)
+                bridge = OpenCodeSkillBridge(skill_provider=pool.skill_provider)
 
-                    commands = bridge.get_commands()
-                    print_result(
-                        "Bridge has commands after subscription",
-                        len(commands) > 0,
-                        f"Commands: {[c.name for c in commands]}"
-                        if commands
-                        else "NO commands in bridge!",
-                    )
+                commands = bridge.get_commands()
+                print_result(
+                    "Bridge has commands after subscription",
+                    len(commands) > 0,
+                    f"Commands: {[c.name for c in commands]}"
+                    if commands
+                    else "NO commands in bridge!",
+                )
 
-                    skill_commands = bridge.get_skill_commands()
-                    print_result(
-                        "Bridge has skill_commands",
-                        len(skill_commands) > 0,
-                        f"Skills: {[c.name for c in skill_commands]}"
-                        if skill_commands
-                        else "NO skill commands!",
-                    )
-                else:
-                    print_result(
-                        "Bridge creation",
-                        False,
-                        (
-                            "skill_commands is None - bridge will NOT be created!"
-                            " This is the root cause."
-                        ),
-                    )
+                bridge_skill_commands = bridge.get_skill_commands()
+                print_result(
+                    "Bridge has skill_commands",
+                    len(bridge_skill_commands) > 0,
+                    f"Skills: {[c.name for c in bridge_skill_commands]}"
+                    if bridge_skill_commands
+                    else "NO skill commands!",
+                )
         except Exception as e:  # noqa: BLE001
             print_result("Bridge simulation", False, str(e))
     else:
@@ -359,8 +322,7 @@ Common fixes for skills not showing in TUI:
 5. Check server logs with:
    OBSERVABILITY_ENABLED=true agentpool serve-opencode config.yml
 
-6. If pool.skill_commands is None, the OpenCode bridge is never created,
-   which means /command endpoint won't return skill commands.
+6. If pool.skill_provider is None, the OpenCode bridge won't have commands.
 """)
 
 

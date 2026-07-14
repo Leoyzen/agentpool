@@ -127,6 +127,12 @@ def _mock_session_pool(agent: Agent, run_ctx: AgentRunContext) -> None:
     agent_pool.storage = MagicMock()
     agent_pool.storage.log_message = AsyncMock()
     agent_pool.storage.log_session = AsyncMock()
+    # Set up get_context() to return a HostContext-like mock with the same
+    # session_pool and storage so migrated code using host_context works.
+    host_ctx = MagicMock()
+    host_ctx.session_pool = session_pool
+    host_ctx.storage = agent_pool.storage
+    agent_pool.get_context.return_value = host_ctx
     agent.agent_pool = agent_pool
 
 
@@ -173,7 +179,7 @@ async def test_inject_prompt_from_different_task_with_session_pool(
 
     # After deprecation, inject_prompt() delegates to turns.steer() for native agents.
     # Verify the delegation happened correctly.
-    session_pool = slow_agent.agent_pool.session_pool  # type: ignore[union-attr]
+    session_pool = slow_agent.host_context.session_pool  # type: ignore[union-attr]
     session_pool.steer.assert_called_once_with(  # type: ignore[attr-defined]
         "test-session", "Background task completed"
     )
@@ -224,7 +230,7 @@ async def test_queue_prompt_from_different_task_with_session_pool(
 
     # After deprecation, queue_prompt() delegates to turns.followup() for native agents.
     # Verify the delegation happened correctly.
-    session_pool = slow_agent.agent_pool.session_pool  # type: ignore[union-attr]
+    session_pool = slow_agent.host_context.session_pool  # type: ignore[union-attr]
     session_pool.followup.assert_called_once_with(  # type: ignore[attr-defined]
         "test-session", "Follow-up prompt"
     )
@@ -294,7 +300,7 @@ async def test_inject_prompt_triggers_continuation(slow_agent: Agent[None]) -> N
     """inject_prompt from a different task should cause run_stream to continue.
 
     The run_stream() loop checks for pending injections
-    after each _run_stream_once iteration. If inject_prompt() successfully
+    after each _stream_events iteration. If inject_prompt() successfully
     delivers to the injection manager (via SessionPool fallback), and the
     injection gets flushed, the loop should run another iteration.
     """
@@ -328,7 +334,7 @@ async def test_inject_prompt_triggers_continuation(slow_agent: Agent[None]) -> N
 
     # After deprecation, inject_prompt() delegates to turns.steer() for native agents.
     # Verify the delegation happened correctly.
-    session_pool = slow_agent.agent_pool.session_pool  # type: ignore[union-attr]
+    session_pool = slow_agent.host_context.session_pool  # type: ignore[union-attr]
     session_pool.steer.assert_called_with(  # type: ignore[attr-defined]
         "test-session", "Follow-up from different task"
     )
@@ -411,7 +417,7 @@ async def test_hook_manager_consumes_cross_task_injection_with_session_pool(
 
     # After deprecation, inject_prompt() delegates to turns.steer() for native agents.
     # Verify the delegation happened correctly.
-    session_pool = slow_agent.agent_pool.session_pool  # type: ignore[union-attr]
+    session_pool = slow_agent.host_context.session_pool  # type: ignore[union-attr]
     session_pool.steer.assert_called_with(  # type: ignore[attr-defined]
         "test-session", "Background task result notice"
     )

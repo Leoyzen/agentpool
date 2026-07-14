@@ -5,7 +5,7 @@ instances, verifying that the full create/close chain populates and cleans
 per-session MCP state correctly.
 
 Tests:
-    G1  - Full create-session chain populates MCP _SessionContext with snapshot
+    G1  - Full create-session chain populates MCP McpSessionContext with snapshot
     G5  - close_session cleans agent.mcp session context and exits agent context
     G6  - resume_session creates real ACPSession with _acp_mcp_manager wired
     G13 - MCPManager.cleanup() cleans all session contexts
@@ -33,7 +33,7 @@ def _make_mock_pool() -> MagicMock:
     """Create a mock AgentPool suitable for SessionController tests.
 
     Returns a MagicMock with manifest, main_agent_name, _config_file_path,
-    skills_instruction_provider, skills_tools_provider, and mcp configured
+    skills_tools_provider, and mcp configured
     so that SessionController.get_or_create_session_agent() can resolve
     a NativeAgentConfig and call cfg.get_agent().
     """
@@ -46,7 +46,6 @@ def _make_mock_pool() -> MagicMock:
     )
     mock_pool.main_agent_name = "test_agent"
     mock_pool._config_file_path = None
-    mock_pool.skills_instruction_provider = None
     mock_pool.skills_tools_provider = MagicMock()
     mock_pool.mcp = MCPManager(name="pool-mcp")
     return mock_pool
@@ -65,11 +64,11 @@ def _make_mock_client() -> MagicMock:
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_full_create_session_chain_populates_mcp_session_context() -> None:
-    """SessionController.get_or_create_session_agent() populates MCPManager _SessionContext.
+    """SessionController.get_or_create_session_agent() populates MCPManager McpSessionContext.
 
     Verifies that the real SessionController, when given a NativeAgentConfig,
     calls agent.mcp.get_or_create_session() and agent.mcp.update_session_snapshot()
-    so that the agent's MCPManager has a _SessionContext with a non-None snapshot.
+    so that the agent's MCPManager has a McpSessionContext with a non-None snapshot.
     """
     from agentpool.agents.native_agent import Agent
     from agentpool.models.agents import NativeAgentConfig
@@ -94,9 +93,21 @@ async def test_full_create_session_chain_populates_mcp_session_context() -> None
     mock_pool.manifest = manifest
     mock_pool.main_agent_name = "test_agent"
     mock_pool._config_file_path = None
-    mock_pool.skills_instruction_provider = None
     mock_pool.skills_tools_provider = MagicMock()
     mock_pool.mcp = agent.mcp  # Use the agent's own MCPManager
+    mock_pool.get_context.return_value = MagicMock()
+
+    # Use side_effect to mimic AgentFactory._create_native_main() behavior:
+    # populate the MCP session context with a snapshot.
+    async def _mock_create_session_agent(**kwargs: object) -> Agent:
+        sid = kwargs.get("session_id", "")
+        agent.mcp.get_or_create_session(sid)
+        agent.mcp.update_session_snapshot(sid, McpConfigSnapshot())
+        return agent
+
+    mock_pool._factory.create_session_agent = AsyncMock(
+        side_effect=_mock_create_session_agent,
+    )
 
     controller = SessionController(pool=mock_pool)
 
@@ -108,9 +119,9 @@ async def test_full_create_session_chain_populates_mcp_session_context() -> None
             session_id, agent_name="test_agent"
         )
 
-        # Assert: agent's MCPManager has a _SessionContext with non-None snapshot
+        # Assert: agent's MCPManager has a McpSessionContext with non-None snapshot
         ctx = result_agent.mcp.get_session_context(session_id)
-        assert ctx is not None, "get_or_create_session_agent() must create a _SessionContext"
+        assert ctx is not None, "get_or_create_session_agent() must create a McpSessionContext"
         assert ctx.snapshot is not None, (
             "get_or_create_session_agent() must call update_session_snapshot()"
         )

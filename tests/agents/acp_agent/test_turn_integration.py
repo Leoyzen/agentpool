@@ -21,8 +21,9 @@ from agentpool.agents.events import (
     PartDeltaEvent,
     StreamCompleteEvent,
 )
+from agentpool.lifecycle import RunState
 from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.run import RunHandle, RunStatus
+from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
 
 
@@ -95,7 +96,6 @@ async def test_acp_turn_full_cycle_with_mock_client() -> None:
         acp_client=client,
         prompts=["Say hello"],
         run_ctx=run_ctx,
-        message_history=[],
         session_id="test-session",
     )
 
@@ -134,7 +134,7 @@ async def test_acp_turn_full_cycle_with_mock_client() -> None:
 class _BlockingTurn(Turn):
     """Stub Turn that blocks on a release event before completing.
 
-    Used to keep _status == RunStatus.running long enough to call steer().
+    Used to keep _status == RunState.RUNNING long enough to call steer().
     """
 
     def __init__(self, *, release_event: asyncio.Event) -> None:
@@ -186,7 +186,7 @@ async def test_run_handle_steer_for_acp_path() -> None:
     await asyncio.sleep(0.05)
 
     # Turn should be running (blocked on release_event inside _BlockingTurn)
-    assert handle._status == RunStatus.running
+    assert handle._run_state == RunState.RUNNING
     # ACP path does not set active_agent_run (only NativeTurn does)
     assert handle.active_agent_run is None
 
@@ -202,7 +202,7 @@ async def test_run_handle_steer_for_acp_path() -> None:
     await asyncio.sleep(0.05)
     await consumer_task
 
-    assert handle._status == RunStatus.done
+    assert handle._run_state == RunState.DONE
 
 
 # ---------------------------------------------------------------------------

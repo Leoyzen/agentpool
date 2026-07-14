@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Self, cast, overload
+from typing import TYPE_CHECKING, Self, overload
 
 from upathtools import JoinablePathLike, UPath, to_upath
 
@@ -16,8 +16,6 @@ if TYPE_CHECKING:
 
     from fsspec import AbstractFileSystem
 
-    from agentpool.resource_providers.base import ResourceProvider
-    from agentpool.resource_providers.local import LocalResourceProvider
     from agentpool.skills.skill import Skill
 
 
@@ -55,7 +53,6 @@ class SkillsManager:
         self._initialized = False
         self._config = config
         self._config_file_path = config_file_path
-        self._resource_provider: LocalResourceProvider | None = None
 
     def __repr__(self) -> str:
         skill_count = len(self.registry.list_items()) if self._initialized else "?"
@@ -68,17 +65,6 @@ class SkillsManager:
             self._initialized = True
             count = len(self.registry.list_items())
             logger.info("Skills manager initialized", name=self.name, skill_count=count)
-
-            # Create and enter LocalResourceProvider
-            from agentpool.resource_providers.local import LocalResourceProvider
-
-            self._resource_provider = LocalResourceProvider(
-                name=self.name,
-                skills_dirs=cast(list[JoinablePathLike], self.registry.skills_dirs),
-                owner=self.owner,
-            )
-            await self._resource_provider.__aenter__()
-            logger.debug("Resource provider initialized", name=self.name)
         except Exception as e:
             msg = "Failed to initialize skills manager"
             logger.exception(msg, name=self.name, error=e)
@@ -92,27 +78,6 @@ class SkillsManager:
         exc_tb: TracebackType | None,
     ) -> None:
         """Clean up the skills manager."""
-        # Clean up resource provider if initialized
-        if self._resource_provider is not None:
-            await self._resource_provider.__aexit__(exc_type, exc_val, exc_tb)
-            self._resource_provider = None
-
-    @property
-    def resource_provider(self) -> ResourceProvider:
-        """Get the resource provider for accessing skills.
-
-        Returns:
-            The LocalResourceProvider instance
-
-        Raises:
-            RuntimeError: If the manager has not been initialized
-        """
-        if self._resource_provider is None:
-            raise RuntimeError(
-                "Resource provider not available. "
-                "Ensure the manager is used as an async context manager."
-            )
-        return self._resource_provider
 
     @overload
     async def add_skills_directory(self, path: JoinablePathLike) -> None: ...
@@ -172,7 +137,7 @@ class SkillsManager:
             default_paths = [p.expanduser() for p in DEFAULT_SKILLS_PATHS]
 
         # Sync registry's skills_dirs to reflect actual effective paths.
-        # This ensures downstream consumers (e.g. LocalResourceProvider)
+        # This ensures downstream consumers (e.g. SkillManagerCap)
         # do not re-discover default paths when include_default=False.
         self.registry.skills_dirs = [to_upath(p).expanduser() for p in paths]
 

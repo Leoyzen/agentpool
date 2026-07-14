@@ -1,0 +1,213 @@
+"""Tests for SubagentCapability — native capability for subagent delegation."""
+
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import MagicMock
+
+from pydantic_ai.capabilities import AbstractCapability
+from pydantic_ai.toolsets import FunctionToolset
+import pytest
+
+from agentpool.capabilities.agent_context import AgentContext
+from agentpool.capabilities.delegation import AgentNotFoundError, DelegationService
+from agentpool.capabilities.subagent_capability import SubagentCapability
+from agentpool.host.context import RunScope
+
+
+pytestmark = pytest.mark.unit
+
+
+# =============================================================================
+# Test fixtures
+# =============================================================================
+
+
+class FakeDelegationService:
+    """Minimal DelegationService implementation for testing."""
+
+    def __init__(
+        self,
+        *,
+        agents: list[str] | None = None,
+        spawn_output: list[str] | None = None,
+    ) -> None:
+        self._agents = agents if agents is not None else ["analyzer", "reviewer"]
+        self._spawn_output = spawn_output if spawn_output is not None else ["chunk_1", "chunk_2"]
+        self.spawn_calls: list[tuple[str, str]] = []
+
+    def spawn_subagent(self, name: str, prompt: str) -> Any:
+        """Yield test chunks, recording the call."""
+        self.spawn_calls.append((name, prompt))
+
+        if name not in self._agents:
+            raise AgentNotFoundError(name)
+
+        async def _gen() -> Any:
+            for chunk in self._spawn_output:
+                yield chunk
+
+        return _gen()
+
+    def get_available_agents(self) -> list[str]:
+        return list(self._agents)
+
+
+def _make_ctx(delegation: DelegationService) -> Any:
+    """Create a RunContext-like object with AgentContext as deps."""
+    ctx = MagicMock()
+    ctx.deps = AgentContext(
+        agent_registry=MagicMock(),
+        delegation=delegation,
+        session=MagicMock(),
+        scope=RunScope(),
+        host=MagicMock(),
+    )
+    return ctx
+
+
+# =============================================================================
+# Tests
+# =============================================================================
+
+
+def test_is_abstract_capability() -> None:
+    """SubagentCapability is an instance of AbstractCapability."""
+    cap = SubagentCapability()
+    assert isinstance(cap, AbstractCapability)
+
+
+def test_get_toolset_returns_function_toolset() -> None:
+    """get_toolset() returns a FunctionToolset with both tools."""
+    cap = SubagentCapability()
+    toolset = cap.get_toolset()
+    assert toolset is not None
+    assert isinstance(toolset, FunctionToolset)
+
+
+def test_toolset_exposes_spawn_subagent() -> None:
+    """Toolset contains the spawn_subagent tool."""
+    cap = SubagentCapability()
+    toolset = cap.get_toolset()
+    assert isinstance(toolset, FunctionToolset)
+    assert "spawn_subagent" in toolset.tools
+
+
+def test_toolset_exposes_get_available_agents() -> None:
+    """Toolset contains the get_available_agents tool."""
+    cap = SubagentCapability()
+    toolset = cap.get_toolset()
+    assert isinstance(toolset, FunctionToolset)
+    assert "get_available_agents" in toolset.tools
+
+
+async def test_spawn_subagent_calls_delegation() -> None:
+    """spawn_subagent tool delegates to DelegationService.spawn_subagent."""
+    delegation = FakeDelegationService(spawn_output=["result_a", "result_b"])
+    ctx = _make_ctx(delegation)
+
+    result = await SubagentCapability.spawn_subagent(ctx, "analyzer", "do stuff")
+
+    assert delegation.spawn_calls == [("analyzer", "do stuff")]
+    assert "result_a" in result
+    assert "result_b" in result
+
+
+async def test_spawn_subagent_unknown_agent_raises() -> None:
+    """AgentNotFoundError is propagated when agent name is unknown."""
+    delegation = FakeDelegationService(agents=["analyzer"])
+    ctx = _make_ctx(delegation)
+
+    with pytest.raises(AgentNotFoundError, match="nonexistent"):
+        await SubagentCapability.spawn_subagent(ctx, "nonexistent", "prompt")
+
+
+async def test_get_available_agents_returns_registry_names() -> None:
+    """get_available_agents tool returns the agent list from DelegationService."""
+    delegation = FakeDelegationService(agents=["alpha", "beta", "gamma"])
+    ctx = _make_ctx(delegation)
+
+    result = await SubagentCapability.get_available_agents(ctx)
+
+    assert result == ["alpha", "beta", "gamma"]
+
+
+async def test_get_available_agents_returns_empty_list() -> None:
+    """get_available_agents returns empty list when no agents registered."""
+    delegation = FakeDelegationService(agents=[])
+    ctx = _make_ctx(delegation)
+
+    result = await SubagentCapability.get_available_agents(ctx)
+
+    assert result == []
+
+
+def test_get_instructions_returns_description() -> None:
+    """get_instructions() returns a non-None description."""
+    cap = SubagentCapability()
+    instructions = cap.get_instructions()
+    assert instructions is not None
+    assert "spawn_subagent" in instructions
+    assert "get_available_agents" in instructions
+
+
+def test_no_agent_pool_reference() -> None:
+    """SubagentCapability does not import or reference AgentPool."""
+    cap = SubagentCapability()
+    # The capability should have no pool/AgentPool attribute
+    assert not hasattr(cap, "pool")
+    assert not hasattr(cap, "_pool")
+    assert not hasattr(cap, "agent_pool")
+
+
+async def test_aenter_returns_self() -> None:
+    """__aenter__ returns the capability itself (no-op lifecycle)."""
+    cap = SubagentCapability[Any]()
+    result = await cap.__aenter__()
+    assert result is cap
+
+
+async def test_aexit_is_noop() -> None:
+    """__aexit__ is a no-op that returns None."""
+    cap = SubagentCapability[Any]()
+    result = await cap.__aexit__(None, None, None)
+    assert result is None
+
+
+def test_toolset_id_customizable() -> None:
+    """Toolset ID can be customized via constructor."""
+    cap = SubagentCapability(toolset_id="custom_subagent")
+    toolset = cap.get_toolset()
+    assert isinstance(toolset, FunctionToolset)
+    assert toolset.id == "custom_subagent"
+
+
+def test_default_toolset_id() -> None:
+    """Default toolset ID is 'subagent'."""
+    cap = SubagentCapability()
+    toolset = cap.get_toolset()
+    assert isinstance(toolset, FunctionToolset)
+    assert toolset.id == "subagent"
+
+
+async def test_spawn_subagent_empty_output() -> None:
+    """spawn_subagent returns empty string when delegation yields no chunks."""
+    delegation = FakeDelegationService(spawn_output=[])
+    ctx = _make_ctx(delegation)
+
+    result = await SubagentCapability.spawn_subagent(ctx, "analyzer", "prompt")
+
+    assert result == ""
+
+
+async def test_delegation_service_protocol_isinstance() -> None:
+    """FakeDelegationService satisfies the runtime_checkable DelegationService Protocol."""
+    delegation = FakeDelegationService()
+    assert isinstance(delegation, DelegationService)
+
+
+def test_agent_not_found_error_message() -> None:
+    """AgentNotFoundError stores and reports the agent name."""
+    err = AgentNotFoundError("my_agent")
+    assert err.agent_name == "my_agent"
+    assert "my_agent" in str(err)

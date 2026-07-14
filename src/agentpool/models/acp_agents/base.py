@@ -20,11 +20,11 @@ from agentpool_config.toolsets import BaseToolsetConfig
 
 if TYPE_CHECKING:
     from exxec import ExecutionEnvironment
+    from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.agents.acp_agent import ACPAgent
     from agentpool.common_types import AnyEventHandlerType
     from agentpool.delegation import AgentPool
-    from agentpool.resource_providers import ResourceProvider
     from agentpool.ui.base import InputProvider
 
 
@@ -141,12 +141,12 @@ class BaseACPAgentConfig(BaseAgentConfig):
         """Get the ACP registry agent ID, if this is a registry-based agent."""
         return None
 
-    def get_tool_providers(self) -> list[ResourceProvider]:
+    def get_tool_providers(self) -> list[AbstractCapability]:
         """Get all resource providers for this agent's tools."""
-        from agentpool.resource_providers import StaticResourceProvider
+        from agentpool.capabilities.function_toolset import FunctionToolsetCapability
         from agentpool.tools.base import Tool
 
-        providers: list[ResourceProvider] = []
+        providers: list[AbstractCapability] = []
         static_tools: list[Tool] = []
 
         for tool_config in self.tools:
@@ -164,7 +164,7 @@ class BaseACPAgentConfig(BaseAgentConfig):
                 continue
 
         if static_tools:
-            providers.append(StaticResourceProvider(name="tools", tools=static_tools))
+            providers.append(FunctionToolsetCapability(name="tools", tools=static_tools))
 
         return providers
 

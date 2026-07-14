@@ -23,7 +23,7 @@ class TestGetAgentRoleConfigOption:
         pool.manifest.agents = {"solo": MagicMock(name="solo")}
         agent = MagicMock()
         agent.name = "solo"
-        agent.agent_pool = pool
+        agent.host_context = pool
 
         result = get_agent_role_config_option(agent)
         assert result is None
@@ -40,7 +40,7 @@ class TestGetAgentRoleConfigOption:
         pool.manifest.agents = {"agent_a": agent_a, "agent_b": agent_b}
         agent = MagicMock()
         agent.name = "agent_a"
-        agent.agent_pool = pool
+        agent.host_context = pool
 
         result = get_agent_role_config_option(agent)
         assert result is not None
@@ -64,7 +64,7 @@ class TestGetAgentRoleConfigOption:
     def test_no_pool_returns_none(self):
         """Agent without pool should not expose agent_role."""
         agent = MagicMock()
-        agent.agent_pool = None
+        agent.host_context = None
 
         result = get_agent_role_config_option(agent)
         assert result is None
@@ -79,7 +79,7 @@ class TestSwapSessionAgent:
         pool = MagicMock()
         default_agent = MagicMock()
         default_agent.name = "default"
-        default_agent.agent_pool = pool
+        default_agent.host_context = pool
         pool.manifest.agents = {"default": default_agent}
 
         client = MagicMock()
@@ -98,6 +98,7 @@ class TestSwapSessionAgent:
         session._task_lock = MagicMock()
         session._task_lock.locked.return_value = False
         session.switch_active_agent = AsyncMock()
+        session.is_busy = False
         acp_agent.session_manager._acp_sessions = {"sess_1": session}
         acp_agent.session_manager.get_session = lambda sid: session
 
@@ -127,6 +128,7 @@ class TestSwapSessionAgent:
         session.agent.name = "default"
         session._task_lock = MagicMock()
         session._task_lock.locked.return_value = False
+        session.is_busy = False
         session.switch_active_agent = AsyncMock(side_effect=ValueError("Agent not found"))
         acp_agent.session_manager.get_session = lambda sid: session
 
@@ -142,6 +144,7 @@ class TestSwapSessionAgent:
         session.agent.name = "default"
         session._task_lock = MagicMock()
         session._task_lock.locked.return_value = False
+        session.is_busy = False
         session.switch_active_agent = AsyncMock()
         acp_agent.session_manager.get_session = lambda sid: session
 

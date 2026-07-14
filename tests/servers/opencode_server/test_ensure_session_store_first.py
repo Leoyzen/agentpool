@@ -31,13 +31,14 @@ def create_mock_agent() -> MagicMock:
     agent = MagicMock(spec=BaseAgent)
     agent.name = "test_agent"
     agent.session_id = "original_session_id"
-    agent.agent_pool = MagicMock()
-    agent.agent_pool.manifest.config_file_path = "test_config.yml"
-    agent.agent_pool.storage.save_session = AsyncMock()
-    agent.agent_pool.storage.load_session = AsyncMock(return_value=None)
-    agent.agent_pool.session_pool = MagicMock()
-    agent.agent_pool.session_pool.sessions = MagicMock()
-    agent.agent_pool.session_pool.sessions.store = None
+    agent.host_context = MagicMock()
+    agent._agent_pool = agent.host_context  # state.py resolves _pool via agent._agent_pool
+    agent.host_context.manifest.config_file_path = "test_config.yml"
+    agent.host_context.storage.save_session = AsyncMock()
+    agent.host_context.storage.load_session = AsyncMock(return_value=None)
+    agent.host_context.session_pool = MagicMock()
+    agent.host_context.session_pool.sessions = MagicMock()
+    agent.host_context.session_pool.sessions.store = None
     agent.env = MagicMock()
     agent.env.cwd = "/test/dir"
     return agent

@@ -29,8 +29,8 @@ def agent():
         ],
     )
     # Add real tools
-    agent.tools.register_tool(add)
-    agent.tools.register_tool(greet)
+    agent._builtin_provider.register_tool(add)
+    agent._builtin_provider.register_tool(greet)
     return agent
 
 
@@ -135,7 +135,7 @@ async def test_tool_rendering(agent):
         """Add two numbers."""
         return a + b
 
-    agent.tools.register_tool(add_3)
+    agent._builtin_provider.register_tool(add_3)
     agent.sys_prompts.inject_tools = "all"
     result = await agent.sys_prompts.format_system_prompt(agent)
     assert "add_3" in result

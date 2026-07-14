@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 import asyncio
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Literal, Self, overload
+import warnings
 
 from anyenv.signals import Signal
 
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
         QueueStrategy,
     )
     from agentpool.delegation import AgentPool
+    from agentpool.host.context import HostContext
     from agentpool.messaging.context import NodeContext
     from agentpool.storage import StorageManager
     from agentpool.talk import Talk, TeamTalk
@@ -110,7 +112,7 @@ class MessageNode[TDeps, TResult](ABC):
         self._name = name or self.__class__.__name__
         self._display_name = display_name
         self.log = logger.bind(agent_name=self._name)
-        self.agent_pool = agent_pool
+        self._agent_pool = agent_pool
         self.description = description
         self.connections = ConnectionManager(self)
         cfgs = list(event_configs) if event_configs else None
@@ -126,7 +128,7 @@ class MessageNode[TDeps, TResult](ABC):
         # However, when the agent has its own MCP servers (agent-level),
         # create a dedicated MCPManager for them. Pool-level servers are
         # still accessible via agent_pool.mcp and are added separately by
-        # the orchestrator via agent.tools.add_provider().
+        # the orchestrator via agent._external_capabilities.append().
         if agent_pool is not None and not mcp_servers:
             self._mcp_shared = True
             self.mcp = agent_pool.mcp
@@ -134,6 +136,43 @@ class MessageNode[TDeps, TResult](ABC):
             self._mcp_shared = False
             self.mcp = MCPManager(name_, servers=mcp_servers, owner=self.name)
         self.enable_db_logging = enable_logging
+
+    @property
+    def agent_pool(self) -> AgentPool[Any] | None:
+        """Compatibility shim: returns the pool reference.
+
+        .. deprecated:: M2
+            Use :attr:`host_context` instead. The ``agent_pool`` property
+            will be removed in M3. ``host_context`` provides the same
+            infrastructure fields via an immutable :class:`HostContext`.
+        """
+        warnings.warn(
+            "agent_pool is deprecated, use host_context (HostContext) instead. "
+            "See AGENTS.md for migration guide.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self._agent_pool
+
+    @agent_pool.setter
+    def agent_pool(self, value: AgentPool[Any] | None) -> None:
+        self._agent_pool = value
+
+    def _bind_pool(self, pool: AgentPool[Any] | None) -> None:
+        """Internal method to set the pool reference without DeprecationWarning.
+
+        Used by Talk wiring and other internal code that needs to set
+        the pool reference without going through the deprecated public
+        property setter.
+        """
+        self._agent_pool = pool
+
+    @property
+    def host_context(self) -> HostContext | None:
+        """Return HostContext from the pool, if available."""
+        if self._agent_pool is not None:
+            return self._agent_pool.get_context()
+        return None
 
     async def log_session(
         self,
@@ -224,7 +263,7 @@ class MessageNode[TDeps, TResult](ABC):
     @property
     def storage(self) -> StorageManager | None:
         """Get storage manager from pool."""
-        return self.agent_pool.storage if self.agent_pool else None
+        return self._agent_pool.storage if self._agent_pool else None
 
     @property
     def name(self) -> str:
@@ -397,8 +436,8 @@ class MessageNode[TDeps, TResult](ABC):
 
         if callable(target):
             target = Agent.from_callback(target)
-            if pool := self.agent_pool:
-                target.agent_pool = pool
+            if pool := self._agent_pool:
+                target._bind_pool(pool)
         # we are explicit here just to make disctinction clear, we only want sequences
         # of message units
         if isinstance(target, Sequence) and not isinstance(target, BaseTeam):
@@ -407,8 +446,8 @@ class MessageNode[TDeps, TResult](ABC):
                 match t:
                     case _ if callable(t):
                         other = Agent.from_callback(t)
-                        if pool := self.agent_pool:
-                            other.agent_pool = pool
+                        if pool := self._agent_pool:
+                            other._bind_pool(pool)
                         targets.append(other)
                     case MessageNode():
                         targets.append(t)

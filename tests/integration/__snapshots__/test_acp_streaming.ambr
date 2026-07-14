@@ -1,0 +1,91 @@
+# serializer version: 1
+# name: test_acp_streaming_event_sequence_with_tool_metadata[asyncio]
+  list([
+    dict({
+      'agent_name': 'test-acp-agent',
+      'event_kind': 'run_started',
+      'parent_session_id': None,
+    }),
+    dict({
+      'content': 'Hello',
+      'delta_type': 'TextPartDelta',
+      'event_kind': 'part_delta',
+      'index': 0,
+    }),
+    dict({
+      'event_kind': 'tool_call_start',
+      'kind': 'other',
+      'raw_input': dict({
+        'path': '/test/file.py',
+      }),
+      'title': 'Read file',
+      'tool_call_id': 'tc-read-001',
+      'tool_name': 'Read file',
+    }),
+    dict({
+      'agent_name': 'test-acp-agent',
+      'event_kind': 'tool_call_complete',
+      'metadata': dict({
+        'diff': dict({
+          'new': 'b',
+          'old': 'a',
+          'path': '/test/file.py',
+        }),
+      }),
+      'tool_call_id': 'tc-read-001',
+      'tool_input': dict({
+      }),
+      'tool_name': 'Read file',
+      'tool_result': 'file contents here',
+    }),
+    dict({
+      'content': ' world',
+      'delta_type': 'TextPartDelta',
+      'event_kind': 'part_delta',
+      'index': 0,
+    }),
+    dict({
+      'cancelled': False,
+      'content': 'Hello world',
+      'event_kind': 'stream_complete',
+      'finish_reason': 'stop',
+      'name': 'test-acp-agent',
+      'role': 'assistant',
+    }),
+  ])
+# ---
+# name: test_acp_streaming_text_only_sequence[asyncio]
+  list([
+    dict({
+      'agent_name': 'test-acp-agent',
+      'event_kind': 'run_started',
+      'parent_session_id': None,
+    }),
+    dict({
+      'content': 'Hello',
+      'delta_type': 'TextPartDelta',
+      'event_kind': 'part_delta',
+      'index': 0,
+    }),
+    dict({
+      'content': ' ',
+      'delta_type': 'TextPartDelta',
+      'event_kind': 'part_delta',
+      'index': 0,
+    }),
+    dict({
+      'content': 'world',
+      'delta_type': 'TextPartDelta',
+      'event_kind': 'part_delta',
+      'index': 0,
+    }),
+    dict({
+      'cancelled': False,
+      'content': 'Hello world',
+      'event_kind': 'stream_complete',
+      'finish_reason': 'stop',
+      'name': 'test-acp-agent',
+      'role': 'assistant',
+    }),
+  ])
+# ---

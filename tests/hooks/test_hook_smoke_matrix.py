@@ -219,7 +219,6 @@ async def _run_acp_standalone(hook_type: HookType) -> None:
         acp_client=client,  # type: ignore[arg-type]
         prompts=["do something"],
         run_ctx=run_ctx,
-        message_history=[],
         session_id="smoke-acp-session",
         agent_name="smoke-acp-agent",
         hooks=hooks,

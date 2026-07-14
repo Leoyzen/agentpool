@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import TYPE_CHECKING, Self
 
+from pydantic import TypeAdapter
+
 from agentpool.log import get_logger
 from agentpool.sessions.models import SessionData
 from agentpool.utils.time_utils import get_now
@@ -81,6 +83,21 @@ class SQLSessionStore:
 
     def _to_db_model(self, data: SessionData) -> Session:
         """Convert SessionData to database model."""
+        # Serialize pending_deferred_calls into metadata_json so they
+        # survive the roundtrip. SessionData has no dedicated column,
+        # but metadata_json is a JSON column that can carry arbitrary data.
+        from agentpool.sessions.models import PendingDeferredCall
+
+        metadata = dict(data.metadata)
+        if data.pending_deferred_calls:
+            calls_adapter = TypeAdapter(list[PendingDeferredCall])
+            metadata["_pending_deferred_calls"] = calls_adapter.dump_python(
+                data.pending_deferred_calls, mode="json"
+            )
+        elif "_pending_deferred_calls" in metadata:
+            # Clear stale entries
+            metadata.pop("_pending_deferred_calls", None)
+
         return Session(
             id=data.session_id,  # id is the primary key
             agent_name=data.agent_name,
@@ -92,7 +109,7 @@ class SQLSessionStore:
             cwd=data.cwd,
             created_at=data.created_at,  # Maps to start_time in DB
             last_active=data.last_active,
-            metadata_json=data.metadata,
+            metadata_json=metadata,
             status=data.status,
         )
 
@@ -102,10 +119,24 @@ class SQLSessionStore:
         ``Session.title`` is the single source of truth — it always
         overrides ``metadata_json["title"]`` so that title updates that
         only write the column are correctly reflected on read.
+
+        ``pending_deferred_calls`` are deserialized from
+        ``metadata_json["_pending_deferred_calls"]`` (stored by
+        ``_to_db_model``).
         """
+        from agentpool.sessions.models import PendingDeferredCall
+
         metadata = row.metadata_json or {}
         if row.title:
             metadata = {**metadata, "title": row.title}
+
+        # Deserialize pending_deferred_calls from metadata
+        pending_calls: list[PendingDeferredCall] = []
+        raw_calls = metadata.pop("_pending_deferred_calls", None)
+        if raw_calls:
+            calls_adapter = TypeAdapter(list[PendingDeferredCall])
+            pending_calls = calls_adapter.validate_python(raw_calls)
+
         return SessionData(
             session_id=row.id,  # id is the primary key
             agent_name=row.agent_name,
@@ -118,28 +149,44 @@ class SQLSessionStore:
             last_active=row.last_active or get_now(),
             metadata=metadata,
             status=row.status or "active",
+            pending_deferred_calls=pending_calls,
         )
 
     async def save(self, data: SessionData) -> None:
         """Save or update session data.
 
-        Uses delete-then-insert for upsert semantics.
+        Uses delete-then-insert for upsert semantics, but preserves
+        ``checkpoint_data`` from the existing record so that session
+        status updates (e.g. ``active`` → ``checkpointed``) do not
+        destroy checkpoint data saved by ``SQLProvider.save_checkpoint()``.
 
         Args:
             data: Session data to persist
         """
-        from sqlalchemy import delete
+        from sqlalchemy import delete, select
         from sqlalchemy.ext.asyncio import AsyncSession
 
         engine = self._get_engine()
 
         async with AsyncSession(engine) as session:
+            # Preserve checkpoint_data from existing record before delete.
+            # Without this, the delete-then-insert upsert destroys
+            # checkpoint_data saved by SQLProvider.save_checkpoint().
+            result = await session.execute(
+                select(Session.checkpoint_data).where(  # type: ignore[call-overload]
+                    Session.id == data.session_id
+                )
+            )
+            existing_checkpoint = result.scalar_one_or_none()
+
             # Delete existing if present (upsert via delete+insert)
             stmt = delete(Session).where(Session.id == data.session_id)  # type: ignore[arg-type]
             await session.execute(stmt)
 
             # Insert new/updated
             db_session = self._to_db_model(data)
+            if existing_checkpoint is not None:
+                db_session.checkpoint_data = existing_checkpoint
             session.add(db_session)
             await session.commit()
             logger.debug("Saved session", session_id=data.session_id)

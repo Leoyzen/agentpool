@@ -142,3 +142,41 @@ class TestSQLCheckpoint:
 
             result = await provider.load_checkpoint("s1")
             assert result is None
+
+    @pytest.mark.unit
+    async def test_save_checkpoint_without_prior_session(self, provider: SQLModelProvider) -> None:
+        """save_checkpoint succeeds even when no Conversation record exists.
+
+        This is the ACP session scenario: SessionStore uses a separate Session table,
+        and StorageManager.save_session() is never called. The SQL provider should
+        create a minimal Conversation record on demand (upsert pattern) rather than
+        raising ValueError.
+        """
+        async with provider:
+            # No save_session() call — directly save checkpoint
+            await provider.save_checkpoint(
+                "s-no-conv",
+                '[{"role":"user","content":"hello"}]',
+                '[{"tool_call_id":"tc1","tool_name":"bash"}]',
+            )
+            result = await provider.load_checkpoint("s-no-conv")
+
+        assert result is not None
+        messages_json, pending_calls_json = result
+        assert messages_json == '[{"role":"user","content":"hello"}]'
+        assert pending_calls_json == '[{"tool_call_id":"tc1","tool_name":"bash"}]'
+
+    @pytest.mark.unit
+    async def test_save_checkpoint_without_session_then_overwrite(
+        self, provider: SQLModelProvider
+    ) -> None:
+        """save_checkpoint can overwrite a checkpoint created without prior session."""
+        async with provider:
+            await provider.save_checkpoint("s-upsert", "old", "old_calls")
+            await provider.save_checkpoint("s-upsert", "new", "new_calls")
+            result = await provider.load_checkpoint("s-upsert")
+
+        assert result is not None
+        messages_json, pending_calls_json = result
+        assert messages_json == "new"
+        assert pending_calls_json == "new_calls"

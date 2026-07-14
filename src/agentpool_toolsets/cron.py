@@ -5,16 +5,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Self
 
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.log import get_logger
-from agentpool.resource_providers import ResourceProvider
 from agentpool.utils.time_utils import datetime_to_ms
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from types import TracebackType
-
-    from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.tools.base import Tool
     from agentpool_bot.cron.cron_types import CronSchedule
@@ -24,7 +22,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class CronTools(ResourceProvider):
+class CronTools(FunctionToolsetCapability):
     """Provider that exposes cron job management tools.
 
     Wraps a ``CronService`` and gives agents the ability to
@@ -43,7 +41,6 @@ class CronTools(ResourceProvider):
     def __init__(self, service: CronService, name: str = "cron") -> None:
         super().__init__(name=name)
         self.service = service
-        self._tools: list[Tool] | None = None
 
     async def __aenter__(self) -> Self:
         """Start the cron service."""
@@ -61,7 +58,7 @@ class CronTools(ResourceProvider):
 
     async def get_tools(self) -> Sequence[Tool]:
         """Return cron management tools."""
-        if self._tools is not None:
+        if self._tools:
             return self._tools
 
         self._tools = [
@@ -160,11 +157,3 @@ class CronTools(ResourceProvider):
         if self.service.remove_job(job_id):
             return f"Removed job {job_id}"
         return f"Job {job_id} not found"
-
-    def as_capability(self) -> AbstractCapability | None:
-        """Return a pydantic-ai capability for this provider.
-
-        Returns:
-            A pydantic-ai AbstractCapability instance, or None.
-        """
-        return None
