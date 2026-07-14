@@ -49,7 +49,9 @@
 - [ ] 5.4 Update `receive_request()` return type annotation from `RunHandle | None` to `str | None` — `str` (message_id) for success (both new runs and steer/followup), `None` for failure
 - [ ] 5.5 Pass `message_id` to `run.steer()` and `run.followup()` calls in `receive_request()`; return the `message_id` string from `steer()`/`followup()`
 - [ ] 5.6 Add `SessionController.revoke_inject(session_id: str, message_id: str) -> bool` method that delegates to active `RunHandle.revoke()`
-- [ ] 5.7 Add unit tests for: `receive_request` with `message_id` propagation, `list` content preservation (no stringification), return type `str | None` verification, initial prompt via followup (D17), `revoke_inject` on active/idle sessions
+- [ ] 5.7 Add `SessionController.wait_for_completion(session_id: str, timeout: float | None = None) -> bool` method — looks up active run via `session.current_run_id` → `self._runs[run_id]` and awaits `run_handle.complete_event.wait()` with timeout. Returns `True` if completed, `False` on timeout or no active run. Also add pass-through on `SessionPool`.
+- [ ] 5.8 Migrate 2 callers that access `RunHandle` attributes on `receive_request()` return value: (1) `session_routes.py:1935-1941` — replace `run_handle.complete_event.wait()` with `session_pool.wait_for_completion(session_id, timeout=30)`; (2) `acp_server/handler.py:604-607` — replace `run_handle._turn_complete_event.wait()` with `session_pool.wait_for_completion(session_id)` or equivalent
+- [ ] 5.9 Add unit tests for: `receive_request` with `message_id` propagation, `list` content preservation (no stringification), return type `str | None` verification, initial prompt via followup (D17), `revoke_inject` on active/idle sessions, `wait_for_completion` on active/idle/timed-out sessions
 
 ## 5.5. RunHandle Start/Idle Loop Update
 
@@ -61,8 +63,9 @@
 - [ ] 5.5.6 Change `_execute_turn()` parameter `current_prompts` type from `list[str]` to `list[str | list[Any]]`. Handle `"\n".join(current_prompts)` at line 645: when prompts contain `list` items, extract text from `content_blocks` for `ChatMessage.content` or use `content_blocks` directly
 - [ ] 5.5.7 Widen `NativeTurn.prompts` type annotation from `list[str]` to `list[str | list[Any]]` (or `list[UserContent]`) to match the base class `BaseAgent.create_turn()` which already accepts `list[UserContent]`
 - [ ] 5.5.8 For native agents in `_execute_turn()`: when a prompt is `list[Any]`, pass as structured content to the agent turn (e.g. `enqueue(*prompt)`); when `str`, pass as plain text
-- [ ] 5.5.9 Add `_enqueued` cleanup: after each turn's drain cycle, remove `_enqueued` entries whose `PendingMessage` references are no longer in `agent_run.pending_messages` (identity check). Prevents unbounded memory growth in long-running sessions.
-- [ ] 5.5.10 Add unit tests for: start with empty initial_prompt (followup path), start with empty string producing `[]` not `[""]`, followup DirectChannel fallback preserving message_id, _idle_loop with content_blocks (all 3 sites), _drain_events with content_blocks (both sites), _execute_turn with list prompt, _enqueued cleanup after drain
+- [ ] 5.5.9 Update `AgentRunContext.queued_steer_messages` type from `list[str]` to `list[str | list[Any]]` (used at `run.py:767, 838` — steer messages on RUNNING agents without active_agent_run or CommChannel)
+- [ ] 5.5.10 Add `_enqueued` cleanup: after each turn's drain cycle, remove `_enqueued` entries whose `PendingMessage` references are no longer in `agent_run.pending_messages` (identity check). Prevents unbounded memory growth in long-running sessions.
+- [ ] 5.5.11 Add unit tests for: start with empty initial_prompt (followup path), start with empty string producing `[]` not `[""]`, followup DirectChannel fallback preserving message_id, _idle_loop with content_blocks (all 3 sites), _drain_events with content_blocks (both sites), _execute_turn with list prompt, _enqueued cleanup after drain
 
 ## 6. ACPMessageAccumulator Fix
 

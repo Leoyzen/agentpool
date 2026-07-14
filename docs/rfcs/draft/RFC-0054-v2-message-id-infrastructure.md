@@ -486,7 +486,7 @@ Both methods added to the Protocol. `DirectChannel` implements as no-ops returni
 
 #### D8: `receive_request()` return type simplifies to `str | None`
 
-`str` (the `message_id`) for success (both new runs via followup D17 and steer/followup on busy sessions), `None` for failure. The `RunHandle` case is eliminated — initial prompts route through `followup()` which returns `str`.
+`str` (the `message_id`) for success (both new runs via followup D17 and steer/followup on busy sessions), `None` for failure. The `RunHandle` case is eliminated — initial prompts route through `followup()` which returns `str`. Two existing callers that access `RunHandle.complete_event` / `_turn_complete_event` (`session_routes.py:1935` and `acp_server/handler.py:607`) are migrated to a new `wait_for_completion(session_id, timeout)` method on `SessionController`/`SessionPool`.
 
 #### D9-D12: Deferred items and constraints
 

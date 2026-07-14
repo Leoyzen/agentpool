@@ -106,7 +106,12 @@ The `recv()` method changes from `asyncio.Queue.get_nowait()` to `deque.popleft(
 
 **Rationale**: Protocol handlers that have a client-provided message ID (from v2 `session/inject` or `session/prompt` request) can pass it through. Internal callers (auto-resume, background tasks) don't need to provide it. The return type simplifies because every code path (new run, steer, followup) now goes through `Feedback` → `message_id` → `str` return. The protocol handler subscribes to the `EventBus` and filters by `session_id` — it does not need the `RunHandle` directly.
 
-**Backward compatibility**: Existing callers that check `if receive_request(...)` still work — truthy `str` is truthy, `None` is falsy. Callers that type-check the return as `RunHandle` need updating, but all current callers use the return value in boolean context only.
+**Backward compatibility**: Existing callers that check `if receive_request(...)` still work — truthy `str` is truthy, `None` is falsy. However, **2 existing callers access `RunHandle`-specific attributes** on the return value and MUST be migrated:
+
+1. `session_routes.py:1935-1941`: `run_handle.complete_event.wait()` — waits for run completion
+2. `acp_server/handler.py:604-607`: `run_handle._turn_complete_event.wait()` — waits for turn completion
+
+**Fix**: Add `wait_for_completion(session_id: str, timeout: float | None = None) -> bool` method to `SessionController` and `SessionPool`. This method looks up the active run via `session.current_run_id` → `self._runs[run_id]` and awaits `run_handle.complete_event.wait()` with the given timeout. Both callers are migrated from `run_handle.complete_event.wait()` to `session_pool.wait_for_completion(session_id, timeout=30)`. This decouples callers from the `RunHandle` type entirely.
 
 ### D9: `RunHandle.replace()` deferred to future change
 
