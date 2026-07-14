@@ -37,7 +37,7 @@ from agentpool.tools.base import is_terminal_tool
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from pydantic_ai import PydanticAgent
+    from pydantic_ai import Agent as PydanticAgent
     from pydantic_ai.messages import ModelMessage
 
     from agentpool.agents.context import AgentRunContext
@@ -333,8 +333,7 @@ class NativeTurn(HookAwareTurn, Turn):
                 # instead of RunErrorEvent, so history is preserved.
                 if self._message_history is not None:
                     logger.warning(
-                        "agentlet.iter() exit failed after turn completion, "
-                        "preserving history",
+                        "agentlet.iter() exit failed after turn completion, preserving history",
                         error=str(exc),
                     )
                     # Build a minimal final message from _message_history.

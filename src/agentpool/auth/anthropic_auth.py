@@ -617,7 +617,7 @@ def _compute_cch(body: bytes) -> str:
         ImportError: If xxhash package is not installed
     """
     try:
-        import xxhash
+        import xxhash  # type: ignore[import-not-found]
     except ImportError:
         msg = "xxhash package required for Anthropic Max OAuth. Install with: pip install xxhash"
         raise ImportError(msg) from None

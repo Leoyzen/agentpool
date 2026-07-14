@@ -155,13 +155,9 @@ class CombinedToolsetCapability(AbstractCapability[AgentDepsT]):
             if isinstance(toolset, AbstractToolset):
                 toolsets.append(toolset)
             else:
-                # ToolsetFunc (async callable) — wrap in DynamicToolset
-                # which handles callable toolsets by resolving them per-run.
-                try:
-                    from pydantic_ai.toolsets._dynamic import DynamicToolset
-                except ImportError:
-                    from pydantic_ai.toolsets import DynamicToolset
-                toolsets.append(DynamicToolset(toolset_func=toolset))
+                # ToolsetFunc (async callable) — AgentToolset accepts
+                # callable toolsets directly in pydantic-ai v2.
+                toolsets.append(toolset)  # type: ignore[arg-type]
         if not toolsets:
             return None
         return CombinedToolset(toolsets=toolsets)
@@ -176,7 +172,7 @@ class CombinedToolsetCapability(AbstractCapability[AgentDepsT]):
         parts: list[str] = []
         for cap in self._capabilities:
             instr = cap.get_instructions()
-            if instr is not None:
+            if isinstance(instr, str):
                 parts.append(instr)
         if not parts:
             return None

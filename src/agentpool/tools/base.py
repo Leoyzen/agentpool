@@ -368,18 +368,12 @@ class Tool[TOutputType = Any]:
                         base_schema.setdefault("properties", {})[param_name] = param_def
             return base_schema
 
-        # Try primary path with pydantic_ai.function_schema
+        # Try primary path with pydantic_ai._function_schema
         try:
-            try:
-                from pydantic_ai._function_schema import (  # type: ignore[attr-defined]
-                    GenerateJsonSchema,
-                    function_schema,
-                )
-            except ImportError:
-                from pydantic_ai.function_schema import (  # type: ignore[attr-defined]
-                    GenerateJsonSchema,
-                    function_schema,
-                )
+            from pydantic_ai._function_schema import (  # type: ignore[attr-defined]
+                GenerateJsonSchema,
+                function_schema,
+            )
 
             # ToolResult is a dataclass, not a Pydantic model: GenerateJsonSchema cannot
             # build a return-value JSON Schema and emits UserWarning, then falls back to an

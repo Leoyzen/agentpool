@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from pydantic_ai.capabilities import AbstractCapability
-    from pydantic_ai.messages import ModelRequestContext
+    from pydantic_ai.models import ModelRequestContext
 
     from agentpool.capabilities.mcp_server_cap import McpServerCap
     from agentpool.skills.skill import Skill
@@ -130,7 +130,7 @@ class SkillManagerCap(
         # Build the full children list: original children + skill MCP children.
         all_children: list[AbstractCapability[AgentDepsT]] = list(self._children)
         for caps in self._skill_mcp_children.values():
-            all_children.extend(caps)  # type: ignore[arg-type]  # McpServerCap[None] vs AgentDepsT
+            all_children.extend(caps)
 
         # Initialize CombinedToolsetCapability with all child capabilities.
         super().__init__(all_children, name=name or "skill-manager")

@@ -20,7 +20,6 @@ from upathtools import UPath, core
 from upathtools_config import FilesystemConfigType
 from upathtools_config.base import FileSystemConfig
 
-from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.models.model_configs import AnyModelConfig
 from agentpool_config.converters import ConversionConfig
 from agentpool_config.tools import ImportToolConfig
@@ -28,7 +27,7 @@ from agentpool_config.workers import AgentWorkerConfig, WorkerConfig
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
     from pydantic_ai.capabilities import AbstractCapability
     from pydantic_ai.tools import RunContext, ToolDefinition
@@ -38,14 +37,14 @@ if TYPE_CHECKING:
 
 def _make_tool_filter(
     tool_filter: dict[str, bool],
-) -> Callable[[RunContext[None], ToolDefinition], bool]:
+) -> Callable[[RunContext[object], ToolDefinition], bool | Awaitable[bool]]:
     """Create a tool filter function from a name→bool mapping.
 
     Tools listed with ``True`` are included; ``False`` excludes them.
     Tools not listed default to included (``True``).
     """
 
-    def filter_func(_ctx: RunContext[None], tool: ToolDefinition) -> bool:
+    def filter_func(_ctx: RunContext[object], tool: ToolDefinition) -> bool:
         return tool_filter.get(tool.name, True)
 
     return filter_func
@@ -904,6 +903,8 @@ class PlanToolsetConfig(BaseToolsetConfig):
         # TODO: Migrate PlanProvider to capability-native architecture.
         # The old PlanProvider was removed during M3 migration; plan tools
         # need to be reimplemented as a FunctionToolsetCapability subclass.
+        from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+
         provider = FunctionToolsetCapability(name="plan")
         if self.tools is not None:
             from agentpool.capabilities.filtered_toolset import FilteredToolsetCapability

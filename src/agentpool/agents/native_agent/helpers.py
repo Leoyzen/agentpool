@@ -60,7 +60,7 @@ async def process_tool_event(
         case (
             PartStartEvent(part=BaseToolReturnPart(tool_call_id=call_id, content=content))
             | FunctionToolResultEvent(
-                result=BaseToolReturnPart(tool_call_id=call_id, content=content)
+                part=BaseToolReturnPart(tool_call_id=call_id, content=content)
             )
         ):
             if call_info := pending_tool_calls.pop(call_id, None):

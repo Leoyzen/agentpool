@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from pydantic_ai.models import Model
     from pydantic_ai.models.anthropic import AnthropicModelSettings
     from pydantic_ai.models.fallback import FallbackModel
-    from pydantic_ai.models.gemini import GeminiModelSettings
+    from pydantic_ai.models.google import GoogleModelSettings as GeminiModelSettings
     from pydantic_ai.models.openai import OpenAIResponsesModelSettings
 
 
@@ -973,7 +973,7 @@ class GeminiModelConfig(BaseModelConfig):
 
     def get_model_settings(self) -> GeminiModelSettings:
         """Get model settings in pydantic-ai format."""
-        from pydantic_ai.models.gemini import GeminiModelSettings
+        from pydantic_ai.models.google import GoogleModelSettings as GeminiModelSettings
 
         settings = {
             "max_tokens": self.max_tokens,

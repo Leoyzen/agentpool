@@ -472,7 +472,7 @@ class ACPEventConverter:
                 pass
 
             # Tool completed successfully
-            case FunctionToolResultEvent(result=ToolReturnPart(content=out), tool_call_id=tc_id):
+            case FunctionToolResultEvent(part=ToolReturnPart(content=out), tool_call_id=tc_id):
                 # Handle async generator content
                 tool_state = self._tool_states.get(tc_id)
                 if tool_state and tool_state.has_content:
@@ -489,7 +489,7 @@ class ACPEventConverter:
                 self._cleanup_tool_state(tc_id)
 
             # Tool failed with retry
-            case FunctionToolResultEvent(result=RetryPromptPart() as result, tool_call_id=tc_id):
+            case FunctionToolResultEvent(part=RetryPromptPart() as result, tool_call_id=tc_id):
                 error_message = result.model_response()
                 content = ContentToolCallContent.text(f"Error: {error_message}")
                 yield ToolCallProgress(tool_call_id=tc_id, status="failed", content=[content])

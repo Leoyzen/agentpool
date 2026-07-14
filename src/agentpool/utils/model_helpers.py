@@ -130,7 +130,7 @@ def _infer_single_model(model: str | Model) -> Model:  # noqa: PLR0911
         from agentpool.utils.importing import import_callable
 
         imported = import_callable(model.removeprefix("import:"))
-        return imported() if isinstance(imported, type) else imported  # type: ignore[no-any-return]
+        return imported() if isinstance(imported, type) else imported  # type: ignore[return-value]
     if model == "test":
         from pydantic_ai.models.test import TestModel
 

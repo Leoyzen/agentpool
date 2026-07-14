@@ -16,7 +16,7 @@ from pydantic_ai.messages import ModelMessage, ModelRequest
 if TYPE_CHECKING:
     from pydantic_ai import RunContext
     from pydantic_ai.capabilities import AgentNode, NodeResult
-    from pydantic_ai.messages import ModelRequestContext
+    from pydantic_ai.models import ModelRequestContext
 
 
 @dataclass

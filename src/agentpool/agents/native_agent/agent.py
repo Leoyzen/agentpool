@@ -14,19 +14,10 @@ import warnings
 import logfire
 from pydantic_ai import (
     Agent as PydanticAgent,
+    AgentRetries,
 )
+from pydantic_ai.capabilities import NativeTool, ProcessHistory
 from pydantic_ai.models import Model
-
-
-try:
-    from pydantic_ai import AgentRetries
-    from pydantic_ai.capabilities import NativeTool, ProcessHistory
-except ImportError:
-    AgentRetries = None  # type: ignore[misc,assignment]
-    from pydantic_ai.capabilities import (  # type: ignore[no-redef]
-        BuiltinTool as NativeTool,
-        HistoryProcessor as ProcessHistory,
-    )
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.context import AgentContext
@@ -49,7 +40,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from exxec import ExecutionEnvironment
-    from pydantic_ai import AgentBuiltinTool, UsageLimits, UserContent
+    from pydantic_ai import AgentNativeTool as AgentBuiltinTool, UsageLimits, UserContent
     from pydantic_ai.capabilities import AbstractCapability
     from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models import Model

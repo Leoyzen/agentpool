@@ -34,7 +34,7 @@ class FixedArgsTestModel(TestModel):
     tool_args: dict[str, dict[str, Any]] = None  # type: ignore[assignment]  # set in __init__
     """Mapping of tool_name -> args to use instead of generated args."""
 
-    def __init__(  # type: ignore[no-redef]
+    def __init__(
         self,
         *,
         tool_args: dict[str, dict[str, Any]] | None = None,

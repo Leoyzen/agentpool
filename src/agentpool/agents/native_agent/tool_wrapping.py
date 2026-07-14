@@ -107,8 +107,11 @@ def wrap_tool[TReturn](
             # as the elicitation handle, causing a mismatch between
             # PendingDeferredCall.tool_call_id and ToolCallPart.tool_call_id.
             if ctx.deps is not None:
-                ctx.deps.tool_call_id = ctx.tool_call_id or ""
-                ctx.deps.tool_name = ctx.tool_name or ""
+                # ctx.deps is typed as object, but at runtime it's an AgentContext.
+                # These assignments are safe because the deps type is always AgentContext
+                # for AgentPool agents, and the fields are set here for tool identification.
+                ctx.deps.tool_call_id = ctx.tool_call_id or ""  # type: ignore[attr-defined]
+                ctx.deps.tool_name = ctx.tool_name or ""  # type: ignore[attr-defined]
 
             if agent_ctx_key:
                 model_name = f"{ctx.model.system}:{ctx.model.model_name}" if ctx.model else None
@@ -118,7 +121,7 @@ def wrap_tool[TReturn](
                     tool_call_id=ctx.tool_call_id or "",
                     tool_input=kwargs.copy(),
                     model_name=model_name,
-                    run_ctx=ctx.deps.run_ctx if ctx.deps else None,
+                    run_ctx=ctx.deps.run_ctx if ctx.deps else None,  # type: ignore[attr-defined]
                 )
                 kwargs[agent_ctx_key] = call_ctx
 
