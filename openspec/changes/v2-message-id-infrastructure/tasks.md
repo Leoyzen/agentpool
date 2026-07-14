@@ -65,10 +65,13 @@
 
 ## 8. OpenCode Server Alignment
 
-- [ ] 8.1 Audit `opencode_server/event_processor.py` for independent `assistant_msg_id` generation
-- [ ] 8.2 Update event processor to read `message_id` from `PartStartEvent`/`PartDeltaEvent` instead of generating independently
-- [ ] 8.3 Verify OpenCode server event flow produces consistent `message_id` with ACP server
-- [ ] 8.4 Audit `agui_server/` and `openai_api_server/` for independent `message_id` generation; update to read from events if found
+- [ ] 8.1 Update `opencode_server/event_processor.py` to read `message_id` from `PartStartEvent`/`PartDeltaEvent` instead of generating `assistant_msg_id` independently
+- [ ] 8.2 Update `opencode_server/session_pool_integration.py` `_before_consumer_loop()` to read `message_id` from events instead of generating `assistant_msg_id` via `identifier.ascending("message")` — resolves the dual `assistant_msg_id` problem (D14)
+- [ ] 8.3 Update `opencode_server/routes/message_routes.py` to pass `delivery` from `MessageRequest` to `receive_request(priority=delivery)` instead of hardcoding `priority="when_idle"` (D13)
+- [ ] 8.4 Update `opencode_server/routes/message_routes.py` to pass `message_id` from `MessageRequest` to `receive_request(message_id=...)` for client-provided ID propagation
+- [ ] 8.5 Update `opencode_server/routes/session_routes.py` to pass `delivery` and `message_id` for command, fork, and compact routes
+- [ ] 8.6 Verify OpenCode server event flow produces consistent `message_id` with ACP server — single coherent message ID per turn
+- [ ] 8.7 Audit `agui_server/` and `openai_api_server/` for independent `message_id` generation; update to read from events if found
 
 ## 9. Integration Testing
 

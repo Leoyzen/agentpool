@@ -12,6 +12,9 @@ AgentPool's internal architecture has four independent, non-communicating messag
 - **Extend `SessionController.receive_request()`**: Accept optional `message_id` parameter, propagate to `steer()`/`followup()`. Add `revoke_inject(session_id, message_id)` method.
 - **Fix `ACPMessageAccumulator` message_id discard**: Preserve incoming `message_id` from external ACP agents instead of generating a fresh UUID at `_finalize_current_message()`.
 - **Wire `ACPEventConverter` to event message_id**: Read `message_id` from streaming events instead of maintaining an independent `_current_message_id`.
+- **Map OpenCode `delivery` to priority routing**: OpenCode's `delivery: "steer" | "queue"` maps to `receive_request()` priority. Currently hardcoded to `when_idle`.
+- **Resolve dual `assistant_msg_id` in OpenCode server**: REST path and EventBus consumer each generate independent IDs — unify to read from events.
+- **Wire OpenCode `MessageRequest.message_id` through to `receive_request()`**: Client-provided ID propagates to `Feedback.message_id`.
 
 ## Capabilities
 
@@ -36,4 +39,7 @@ AgentPool's internal architecture has four independent, non-communicating messag
 - **`agents/acp_agent/acp_converters.py`**: `_finalize_current_message()` preserves incoming `message_id`; `process()` reads `update.message_id`.
 - **`agentpool_server/acp_server/event_converter.py`**: Reads `message_id` from events instead of independent UUID generation.
 - **`agentpool_server/opencode_server/event_processor.py`**: Reads `message_id` from events instead of independent generation.
+- **`agentpool_server/opencode_server/session_pool_integration.py`**: EventBus consumer reads `message_id` from events instead of generating `assistant_msg_id` in `_before_consumer_loop()`.
+- **`agentpool_server/opencode_server/routes/message_routes.py`**: Passes `delivery` and `message_id` from `MessageRequest` to `receive_request()` instead of hardcoding `priority="when_idle"`.
+- **`agentpool_server/opencode_server/routes/session_routes.py`**: Same delivery/message_id pass-through for command, fork, and compact routes.
 - **Tests**: New tests for revoke/replace semantics, message_id propagation, and ID-tracked feedback queue.

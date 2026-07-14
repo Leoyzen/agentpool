@@ -128,6 +128,30 @@ The `recv()` method changes from `asyncio.Queue.get_nowait()` to `deque.popleft(
 
 **Constraint**: All `ProtocolChannel` methods (`deliver_feedback()`, `recv()`, `revoke()`, `replace()`, `close()`) MUST be called from the same event loop thread. Cross-thread access requires external synchronization. This is the existing convention for all AgentPool lifecycle components and is not a new constraint, but it is documented here because `revoke()` and `replace()` introduce new mutation paths.
 
+### D13: Map OpenCode `delivery` to `receive_request` priority
+
+**Decision**: OpenCode's `delivery: "steer" | "queue"` maps directly to AgentPool's priority system. `receive_request()` SHALL accept `delivery` as an alias for `priority`: `"steer"` → `"asap"`, `"queue"` → `"when_idle"`. OpenCode route handlers SHALL pass `delivery` from `MessageRequest` to `receive_request()` instead of hardcoding `priority="when_idle"`.
+
+**Rationale**: OpenCode's protocol already has the steer/queue distinction (`SessionDelivery.Delivery = ["steer", "queue"]`), but AgentPool's OpenCode routes currently ignore it. Wiring it through enables mid-turn steer via OpenCode HTTP, matching ACP v2's `session/inject` semantics.
+
+### D14: Resolve dual `assistant_msg_id` in OpenCode server
+
+**Decision**: The OpenCode server currently has TWO independent `assistant_msg_id` generation paths (REST path in `message_routes.py:370` and EventBus consumer in `session_pool_integration.py:932`), creating a split-message issue. The fix: the REST path generates the canonical `assistant_msg_id` using `identifier.ascending("message", request.message_id)`, passes it to `receive_request(message_id=...)`, and the EventBus consumer reads `message_id` from `PartStartEvent` instead of generating its own.
+
+**Rationale**: Content parts (text, tools, reasoning) are currently broadcast linked to the consumer's `assistant_msg_id_B`, while step-start/finish is linked to the REST path's `assistant_msg_id_A`. This creates a split-message issue in the frontend. Reading from events ensures a single coherent message ID.
+
+### D15: OpenCode `message_id` format is opaque to internal pipeline
+
+**Decision**: AgentPool's internal `Feedback.message_id` uses UUID by default, but the OpenCode server uses `identifier.ascending("message")` which produces `msg_*` format IDs. Both are opaque strings — the internal pipeline treats them identically. No format enforcement is applied.
+
+**Rationale**: ACP uses UUID4, OpenCode uses monotonic ascending `msg_*` IDs. Both are valid opaque strings per the message-id RFD. The internal pipeline should not enforce a specific format — protocol converters generate IDs appropriate to their protocol.
+
+### D16: OpenCode abort maps to `RunHandle.cancel()`, not `revoke()`
+
+**Decision**: OpenCode's `POST /abort` is session-level — it cancels the entire run via `RunHandle.cancel()` (existing behavior). ACP v2's `session/revoke_inject` is message-level — it cancels a specific pending inject via `RunHandle.revoke(message_id)`. These are different operations and OpenCode does not need a message-level revoke endpoint in this change.
+
+**Rationale**: OpenCode's protocol has no message-level revoke concept. The `revoke()` infrastructure is built internally for ACP v2 to use, but OpenCode clients continue to use session-level abort.
+
 ## Risks / Trade-offs
 
 - **[Queue type change from `asyncio.Queue` to `deque`]** → `recv()` is only called from synchronous drain loops, not from `await queue.get()` contexts. No async semantics are lost. Mitigation: verify all `recv()` call sites are synchronous (they are — 4 sites in `run.py`, all use `while True: fb = recv(); if None: break`).
