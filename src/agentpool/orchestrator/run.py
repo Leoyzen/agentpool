@@ -233,6 +233,10 @@ class RunHandle:
     """
     _agent_registry: AgentRegistry | None = None
     """Read-only registry of compiled agents for delegation."""
+    _resume_deferred_tool_results: Any = None
+    """Deferred tool results from checkpoint, forwarded to ``agent.create_turn()``
+    via ``**pydantic_ai_kwargs`` during resume. Only set by
+    ``_create_run_handle()`` when resuming from a checkpoint."""
 
     def __post_init__(self) -> None:
         """Initialize default lifecycle dimensions.
@@ -601,10 +605,17 @@ class RunHandle:
         # capabilities (SubagentCapability, etc.) can access the
         # delegation service, resource sources, and host.
         self._inject_agent_context()
+        # Forward _resume_deferred_tool_results to agent.create_turn()
+        # via **pydantic_ai_kwargs so it reaches NativeTurn → agentlet.iter().
+        # Only set during resume from checkpoint; None for normal turns.
+        create_turn_kwargs: dict[str, Any] = {}
+        if self._resume_deferred_tool_results is not None:
+            create_turn_kwargs["deferred_tool_results"] = self._resume_deferred_tool_results
         turn = agent.create_turn(
             prompts=current_prompts,  # type: ignore[arg-type]
             run_ctx=self.run_ctx,
             message_history=self._message_history,
+            **create_turn_kwargs,
         )
         # Publish RunStartedEvent before turn.execute() so consumers
         # know a new turn is starting.

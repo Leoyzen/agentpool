@@ -155,11 +155,11 @@ async def test_native_turn_events_reach_event_bus_consumer() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_aborted_error_yields_stream_complete() -> None:
-    """NativeTurn must yield StreamCompleteEvent even on RunAbortedError.
+async def test_run_aborted_error_yields_run_error() -> None:
+    """NativeTurn must yield RunErrorEvent on RunAbortedError (not StreamCompleteEvent).
 
-    Without this, RunHandle.start() never sees StreamCompleteEvent,
-    the turn loop continues, and the handle hangs in idle.
+    Without this, the ACP client sees stop_reason="end_turn" (normal completion)
+    instead of an error, and may create a new session incorrectly.
     """
     agent = Agent(
         name="test-abort-sc",
@@ -184,11 +184,18 @@ async def test_run_aborted_error_yields_stream_complete() -> None:
         with patch.object(agent, "get_agentlet", AsyncMock(return_value=mock_agentlet)):
             events.extend([event async for event in turn.execute()])
 
-        # Must have StreamCompleteEvent as last event
+        # Must yield RunErrorEvent, NOT StreamCompleteEvent
+        from agentpool.agents.events.events import RunErrorEvent
+
+        run_errors = [e for e in events if isinstance(e, RunErrorEvent)]
+        assert len(run_errors) == 1, (
+            f"Expected 1 RunErrorEvent after RunAbortedError, got "
+            f"{len(run_errors)}. Events: {[type(e).__name__ for e in events]}"
+        )
         stream_complete = [e for e in events if isinstance(e, StreamCompleteEvent)]
-        assert len(stream_complete) == 1, (
-            f"Expected 1 StreamCompleteEvent after RunAbortedError, got "
-            f"{len(stream_complete)}. Events: {[type(e).__name__ for e in events]}"
+        assert len(stream_complete) == 0, (
+            f"Should NOT yield StreamCompleteEvent on RunAbortedError. "
+            f"Events: {[type(e).__name__ for e in events]}"
         )
 
 

@@ -1180,6 +1180,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         prompts: list[UserContent],
         run_ctx: AgentRunContext,
         message_history: list[ModelMessage],
+        **pydantic_ai_kwargs: Any,
     ) -> Turn:
         """Create a NativeTurn for single-cycle execution.
 
@@ -1187,19 +1188,30 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             prompts: Pre-converted prompt strings for this turn.
             run_ctx: Per-run isolated context.
             message_history: Incoming message history.
+            **pydantic_ai_kwargs: Extra kwargs forwarded to
+                ``NativeTurn.__init__()`` → ``agentlet.iter()`` (e.g.
+                ``deferred_tool_results`` for crash recovery resume).
 
         Returns:
             A NativeTurn instance for single-cycle execution.
         """
-        from agentpool.orchestrator.run import inject_cancelled_tool_results
+        # Skip inject_cancelled_tool_results when resuming with
+        # deferred_tool_results — pydantic-ai's _handle_deferred_tool_results
+        # handles unprocessed tool calls directly. Adding RetryPromptPart
+        # via inject_cancelled_tool_results would conflict with the
+        # deferred_tool_results (same tool_call_id appears in both,
+        # causing "already executed" or mismatch errors).
+        if "deferred_tool_results" not in pydantic_ai_kwargs:
+            from agentpool.orchestrator.run import inject_cancelled_tool_results
 
-        message_history = inject_cancelled_tool_results(message_history)
+            message_history = inject_cancelled_tool_results(message_history)
         return NativeTurn(
             agent=self,
             prompts=prompts,  # type: ignore[arg-type]
             run_ctx=run_ctx,
             message_history=message_history,
             hooks=self.hooks,
+            **pydantic_ai_kwargs,
         )
 
     async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:

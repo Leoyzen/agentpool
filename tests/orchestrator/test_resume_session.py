@@ -30,13 +30,13 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 
-async def _ok_gen(**kwargs: Any) -> Any:
+async def _ok_gen(*args: Any, **kwargs: Any) -> Any:
     """Async generator that yields nothing and completes silently."""
     return
     yield  # pragma: no cover
 
 
-async def _fail_gen(**kwargs: Any) -> Any:
+async def _fail_gen(*args: Any, **kwargs: Any) -> Any:
     """Async generator that raises RuntimeError during iteration."""
     raise RuntimeError("Boom")
     yield  # pragma: no cover
@@ -46,7 +46,7 @@ def _track_calls() -> Any:
     """Return (async_gen_fn, calls_list) — calls_list collects call kwargs."""
     calls: list[dict[str, Any]] = []
 
-    async def _tracked_gen(**kwargs: Any) -> Any:
+    async def _tracked_gen(*args: Any, **kwargs: Any) -> Any:
         calls.append(dict(kwargs))
         return
         yield  # pragma: no cover
@@ -271,7 +271,7 @@ async def test_resume_native_agent_loads_checkpoint_and_runs(
 ) -> None:
     """resume_session for native agent loads checkpoint, reconstructs agent.
 
-    Runs with history+results.
+    Routes through session_pool.run_stream() with resume parameters.
     """
     store = session_pool.sessions.store
     assert store is not None
@@ -294,49 +294,39 @@ async def test_resume_native_agent_loads_checkpoint_and_runs(
         pending_calls=[make_pending_call("call-1")],
     )
 
-    # Mock the checkpoint manager load
-    mock_agent = MagicMock()
-    mock_agent.run = AsyncMock(return_value=MagicMock())
-    mock_agentlet = MagicMock()
-    mock_agent.get_agentlet = AsyncMock(return_value=mock_agentlet)
-
-    # Mock pool.get_agent returns a mock native agent
-    from agentpool.agents.native_agent import Agent as NativeAgent
-
-    mock_native = MagicMock(spec=NativeAgent)
+    # Mock the reconstructed agent
+    mock_native = MagicMock()
     mock_native.name = "test-agent"
     mock_native._model = None
     mock_native.model_settings = None
-    mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    tracked_gen, run_stream_calls = _track_calls()
-    mock_native.run_stream = tracked_gen
 
-    mock_pool.get_agent = MagicMock(return_value=mock_native)
+    # Track run_stream calls on session_pool
+    run_stream_calls: list[dict[str, Any]] = []
 
-    mock_load = AsyncMock(return_value=checkpoint_data)
+    async def tracked_run_stream(session_id: str, *prompts: Any, **kwargs: Any) -> Any:
+        run_stream_calls.append({"session_id": session_id, "prompts": prompts, **kwargs})
+        return
+        yield  # pragma: no cover
+
     mock_reconstruct = AsyncMock(return_value=mock_native)
     with (
-        patch.object(session_pool, "_load_checkpoint_data", mock_load),
+        patch.object(session_pool, "_load_checkpoint_data", AsyncMock(return_value=checkpoint_data)),
         patch.object(session_pool, "_reconstruct_native_agent", mock_reconstruct),
+        patch.object(session_pool, "run_stream", tracked_run_stream),
     ):
         results = make_deferred_tool_results(["call-1"])
         await session_pool.resume_session("sess-1", results)
 
     # Verify checkpoint was loaded
-    mock_load.assert_awaited_once_with("sess-1")
-
-    # Verify agent was reconstructed
     mock_reconstruct.assert_awaited_once_with("sess-1", "test-agent")
 
-    # Verify agent.run_stream was called with message_history and deferred_tool_results
+    # Verify run_stream was called with resume parameters
     assert len(run_stream_calls) == 1
-    kwargs = run_stream_calls[0]
-    assert "message_history" in kwargs
-    # message_history is now wrapped in a MessageHistory object (not raw list)
-    from agentpool.messaging import MessageHistory
-
-    assert isinstance(kwargs["message_history"], MessageHistory)
-    assert "deferred_tool_results" in kwargs
+    call = run_stream_calls[0]
+    assert call["session_id"] == "sess-1"
+    assert "message_history" in call
+    assert "deferred_tool_results" in call
+    assert "cached_elicitation_responses" in call
 
 
 # ---------------------------------------------------------------------------
@@ -374,12 +364,6 @@ async def test_resume_native_agent_clears_pending_after_success(
     mock_native._model = None
     mock_native.model_settings = None
 
-    mock_agentlet = MagicMock()
-    mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run_stream = _ok_gen
-
-    mock_pool.get_agent = MagicMock(return_value=mock_native)
-
     with (
         patch.object(
             session_pool, "_load_checkpoint_data", AsyncMock(return_value=checkpoint_data)
@@ -387,6 +371,7 @@ async def test_resume_native_agent_clears_pending_after_success(
         patch.object(
             session_pool, "_reconstruct_native_agent", AsyncMock(return_value=mock_native)
         ),
+        patch.object(session_pool, "run_stream", _ok_gen),
     ):
         results = make_deferred_tool_results(["call-1"])
         await session_pool.resume_session("sess-1", results)
@@ -427,12 +412,6 @@ async def test_resume_native_agent_does_not_clear_pending_on_failure(
     mock_native._model = None
     mock_native.model_settings = None
 
-    mock_agentlet = MagicMock()
-    mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run_stream = _fail_gen
-
-    mock_pool.get_agent = MagicMock(return_value=mock_native)
-
     with (
         patch.object(
             session_pool, "_load_checkpoint_data", AsyncMock(return_value=checkpoint_data)
@@ -440,6 +419,7 @@ async def test_resume_native_agent_does_not_clear_pending_on_failure(
         patch.object(
             session_pool, "_reconstruct_native_agent", AsyncMock(return_value=mock_native)
         ),
+        patch.object(session_pool, "run_stream", _fail_gen),
     ):
         results = make_deferred_tool_results(["call-1"])
         with pytest.raises(RuntimeError, match="Boom"):
@@ -487,12 +467,6 @@ async def test_resume_session_emits_resume_event(
     mock_native._model = None
     mock_native.model_settings = None
 
-    mock_agentlet = MagicMock()
-    mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run_stream = _ok_gen
-
-    mock_pool.get_agent = MagicMock(return_value=mock_native)
-
     # Subscribe to event bus before resume
     queue = await session_pool.event_bus.subscribe("sess-1")
 
@@ -503,6 +477,7 @@ async def test_resume_session_emits_resume_event(
         patch.object(
             session_pool, "_reconstruct_native_agent", AsyncMock(return_value=mock_native)
         ),
+        patch.object(session_pool, "run_stream", _ok_gen),
     ):
         results = make_deferred_tool_results(["call-1", "call-2"])
         await session_pool.resume_session("sess-1", results)
@@ -562,12 +537,6 @@ async def test_resume_session_transitions_status_to_active(
     mock_native._model = None
     mock_native.model_settings = None
 
-    mock_agentlet = MagicMock()
-    mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run_stream = _ok_gen
-
-    mock_pool.get_agent = MagicMock(return_value=mock_native)
-
     with (
         patch.object(
             session_pool, "_load_checkpoint_data", AsyncMock(return_value=checkpoint_data)
@@ -575,6 +544,7 @@ async def test_resume_session_transitions_status_to_active(
         patch.object(
             session_pool, "_reconstruct_native_agent", AsyncMock(return_value=mock_native)
         ),
+        patch.object(session_pool, "run_stream", _ok_gen),
     ):
         results = make_deferred_tool_results(["call-1"])
         await session_pool.resume_session("sess-1", results)
@@ -619,12 +589,6 @@ async def test_resume_session_keeps_checkpointed_status_on_failure(
     mock_native._model = None
     mock_native.model_settings = None
 
-    mock_agentlet = MagicMock()
-    mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run_stream = _fail_gen
-
-    mock_pool.get_agent = MagicMock(return_value=mock_native)
-
     with (
         patch.object(
             session_pool, "_load_checkpoint_data", AsyncMock(return_value=checkpoint_data)
@@ -632,6 +596,7 @@ async def test_resume_session_keeps_checkpointed_status_on_failure(
         patch.object(
             session_pool, "_reconstruct_native_agent", AsyncMock(return_value=mock_native)
         ),
+        patch.object(session_pool, "run_stream", _fail_gen),
     ):
         results = make_deferred_tool_results(["call-1"])
         with pytest.raises(RuntimeError, match="Boom"):
@@ -732,12 +697,6 @@ async def test_resume_session_with_empty_pending_calls(
     mock_native._model = None
     mock_native.model_settings = None
 
-    mock_agentlet = MagicMock()
-    mock_native.get_agentlet = AsyncMock(return_value=mock_agentlet)
-    mock_native.run_stream = _ok_gen
-
-    mock_pool.get_agent = MagicMock(return_value=mock_native)
-
     with (
         patch.object(
             session_pool, "_load_checkpoint_data", AsyncMock(return_value=checkpoint_data)
@@ -745,6 +704,7 @@ async def test_resume_session_with_empty_pending_calls(
         patch.object(
             session_pool, "_reconstruct_native_agent", AsyncMock(return_value=mock_native)
         ),
+        patch.object(session_pool, "run_stream", _ok_gen),
     ):
         # Empty results should be fine when no pending calls
         results = make_deferred_tool_results([])

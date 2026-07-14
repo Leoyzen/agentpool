@@ -74,7 +74,7 @@ def _acp_event_observer(show_detailed: bool = False) -> Callable[[Any], None]:
         if show_detailed:
             import json
 
-            msg_str = json.dumps(event.message, ensure_ascii=False, separators=(",", ":"))
+            msg_str = json.dumps(event.message, ensure_ascii=False, separators=(",", ":"), default=str)
             print(f"[ACP {direction_icon}] {method}: {msg_str}", flush=True, file=sys.stderr)
         else:
             print(f"[ACP {direction_icon}] {method}", flush=True, file=sys.stderr)

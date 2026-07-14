@@ -34,6 +34,8 @@ from agentpool.orchestrator.session_controller import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
 
+    from pydantic_ai.messages import ModelMessage
+
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.agents.native_agent import Agent
     from agentpool.agents.native_agent.checkpoint import CheckpointData
@@ -41,7 +43,7 @@ if TYPE_CHECKING:
     from agentpool.delegation.base_team import BaseTeam
     from agentpool.messaging import ChatMessage
     from agentpool.messaging.messagenode import MessageNode
-    from agentpool.sessions.models import ElicitationResumePayload, SessionData
+    from agentpool.sessions.models import ElicitationResumePayload, PendingDeferredCall, SessionData
     from agentpool.sessions.store import SessionStore
     from agentpool_config.teams import TeamConfig
 
@@ -418,15 +420,29 @@ class SessionPool:
     ) -> None:
         """Resume a native agent from checkpoint with deferred results.
 
-        Loads message_history from checkpoint, reconstructs the agent from its
-        original config, and calls agent.run_stream() with the restored history
-        and deferred results.
+        Routes resume through the SessionPool's normal turn management
+        (``run_stream()`` → ``_run_stream_run_turn()`` →
+        ``_create_run_handle()``) so the resumed turn has full RunHandle
+        lifecycle support (journal, snapshot, event delivery, session
+        coordination).
 
-        For elicitation deferred calls (``deferred_kind="elicitation"``), the
-        elicitation responses are pre-populated into
-        ``AgentRunContext.cached_elicitation_responses`` so that
-        ``handle_elicitation()`` returns the cached response during tool
-        re-execution instead of deferring again.
+        The checkpoint's ``message_history`` is passed as a
+        ``list[ModelMessage]`` (NOT wrapped in ``MessageHistory``) to
+        initialize ``RunHandle._message_history``.
+
+        Elicitation responses are delivered via TWO mechanisms:
+
+        1. **DeferredToolResults** (primary): ``ToolReturnPart`` entries
+           built from ``elicitation_payloads``, keyed by ``tool_call_id``.
+           pydantic-ai matches these against the ``ModelResponse`` in
+           ``message_history`` and uses the results directly, skipping
+           tool execution. This is necessary because ``agentlet.iter()``
+           starts from ``UserPromptNode`` and generates a NEW
+           ``ModelResponse`` — it does NOT replay the old one.
+
+        2. **cached_elicitation_responses** (fallback): Set on
+           ``AgentRunContext`` for cases where the tool does re-execute
+           and calls ``handle_elicitation()``.
 
         Args:
             session_data: Persisted session data.
@@ -469,62 +485,136 @@ class SessionPool:
                     exc_info=True,
                 )
 
-        # Build cached elicitation responses for crash recovery.
+        # Build cached elicitation responses for crash recovery (fallback).
         cached_elicitation: dict[str, Any] = {}
+        # Build DeferredToolResults from elicitation_payloads (primary mechanism).
+        # pydantic-ai's agentlet.iter() starts from UserPromptNode, NOT from
+        # ModelResponse in message_history. It generates a NEW ModelResponse
+        # with a NEW tool_call_id, so cached_elicitation_responses (keyed by
+        # the OLD tool_call_id) are never hit. By passing DeferredToolResults,
+        # pydantic-ai matches them against the ModelResponse in message_history
+        # and uses the results directly, skipping tool execution entirely.
+        from pydantic_ai.messages import ModelResponse, ToolCallPart, ToolReturnPart
+        from pydantic_ai.tools import DeferredToolResults
+
+        # Build a mapping from elicitation handle (PendingDeferredCall.tool_call_id)
+        # to the actual ToolCallPart.tool_call_id in the ModelResponse.
+        # This is needed because handle_elicitation() may use run_ctx.run_id as
+        # the handle when agent_ctx.tool_call_id is not set (MCP tools without
+        # AgentContext param). The DeferredToolResults must be keyed by the
+        # ToolCallPart.tool_call_id (what pydantic-ai expects), not the
+        # elicitation handle.
+        pending_by_handle: dict[str, PendingDeferredCall] = {
+            call.tool_call_id: call for call in checkpoint.pending_calls
+        }
+        # Find ToolCallPart.tool_call_id for each pending call.
+        # Match by tool_name first; fall back to positional matching
+        # (MCP tools without AgentContext param may have empty tool_name
+        # in PendingDeferredCall, so name matching fails).
+        tool_call_id_map: dict[str, str] = {}  # handle → ToolCallPart.tool_call_id
+        last_model_response: ModelResponse | None = None
+        for msg in reversed(checkpoint.message_history):
+            if isinstance(msg, ModelResponse):
+                last_model_response = msg
+                break
+        if last_model_response is not None:
+            # Collect all ToolCallParts from the last ModelResponse
+            tool_call_parts: list[ToolCallPart] = [
+                part for part in last_model_response.parts
+                if isinstance(part, ToolCallPart) and part.tool_call_id
+            ]
+            pending_calls_list = list(pending_by_handle.items())
+
+            # First pass: match by tool_name
+            matched_tc_indices: set[int] = set()
+            for handle, pcall in pending_calls_list:
+                if not pcall.tool_name:
+                    continue
+                for i, tc in enumerate(tool_call_parts):
+                    if i in matched_tc_indices:
+                        continue
+                    if tc.tool_name == pcall.tool_name:
+                        tool_call_id_map[handle] = tc.tool_call_id  # type: ignore[assignment]
+                        matched_tc_indices.add(i)
+                        break
+
+            # Second pass: positional matching for unmatched handles
+            unmatched_tc_indices = [
+                i for i in range(len(tool_call_parts)) if i not in matched_tc_indices
+            ]
+            unmatched_handles = [
+                h for h, _ in pending_calls_list if h not in tool_call_id_map
+            ]
+            for handle, tc_idx in zip(unmatched_handles, unmatched_tc_indices, strict=False):
+                tool_call_id_map[handle] = tool_call_parts[tc_idx].tool_call_id  # type: ignore[assignment]
+
+        elicitation_tool_results: dict[str, Any] = {}
         if elicitation_payloads:
             from mcp.types import ElicitResult as MCPElicitResult
 
             for payload in elicitation_payloads:
+                # Map elicitation handle to ToolCallPart.tool_call_id
+                actual_tool_call_id = tool_call_id_map.get(
+                    payload.deferred_handle, payload.deferred_handle
+                )
+                pcall = pending_by_handle.get(payload.deferred_handle)
+                tool_name = pcall.tool_name if pcall else ""
                 match payload.action:
                     case "accept":
                         cached_elicitation[payload.deferred_handle] = MCPElicitResult(
                             action="accept",
                             content=payload.content,
                         )
+                        elicitation_tool_results[actual_tool_call_id] = ToolReturnPart(
+                            tool_name=tool_name,
+                            content=payload.content or {},
+                            tool_call_id=actual_tool_call_id,
+                        )
                     case "decline":
                         cached_elicitation[payload.deferred_handle] = MCPElicitResult(
                             action="decline",
+                        )
+                        elicitation_tool_results[actual_tool_call_id] = ToolReturnPart(
+                            tool_name=tool_name,
+                            content="declined",
+                            tool_call_id=actual_tool_call_id,
                         )
                     case "cancel":
                         cached_elicitation[payload.deferred_handle] = MCPElicitResult(
                             action="cancel",
                         )
+                        elicitation_tool_results[actual_tool_call_id] = ToolReturnPart(
+                            tool_name=tool_name,
+                            content="cancelled",
+                            tool_call_id=actual_tool_call_id,
+                        )
 
         try:
-            # Wrap checkpoint ModelMessages in a ChatMessage + MessageHistory
-            # so run_stream()'s internal _run_stream_once() can use the same
-            # MessageHistory API (get_pending_parts, get_history, etc.).
-            from agentpool.messaging import ChatMessage, MessageHistory
-
-            chat_msg = ChatMessage(
-                content="",
-                role="assistant",
-                messages=list(checkpoint.message_history),
-                session_id=session_data.session_id,
-            )
-            history = MessageHistory(messages=[chat_msg])
-
-            # Set up run context with cached elicitation responses for
-            # crash recovery.
-            run_ctx = AgentRunContext(
-                session_id=session_data.session_id,
-                event_bus=self._event_bus,
-            )
-            if cached_elicitation:
-                run_ctx.cached_elicitation_responses = cached_elicitation
-
-            # Call run_stream() with deferred_tool_results and _run_ctx.
-            # run_stream() forwards **pydantic_ai_kwargs to agentlet.iter().
-            # Only pass deferred_tool_results when it has actual results —
-            # passing an empty DeferredToolResults makes pydantic-ai expect
-            # results for ALL tool calls in the message history, which breaks
-            # crash recovery for elicitation (Path 3 local tools) where the
-            # tool should re-execute and hit cached_elicitation_responses.
-            run_kwargs: dict[str, Any] = dict(_run_ctx=run_ctx)
-            if getattr(results, "calls", None):
+            # Route through the pool's normal turn management so the
+            # resumed turn has full RunHandle lifecycle (journal,
+            # snapshot, event delivery, session coordination).
+            # Pass message_history as list[ModelMessage] (NOT wrapped
+            # in MessageHistory) — the pool path initializes
+            # RunHandle._message_history directly.
+            run_kwargs: dict[str, Any] = {
+                "cached_elicitation_responses": cached_elicitation or None,
+                "message_history": list(checkpoint.message_history),
+            }
+            # Build DeferredToolResults from elicitation_payloads.
+            # This is the PRIMARY mechanism for crash recovery: pydantic-ai
+            # matches these against the ModelResponse in message_history and
+            # uses the results directly, skipping tool execution.
+            # cached_elicitation_responses is kept as a fallback.
+            if elicitation_tool_results:
+                run_kwargs["deferred_tool_results"] = DeferredToolResults(
+                    calls=elicitation_tool_results
+                )
+            elif getattr(results, "calls", None):
+                # Non-elicitation deferred results from the caller
                 run_kwargs["deferred_tool_results"] = results
-            async for _ in agent.run_stream(
-                message_history=history,
+            async for _ in self.run_stream(
+                session_data.session_id,
+                "",
                 **run_kwargs,
             ):
                 pass
@@ -933,6 +1023,10 @@ class SessionPool:
         session: SessionState,
         agent: BaseAgent[Any, Any],
         session_id: str,
+        *,
+        cached_elicitation_responses: dict[str, Any] | None = None,
+        deferred_tool_results: Any = None,
+        message_history: list[ModelMessage] | None = None,
     ) -> RunHandle:
         """Create and register a RunHandle without a background task.
 
@@ -944,17 +1038,54 @@ class SessionPool:
         lifecycle dimensions for protocol server integration, matching
         the pattern in :meth:`SessionController._start_run_handle`.
 
+        Also wires ``_host_context`` and ``_agent_registry`` so that
+        ``get_agentlet()`` can create a ``CheckpointManager`` and
+        ``SubagentCapability`` can resolve agents — matching the
+        infrastructure provided by ``_start_run_handle()``.
+
+        Resume parameters (``cached_elicitation_responses``,
+        ``deferred_tool_results``, ``message_history``) are only set
+        by ``resume_session()``. Normal turns pass ``None`` for all
+        three — runtime behavior is unchanged.
+
+        Args:
+            session: The session state.
+            agent: The agent instance (native or ACP).
+            session_id: The session identifier.
+            cached_elicitation_responses: Pre-populated elicitation
+                responses for crash recovery resume.
+            deferred_tool_results: Deferred tool results for resolving
+                pending deferred calls during resume.
+            message_history: Message history from checkpoint to
+                initialize ``RunHandle._message_history``.
+
         Returns:
             The newly created and registered RunHandle.
+
+        Raises:
+            SessionBusyError: If the session already has an active run
+                that is not ``DONE``.
         """
         from agentpool.lifecycle import (
             MemoryJournal,
             ProtocolChannel,
             ProtocolTrigger,
         )
+        from agentpool.lifecycle.types import RunState
+
+        # Staleness check: prevent silently overwriting an active run.
+        if (
+            session.current_run_id is not None
+            and session.current_run_id in self.sessions._runs
+        ):
+            existing = self.sessions._runs[session.current_run_id]
+            if existing._run_state != RunState.DONE:
+                raise SessionBusyError(session_id, session.current_run_id)
 
         event_bus = self.event_bus
         run_ctx = AgentRunContext(session_id=session_id, event_bus=event_bus)
+        if cached_elicitation_responses is not None:
+            run_ctx.cached_elicitation_responses = cached_elicitation_responses
 
         trigger = ProtocolTrigger()
         comm_channel: ProtocolChannel | None = None
@@ -966,6 +1097,15 @@ class SessionPool:
                 session_id=session_id,
             )
 
+        # Wire _host_context and _agent_registry, matching the pattern
+        # in SessionController._start_run_handle() (session_controller.py:950-972).
+        from agentpool.host.registry import AgentRegistry
+
+        host_ctx = self.pool.get_context()
+        agent_registry = AgentRegistry(
+            dict.fromkeys(self.pool.manifest.agents),  # type: ignore[arg-type]
+        )
+
         run_handle = RunHandle(
             run_id=uuid.uuid4().hex,
             session_id=session_id,
@@ -976,7 +1116,13 @@ class SessionPool:
             run_ctx=run_ctx,
             _trigger_source=trigger,
             _comm_channel=comm_channel,
+            _host_context=host_ctx,
+            _agent_registry=agent_registry,
         )
+        if message_history is not None:
+            run_handle._message_history = list(message_history)
+        if deferred_tool_results is not None:
+            run_handle._resume_deferred_tool_results = deferred_tool_results
         self.sessions._runs[run_handle.run_id] = run_handle
         session.current_run_id = run_handle.run_id
         return run_handle
@@ -1146,6 +1292,11 @@ class SessionPool:
         If no active run exists, creates a RunHandle and yields events
         directly from ``start()``. If a run is active, steers the
         message and yields from the EventBus subscription.
+
+        Resume parameters (``cached_elicitation_responses``,
+        ``deferred_tool_results``, ``message_history``) are extracted
+        from ``**kwargs`` and forwarded to ``_create_run_handle()``.
+        Only set by ``resume_session()``; normal turns pass ``None``.
         """
         session, _ = await self.sessions.get_or_create_session(session_id)
         if session.is_closing:
@@ -1156,6 +1307,12 @@ class SessionPool:
         input_provider = kwargs.pop("input_provider", None)
         if input_provider is not None:
             session.input_provider = input_provider
+        # Extract resume parameters — only set by resume_session().
+        cached_elicitation_responses: dict[str, Any] | None = kwargs.pop(
+            "cached_elicitation_responses", None
+        )
+        deferred_tool_results: Any = kwargs.pop("deferred_tool_results", None)
+        message_history: list[ModelMessage] | None = kwargs.pop("message_history", None)
         agent = await self.sessions.get_or_create_session_agent(
             session_id, input_provider=input_provider
         )
@@ -1185,14 +1342,50 @@ class SessionPool:
             return
 
         # No active run — create RunHandle and yield from start().
-        # Also subscribe to EventBus so that events published by tools
-        # during turn execution (e.g. SpawnSessionStart from task() →
-        # create_child_session()) are delivered to the consumer, not
-        # just events yielded directly by start().
-        run_handle = self._create_run_handle(session, agent, session_id)
-        self.event_bus.clear_replay_buffer(session_id)
-        bus_queue = await self.event_bus.subscribe(session_id, scope=scope)
-        gen = run_handle.start(content)
+        # Acquire _request_lock to prevent race with concurrent
+        # receive_request() → _start_run_handle() on the same session.
+        # Without this, both paths could see current_run_id is None and
+        # create overlapping RunHandles.
+        async with session._request_lock:
+            # Re-check current_run_id inside the lock — another caller
+            # may have created a run while we waited.
+            if session.current_run_id is not None:
+                # Active run appeared — steer and use EventBus
+                run_handle = self.sessions._runs.get(session.current_run_id)
+                if run_handle is not None:
+                    run_handle.steer(content)
+                queue = await self.event_bus.subscribe(session_id, scope=scope)
+                try:
+                    while True:
+                        try:
+                            event = await queue.get()
+                        except asyncio.QueueShutDown:
+                            break
+                        yield event.event
+                        raw_event = getattr(event, "event", event)
+                        if isinstance(raw_event, StreamCompleteEvent | RunErrorEvent):
+                            break
+                finally:
+                    await self.event_bus.unsubscribe(session_id, queue)
+                return
+
+            # Also subscribe to EventBus so that events published by tools
+            # during turn execution (e.g. SpawnSessionStart from task() →
+            # create_child_session()) are delivered to the consumer, not
+            # just events yielded directly by start().
+            run_handle = self._create_run_handle(
+                session,
+                agent,
+                session_id,
+                cached_elicitation_responses=cached_elicitation_responses,
+                deferred_tool_results=deferred_tool_results,
+                message_history=message_history,
+            )
+            self.event_bus.clear_replay_buffer(session_id)
+            bus_queue = await self.event_bus.subscribe(session_id, scope=scope)
+            gen = run_handle.start(content)
+        # Lock released — the run is now registered and can be steered
+        # by concurrent receive_request() calls.
         try:
             async for evt in gen:
                 # Drain any tool-published events from EventBus before

@@ -165,16 +165,6 @@ class AgentRunContext:
     by ``handle_elicitation()`` for ``asyncio.wait_for()``.
     """
 
-    current_messages: list[Any] | None = None
-    """Current pydantic-ai message history snapshot.
-
-    Set by the tool wrapping layer (``wrap_tool``) before each tool call
-    from ``ctx.messages``. Used by ``handle_elicitation()`` to pass real
-    message history to ``CheckpointManager.checkpoint()`` for crash
-    recovery. Without this, crash recovery would re-execute all prior
-    tool calls, causing duplicate side effects.
-    """
-
     _run_handle: RunHandle | None = None
     """Run handle for this execution, set by RunHandle lifecycle."""
 
@@ -384,9 +374,18 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                         timeout_seconds=run_ctx.elicitation_timeout,
                     )
                     await run_ctx.event_bus.publish(run_ctx.session_id, event)
+                # Get message history for checkpoint from the active agent run.
+                # active_agent_run is the authoritative pydantic-ai AgentRun
+                # object, always available during tool execution (set in
+                # NativeTurn.execute() inside the `async with agentlet.iter()` block).
+                checkpoint_messages: list[Any] = []
+                if run_ctx._run_handle is not None:
+                    agent_run = run_ctx._run_handle.active_agent_run
+                    if agent_run is not None:
+                        checkpoint_messages = agent_run.all_messages()
                 await run_ctx.checkpoint_manager.checkpoint(
                     session_id=run_ctx.session_id,
-                    message_history=run_ctx.current_messages or [],
+                    message_history=checkpoint_messages,
                     pending_calls=[pending_call],
                     agent_config_hash="",
                 )
