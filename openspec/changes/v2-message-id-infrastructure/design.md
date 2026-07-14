@@ -118,15 +118,34 @@ The `recv()` method changes from `asyncio.Queue.get_nowait()` to `deque.popleft(
 
 **Known limitation**: `_pending`, `_delivered`, and `_revoked` sets in `ProtocolChannel` are in-memory. On crash, all pending feedback is lost. This matches current behavior (`asyncio.Queue` is also in-memory), so it is not a regression. v2 `session/inject` semantics may expect durability for pending messages, but that is out of scope for this change. Future work: if durable feedback is needed, the Journal's tool execution log pattern can be extended to track pending feedback by `message_id`.
 
-### D11: `Feedback.content_blocks` consumption deferred
+### D11: `Feedback.content_blocks` activated — pipeline carries structured content
 
-**Decision**: The `content_blocks` field is added to `Feedback` in this change, but no consumer reads it yet. Protocol converters continue to use `Feedback.content` (plain text). Consumption of `content_blocks` as ACP `ContentBlock[]` wire format is deferred to the v2 protocol adapter change.
+**Decision**: The `content_blocks` field on `Feedback` is **activated** in this change. The internal pipeline (`receive_request()` → `Feedback` → `steer()`/`followup()` → `agent_run.enqueue()`) carries structured content through without stringification. Specifically:
 
-**Rationale**: Adding the field now ensures the type is ready for v2 without requiring a second `Feedback` extension. The field defaults to `None`, so existing code is unaffected.
+- `receive_request()` stops stringifying `list` content to `str` — preserves `str | list[Any]` as-is.
+- `steer()` and `followup()` accept `message: str | list[Any]`. When `list`, it is stored in `Feedback.content_blocks`; when `str`, in `Feedback.content`.
+- For native agents: when `content_blocks` is present, `steer()` calls `agent_run.enqueue(*content_blocks)` (PydanticAI's `enqueue` already supports multimodal `UserContent` — `ImageUrl`, `BinaryContent`, `TextContent`). When only `content` (str), calls `enqueue(content)` as before.
+- For non-native (ACP) agents: `content_blocks` is passed through to the injection path. ACP-specific conversion is deferred (see Future Work).
+
+**Rationale**: `receive_request()` currently does `content_str = " ".join(str(c) for c in content)`, which destroys multimodal content (images become `<ImageContentBlock ...>` strings). PydanticAI's `enqueue()` already accepts `EnqueueContent = UserContent | ModelRequestPart | ModelMessage` where `UserContent = str | TextContent | MultiModalContent | CachePoint`. The pipeline should be content-agnostic — it carries `list[Any]` transparently without caring what's inside.
+
+**Future Work (NOT in this change)**:
+- ACP `ContentBlock` (TextContentBlock, ImageContentBlock, AudioContentBlock, etc.) → PydanticAI `UserContent` (str, ImageUrl, BinaryContent) type mapping. This belongs in the v2 ACP protocol adapter.
+- OpenCode `parts` (TextPartInput, FilePartInput) → internal `content_blocks` mapping. This belongs in the OpenCode v2 route handler.
+- Protocol converter consumption of `content_blocks` for wire serialization (ACP outbound `ContentBlock[]`). Deferred to v2 protocol adapter.
+- `Feedback.content_blocks` typed as `list[dict[str, Any]]` (generic dicts) in this change. A stronger typed union (`list[ContentBlock] | list[UserContent]`) is deferred to avoid leaking protocol-specific types into the internal layer.
 
 ### D12: Thread safety — single event loop thread only
 
 **Constraint**: All `ProtocolChannel` methods (`deliver_feedback()`, `recv()`, `revoke()`, `replace()`, `close()`) MUST be called from the same event loop thread. Cross-thread access requires external synchronization. This is the existing convention for all AgentPool lifecycle components and is not a new constraint, but it is documented here because `revoke()` and `replace()` introduce new mutation paths.
+
+### D12.1: Revoke boundary — CommChannel layer only, PydanticAI does not support revoke
+
+**Constraint**: `revoke(message_id)` operates exclusively on `ProtocolChannel._pending`. Once `recv()` delivers the `Feedback` and `steer()` calls `agent_run.enqueue()`, the message enters PydanticAI's internal `pending_messages` list which has no ID field, no single-message removal API, and no dequeue method. `revoke()` SHALL return `False` (already delivered) for any message that has transitioned to `_delivered`.
+
+**Evidence**: PydanticAI's `PendingMessage` dataclass has only `messages: list[ModelMessage]` and `priority: str` — no `message_id` field. `AgentRun.enqueue()` returns `None` (doesn't return the `PendingMessage` reference). `PendingMessageDrainCapability._drain_by_priority()` removes by priority class, not by ID. There is no supported way to remove a single enqueued message.
+
+**Rationale**: Theoretically, one could hack `agent_run.pending_messages` (a live `list[PendingMessage]`) by recording the list index before/after `enqueue()` and calling `pop(index)`. This is fragile (race condition with drain capability, not a supported API, could break on PydanticAI upgrades) and not worth the complexity. The CommChannel layer is the correct architectural boundary for revoke.
 
 ### D13: Map OpenCode `delivery` to `receive_request` priority
 

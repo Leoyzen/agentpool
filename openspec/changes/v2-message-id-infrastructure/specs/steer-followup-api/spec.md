@@ -4,8 +4,9 @@
 
 `TurnRunner` SHALL expose `steer()` and `followup()` methods that route messages based on agent type. For native agents, they SHALL call `pydantic_ai_run.enqueue()` with the appropriate priority. For non-native agents, they SHALL delegate to `PromptInjectionManager.inject()` / `PromptInjectionManager.queue()`.
 
-- `steer(message, *, message_id=None)` SHALL map to `enqueue(priority='asap')` for native agents — the message is drained before the next LLM call via `PendingMessageDrainCapability.before_model_request()`
-- `followup(message, *, message_id=None)` SHALL map to `enqueue(priority='when_idle')` for native agents — the message is drained only when the agent would otherwise terminate, via `PendingMessageDrainCapability.after_node_run()` redirect
+- `steer(message, *, message_id=None)` SHALL map to `enqueue(priority='asap')` for native agents — the message is drained before the next LLM call via `PendingMessageDrainCapability.before_model_request()`. When `message` is a `list`, items SHALL be unpacked as `enqueue(*message)` for multimodal support.
+- `followup(message, *, message_id=None)` SHALL map to `enqueue(priority='when_idle')` for native agents — the message is drained only when the agent would otherwise terminate, via `PendingMessageDrainCapability.after_node_run()` redirect. When `message` is a `list`, items SHALL be unpacked as `enqueue(*message)`.
+- `message` parameter type SHALL be `str | list[Any]` — `str` for plain text, `list[Any]` for structured content (e.g. `[ImageUrl(...), "caption"]`). The pipeline carries structured content through without stringification.
 - For non-native agents, `steer()` SHALL call `injection_manager.inject(message)` and `followup()` SHALL call `injection_manager.queue(message)`
 - Agent type SHALL be detected via `agent.AGENT_TYPE` (ClassVar), NOT via `session.metadata.get("agent_type")` — the agent is already resolved in `_run_turn_unlocked()` and `_create_run()`
 - `TurnRunner` SHALL access the active `AgentRun` via `run_handle.active_agent_run` (set by `RunExecutor`, not by `TurnRunner`)

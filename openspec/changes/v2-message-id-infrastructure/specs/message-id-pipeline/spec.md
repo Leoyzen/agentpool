@@ -88,12 +88,20 @@ The system SHALL maintain a single `message_id` per logical message that flows f
 - **THEN** `ACPMessageAccumulator` SHALL accumulate them into a single message
 - **AND** SHALL NOT trigger `_finalize_current_message()` between chunks with the same `message_id`
 
-#### Scenario: content_blocks field not consumed by protocol converters in this change
+#### Scenario: content_blocks carried through pipeline without stringification
 
-- **WHEN** `Feedback.content_blocks` is set to a non-`None` value
-- **THEN** protocol converters SHALL continue to use `Feedback.content` (plain text) for serialization
-- **AND** `content_blocks` consumption as ACP `ContentBlock[]` wire format is deferred to the v2 protocol adapter change
-- **AND** no assertion or error SHALL occur when `content_blocks` is set
+- **WHEN** `receive_request()` receives `content` as a `list` (e.g. `[{"type": "image", ...}, "caption"]`)
+- **THEN** the list SHALL be preserved as-is in `Feedback.content_blocks` (not stringified)
+- **AND** `Feedback.content` SHALL be set to a plain-text fallback (e.g. empty string or joined text parts)
+- **AND** `steer()` SHALL call `agent_run.enqueue(*content_blocks)` (unpacking the list) for native agents
+- **AND** `steer()` SHALL call `agent_run.enqueue(content)` when `content_blocks` is `None` (backward-compatible text path)
+
+#### Scenario: Protocol-specific ContentBlock mapping is deferred
+
+- **WHEN** ACP `ContentBlock[]` or OpenCode `parts` arrive at the protocol boundary
+- **THEN** conversion to PydanticAI `UserContent` (ImageUrl, BinaryContent, TextContent) SHALL be performed by the v2 protocol adapter (future work)
+- **AND** the internal pipeline treats `content_blocks` as opaque `list[dict[str, Any]]` — no type enforcement
+- **AND** no assertion or error SHALL occur when `content_blocks` contains protocol-specific dict shapes
 
 ### Requirement: OpenCode delivery mode maps to receive_request priority
 

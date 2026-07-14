@@ -28,23 +28,26 @@
 
 ## 4. RunHandle Steer/Followup/Revoke
 
-- [ ] 4.1 Change `RunHandle.steer()` signature to `steer(self, message: str, *, message_id: str | None = None) -> str | None` in `orchestrator/run.py`
-- [ ] 4.2 Change `RunHandle.followup()` signature to `followup(self, message: str, *, message_id: str | None = None) -> str | None` in `orchestrator/run.py`
-- [ ] 4.3 Update `steer()` to construct `Feedback` with `message_id` parameter (or auto-generated UUID) and return `fb.message_id` on success, `None` on failure
-- [ ] 4.4 Update `followup()` to construct `Feedback` with `message_id` parameter (or auto-generated UUID) and return `fb.message_id` on success, `None` on failure
-- [ ] 4.5 Add `RunHandle.revoke(message_id: str) -> bool` method that delegates to `self._comm_channel.revoke(message_id)` if `_comm_channel` is not None, else returns `False`
-- [ ] 4.6 Update `_steer_callback_wrapper()` to handle the new return type (`str | None` instead of `bool`)
-- [ ] 4.7 Verify all 8 `steer()` call sites in `session_pool.py` and 1 in `session_controller.py`: grep for `is True`, `is False`, and bare statement-style calls (`.steer(` without assignment). No caller SHALL depend on `bool` return type
-- [ ] 4.8 Add unit tests for steer with explicit message_id, steer with auto-generated message_id, followup with message_id, revoke pending, revoke delivered, revoke unknown
-- [ ] 4.9 Update `SessionPool.steer()`, `SessionPool.followup()`, `SessionPool.inject_prompt()`, `SessionPool.queue_prompt()` signatures to accept `message_id: str | None = None` and pass through to `RunHandle`
+- [ ] 4.1 Change `RunHandle.steer()` signature to `steer(self, message: str | list[Any], *, message_id: str | None = None) -> str | None` in `orchestrator/run.py`
+- [ ] 4.2 Change `RunHandle.followup()` signature to `followup(self, message: str | list[Any], *, message_id: str | None = None) -> str | None` in `orchestrator/run.py`
+- [ ] 4.3 Update `steer()` to construct `Feedback` with `message_id` parameter (or auto-generated UUID). When `message` is a `list`, store in `Feedback.content_blocks` and `content=""`; when `str`, store in `Feedback.content` as before. Return `fb.message_id` on success, `None` on failure
+- [ ] 4.4 Update `followup()` same as 4.3 but with `is_steer=False`
+- [ ] 4.5 In `steer()`, when `content_blocks` is present and agent is native: call `agent_run.enqueue(*content_blocks, priority="asap")` instead of `enqueue(message, priority="asap")`. When only `content` (str): call `enqueue(content, priority="asap")` as before
+- [ ] 4.6 Same for `followup()`: unpack `content_blocks` for `enqueue(priority="when_idle")` when present
+- [ ] 4.7 Add `RunHandle.revoke(message_id: str) -> bool` method that delegates to `self._comm_channel.revoke(message_id)` if `_comm_channel` is not None, else returns `False`. Revoke only works on messages still in `ProtocolChannel._pending` — after `enqueue()` the message is in PydanticAI's queue (no removal API)
+- [ ] 4.8 Update `_steer_callback_wrapper()` to handle the new return type (`str | None` instead of `bool`)
+- [ ] 4.9 Verify all 8 `steer()` call sites in `session_pool.py` and 1 in `session_controller.py`: grep for `is True`, `is False`, and bare statement-style calls (`.steer(` without assignment). No caller SHALL depend on `bool` return type
+- [ ] 4.10 Add unit tests for steer with explicit message_id, steer with auto-generated message_id, steer with `list` content (content_blocks), followup with message_id, revoke pending, revoke delivered, revoke unknown
+- [ ] 4.11 Update `SessionPool.steer()`, `SessionPool.followup()`, `SessionPool.inject_prompt()`, `SessionPool.queue_prompt()` signatures to accept `message_id: str | None = None` and `message: str | list[Any]` and pass through to `RunHandle`
 
 ## 5. SessionController Extension
 
 - [ ] 5.1 Add `message_id: str | None = None` keyword parameter to `SessionController.receive_request()` in `orchestrator/session_controller.py`
-- [ ] 5.2 Pass `message_id` to `run.steer()` and `run.followup()` calls in `receive_request()`; return the `message_id` string (from steer/followup) or `RunHandle` (for new runs) or `None` (failure)
-- [ ] 5.3 Update `receive_request()` return type annotation from `RunHandle | None` to `RunHandle | str | None`
-- [ ] 5.4 Add `SessionController.revoke_inject(session_id: str, message_id: str) -> bool` method that delegates to active `RunHandle.revoke()`
-- [ ] 5.5 Add unit tests for `receive_request` with `message_id` propagation, return type verification, and `revoke_inject` on active/idle sessions
+- [ ] 5.2 Remove the `content_str = " ".join(str(c) for c in content)` stringification in `receive_request()` — preserve `content` as `str | list[Any]` and pass through to `steer()`/`followup()`/`_start_run_handle()` as-is
+- [ ] 5.3 Pass `message_id` to `run.steer()` and `run.followup()` calls in `receive_request()`; return the `message_id` string (from steer/followup) or `RunHandle` (for new runs) or `None` (failure)
+- [ ] 5.4 Update `receive_request()` return type annotation from `RunHandle | None` to `RunHandle | str | None`
+- [ ] 5.5 Add `SessionController.revoke_inject(session_id: str, message_id: str) -> bool` method that delegates to active `RunHandle.revoke()`
+- [ ] 5.6 Add unit tests for `receive_request` with `message_id` propagation, `list` content preservation (no stringification), return type verification, and `revoke_inject` on active/idle sessions
 
 ## 6. ACPMessageAccumulator Fix
 

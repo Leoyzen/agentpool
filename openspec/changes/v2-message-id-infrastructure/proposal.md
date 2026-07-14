@@ -24,15 +24,15 @@ AgentPool's internal architecture has four independent, non-communicating messag
 ### Modified Capabilities
 - `steer-followup-api`: `steer()` and `followup()` signatures change to accept optional `message_id` and return `str | None` (the message_id) instead of `bool`. New `revoke(message_id)` method on `RunHandle`.
 - `structured-work-channel`: `ProtocolChannel` gains `revoke(message_id)` and `replace(message_id, content)` methods. Feedback queue upgraded from plain FIFO to ID-tracked with pending/delivered/revoked sets.
-- `pending-message-queue`: `Feedback` dataclass extended with `message_id`, `content_blocks`, and `mode` fields.
+- `pending-message-queue`: `Feedback` dataclass extended with `message_id`, `content_blocks`, and `mode` fields. `content_blocks` is activated — pipeline carries structured content through without stringification.
 
 ## Impact
 
-- **`lifecycle/types.py`**: `Feedback` dataclass gains 3 fields with defaults (backward compatible).
+- **`lifecycle/types.py`**: `Feedback` dataclass gains 3 fields with defaults (backward compatible). `content_blocks: list[dict[str, Any]] | None` carries structured content.
 - **`lifecycle/comm_channel.py`**: `ProtocolChannel` feedback queue restructured; new `revoke()` and `replace()` methods.
 - **`lifecycle/protocols.py`**: `CommChannel` Protocol gains `revoke()` and `replace()` method signatures.
-- **`orchestrator/run.py`**: `steer()` and `followup()` signature/return-type changes; new `revoke()` method. 2 construction sites + 4 consumption sites of `Feedback` updated.
-- **`orchestrator/session_controller.py`**: `receive_request()` gains `message_id` parameter; new `revoke_inject()` method.
+- **`orchestrator/run.py`**: `steer()` and `followup()` signature/return-type changes (accept `str | list[Any]`, return `str | None`); new `revoke()` method. When `content_blocks` is present, `steer()` calls `agent_run.enqueue(*content_blocks)` for multimodal support.
+- **`orchestrator/session_controller.py`**: `receive_request()` gains `message_id` parameter; stops stringifying `list` content — preserves `str | list` as-is; new `revoke_inject()` method.
 - **`orchestrator/session_pool.py`**: `steer()`, `followup()`, `inject_prompt()`, `queue_prompt()` public APIs updated to pass through `message_id`.
 - **`agents/events/events.py`**: `PartStartEvent` and `PartDeltaEvent` gain `message_id: str` field.
 - **`agents/native_agent/turn.py`**: `NativeTurn._message_id` propagated to `PartStartEvent`/`PartDeltaEvent`.
