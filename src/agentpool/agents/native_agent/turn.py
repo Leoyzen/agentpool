@@ -325,6 +325,32 @@ class NativeTurn(HookAwareTurn, Turn):
                 raise
 
             except Exception as exc:
+                # If the while loop completed and _message_history is set,
+                # the error is from agentlet.iter() exit (e.g. MCP toolset
+                # double-cleanup when session close already cleaned up MCP
+                # connections). In this case, build the final message from
+                # the collected history and yield StreamCompleteEvent
+                # instead of RunErrorEvent, so history is preserved.
+                if self._message_history is not None:
+                    logger.warning(
+                        "agentlet.iter() exit failed after turn completion, "
+                        "preserving history",
+                        error=str(exc),
+                    )
+                    # Build a minimal final message from _message_history.
+                    new_messages = self._message_history[self._input_history_len :]
+                    fallback_content: Any = extract_text_from_messages(new_messages)
+                    self._final_message = ChatMessage(
+                        content=fallback_content,
+                        role="assistant",
+                        name=self._agent.name,
+                        message_id=self._message_id,
+                        session_id=self._run_ctx.session_id,
+                        parent_id=self._parent_id,
+                        messages=new_messages,
+                    )
+                    yield StreamCompleteEvent(message=self._final_message)
+                    return
                 logger.exception("NativeTurn execution failed")
                 yield RunErrorEvent(
                     message=str(exc),
