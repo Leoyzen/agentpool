@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Self
+
+from pydantic import TypeAdapter
 
 from agentpool.log import get_logger
 from agentpool.sessions.models import SessionData
 from agentpool.utils.time_utils import get_now
 from agentpool_storage.sql_provider.models import Session
-from pydantic import TypeAdapter
 
 
 if TYPE_CHECKING:
@@ -172,7 +173,7 @@ class SQLSessionStore:
             # Without this, the delete-then-insert upsert destroys
             # checkpoint_data saved by SQLProvider.save_checkpoint().
             result = await session.execute(
-                select(Session.checkpoint_data).where(  # type: ignore[attr-defined]
+                select(Session.checkpoint_data).where(  # type: ignore[call-overload]
                     Session.id == data.session_id
                 )
             )

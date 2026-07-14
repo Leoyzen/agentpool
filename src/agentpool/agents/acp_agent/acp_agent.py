@@ -409,7 +409,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 self.log.exception("Error terminating ACP process")
             self._process = None
 
-    async def _stream_events(  # noqa: PLR0915
+    async def _stream_events(  # noqa: PLR0915  # type: ignore[override]
         self,
         run_ctx: AgentRunContext,
         prompts: list[UserContent],
@@ -425,6 +425,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         deps: TDeps | None = None,
         wait_for_connections: bool | None = None,
         store_history: bool = True,
+        **pydantic_ai_kwargs: Any,
     ) -> AsyncIterator[RichAgentStreamEvent[str]]:
         from agentpool.agents.acp_agent.acp_converters import to_finish_reason
 
@@ -816,7 +817,7 @@ if __name__ == "__main__":
 
     async def main() -> None:
         async with ACPAgent(command="claude-code-acp") as agent:
-            async for event in agent.run_stream("hello"):
+            async for event in agent.run_stream("hello"):  # type: ignore[attr-defined]
                 print(event)
 
     asyncio.run(main())

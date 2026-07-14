@@ -15,7 +15,6 @@ Tests verify:
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -126,20 +125,22 @@ async def test_start_event_consumer_called_before_resume(
     mock_pool.session_pool.resume_session = mock_resume
 
     # Mock ACPRequests.elicitation_create to return immediately
-    with patch.object(
-        acp_handler,
-        "client",
-    ):
-        with patch(
+    with (
+        patch.object(
+            acp_handler,
+            "client",
+        ),
+        patch(
             "agentpool_server.acp_server.handler.ACPRequests",
-        ) as MockACPRequests:
-            mock_acp_requests = MagicMock()
-            mock_acp_requests.elicitation_create = AsyncMock(
-                return_value=_FakeElicitationResponse(action="accept"),
-            )
-            MockACPRequests.return_value = mock_acp_requests
+        ) as mock_acp_requests_class,
+    ):
+        mock_acp_requests = MagicMock()
+        mock_acp_requests.elicitation_create = AsyncMock(
+            return_value=_FakeElicitationResponse(action="accept"),
+        )
+        mock_acp_requests_class.return_value = mock_acp_requests
 
-            await acp_handler._handle_elicitation_deferred(session_id, event)
+        await acp_handler._handle_elicitation_deferred(session_id, event)
 
     assert call_order[0] == f"start_event_consumer:{session_id}", (
         f"start_event_consumer must be called first, got: {call_order}"
@@ -177,16 +178,14 @@ async def test_resume_not_called_if_start_consumer_fails(
 
     with patch(
         "agentpool_server.acp_server.handler.ACPRequests",
-    ) as MockACPRequests:
+    ) as mock_acp_requests_class:
         mock_acp_requests = MagicMock()
         mock_acp_requests.elicitation_create = AsyncMock(
             return_value=_FakeElicitationResponse(action="accept"),
         )
-        MockACPRequests.return_value = mock_acp_requests
+        mock_acp_requests_class.return_value = mock_acp_requests
 
         # Should not raise — the handler catches exceptions
         await acp_handler._handle_elicitation_deferred(session_id, event)
 
-    assert not resume_called, (
-        "resume_session must NOT be called if start_event_consumer fails"
-    )
+    assert not resume_called, "resume_session must NOT be called if start_event_consumer fails"

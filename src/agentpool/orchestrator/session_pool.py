@@ -411,7 +411,7 @@ class SessionPool:
         await agent.__aenter__()
         return agent
 
-    async def _resume_native_agent(
+    async def _resume_native_agent(  # noqa: PLR0915
         self,
         session_data: SessionData,
         checkpoint: CheckpointData,
@@ -520,7 +520,8 @@ class SessionPool:
         if last_model_response is not None:
             # Collect all ToolCallParts from the last ModelResponse
             tool_call_parts: list[ToolCallPart] = [
-                part for part in last_model_response.parts
+                part
+                for part in last_model_response.parts
                 if isinstance(part, ToolCallPart) and part.tool_call_id
             ]
             pending_calls_list = list(pending_by_handle.items())
@@ -534,7 +535,7 @@ class SessionPool:
                     if i in matched_tc_indices:
                         continue
                     if tc.tool_name == pcall.tool_name:
-                        tool_call_id_map[handle] = tc.tool_call_id  # type: ignore[assignment]
+                        tool_call_id_map[handle] = tc.tool_call_id
                         matched_tc_indices.add(i)
                         break
 
@@ -542,11 +543,9 @@ class SessionPool:
             unmatched_tc_indices = [
                 i for i in range(len(tool_call_parts)) if i not in matched_tc_indices
             ]
-            unmatched_handles = [
-                h for h, _ in pending_calls_list if h not in tool_call_id_map
-            ]
+            unmatched_handles = [h for h, _ in pending_calls_list if h not in tool_call_id_map]
             for handle, tc_idx in zip(unmatched_handles, unmatched_tc_indices, strict=False):
-                tool_call_id_map[handle] = tool_call_parts[tc_idx].tool_call_id  # type: ignore[assignment]
+                tool_call_id_map[handle] = tool_call_parts[tc_idx].tool_call_id
 
         elicitation_tool_results: dict[str, Any] = {}
         if elicitation_payloads:
@@ -557,8 +556,10 @@ class SessionPool:
                 actual_tool_call_id = tool_call_id_map.get(
                     payload.deferred_handle, payload.deferred_handle
                 )
-                pcall = pending_by_handle.get(payload.deferred_handle)
-                tool_name = pcall.tool_name if pcall else ""
+                pcall_deferred: PendingDeferredCall | None = pending_by_handle.get(
+                    payload.deferred_handle
+                )
+                tool_name = pcall_deferred.tool_name if pcall_deferred else ""
                 match payload.action:
                     case "accept":
                         cached_elicitation[payload.deferred_handle] = MCPElicitResult(
@@ -1074,10 +1075,7 @@ class SessionPool:
         from agentpool.lifecycle.types import RunState
 
         # Staleness check: prevent silently overwriting an active run.
-        if (
-            session.current_run_id is not None
-            and session.current_run_id in self.sessions._runs
-        ):
+        if session.current_run_id is not None and session.current_run_id in self.sessions._runs:
             existing = self.sessions._runs[session.current_run_id]
             if existing._run_state != RunState.DONE:
                 raise SessionBusyError(session_id, session.current_run_id)
@@ -1280,7 +1278,7 @@ class SessionPool:
         async for event in self._run_stream_run_turn(session_id, *prompts, scope=scope, **kwargs):
             yield event
 
-    async def _run_stream_run_turn(
+    async def _run_stream_run_turn(  # noqa: PLR0915
         self,
         session_id: str,
         *prompts: Any,

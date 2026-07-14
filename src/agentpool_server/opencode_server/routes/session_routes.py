@@ -296,7 +296,7 @@ async def _execute_slashed_command(  # noqa: PLR0915
             else:
                 # Fallback to direct agent if SessionPool not available
                 agent = state.agent
-                iterator = agent.run_stream(agent_prompt, session_id=session_id)
+                iterator = agent.run_stream(agent_prompt, session_id=session_id)  # type: ignore[assignment]
 
             async for oc_event in adapter.process_stream(iterator):
                 await state.broadcast_event(oc_event)

@@ -14,20 +14,16 @@ catch the integration bug that mocked tests missed.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from mcp.types import ElicitRequestFormParams, ElicitResult
 from pydantic_ai.models.test import TestModel
 import pytest
 
 from agentpool import Agent
-from agentpool.agents.context import AgentContext, AgentRunContext, ConfirmationResult
 from agentpool.agents.native_agent.checkpoint import CheckpointManager
-from agentpool.agents.events.events import RichAgentStreamEvent, StreamCompleteEvent
-from agentpool.orchestrator.core import EventBus, SessionState
+from agentpool.orchestrator.core import EventBus
 from agentpool.orchestrator.session_pool import SessionPool
 from agentpool.sessions.models import (
     ElicitationResumePayload,
@@ -42,6 +38,8 @@ from agentpool_storage.session_store import SQLSessionStore
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from agentpool.agents.context import AgentContext, ConfirmationResult
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +142,7 @@ async def sql_storage(tmp_path: Path) -> Any:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_e2e_elicitation_timeout_crash_recovery(
+async def test_e2e_elicitation_timeout_crash_recovery(  # noqa: PLR0915
     sql_storage: Any,
 ) -> None:
     """E2e: elicitation → checkpoint → timeout → crash recovery resume.
@@ -280,7 +278,7 @@ async def test_e2e_elicitation_timeout_crash_recovery(
     # Debug: verify mock_pool.storage is the real storage_manager
     assert mock_pool.storage is storage_manager, "mock_pool.storage should be storage_manager"
 
-    event_bus = EventBus()
+    EventBus()
     session_pool = SessionPool(
         pool=mock_pool,
         store=session_store,
@@ -290,7 +288,7 @@ async def test_e2e_elicitation_timeout_crash_recovery(
 
     # Mock _reconstruct_native_agent to return a TestModel agent.
     # The reconstructed agent is used for config drift check and cleanup.
-    elicit_agent = _make_elicit_agent()
+    _make_elicit_agent()
 
     async def mock_reconstruct(
         sid: str,
@@ -382,7 +380,7 @@ async def test_e2e_checkpoint_save_fails_without_conversation(
     - StorageManager.save_checkpoint() returns bool
     - CheckpointManager.checkpoint() logs error on failure
     """
-    storage_manager, session_store = sql_storage
+    storage_manager, _session_store = sql_storage
     session_id = "test-no-conv-record"
 
     # Do NOT call session_store.save() — simulate the ACP scenario where
@@ -410,8 +408,7 @@ async def test_e2e_checkpoint_save_fails_without_conversation(
     # Checkpoint should actually exist in SQL (not silently failed)
     data = await checkpoint_mgr.load_checkpoint(session_id)
     assert data is not None, (
-        "Checkpoint should exist after save. "
-        "If None, save failed silently (the original bug)."
+        "Checkpoint should exist after save. If None, save failed silently (the original bug)."
     )
     assert len(data.pending_calls) == 1
     assert data.pending_calls[0].tool_call_id == "tc-no-conv"
@@ -500,7 +497,7 @@ async def test_e2e_resume_without_pending_deferred_calls_resolves_zero(
     mock_pool.skills_tools_provider = MagicMock()
     mock_pool.skills_tools_provider.get_capabilities = MagicMock(return_value=[])
 
-    event_bus = EventBus()
+    EventBus()
     session_pool = SessionPool(
         pool=mock_pool,
         store=session_store,
@@ -519,9 +516,7 @@ async def test_e2e_resume_without_pending_deferred_calls_resolves_zero(
     session_pool._reconstruct_native_agent = mock_reconstruct  # type: ignore[assignment]
 
     # Mock run_stream to avoid running the full agent lifecycle.
-    async def mock_run_stream_no_pending(
-        session_id: str, *prompts: Any, **kwargs: Any
-    ) -> Any:
+    async def mock_run_stream_no_pending(session_id: str, *prompts: Any, **kwargs: Any) -> Any:
         return
         yield  # pragma: no cover
 
@@ -643,7 +638,7 @@ async def test_e2e_elicitation_resume_builds_deferred_tool_results(
     mock_pool.skills_tools_provider = MagicMock()
     mock_pool.skills_tools_provider.get_capabilities = MagicMock(return_value=[])
 
-    event_bus = EventBus()
+    EventBus()
     session_pool = SessionPool(
         pool=mock_pool,
         store=session_store,
@@ -799,7 +794,7 @@ async def test_e2e_elicitation_resume_maps_tool_call_id_mismatch(
     mock_pool.skills_tools_provider = MagicMock()
     mock_pool.skills_tools_provider.get_capabilities = MagicMock(return_value=[])
 
-    event_bus = EventBus()
+    EventBus()
     session_pool = SessionPool(
         pool=mock_pool,
         store=session_store,

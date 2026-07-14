@@ -310,7 +310,9 @@ async def test_resume_native_agent_loads_checkpoint_and_runs(
 
     mock_reconstruct = AsyncMock(return_value=mock_native)
     with (
-        patch.object(session_pool, "_load_checkpoint_data", AsyncMock(return_value=checkpoint_data)),
+        patch.object(
+            session_pool, "_load_checkpoint_data", AsyncMock(return_value=checkpoint_data)
+        ),
         patch.object(session_pool, "_reconstruct_native_agent", mock_reconstruct),
         patch.object(session_pool, "run_stream", tracked_run_stream),
     ):

@@ -1313,7 +1313,7 @@ class FSSpecTools(FunctionToolsetCapability):
 
         # FIXME: agent.run_stream() requires SessionPool after migrate-to-runexecutor migration.
         # Use SessionPool.run_stream() with message_history support.
-        async for node in agent.run_stream(
+        async for node in agent.run_stream(  # type: ignore[attr-defined]
             prompt,
             message_history=fork_history,
             store_history=False,
@@ -1443,7 +1443,7 @@ class FSSpecTools(FunctionToolsetCapability):
 
         # FIXME: agent.run_stream() requires SessionPool after migrate-to-runexecutor migration.
         # Use SessionPool.run_stream() with message_history support.
-        async for node in agent.run_stream(
+        async for node in agent.run_stream(  # type: ignore[attr-defined]
             prompt,
             message_history=fork_history,
             store_history=False,
@@ -1531,7 +1531,7 @@ class FSSpecTools(FunctionToolsetCapability):
 
         # FIXME: agent.run_stream() requires SessionPool after migrate-to-runexecutor migration.
         # Use SessionPool.run_stream() with message_history support.
-        async for node in agent.run_stream(
+        async for node in agent.run_stream(  # type: ignore[attr-defined]
             prompt,
             message_history=fork_history,
             store_history=False,

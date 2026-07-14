@@ -1298,8 +1298,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         if self._run_context is run_ctx:
             self._run_context = None
 
-    @method_spawner
-    async def run_stream(  # noqa: PLR0915
+    @method_spawner  # type: ignore[arg-type]
+    async def run_stream(  # type: ignore[override]  # noqa: PLR0915
         self,
         *prompts: PromptCompatible,
         store_history: bool = True,
@@ -1346,6 +1346,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             deps: Optional dependencies
             event_handlers: Optional event handlers
             depth: Current delegation depth (0 = top-level run)
+            **pydantic_ai_kwargs: Extra kwargs forwarded to PydanticAI.
 
         Yields:
             Stream events during execution
@@ -1499,6 +1500,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             _owns_event_bus: Whether the caller created a local EventBus
                 (standalone mode). When True, ``message_sent`` is emitted
                 here. When False, the caller (Path A) handles emission.
+            **pydantic_ai_kwargs: Extra kwargs forwarded to PydanticAI.
 
         Yields:
             Stream events during execution
@@ -1718,7 +1720,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # If we have regular content, process it through the agent
         if regular_prompts:
             self.log.debug("Processing prompts through agent", num_prompts=len(regular_prompts))
-            async for event in self.run_stream(*regular_prompts, **kwargs):
+            async for event in self.run_stream(*regular_prompts, **kwargs):  # type: ignore[attr-defined]
                 yield event
 
     @abstractmethod
@@ -1759,6 +1761,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             deps: Optional dependencies
             wait_for_connections: Whether to wait for connected agents
             store_history: Whether to store in history
+            **pydantic_ai_kwargs: Extra kwargs forwarded to PydanticAI.
 
         Yields:
             Stream events during execution
@@ -1934,7 +1937,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # directly, not this method.  run() is a convenience wrapper that collects
         # streaming events and returns the final message.
         final_message = None
-        async for event in self.run_stream(
+        async for event in self.run_stream(  # type: ignore[attr-defined]
             *prompts,
             store_history=store_history,
             message_id=message_id,
