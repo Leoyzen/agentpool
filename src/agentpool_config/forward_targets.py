@@ -229,7 +229,8 @@ class FileConnectionConfig(ConnectionConfig):
     def get_model(self) -> FunctionModel:
         """Get provider for file writing."""
         from jinja2 import Template
-        from llmling_models import function_to_model
+
+        from agentpool.utils.model_helpers import function_to_model
 
         path_obj = to_upath(self.path)
         template_obj = Template(self.template)
@@ -285,7 +286,7 @@ class CallableConnectionConfig(ConnectionConfig):
 
     def get_model(self) -> FunctionModel:
         """Get provider for callable."""
-        from llmling_models import function_to_model
+        from agentpool.utils.model_helpers import function_to_model
 
         return function_to_model(self.callable)
 

@@ -928,7 +928,7 @@ class AgentPoolACPAgent(ACPAgent):
                 # Also include resolved identifiers from StringModelConfig variants,
                 # since configOptions sends resolved identifiers (e.g., "openai-chat:svc/glm-4.7")
                 # while model_variants.keys() are variant names (e.g., "glm47").
-                from llmling_models_config import StringModelConfig
+                from agentpool.models.model_configs import StringModelConfig
 
                 for config in manifest.model_variants.values():
                     if isinstance(config, StringModelConfig):

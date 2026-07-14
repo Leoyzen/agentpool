@@ -17,7 +17,8 @@ from agentpool.log import get_logger
 
 if TYPE_CHECKING:
     from pydantic_ai import RunContext
-    from pydantic_ai.messages import ModelMessage, ModelRequestContext
+    from pydantic_ai.messages import ModelMessage
+    from pydantic_ai.models import ModelRequestContext
 
 
 logger = get_logger(__name__)

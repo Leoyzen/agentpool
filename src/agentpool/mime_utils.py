@@ -1,12 +1,11 @@
 """Centralized MIME type utilities for agentpool.
 
-Uses pydantic-ai's enhanced MimeTypes instance for better cross-platform
-coverage of modern file types (.xlsx, .docx, .webp, .mkv, etc.).
+Uses Python's stdlib mimetypes for cross-platform coverage of file types.
 """
 
 from __future__ import annotations
 
-from pydantic_ai.messages import _mime_types
+import mimetypes
 
 
 # MIME type prefixes that are definitely binary (no need to probe content)
@@ -38,8 +37,7 @@ BINARY_PROBE_SIZE = 8192
 def guess_type(path: str) -> str | None:
     """Guess the MIME type of a file based on its path/extension.
 
-    Uses pydantic-ai's enhanced MimeTypes instance which has better
-    coverage for modern file types across platforms.
+    Uses Python's stdlib mimetypes for cross-platform coverage.
 
     Args:
         path: File path or URL to guess type for
@@ -47,7 +45,7 @@ def guess_type(path: str) -> str | None:
     Returns:
         MIME type string or None if unknown
     """
-    mime_type, _ = _mime_types.guess_type(path)
+    mime_type, _ = mimetypes.guess_type(path)
     return mime_type
 
 

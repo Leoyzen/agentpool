@@ -12,7 +12,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from llmling_models.auth.anthropic_auth import (
+
+from agentpool.auth.anthropic_auth import (
     OAUTH_MANUAL_REDIRECT_URI,
     AnthropicOAuthToken,
     AnthropicTokenStore,
@@ -20,7 +21,6 @@ from llmling_models.auth.anthropic_auth import (
     exchange_code_for_token,
     generate_pkce,
 )
-
 from agentpool_server.opencode_server.models.agent import (
     ProviderAuthAuthorization,
     ProviderAuthMethod,

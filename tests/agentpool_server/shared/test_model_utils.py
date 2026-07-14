@@ -68,7 +68,7 @@ class TestExtractProvider:
 
     def test_string_config_openai(self) -> None:
         """Extract provider from StringModelConfig with openai identifier."""
-        from llmling_models_config import StringModelConfig
+        from agentpool.models.model_configs import StringModelConfig
 
         config = StringModelConfig(identifier="openai:gpt-4o")
         result = _extract_provider(config)
@@ -76,7 +76,7 @@ class TestExtractProvider:
 
     def test_string_config_anthropic(self) -> None:
         """Extract provider from StringModelConfig with anthropic identifier."""
-        from llmling_models_config import StringModelConfig
+        from agentpool.models.model_configs import StringModelConfig
 
         config = StringModelConfig(identifier="anthropic:claude-sonnet-4")
         result = _extract_provider(config)
@@ -84,7 +84,7 @@ class TestExtractProvider:
 
     def test_string_config_no_provider(self) -> None:
         """Return unknown for StringModelConfig without provider prefix."""
-        from llmling_models_config import StringModelConfig
+        from agentpool.models.model_configs import StringModelConfig
 
         config = StringModelConfig(identifier="gpt-4o")
         result = _extract_provider(config)
@@ -92,7 +92,7 @@ class TestExtractProvider:
 
     def test_anthropic_config(self) -> None:
         """Return anthropic for AnthropicModelConfig."""
-        from llmling_models_config import AnthropicModelConfig
+        from agentpool.models.model_configs import AnthropicModelConfig
 
         config = AnthropicModelConfig(identifier="claude-opus-4-5")
         result = _extract_provider(config)
@@ -100,7 +100,7 @@ class TestExtractProvider:
 
     def test_openai_config(self) -> None:
         """Return openai for OpenAIModelConfig."""
-        from llmling_models_config import OpenAIModelConfig
+        from agentpool.models.model_configs import OpenAIModelConfig
 
         config = OpenAIModelConfig(identifier="gpt-5.1-chat-latest")
         result = _extract_provider(config)
@@ -108,7 +108,7 @@ class TestExtractProvider:
 
     def test_gemini_config(self) -> None:
         """Return google for GeminiModelConfig."""
-        from llmling_models_config import GeminiModelConfig
+        from agentpool.models.model_configs import GeminiModelConfig
 
         config = GeminiModelConfig(identifier="gemini-2.0-flash")
         result = _extract_provider(config)
@@ -116,7 +116,7 @@ class TestExtractProvider:
 
     def test_fallback_config_first_string(self) -> None:
         """Extract provider from first model in FallbackModelConfig."""
-        from llmling_models_config import FallbackModelConfig, StringModelConfig
+        from agentpool.models.model_configs import FallbackModelConfig, StringModelConfig
 
         config = FallbackModelConfig(models=[StringModelConfig(identifier="openai:gpt-4o")])
         result = _extract_provider(config)
@@ -124,7 +124,7 @@ class TestExtractProvider:
 
     def test_fallback_config_first_anthropic(self) -> None:
         """Extract anthropic when first model is AnthropicModelConfig."""
-        from llmling_models_config import AnthropicModelConfig, FallbackModelConfig
+        from agentpool.models.model_configs import AnthropicModelConfig, FallbackModelConfig
 
         config = FallbackModelConfig(models=[AnthropicModelConfig(identifier="claude-opus-4-5")])
         result = _extract_provider(config)
@@ -133,7 +133,7 @@ class TestExtractProvider:
     def test_fallback_config_empty_models(self) -> None:
         """Return unknown for FallbackModelConfig with empty models list - minimum 1 required."""
         # Note: FallbackModelConfig requires at least 1 model, so we test with String instead
-        from llmling_models_config import FallbackModelConfig
+        from agentpool.models.model_configs import FallbackModelConfig
 
         # Single model fallback with unknown provider string
         config = FallbackModelConfig(models=["unknown-model-name"])
@@ -142,7 +142,7 @@ class TestExtractProvider:
 
     def test_fallback_config_nested_fallback(self) -> None:
         """Handle nested FallbackModelConfig."""
-        from llmling_models_config import (
+        from agentpool.models.model_configs import (
             AnthropicModelConfig,
             FallbackModelConfig,
         )

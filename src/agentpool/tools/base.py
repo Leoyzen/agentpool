@@ -368,10 +368,8 @@ class Tool[TOutputType = Any]:
                         base_schema.setdefault("properties", {})[param_name] = param_def
             return base_schema
 
-        # Try primary path with pydantic_ai.function_schema
+        # Try primary path with pydantic_ai._function_schema
         try:
-            # pydantic-ai function_schema is internal API but needed for schema generation
-            # This is the standard way to generate schemas for tools in pydantic-ai
             from pydantic_ai._function_schema import (  # type: ignore[attr-defined]
                 GenerateJsonSchema,
                 function_schema,

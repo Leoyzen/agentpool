@@ -15,7 +15,8 @@ from pydantic_ai.capabilities import AbstractCapability
 if TYPE_CHECKING:
     from pydantic_ai import RunContext
     from pydantic_ai.capabilities import WrapModelRequestHandler
-    from pydantic_ai.messages import ModelRequestContext, ModelResponse
+    from pydantic_ai.messages import ModelResponse
+    from pydantic_ai.models import ModelRequestContext
     from pydantic_ai.usage import RunUsage
 
 

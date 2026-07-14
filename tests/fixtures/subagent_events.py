@@ -93,7 +93,7 @@ def get_tool_result_event(
     """Create a function tool result event."""
     # ToolReturnPart: content + tool_name (tool_call_id is auto-generated)
     part = ToolReturnPart(content=result, tool_name=tool_name)
-    return FunctionToolResultEvent(result=part)
+    return FunctionToolResultEvent(part=part)
 
 
 def get_tool_error_event(
@@ -104,7 +104,7 @@ def get_tool_error_event(
     """Create a function tool error event (RetryPromptPart)."""
     # RetryPromptPart: content + tool_name
     part = RetryPromptPart(content=error_message, tool_name=tool_name)
-    return FunctionToolResultEvent(result=part)
+    return FunctionToolResultEvent(part=part)
 
 
 def get_stream_complete_event() -> StreamCompleteEvent[Any]:

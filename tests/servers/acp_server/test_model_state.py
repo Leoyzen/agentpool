@@ -52,7 +52,7 @@ def create_toko_model(model_id, name, description="", provider=""):
 @pytest.fixture
 def manifest_with_variants():
     """Manifest with configured variants."""
-    from llmling_models_config import StringModelConfig
+    from agentpool.models.model_configs import StringModelConfig
 
     variants = {
         "fast_gpt": StringModelConfig(identifier="openai:gpt-4o-mini"),

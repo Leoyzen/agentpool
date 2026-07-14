@@ -4,10 +4,10 @@ import functools
 from typing import Any
 
 import anyio
-from llmling_models import function_to_model
 import pytest
 
 from agentpool import Agent, ChatMessage
+from agentpool.utils.model_helpers import function_to_model
 from agentpool.utils.time_utils import get_now
 
 

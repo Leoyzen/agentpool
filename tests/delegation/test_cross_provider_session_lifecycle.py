@@ -46,7 +46,7 @@ def _make_echo_agent(name: str, response: str = "hello") -> Agent[Any, str]:
     """Create an Agent that echoes a fixed response via function_to_model."""
     from functools import partial
 
-    from llmling_models import function_to_model
+    from agentpool.utils.model_helpers import function_to_model
 
     async def _echo(_msg: str, *, _response: str = response) -> str:
         return _response

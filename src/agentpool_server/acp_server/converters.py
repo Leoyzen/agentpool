@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, assert_never, overload
 
 from pydantic import HttpUrl
 from pydantic_ai import BinaryContent, BinaryImage
-from pydantic_ai.messages import _document_format_lookup
 
 from acp.schema import (
     AudioContentBlock,
@@ -56,6 +55,18 @@ if TYPE_CHECKING:
     from agentpool_config.mcp_server import MCPServerConfig
 
 logger = get_logger(__name__)
+
+_DOCUMENT_FORMATS: dict[str, str] = {
+    "application/pdf": "pdf",
+    "text/plain": "txt",
+    "text/csv": "csv",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "text/html": "html",
+    "text/markdown": "md",
+    "application/msword": "doc",
+    "application/vnd.ms-excel": "xls",
+}
 
 
 @overload
@@ -168,9 +179,7 @@ def resource_to_content(resource: ResourceContents) -> str | BinaryImage | Binar
             binary_data = base64.b64decode(blob)
             if mime_type and mime_type.startswith("image/"):
                 return BinaryImage(data=binary_data, media_type=mime_type)
-            if (
-                mime_type and mime_type.startswith("audio/")
-            ) or mime_type in _document_format_lookup:
+            if (mime_type and mime_type.startswith("audio/")) or mime_type in _DOCUMENT_FORMATS:
                 return BinaryContent(data=binary_data, media_type=mime_type)
             formatted_uri = format_uri_as_link(resource.uri)
             return f"Binary Resource: {formatted_uri}"

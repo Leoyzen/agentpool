@@ -14,19 +14,10 @@ import warnings
 import logfire
 from pydantic_ai import (
     Agent as PydanticAgent,
+    AgentRetries,
 )
+from pydantic_ai.capabilities import NativeTool, ProcessHistory
 from pydantic_ai.models import Model
-
-
-try:
-    from pydantic_ai import AgentRetries
-    from pydantic_ai.capabilities import NativeTool, ProcessHistory
-except ImportError:
-    AgentRetries = None  # type: ignore[misc,assignment]
-    from pydantic_ai.capabilities import (  # type: ignore[no-redef]
-        BuiltinTool as NativeTool,
-        HistoryProcessor as ProcessHistory,
-    )
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.context import AgentContext
@@ -49,7 +40,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from exxec import ExecutionEnvironment
-    from pydantic_ai import AgentBuiltinTool, UsageLimits, UserContent
+    from pydantic_ai import AgentNativeTool as AgentBuiltinTool, UsageLimits, UserContent
     from pydantic_ai.capabilities import AbstractCapability
     from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models import Model
@@ -561,7 +552,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         merged_handlers: list[AnyEventHandlerType] = [*config_handlers, *(event_handlers or [])]
 
         # Handle model configuration - resolve model_variants reference if needed
-        from llmling_models_config import StringModelConfig
+        from agentpool.models.model_configs import StringModelConfig
 
         model_config = config.model
         if (
@@ -669,9 +660,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             name: Optional name for the agent
             kwargs: Additional arguments for agent
         """
-        from llmling_models import function_to_model
-
         from agentpool.utils.inspection import get_fn_name
+        from agentpool.utils.model_helpers import function_to_model
         from agentpool.utils.signatures import get_return_type
 
         name = name or get_fn_name(callback) or "processor"
@@ -699,7 +689,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             Tuple of (Model instance, ModelSettings or None)
             Settings are only returned for variants.
         """
-        from llmling_models import infer_model
+        from agentpool.utils.model_helpers import infer_model
 
         # Check if it's a variant
         ctx = self.host_context
