@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from agentpool_server.opencode_server.anthropic_auth import (
+from agentpool.auth.anthropic_auth import (
     OAUTH_MANUAL_REDIRECT_URI,
     AnthropicOAuthToken,
     AnthropicTokenStore,

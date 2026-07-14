@@ -164,6 +164,7 @@ class _OAuthCallbackHandler(http.server.BaseHTTPRequestHandler):
     code: str | None = None
     state: str | None = None
     error: str | None = None
+    done_event: threading.Event = threading.Event()
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002
         """Suppress default logging."""
@@ -188,6 +189,7 @@ class _OAuthCallbackHandler(http.server.BaseHTTPRequestHandler):
                 f"<h1>Authentication Failed</h1><p>Error: {params['error'][0]}</p>"
                 "<p>You can close this window.</p>".encode()
             )
+            _OAuthCallbackHandler.done_event.set()
             return
 
         if "code" in params and "state" in params:
@@ -207,6 +209,7 @@ class _OAuthCallbackHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(
                 b"<h1>Authentication Failed</h1><p>Missing code or state parameter.</p>"
             )
+        _OAuthCallbackHandler.done_event.set()
 
 
 def _start_callback_server() -> tuple[socketserver.TCPServer, threading.Thread, int]:
@@ -218,12 +221,12 @@ def _start_callback_server() -> tuple[socketserver.TCPServer, threading.Thread, 
     _OAuthCallbackHandler.code = None
     _OAuthCallbackHandler.state = None
     _OAuthCallbackHandler.error = None
+    _OAuthCallbackHandler.done_event.clear()
 
     server = socketserver.TCPServer(("127.0.0.1", 0), _OAuthCallbackHandler)
     port = server.server_address[1]
-    server.timeout = 300
 
-    thread = threading.Thread(target=server.handle_request)
+    thread = threading.Thread(target=server.serve_forever)
     thread.daemon = True
     thread.start()
 
@@ -326,7 +329,7 @@ def authenticate_anthropic_max(  # noqa: PLR0915
 
     if verbose:
         print("Starting local server for OAuth callback...")
-    server, thread, port = _start_callback_server()
+    server, _thread, port = _start_callback_server()
     redirect_uri = f"http://localhost:{port}/callback"
 
     try:
@@ -346,7 +349,7 @@ def authenticate_anthropic_max(  # noqa: PLR0915
 
         if verbose:
             print("Waiting for OAuth callback...")
-        thread.join(timeout=300)
+        _OAuthCallbackHandler.done_event.wait(timeout=300)
 
         if _OAuthCallbackHandler.error:
             msg = f"OAuth error: {_OAuthCallbackHandler.error}"
@@ -394,6 +397,7 @@ def authenticate_anthropic_max(  # noqa: PLR0915
         return token
 
     finally:
+        server.shutdown()
         server.server_close()
 
 

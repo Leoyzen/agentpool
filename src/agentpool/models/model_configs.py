@@ -837,7 +837,7 @@ class AnthropicModelConfig(BaseModelConfig):
         if self.auth_method == "oauth":
             from pydantic_ai.models.anthropic import AnthropicModel
 
-            from agentpool_server.opencode_server.anthropic_auth import (
+            from agentpool.auth.anthropic_auth import (
                 AnthropicMaxProvider,
             )
 

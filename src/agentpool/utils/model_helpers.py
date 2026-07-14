@@ -12,7 +12,7 @@ import os
 from typing import TYPE_CHECKING, Any
 
 import anyenv
-from pydantic import BaseModel, ImportString
+from pydantic import BaseModel
 from pydantic_ai import ModelResponse, TextPart, ToolCallPart, messages
 from pydantic_ai.models import Model, infer_model as infer_model_
 from pydantic_ai.models.function import (
@@ -103,7 +103,7 @@ def _infer_single_model(model: str | Model) -> Model:  # noqa: PLR0911
     if model.startswith("anthropic-max:"):
         from pydantic_ai.models.anthropic import AnthropicModel
 
-        from agentpool_server.opencode_server.anthropic_auth import AnthropicMaxProvider
+        from agentpool.auth.anthropic_auth import AnthropicMaxProvider
 
         provider = AnthropicMaxProvider()
         model_name = model.removeprefix("anthropic-max:")
@@ -127,11 +127,9 @@ def _infer_single_model(model: str | Model) -> Model:  # noqa: PLR0911
         return OpenAIChatModel(model_name=model_name, provider=prov)
 
     if model.startswith("import:"):
+        from agentpool.utils.importing import import_callable
 
-        class Importer(BaseModel):
-            model: ImportString[Any]
-
-        imported = Importer(model=model.removeprefix("import:")).model
+        imported = import_callable(model.removeprefix("import:"))
         return imported() if isinstance(imported, type) else imported  # type: ignore[no-any-return]
     if model == "test":
         from pydantic_ai.models.test import TestModel
