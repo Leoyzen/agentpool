@@ -279,15 +279,21 @@ class NativeTurn(HookAwareTurn, Turn):
                     parent_id=self._parent_id,
                     messages=self._message_history or [],
                 )
-                # Yield RunErrorEvent, NOT StreamCompleteEvent —
-                # StreamCompleteEvent makes the ACP client think the turn
-                # completed normally (stop_reason="end_turn"), causing it to
-                # create a new session instead of waiting for the user's
-                # elicitation response.
-                yield RunErrorEvent(
-                    message=str(exc),
-                    agent_name=self._agent.name,
-                    run_id=self._run_ctx.run_id,
+                # Yield StreamCompleteEvent with cancelled=True so that:
+                # 1. _execute_turn saves the final message to
+                #    agent.conversation (the StreamCompleteEvent branch
+                #    handles this), preserving history for the next turn.
+                # 2. The ACP event converter emits
+                #    TurnCompleteUpdate(stop_reason="cancelled") instead
+                #    of "refusal", so clients know the turn was
+                #    cancelled, not failed.
+                # 3. _consume_run breaks on StreamCompleteEvent and
+                #    closes the generator, setting _turn_complete_event
+                #    in start()'s finally block — unblocking legacy
+                #    clients waiting on the PromptResponse.
+                yield StreamCompleteEvent(
+                    message=self._final_message,
+                    cancelled=True,
                 )
                 return
 

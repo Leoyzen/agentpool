@@ -662,6 +662,7 @@ class RunHandle:
         self._current_turn_id = turn_id
         self._current_turn_failed = False
         turn_failed = False
+        stream_complete_saved = False
         try:
             async for event in turn.execute():
                 if not self._comm_channel.publishes_to_event_bus:
@@ -676,6 +677,7 @@ class RunHandle:
                         [event.message],
                         extend_last=True,
                     )
+                    stream_complete_saved = True
                 yield event
                 if isinstance(event, RunErrorEvent):
                     turn_failed = True
@@ -695,6 +697,24 @@ class RunHandle:
             yield error_event
         finally:
             self._current_turn_failed = turn_failed
+            # Preserve partial history for ALL non-StreamCompleteEvent
+            # exit paths. Without this:
+            #
+            # - RunErrorEvent (generic Exception): agent.conversation
+            #   has only the user message — next turn loses context.
+            # - CancelledError (cooperative cancel): _final_message IS
+            #   set by NativeTurn but no StreamCompleteEvent is yielded,
+            #   so the StreamCompleteEvent branch never fires.
+            #
+            # Use the private attribute to avoid raising when
+            # _final_message was never set (e.g. generic Exception
+            # before any output was produced).  Skip if the
+            # StreamCompleteEvent branch already saved.
+            if not stream_complete_saved and turn._final_message is not None:
+                agent.conversation.add_chat_messages(
+                    [turn._final_message],
+                    extend_last=True,
+                )
 
     async def _handle_turn_result(self, event_bus: EventBus) -> str:
         """Handle cancel and error outcomes after turn execution.

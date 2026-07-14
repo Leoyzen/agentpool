@@ -347,25 +347,30 @@ async def test_stream_complete_via_run_handle_event_bus() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Bug 11: Elicitation timeout should yield RunErrorEvent, not StreamCompleteEvent
+# Bug 11: Elicitation timeout should yield StreamCompleteEvent(cancelled=True)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_elicitation_timeout_yields_run_error_not_stream_complete() -> None:
-    """RunAbortedError from elicitation timeout yields RunErrorEvent, not StreamCompleteEvent.
+async def test_elicitation_timeout_yields_cancelled_stream_complete() -> None:
+    """RunAbortedError from elicitation timeout yields StreamCompleteEvent(cancelled=True).
 
     When the elicitation timeout fires, handle_elicitation() raises
-    RunAbortedError. NativeTurn catches it but currently falls through to
-    yield StreamCompleteEvent — which makes the ACP client think the turn
-    completed normally (stop_reason="end_turn"). The client then creates a
-    new session instead of waiting for the user's elicitation response.
+    RunAbortedError. NativeTurn catches it and yields
+    StreamCompleteEvent(cancelled=True) so that:
 
-    Expected behavior: yield RunErrorEvent with a clear "elicitation timed
-    out" message so the client knows the turn was interrupted, not completed.
+    1. The ACP event converter emits TurnCompleteUpdate(stop_reason="cancelled")
+       — clients know the turn was cancelled, not completed normally.
+    2. _execute_turn saves the final message to agent.conversation
+       (the StreamCompleteEvent branch handles this), preserving history.
+    3. _consume_run breaks on StreamCompleteEvent and closes the generator,
+       setting _turn_complete_event — unblocking legacy clients.
+
+    Previously this yielded RunErrorEvent(stop_reason="refusal"), which
+    caused history loss because _execute_turn's StreamCompleteEvent branch
+    was never taken, leaving agent.conversation without the assistant message.
     """
-    from agentpool.agents.events.events import RunErrorEvent
 
     agent = _make_agent()
 
@@ -408,19 +413,22 @@ async def test_elicitation_timeout_yields_run_error_not_stream_complete() -> Non
                 f"Events: {[type(e).__name__ for e in events]}"
             )
 
-        # Assert: RunErrorEvent should be yielded, NOT StreamCompleteEvent.
+        # Assert: StreamCompleteEvent(cancelled=True) should be yielded.
+        from agentpool.agents.events.events import RunErrorEvent
+
         stream_complete_events = [e for e in events if isinstance(e, StreamCompleteEvent)]
         run_error_events = [e for e in events if isinstance(e, RunErrorEvent)]
 
-        assert len(stream_complete_events) == 0, (
-            "StreamCompleteEvent should NOT be yielded on elicitation timeout. "
-            "This makes the ACP client think the turn completed normally. "
+        assert len(run_error_events) == 0, (
+            "RunErrorEvent should NOT be yielded on elicitation timeout. "
+            "StreamCompleteEvent(cancelled=True) is the correct event. "
             f"Events: {[type(e).__name__ for e in events]}"
         )
-        assert len(run_error_events) >= 1, (
-            "RunErrorEvent should be yielded on elicitation timeout. "
+        assert len(stream_complete_events) >= 1, (
+            "StreamCompleteEvent should be yielded on elicitation timeout. "
             f"Events: {[type(e).__name__ for e in events]}"
         )
-        assert "elicitation" in run_error_events[0].message.lower() or "timeout" in run_error_events[0].message.lower(), (
-            f"RunErrorEvent message should mention elicitation/timeout, got: {run_error_events[0].message}"
+        assert stream_complete_events[0].cancelled is True, (
+            "StreamCompleteEvent should have cancelled=True on elicitation timeout. "
+            f"Got cancelled={stream_complete_events[0].cancelled}"
         )
