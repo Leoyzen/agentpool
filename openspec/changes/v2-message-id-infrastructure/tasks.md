@@ -18,13 +18,14 @@
 - [ ] 3.1 Add `revoke(message_id: str) -> bool` and `replace(message_id: str, new_content: str) -> bool` method signatures to `CommChannel` Protocol in `lifecycle/protocols.py`
 - [ ] 3.2 Implement `DirectChannel.revoke()` returning `False` and `DirectChannel.replace()` returning `False` in `lifecycle/comm_channel.py`
 - [ ] 3.3 Replace `ProtocolChannel._feedback_queue` from `asyncio.Queue[Feedback]` to `collections.deque[Feedback]` in `lifecycle/comm_channel.py`
-- [ ] 3.4 Add `_pending: dict[str, Feedback]`, `_revoked: set[str]`, `_delivered: set[str]` to `ProtocolChannel.__init__`
+- [ ] 3.4 Add `_pending: dict[str, Feedback]`, `_revoked: set[str]`, `_delivered: set[str]`, `_enqueued: dict[str, list]` to `ProtocolChannel.__init__` (`_enqueued` stores `PendingMessage` references for PydanticAI-layer revoke)
 - [ ] 3.5 Implement `ProtocolChannel.deliver_feedback()` with `_revoked` check and `_pending` tracking
 - [ ] 3.6 Implement `ProtocolChannel.recv()` with `_pending` → `_delivered` transition on dequeue
-- [ ] 3.7 Implement `ProtocolChannel.revoke()` with pending/delivered/unknown semantics (idempotent for unknown/revoked, `False` for delivered)
-- [ ] 3.8 Implement `ProtocolChannel.replace()` with in-place content update preserving queue position
-- [ ] 3.9 Update `ProtocolChannel.close()`: replace `while not self._feedback_queue.empty(): self._feedback_queue.get_nowait()` with `self._feedback_queue.clear()` and clear `_pending`, `_revoked`, `_delivered`
-- [ ] 3.10 Add unit tests for revoke before delivery, revoke after delivery, revoke unknown, revoke already-revoked, replace pending, replace delivered, deliver after revoke rejection, recv marks delivered
+- [ ] 3.7 Implement `ProtocolChannel.revoke()` with two-layer logic: (1) check `_pending` — remove from queue, add to `_revoked`, return `True`; (2) check `_enqueued` — remove each `PendingMessage` from `agent_run.pending_messages` via `list.remove(pm)`, catch `ValueError` (already drained), return `True`; (3) check `_delivered` — return `False`; (4) otherwise return `True` (idempotent unknown)
+- [ ] 3.8 Implement `ProtocolChannel.replace()` with in-place content update preserving queue position. Return `False` if `message_id` is in `_enqueued` (already past CommChannel layer) or `_delivered`
+- [ ] 3.9 Implement `ProtocolChannel._track_enqueued(message_id: str, items: list) -> None` — stores `PendingMessage` references in `_enqueued[message_id]`. Called by `RunHandle.steer()` after `agent_run.enqueue()`
+- [ ] 3.10 Update `ProtocolChannel.close()`: replace `while not self._feedback_queue.empty(): self._feedback_queue.get_nowait()` with `self._feedback_queue.clear()` and clear `_pending`, `_revoked`, `_delivered`, `_enqueued`
+- [ ] 3.11 Add unit tests for: revoke before delivery (CommChannel layer), revoke after enqueue (PydanticAI layer), revoke after drain (ValueError caught), revoke after delivery (`False`), revoke unknown (`True`), revoke already-revoked (`True`), replace pending, replace enqueued (`False`), replace delivered (`False`), deliver after revoke rejection, recv marks delivered, _track_enqueued stores references
 
 ## 4. RunHandle Steer/Followup/Revoke
 
@@ -32,12 +33,12 @@
 - [ ] 4.2 Change `RunHandle.followup()` signature to `followup(self, message: str | list[Any], *, message_id: str | None = None) -> str | None` in `orchestrator/run.py`
 - [ ] 4.3 Update `steer()` to construct `Feedback` with `message_id` parameter (or auto-generated UUID). When `message` is a `list`, store in `Feedback.content_blocks` and `content=""`; when `str`, store in `Feedback.content` as before. Return `fb.message_id` on success, `None` on failure
 - [ ] 4.4 Update `followup()` same as 4.3 but with `is_steer=False`
-- [ ] 4.5 In `steer()`, when `content_blocks` is present and agent is native: call `agent_run.enqueue(*content_blocks, priority="asap")` instead of `enqueue(message, priority="asap")`. When only `content` (str): call `enqueue(content, priority="asap")` as before
-- [ ] 4.6 Same for `followup()`: unpack `content_blocks` for `enqueue(priority="when_idle")` when present
-- [ ] 4.7 Add `RunHandle.revoke(message_id: str) -> bool` method that delegates to `self._comm_channel.revoke(message_id)` if `_comm_channel` is not None, else returns `False`. Revoke only works on messages still in `ProtocolChannel._pending` — after `enqueue()` the message is in PydanticAI's queue (no removal API)
+- [ ] 4.5 In `steer()`, when `content_blocks` is present and agent is native: call `agent_run.enqueue(*content_blocks, priority="asap")` instead of `enqueue(message, priority="asap")`. When only `content` (str): call `enqueue(content, priority="asap")` as before. After `enqueue()`, record `queue_len_before = len(agent_run.pending_messages)` before enqueue, then `new_items = agent_run.pending_messages[queue_len_before:]`, then call `self._comm_channel._track_enqueued(fb.message_id, new_items)` if `_comm_channel` is `ProtocolChannel`
+- [ ] 4.6 Same for `followup()`: unpack `content_blocks` for `enqueue(priority="when_idle")` when present. Note: `followup()` goes through CommChannel path (not direct enqueue), so `_track_enqueued` is NOT needed — the Feedback stays in `_pending` until `recv()` picks it up
+- [ ] 4.7 Add `RunHandle.revoke(message_id: str) -> bool` method that delegates to `self._comm_channel.revoke(message_id)`. Revoke operates at two layers: (1) CommChannel `_pending` for undelivered feedback, (2) PydanticAI `pending_messages` for already-enqueued steer messages via `_enqueued` tracking + `list.remove(pm)`. If `_comm_channel` is `None` or `DirectChannel`, return `False`
 - [ ] 4.8 Update `_steer_callback_wrapper()` to handle the new return type (`str | None` instead of `bool`)
 - [ ] 4.9 Verify all 8 `steer()` call sites in `session_pool.py` and 1 in `session_controller.py`: grep for `is True`, `is False`, and bare statement-style calls (`.steer(` without assignment). No caller SHALL depend on `bool` return type
-- [ ] 4.10 Add unit tests for steer with explicit message_id, steer with auto-generated message_id, steer with `list` content (content_blocks), followup with message_id, revoke pending, revoke delivered, revoke unknown
+- [ ] 4.10 Add unit tests for: steer with explicit message_id, steer with auto-generated message_id, steer with `list` content (content_blocks), followup with message_id, revoke pending feedback (CommChannel layer), revoke enqueued steer (PydanticAI layer — verify `PendingMessage` removed from `pending_messages`), revoke after drain (ValueError caught, returns `True`), revoke delivered (`False`), revoke unknown (`True`)
 - [ ] 4.11 Update `SessionPool.steer()`, `SessionPool.followup()`, `SessionPool.inject_prompt()`, `SessionPool.queue_prompt()` signatures to accept `message_id: str | None = None` and `message: str | list[Any]` and pass through to `RunHandle`
 
 ## 5. SessionController Extension

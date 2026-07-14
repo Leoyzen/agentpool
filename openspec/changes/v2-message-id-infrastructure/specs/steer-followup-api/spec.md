@@ -84,13 +84,28 @@
 - **THEN** a new UUID SHALL be auto-generated for `Feedback.message_id`
 - **AND** the return value SHALL be that UUID string
 
-#### Scenario: Revoke pending steer
+#### Scenario: Revoke pending steer (CommChannel layer)
 
-- **WHEN** `RunHandle.revoke(message_id)` is called with a valid pending `message_id`
+- **WHEN** `RunHandle.revoke(message_id)` is called with a valid `message_id` in `ProtocolChannel._pending`
 - **THEN** the system calls `CommChannel.revoke(message_id)`
-- **AND** the pending feedback SHALL be removed from the queue
+- **AND** the pending feedback SHALL be removed from `_pending` and the queue
 - **AND** no `user_message` notification SHALL be emitted for that `message_id` in the future
 - **AND** the return value SHALL be `True`
+
+#### Scenario: Revoke steer already enqueued to PydanticAI (PydanticAI layer)
+
+- **WHEN** `steer()` called `agent_run.enqueue(message)` and tracked the `PendingMessage` references in `_enqueued[message_id]`
+- **AND** `RunHandle.revoke(message_id)` is called before `before_model_request` drain consumes the message
+- **THEN** the tracked `PendingMessage` objects SHALL be removed from `agent_run.pending_messages` via `list.remove(pm)`
+- **AND** the return value SHALL be `True`
+- **AND** the subsequent `before_model_request` drain SHALL NOT find the revoked message
+
+#### Scenario: Revoke steer after PydanticAI drain (already consumed)
+
+- **WHEN** `RunHandle.revoke(message_id)` is called after `_drain_by_priority()` has already consumed the `PendingMessage`
+- **THEN** `list.remove(pm)` SHALL raise `ValueError` (caught internally)
+- **AND** the return value SHALL be `True` (idempotent — message is no longer in queue)
+- **AND** no exception SHALL propagate to the caller
 
 #### Scenario: Revoke already-delivered steer
 

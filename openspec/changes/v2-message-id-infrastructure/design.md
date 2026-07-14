@@ -139,13 +139,23 @@ The `recv()` method changes from `asyncio.Queue.get_nowait()` to `deque.popleft(
 
 **Constraint**: All `ProtocolChannel` methods (`deliver_feedback()`, `recv()`, `revoke()`, `replace()`, `close()`) MUST be called from the same event loop thread. Cross-thread access requires external synchronization. This is the existing convention for all AgentPool lifecycle components and is not a new constraint, but it is documented here because `revoke()` and `replace()` introduce new mutation paths.
 
-### D12.1: Revoke boundary — CommChannel layer only, PydanticAI does not support revoke
+### D12.1: Revoke operates at two layers — CommChannel queue and PydanticAI pending_messages
 
-**Constraint**: `revoke(message_id)` operates exclusively on `ProtocolChannel._pending`. Once `recv()` delivers the `Feedback` and `steer()` calls `agent_run.enqueue()`, the message enters PydanticAI's internal `pending_messages` list which has no ID field, no single-message removal API, and no dequeue method. `revoke()` SHALL return `False` (already delivered) for any message that has transitioned to `_delivered`.
+**Decision**: `revoke(message_id)` SHALL operate at two layers to cover both `steer()` code paths:
 
-**Evidence**: PydanticAI's `PendingMessage` dataclass has only `messages: list[ModelMessage]` and `priority: str` — no `message_id` field. `AgentRun.enqueue()` returns `None` (doesn't return the `PendingMessage` reference). `PendingMessageDrainCapability._drain_by_priority()` removes by priority class, not by ID. There is no supported way to remove a single enqueued message.
+1. **CommChannel layer** (`ProtocolChannel._pending`): For messages still pending in the feedback queue (followup messages, steer on idle agents, steer in turn gaps). `revoke()` removes from `_pending` dict. This covers `followup()` and the CommChannel path of `steer()`.
 
-**Rationale**: Theoretically, one could hack `agent_run.pending_messages` (a live `list[PendingMessage]`) by recording the list index before/after `enqueue()` and calling `pop(index)`. This is fragile (race condition with drain capability, not a supported API, could break on PydanticAI upgrades) and not worth the complexity. The CommChannel layer is the correct architectural boundary for revoke.
+2. **PydanticAI queue layer** (`agent_run.pending_messages`): For steer messages that went directly to `enqueue()` (the most common steer case — agent RUNNING with active agent_run). After `enqueue()`, `steer()` SHALL record the newly appended `PendingMessage` references by slicing `agent_run.pending_messages[queue_len_before:]`. `revoke()` SHALL remove these references from the live `pending_messages` list via `list.remove(pm)` (identity comparison).
+
+**Revoke window**: The PydanticAI-layer revoke window is from `enqueue()` (t0) to `before_model_request` drain (t1). During model generation (waiting for API response), the message sits in `pending_messages` and can be removed. Once `_drain_by_priority()` consumes it, `list.remove(pm)` raises `ValueError` — caught and treated as "already consumed" (`revoke()` returns `True`, idempotent).
+
+**Evidence**: PydanticAI's `PendingMessage` has no `message_id` field and `enqueue()` returns `None`, but `agent_run.pending_messages` exposes the live `list[PendingMessage]` for inspection. `list.remove(pm)` uses identity (`is`) comparison, which reliably finds the exact `PendingMessage` object appended by `enqueue()`. Both `remove()` and `_drain_by_priority()` run on the same event loop thread — no true concurrency, only interleaving at `await` points. The drain only fires at `before_model_request` and `after_node_run` hooks, not during model API calls.
+
+**Tracking mechanism**: `ProtocolChannel` SHALL maintain an `_enqueued: dict[str, list[PendingMessage]]` mapping. `steer()` calls `comm_channel._track_enqueued(message_id, new_items)` after `enqueue()`. `revoke()` checks `_pending` first, then `_enqueued`. On successful revoke from `_enqueued`, the `PendingMessage` references are removed from `agent_run.pending_messages` via `list.remove(pm)`.
+
+**Race safety**: If `_drain_by_priority()` runs between `enqueue()` and `revoke()`, the `PendingMessage` is already removed from the list. `list.remove(pm)` raises `ValueError`, which is caught — `revoke()` returns `True` (idempotent: the message is no longer in the queue, same end state as revoke). If `revoke()` runs before drain, the `PendingMessage` is removed from the list, and the subsequent drain's `_drain_by_priority()` simply won't find it (it iterates the list and builds a `remaining` list). Both paths are safe.
+
+**Limitation**: Once the drain has consumed the `PendingMessage` and appended its `ModelMessage`s to `ctx.messages` (the conversation history), the message is irreversible. `revoke()` returns `True` (idempotent) but cannot undo the injection. This matches ACP v2 semantics — revoke is best-effort, not guaranteed.
 
 ### D13: Map OpenCode `delivery` to `receive_request` priority
 
