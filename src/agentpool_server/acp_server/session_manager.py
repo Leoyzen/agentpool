@@ -297,6 +297,19 @@ class ACPSessionManager:
             logger.warning("Session not found in store", session_id=session_id)
             return None
 
+        # Reset session status from "closed" to "active" on resume.
+        # When a session is closed (via close_session or expiry), the store
+        # status is set to "closed". On resume, we must reset it to "active"
+        # so that subsequent operations (e.g. elicitation resume via
+        # session_pool.resume_session) don't fail with SessionBusyError
+        # because the status check only allows "checkpointed" or "active".
+        if data.status == "closed":
+            data = data.model_copy(update={"status": "active"})
+            data.touch()
+            if self.session_store:
+                await self.session_store.save(data)
+            logger.info("Reset session status to active on resume", session_id=session_id)
+
         # Validate agent still exists
         if data.agent_name not in self._pool.manifest.agents:
             msg = "Session agent no longer exists"
