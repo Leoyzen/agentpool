@@ -263,6 +263,13 @@ class ACPServer(BaseServer):
     async def _resolve_default_agent(self) -> BaseAgent[Any, Any]:
         """Resolve the default agent from name or get pool's default agent.
 
+        Creates a bare agent instance with pool reference via
+        ``config.get_agent(pool=pool)`` — this does NOT create a session
+        in the SessionController. Previously this called
+        ``get_or_create_session_agent("acp-default", ...)`` which created
+        a phantom ``"acp-default"`` session that polluted logs and
+        expired after 1 hour.
+
         Returns:
             The resolved agent instance
 
@@ -279,7 +286,11 @@ class ACPServer(BaseServer):
         if self.agent and self.agent not in self.pool.manifest.agents:
             raise ValueError(f"Agent {self.agent!r} not found in pool")
 
-        return await session_pool.sessions.get_or_create_session_agent("acp-default", agent_name)
+        # Create a bare agent with pool reference, WITHOUT creating a session.
+        cfg = self.pool.manifest.agents[agent_name]
+        agent: BaseAgent[Any, Any] = cfg.get_agent(pool=self.pool)
+        await agent.__aenter__()
+        return agent
 
     async def _start_async(self) -> None:
         """Start the ACP server (blocking async - runs until stopped)."""
