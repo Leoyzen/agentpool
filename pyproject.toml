@@ -56,7 +56,7 @@ dependencies = [
   "psygnal>=0.11.1",
   "py-key-value-aio[disk]",
   "pydantic>=2.10.0",
-  "pydantic-ai-slim[openai,google,anthropic,mistral,retries]==1.107.1",
+  "pydantic-ai-slim[openai,google,anthropic,mistral,retries]==2.0.0",
   "pydantic-graph",
   # Only add below (Copier)
   "pydocket>=0.16.1",
