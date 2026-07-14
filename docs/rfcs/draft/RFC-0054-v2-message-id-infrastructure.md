@@ -174,9 +174,9 @@ Additionally, the `Feedback` dataclass lacks `message_id`, the `ProtocolChannel`
 ### Goals (In Scope)
 
 1. Unify message ID generation into a single source of truth per message, flowing through events, CommChannel, and protocol conversion
-2. Extend `Feedback` with `message_id` (auto-generated UUID), `content_blocks` (structured content), and `mode` ("steer" | "queue")
-3. Add `revoke(message_id)` and `replace(message_id, content)` to `ProtocolChannel` with pending/delivered/revoked tracking
-4. Extend `RunHandle.steer()`/`followup()` to accept and return `message_id`; add `RunHandle.revoke()`
+2. Extend `Feedback` with `message_id` (auto-generated UUID), `content_blocks` (structured content, activated), and `mode` ("steer" | "queue")
+3. Add `revoke(message_id)` and `replace(message_id, content)` to `ProtocolChannel` with pending/delivered/revoked tracking — revoke operates at two layers (CommChannel queue + PydanticAI `pending_messages` list)
+4. Extend `RunHandle.steer()`/`followup()` to accept `str | list[Any]` (multimodal) and return `message_id`; add `RunHandle.revoke()`
 5. Extend `SessionController.receive_request()` to accept and propagate `message_id`; add `revoke_inject()`
 6. Fix `ACPMessageAccumulator` to preserve incoming `message_id` from external ACP agents
 7. Wire `ACPEventConverter` to read `message_id` from events instead of generating independently
@@ -193,15 +193,17 @@ Additionally, the `Feedback` dataclass lacks `message_id`, the `ProtocolChannel`
 4. Steer-in-stream capability declaration (`["interrupt"]` / `["finish"]`) — future v2 protocol work
 5. Non-blocking `session/prompt` lifecycle — future v2 protocol work
 6. `RunHandle.replace()` and `SessionController.replace_inject()` — `CommChannel.replace()` is implemented but RunHandle exposure is deferred (D9)
-7. `Feedback.content_blocks` consumption by protocol converters — field added but consumption deferred (D11)
-8. Durable persistence of pending feedback for crash recovery — in-memory only, matching current behavior (D10)
+7. ACP `ContentBlock` ↔ PydanticAI `UserContent` type mapping — deferred to v2 protocol adapter (D11 future work)
+8. OpenCode `parts` → internal `content_blocks` mapping — deferred to v2 route handler (D11 future work)
+9. Durable persistence of pending feedback for crash recovery — in-memory only, matching current behavior (D10)
 
 ### Success Criteria
 
 - [ ] A single `message_id` flows from `NativeTurn._message_id` through `PartStartEvent` to `AgentMessageChunk` without regeneration
 - [ ] External ACP agents' `message_id` values are preserved through `ACPMessageAccumulator` into `ChatMessage`
 - [ ] `steer()` returns a `message_id` string that can be used with `revoke()` to cancel a pending message
-- [ ] `revoke()` returns `False` for delivered messages and `True` for pending/unknown (idempotent)
+- [ ] `revoke()` returns `False` for delivered messages and `True` for pending/enqueued/unknown (idempotent)
+- [ ] `revoke()` can remove a steer message from PydanticAI's `pending_messages` list after `enqueue()` but before drain
 - [ ] All existing steer/followup callers continue to work without modification (backward compatible)
 - [ ] All existing tests pass without regression
 
@@ -417,12 +419,12 @@ Option 2 (Incremental) achieves the same end state but with higher total effort 
 ```mermaid
 graph TB
     subgraph Internal["Internal Model v2-ready"]
-        FB["Feedback<br/>message_id, content, is_steer, mode"]
+        FB["Feedback<br/>message_id, content, content_blocks, is_steer, mode"]
         PSE["PartStartEvent<br/>message_id"]
         PDE["PartDeltaEvent<br/>message_id"]
-        PC["ProtocolChannel<br/>deque + pending + revoked + delivered"]
-        RH["RunHandle<br/>steer/followup return str or None<br/>revoke returns bool"]
-        SC["SessionController<br/>receive_request returns RunHandle or str or None<br/>revoke_inject returns bool"]
+        PC["ProtocolChannel<br/>deque + pending + revoked + delivered + enqueued"]
+        RH["RunHandle<br/>steer/followup: str or list -> str or None<br/>revoke: two-layer -> bool"]
+        SC["SessionController<br/>receive_request: str or list, message_id<br/>returns RunHandle or str or None"]
     end
 
     subgraph Adapter["Protocol Adapter Layer thin"]
@@ -461,7 +463,9 @@ Replace `asyncio.Queue[Feedback]` with `collections.deque[Feedback]` plus `_pend
 
 Returning the `message_id` gives callers the handle needed for revoke/replace. Truthy `str` is boolean-compatible with existing `if run.steer(msg):` patterns.
 
-**Feedback tracking for revoke**: When `steer()` or `followup()` is called via `SessionController.receive_request()` (the protocol-server path), the `Feedback` is delivered through `ProtocolChannel.deliver_feedback()`, which places it in the `_pending` dict. `revoke()` can then remove it before `recv()` delivers it to the RunLoop. Once `recv()` dequeues the `Feedback`, it transitions to `_delivered` and `revoke()` returns `False`. For native agents, after `recv()` delivers the `Feedback`, `steer()` calls `pydantic_ai_run.enqueue()` — at that point the message is beyond revoke scope, matching the v2 semantic. Direct `RunHandle.steer()` calls (not through `receive_request()`) do NOT route through `ProtocolChannel.deliver_feedback()` — the `Feedback` is constructed only as a carrier for `message_id` generation, and `revoke()` returns `True` (idempotent unknown). This is acceptable because v2 protocol handlers always route through `receive_request()`.
+**Feedback tracking for revoke**: `revoke()` operates at two layers (see D12.1). When `steer()` is called on a running agent (the most common case), it calls `agent_run.enqueue()` directly, bypassing `ProtocolChannel._pending`. To make revoke work in this case, `steer()` records the newly appended `PendingMessage` references by slicing `agent_run.pending_messages[queue_len_before:]` and stores them in `ProtocolChannel._enqueued[message_id]`. `revoke()` can then remove these references from the live `pending_messages` list via `list.remove(pm)` (identity comparison). The revoke window is from `enqueue()` to `before_model_request` drain — during model API generation, the message sits in the list and can be removed. If drain has already consumed the message, `list.remove(pm)` raises `ValueError` (caught), and `revoke()` returns `True` (idempotent).
+
+For `followup()` and steer on idle agents: the `Feedback` goes through `ProtocolChannel.deliver_feedback()` → `_pending` dict. `revoke()` removes from `_pending` before `recv()` delivers it. Once `recv()` dequeues, the message transitions to `_delivered` and `revoke()` returns `False`.
 
 #### D5: `ACPEventConverter` reads `message_id` from events
 
@@ -485,8 +489,22 @@ Both methods added to the Protocol. `DirectChannel` implements as no-ops returni
 
 - **D9**: `RunHandle.replace()` deferred — `CommChannel.replace()` is implemented but not exposed at RunHandle level
 - **D10**: Crash recovery does not persist pending feedback — in-memory only, matching current behavior
-- **D11**: `Feedback.content_blocks` field added but not consumed by converters — deferred to v2 adapter
+- **D11**: `Feedback.content_blocks` **activated** — pipeline carries structured content (`list[Any]`) through `receive_request()` → `Feedback` → `steer()` → `agent_run.enqueue(*content_blocks)` without stringification. `receive_request()` stops stringifying `list` content. PydanticAI's `enqueue()` already supports multimodal (`ImageUrl`, `BinaryContent`, `TextContent`). Protocol-specific type mapping (ACP `ContentBlock` ↔ PydanticAI `UserContent`) deferred to v2 protocol adapter.
 - **D12**: All `ProtocolChannel` methods must be called from the same event loop thread
+
+#### D12.1: Two-layer revoke — CommChannel queue + PydanticAI pending_messages
+
+`revoke(message_id)` operates at two layers to cover both `steer()` code paths:
+
+1. **CommChannel layer** (`ProtocolChannel._pending`): For messages still pending in the feedback queue (followup messages, steer on idle agents, steer in turn gaps). `revoke()` removes from `_pending` dict.
+
+2. **PydanticAI queue layer** (`agent_run.pending_messages`): For steer messages that went directly to `enqueue()` (the most common steer case — agent RUNNING with active agent_run). After `enqueue()`, `steer()` records the newly appended `PendingMessage` references by slicing `agent_run.pending_messages[queue_len_before:]`. `revoke()` removes these from the live list via `list.remove(pm)` (identity comparison).
+
+**Revoke window**: From `enqueue()` (t0) to `before_model_request` drain (t1). During model generation (waiting for API response), the message sits in `pending_messages` and can be removed. Once drain consumes it and appends `ModelMessage`s to `ctx.messages`, the message is irreversible.
+
+**Race safety**: `list.remove(pm)` uses identity comparison. If drain already consumed the message, `ValueError` is caught — `revoke()` returns `True` (idempotent). Both `remove()` and `_drain_by_priority()` run on the same event loop thread — no true concurrency, only interleaving at `await` points.
+
+**Evidence**: PydanticAI's `PendingMessage` has no `message_id` field and `enqueue()` returns `None`, but `agent_run.pending_messages` exposes the live `list[PendingMessage]` for inspection. `list.remove(pm)` uses identity (`is`) comparison, which reliably finds the exact object appended by `enqueue()`.
 
 ### Data Model
 
@@ -497,7 +515,7 @@ class Feedback:
     content: str
     is_steer: bool
     message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    content_blocks: list[dict[str, Any]] | None = None
+    content_blocks: list[dict[str, Any]] | None = None  # activated: multimodal content
     mode: str | None = None  # "steer" | "queue", derived from is_steer
 
     def __post_init__(self) -> None:
@@ -515,10 +533,11 @@ class PartDeltaEvent(PyAIPartDeltaEvent):
 
 # lifecycle/comm_channel.py
 class ProtocolChannel:
-    _feedback_queue: deque[Feedback]  # CHANGED from asyncio.Queue
-    _pending: dict[str, Feedback]     # NEW: O(1) lookup by message_id
-    _revoked: set[str]                # NEW: tombstone tracking
-    _delivered: set[str]              # NEW: already-delivered tracking
+    _feedback_queue: deque[Feedback]       # CHANGED from asyncio.Queue
+    _pending: dict[str, Feedback]          # NEW: O(1) lookup by message_id
+    _revoked: set[str]                     # NEW: tombstone tracking
+    _delivered: set[str]                   # NEW: already-delivered tracking
+    _enqueued: dict[str, list]             # NEW: PendingMessage refs for PydanticAI-layer revoke
 ```
 
 ### Feedback Lifecycle State Machine
@@ -528,11 +547,16 @@ The following state machine shows the lifecycle of a `Feedback` message through 
 ```mermaid
 stateDiagram-v2
     [*] --> Created: steer or followup constructs Feedback
-    Created --> Pending: deliver_feedback adds to pending
-    Pending --> Delivered: recv dequeues, moves to delivered
-    Pending --> Revoked: revoke removes from pending
+    Created --> Pending: deliver_feedback adds to _pending
+    Created --> Enqueued: steer on running agent calls enqueue directly
+    Pending --> Delivered: recv dequeues, moves to _delivered
+    Pending --> Revoked: revoke removes from _pending
+    Enqueued --> Drained: before_model_request drain consumes
+    Enqueued --> Revoked: revoke removes from pending_messages list
+    Drained --> Consumed: ModelMessage appended to ctx.messages
     Revoked --> [*]: no user_message emitted
     Delivered --> [*]: message handed to agent, revoke returns False
+    Consumed --> [*]: irreversible, revoke returns True idempotent
 ```
 
 ### Revoke Semantics Decision Tree
@@ -540,14 +564,17 @@ stateDiagram-v2
 ```mermaid
 flowchart TD
     R["revoke message_id called"]
-    R --> CheckDelivered{"message_id in delivered?"}
+    R --> CheckDelivered{"message_id in _delivered?"}
     CheckDelivered -->|"Yes"| ReturnFalse["return False already_delivered"]
-    CheckDelivered -->|"No"| CheckPending{"message_id in pending?"}
-    CheckPending -->|"Yes"| Remove["Remove-from-pending-and-deque<br/>Add-to-revoked"]
+    CheckDelivered -->|"No"| CheckPending{"message_id in _pending?"}
+    CheckPending -->|"Yes"| Remove["Remove from _pending and deque<br/>Add to _revoked"]
     Remove --> ReturnTrue1["return True"]
-    CheckPending -->|"No"| CheckRevoked{"message_id in revoked?"}
-    CheckRevoked -->|"Yes"| ReturnTrue2["return True idempotent"]
-    CheckRevoked -->|"No"| ReturnTrue3["return True unknown idempotent"]
+    CheckPending -->|"No"| CheckEnqueued{"message_id in _enqueued?"}
+    CheckEnqueued -->|"Yes"| RemovePM["list.remove pm from pending_messages<br/>catch ValueError if already drained"]
+    RemovePM --> ReturnTrue2["return True"]
+    CheckEnqueued -->|"No"| CheckRevoked{"message_id in _revoked?"}
+    CheckRevoked -->|"Yes"| ReturnTrue3["return True idempotent"]
+    CheckRevoked -->|"No"| ReturnTrue4["return True unknown idempotent"]
 ```
 
 ### Cross-Protocol Message ID Flow
@@ -629,21 +656,22 @@ OpenCode does not need a message-level revoke endpoint in this change. The `revo
 
 ```python
 # RunHandle
-def steer(self, message: str, *, message_id: str | None = None) -> str | None: ...
-def followup(self, message: str, *, message_id: str | None = None) -> str | None: ...
-def revoke(self, message_id: str) -> bool: ...
+def steer(self, message: str | list[Any], *, message_id: str | None = None) -> str | None: ...
+def followup(self, message: str | list[Any], *, message_id: str | None = None) -> str | None: ...
+def revoke(self, message_id: str) -> bool: ...  # two-layer: _pending + _enqueued
 
 # SessionController
 async def receive_request(
-    self, session_id: str, content: Any,
+    self, session_id: str, content: str | list[Any],
     priority: str = "when_idle",
     *, message_id: str | None = None,
-) -> RunHandle | str | None: ...
+) -> RunHandle | str | None: ...  # no stringification — preserves list[Any]
 def revoke_inject(self, session_id: str, message_id: str) -> bool: ...
 
 # CommChannel Protocol
-def revoke(self, message_id: str) -> bool: ...
+def revoke(self, message_id: str) -> bool: ...  # two-layer: _pending → _enqueued → _delivered → unknown
 def replace(self, message_id: str, new_content: str) -> bool: ...
+def _track_enqueued(self, message_id: str, items: list) -> None: ...  # stores PendingMessage refs
 ```
 
 ---
@@ -655,7 +683,7 @@ def replace(self, message_id: str, new_content: str) -> bool: ...
 | Threat | Impact | Likelihood | Mitigation |
 |--------|--------|------------|------------|
 | Message ID spoofing | Low | Low | IDs are agent-owned opaque strings; clients cannot inject IDs into the pipeline |
-| Revoke race condition | Low | Low | Single-threaded event loop; `_delivered` set prevents post-delivery revoke |
+| Revoke race condition | Low | Low | Single-threaded event loop; `_delivered` set prevents post-delivery revoke; `list.remove(pm)` catches `ValueError` for post-drain revoke (idempotent) |
 | Pending feedback memory leak | Low | Low | `close()` clears all tracking structures; TTL cleanup handles abandoned sessions |
 
 ### Security Measures
@@ -765,7 +793,7 @@ All changes are additive (new fields with defaults, new methods). Rolling back m
 3. **Should `Feedback.content_blocks` use a typed model instead of `list[dict[str, Any]]`?**
    - Context: Using `dict` keeps the type version-agnostic but loses type safety. A typed model would be better but couples to the ACP ContentBlock schema.
    - Owner: Future v2 adapter change
-   - Status: Deferred (D11)
+   - Status: `content_blocks` is **activated** in this change (D11) — pipeline carries `list[Any]` through without stringification. Protocol-specific type mapping (ACP `ContentBlock` ↔ PydanticAI `UserContent`) is deferred to the v2 protocol adapter. A stronger typed union is future work.
 
 4. **Should OpenCode expose `delivery: "steer"` via HTTP routes?**
    - Context: OpenCode's schema has `delivery: "steer" | "queue"` but AgentPool's routes hardcode `priority="when_idle"`. D13 proposes mapping `delivery` to `priority`. However, mid-turn steer via OpenCode HTTP is a new behavior that may need frontend support.
@@ -818,8 +846,8 @@ All changes are additive (new fields with defaults, new methods). Rolling back m
 | `agents/events/events.py` | PartStart/DeltaEvent +1 field | Low — default `""` |
 | `lifecycle/comm_channel.py` | ProtocolChannel queue + methods | Medium — queue type change |
 | `lifecycle/protocols.py` | CommChannel Protocol +2 methods | Low — new signatures |
-| `orchestrator/run.py` | steer/followup signature + revoke | Medium — return type change |
-| `orchestrator/session_controller.py` | receive_request + revoke_inject | Low — optional parameter |
+| `orchestrator/run.py` | steer/followup signature + revoke | Medium — return type + content type change |
+| `orchestrator/session_controller.py` | receive_request + revoke_inject | Medium — stop stringifying, accept list[Any] |
 | `orchestrator/session_pool.py` | Public API pass-through | Low — optional parameter |
 | `agents/native_agent/turn.py` | message_id propagation | Low — set field on events |
 | `agents/acp_agent/acp_converters.py` | Preserve incoming message_id | Low — conditional fallback |
