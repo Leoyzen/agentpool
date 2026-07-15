@@ -109,3 +109,28 @@
 - [ ] 9.10 End-to-end test: receive_request with list content (multimodal) → content_blocks preserved through pipeline → agent_run.enqueue(*content_blocks) for native agents
 - [ ] 9.11 End-to-end test: OpenCode server with delivery="steer" → mid-turn injection via enqueue("asap")
 - [ ] 9.12 End-to-end test: OpenCode server single assistant_msg_id per turn across all event types (text, tools, reasoning, step-start/finish)
+## 10. DeliveryMode Enum (Phase 4)
+
+- [ ] 10.1 Add `DeliveryMode(enum.Enum)` to `lifecycle/types.py` with values `STEER = "steer"` and `QUEUE = "queue"`. Include docstring mapping to ACP v2, OpenCode, and pydantic-ai internal names.
+- [ ] 10.2 Verify `Feedback.mode` field (from Task 1.1) uses the same string values (`"steer"` / `"queue"`) so `DeliveryMode` values can be used directly without conversion.
+- [ ] 10.3 Add unit tests for `DeliveryMode` enum: value equality with `"steer"`/`"queue"`, `Feedback(mode=DeliveryMode.STEER)` construction, `Feedback(mode=DeliveryMode.QUEUE)` construction.
+
+## 11. SessionPool Public API (Phase 4)
+
+- [ ] 11.1 Add `SessionController._route_message(session_id, content, *, mode, message_id) -> str | None` internal method. Extracts the dispatch logic from `receive_request()` (idle vs busy session, create run vs steer/followup). Returns `message_id` on success, `None` on failure.
+- [ ] 11.2 Add `SessionPool.send_message(session_id, content, *, mode=DeliveryMode.QUEUE, message_id=None) -> str | None` to `orchestrator/session_pool.py`. Delegates to `SessionController._route_message()`. When `content` is `list[Any]`, passes as `content_blocks` to `Feedback`; when `str`, passes as `content`.
+- [ ] 11.3 Add `SessionPool.wait_for_completion(session_id, timeout=None) -> str` to `orchestrator/session_pool.py`. Subscribes to EventBus, waits for `StreamCompleteEvent` or `RunErrorEvent`, extracts text from final message. Raises `asyncio.TimeoutError` on timeout, `SessionNotFoundError` if session missing, `RunError` on agent error.
+- [ ] 11.4 Add `SessionPool.run_agent(agent: str, prompt: str, parent_session_id: str | None = None, **metadata) -> str` to `orchestrator/session_pool.py`. Creates session via `create_session()`, sends prompt via `send_message(mode=QUEUE)`, waits via `wait_for_completion()`, closes session in `finally`. Logs warning if nesting depth > 3 (tracked via `_run_agent_depth` ContextVar).
+- [ ] 11.5 Add `SessionPool.revoke_message(session_id, message_id) -> bool` to `orchestrator/session_pool.py`. Wraps `SessionController.revoke_inject()` (from Task 5.4). Returns `True` if revoked, `False` if already delivered.
+- [ ] 11.6 Add unit tests for: `send_message` with `DeliveryMode.STEER` (mid-turn injection), `send_message` with `DeliveryMode.QUEUE` (next-turn queue), `send_message` with `list` content (content_blocks), `send_message` with explicit `message_id`, `send_message` with auto-generated `message_id`, `run_agent` success path (create → send → wait → close), `run_agent` error path (ensure session cleanup), `wait_for_completion` timeout, `revoke_message` pending (returns `True`), `revoke_message` delivered (returns `False`).
+
+## 12. Deprecation + Migration (Phase 4)
+
+- [ ] 12.1 Add `DeprecationWarning` to `SessionPool.receive_request()`. Delegate to `send_message()` with `priority` mapped: `"asap"` → `DeliveryMode.STEER`, `"when_idle"` → `DeliveryMode.QUEUE`. Unknown priority values emit additional `DeprecationWarning` and default to `QUEUE`. Return type narrows from `RunHandle | None` to `str | None`.
+- [ ] 12.2 Add `DeprecationWarning` to `DelegationService.spawn_subagent()` in `capabilities/delegation.py`. Delegate to `ctx.host.session_pool.run_agent(name, prompt, parent_session_id)`.
+- [ ] 12.3 Add `DeprecationWarning` to `DelegationService.get_available_agents()`. Delegate to `list(ctx.agent_registry.agent_configs.keys())`.
+- [ ] 12.4 Add `DeprecationWarning` to `RunLoopDelegationService.spawn_subagent()` in `capabilities/runloop_delegation.py`. Delegate to `self._host.session_pool.run_agent(name, prompt, self._session_id)`.
+- [ ] 12.5 Migrate `SubagentCapability` (in `capabilities/subagent_capability.py`) from `ctx.delegation.spawn_subagent()` to `ctx.host.session_pool.run_agent()`. Internal change — tool's external behavior unchanged. Keep `ctx.delegation` field on `AgentContext` for backward compat but mark deprecated in docstring.
+- [ ] 12.6 Grep all `receive_request()` call sites in protocol servers (`acp_server/handler.py`, `opencode_server/session_pool_integration.py`, `agui_server/`, `openai_api_server/`). Verify none use `isinstance(result, RunHandle)` or access `RunHandle`-specific attributes on the return value. All should use truthy check (`if result:`) or `if result is not None:`.
+- [ ] 12.7 Add regression tests: `receive_request()` with `DeprecationWarning` still returns truthy `str` on success, `None` on failure. `DelegationService.spawn_subagent()` with `DeprecationWarning` still returns result string. `SubagentCapability` `task` tool still works after migration to `run_agent()`.
+- [ ] 12.8 Add `wait_for_completion()` integration test: send message → wait → verify result text matches agent output. Test with timeout → verify `asyncio.TimeoutError` raised. Test with non-existent session → verify `SessionNotFoundError`.

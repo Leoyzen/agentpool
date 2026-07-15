@@ -266,3 +266,64 @@ receive_request() → _start_run_handle(content, message_id)
 - **[Initial prompt via followup]** → `_idle_loop()` and `_drain_events()` currently read only `fb.content` (string). Must also pass `fb.content_blocks` through. `_message_queue` type changes from `list[str]` to `list[str | list[Any]]`. Mitigation: `_execute_turn()` already receives prompts as a list — type widening is backward compatible.
 
 - **[AG-UI and OpenAI API servers]** → These servers also consume `PartStartEvent`/`PartDeltaEvent` and may have independent `message_id` generation. Mitigation: Task 8.7 audits these servers for independent generation and updates if found.
+### Phase 4: Public API + Deprecation
+
+#### D18: `DeliveryMode` enum in `lifecycle/types.py`
+
+**Context**: The internal `priority: "asap" | "when_idle"` string is spread across `receive_request`, `steer`, `followup`, and `enqueue`. ACP v2 RFD #1261 uses `mode: "steer" | "queue"`, and OpenCode uses `SessionDelivery.Delivery = ["steer", "queue"]`. These are all the same concept with different names.
+
+**Decision**: Introduce `DeliveryMode(enum.Enum)` with values `STEER = "steer"` and `QUEUE = "queue"`. The enum values match ACP v2 and OpenCode wire formats directly. `Feedback.mode` uses the same string values (`"steer"` / `"queue"`) so `Feedback` can be constructed with `DeliveryMode` values without conversion.
+
+PydanticAI's internal `"asap"` / `"when_idle"` drain hooks are implementation details — callers use `DeliveryMode`, the mapping happens inside `SessionPool`.
+
+#### D19: `SessionPool.send_message()` unified public API
+
+**Context**: External callers currently use `receive_request()` which has a confusing `priority` string parameter and returns `RunHandle | None`. The return type leaks an internal implementation detail.
+
+**Decision**: Add `SessionPool.send_message(session_id, content, *, mode=DeliveryMode.QUEUE, message_id=None) -> str | None`. Returns `message_id` on success (both new runs and steer/followup), `None` on failure. Internally calls `SessionController._route_message()` — a new internal method that replaces the current `receive_request` dispatch logic.
+
+`content` accepts `str | list[Any]` — when `list[Any]`, stored as `Feedback.content_blocks` for structured/multimodal content. When `str`, stored as `Feedback.content` as before.
+
+#### D20: `SessionPool.run_agent()` convenience method
+
+**Context**: `SubagentCapability` currently uses `DelegationService.spawn_subagent()` which is a protocol that wraps `SessionPool` internals. The indirection adds complexity without value.
+
+**Decision**: Add `SessionPool.run_agent(agent: str, prompt: str, parent_session_id: str | None = None, **metadata) -> str`. Creates a session, sends the prompt via `send_message(mode=QUEUE)`, waits for completion via `wait_for_completion()`, closes the session, and returns the result text. On error, ensures session cleanup via `try/finally`.
+
+Recursion depth is not enforced in v1 — relies on model-level self-limitation and `max_member_turns` in team_mode config. A `max_depth: int = 3` parameter is deferred to v2. Implementers SHOULD log a warning if nesting exceeds 3 levels.
+
+#### D21: `SessionPool.revoke_message()` public wrapper
+
+**Decision**: Add `SessionPool.revoke_message(session_id, message_id) -> bool`. Wraps `SessionController.revoke_inject()`. Returns `True` if revoked (still pending), `False` if already delivered. A message can be revoked if still pending in CommChannel queue or PydanticAI `pending_messages` list.
+
+#### D22: `receive_request()` deprecation with priority→DeliveryMode mapping
+
+**Decision**: `SessionPool.receive_request()` is marked deprecated with `DeprecationWarning`. It delegates to `send_message()` with priority mapped: `"asap"` → `DeliveryMode.STEER`, `"when_idle"` → `DeliveryMode.QUEUE`. Unknown priority values emit an additional `DeprecationWarning` and default to `QUEUE`.
+
+The return type changes from `RunHandle | None` to `str | None` (the `message_id`). Existing callers using `if receive_request(...):` still work because truthy `str` behaves identically to `True`.
+
+#### D23: `DelegationService` and `RunLoopDelegationService` deprecation
+
+**Decision**: Both classes emit `DeprecationWarning` and delegate to `SessionPool.run_agent()`:
+- `DelegationService.spawn_subagent(name, prompt)` → `ctx.host.session_pool.run_agent(name, prompt, parent_session_id)`
+- `DelegationService.get_available_agents()` → `list(ctx.agent_registry.agent_configs.keys())`
+- `RunLoopDelegationService.spawn_subagent()` → same delegation
+
+The `AgentContext.delegation` field remains for backward compatibility but is deprecated. Consumers should use `ctx.host.session_pool` directly.
+
+#### D24: `SubagentCapability` migration to `run_agent()`
+
+**Decision**: `SubagentCapability` (which provides the `task` tool) migrates from `ctx.delegation.spawn_subagent()` to `ctx.host.session_pool.run_agent()`. The migration is internal — the tool's external behavior is unchanged. `DelegationService` calls emit `DeprecationWarning` but still function.
+
+#### D25: `SessionPool.wait_for_completion()` helper
+
+**Decision**: Add `SessionPool.wait_for_completion(session_id, timeout=None) -> str`. Waits for the session's current run to complete and returns the final text output. Raises `asyncio.TimeoutError` on timeout, `SessionNotFoundError` if session doesn't exist, `RunError` if the run ends in error. Used by `run_agent()` internally.
+
+### Consumer Migration Summary
+
+| Consumer | Old API | New API | Breaking? |
+|----------|---------|---------|-----------|
+| SubagentCapability | `ctx.delegation.spawn_subagent()` | `ctx.host.session_pool.run_agent()` | No (deprecation warning) |
+| BackgroundTaskCapability | `receive_request(sid, content, priority=...)` | `send_message(sid, content, mode=...)` | No (deprecation warning) |
+| Protocol servers | `receive_request(sid, ..., message_id=...)` | `send_message(sid, ..., message_id=...)` | No (deprecation warning) |
+| RunHandle.steer/followup | Direct calls | Still work (internal API) | No |

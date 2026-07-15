@@ -20,6 +20,7 @@ AgentPool's internal architecture has four independent, non-communicating messag
 
 ### New Capabilities
 - `message-id-pipeline`: End-to-end message ID propagation from generation (native turn or ACP inbound) through events, CommChannel feedback, and protocol conversion. Covers ID unification, event-level `message_id` fields, and the `ACPMessageAccumulator` preserve-incoming-ID fix.
+- `session-pool-public-api`: Unified public API on `SessionPool` with `DeliveryMode` enum, `send_message()`, `run_agent()`, `revoke_message()`, and `wait_for_completion()`. Deprecates `receive_request()` and `DelegationService`.
 
 ### Modified Capabilities
 - `steer-followup-api`: `steer()` and `followup()` signatures change to accept optional `message_id` and return `str | None` (the message_id) instead of `bool`. New `revoke(message_id)` method on `RunHandle`.
