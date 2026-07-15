@@ -1169,13 +1169,14 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
             if ctx is None:
                 return
 
-            # D14: Update ctx.assistant_msg_id from event message_id if the
-            # context still has a placeholder or auto-generated ID. This ensures
-            # all parts created by the EventProcessor use the canonical
-            # message_id from the event pipeline.
-            event_message_id = getattr(event, "message_id", "")
-            if event_message_id and ctx.assistant_msg_id != event_message_id:
-                ctx.assistant_msg_id = event_message_id
+            # NOTE: Do NOT overwrite ctx.assistant_msg_id from event.message_id.
+            # NativeTurn generates its own UUID for _message_id (uuid4().hex)
+            # which is different from the canonical assistant_msg_id generated
+            # by the REST handler (identifier.ascending("message", ...)).
+            # Overwriting causes a mismatch: parts get the NativeTurn UUID as
+            # their message_id while the assistant message keeps the REST
+            # handler's ID, so the UI cannot associate parts with the message.
+            # The canonical assistant_msg_id from the REST handler is correct.
 
             # Register assistant message on first non-spawn event
             if not self._message_registered.get(session_id, False):
