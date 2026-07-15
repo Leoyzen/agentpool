@@ -187,7 +187,8 @@ def slow_mock_agent():  # noqa: PLR0915
 
     # Mock wait_for_completion to wait for the run to actually finish
     async def _mock_wait_for_completion(
-        sid: str, timeout: float | None = None,
+        sid: str,
+        timeout: float | None = None,
     ) -> str:
         # Wait a bit for the background task to complete
         await asyncio.sleep(0.5)

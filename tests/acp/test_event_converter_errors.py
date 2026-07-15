@@ -21,15 +21,13 @@ from agentpool_server.acp_server.event_converter import ACPEventConverter
 @pytest.fixture
 def converter() -> ACPEventConverter:
     """Create a converter instance for testing."""
-    c = ACPEventConverter()
-    return c
+    return ACPEventConverter()
 
 
 @pytest.fixture
 def converter_with_turn_complete() -> ACPEventConverter:
     """Create a converter with client_supports_turn_complete enabled."""
-    c = ACPEventConverter(client_supports_turn_complete=True)
-    return c
+    return ACPEventConverter(client_supports_turn_complete=True)
 
 
 def _dump(update: object) -> dict[str, object]:

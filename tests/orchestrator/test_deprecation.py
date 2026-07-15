@@ -98,7 +98,10 @@ async def test_receive_request_priority_mapping(session_pool: SessionPool) -> No
         await session_pool.receive_request("s", "x", priority="asap")
 
     session_pool.send_message.assert_awaited_once_with(
-        "s", "x", mode=DeliveryMode.STEER, message_id=None,
+        "s",
+        "x",
+        mode=DeliveryMode.STEER,
+        message_id=None,
     )
 
 
@@ -120,7 +123,10 @@ async def test_receive_request_unknown_priority(session_pool: SessionPool) -> No
     # Two warnings: one for deprecation, one for unknown priority.
     assert len(dep_warnings) >= 2
     session_pool.send_message.assert_awaited_once_with(
-        "s", "x", mode=DeliveryMode.QUEUE, message_id=None,
+        "s",
+        "x",
+        mode=DeliveryMode.QUEUE,
+        message_id=None,
     )
 
 
@@ -143,10 +149,12 @@ async def test_delegation_service_spawn_subagent_deprecation() -> None:
     child_session.current_run_id = "run-1"
     host.session_pool.sessions.get_session = MagicMock(return_value=child_session)
     run_handle = MagicMock()
+
     # start() must return an async iterator for `async for` to work.
     async def _empty_gen() -> Any:
         return
         yield  # pragma: no cover -- makes this an async generator
+
     run_handle.start = MagicMock(return_value=_empty_gen())
     host.session_pool.sessions._runs = {"run-1": run_handle}
 
@@ -249,7 +257,9 @@ async def test_subagent_capability_uses_run_agent() -> None:
 
     assert result == "subagent result"
     session_pool.run_agent.assert_awaited_once_with(
-        "worker", "do task", parent_session_id="parent-session",
+        "worker",
+        "do task",
+        parent_session_id="parent-session",
     )
     # DelegationService should NOT be called.
     delegation.spawn_subagent.assert_not_called()

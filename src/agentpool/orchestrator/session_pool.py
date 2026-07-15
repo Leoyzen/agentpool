@@ -1264,7 +1264,10 @@ class SessionPool:
             )
             mode = DeliveryMode.QUEUE
         return await self.send_message(
-            session_id, content, mode=mode, message_id=message_id,
+            session_id,
+            content,
+            mode=mode,
+            message_id=message_id,
         )
 
     async def send_message(
@@ -1366,7 +1369,9 @@ class SessionPool:
         result_text: str = ""
         try:
             msg_id = await self.send_message(
-                session_id, prompt, mode=DeliveryMode.QUEUE,
+                session_id,
+                prompt,
+                mode=DeliveryMode.QUEUE,
             )
             if msg_id is None:
                 msg = f"Failed to send message to session {session_id}"

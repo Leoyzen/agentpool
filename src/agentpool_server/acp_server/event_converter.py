@@ -401,8 +401,8 @@ class ACPEventConverter:
             new UUID string.
         """
         match event:
-            case AgentPoolPartStartEvent(message_id=mid) | AgentPoolPartDeltaEvent(
-                message_id=mid
+            case (
+                AgentPoolPartStartEvent(message_id=mid) | AgentPoolPartDeltaEvent(message_id=mid)
             ) if mid:
                 return mid
             case _:

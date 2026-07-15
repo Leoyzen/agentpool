@@ -303,6 +303,7 @@ async def test_staged_content_reaches_model_through_runhandle_pipeline() -> None
         # _message_queue, and start("") enters _idle_loop() which finds
         # it without blocking.
         run_handle.followup("")
+
         async def _drive_run() -> None:
             async for _ in run_handle.start(""):
                 pass

@@ -217,7 +217,7 @@ async def test_acp_cancel_then_prompt_no_hang(
     )
     session2 = session_pool.sessions.get_session(session_id)
     assert session2 is not None
-    second_handle = session_pool.sessions._runs.get(session2.current_run_id)  # type: ignore[union-attr]
+    session_pool.sessions._runs.get(session2.current_run_id)  # type: ignore[union-attr]
 
     # --- Step 4: Verify new prompt is processed (events published, no hang) ---
     post_events: list[Any] = []

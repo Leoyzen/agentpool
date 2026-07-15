@@ -675,8 +675,7 @@ class RunHandle:
         # extract text from each block for the ChatMessage.content
         # string representation.
         prompt_text = "\n".join(
-            p if isinstance(p, str) else " ".join(str(b) for b in p)
-            for p in current_prompts
+            p if isinstance(p, str) else " ".join(str(b) for b in p) for p in current_prompts
         )
         agent.conversation.add_chat_messages([
             ChatMessage(

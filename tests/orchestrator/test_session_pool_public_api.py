@@ -63,8 +63,12 @@ async def test_send_message_queue_mode(session_pool: SessionPool) -> None:
 
     assert result == "msg-123"
     session_pool.sessions._route_message.assert_awaited_once_with(
-        mock_session, mock_agent, "sess-1", "hello",
-        priority="when_idle", message_id=None,
+        mock_session,
+        mock_agent,
+        "sess-1",
+        "hello",
+        priority="when_idle",
+        message_id=None,
     )
 
 
@@ -81,8 +85,12 @@ async def test_send_message_steer_mode(session_pool: SessionPool) -> None:
 
     assert result == "msg-456"
     session_pool.sessions._route_message.assert_awaited_once_with(
-        mock_session, mock_agent, "sess-1", "steer me",
-        priority="asap", message_id=None,
+        mock_session,
+        mock_agent,
+        "sess-1",
+        "steer me",
+        priority="asap",
+        message_id=None,
     )
 
 
@@ -96,13 +104,19 @@ async def test_send_message_with_message_id(session_pool: SessionPool) -> None:
     session_pool.sessions._route_message = AsyncMock(return_value="custom-id")  # type: ignore[method-assign]
 
     result = await session_pool.send_message(
-        "sess-1", "hello", message_id="custom-id",
+        "sess-1",
+        "hello",
+        message_id="custom-id",
     )
 
     assert result == "custom-id"
     session_pool.sessions._route_message.assert_awaited_once_with(
-        mock_session, mock_agent, "sess-1", "hello",
-        priority="when_idle", message_id="custom-id",
+        mock_session,
+        mock_agent,
+        "sess-1",
+        "hello",
+        priority="when_idle",
+        message_id="custom-id",
     )
 
 
@@ -120,8 +134,12 @@ async def test_send_message_list_content(session_pool: SessionPool) -> None:
 
     assert result == "msg-789"
     session_pool.sessions._route_message.assert_awaited_once_with(
-        mock_session, mock_agent, "sess-1", content,
-        priority="when_idle", message_id=None,
+        mock_session,
+        mock_agent,
+        "sess-1",
+        content,
+        priority="when_idle",
+        message_id=None,
     )
 
 
@@ -147,8 +165,12 @@ async def test_send_message_default_mode_is_queue(session_pool: SessionPool) -> 
     await session_pool.send_message("sess-1", "hello")
 
     session_pool.sessions._route_message.assert_awaited_once_with(
-        mock_session, mock_agent, "sess-1", "hello",
-        priority="when_idle", message_id=None,
+        mock_session,
+        mock_agent,
+        "sess-1",
+        "hello",
+        priority="when_idle",
+        message_id=None,
     )
 
 
@@ -174,8 +196,11 @@ async def test_run_agent_basic(session_pool: SessionPool) -> None:
         **metadata: Any,
     ) -> Any:
         return await original_create(
-            session_id, agent_name,
-            parent_session_id, lifecycle_policy, **metadata,
+            session_id,
+            agent_name,
+            parent_session_id,
+            lifecycle_policy,
+            **metadata,
         )
 
     # Mock send_message to publish a StreamCompleteEvent to the EventBus
@@ -270,7 +295,10 @@ async def test_run_agent_with_parent(session_pool: SessionPool) -> None:
         patch("uuid.uuid4", return_value=MagicMock(__str__=lambda _: "child-uuid")),
     ):
         result = await session_pool.run_agent(
-            "child-agent", "do work", parent_session_id="parent-sess", key="value",
+            "child-agent",
+            "do work",
+            parent_session_id="parent-sess",
+            key="value",
         )
 
     assert result == "result"
@@ -457,7 +485,10 @@ async def test_route_message_idle_session_starts_run(
     session_pool.sessions._start_run_handle = MagicMock(return_value="msg-started")  # type: ignore[method-assign]
 
     result = await session_pool.sessions._route_message(
-        session, mock_agent, "sess-1", "hello",
+        session,
+        mock_agent,
+        "sess-1",
+        "hello",
     )
 
     assert result == "msg-started"
@@ -477,7 +508,10 @@ async def test_route_message_closing_session_returns_none(
     mock_agent = MagicMock()
 
     result = await session_pool.sessions._route_message(
-        session, mock_agent, "sess-1", "hello",
+        session,
+        mock_agent,
+        "sess-1",
+        "hello",
     )
 
     assert result is None

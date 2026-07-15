@@ -235,7 +235,10 @@ async def test_message_id_passed_to_steer(
     controller.get_session("sess-mid").current_run_id = "existing-run-id"  # type: ignore[union-attr]
 
     result = await controller.receive_request(
-        "sess-mid", "steer me", priority="asap", message_id="custom-mid",
+        "sess-mid",
+        "steer me",
+        priority="asap",
+        message_id="custom-mid",
     )
 
     assert result == "custom-mid"

@@ -31,6 +31,7 @@ def mock_pool() -> MagicMock:
     session_pool = MagicMock()
     session_pool.create_session = AsyncMock()
     session_pool.receive_request = AsyncMock()
+    session_pool.wait_for_completion = AsyncMock(return_value="sess-1")
     session_pool.event_bus = MagicMock()
 
     # Mock sessions registry
@@ -301,6 +302,13 @@ class TestHandlePromptBlockingBehavior:
             agent_type="native",
         )
         mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
+        mock_pool.session_pool._get_active_run_handle = MagicMock(return_value=run_handle)
+
+        async def _wait_blocking(session_id: str, timeout: float | None = None) -> str:
+            await run_handle._turn_complete_event.wait()
+            return session_id
+
+        mock_pool.session_pool.wait_for_completion = AsyncMock(side_effect=_wait_blocking)
 
         prompt = [TextContentBlock(text="hello")]
         task = asyncio.create_task(handler.handle_prompt("sess-1", prompt))
@@ -364,10 +372,8 @@ class TestHandlePromptBlockingBehavior:
         mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
 
         prompt = [TextContentBlock(text="hello")]
-        with patch.object(
-            run_handle._turn_complete_event, "wait", side_effect=asyncio.CancelledError
-        ):
-            result = await handler.handle_prompt("sess-1", prompt)
+        mock_pool.session_pool.wait_for_completion = AsyncMock(side_effect=asyncio.CancelledError)
+        result = await handler.handle_prompt("sess-1", prompt)
 
         assert result is not None
         assert result.stop_reason == "cancelled"
@@ -385,6 +391,13 @@ class TestHandlePromptBlockingBehavior:
             agent_type="native",
         )
         mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
+        mock_pool.session_pool._get_active_run_handle = MagicMock(return_value=run_handle)
+
+        async def _wait_blocking(session_id: str, timeout: float | None = None) -> str:
+            await run_handle._turn_complete_event.wait()
+            return session_id
+
+        mock_pool.session_pool.wait_for_completion = AsyncMock(side_effect=_wait_blocking)
 
         prompt = [TextContentBlock(text="hello")]
         task = asyncio.create_task(handler.handle_prompt("sess-1", prompt))
@@ -413,6 +426,7 @@ class TestHandlePromptBlockingBehavior:
             _turn_complete_event=turn_event,
         )
         mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
+        mock_pool.session_pool._get_active_run_handle = MagicMock(return_value=run_handle)
 
         prompt = [TextContentBlock(text="hello")]
         result = await handler.handle_prompt("sess-1", prompt)

@@ -123,7 +123,8 @@ def mock_agent_with_event_bus(tmp_project_dir):
 
     # wait_for_completion waits on the same event the test controls
     async def _mock_wait_for_completion(
-        sid: str, timeout: float | None = None,
+        sid: str,
+        timeout: float | None = None,
     ) -> str:
         await asyncio.wait_for(run_handle.complete_event.wait(), timeout=timeout or 30.0)
         return sid

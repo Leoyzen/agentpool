@@ -49,8 +49,6 @@ async def _receive_and_get_handle(
     receive_request() now returns str | None (message_id), but many tests
     need the RunHandle to inspect state. This helper bridges the gap.
     """
-    from agentpool.orchestrator.run import RunHandle
-
     message_id = await session_pool.receive_request(session_id, content, **kwargs)
     assert message_id is not None, "receive_request should return a message_id for idle session"
     handle = session_pool._get_active_run_handle(session_id)
@@ -775,7 +773,7 @@ async def test_runhandle_dies_in_idle_loop(mock_pool: MagicMock) -> None:
     # followup() doesn't work after RunHandle is done (start() generator
     # was already closed by _consume_run). We need a new receive_request
     # to trigger the second create_turn which raises RuntimeError.
-    crash_msg_id = await asyncio.wait_for(
+    await asyncio.wait_for(
         session_pool.receive_request(session_id, "trigger error"),
         timeout=30.0,
     )

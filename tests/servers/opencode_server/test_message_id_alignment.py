@@ -272,8 +272,14 @@ class TestHandleEventUpdatesMessageId:
     """Tests that _handle_event updates ctx.assistant_msg_id from events (D14)."""
 
     @pytest.mark.asyncio
-    async def test_handle_event_updates_ctx_message_id_from_event(self):
-        """_handle_event should update ctx.assistant_msg_id from event.message_id."""
+    async def test_handle_event_preserves_ctx_message_id_from_event(self):
+        """_handle_event should NOT overwrite ctx.assistant_msg_id from event.message_id.
+
+        NativeTurn generates its own UUID as _message_id, which differs from
+        the canonical assistant_msg_id from the REST handler. Overwriting
+        causes a mismatch between parts and the assistant message, breaking
+        UI rendering.
+        """
         from pydantic_ai.messages import TextPart as PydanticTextPart
 
         from agentpool.agents.events import PartStartEvent
@@ -334,8 +340,10 @@ class TestHandleEventUpdatesMessageId:
 
         await integration._handle_event("test-session", envelope)
 
-        # The ctx.assistant_msg_id should have been updated
-        assert ctx.assistant_msg_id == "msg_from_event_123"
+        # The ctx.assistant_msg_id should NOT be overwritten by the event's
+        # internal message_id (NativeTurn UUID). The canonical ID from the
+        # REST handler must be preserved.
+        assert ctx.assistant_msg_id == "msg_placeholder"
 
     @pytest.mark.asyncio
     async def test_handle_event_does_not_update_when_event_has_no_message_id(self):

@@ -230,7 +230,7 @@ class BlockingOnRealQuestionAgentMock:
 # ---------------------------------------------------------------------------
 
 
-def _make_pool_mock(agent: Any) -> Mock:
+def _make_pool_mock(agent: Any) -> Mock:  # noqa: PLR0915
     """Create a mock pool wired to the given agent."""
     pool = Mock()
     pool.manifest = Mock()
@@ -257,7 +257,6 @@ def _make_pool_mock(agent: Any) -> Mock:
     from tests.servers.opencode_server.conftest import _make_functional_event_bus
 
     session_pool.event_bus = _make_functional_event_bus()
-    from tests._helpers.mock_stream import EmptyReceiveStream
 
     # Override subscribe to return a real queue-based stream
     _event_queues: dict[str, list[Any]] = {}
@@ -319,7 +318,9 @@ def _make_pool_mock(agent: Any) -> Mock:
                 await session_pool.event_bus.publish(
                     session_id,
                     RunFailedEvent(
-                        run_id="test-run", session_id=session_id, exception=exc,
+                        run_id="test-run",
+                        session_id=session_id,
+                        exception=exc,
                     ),
                 )
             finally:
@@ -332,7 +333,8 @@ def _make_pool_mock(agent: Any) -> Mock:
 
     # Mock wait_for_completion to actually wait for the background run
     async def _mock_wait_for_completion(
-        sid: str, timeout: float | None = None,
+        sid: str,
+        timeout: float | None = None,
     ) -> str:
         ev = _completion_events.get(sid)
         if ev is not None:

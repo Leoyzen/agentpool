@@ -1058,7 +1058,12 @@ class SessionController:
                     session.current_run_id = None
             if session.current_run_id is None:
                 return self._start_run_handle(
-                    session, agent, session_id, content, deps=deps, message_id=message_id,
+                    session,
+                    agent,
+                    session_id,
+                    content,
+                    deps=deps,
+                    message_id=message_id,
                 )
             run = self._runs.get(session.current_run_id) if session.current_run_id else None
             if run is not None:

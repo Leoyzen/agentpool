@@ -106,7 +106,9 @@ def _make_protocol_channel(
     journal = MemoryJournal()
     event_bus = EventBus()
     return ProtocolChannel(
-        journal=journal, event_bus=event_bus, session_id=session_id,
+        journal=journal,
+        event_bus=event_bus,
+        session_id=session_id,
     )
 
 
@@ -252,14 +254,18 @@ async def test_acp_event_converter_reads_message_id_from_events() -> None:
 
     # Event with explicit message_id.
     event_with_id = PartStartEvent.text(
-        index=0, content="hello", message_id="event-msg-001",
+        index=0,
+        content="hello",
+        message_id="event-msg-001",
     )
     result = converter._get_message_id(event_with_id)
     assert result == "event-msg-001"
 
     # Delta event with explicit message_id.
     delta_with_id = PartDeltaEvent.text(
-        index=0, content=" world", message_id="event-msg-001",
+        index=0,
+        content=" world",
+        message_id="event-msg-001",
     )
     result_delta = converter._get_message_id(delta_with_id)
     assert result_delta == "event-msg-001"
@@ -393,16 +399,24 @@ async def test_opencode_delivery_mode_mapping() -> None:
     # STEER mode → priority="asap"
     await session_pool.send_message("s", "x", mode=DeliveryMode.STEER)
     session_pool.sessions._route_message.assert_awaited_with(
-        mock_session, mock_agent, "s", "x",
-        priority="asap", message_id=None,
+        mock_session,
+        mock_agent,
+        "s",
+        "x",
+        priority="asap",
+        message_id=None,
     )
 
     # QUEUE mode → priority="when_idle"
     session_pool.sessions._route_message.reset_mock()
     await session_pool.send_message("s", "x", mode=DeliveryMode.QUEUE)
     session_pool.sessions._route_message.assert_awaited_with(
-        mock_session, mock_agent, "s", "x",
-        priority="when_idle", message_id=None,
+        mock_session,
+        mock_agent,
+        "s",
+        "x",
+        priority="when_idle",
+        message_id=None,
     )
 
 
@@ -461,14 +475,20 @@ async def test_send_message_steer_mode_on_active_session() -> None:
     session_pool.sessions._route_message = AsyncMock(return_value="steer-msg-001")  # type: ignore[method-assign]
 
     result = await session_pool.send_message(
-        "active-session", "interrupt now", mode=DeliveryMode.STEER,
+        "active-session",
+        "interrupt now",
+        mode=DeliveryMode.STEER,
         message_id="steer-msg-001",
     )
 
     assert result == "steer-msg-001"
     session_pool.sessions._route_message.assert_awaited_once_with(
-        mock_session, mock_agent, "active-session", "interrupt now",
-        priority="asap", message_id="steer-msg-001",
+        mock_session,
+        mock_agent,
+        "active-session",
+        "interrupt now",
+        priority="asap",
+        message_id="steer-msg-001",
     )
 
 
@@ -500,7 +520,9 @@ async def test_send_message_queue_mode_creates_new_run() -> None:
     session_pool.sessions._start_run_handle = MagicMock(return_value="new-run-msg-001")  # type: ignore[method-assign]
 
     result = await session_pool.send_message(
-        "new-session", "start working", mode=DeliveryMode.QUEUE,
+        "new-session",
+        "start working",
+        mode=DeliveryMode.QUEUE,
     )
 
     assert result == "new-run-msg-001"
@@ -528,7 +550,8 @@ async def test_run_agent_creates_session_runs_returns_text_cleans_up() -> None:
 
     # Create a real session first so create_session works.
     await session_pool.sessions.get_or_create_session(
-        "pre-init", agent_name="test-agent",
+        "pre-init",
+        agent_name="test-agent",
     )
     original_create = session_pool.create_session
 
@@ -540,8 +563,11 @@ async def test_run_agent_creates_session_runs_returns_text_cleans_up() -> None:
         **metadata: Any,
     ) -> Any:
         return await original_create(
-            session_id, agent_name,
-            parent_session_id, lifecycle_policy, **metadata,
+            session_id,
+            agent_name,
+            parent_session_id,
+            lifecycle_policy,
+            **metadata,
         )
 
     final_msg = ChatMessage(content="Integration test result", role="assistant")
