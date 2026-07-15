@@ -1383,7 +1383,12 @@ class SessionPool:
                 try:
                     envelope = await asyncio.wait_for(bus_queue.get(), timeout=120.0)
                 except TimeoutError:
-                    break
+                    logger.warning(
+                        "Agent execution timed out after 120 seconds in run_agent",
+                        session_id=session_id,
+                    )
+                    msg = f"Agent execution timed out after 120 seconds for session {session_id}"
+                    raise TimeoutError(msg) from None
                 event = envelope.event
                 if isinstance(event, StreamCompleteEvent):
                     content = event.message.content

@@ -548,7 +548,7 @@ async def _process_message_locked(  # noqa: PLR0915
         if integration is not None:
             message_id = await integration.route_message(
                 session_id=session_id,
-                content=list(user_prompt),
+                content=user_prompt if isinstance(user_prompt, str) else list(user_prompt),
                 priority=delivery_priority,
                 input_provider=input_provider,
                 agent_name=agent_name,
@@ -557,7 +557,7 @@ async def _process_message_locked(  # noqa: PLR0915
         else:
             message_id = await session_pool.receive_request(
                 session_id=session_id,
-                content=list(user_prompt),
+                content=user_prompt if isinstance(user_prompt, str) else list(user_prompt),
                 priority=delivery_priority,
                 input_provider=input_provider,
                 message_id=assistant_msg_id,
@@ -805,7 +805,7 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
         if integration is not None:
             await integration.route_message(
                 session_id=session_id,
-                content=list(user_prompt),
+                content=user_prompt if isinstance(user_prompt, str) else list(user_prompt),
                 priority=delivery_priority,
                 input_provider=input_provider,
                 agent_name=agent_name,
@@ -820,7 +820,7 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
 
             await session_pool.receive_request(
                 session_id=session_id,
-                content=list(user_prompt),
+                content=user_prompt if isinstance(user_prompt, str) else list(user_prompt),
                 priority=delivery_priority,
                 input_provider=input_provider,
                 message_id=async_assistant_msg_id,
