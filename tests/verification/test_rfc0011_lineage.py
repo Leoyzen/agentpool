@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from typing import Any
 
 from pydantic_ai.models.test import TestModel
@@ -155,29 +154,32 @@ async def test_sql_storage_parent_id(test_pool):
 
 
 @pytest.mark.asyncio
-async def test_storage_soft_validation(test_pool, caplog):
+async def test_storage_soft_validation(test_pool):
     """Test that soft validation works (no crash if parent missing)."""
+    import structlog
+
     storage_manager = test_pool.storage
     sql_provider = storage_manager.providers[0]
     assert isinstance(sql_provider, SQLModelProvider)
 
-    caplog.set_level(logging.WARNING)
-
     child_id = "child-with-ghost-parent"
     ghost_parent_id = "non-existent-parent"
 
-    # This should not raise an exception
-    await sql_provider.log_session(
-        session_id=child_id, node_name="child", parent_session_id=ghost_parent_id
-    )
+    # Use structlog's capture_logs to reliably capture log events
+    # regardless of structlog configuration or parallel test execution.
+    # caplog only captures stdlib logging records, but structlog may
+    # use ConsoleRenderer which bypasses the stdlib logging system.
+    with structlog.testing.capture_logs() as cap_logs:
+        await sql_provider.log_session(
+            session_id=child_id, node_name="child", parent_session_id=ghost_parent_id
+        )
 
-    # Verify warning in logs
-    # Note: structlog might not propagate to caplog easily depending on config,
-    # but since it's using stdlib LoggerFactory it should.
+    # Verify warning was emitted
     assert any(
-        ghost_parent_id in record.message
-        for record in caplog.records
-        if record.levelname == "WARNING"
+        record["event"] == "Parent session not found"
+        and record.get("parent_session_id") == ghost_parent_id
+        and record["log_level"] == "warning"
+        for record in cap_logs
     )
 
     # Verify child still saved

@@ -211,7 +211,7 @@ class NativeTurn(HookAwareTurn, Turn):
                     **self._pydantic_ai_kwargs,
                 )
                 async with agentlet.iter(
-                    effective_prompts,  # type: ignore[arg-type]
+                    effective_prompts,
                     **iter_kwargs,
                 ) as agent_run:
                     if self._run_ctx._run_handle is not None:
