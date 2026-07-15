@@ -72,6 +72,7 @@
 - **allowed_tools enforced via FilteredToolset**: The `parsed_allowed_tools()` method parses the space/comma-separated `allowed-tools` frontmatter string. `SkillCapability.get_wrapper_toolset()` wraps the assembled toolset in a `FilteredToolset` that drops tools not in the allowed list.
 - **SkillMcpManager has session-scoped lifecycle**: Connections are per `(session_id, server_name)` pair, lazily established on first tool access, with idle timeout (default 5 minutes) and exponential backoff retry (3 attempts). `on_run_ended()` triggers cleanup.
 - **One MCP server per capability**: Each `MCPCapability` wraps exactly one server. Use `CombinedToolsetCapability` to combine them.
+- **Span instrumentation is mandatory**: All critical-path methods (RunLoop, Turn, delegation, capabilities, lifecycle) MUST use `@logfire.instrument` or `with logfire.span(...)`. Never `asyncio.create_task()` without an active span — it produces orphan traces. See root AGENTS.md "Telemetry & Span Instrumentation" for rules and naming conventions.
 
 ## Anti-Patterns
 
@@ -83,6 +84,7 @@
 - **Accessing `agent_pool` read-only**: Use `host_context` (immutable `HostContext`) instead. The `agent_pool` property emits `DeprecationWarning` as of M2.
 - **Mixing `lifecycle.EventEnvelope` with `orchestrator.event_bus.EventEnvelope`**: These are separate types with different roles. Import from `agentpool.lifecycle.types` for lifecycle transport envelopes; from `agentpool.orchestrator.event_bus` for internal EventBus envelopes.
 - **Blocking calls in async paths**: MCP connections, tool execution, and hooks all expect async methods. Use `anyio` or `asyncio`.
+- **Bare `asyncio.create_task()` without span**: Produces orphan traces. Always ensure a `logfire.span` is active at the call site.
 
 ## Notes
 

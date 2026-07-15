@@ -32,6 +32,7 @@ Standalone JSON-RPC 2.0 protocol implementation for the Agent Communication Prot
 - **Bridge vs native**: Use `acp.serve()` for agents you control. Use `acp.bridge.ACPBridge` only for external stdio agents (see `bridge/README.md` distinction).
 - **Factory pattern for agents**: `serve()` accepts `Agent | Callable[[AgentSideConnection], Agent]` -- the factory form lets agents access their connection for sending notifications.
 - **Defensive subprocess shutdown**: `spawn_stdio_transport()` in `transports.py` follows MCP SDK pattern -- close stdin first, wait gracefully, then terminate, then kill.
+- **W3C trace context via `_meta`**: ACP spec reserves `_meta.traceparent`, `_meta.tracestate`, `_meta.baggage` for W3C trace context ([RFD](https://agentclientprotocol.com/rfds/meta-propagation)). When acting as ACP client, inject `traceparent` via `TraceContextTextMapPropagator.inject()`. When acting as ACP agent, extract it to create child spans linked to the client's trace. Schema models use `field_meta` (aliased to `_meta` in JSON).
 
 ## Notes
 

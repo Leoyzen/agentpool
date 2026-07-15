@@ -964,11 +964,14 @@ src/agentpool/lifecycle/
 - Per-agent or shared database
 - Analytics via CLI: `agentpool history stats`
 
-**Observability**: Logfire integration
-- Structured logging with context
-- Trace agent execution
-- Performance monitoring
-- Disabled in tests via env vars
+**Observability**: Logfire + OpenTelemetry integration
+- Structured logging with context via `logfire.configure()`
+- Auto-instrumentation: `logfire.instrument_pydantic_ai()`, `logfire.instrument_mcp()`, `logfire.instrument_fastapi(app)`
+- Manual instrumentation: `@logfire.instrument` decorator and `with logfire.span(...)` context manager
+- Trace agent execution end-to-end across async task boundaries and subagent delegation
+- Export to any OTLP-compatible backend (SigNoz, Jaeger, Honeycomb, etc.) via OTEL env vars
+- Disabled in tests via env vars (see conftest.py)
+- See [Telemetry & Span Instrumentation](#telemetry--span-instrumentation) for mandatory practices
 
 ### Configuration System
 
@@ -997,6 +1000,21 @@ src/agentpool/lifecycle/
 - Google-style docstrings (no types in Args section)
 - Type hints required (checked with mypy --strict)
 - Use `from __future__ import annotations` for forward references
+
+### Python 3.12+ Feature Usage
+
+The project targets Python 3.13+ and **SHOULD** leverage 3.12+ features where they improve clarity or safety:
+
+- **PEP 695 generics**: `def func[T](x: T) -> T:` instead of `TypeVar`
+- **`type` statement**: `type JsonResult = dict[str, str]` instead of `TypeAlias`
+- **`override` decorator** (PEP 698) for method overrides; **`Self`** for factory return types
+- **`asyncio.TaskGroup`** for structured concurrency; **`asyncio.timeout()`** over `wait_for()`
+- **`match/case`** over `if/elif` for variant dispatch (events, tool results)
+- **Walrus operator `:=`** for assignment in conditions: `if (n := len(data)) > 10:`
+- **`itertools.batched()`** (3.12+) for chunking; `functools.cache` / `cached_property` for memoization
+
+!!! warning "Deprecated patterns"
+    `typing.TypeVar`, `typing.TypeAlias`, `asyncio.wait_for()` — use the modern alternatives above.
 
 ### Testing
 - Tests use pytest (not in classes)
@@ -1038,6 +1056,44 @@ New protocol servers:
 2. Implement protocol-specific handlers
 3. Use `AggregatingServer` if wrapping multiple agents
 4. Add CLI command in `agentpool_cli/`
+
+### Telemetry & Span Instrumentation
+
+AgentPool uses Logfire (backed by OpenTelemetry). All code in the **critical execution path** (RunLoop, Turn, delegation, protocol entry points) **MUST** be instrumented. Uninstrumented code produces orphan traces.
+
+**Rules:**
+
+1. **`@logfire.instrument`** for method-level spans. Format string params extract from args:
+   ```python
+   @logfire.instrument("session.receive_request {session_id}")
+   async def receive_request(self, session_id: str, content: str, **kwargs) -> str | None: ...
+   ```
+
+2. **`with logfire.span(...)`** for spans that must stay open across `await` boundaries (e.g., delegation):
+   ```python
+   with logfire.span("delegation.subagent", parent_session_id=..., child_agent_name=name):
+       return await session_pool.run_agent(name, prompt, parent_session_id=self._session_id)
+   ```
+
+3. **Never `asyncio.create_task()` without an active span.** `create_task()` copies `contextvars` — if a span is active, the child task inherits it as parent. If not, child spans are orphaned. Use `@logfire.instrument` on the calling method, or wrap in `with logfire.span(...)`.
+
+4. **ACP cross-process: populate `_meta.traceparent`** (W3C trace context) when acting as ACP client; extract when acting as ACP agent. See [ACP _meta Propagation RFD](https://agentclientprotocol.com/rfds/meta-propagation).
+
+**Span naming:** `protocol.{name}.{method}`, `orchestration.{component}.{method}`, `turn.{agent_type}`, `delegation.subagent`, `capability.{name}.{method}`, `lifecycle.{component}.{method}`, `graph.{component}.{method}`
+
+**Required span attributes:** `session_id`, `parent_session_id`, `agent_name`, `turn_id`, `run_id`
+
+**Do NOT instrument:** `MemoryJournal` / `MemorySnapshotStore`, pure data transforms, test helpers, logging calls.
+
+**Critical `create_task()` call sites that MUST have a span:**
+
+| Call site | File | How |
+|---|---|---|
+| `_consume_run()` | `session_controller.py` | `@logfire.instrument` on `_start_run_handle()` |
+| `event_bus.publish()` | `run.py` | `@logfire.instrument` on calling method |
+| `_interrupt()` | `run.py` | `@logfire.instrument` on `cancel()` |
+| Background tasks | `subagent_tools.py` | `with logfire.span(...)` in task body |
+| `_execute_parallel()` | `base_team.py` | `@logfire.instrument` on `_execute_parallel()` |
 
 ## Common Patterns
 
