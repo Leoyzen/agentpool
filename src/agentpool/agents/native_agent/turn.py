@@ -192,7 +192,10 @@ class NativeTurn(HookAwareTurn, Turn):
                     [f"{staged_text}\n\n{user_request}"] if user_request else [staged_text]
                 )
             else:
-                effective_prompts = self._prompts
+                effective_prompts = [
+                    p if isinstance(p, str) else " ".join(str(b) for b in p)
+                    for p in self._prompts
+                ]
 
             agent_run: Any = None
             try:
