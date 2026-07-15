@@ -192,6 +192,7 @@ class ACPEventConverter:
     _tool_states: dict[str, _ToolState] = field(default_factory=dict)
     """Active tool call states."""
 
+    _current_message_id: str = ""
     _current_tool_inputs: dict[str, dict[str, Any]] = field(default_factory=dict)
     """Current tool inputs by tool_call_id."""
 
@@ -261,6 +262,7 @@ class ACPEventConverter:
 
     def reset(self) -> None:
         """Reset converter state for a new run."""
+        self._current_message_id = ""
         self._tool_states.clear()
         self._current_tool_inputs.clear()
         self._subagent_headers.clear()
@@ -386,27 +388,37 @@ class ACPEventConverter:
         self._current_tool_inputs.pop(tool_call_id, None)
 
     def _get_message_id(self, event: RichAgentStreamEvent[Any]) -> str:
-        """Extract message_id from event, or generate a one-off UUID.
+        """Extract message_id from event, or reuse known ID, or generate UUID.
 
-        Reads ``message_id`` from AgentPool PartStartEvent/PartDeltaEvent
-        instances (populated by EventMapper or ACP converters). For events
-        without a message_id field, generates a one-off UUID so ACP
-        clients always receive a valid message_id.
+        Maintains a sticky ``_current_message_id`` that persists across
+        events within the same turn. This ensures that all chunks of a
+        single message (e.g., successive ``ThinkingPartDelta`` events)
+        share the same ``message_id`` even if the source events carry
+        inconsistent or empty IDs.
+
+        For ACP agents that may not send ``message_id`` on every chunk,
+        the first event's ID becomes the canonical ID for the entire
+        turn. Falls back to a one-off UUID only when no event has ever
+        carried a message_id.
 
         Args:
             event: The stream event to extract message_id from.
 
         Returns:
-            The event's message_id if present and non-empty, otherwise a
-            new UUID string.
+            A consistent message_id for the current turn segment.
         """
         match event:
             case (
                 AgentPoolPartStartEvent(message_id=mid) | AgentPoolPartDeltaEvent(message_id=mid)
             ) if mid:
+                self._current_message_id = mid
                 return mid
             case _:
-                return str(uuid.uuid4())
+                if self._current_message_id:
+                    return self._current_message_id
+                mid = str(uuid.uuid4())
+                self._current_message_id = mid
+                return mid
 
     async def convert(  # noqa: PLR0915
         self, event: RichAgentStreamEvent[Any]

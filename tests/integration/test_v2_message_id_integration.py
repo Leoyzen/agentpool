@@ -270,18 +270,20 @@ async def test_acp_event_converter_reads_message_id_from_events() -> None:
     result_delta = converter._get_message_id(delta_with_id)
     assert result_delta == "event-msg-001"
 
-    # Event without message_id — should auto-generate a UUID.
+    # Event without message_id — reuses the sticky _current_message_id
+    # from the last event with an explicit ID. This ensures all chunks
+    # within a turn share the same message_id (important for ACP thought
+    # chunks that may not carry message_id on every chunk).
     event_without_id = PartStartEvent.text(index=0, content="no id")
     result_auto = converter._get_message_id(event_without_id)
-    assert result_auto != ""
-    assert len(result_auto) > 0
-    assert result_auto != "event-msg-001"
+    assert result_auto == "event-msg-001"
 
-    # Delta without message_id — should auto-generate.
-    delta_without_id = PartDeltaEvent.text(index=0, content="no id")
-    result_delta_auto = converter._get_message_id(delta_without_id)
-    assert result_delta_auto != ""
-    assert result_delta_auto != "event-msg-001"
+    # After reset(), sticky message_id is cleared — new events without
+    # an explicit ID generate a fresh UUID.
+    converter.reset()
+    result_after_reset = converter._get_message_id(event_without_id)
+    assert result_after_reset != ""
+    assert result_after_reset != "event-msg-001"
 
 
 # ---------------------------------------------------------------------------
