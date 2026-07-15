@@ -867,20 +867,6 @@ def test_protocol_channel_replace_delivered_returns_false():
     assert result is False
 
 
-def test_protocol_channel_replace_enqueued_returns_false():
-    """replace() returns False for feedback already enqueued to PydanticAI."""
-    mock_bus = AsyncMock(spec=EventBus)
-    channel = ProtocolChannel(MemoryJournal(), mock_bus)
-    fb = Feedback(content="original", is_steer=True)
-
-    channel.deliver_feedback(fb)
-    # Simulate enqueue tracking
-    channel._track_enqueued(fb.message_id, ["fake_pending_msg"])
-
-    result = channel.replace(fb.message_id, "new content")
-    assert result is False
-
-
 def test_protocol_channel_replace_unknown_returns_false():
     """replace() returns False for unknown message_id."""
     mock_bus = AsyncMock(spec=EventBus)
@@ -890,96 +876,12 @@ def test_protocol_channel_replace_unknown_returns_false():
 
 
 # ---------------------------------------------------------------------------
-# ProtocolChannel — _track_enqueued
-# ---------------------------------------------------------------------------
-
-
-def test_protocol_channel_track_enqueued_stores_references():
-    """_track_enqueued stores PendingMessage references in _enqueued."""
-    mock_bus = AsyncMock(spec=EventBus)
-    channel = ProtocolChannel(MemoryJournal(), mock_bus)
-
-    fake_items: list[str] = ["pm1", "pm2"]
-    channel._track_enqueued("msg-id-1", fake_items)
-
-    assert "msg-id-1" in channel._enqueued
-    assert channel._enqueued["msg-id-1"] == fake_items
-
-
-def test_protocol_channel_track_enqueued_empty_list_noop():
-    """_track_enqueued with empty list does not create an entry."""
-    mock_bus = AsyncMock(spec=EventBus)
-    channel = ProtocolChannel(MemoryJournal(), mock_bus)
-
-    channel._track_enqueued("msg-id-1", [])
-
-    assert "msg-id-1" not in channel._enqueued
-
-
-def test_protocol_channel_revoke_enqueued_removes_from_pending_messages():
-    """revoke() removes PendingMessage refs from agent_run.pending_messages."""
-    mock_bus = AsyncMock(spec=EventBus)
-    channel = ProtocolChannel(MemoryJournal(), mock_bus)
-
-    # Simulate a PendingMessage and agent_run with pending_messages list
-    class FakePendingMessage:
-        pass
-
-    class FakeAgentRun:
-        def __init__(self) -> None:
-            self.pending_messages: list[FakePendingMessage] = []
-
-    class FakeRunLoop:
-        def __init__(self) -> None:
-            self._active_agent_run = FakeAgentRun()
-
-    run_loop = FakeRunLoop()
-    pm = FakePendingMessage()
-    run_loop._active_agent_run.pending_messages.append(pm)
-    channel.attach(run_loop)
-
-    channel._track_enqueued("msg-id-1", [pm])
-    assert "msg-id-1" in channel._enqueued
-
-    result = channel.revoke("msg-id-1")
-    assert result is True
-    assert pm not in run_loop._active_agent_run.pending_messages
-    assert "msg-id-1" not in channel._enqueued
-
-
-def test_protocol_channel_revoke_enqueued_already_drained():
-    """revoke() handles ValueError when PendingMessage already drained."""
-    mock_bus = AsyncMock(spec=EventBus)
-    channel = ProtocolChannel(MemoryJournal(), mock_bus)
-
-    class FakePendingMessage:
-        pass
-
-    class FakeAgentRun:
-        def __init__(self) -> None:
-            self.pending_messages: list[FakePendingMessage] = []
-
-    class FakeRunLoop:
-        def __init__(self) -> None:
-            self._active_agent_run = FakeAgentRun()
-
-    run_loop = FakeRunLoop()
-    pm = FakePendingMessage()
-    # Don't add pm to pending_messages — simulate already drained
-    channel.attach(run_loop)
-    channel._track_enqueued("msg-id-1", [pm])
-
-    result = channel.revoke("msg-id-1")
-    assert result is True  # idempotent — already gone
-
-
-# ---------------------------------------------------------------------------
 # ProtocolChannel — close clears all tracking structures
 # ---------------------------------------------------------------------------
 
 
 def test_protocol_channel_close_clears_all_tracking_structures():
-    """close() clears _pending, _revoked, _delivered, _enqueued."""
+    """close() clears _pending, _revoked, _delivered."""
     mock_bus = AsyncMock(spec=EventBus)
     channel = ProtocolChannel(MemoryJournal(), mock_bus)
 
@@ -987,13 +889,11 @@ def test_protocol_channel_close_clears_all_tracking_structures():
     fb2 = Feedback(content="fb2", is_steer=False)
     channel.deliver_feedback(fb1)
     channel.deliver_feedback(fb2)
-    channel._track_enqueued("fake-id", ["pm1"])
     # Revoke fb1 to populate _revoked
     channel.revoke(fb1.message_id)
 
     assert len(channel._pending) > 0
     assert len(channel._revoked) > 0
-    assert len(channel._enqueued) > 0
 
     channel.close()
 
@@ -1001,4 +901,3 @@ def test_protocol_channel_close_clears_all_tracking_structures():
     assert len(channel._pending) == 0
     assert len(channel._revoked) == 0
     assert len(channel._delivered) == 0
-    assert len(channel._enqueued) == 0

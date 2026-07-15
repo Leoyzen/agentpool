@@ -297,14 +297,17 @@ class CommChannel(Protocol):
     def revoke(self, message_id: str) -> bool:
         """Revoke a pending feedback message by ID.
 
-        Operates at two layers:
+        Revocation operates at the CommChannel queue layer only. If the
+        feedback is still pending in the channel's feedback queue (not
+        yet delivered to the RunLoop), it is removed and marked as
+        revoked.
 
-        1. **CommChannel layer**: If the feedback is still pending in
-           the channel's feedback queue (not yet delivered to the
-           RunLoop), remove it and mark as revoked.
-        2. **PydanticAI layer**: If the feedback was already enqueued
-           into ``agent_run.pending_messages`` via ``steer()``, remove
-           the ``PendingMessage`` references from the live list.
+        Once feedback is delivered to the agent runtime (dequeued by
+        ``recv()`` and passed to ``agent_run``), it cannot be revoked.
+        This is a deliberate design choice — post-delivery revocation
+        would require deep integration with pydantic_ai's
+        ``PendingMessage`` lifecycle, which is fragile and provides
+        little value.
 
         Returns ``True`` if the message was revoked or is already gone
         (idempotent). Returns ``False`` if the message was already
@@ -329,9 +332,9 @@ class CommChannel(Protocol):
         ``new_content`` is a ``list``, updates ``Feedback.content_blocks``;
         when ``str``, updates ``Feedback.content``.
 
-        Returns ``False`` if the message has already been enqueued into
-        the PydanticAI layer (past CommChannel scope) or already
-        delivered. Unidirectional channels always return ``False``.
+        Returns ``False`` if the message has already been delivered
+        (past CommChannel scope). Unidirectional channels always return
+        ``False``.
 
         Args:
             message_id: The ID of the feedback message to replace.

@@ -245,8 +245,6 @@ class ProtocolChannel:
       re-delivered.
     - ``_delivered``: ``set[str]`` — delivered message IDs; ``revoke()``
       returns ``False`` for these.
-    - ``_enqueued``: ``dict[str, list]`` — ``PendingMessage`` references
-      for PydanticAI-layer revoke, keyed by ``message_id``.
 
     Events are journaled (append or upsert) before delivery, unless
     ``_replaying`` is ``True``.
@@ -272,7 +270,6 @@ class ProtocolChannel:
         self._pending: dict[str, Feedback] = {}
         self._revoked: set[str] = set()
         self._delivered: set[str] = set()
-        self._enqueued: dict[str, list[Any]] = {}
         self._replaying: bool = False
         self._closed: bool = False
         self._run_loop: Any = None
@@ -387,19 +384,20 @@ class ProtocolChannel:
     def revoke(self, message_id: str) -> bool:
         """Revoke a pending feedback message by ID.
 
-        Operates at two layers:
+        Revocation only operates at the CommChannel queue layer. If the
+        feedback is still in the queue (not yet delivered to the
+        RunLoop), it is removed and marked as revoked. If already
+        delivered, revocation is not possible and ``False`` is returned.
 
-        1. **CommChannel layer** (``_pending``): If the feedback is
-           still in the queue, remove it from both ``_feedback_queue``
-           and ``_pending``, add to ``_revoked``, and return ``True``.
-        2. **PydanticAI layer** (``_enqueued``): If the feedback was
-           already enqueued into ``agent_run.pending_messages`` via
-           ``steer()``, remove each ``PendingMessage`` from the live
-           list via ``list.remove(pm)``. If ``list.remove()`` raises
-           ``ValueError`` (already drained), catch it and treat as
-           success. Clean up the ``_enqueued`` entry.
-        3. If already in ``_delivered``, return ``False``.
-        4. Otherwise, return ``True`` (idempotent unknown).
+        Design decision: Once feedback is dequeued by ``recv()`` and
+        delivered to the agent runtime (via ``_idle_loop`` →
+        ``_execute_turn`` → ``agent_run``), it cannot be revoked. This
+        is a deliberate design choice — post-delivery revocation would
+        require deep integration with pydantic_ai's ``PendingMessage``
+        lifecycle, which is fragile and provides little value (the
+        message is already being processed). Future work: If ACP v2
+        requires post-delivery revocation, a PydanticAI capability hook
+        could be added to support it.
 
         Args:
             message_id: The ID of the feedback message to revoke.
@@ -407,38 +405,18 @@ class ProtocolChannel:
         Returns:
             ``True`` if revoked or already gone, ``False`` if delivered.
         """
-        # Layer 3: Already delivered — cannot revoke.
+        # Already delivered — cannot revoke.
         if message_id in self._delivered:
             return False
 
-        # Layer 1: Still pending in CommChannel queue.
+        # Still pending in CommChannel queue — remove and mark revoked.
         if message_id in self._pending:
             feedback = self._pending.pop(message_id)
             self._feedback_queue.remove(feedback)
             self._revoked.add(message_id)
             return True
 
-        # Layer 2: Already enqueued into PydanticAI pending_messages.
-        if message_id in self._enqueued:
-            pending_items = self._enqueued.pop(message_id)
-            for pm in pending_items:
-                try:
-                    # pm is a PendingMessage from agent_run.pending_messages.
-                    # list.remove() uses identity (is) comparison.
-                    # The run_loop holds the agent_run with pending_messages.
-                    if self._run_loop is not None:
-                        run_loop: Any = self._run_loop
-                        agent_run: Any = run_loop._active_agent_run
-                        if agent_run is not None:
-                            agent_run.pending_messages.remove(pm)
-                except ValueError:
-                    # Already drained by _drain_by_priority() — same
-                    # end state as revoke. Idempotent.
-                    pass
-            self._revoked.add(message_id)
-            return True
-
-        # Layer 4: Unknown message_id — idempotent success.
+        # Unknown message_id — idempotent success.
         return True
 
     def replace(self, message_id: str, new_content: str | list[Any]) -> bool:
@@ -449,9 +427,8 @@ class ProtocolChannel:
         ``new_content`` is a ``list``, updates ``Feedback.content_blocks``;
         when ``str``, updates ``Feedback.content``.
 
-        Returns ``False`` if the message has already been enqueued into
-        the PydanticAI layer (past CommChannel scope) or already
-        delivered.
+        Returns ``False`` if the message has already been delivered
+        (past CommChannel scope).
 
         Args:
             message_id: The ID of the feedback message to replace.
@@ -460,8 +437,8 @@ class ProtocolChannel:
         Returns:
             ``True`` if replaced, ``False`` if past CommChannel scope.
         """
-        # Cannot replace if already enqueued or delivered.
-        if message_id in self._enqueued or message_id in self._delivered:
+        # Cannot replace if already delivered.
+        if message_id in self._delivered:
             return False
 
         if message_id not in self._pending:
@@ -477,24 +454,6 @@ class ProtocolChannel:
             feedback.content_blocks = None
         return True
 
-    def _track_enqueued(self, message_id: str, items: list[Any]) -> None:
-        """Track PendingMessage references for PydanticAI-layer revoke.
-
-        Called by ``RunHandle.steer()`` after ``agent_run.enqueue()``.
-        Stores the newly appended ``PendingMessage`` references so
-        ``revoke()`` can remove them from ``agent_run.pending_messages``
-        via ``list.remove(pm)`` (identity comparison).
-
-        Args:
-            message_id: The feedback message ID associated with the
-                enqueued items.
-            items: List of ``PendingMessage`` references appended by
-                ``enqueue()``.
-        """
-        if not items:
-            return
-        self._enqueued[message_id] = items
-
     def close(self) -> None:
         """Clean up all tracking structures and mark as closed.
 
@@ -506,7 +465,6 @@ class ProtocolChannel:
         self._pending.clear()
         self._revoked.clear()
         self._delivered.clear()
-        self._enqueued.clear()
 
 
 __all__ = [

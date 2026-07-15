@@ -1400,8 +1400,14 @@ class SessionPool:
             # Ensure the run has fully completed before closing.
             await self.wait_for_completion(session_id, timeout=10.0)
         finally:
-            await self.event_bus.unsubscribe(session_id, bus_queue)
-            await self.close_session(session_id)
+            try:
+                await self.event_bus.unsubscribe(session_id, bus_queue)
+            except Exception:
+                logger.exception("Failed to unsubscribe from EventBus", session_id=session_id)
+            try:
+                await self.close_session(session_id)
+            except Exception:
+                logger.exception("Failed to close session", session_id=session_id)
 
         return result_text
 

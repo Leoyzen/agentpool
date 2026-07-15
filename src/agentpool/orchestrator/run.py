@@ -25,7 +25,6 @@ from agentpool.lifecycle import (
     Journal,
     MemoryJournal,
     MemorySnapshotStore,
-    ProtocolChannel,
     RunOutcome,
     RunState,
     SnapshotStore,
@@ -289,12 +288,10 @@ class RunHandle:
 
     @property
     def _active_agent_run(self) -> AgentRun[Any, Any] | None:
-        """Alias for ``active_agent_run`` used by ``ProtocolChannel.revoke()``.
+        """Alias for ``active_agent_run``.
 
-        ProtocolChannel accesses ``run_loop._active_agent_run`` to reach
-        ``agent_run.pending_messages`` for PydanticAI-layer revoke. This
-        property provides the underscore-prefixed access without changing
-        the public ``active_agent_run`` field name.
+        Provides the underscore-prefixed access for internal callers
+        that prefer the private naming convention.
         """
         return self.active_agent_run
 
@@ -822,7 +819,7 @@ class RunHandle:
             self._message_history = turn.message_history
         return "proceed"
 
-    async def _drain_events(self) -> list[str | list[Any]]:  # noqa: PLR0915
+    async def _drain_events(self) -> list[str | list[Any]]:
         """Post-turn snapshot, child event collection, and feedback drain.
 
         Transitions to IDLE, saves a turn-boundary snapshot, saves the
@@ -908,16 +905,6 @@ class RunHandle:
                     self._message_queue.append(fb.content)
         prompts = feedback_steer + list(self._message_queue)
         self._message_queue.clear()
-        # Clean up _enqueued entries whose PendingMessage references
-        # are no longer in agent_run.pending_messages (already drained).
-        # Prevents unbounded memory growth in long-running sessions.
-        if isinstance(self._comm_channel, ProtocolChannel) and self.active_agent_run is not None:
-            agent_run = self.active_agent_run
-            live_pending = {id(pm) for pm in agent_run.pending_messages}
-            # Use list() to avoid mutation during iteration.
-            for msg_id, items in list(self._comm_channel._enqueued.items()):
-                if all(id(pm) not in live_pending for pm in items):
-                    self._comm_channel._enqueued.pop(msg_id, None)
         # Signal that this turn has completed normally.
         self._turn_was_cancelled = False
         self._turn_complete_event.set()
@@ -941,9 +928,15 @@ class RunHandle:
         ``Feedback.content_blocks`` (structured/multimodal content). For
         native agents with an active ``agent_run``, the content blocks
         are unpacked via ``agent_run.enqueue(*content_blocks,
-        priority="asap")``. After enqueue, the newly appended
-        ``PendingMessage`` references are tracked via
-        ``comm_channel._track_enqueued()`` for PydanticAI-layer revoke.
+        priority="asap")``.
+
+        Design note: Once feedback is dequeued by ``recv()`` and
+        delivered to the agent runtime (via ``_idle_loop`` →
+        ``_execute_turn`` → ``agent_run``), it cannot be revoked.
+        This is a deliberate design choice — post-delivery revocation
+        would require deep integration with pydantic_ai's
+        ``PendingMessage`` lifecycle, which is fragile and provides
+        little value.
 
         Args:
             message: The steer message (plain text or structured content
@@ -1009,17 +1002,9 @@ class RunHandle:
             agent_run = self.active_agent_run
             if agent_run is not None:
                 if fb.content_blocks is not None:
-                    queue_len_before = len(agent_run.pending_messages)
                     agent_run.enqueue(*fb.content_blocks, priority="asap")
-                    new_items = agent_run.pending_messages[queue_len_before:]
-                    if isinstance(self._comm_channel, ProtocolChannel):
-                        self._comm_channel._track_enqueued(fb.message_id, list(new_items))
                 else:
-                    queue_len_before = len(agent_run.pending_messages)
                     agent_run.enqueue(fb.content, priority="asap")
-                    new_items = agent_run.pending_messages[queue_len_before:]
-                    if isinstance(self._comm_channel, ProtocolChannel):
-                        self._comm_channel._track_enqueued(fb.message_id, list(new_items))
                 return fb.message_id
             # No active agent_run — queue for next turn.
             if fb.content_blocks is not None:
@@ -1044,10 +1029,6 @@ class RunHandle:
 
         When ``message`` is a ``list``, it is stored as
         ``Feedback.content_blocks`` (structured/multimodal content).
-
-        Note: ``followup()`` goes through the CommChannel path (not
-        direct enqueue), so ``_track_enqueued`` is NOT needed — the
-        Feedback stays in ``_pending`` until ``recv()`` picks it up.
 
         Args:
             message: The follow-up message (plain text or structured
@@ -1102,10 +1083,11 @@ class RunHandle:
     def revoke(self, message_id: str) -> bool:
         """Revoke a pending steer or followup message by ID.
 
-        Delegates to ``comm_channel.revoke()`` which operates at two
-        layers: (1) CommChannel ``_pending`` for undelivered feedback,
-        (2) PydanticAI ``pending_messages`` for already-enqueued steer
-        messages via ``_enqueued`` tracking + ``list.remove(pm)``.
+        Delegates to ``comm_channel.revoke()`` which operates at the
+        CommChannel queue layer. If the feedback is still pending in
+        the channel's feedback queue, it is removed and marked as
+        revoked. Once delivered to the agent runtime, revocation is
+        not possible (by design).
 
         Args:
             message_id: The ID of the message to revoke.
