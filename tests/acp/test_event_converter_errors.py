@@ -22,7 +22,6 @@ from agentpool_server.acp_server.event_converter import ACPEventConverter
 def converter() -> ACPEventConverter:
     """Create a converter instance for testing."""
     c = ACPEventConverter()
-    c._current_message_id = "test-msg-id"
     return c
 
 
@@ -30,7 +29,6 @@ def converter() -> ACPEventConverter:
 def converter_with_turn_complete() -> ACPEventConverter:
     """Create a converter with client_supports_turn_complete enabled."""
     c = ACPEventConverter(client_supports_turn_complete=True)
-    c._current_message_id = "test-msg-id"
     return c
 
 
@@ -109,7 +107,6 @@ async def test_run_error_event_resets_converter_state(
     _ = [u async for u in converter_with_turn_complete.convert(event)]
 
     assert "tc_001" not in converter_with_turn_complete._tool_states
-    assert converter_with_turn_complete._current_message_id != "test-msg-id"
 
 
 @pytest.mark.unit
@@ -203,7 +200,6 @@ async def test_run_failed_event_resets_converter_state(
     _ = [u async for u in converter_with_turn_complete.convert(event)]
 
     assert "tc_001" not in converter_with_turn_complete._tool_states
-    assert converter_with_turn_complete._current_message_id != "test-msg-id"
 
 
 @pytest.mark.unit
@@ -249,7 +245,6 @@ async def test_reset_idempotent(converter: ACPEventConverter):
     assert converter._subagent_headers == set()
     assert converter._subagent_content == {}
     assert converter._child_sessions == set()
-    assert converter._current_message_id is not None
     assert converter.last_usage is None
 
 
@@ -284,6 +279,4 @@ async def test_stream_complete_single_reset(converter_with_turn_complete: ACPEve
     assert converter_with_turn_complete._tool_states == {}
     assert converter_with_turn_complete._current_tool_inputs == {}
     assert converter_with_turn_complete._subagent_headers == set()
-    # _current_message_id should have changed from the fixture's "test-msg-id"
-    assert converter_with_turn_complete._current_message_id != "test-msg-id"
     assert converter_with_turn_complete.last_usage is None

@@ -596,22 +596,24 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
 
         stop_reason: StopReason = "end_turn"
         try:
-            run_handle = await session_pool.receive_request(
+            message_id = await session_pool.receive_request(
                 session_id, contents, input_provider=input_provider
             )
             # Legacy clients (no turn_complete support) block until the run finishes
             # so they don't need session/update turn_complete notifications.
-            if run_handle is not None and not (
+            if message_id is not None and not (
                 self.client_capabilities is not None and self.client_capabilities.turn_complete
             ):
-                await run_handle._turn_complete_event.wait()
+                # Get run handle reference before waiting (cleaned up after completion).
+                run_handle = session_pool._get_active_run_handle(session_id)
+                await session_pool.wait_for_completion(session_id)
                 # Check if run was cancelled after the turn completed.
                 # When client sends session/cancel, cancel_session() calls
                 # cancel_run_for_session() which sets run_ctx.cancelled.
                 # The start() loop then publishes RunFailedEvent, which sets
                 # _turn_complete_event. We detect the cancelled flag to
                 # return stopReason="cancelled".
-                if run_handle.cancelled:
+                if run_handle is not None and run_handle.cancelled:
                     stop_reason = "cancelled"
         except asyncio.CancelledError:
             logger.info("Prompt processing cancelled", session_id=session_id)

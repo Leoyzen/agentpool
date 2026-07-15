@@ -499,12 +499,13 @@ async def test_steer_followup_inside_request_lock() -> None:
     fake_run = MagicMock()
     lock = controller._sessions[session_id]._request_lock
 
-    def _check_lock_and_steer(content: str) -> None:
+    def _check_lock_and_steer(content: str, *, message_id: str | None = None) -> None:
         nonlocal lock_was_held_during_steer
         lock_was_held_during_steer = lock.locked()
 
     fake_run.steer = _check_lock_and_steer
     fake_run.followup = MagicMock()
+    fake_run._run_state = MagicMock()  # Not RunState.DONE
     controller._runs["fake-run-id"] = fake_run
 
     await controller.receive_request(session_id, "steer me", priority="asap")

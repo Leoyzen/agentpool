@@ -312,8 +312,8 @@ class TestMessageRouting:
         )
 
         assert run_handle is not None
-        assert isinstance(run_handle, RunHandle)
-        assert run_handle.session_id == "test-session-004"
+        # D14: route_message now returns str (message_id), not RunHandle
+        assert isinstance(run_handle, str)
 
     @pytest.mark.asyncio
     async def test_route_message_with_when_idle_priority_queues(
@@ -344,13 +344,15 @@ class TestMessageRouting:
         )
         assert run_handle_1 is not None
 
-        # Second message should be queued (session is busy)
+        # Second message should be queued (session is busy).
+        # D14: receive_request now returns str (message_id) for both new runs
+        # and steer/followup. A non-None return means the message was accepted.
         run_handle_2 = await integration.route_message(
             session_id="test-session-005",
             content="Second message",
             priority="when_idle",
         )
-        assert run_handle_2 is None  # Queued, not started
+        assert run_handle_2 is not None  # Queued successfully (followup returned message_id)
 
     @pytest.mark.asyncio
     async def test_route_message_with_asap_priority_injects(
@@ -609,19 +611,23 @@ class TestSessionAbort:
 
         assert run_handle is not None
 
+        # D14: route_message now returns str (message_id), not RunHandle.
+        # Look up the RunHandle from the session pool for state checks.
+        sp_session = session_pool.sessions.get_session("test-session-011")
+        assert sp_session is not None
+        assert sp_session.current_run_id is not None
+        actual_handle = session_pool.get_run(sp_session.current_run_id)
+        assert actual_handle is not None
+
         # Give the background task time to start and transition to running
         await asyncio.sleep(0.05)
-        assert run_handle._run_state == RunState.RUNNING
+        assert actual_handle._run_state == RunState.RUNNING
 
         await integration.abort_session("test-session-011")
 
         # After abort, the run context should be cancelled.
-        # Note: run_handle.cancelled checks _turn_was_cancelled which is
-        # set in start()'s post-turn code. Since _consume_run closes the
-        # generator at the yield point, the post-turn code may not run.
-        # Instead, verify run_ctx.cancelled which is set directly by cancel().
         await asyncio.sleep(0.1)
-        assert run_handle.run_ctx.cancelled is True
+        assert actual_handle.run_ctx.cancelled is True
 
     @pytest.mark.asyncio
     async def test_abort_session_broadcasts_error_event(

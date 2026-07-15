@@ -1,4 +1,4 @@
-"""Lifecycle types: RunState, Prompt, Feedback, ResumeResult, ToolExecutionRecord, EventEnvelope.
+"""Lifecycle types: RunState, DeliveryMode, Prompt, Feedback, etc.
 
 These are the foundational data structures for the M2 lifecycle subsystem.
 M2 uses plain dataclasses; M6 will upgrade to Pydantic models with the same
@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+import uuid
 
 
 class RunState(Enum):
@@ -42,6 +43,25 @@ class RunOutcome(Enum):
     CHECKPOINTED = "checkpointed"
 
 
+class DeliveryMode(Enum):
+    """Delivery mode for feedback messages.
+
+    Unifies the naming across protocols:
+
+    - ACP v2 (RFD #1261): ``mode: "steer" | "queue"``
+    - OpenCode: ``SessionDelivery.Delivery = ["steer", "queue"]``
+    - PydanticAI internal: ``"asap"`` (drain before model request) /
+      ``"when_idle"`` (drain after node run)
+
+    The enum values (``"steer"``, ``"queue"``) match the ACP v2 and
+    OpenCode wire formats directly. ``Feedback.mode`` uses the same
+    string values so ``DeliveryMode`` can be used without conversion.
+    """
+
+    STEER = "steer"
+    QUEUE = "queue"
+
+
 @dataclass
 class Prompt:
     """Incoming prompt delivered to the RunLoop by a TriggerSource.
@@ -66,10 +86,28 @@ class Feedback:
         is_steer: ``True`` if this should steer the active Turn
             (injected mid-Turn); ``False`` if it is a followup
             queued for the next Turn.
+        message_id: Unique identifier for this feedback message.
+            Auto-generated as a UUID4 string. Callers can override
+            with an explicit value for protocol-provided IDs.
+        content_blocks: Structured/multimodal content blocks, or
+            ``None`` for plain-text feedback. When present, the
+            pipeline carries structured content through without
+            stringification.
+        mode: Delivery mode — ``"steer"`` or ``"queue"``. Auto-derived
+            from ``is_steer`` in ``__post_init__`` if not explicitly
+            set. Matches ACP v2 and OpenCode wire format values.
     """
 
     content: str
     is_steer: bool
+    message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    content_blocks: list[Any] | None = None
+    mode: str = ""
+
+    def __post_init__(self) -> None:
+        """Auto-derive ``mode`` from ``is_steer`` if not explicitly set."""
+        if not self.mode:
+            self.mode = DeliveryMode.STEER.value if self.is_steer else DeliveryMode.QUEUE.value
 
 
 @dataclass
@@ -141,6 +179,7 @@ class EventEnvelope:
 
 
 __all__ = [
+    "DeliveryMode",
     "EventEnvelope",
     "Feedback",
     "Prompt",

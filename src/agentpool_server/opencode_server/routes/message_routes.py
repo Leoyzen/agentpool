@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, assert_never
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from agentpool.lifecycle import RunOutcome
+from agentpool.agents.events import RunErrorEvent, RunFailedEvent
 from agentpool.log import get_logger
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
@@ -367,6 +367,9 @@ async def _process_message_locked(  # noqa: PLR0915
     )
 
     # --- Create assistant message ---
+    # D14: Generate the canonical assistant_msg_id. This is passed to
+    # receive_request(message_id=...) so it flows through the event pipeline
+    # and the consumer loop reuses it instead of generating its own.
     assistant_msg_id = identifier.ascending("message")
     now = now_ms()
     assistant_msg = AssistantMessage(
@@ -539,42 +542,53 @@ async def _process_message_locked(  # noqa: PLR0915
         # The _consume_events loop below only handles the parent session's
         # direct agent events; child events flow through the EventBus
         # independently via _consume_child_events.
+        # D13: Map delivery mode from request to priority.
+        # "steer" → "asap" (inject into active turn), "queue" → "when_idle".
+        delivery_priority = "asap" if request.delivery == "steer" else "when_idle"
         if integration is not None:
-            run_handle = await integration.route_message(
+            message_id = await integration.route_message(
                 session_id=session_id,
-                content=user_prompt,
-                priority="when_idle",
+                content=list(user_prompt),
+                priority=delivery_priority,
                 input_provider=input_provider,
                 agent_name=agent_name,
+                message_id=assistant_msg_id,
             )
         else:
-            run_handle = await session_pool.receive_request(
+            message_id = await session_pool.receive_request(
                 session_id=session_id,
-                content=user_prompt,
-                priority="when_idle",
+                content=list(user_prompt),
+                priority=delivery_priority,
                 input_provider=input_provider,
+                message_id=assistant_msg_id,
             )
 
-        if run_handle is not None:
+        if message_id is not None:
             # Subscribe to EventBus locally so the adapter receives events
             # and accumulates response_text / tokens for finalize().
             # The session-scoped consumer (_event_consumer_loop) already
             # broadcasts SSE events; we only feed the adapter context here.
             event_stream = await session_pool.event_bus.subscribe(session_id)
 
+            # Track whether the run failed via event observation
+            run_failed = False
+
             async def _feed_adapter() -> None:
                 from agentpool.orchestrator.core import drain_and_merge
 
+                nonlocal run_failed
                 async for event in drain_and_merge(event_stream):
+                    if isinstance(event.event, (RunErrorEvent, RunFailedEvent)):
+                        run_failed = True
                     async for _ in adapter.convert_event(event.event):
                         pass
 
             adapter_task = asyncio.create_task(_feed_adapter(), name=f"adapter_feed_{session_id}")
 
             try:
-                await run_handle.complete_event.wait()
+                await session_pool.wait_for_completion(session_id)
             except asyncio.CancelledError:
-                run_handle.cancel()
+                session_pool.sessions.cancel_run_for_session(session_id)
                 raise
             finally:
                 adapter_task.cancel()
@@ -583,7 +597,7 @@ async def _process_message_locked(  # noqa: PLR0915
                 await session_pool.event_bus.unsubscribe(session_id, event_stream)
 
             # Finalize based on run outcome
-            if run_handle.outcome != RunOutcome.FAILED:
+            if not run_failed:
                 for oc_event in adapter.finalize():
                     await state.broadcast_event(oc_event)
 
@@ -781,15 +795,21 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
             agent=state.agent,
         )
 
+        # D13: Map delivery mode from request to priority.
+        delivery_priority = "asap" if request.delivery == "steer" else "when_idle"
+        # D14: Generate assistant_msg_id and pass to receive_request so the
+        # consumer loop reuses it instead of generating an independent one.
+        async_assistant_msg_id = identifier.ascending("message")
         # Use integration layer to ensure session creation and event consumer startup
         integration = state.session_pool_integration
         if integration is not None:
             await integration.route_message(
                 session_id=session_id,
-                content=user_prompt,
-                priority="when_idle",
+                content=list(user_prompt),
+                priority=delivery_priority,
                 input_provider=input_provider,
                 agent_name=agent_name,
+                message_id=async_assistant_msg_id,
             )
         else:
             sp_state, _was_created = await session_pool.sessions.get_or_create_session(
@@ -800,9 +820,10 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
 
             await session_pool.receive_request(
                 session_id=session_id,
-                content=user_prompt,
-                priority="when_idle",
+                content=list(user_prompt),
+                priority=delivery_priority,
                 input_provider=input_provider,
+                message_id=async_assistant_msg_id,
             )
 
 

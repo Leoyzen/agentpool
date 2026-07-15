@@ -4,9 +4,17 @@ Exposes ``spawn_subagent`` and ``get_available_agents`` tools that
 delegate to ``ctx.deps.delegation`` (a ``DelegationService`` Protocol)
 at runtime. This replaces ``SubagentCapability`` with a lightweight
 ``AbstractCapability`` that has no direct ``AgentPool`` reference.
+
+In M2+, the preferred path is ``ctx.host.session_pool.run_agent()``
+for spawning and ``ctx.agent_registry.list_names()`` for listing.
+The old ``DelegationService`` path is used as a fallback when
+``session_pool`` is not available, emitting a ``DeprecationWarning``.
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
+import warnings
 
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.tools import AgentDepsT, RunContext
@@ -15,20 +23,24 @@ from pydantic_ai.toolsets import AgentToolset, FunctionToolset
 from agentpool.capabilities.delegation import AgentNotFoundError, DelegationService
 
 
+if TYPE_CHECKING:
+    from agentpool.capabilities.agent_context import AgentContext
+
+
 class SubagentCapability(AbstractCapability[AgentDepsT]):
     """Capability providing subagent delegation tools.
 
     Exposes two tools via ``get_toolset()``:
 
     - ``spawn_subagent(name, prompt)``: delegates to
-      ``ctx.deps.delegation.spawn_subagent()`` and collects the
-      streaming output into a final string.
+      ``ctx.host.session_pool.run_agent()`` (preferred) or falls back
+      to ``ctx.deps.delegation.spawn_subagent()`` (deprecated).
     - ``get_available_agents()``: delegates to
-      ``ctx.deps.delegation.get_available_agents()`` returning the
-      list of agent names available for delegation.
+      ``ctx.agent_registry.list_names()`` (preferred) or falls back
+      to ``ctx.deps.delegation.get_available_agents()`` (deprecated).
 
     The capability holds no ``AgentPool`` reference — all delegation
-    goes through the ``DelegationService`` Protocol at runtime.
+    goes through the ``AgentContext`` at runtime.
     """
 
     def __init__(self, *, toolset_id: str = "subagent") -> None:
@@ -87,8 +99,25 @@ class SubagentCapability(AbstractCapability[AgentDepsT]):
             name: Name of the agent to delegate to.
             prompt: Task description to send to the subagent.
         """
-        delegation = _resolve_delegation(ctx)
-        stream = delegation.spawn_subagent(name, prompt)
+        agent_ctx = _resolve_agent_context(ctx)
+        # Preferred path: use session_pool.run_agent() (D24).
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is not None:
+            return await session_pool.run_agent(
+                name,
+                prompt,
+                parent_session_id=agent_ctx.session.session_id,
+            )
+        # Fallback: old DelegationService path (deprecated).
+        warnings.warn(
+            "SubagentCapability.spawn_subagent() fell back to the "
+            "deprecated DelegationService.spawn_subagent() because "
+            "session_pool is None. Use ctx.host.session_pool.run_agent() "
+            "instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        stream = agent_ctx.delegation.spawn_subagent(name, prompt)
         chunks = [str(chunk) async for chunk in stream]
         return "\n".join(chunks) if chunks else ""
 
@@ -101,27 +130,28 @@ class SubagentCapability(AbstractCapability[AgentDepsT]):
         Returns:
             Sorted list of agent names in the registry.
         """
-        delegation = _resolve_delegation(ctx)
-        return delegation.get_available_agents()
+        agent_ctx = _resolve_agent_context(ctx)
+        # Preferred path: use agent_registry.list_names() (D24).
+        return agent_ctx.agent_registry.list_names()
 
 
-def _resolve_delegation(ctx: RunContext[AgentDepsT]) -> DelegationService:
-    """Extract the ``DelegationService`` from the run context deps.
+def _resolve_agent_context(ctx: RunContext[AgentDepsT]) -> AgentContext:
+    """Extract the ``AgentContext`` from the run context deps.
 
     Args:
         ctx: The pydantic-ai run context.
 
     Returns:
-        The ``DelegationService`` instance from ``ctx.deps.delegation``.
+        The ``AgentContext`` instance from ``ctx.deps``.
 
     Raises:
-        RuntimeError: If deps does not have a ``delegation`` field.
+        RuntimeError: If deps is not an ``AgentContext``.
     """
     from agentpool.capabilities.agent_context import AgentContext
 
     deps = ctx.deps
     if isinstance(deps, AgentContext):
-        return deps.delegation
+        return deps
     msg = (
         "SubagentCapability requires AgentContext as deps with a "
         "'delegation' field. "
@@ -130,6 +160,8 @@ def _resolve_delegation(ctx: RunContext[AgentDepsT]) -> DelegationService:
     raise RuntimeError(msg)
 
 
+# Kept for backward compatibility — callers that import
+# DelegationService from this module still work.
 __all__ = [
     "AgentNotFoundError",
     "DelegationService",

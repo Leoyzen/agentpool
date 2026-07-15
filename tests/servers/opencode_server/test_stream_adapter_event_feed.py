@@ -113,12 +113,22 @@ def mock_agent_with_event_bus(tmp_project_dir):
     session_pool.sessions.get_or_create_session = AsyncMock(return_value=(Mock(), True))
     session_pool.event_bus = event_bus
 
-    # RunHandle whose complete_event we control from the test
+    # D14: receive_request now returns str (message_id), not RunHandle.
+    # wait_for_completion is used to wait for the run to finish.
     run_handle = Mock()
     run_handle._run_state = RunState.DONE
     run_handle.outcome = RunOutcome.COMPLETED
     run_handle.complete_event = asyncio.Event()
-    session_pool.receive_request = AsyncMock(return_value=run_handle)
+    session_pool.receive_request = AsyncMock(return_value="msg_test_run")
+
+    # wait_for_completion waits on the same event the test controls
+    async def _mock_wait_for_completion(
+        sid: str, timeout: float | None = None,
+    ) -> str:
+        await asyncio.wait_for(run_handle.complete_event.wait(), timeout=timeout or 30.0)
+        return sid
+
+    session_pool.wait_for_completion = _mock_wait_for_completion
 
     pool.session_pool = session_pool
     agent.agent_pool = pool

@@ -288,12 +288,12 @@ def acp_to_native_event(update: SessionUpdate) -> RichAgentStreamEvent[Any] | No
     """
     match update:
         # Text message chunks -> PartDeltaEvent with TextPartDelta
-        case AgentMessageChunk(content=TextContentBlock(text=text)):
-            return PartDeltaEvent.text(index=0, content=text)
+        case AgentMessageChunk(content=TextContentBlock(text=text), message_id=msg_id):
+            return PartDeltaEvent.text(index=0, content=text, message_id=msg_id or "")
 
         # Thought chunks -> PartDeltaEvent with ThinkingPartDelta
-        case AgentThoughtChunk(content=TextContentBlock(text=text)):
-            return PartDeltaEvent.thinking(index=0, content=text)
+        case AgentThoughtChunk(content=TextContentBlock(text=text), message_id=msg_id):
+            return PartDeltaEvent.thinking(index=0, content=text, message_id=msg_id or "")
 
         # User message echo - usually ignored
         case UserMessageChunk():
@@ -334,7 +334,7 @@ def acp_to_native_event(update: SessionUpdate) -> RichAgentStreamEvent[Any] | No
                     tool_input={},  # ACP doesn't provide input in progress updates
                     tool_result=str(raw_output) if raw_output else "",
                     agent_name="",  # Will be set by agent
-                    message_id="",
+                    message_id="",  # Will be set by ACPTurn from _message_id
                     metadata=None,  # Will be injected by agent from metadata accumulator
                 )
             # Otherwise return progress event
@@ -493,6 +493,9 @@ class ACPMessageAccumulator:
     _last_parent_id: str | None = field(default=None, repr=False)
     """Parent ID for linking messages."""
 
+    _current_message_id: str = field(default="", repr=False)
+    """Current message ID from ACP updates, preserved for finalize."""
+
     def reset(self) -> None:
         """Reset accumulator state for a new conversation."""
         self._current_role = None
@@ -502,6 +505,7 @@ class ACPMessageAccumulator:
         self._completed_tool_calls.clear()
         self._messages.clear()
         self._last_parent_id = None
+        self._current_message_id = ""
 
     def _finalize_current_message(self) -> None:
         """Finalize the current message and add it to the messages list."""
@@ -509,7 +513,7 @@ class ACPMessageAccumulator:
 
         if self._current_role is None:
             return
-        message_id = str(uuid4())
+        message_id = self._current_message_id if self._current_message_id else str(uuid4())
         if self._current_role == "user":
             # Build user message
             content = "".join(self._text_buffer)
@@ -598,6 +602,7 @@ class ACPMessageAccumulator:
         self._pending_tool_calls.clear()
         self._completed_tool_calls.clear()
         self._current_role = None
+        self._current_message_id = ""
 
     def _switch_role(self, new_role: Literal["user", "assistant"]) -> None:
         """Switch to a new role, finalizing the current message if needed."""
@@ -605,23 +610,37 @@ class ACPMessageAccumulator:
             self._finalize_current_message()
         self._current_role = new_role
 
+    def _update_message_id(self, message_id: str | None) -> None:
+        """Update the current message ID, finalizing if it changed.
+
+        A change in message_id indicates a new message has started,
+        so we finalize the current message before processing the new one.
+        """
+        if message_id and message_id != self._current_message_id:
+            if self._current_role is not None:
+                self._finalize_current_message()
+            self._current_message_id = message_id
+
     def process(self, update: SessionUpdate) -> None:
         """Process a single ACP session update."""
         match update:
             # User message chunks → switch to user role
-            case UserMessageChunk(content=content_block):
+            case UserMessageChunk(content=content_block, message_id=msg_id):
+                self._update_message_id(msg_id)
                 self._switch_role("user")
                 if isinstance(content_block, TextContentBlock):
                     self._text_buffer.append(content_block.text)
 
             # Agent message chunks → switch to assistant role
-            case AgentMessageChunk(content=content_block):
+            case AgentMessageChunk(content=content_block, message_id=msg_id):
+                self._update_message_id(msg_id)
                 self._switch_role("assistant")
                 if isinstance(content_block, TextContentBlock):
                     self._text_buffer.append(content_block.text)
 
             # Agent thought chunks → assistant role thinking
-            case AgentThoughtChunk(content=content_block):
+            case AgentThoughtChunk(content=content_block, message_id=msg_id):
+                self._update_message_id(msg_id)
                 self._switch_role("assistant")
                 if isinstance(content_block, TextContentBlock):
                     self._thinking_buffer.append(content_block.text)

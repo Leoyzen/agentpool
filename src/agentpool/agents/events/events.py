@@ -49,39 +49,51 @@ ToolCallStatus = Literal["pending", "in_progress", "completed", "failed"]
 # Lifecycle events (aligned with AG-UI protocol)
 
 
+@dataclass(kw_only=True)
 class PartStartEvent(PyAIPartStartEvent):
     """Part start event."""
 
     session_id: str = ""
     """ID of the session that emitted this event."""
 
-    @classmethod
-    def thinking(cls, index: int, content: str) -> PartStartEvent:
-        return cls(index=index, part=ThinkingPart(content=content))
+    message_id: str = ""
+    """ID of the message this event belongs to."""
 
     @classmethod
-    def text(cls, index: int, content: str) -> PartStartEvent:
-        return cls(index=index, part=TextPart(content=content))
+    def thinking(cls, index: int, content: str, *, message_id: str = "") -> PartStartEvent:
+        return cls(index=index, part=ThinkingPart(content=content), message_id=message_id)
+
+    @classmethod
+    def text(cls, index: int, content: str, *, message_id: str = "") -> PartStartEvent:
+        return cls(index=index, part=TextPart(content=content), message_id=message_id)
 
 
+@dataclass(kw_only=True)
 class PartDeltaEvent(PyAIPartDeltaEvent):
-    """Part start event."""
+    """Part delta event."""
 
     session_id: str = ""
     """ID of the session that emitted this event."""
 
-    @classmethod
-    def thinking(cls, index: int, content: str) -> PartDeltaEvent:
-        return cls(index=index, delta=ThinkingPartDelta(content_delta=content))
+    message_id: str = ""
+    """ID of the message this event belongs to."""
 
     @classmethod
-    def text(cls, index: int, content: str) -> PartDeltaEvent:
-        return cls(index=index, delta=TextPartDelta(content_delta=content))
+    def thinking(cls, index: int, content: str, *, message_id: str = "") -> PartDeltaEvent:
+        return cls(
+            index=index, delta=ThinkingPartDelta(content_delta=content), message_id=message_id
+        )
 
     @classmethod
-    def tool_call(cls, index: int, content: str, tool_call_id: str) -> PartDeltaEvent:
+    def text(cls, index: int, content: str, *, message_id: str = "") -> PartDeltaEvent:
+        return cls(index=index, delta=TextPartDelta(content_delta=content), message_id=message_id)
+
+    @classmethod
+    def tool_call(
+        cls, index: int, content: str, tool_call_id: str, *, message_id: str = ""
+    ) -> PartDeltaEvent:
         delta = ToolCallPartDelta(args_delta=content, tool_call_id=tool_call_id)
-        return cls(index=index, delta=delta)
+        return cls(index=index, delta=delta, message_id=message_id)
 
 
 @dataclass(kw_only=True)

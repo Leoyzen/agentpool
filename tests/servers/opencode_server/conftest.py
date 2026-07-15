@@ -248,6 +248,7 @@ def mock_pool(  # noqa: PLR0915
     _run_handle.complete_event = Mock()
     _run_handle.complete_event.wait = AsyncMock()
     pool.session_pool.receive_request = AsyncMock(return_value=_run_handle)
+    pool.session_pool.wait_for_completion = AsyncMock(return_value="test-session")
     pool.session_pool.event_bus = _make_functional_event_bus()
     pool.session_pool.sessions.store = Mock()
     pool.session_pool.sessions.store.save = storage_manager.save_session

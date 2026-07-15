@@ -288,7 +288,9 @@ async def test_close_session_after_cancel() -> None:
     mock_pool.get_agent.return_value = agent
 
     # --- Step 1: Start a run with the blocking agent ---
-    run_handle = await session_pool.receive_request(session_id, "blocking prompt")
+    msg_id = await session_pool.receive_request(session_id, "blocking prompt")
+    assert msg_id is not None
+    run_handle = session_pool._get_active_run_handle(session_id)
     assert run_handle is not None
 
     # Wait for the blocking turn to start

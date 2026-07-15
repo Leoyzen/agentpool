@@ -17,6 +17,7 @@ from agentpool.agents.events import (
 )
 from agentpool.lifecycle import (
     CommChannel,
+    DeliveryMode,
     DirectChannel,
     Feedback,
     MemoryJournal,
@@ -559,10 +560,10 @@ def test_protocol_channel_close_drains_feedback_queue():
 
     channel.deliver_feedback(Feedback(content="fb1", is_steer=True))
     channel.deliver_feedback(Feedback(content="fb2", is_steer=False))
-    assert channel._feedback_queue.qsize() == 2
+    assert len(channel._feedback_queue) == 2
 
     channel.close()
-    assert channel._feedback_queue.empty()
+    assert len(channel._feedback_queue) == 0
 
 
 def test_protocol_channel_recv_none_after_close():
@@ -615,3 +616,389 @@ def test_protocol_channel_replaying_default_false():
     mock_bus = AsyncMock(spec=EventBus)
     channel = ProtocolChannel(MemoryJournal(), mock_bus)
     assert channel._replaying is False
+
+
+# ---------------------------------------------------------------------------
+# Feedback type extension tests
+# ---------------------------------------------------------------------------
+
+
+def test_feedback_auto_generates_message_id():
+    """Feedback auto-generates a UUID message_id when not provided."""
+    fb = Feedback(content="hello", is_steer=True)
+    assert fb.message_id  # non-empty string
+    assert isinstance(fb.message_id, str)
+
+
+def test_feedback_explicit_message_id_override():
+    """Feedback accepts an explicit message_id override."""
+    fb = Feedback(content="hello", is_steer=True, message_id="custom-id-123")
+    assert fb.message_id == "custom-id-123"
+
+
+def test_feedback_message_id_unique_per_instance():
+    """Each Feedback instance gets a unique auto-generated message_id."""
+    fb1 = Feedback(content="a", is_steer=True)
+    fb2 = Feedback(content="b", is_steer=True)
+    assert fb1.message_id != fb2.message_id
+
+
+def test_feedback_mode_derived_from_is_steer_true():
+    """Feedback with is_steer=True derives mode='steer'."""
+    fb = Feedback(content="steer msg", is_steer=True)
+    assert fb.mode == "steer"
+    assert fb.mode == DeliveryMode.STEER.value
+
+
+def test_feedback_mode_derived_from_is_steer_false():
+    """Feedback with is_steer=False derives mode='queue'."""
+    fb = Feedback(content="queue msg", is_steer=False)
+    assert fb.mode == "queue"
+    assert fb.mode == DeliveryMode.QUEUE.value
+
+
+def test_feedback_mode_explicit_override():
+    """Feedback accepts an explicit mode override."""
+    fb = Feedback(content="msg", is_steer=True, mode="queue")
+    assert fb.mode == "queue"
+
+
+def test_feedback_content_blocks_default_none():
+    """Feedback.content_blocks defaults to None."""
+    fb = Feedback(content="text", is_steer=True)
+    assert fb.content_blocks is None
+
+
+def test_feedback_content_blocks_passthrough():
+    """Feedback accepts content_blocks for structured content."""
+    blocks: list[str] = ["text part", "image part"]
+    fb = Feedback(content="", is_steer=True, content_blocks=blocks)
+    assert fb.content_blocks is blocks
+
+
+def test_feedback_existing_construction_still_works():
+    """Existing Feedback(content=..., is_steer=...) construction still works."""
+    fb = Feedback(content="legacy", is_steer=True)
+    assert fb.content == "legacy"
+    assert fb.is_steer is True
+    assert fb.message_id  # auto-generated
+    assert fb.mode == "steer"
+    assert fb.content_blocks is None
+
+
+# ---------------------------------------------------------------------------
+# DeliveryMode enum tests
+# ---------------------------------------------------------------------------
+
+
+def test_delivery_mode_steer_value():
+    """DeliveryMode.STEER value is 'steer'."""
+    assert DeliveryMode.STEER.value == "steer"
+
+
+def test_delivery_mode_queue_value():
+    """DeliveryMode.QUEUE value is 'queue'."""
+    assert DeliveryMode.QUEUE.value == "queue"
+
+
+def test_delivery_mode_feedback_construction_steer():
+    """Feedback can be constructed with DeliveryMode.STEER for mode."""
+    fb = Feedback(content="msg", is_steer=True, mode=DeliveryMode.STEER.value)
+    assert fb.mode == "steer"
+
+
+def test_delivery_mode_feedback_construction_queue():
+    """Feedback can be constructed with DeliveryMode.QUEUE for mode."""
+    fb = Feedback(content="msg", is_steer=False, mode=DeliveryMode.QUEUE.value)
+    assert fb.mode == "queue"
+
+
+# ---------------------------------------------------------------------------
+# DirectChannel — revoke / replace (no-ops)
+# ---------------------------------------------------------------------------
+
+
+def test_direct_channel_revoke_returns_false():
+    """DirectChannel.revoke() always returns False."""
+    channel = DirectChannel(MemoryJournal())
+    assert channel.revoke("some-id") is False
+
+
+def test_direct_channel_replace_returns_false():
+    """DirectChannel.replace() always returns False."""
+    channel = DirectChannel(MemoryJournal())
+    assert channel.replace("some-id", "new content") is False
+    assert channel.replace("some-id", ["block1", "block2"]) is False
+
+
+# ---------------------------------------------------------------------------
+# ProtocolChannel — revoke (CommChannel layer)
+# ---------------------------------------------------------------------------
+
+
+def test_protocol_channel_revoke_before_delivery():
+    """revoke() removes pending feedback from the queue."""
+    mock_bus = AsyncMock(spec=EventBus)
+    channel = ProtocolChannel(MemoryJournal(), mock_bus)
+    fb = Feedback(content="steer msg", is_steer=True)
+
+    channel.deliver_feedback(fb)
+    assert fb.message_id in channel._pending
+
+    result = channel.revoke(fb.message_id)
+    assert result is True
+    assert fb.message_id not in channel._pending
+    assert fb.message_id in channel._revoked
+    assert len(channel._feedback_queue) == 0
+    assert channel.recv() is None
+
+
+def test_protocol_channel_revoke_after_delivery_returns_false():
+    """revoke() returns False for already-delivered feedback."""
+    mock_bus = AsyncMock(spec=EventBus)
+    channel = ProtocolChannel(MemoryJournal(), mock_bus)
+    fb = Feedback(content="steer msg", is_steer=True)
+
+    channel.deliver_feedback(fb)
+    delivered = channel.recv()
+    assert delivered is fb
+
+    result = channel.revoke(fb.message_id)
+    assert result is False
+    assert fb.message_id in channel._delivered
+
+
+def test_protocol_channel_revoke_unknown_returns_true():
+    """revoke() returns True for unknown message_id (idempotent)."""
+    mock_bus = AsyncMock(spec=EventBus)
+    channel = ProtocolChannel(MemoryJournal(), mock_bus)
+    result = channel.revoke("nonexistent-id")
+    assert result is True
+
+
+def test_protocol_channel_revoke_already_revoked_returns_true():
+    """revoke() returns True for already-revoked message_id."""
+    mock_bus = AsyncMock(spec=EventBus)
+    channel = ProtocolChannel(MemoryJournal(), mock_bus)
+    fb = Feedback(content="msg", is_steer=True)
+
+    channel.deliver_feedback(fb)
+    assert channel.revoke(fb.message_id) is True
+    # Second revoke — already in _revoked, not in _pending → falls through to True
+    assert channel.revoke(fb.message_id) is True
+
+
+def test_protocol_channel_deliver_after_revoke_rejected():
+    """deliver_feedback() for a revoked message_id is rejected (not enqueued)."""
+    mock_bus = AsyncMock(spec=EventBus)
+    channel = ProtocolChannel(MemoryJournal(), mock_bus)
+    fb = Feedback(content="msg", is_steer=True)
+
+    channel.deliver_feedback(fb)
+    channel.revoke(fb.message_id)
+
+    # Attempt to re-deliver the same message_id
+    fb2 = Feedback(content="msg again", is_steer=True, message_id=fb.message_id)
+    channel.deliver_feedback(fb2)
+    assert fb.message_id not in channel._pending
+    assert len(channel._feedback_queue) == 0
+
+
+def test_protocol_channel_recv_marks_delivered():
+    """recv() transitions feedback from _pending to _delivered."""
+    mock_bus = AsyncMock(spec=EventBus)
+    channel = ProtocolChannel(MemoryJournal(), mock_bus)
+    fb = Feedback(content="msg", is_steer=True)
+
+    channel.deliver_feedback(fb)
+    assert fb.message_id in channel._pending
+    assert fb.message_id not in channel._delivered
+
+    result = channel.recv()
+    assert result is fb
+    assert fb.message_id not in channel._pending
+    assert fb.message_id in channel._delivered
+
+
+# ---------------------------------------------------------------------------
+# ProtocolChannel — replace
+# ---------------------------------------------------------------------------
+
+
+def test_protocol_channel_replace_pending_string():
+    """replace() updates content for pending feedback with string content."""
+    mock_bus = AsyncMock(spec=EventBus)
+    channel = ProtocolChannel(MemoryJournal(), mock_bus)
+    fb = Feedback(content="original", is_steer=False)
+
+    channel.deliver_feedback(fb)
+    result = channel.replace(fb.message_id, "replaced content")
+
+    assert result is True
+    assert fb.content == "replaced content"
+    assert fb.content_blocks is None
+
+
+def test_protocol_channel_replace_pending_list():
+    """replace() updates content_blocks for pending feedback with list content."""
+    mock_bus = AsyncMock(spec=EventBus)
+    channel = ProtocolChannel(MemoryJournal(), mock_bus)
+    fb = Feedback(content="original", is_steer=False)
+
+    channel.deliver_feedback(fb)
+    new_blocks: list[str] = ["block1", "block2"]
+    result = channel.replace(fb.message_id, new_blocks)
+
+    assert result is True
+    assert fb.content == ""
+    assert fb.content_blocks == new_blocks
+
+
+def test_protocol_channel_replace_delivered_returns_false():
+    """replace() returns False for already-delivered feedback."""
+    mock_bus = AsyncMock(spec=EventBus)
+    channel = ProtocolChannel(MemoryJournal(), mock_bus)
+    fb = Feedback(content="original", is_steer=False)
+
+    channel.deliver_feedback(fb)
+    channel.recv()
+
+    result = channel.replace(fb.message_id, "new content")
+    assert result is False
+
+
+def test_protocol_channel_replace_enqueued_returns_false():
+    """replace() returns False for feedback already enqueued to PydanticAI."""
+    mock_bus = AsyncMock(spec=EventBus)
+    channel = ProtocolChannel(MemoryJournal(), mock_bus)
+    fb = Feedback(content="original", is_steer=True)
+
+    channel.deliver_feedback(fb)
+    # Simulate enqueue tracking
+    channel._track_enqueued(fb.message_id, ["fake_pending_msg"])
+
+    result = channel.replace(fb.message_id, "new content")
+    assert result is False
+
+
+def test_protocol_channel_replace_unknown_returns_false():
+    """replace() returns False for unknown message_id."""
+    mock_bus = AsyncMock(spec=EventBus)
+    channel = ProtocolChannel(MemoryJournal(), mock_bus)
+    result = channel.replace("nonexistent", "new content")
+    assert result is False
+
+
+# ---------------------------------------------------------------------------
+# ProtocolChannel — _track_enqueued
+# ---------------------------------------------------------------------------
+
+
+def test_protocol_channel_track_enqueued_stores_references():
+    """_track_enqueued stores PendingMessage references in _enqueued."""
+    mock_bus = AsyncMock(spec=EventBus)
+    channel = ProtocolChannel(MemoryJournal(), mock_bus)
+
+    fake_items: list[str] = ["pm1", "pm2"]
+    channel._track_enqueued("msg-id-1", fake_items)
+
+    assert "msg-id-1" in channel._enqueued
+    assert channel._enqueued["msg-id-1"] == fake_items
+
+
+def test_protocol_channel_track_enqueued_empty_list_noop():
+    """_track_enqueued with empty list does not create an entry."""
+    mock_bus = AsyncMock(spec=EventBus)
+    channel = ProtocolChannel(MemoryJournal(), mock_bus)
+
+    channel._track_enqueued("msg-id-1", [])
+
+    assert "msg-id-1" not in channel._enqueued
+
+
+def test_protocol_channel_revoke_enqueued_removes_from_pending_messages():
+    """revoke() removes PendingMessage refs from agent_run.pending_messages."""
+    mock_bus = AsyncMock(spec=EventBus)
+    channel = ProtocolChannel(MemoryJournal(), mock_bus)
+
+    # Simulate a PendingMessage and agent_run with pending_messages list
+    class FakePendingMessage:
+        pass
+
+    class FakeAgentRun:
+        def __init__(self) -> None:
+            self.pending_messages: list[FakePendingMessage] = []
+
+    class FakeRunLoop:
+        def __init__(self) -> None:
+            self._active_agent_run = FakeAgentRun()
+
+    run_loop = FakeRunLoop()
+    pm = FakePendingMessage()
+    run_loop._active_agent_run.pending_messages.append(pm)
+    channel.attach(run_loop)
+
+    channel._track_enqueued("msg-id-1", [pm])
+    assert "msg-id-1" in channel._enqueued
+
+    result = channel.revoke("msg-id-1")
+    assert result is True
+    assert pm not in run_loop._active_agent_run.pending_messages
+    assert "msg-id-1" not in channel._enqueued
+
+
+def test_protocol_channel_revoke_enqueued_already_drained():
+    """revoke() handles ValueError when PendingMessage already drained."""
+    mock_bus = AsyncMock(spec=EventBus)
+    channel = ProtocolChannel(MemoryJournal(), mock_bus)
+
+    class FakePendingMessage:
+        pass
+
+    class FakeAgentRun:
+        def __init__(self) -> None:
+            self.pending_messages: list[FakePendingMessage] = []
+
+    class FakeRunLoop:
+        def __init__(self) -> None:
+            self._active_agent_run = FakeAgentRun()
+
+    run_loop = FakeRunLoop()
+    pm = FakePendingMessage()
+    # Don't add pm to pending_messages — simulate already drained
+    channel.attach(run_loop)
+    channel._track_enqueued("msg-id-1", [pm])
+
+    result = channel.revoke("msg-id-1")
+    assert result is True  # idempotent — already gone
+
+
+# ---------------------------------------------------------------------------
+# ProtocolChannel — close clears all tracking structures
+# ---------------------------------------------------------------------------
+
+
+def test_protocol_channel_close_clears_all_tracking_structures():
+    """close() clears _pending, _revoked, _delivered, _enqueued."""
+    mock_bus = AsyncMock(spec=EventBus)
+    channel = ProtocolChannel(MemoryJournal(), mock_bus)
+
+    fb1 = Feedback(content="fb1", is_steer=True)
+    fb2 = Feedback(content="fb2", is_steer=False)
+    channel.deliver_feedback(fb1)
+    channel.deliver_feedback(fb2)
+    channel._track_enqueued("fake-id", ["pm1"])
+    # Revoke fb1 to populate _revoked
+    channel.revoke(fb1.message_id)
+
+    assert len(channel._pending) > 0
+    assert len(channel._revoked) > 0
+    assert len(channel._enqueued) > 0
+
+    channel.close()
+
+    assert len(channel._feedback_queue) == 0
+    assert len(channel._pending) == 0
+    assert len(channel._revoked) == 0
+    assert len(channel._delivered) == 0
+    assert len(channel._enqueued) == 0

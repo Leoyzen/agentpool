@@ -1,7 +1,7 @@
 """Tests for SessionController.receive_request() ACP RunHandle path.
 
 Covers three scenarios:
-1. ACPAgent + idle -> creates RunHandle.
+1. ACPAgent + idle -> creates RunHandle, returns message_id.
 2. ACPAgent + busy + asap -> calls RunHandle.steer().
 3. ACPAgent + busy + when_idle -> calls RunHandle.followup().
 """
@@ -77,17 +77,17 @@ def _setup_session(
 
 
 # ---------------------------------------------------------------------------
-# Test 1: ACPAgent + idle -> creates RunHandle
+# Test 1: ACPAgent + idle -> creates RunHandle, returns message_id
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_acp_flag_on_idle_creates_run_handle(
+async def test_acp_idle_creates_run_handle_and_returns_message_id(
     controller: SessionController,
     event_bus: EventBus,
     mock_acp_agent: MagicMock,
 ) -> None:
-    """When session is idle, a RunHandle is created."""
+    """When session is idle, a RunHandle is created and message_id returned."""
     controller._event_bus = event_bus
     _setup_session(controller, "sess-1", mock_acp_agent)
 
@@ -96,15 +96,17 @@ async def test_acp_flag_on_idle_creates_run_handle(
 
     result = await controller.receive_request("sess-1", "hello")
 
+    # receive_request() now returns str | None (message_id)
     assert result is not None
-    assert isinstance(result, RunHandle)
-    assert result.agent is mock_acp_agent
-    assert result.event_bus is event_bus
-    assert result.session is controller.get_session("sess-1")
-    assert result.run_id in controller._runs
+    assert isinstance(result, str)
+    # A RunHandle should have been created and registered
     session = controller.get_session("sess-1")
     assert session is not None
-    assert session.current_run_id == result.run_id
+    assert session.current_run_id is not None
+    run_handle = controller._runs.get(session.current_run_id)
+    assert run_handle is not None
+    assert run_handle.agent is mock_acp_agent
+    assert run_handle.event_bus is event_bus
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +115,7 @@ async def test_acp_flag_on_idle_creates_run_handle(
 
 
 @pytest.mark.anyio
-async def test_acp_flag_on_busy_asap_calls_steer(
+async def test_acp_busy_asap_calls_steer(
     controller: SessionController,
     event_bus: EventBus,
     mock_acp_agent: MagicMock,
@@ -123,15 +125,17 @@ async def test_acp_flag_on_busy_asap_calls_steer(
     _setup_session(controller, "sess-2", mock_acp_agent)
 
     existing_run = MagicMock(spec=RunHandle)
-    existing_run.steer = MagicMock(return_value=True)
-    existing_run.followup = MagicMock(return_value=True)
+    existing_run.steer = MagicMock(return_value="msg-steer-id")
+    existing_run.followup = MagicMock(return_value="msg-followup-id")
+    existing_run._run_state = MagicMock()  # Not RunState.DONE
     existing_run.run_id = "existing-run-id"
     controller._runs["existing-run-id"] = existing_run
     controller.get_session("sess-2").current_run_id = "existing-run-id"  # type: ignore[union-attr]
 
-    await controller.receive_request("sess-2", "urgent", priority="asap")
+    result = await controller.receive_request("sess-2", "urgent", priority="asap")
 
-    existing_run.steer.assert_called_once_with("urgent")
+    assert result == "msg-steer-id"
+    existing_run.steer.assert_called_once_with("urgent", message_id=None)
     existing_run.followup.assert_not_called()
 
 
@@ -141,7 +145,7 @@ async def test_acp_flag_on_busy_asap_calls_steer(
 
 
 @pytest.mark.anyio
-async def test_acp_flag_on_busy_when_idle_calls_followup(
+async def test_acp_busy_when_idle_calls_followup(
     controller: SessionController,
     event_bus: EventBus,
     mock_acp_agent: MagicMock,
@@ -151,15 +155,17 @@ async def test_acp_flag_on_busy_when_idle_calls_followup(
     _setup_session(controller, "sess-3", mock_acp_agent)
 
     existing_run = MagicMock(spec=RunHandle)
-    existing_run.steer = MagicMock(return_value=True)
-    existing_run.followup = MagicMock(return_value=True)
+    existing_run.steer = MagicMock(return_value="msg-steer-id")
+    existing_run.followup = MagicMock(return_value="msg-followup-id")
+    existing_run._run_state = MagicMock()  # Not RunState.DONE
     existing_run.run_id = "existing-run-id"
     controller._runs["existing-run-id"] = existing_run
     controller.get_session("sess-3").current_run_id = "existing-run-id"  # type: ignore[union-attr]
 
-    await controller.receive_request("sess-3", "later", priority="when_idle")
+    result = await controller.receive_request("sess-3", "later", priority="when_idle")
 
-    existing_run.followup.assert_called_once_with("later")
+    assert result == "msg-followup-id"
+    existing_run.followup.assert_called_once_with("later", message_id=None)
     existing_run.steer.assert_not_called()
 
 
@@ -187,11 +193,12 @@ async def test_stale_current_run_id_detected(
     result = await controller.receive_request("sess-stale", "test prompt")
 
     assert result is not None
-    assert isinstance(result, RunHandle)
+    assert isinstance(result, str)
     session = controller.get_session("sess-stale")
     assert session is not None
     assert session.current_run_id != "nonexistent-run-id"
-    assert session.current_run_id == result.run_id
+    # A new RunHandle should have been created
+    assert session.current_run_id in controller._runs
 
 
 # ---------------------------------------------------------------------------
@@ -226,8 +233,8 @@ async def test_cancel_then_receive_request_starts_new_run(
     result = await controller.receive_request("sess-cancel", "new prompt")
 
     assert result is not None
-    assert isinstance(result, RunHandle)
-    assert result.run_id != "failed-run-id"
+    assert isinstance(result, str)
     session = controller.get_session("sess-cancel")
     assert session is not None
-    assert session.current_run_id == result.run_id
+    assert session.current_run_id != "failed-run-id"
+    assert session.current_run_id in controller._runs

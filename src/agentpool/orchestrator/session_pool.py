@@ -18,6 +18,7 @@ from agentpool.agents.events import (
     SessionResumeEvent,
     StreamCompleteEvent,
 )
+from agentpool.lifecycle.types import DeliveryMode
 from agentpool.log import get_logger
 from agentpool.orchestrator.event_bus import EventBus
 from agentpool.orchestrator.run import RunHandle
@@ -1207,11 +1208,18 @@ class SessionPool:
     async def receive_request(
         self,
         session_id: str,
-        content: Any,
+        content: str | list[Any],
+        *,
         priority: str = "when_idle",
+        message_id: str | None = None,
         **kwargs: Any,
-    ) -> RunHandle | None:
+    ) -> str | None:
         """Route an incoming request for a session (fire-and-forget).
+
+        .. deprecated::
+            Use :meth:`send_message` with ``DeliveryMode`` instead.
+            This method maps ``priority`` to ``DeliveryMode`` and
+            delegates to :meth:`send_message`.
 
         Creates a background task that processes the prompt through
         the RunHandle lifecycle. Protocol handlers should subscribe to the
@@ -1222,14 +1230,203 @@ class SessionPool:
 
         Args:
             session_id: Target session.
-            content: Message / prompt content.
-            priority: "when_idle" to queue, "asap" to inject into active turn.
+            content: Message / prompt content (text or structured content
+                blocks). List content is passed through without
+                stringification.
+            priority: ``"when_idle"`` to queue, ``"asap"`` to inject into
+                active turn. Unknown values default to ``"when_idle"``.
+            message_id: Optional message ID. Auto-generated as UUID4 if
+                not provided.
             **kwargs: Additional arguments passed to the turn runner.
 
         Returns:
-            The RunHandle if a new run was started, otherwise None.
+            The ``message_id`` string on success, ``None`` on failure.
         """
-        return await self.sessions.receive_request(session_id, content, priority=priority, **kwargs)
+        import warnings
+
+        warnings.warn(
+            "SessionPool.receive_request() is deprecated. "
+            "Use send_message() with DeliveryMode instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        # Map priority string to DeliveryMode enum.
+        if priority == "asap":
+            mode = DeliveryMode.STEER
+        elif priority == "when_idle":
+            mode = DeliveryMode.QUEUE
+        else:
+            warnings.warn(
+                f"Unknown priority {priority!r}; defaulting to QUEUE. "
+                "Use send_message() with DeliveryMode for type safety.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            mode = DeliveryMode.QUEUE
+        return await self.send_message(
+            session_id, content, mode=mode, message_id=message_id,
+        )
+
+    async def send_message(
+        self,
+        session_id: str,
+        content: str | list[Any],
+        *,
+        mode: DeliveryMode = DeliveryMode.QUEUE,
+        message_id: str | None = None,
+    ) -> str | None:
+        """Send a message to a session using the typed ``DeliveryMode`` enum.
+
+        Maps ``DeliveryMode.STEER`` → ``priority="asap"`` (inject into
+        active turn) and ``DeliveryMode.QUEUE`` → ``priority="when_idle"``
+        (queue for next turn), then delegates to
+        :meth:`SessionController.receive_request`.
+
+        Args:
+            session_id: Target session.
+            content: Message / prompt content (text or structured content
+                blocks). List content is stored as ``Feedback.content_blocks``
+                without stringification.
+            mode: Delivery mode — ``STEER`` for mid-turn injection,
+                ``QUEUE`` for next-turn queue (default).
+            message_id: Optional message ID. Auto-generated as UUID4 if
+                not provided. Returned on success.
+
+        Returns:
+            The ``message_id`` string on success (both new runs and
+            steer/followup), ``None`` on failure.
+        """
+        priority = "asap" if mode is DeliveryMode.STEER else "when_idle"
+        # Delegate directly to _route_message() to avoid the deprecated
+        # receive_request() path. This requires session+agent resolution,
+        # which mirrors what SessionController.receive_request() does.
+        session = self.sessions.get_session(session_id)
+        if session is None:
+            return None
+        session.last_active_at = time.monotonic()
+        agent = await self.sessions.get_or_create_session_agent(session_id)
+        if agent is None:
+            return None
+        return await self.sessions._route_message(
+            session,
+            agent,
+            session_id,
+            content,
+            priority=priority,
+            message_id=message_id,
+        )
+
+    async def run_agent(
+        self,
+        agent: str,
+        prompt: str,
+        parent_session_id: str | None = None,
+        **metadata: Any,
+    ) -> str:
+        """Run an agent to completion and return the result text.
+
+        Creates a temporary session, sends the prompt via
+        :meth:`send_message` with ``DeliveryMode.QUEUE``, subscribes to
+        the EventBus to capture the ``StreamCompleteEvent``, waits for
+        run completion, then closes the session. The session is always
+        cleaned up via ``try/finally`` even on error.
+
+        Args:
+            agent: Name of the agent to run.
+            prompt: Input prompt for the agent.
+            parent_session_id: Optional parent session for hierarchical
+                sessions (e.g. subagent delegation).
+            **metadata: Arbitrary metadata attached to the session.
+
+        Returns:
+            The final assistant response text.
+
+        Raises:
+            SessionNotFoundError: If the session cannot be created.
+            asyncio.TimeoutError: If the run does not complete within
+                the default timeout.
+            Exception: Any error from the agent run is re-raised after
+                session cleanup.
+        """
+        import uuid
+
+        from agentpool.agents.events import RunErrorEvent
+
+        session_id = str(uuid.uuid4())
+        await self.create_session(
+            session_id,
+            agent_name=agent,
+            parent_session_id=parent_session_id,
+            **metadata,
+        )
+
+        # Subscribe to EventBus BEFORE sending the message to avoid
+        # missing the StreamCompleteEvent in a race.
+        bus_queue = await self.event_bus.subscribe(session_id, scope="session")
+        result_text: str = ""
+        try:
+            msg_id = await self.send_message(
+                session_id, prompt, mode=DeliveryMode.QUEUE,
+            )
+            if msg_id is None:
+                msg = f"Failed to send message to session {session_id}"
+                raise RuntimeError(msg)
+
+            # Drain events from the EventBus until we capture the
+            # StreamCompleteEvent or RunErrorEvent.
+            while True:
+                try:
+                    envelope = await asyncio.wait_for(bus_queue.get(), timeout=120.0)
+                except TimeoutError:
+                    break
+                event = envelope.event
+                if isinstance(event, StreamCompleteEvent):
+                    content = event.message.content
+                    result_text = content if isinstance(content, str) else str(content)
+                    break
+                if isinstance(event, RunErrorEvent):
+                    raise RuntimeError(event.message)  # noqa: TRY004
+
+            # Ensure the run has fully completed before closing.
+            await self.wait_for_completion(session_id, timeout=10.0)
+        finally:
+            await self.event_bus.unsubscribe(session_id, bus_queue)
+            await self.close_session(session_id)
+
+        return result_text
+
+    async def wait_for_completion(
+        self,
+        session_id: str,
+        timeout: float | None = None,
+    ) -> str:
+        """Wait for the active run on a session to complete.
+
+        Args:
+            session_id: The session to wait for.
+            timeout: Maximum seconds to wait. ``None`` waits indefinitely.
+
+        Returns:
+            The ``session_id`` on completion.
+
+        Raises:
+            SessionNotFoundError: If the session does not exist.
+            asyncio.TimeoutError: If the run does not complete within
+                ``timeout`` seconds.
+        """
+        return await self.sessions.wait_for_completion(session_id, timeout=timeout)
+
+    def revoke_message(self, session_id: str, message_id: str) -> bool:
+        """Revoke a pending steer or followup message by ID.
+
+        Args:
+            session_id: The session containing the message.
+            message_id: The ID of the message to revoke.
+
+        Returns:
+            ``True`` if revoked, ``False`` if already delivered or not found.
+        """
+        return self.sessions.revoke_inject(session_id, message_id)
 
     @property
     def active_runs(self) -> list[RunHandle]:
@@ -1413,11 +1610,11 @@ class SessionPool:
             session.current_run_id = None
             self.sessions._runs.pop(run_handle.run_id, None)
 
-    async def inject_prompt(self, session_id: str, message: str, **kwargs: Any) -> bool:
+    async def inject_prompt(self, session_id: str, message: str, **kwargs: Any) -> str | None:
         """Inject a message into a session.
 
         If the session has an active run, injects immediately via
-        ``RunHandle.steer()``. Otherwise, returns False.
+        ``RunHandle.steer()``. Otherwise, returns None.
 
         Does NOT acquire session.turn_lock.
 
@@ -1427,14 +1624,14 @@ class SessionPool:
             **kwargs: Additional arguments passed to the agent run.
 
         Returns:
-            True if injected into active turn, False if queued.
+            message_id if injected into active turn, None otherwise.
         """
         run_handle = self._get_active_run_handle(session_id)
         if run_handle is not None:
             return run_handle.steer(message)
-        return False
+        return None
 
-    async def queue_prompt(self, session_id: str, *prompts: Any, **kwargs: Any) -> bool:
+    async def queue_prompt(self, session_id: str, *prompts: Any, **kwargs: Any) -> str | None:
         """Queue prompts for a session.
 
         Similar to inject_prompt but for full prompts.
@@ -1446,15 +1643,15 @@ class SessionPool:
             **kwargs: Additional arguments passed to the agent run.
 
         Returns:
-            True if queued into active turn, False if stored for later.
+            message_id if queued into active turn, None otherwise.
         """
         run_handle = self._get_active_run_handle(session_id)
         if run_handle is not None:
             message = prompts[0] if prompts else ""
             return run_handle.followup(str(message))
-        return False
+        return None
 
-    async def steer(self, session_id: str, message: str, **kwargs: Any) -> bool:
+    async def steer(self, session_id: str, message: str, **kwargs: Any) -> str | None:
         """Inject a steer message with agent-type-aware routing.
 
         Delegates to ``RunHandle.steer()`` when an active run exists.
@@ -1465,14 +1662,14 @@ class SessionPool:
             **kwargs: Additional arguments (ignored).
 
         Returns:
-            True if delivered into active turn, False if queued for idle.
+            message_id if delivered into active turn, None otherwise.
         """
         run_handle = self._get_active_run_handle(session_id)
         if run_handle is not None:
             return run_handle.steer(message)
-        return False
+        return None
 
-    async def followup(self, session_id: str, message: str, **kwargs: Any) -> bool:
+    async def followup(self, session_id: str, message: str, **kwargs: Any) -> str | None:
         """Queue a follow-up message with agent-type-aware routing.
 
         Delegates to ``RunHandle.followup()`` when an active run exists.
@@ -1483,12 +1680,12 @@ class SessionPool:
             **kwargs: Additional arguments (ignored).
 
         Returns:
-            True if delivered into active turn, False if queued for idle.
+            message_id if delivered into active turn, None otherwise.
         """
         run_handle = self._get_active_run_handle(session_id)
         if run_handle is not None:
             return run_handle.followup(message)
-        return False
+        return None
 
     async def get_messages(
         self,

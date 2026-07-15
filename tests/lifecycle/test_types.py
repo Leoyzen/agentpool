@@ -306,6 +306,12 @@ class _DummyCommChannel:
     def deliver_feedback(self, feedback: Feedback) -> bool:
         return False
 
+    def revoke(self, message_id: str) -> bool:
+        return False
+
+    def replace(self, message_id: str, new_content: str | list[Any]) -> bool:
+        return False
+
     def close(self) -> None: ...
 
 

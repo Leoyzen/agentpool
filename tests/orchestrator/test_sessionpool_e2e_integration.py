@@ -63,15 +63,15 @@ async def test_e2e_reasoning_events_through_sessionpool() -> None:
         session_id = "test-session"
 
         # Route message through integration (this should start consumer)
-        run_handle = await integration.route_message(
+        message_id = await integration.route_message(
             session_id=session_id,
             content="hello",
             priority="when_idle",
         )
 
-        if run_handle is not None:
+        if message_id is not None:
             # Wait for run to complete
-            await run_handle.complete_event.wait()
+            await session_pool.wait_for_completion(session_id)
 
             # Give consumer time to process events
             await asyncio.sleep(0.2)
@@ -128,14 +128,14 @@ async def test_e2e_pre_existing_session_consumer_started() -> None:
         await session_pool.create_session(session_id, agent_name="test_agent")
 
         # Now route message - consumer should still start
-        run_handle = await integration.route_message(
+        message_id = await integration.route_message(
             session_id=session_id,
             content="hello",
             priority="when_idle",
         )
 
-        if run_handle is not None:
-            await run_handle.complete_event.wait()
+        if message_id is not None:
+            await session_pool.wait_for_completion(session_id)
             await asyncio.sleep(0.2)
 
         await integration._stop_event_consumer(session_id)

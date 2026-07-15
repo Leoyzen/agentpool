@@ -554,6 +554,7 @@ class MessageRequest(OpenCodeBaseModel):
 
     parts: list[PartInput]
     message_id: str | None = None
+    delivery: str | None = None
     model: ModelRef | None = None
     agent: str | None = None
     no_reply: bool | None = None

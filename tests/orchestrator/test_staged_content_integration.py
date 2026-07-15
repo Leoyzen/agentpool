@@ -187,11 +187,9 @@ async def test_receive_request_empty_list_not_converted_to_string() -> None:
     """receive_request must not convert empty list [] to string "[]".
 
     When the ACP handler sends only a slash command, non_command_content
-    is an empty list. ``str([])`` produces ``"[]"`` which becomes the
-    model's prompt — causing the model to see "[]" instead of nothing.
-
-    The fix: when content is an empty list (or falsy), pass an empty
-    string instead of str([]).
+    is an empty list. With D9, list content is passed directly to
+    followup()/steer() without stringification. The initial prompt
+    is routed through followup() (D17), and start() is called with "".
     """
     from unittest.mock import MagicMock
 
@@ -234,17 +232,18 @@ async def test_receive_request_empty_list_not_converted_to_string() -> None:
     # Call receive_request with empty list (what ACP handler passes)
     result = await controller.receive_request(session_id, [])
 
-    assert result is not None, "Expected a RunHandle to be created"
+    assert result is not None, "Expected a message_id to be returned"
 
     # Give the background task a moment to run
     import asyncio as _aio
 
     await _aio.sleep(0.1)
 
-    # The content passed to _start_run_handle should be "" not "[]"
+    # D17: start() is called with "" (empty string), not the content.
+    # The content was routed through followup() before start().
     assert len(captured_content) > 0, " _consume_run was never called"
     assert captured_content[0] == "", (
-        f"Expected empty string for empty list content, got {captured_content[0]!r}"
+        f"Expected empty string for start() initial_prompt, got {captured_content[0]!r}"
     )
     assert captured_content[0] != "[]", "Empty list was converted to '[]' — this is the bug"
 
@@ -299,10 +298,12 @@ async def test_staged_content_reaches_model_through_runhandle_pipeline() -> None
             scope="session",
         )
 
-        # Step 3: Start run — simulate the FIXED path where empty content
-        # becomes empty string, and staged_content is consumed by NativeTurn
+        # Step 3: Start run — D17 pattern: initial prompt via followup()
+        # before start(""). With DirectChannel, followup("") appends to
+        # _message_queue, and start("") enters _idle_loop() which finds
+        # it without blocking.
+        run_handle.followup("")
         async def _drive_run() -> None:
-            # Pass empty string (the fixed behavior for empty content [])
             async for _ in run_handle.start(""):
                 pass
 

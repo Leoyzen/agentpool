@@ -148,7 +148,15 @@ def slow_mock_agent():  # noqa: PLR0915
     pool.session_pool.event_bus = event_bus
 
     # Mock receive_request to actually call agent.run_stream and publish events
-    async def _mock_receive_request(*, session_id, content, priority, input_provider):
+    async def _mock_receive_request(
+        *,
+        session_id: str,
+        content: Any,
+        priority: str = "when_idle",
+        input_provider: Any | None = None,
+        message_id: str | None = None,
+        **kwargs: Any,
+    ):
         from agentpool.lifecycle import RunOutcome, RunState
         from agentpool.orchestrator.run import RunHandle
 
@@ -173,9 +181,22 @@ def slow_mock_agent():  # noqa: PLR0915
                 complete_event.set()
 
         _task = asyncio.create_task(_do_run())  # noqa: RUF006
-        return handle
+        return message_id or "msg_test_run"
 
     pool.session_pool.receive_request = AsyncMock(side_effect=_mock_receive_request)
+
+    # Mock wait_for_completion to wait for the run to actually finish
+    async def _mock_wait_for_completion(
+        sid: str, timeout: float | None = None,
+    ) -> str:
+        # Wait a bit for the background task to complete
+        await asyncio.sleep(0.5)
+        return sid
+
+    pool.session_pool.wait_for_completion = AsyncMock(side_effect=_mock_wait_for_completion)
+    # Add cancel_run_for_session to the existing sessions mock
+    if not hasattr(pool.session_pool.sessions, "cancel_run_for_session"):
+        pool.session_pool.sessions.cancel_run_for_session = Mock()
 
     # CRITICAL: all_agents must return a real dict to avoid Mock issues
     pool.manifest.agents = {agent.name: agent}

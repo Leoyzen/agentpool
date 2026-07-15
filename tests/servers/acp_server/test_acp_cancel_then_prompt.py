@@ -183,8 +183,11 @@ async def test_acp_cancel_then_prompt_no_hang(
     queue = await session_pool.event_bus.subscribe(session_id)
 
     # --- Step 1: Start a run with the blocking agent (simulates handle_prompt) ---
-    first_handle = await session_pool.receive_request(session_id, "first prompt")
-    assert first_handle is not None, "receive_request should return a RunHandle for idle session"
+    await session_pool.receive_request(session_id, "first prompt")
+    session_state = session_pool.sessions.get_session(session_id)
+    assert session_state is not None
+    first_handle = session_pool.sessions._runs.get(session_state.current_run_id)  # type: ignore[union-attr]
+    assert first_handle is not None, "Should have a RunHandle after receive_request"
 
     # Wait for the blocking turn to start
     await asyncio.sleep(0.1)
@@ -208,10 +211,13 @@ async def test_acp_cancel_then_prompt_no_hang(
 
     # --- Step 3: Send a new prompt (simulates second handle_prompt) ---
     # Use asyncio.wait_for to catch hangs.
-    second_handle = await asyncio.wait_for(
+    await asyncio.wait_for(
         session_pool.receive_request(session_id, "second prompt"),
         timeout=30.0,
     )
+    session2 = session_pool.sessions.get_session(session_id)
+    assert session2 is not None
+    second_handle = session_pool.sessions._runs.get(session2.current_run_id)  # type: ignore[union-attr]
 
     # --- Step 4: Verify new prompt is processed (events published, no hang) ---
     post_events: list[Any] = []
@@ -239,11 +245,8 @@ async def test_acp_cancel_then_prompt_no_hang(
     )
 
     # --- Step 5: Verify RunHandle state ---
-    if second_handle is not None:
-        assert second_handle is not first_handle, (
-            "New RunHandle should be a different instance if old one was cleaned up"
-        )
-
+    # After cancel + followup, the RunHandle may be the same instance (reused)
+    # or a new one. Either is valid — what matters is the state.
     assert first_handle._run_state in (RunState.IDLE, RunState.DONE), (
         f"First RunHandle should be idle or done, got: {first_handle._run_state}"
     )
@@ -313,7 +316,10 @@ async def test_cancel_does_not_start_spontaneous_turn(
     queue = await session_pool.event_bus.subscribe(session_id)
 
     # --- Start a blocking run ---
-    first_handle = await session_pool.receive_request(session_id, "first prompt")
+    await session_pool.receive_request(session_id, "first prompt")
+    session_state = session_pool.sessions.get_session(session_id)
+    assert session_state is not None
+    first_handle = session_pool.sessions._runs.get(session_state.current_run_id)  # type: ignore[union-attr]
     assert first_handle is not None
 
     # Wait for the blocking turn to start

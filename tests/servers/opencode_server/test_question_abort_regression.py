@@ -253,21 +253,52 @@ def _make_pool_mock(agent: Any) -> Mock:
     sp_session = Mock()
     sp_session.agent = agent
     session_pool.sessions.get_session = Mock(return_value=sp_session)
-    session_pool.event_bus = Mock()
+    # Use a functional event bus that routes publish→subscribe
+    from tests.servers.opencode_server.conftest import _make_functional_event_bus
+
+    session_pool.event_bus = _make_functional_event_bus()
     from tests._helpers.mock_stream import EmptyReceiveStream
 
-    session_pool.event_bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
-    session_pool.event_bus.unsubscribe = AsyncMock()
+    # Override subscribe to return a real queue-based stream
+    _event_queues: dict[str, list[Any]] = {}
+
+    async def _subscribe(sid: str, scope: str = "session") -> Any:
+        from asyncio import Queue
+
+        q: Any = Queue(maxsize=1024)
+        _event_queues.setdefault(sid, []).append(q)
+        return q
+
+    async def _unsubscribe(sid: str, q: Any) -> None:
+        if sid in _event_queues:
+            _event_queues[sid] = [x for x in _event_queues[sid] if x is not q]
+
+    async def _publish(sid: str, event: Any) -> None:
+        for subscriber_sid, queues in _event_queues.items():
+            if subscriber_sid == sid:
+                for q in queues:
+                    with contextlib.suppress(Exception):
+                        q.put_nowait(event)
+
+    session_pool.event_bus.subscribe = AsyncMock(side_effect=_subscribe)
+    session_pool.event_bus.unsubscribe = AsyncMock(side_effect=_unsubscribe)
+    session_pool.event_bus.publish = AsyncMock(side_effect=_publish)
+
+    # Shared completion tracking across receive_request and wait_for_completion
+    _completion_events: dict[str, asyncio.Event] = {}
 
     async def _mock_receive_request(
         session_id: str,
         content: str,
         priority: str = "when_idle",
         input_provider: Any = None,
-    ) -> Any:
+        message_id: str | None = None,
+        **kwargs: Any,
+    ) -> str | None:
         from agentpool.lifecycle import RunOutcome, RunState
 
         complete_event = asyncio.Event()
+        _completion_events[session_id] = complete_event
         run_handle = Mock()
         run_handle._run_state = RunState.RUNNING
         run_handle.complete_event = complete_event
@@ -275,20 +306,41 @@ def _make_pool_mock(agent: Any) -> Mock:
         async def _background_run():
             try:
                 stream = agent.run_stream(content, session_id=session_id)
-                async for _ in stream:
-                    pass
+                async for event in stream:
+                    await session_pool.event_bus.publish(session_id, event)
                 run_handle._run_state = RunState.DONE
                 run_handle.outcome = RunOutcome.COMPLETED
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 run_handle._run_state = RunState.DONE
                 run_handle.outcome = RunOutcome.FAILED
+                # Publish RunFailedEvent so the message_routes error path fires
+                from agentpool.agents.events import RunFailedEvent
+
+                await session_pool.event_bus.publish(
+                    session_id,
+                    RunFailedEvent(
+                        run_id="test-run", session_id=session_id, exception=exc,
+                    ),
+                )
             finally:
                 complete_event.set()
 
         _task = asyncio.create_task(_background_run())  # noqa: RUF006
-        return run_handle
+        return message_id or "msg_test_run"
 
     session_pool.receive_request = _mock_receive_request
+
+    # Mock wait_for_completion to actually wait for the background run
+    async def _mock_wait_for_completion(
+        sid: str, timeout: float | None = None,
+    ) -> str:
+        ev = _completion_events.get(sid)
+        if ev is not None:
+            await asyncio.wait_for(ev.wait(), timeout=timeout or 30.0)
+        return sid
+
+    session_pool.wait_for_completion = _mock_wait_for_completion
+    session_pool.sessions.cancel_run_for_session = Mock()
     pool.session_pool = session_pool
 
     return pool

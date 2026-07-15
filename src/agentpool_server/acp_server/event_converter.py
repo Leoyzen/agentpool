@@ -57,6 +57,8 @@ from agentpool.agents.events import (
     ElicitationDeferredEvent,
     FileContentItem,
     LocationContentItem,
+    PartDeltaEvent as AgentPoolPartDeltaEvent,
+    PartStartEvent as AgentPoolPartStartEvent,
     PlanUpdateEvent,
     RunErrorEvent,
     RunFailedEvent,
@@ -205,9 +207,6 @@ class ACPEventConverter:
     _subagent_tool_call_ids: dict[str, str] = field(default_factory=dict)
     """Map child_session_id to tool_call_id for zed mode subagent tracking."""
 
-    _current_message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    """Message ID for the current agent response."""
-
     last_usage: Usage | None = field(default=None, init=False)
     """Usage from the last completed stream, if available."""
 
@@ -265,7 +264,6 @@ class ACPEventConverter:
         self._tool_states.clear()
         self._current_tool_inputs.clear()
         self._subagent_headers.clear()
-        self._current_message_id = str(uuid.uuid4())
         self.last_usage = None
         self._subagent_content.clear()
         self._child_sessions.clear()
@@ -387,6 +385,29 @@ class ACPEventConverter:
         self._tool_states.pop(tool_call_id, None)
         self._current_tool_inputs.pop(tool_call_id, None)
 
+    def _get_message_id(self, event: RichAgentStreamEvent[Any]) -> str:
+        """Extract message_id from event, or generate a one-off UUID.
+
+        Reads ``message_id`` from AgentPool PartStartEvent/PartDeltaEvent
+        instances (populated by EventMapper or ACP converters). For events
+        without a message_id field, generates a one-off UUID so ACP
+        clients always receive a valid message_id.
+
+        Args:
+            event: The stream event to extract message_id from.
+
+        Returns:
+            The event's message_id if present and non-empty, otherwise a
+            new UUID string.
+        """
+        match event:
+            case AgentPoolPartStartEvent(message_id=mid) | AgentPoolPartDeltaEvent(
+                message_id=mid
+            ) if mid:
+                return mid
+            case _:
+                return str(uuid.uuid4())
+
     async def convert(  # noqa: PLR0915
         self, event: RichAgentStreamEvent[Any]
     ) -> AsyncIterator[ACPSessionUpdate]:
@@ -404,7 +425,7 @@ class ACPEventConverter:
                 PartStartEvent(part=TextPart(content=delta))
                 | PartDeltaEvent(delta=TextPartDelta(content_delta=delta))
             ):
-                yield AgentMessageChunk.text(delta, message_id=self._current_message_id)
+                yield AgentMessageChunk.text(delta, message_id=self._get_message_id(event))
 
             # Thinking/reasoning
             case (
@@ -412,7 +433,7 @@ class ACPEventConverter:
                 | PartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta))
             ):
                 if delta is not None:
-                    yield AgentThoughtChunk.text(delta, message_id=self._current_message_id)
+                    yield AgentThoughtChunk.text(delta, message_id=self._get_message_id(event))
 
             # Builtin tool call started (e.g., WebSearchTool, CodeExecutionTool)
             case PartStartEvent(part=NativeToolCallPart() as part):
@@ -709,13 +730,13 @@ class ACPEventConverter:
 
             case CompactionEvent(trigger=trigger, phase=phase) if phase == "starting":
                 text = get_compaction_text(trigger)
-                yield AgentMessageChunk.text(text, message_id=self._current_message_id)
+                yield AgentMessageChunk.text(text, message_id=self._get_message_id(event))
 
             case CompactionEvent(phase="completed"):
                 # Signal compaction completion to the client
                 yield AgentMessageChunk.text(
                     "\n\n---\n\n✅ **Context compaction complete.**\n\n---\n\n",
-                    message_id=self._current_message_id,
+                    message_id=self._get_message_id(event),
                 )
 
             case SpawnSessionStart(
@@ -727,7 +748,7 @@ class ACPEventConverter:
                 if self.subagent_display_mode == "legacy":
                     icon = "⚡" if spawn_mechanism == "spawn" else "🚀"
                     text = f"\n{icon} **`{source_name}`**: {description}\n"
-                    yield AgentMessageChunk.text(text, message_id=self._current_message_id)
+                    yield AgentMessageChunk.text(text, message_id=self._get_message_id(event))
                     self._child_sessions.add(child_session_id)
                 elif self.subagent_display_mode == "zed":
                     tool_call_id = event.tool_call_id or str(uuid.uuid4())
@@ -829,7 +850,7 @@ class ACPEventConverter:
                 # abnormally (e.g. elicitation timeout), not successfully.
                 agent_prefix = f"[{agent_name}] " if agent_name else ""
                 error_text = f"\n\n❌ **Error**: {agent_prefix}{message}\n\n"
-                yield AgentMessageChunk.text(error_text, message_id=self._current_message_id)
+                yield AgentMessageChunk.text(error_text, message_id=self._get_message_id(event))
                 async for cancel_update in self.cancel_pending_tools():
                     yield cancel_update
                 if self.client_supports_turn_complete:
@@ -852,7 +873,7 @@ class ACPEventConverter:
                 )
                 if not is_cancellation:
                     error_text = f"\n\n❌ **Run Failed** [{run_id}]: {exc}\n\n"
-                    yield AgentMessageChunk.text(error_text, message_id=self._current_message_id)
+                    yield AgentMessageChunk.text(error_text, message_id=self._get_message_id(event))
                 async for cancel_update in self.cancel_pending_tools():
                     yield cancel_update
                 if self.client_supports_turn_complete:

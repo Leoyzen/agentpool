@@ -25,6 +25,7 @@ from agentpool.lifecycle import (
     Journal,
     MemoryJournal,
     MemorySnapshotStore,
+    ProtocolChannel,
     RunOutcome,
     RunState,
     SnapshotStore,
@@ -181,7 +182,7 @@ class RunHandle:
     _closing: bool = False
     _closed: bool = False
     _idle_event: asyncio.Event = field(default_factory=_create_set_event)
-    _message_queue: list[str] = field(default_factory=list)
+    _message_queue: list[str | list[Any]] = field(default_factory=list)
     _message_history: list[ModelMessage] = field(default_factory=list)
     _turn_complete_event: asyncio.Event = field(default_factory=asyncio.Event)
     _turn_was_cancelled: bool = False
@@ -286,6 +287,17 @@ class RunHandle:
             return []
         return self._journal.get_tool_executions(self._recovered_inflight_turn_id)
 
+    @property
+    def _active_agent_run(self) -> AgentRun[Any, Any] | None:
+        """Alias for ``active_agent_run`` used by ``ProtocolChannel.revoke()``.
+
+        ProtocolChannel accesses ``run_loop._active_agent_run`` to reach
+        ``agent_run.pending_messages`` for PydanticAI-layer revoke. This
+        property provides the underscore-prefixed access without changing
+        the public ``active_agent_run`` field name.
+        """
+        return self.active_agent_run
+
     async def _transition(
         self,
         new_state: RunState,
@@ -362,7 +374,7 @@ class RunHandle:
     # New session-level lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self, initial_prompt: str) -> AsyncGenerator[RichAgentStreamEvent[Any]]:
+    async def start(self, initial_prompt: str = "") -> AsyncGenerator[RichAgentStreamEvent[Any]]:
         """Start the idle/wake/turn loop as an async generator.
 
         Yields :class:`RichAgentStreamEvent` tokens from each turn's
@@ -370,8 +382,16 @@ class RunHandle:
         the handle goes idle and waits for :meth:`steer` or
         :meth:`followup` to wake it.
 
+        When ``initial_prompt`` is empty (default), the loop starts in
+        idle mode and picks up the first prompt from
+        :meth:`followup` via the CommChannel feedback queue (D17). This
+        ensures the initial prompt gets a ``message_id`` and can be
+        revoked before delivery.
+
         Args:
-            initial_prompt: The first user prompt to process.
+            initial_prompt: The first user prompt to process. Empty
+                string (default) triggers idle-first startup via
+                followup/CommChannel.
         """
         agent = self.agent
         event_bus = self.event_bus
@@ -400,9 +420,12 @@ class RunHandle:
             async with session.turn_lock:
                 # For "retry" recovery, prepend the recovered prompt.
                 if recovered_prompt is not None:
-                    current_prompts: list[str] = [recovered_prompt]
+                    current_prompts: list[str | list[Any]] = [recovered_prompt]
                 else:
-                    current_prompts = [initial_prompt]
+                    # CRITICAL: empty string must produce [] not [""].
+                    # [""] is a non-empty list that bypasses _idle_loop()
+                    # and executes a spurious empty-prompt turn.
+                    current_prompts = [initial_prompt] if initial_prompt else []
                 while not self._closing:
                     if not current_prompts:
                         current_prompts = await self._idle_loop()
@@ -506,7 +529,7 @@ class RunHandle:
         self._comm_channel.attach(self)
         return recovered_prompt
 
-    async def _idle_loop(self) -> list[str]:
+    async def _idle_loop(self) -> list[str | list[Any]]:
         """Wait for idle, drain feedback, and collect prompts for next turn.
 
         Clears the idle event, drains CommChannel feedback and message
@@ -530,7 +553,10 @@ class RunHandle:
                 fb = self._comm_channel.recv()
                 if fb is None:
                     break
-                self._message_queue.append(fb.content)
+                if fb.content_blocks is not None:
+                    self._message_queue.append(fb.content_blocks)
+                else:
+                    self._message_queue.append(fb.content)
         # Check if messages were queued during cancel/cleanup before
         # blocking. Without this, messages routed through _message_queue
         # by the cancel path would deadlock: cancel() sets _idle_event,
@@ -546,7 +572,10 @@ class RunHandle:
                         fb = self._comm_channel.recv()
                         if fb is None:
                             break
-                        self._message_queue.append(fb.content)
+                        if fb.content_blocks is not None:
+                            self._message_queue.append(fb.content_blocks)
+                        else:
+                            self._message_queue.append(fb.content)
                 # Process pending messages before exiting so close()
                 # with queued followups are handled as final Turns.
                 if not self._message_queue:
@@ -558,7 +587,10 @@ class RunHandle:
                 fb = self._comm_channel.recv()
                 if fb is None:
                     break
-                self._message_queue.append(fb.content)
+                if fb.content_blocks is not None:
+                    self._message_queue.append(fb.content_blocks)
+                else:
+                    self._message_queue.append(fb.content)
         prompts = list(self._message_queue)
         self._message_queue.clear()
         return prompts
@@ -568,7 +600,7 @@ class RunHandle:
         agent: BaseAgent[Any, Any],
         event_bus: EventBus,
         session: SessionState,
-        current_prompts: list[str],
+        current_prompts: list[str | list[Any]],
     ) -> AsyncGenerator[RichAgentStreamEvent[Any]]:
         """Execute a single turn and yield stream events.
 
@@ -639,10 +671,16 @@ class RunHandle:
             _current_input_provider.set(session.input_provider)
         # Save user prompt to agent conversation before execution.
         # This ensures user messages are preserved even if the turn
-        # fails or is cancelled.
+        # fails or is cancelled. For list prompts (content_blocks),
+        # extract text from each block for the ChatMessage.content
+        # string representation.
+        prompt_text = "\n".join(
+            p if isinstance(p, str) else " ".join(str(b) for b in p)
+            for p in current_prompts
+        )
         agent.conversation.add_chat_messages([
             ChatMessage(
-                content="\n".join(current_prompts),
+                content=prompt_text,
                 role="user",
                 name=agent.name,
                 session_id=self.session_id,
@@ -655,7 +693,7 @@ class RunHandle:
             "state": RunState.RUNNING.value,
             "run_id": self.run_id,
             "turn_id": turn_id,
-            "prompt": "\n".join(current_prompts),
+            "prompt": prompt_text,
         })
         # Store turn state for downstream sub-methods.
         self._current_turn = turn
@@ -785,7 +823,7 @@ class RunHandle:
             self._message_history = turn.message_history
         return "proceed"
 
-    async def _drain_events(self) -> list[str]:
+    async def _drain_events(self) -> list[str | list[Any]]:  # noqa: PLR0915
         """Post-turn snapshot, child event collection, and feedback drain.
 
         Transitions to IDLE, saves a turn-boundary snapshot, saves the
@@ -854,24 +892,44 @@ class RunHandle:
         # may have been enqueued by steer/followup via deliver_feedback()
         # during the Turn. Steer feedback is prioritized as next-turn
         # prompts.
-        feedback_steer: list[str] = []
+        feedback_steer: list[str | list[Any]] = []
         if self._comm_channel is not None:
             while True:
                 fb = self._comm_channel.recv()
                 if fb is None:
                     break
                 if fb.is_steer:
-                    feedback_steer.append(fb.content)
+                    if fb.content_blocks is not None:
+                        feedback_steer.append(fb.content_blocks)
+                    else:
+                        feedback_steer.append(fb.content)
+                elif fb.content_blocks is not None:
+                    self._message_queue.append(fb.content_blocks)
                 else:
                     self._message_queue.append(fb.content)
         prompts = feedback_steer + list(self._message_queue)
         self._message_queue.clear()
+        # Clean up _enqueued entries whose PendingMessage references
+        # are no longer in agent_run.pending_messages (already drained).
+        # Prevents unbounded memory growth in long-running sessions.
+        if isinstance(self._comm_channel, ProtocolChannel) and self.active_agent_run is not None:
+            agent_run = self.active_agent_run
+            live_pending = {id(pm) for pm in agent_run.pending_messages}
+            # Use list() to avoid mutation during iteration.
+            for msg_id, items in list(self._comm_channel._enqueued.items()):
+                if all(id(pm) not in live_pending for pm in items):
+                    self._comm_channel._enqueued.pop(msg_id, None)
         # Signal that this turn has completed normally.
         self._turn_was_cancelled = False
         self._turn_complete_event.set()
         return prompts
 
-    def steer(self, message: str) -> bool:
+    def steer(
+        self,
+        message: str | list[Any],
+        *,
+        message_id: str | None = None,
+    ) -> str | None:
         """Inject a steer message into the active turn or wake idle handle.
 
         For ProtocolChannel (bidirectional CommChannel with
@@ -880,9 +938,23 @@ class RunHandle:
         existing ``_message_queue`` / ``active_agent_run.enqueue()``
         logic.
 
+        When ``message`` is a ``list``, it is stored as
+        ``Feedback.content_blocks`` (structured/multimodal content). For
+        native agents with an active ``agent_run``, the content blocks
+        are unpacked via ``agent_run.enqueue(*content_blocks,
+        priority="asap")``. After enqueue, the newly appended
+        ``PendingMessage`` references are tracked via
+        ``comm_channel._track_enqueued()`` for PydanticAI-layer revoke.
+
+        Args:
+            message: The steer message (plain text or structured content
+                blocks).
+            message_id: Optional message ID. Auto-generated as UUID4 if
+                not provided.
+
         Returns:
-            True if the message was delivered, False if the handle is
-            closing or in a non-steerable state.
+            The ``message_id`` string on success, ``None`` if the handle
+            is closing or in a non-steerable state.
 
         Raises:
             RuntimeError: If :meth:`close` has already been called.
@@ -892,65 +964,162 @@ class RunHandle:
             raise RuntimeError(msg)
 
         if self._closing:
-            return False
+            return None
+
+        # Construct Feedback with message_id and content_blocks.
+        # When message_id is None, omit it so Feedback's default_factory
+        # auto-generates a UUID4.
+        fb_kwargs: dict[str, Any] = {}
+        if message_id is not None:
+            fb_kwargs["message_id"] = message_id
+        if isinstance(message, list):
+            fb = Feedback(
+                content="",
+                is_steer=True,
+                content_blocks=message,
+                **fb_kwargs,
+            )
+        else:
+            fb = Feedback(
+                content=message,
+                is_steer=True,
+                **fb_kwargs,
+            )
 
         # Try CommChannel feedback path (ProtocolChannel returns True).
-        if self._comm_channel is not None:
-            feedback = Feedback(content=message, is_steer=True)
-            if self._comm_channel.deliver_feedback(feedback):
-                # Always set _idle_event when delivering via ProtocolChannel.
-                # If the loop is running, the event is cleared when entering
-                # idle, and the loop then drains CommChannel feedback. If the
-                # loop is transitioning to idle (e.g., after cancel), the
-                # event prevents blocking on _idle_event.wait() when the
-                # feedback is already in the CommChannel queue.
-                self._idle_event.set()
-                return True
+        if self._comm_channel is not None and self._comm_channel.deliver_feedback(fb):
+            # Always set _idle_event when delivering via ProtocolChannel.
+            # If the loop is running, the event is cleared when entering
+            # idle, and the loop then drains CommChannel feedback. If the
+            # loop is transitioning to idle (e.g., after cancel), the
+            # event prevents blocking on _idle_event.wait() when the
+            # feedback is already in the CommChannel queue.
+            self._idle_event.set()
+            return fb.message_id
 
         # Fallback: DirectChannel path (existing logic).
         if self._run_state == RunState.IDLE:
-            self._message_queue.append(message)
+            if fb.content_blocks is not None:
+                self._message_queue.append(fb.content_blocks)
+            else:
+                self._message_queue.append(fb.content)
             self._idle_event.set()
-            return True
+            return fb.message_id
 
         if self._run_state == RunState.RUNNING:
             agent_run = self.active_agent_run
             if agent_run is not None:
-                agent_run.enqueue(message, priority="asap")
-                return True
-            self.run_ctx.queued_steer_messages.append(message)
-            return True
+                if fb.content_blocks is not None:
+                    queue_len_before = len(agent_run.pending_messages)
+                    agent_run.enqueue(*fb.content_blocks, priority="asap")
+                    new_items = agent_run.pending_messages[queue_len_before:]
+                    if isinstance(self._comm_channel, ProtocolChannel):
+                        self._comm_channel._track_enqueued(fb.message_id, list(new_items))
+                else:
+                    queue_len_before = len(agent_run.pending_messages)
+                    agent_run.enqueue(fb.content, priority="asap")
+                    new_items = agent_run.pending_messages[queue_len_before:]
+                    if isinstance(self._comm_channel, ProtocolChannel):
+                        self._comm_channel._track_enqueued(fb.message_id, list(new_items))
+                return fb.message_id
+            # No active agent_run — queue for next turn.
+            if fb.content_blocks is not None:
+                self.run_ctx.queued_steer_messages.append(fb.content_blocks)
+            else:
+                self.run_ctx.queued_steer_messages.append(fb.content)
+            return fb.message_id
 
-        return False
+        return None
 
-    def followup(self, message: str) -> bool:
+    def followup(
+        self,
+        message: str | list[Any],
+        *,
+        message_id: str | None = None,
+    ) -> str | None:
         """Queue a follow-up prompt for the next turn.
 
         For ProtocolChannel, routes through the CommChannel feedback
         loop with ``is_steer=False``. For DirectChannel, falls back
         to the existing ``_message_queue`` logic.
 
+        When ``message`` is a ``list``, it is stored as
+        ``Feedback.content_blocks`` (structured/multimodal content).
+
+        Note: ``followup()`` goes through the CommChannel path (not
+        direct enqueue), so ``_track_enqueued`` is NOT needed — the
+        Feedback stays in ``_pending`` until ``recv()`` picks it up.
+
+        Args:
+            message: The follow-up message (plain text or structured
+                content blocks).
+            message_id: Optional message ID. Auto-generated as UUID4 if
+                not provided.
+
         Returns:
-            True if the message was queued, False if the handle is closing.
+            The ``message_id`` string on success, ``None`` if the handle
+            is closing.
         """
         if self._closing:
-            return False
+            return None
+
+        # Construct Feedback BEFORE deliver_feedback to preserve
+        # message_id generation for both ProtocolChannel and
+        # DirectChannel paths (D17 BLOCKER 2 fix).
+        # When message_id is None, omit it so Feedback's default_factory
+        # auto-generates a UUID4.
+        fb_kwargs: dict[str, Any] = {}
+        if message_id is not None:
+            fb_kwargs["message_id"] = message_id
+        if isinstance(message, list):
+            fb = Feedback(
+                content="",
+                is_steer=False,
+                content_blocks=message,
+                **fb_kwargs,
+            )
+        else:
+            fb = Feedback(
+                content=message,
+                is_steer=False,
+                **fb_kwargs,
+            )
 
         # Try CommChannel feedback path (ProtocolChannel returns True).
-        if self._comm_channel is not None:
-            feedback = Feedback(content=message, is_steer=False)
-            if self._comm_channel.deliver_feedback(feedback):
-                # Always set _idle_event (see steer() for rationale).
-                self._idle_event.set()
-                return True
+        if self._comm_channel is not None and self._comm_channel.deliver_feedback(fb):
+            # Always set _idle_event (see steer() for rationale).
+            self._idle_event.set()
+            return fb.message_id
 
         # Fallback: DirectChannel path (existing logic).
-        self._message_queue.append(message)
+        if fb.content_blocks is not None:
+            self._message_queue.append(fb.content_blocks)
+        else:
+            self._message_queue.append(fb.content)
         if self._run_state == RunState.IDLE:
             self._idle_event.set()
-        return True
+        return fb.message_id
 
-    async def _steer_callback_wrapper(self, session_id: str, message: str) -> bool:
+    def revoke(self, message_id: str) -> bool:
+        """Revoke a pending steer or followup message by ID.
+
+        Delegates to ``comm_channel.revoke()`` which operates at two
+        layers: (1) CommChannel ``_pending`` for undelivered feedback,
+        (2) PydanticAI ``pending_messages`` for already-enqueued steer
+        messages via ``_enqueued`` tracking + ``list.remove(pm)``.
+
+        Args:
+            message_id: The ID of the message to revoke.
+
+        Returns:
+            ``True`` if revoked or already gone (idempotent), ``False``
+            if already delivered or no CommChannel configured.
+        """
+        if self._comm_channel is None:
+            return False
+        return self._comm_channel.revoke(message_id)
+
+    async def _steer_callback_wrapper(self, session_id: str, message: str) -> str | None:
         """Adapter wrapping :meth:`steer` for use as :attr:`AgentRunContext.steer_callback`.
 
         The :attr:`~agentpool.agents.context.AgentRunContext.steer_callback` field
@@ -965,7 +1134,7 @@ class RunHandle:
             message: The steer message to inject into the active turn.
 
         Returns:
-            True if the message was delivered, False otherwise.
+            The ``message_id`` string on success, ``None`` otherwise.
         """
         return self.steer(message)
 

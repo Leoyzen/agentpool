@@ -34,6 +34,7 @@ from agentpool.lifecycle.triggers import (
     ScheduledTrigger,
 )
 from agentpool.lifecycle.types import (
+    DeliveryMode,
     EventEnvelope,
     Feedback,
     Prompt,
@@ -46,6 +47,7 @@ from agentpool.lifecycle.types import (
 __all__ = [
     "ChannelTrigger",
     "CommChannel",
+    "DeliveryMode",
     "DirectChannel",
     "DurableJournal",
     "DurableSnapshotStore",

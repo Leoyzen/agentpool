@@ -888,10 +888,11 @@ class SessionController:
         session: SessionState,
         agent: BaseAgent[Any, Any],
         session_id: str,
-        content: str,
+        content: str | list[Any],
         *,
         deps: Any = None,
-    ) -> RunHandle:
+        message_id: str | None = None,
+    ) -> str | None:
         """Create, register, and launch a RunHandle via the new path.
 
         Creates the RunHandle with ProtocolTrigger and ProtocolChannel
@@ -901,16 +902,26 @@ class SessionController:
         and the ProtocolTrigger allows steer/followup delivery via
         ``trigger.deliver()``.
 
+        The initial prompt is routed through ``run_handle.followup()``
+        before ``start()`` is called (D17). This ensures the initial
+        prompt gets a ``message_id`` and can be revoked before delivery.
+        ``start()`` is called with an empty string — the first
+        ``_idle_loop()`` iteration drains the ``followup()`` feedback
+        and uses it as the first turn's prompt.
+
         Args:
             session: The session state.
             agent: The agent instance (native or ACP).
             session_id: The session identifier.
-            content: The initial prompt text.
+            content: The initial prompt (text or structured content blocks).
             deps: Optional dependencies to pass to the agent run context
                 (e.g. delegation_depth from BackgroundTaskCapability).
+            message_id: Optional message ID for the initial prompt.
+                Auto-generated as UUID4 if not provided.
 
         Returns:
-            The newly created RunHandle.
+            The ``message_id`` string on success, ``None`` if the handle
+            is closing.
         """
         from agentpool.lifecycle import (
             MemoryJournal,
@@ -972,7 +983,14 @@ class SessionController:
         )
         self._runs[run_handle.run_id] = run_handle
         session.current_run_id = run_handle.run_id
-        task = asyncio.create_task(self._consume_run(run_handle, content))
+
+        # D17: Route initial prompt through followup() before start().
+        # This ensures the initial prompt gets a message_id and can be
+        # revoked before delivery. start("") is called with empty prompt —
+        # the first _idle_loop() iteration drains the followup() feedback.
+        mid = run_handle.followup(content, message_id=message_id)
+
+        task = asyncio.create_task(self._consume_run(run_handle, ""))
         # Keep a strong reference to prevent GC from destroying the task.
         self._background_tasks.add(task)
 
@@ -987,30 +1005,113 @@ class SessionController:
             self._cleanup_run(rid)
 
         task.add_done_callback(_on_run_done)
-        return run_handle
+        return mid
+
+    async def _route_message(
+        self,
+        session: SessionState,
+        agent: BaseAgent[Any, Any],
+        session_id: str,
+        content: str | list[Any],
+        *,
+        priority: str = "when_idle",
+        deps: Any = None,
+        message_id: str | None = None,
+    ) -> str | None:
+        """Route a message to the appropriate handler based on session state.
+
+        Dispatch logic extracted from :meth:`receive_request` so that
+        callers (e.g. :meth:`SessionPool.send_message`) can route messages
+        without the deprecated ``priority`` string parameter.
+
+        Idle sessions create a RunHandle via :meth:`_start_run_handle`.
+        Busy sessions call ``RunHandle.steer()`` (``"asap"``) or
+        ``RunHandle.followup()`` (``"when_idle"``).
+
+        Args:
+            session: The live session state (must already exist).
+            agent: The resolved agent instance for this session.
+            session_id: Target session identifier.
+            content: Message / prompt content (text or structured content
+                blocks). Passed through without stringification.
+            priority: ``"when_idle"`` to queue, ``"asap"`` to inject.
+                Aliases: ``"steer"`` → ``"asap"``, ``"followup"`` →
+                ``"when_idle"``.
+            deps: Optional dependencies for the agent run context.
+            message_id: Optional message ID. Auto-generated as UUID4 if
+                not provided.
+
+        Returns:
+            The ``message_id`` string on success, ``None`` for rejection.
+        """
+        resolved = {"steer": "asap", "followup": "when_idle"}.get(priority, priority)
+        # D9: Do NOT stringify list content. Pass str | list[Any] directly
+        # to steer()/followup() which accept both via Feedback.content_blocks.
+        async with session._request_lock:
+            if session.closing or session.is_closing:
+                return None
+            # Stale-run detection: if current_run_id points to a missing
+            # or terminal run, clear it and start a new run.
+            if session.current_run_id is not None:
+                existing_run = self._runs.get(session.current_run_id)
+                if existing_run is None or existing_run._run_state == RunState.DONE:
+                    session.current_run_id = None
+            if session.current_run_id is None:
+                return self._start_run_handle(
+                    session, agent, session_id, content, deps=deps, message_id=message_id,
+                )
+            run = self._runs.get(session.current_run_id) if session.current_run_id else None
+            if run is not None:
+                if resolved == "asap":
+                    return run.steer(content, message_id=message_id)
+                return run.followup(content, message_id=message_id)
+        return None
 
     async def receive_request(
         self,
         session_id: str,
-        content: Any,
+        content: str | list[Any],
+        *,
         priority: str = "when_idle",
+        message_id: str | None = None,
         **kwargs: Any,
-    ) -> RunHandle | None:
+    ) -> str | None:
         """Receive an incoming request for a session.
+
+        .. deprecated::
+            Use ``SessionPool.send_message()`` with ``DeliveryMode`` instead.
+            This method emits a ``DeprecationWarning`` and delegates to
+            ``_route_message()``.
 
         Routes through the RunHandle path: idle sessions create a
         RunHandle, busy sessions call ``steer()`` / ``followup()``.
 
         Args:
             session_id: Target session.
-            content: Message / prompt content.
-            priority: ``"when_idle"`` to queue, ``"asap"`` to inject into active turn.
-                Aliases: ``"steer"`` → ``"asap"``, ``"followup"`` → ``"when_idle"``.
-            **kwargs: Additional arguments passed to the turn runner (e.g. input_provider).
+            content: Message / prompt content (text or structured content
+                blocks). List content is passed through without
+                stringification to preserve multimodal content.
+            priority: ``"when_idle"`` to queue, ``"asap"`` to inject into
+                active turn. Aliases: ``"steer"`` → ``"asap"``,
+                ``"followup"`` → ``"when_idle"``.
+            message_id: Optional message ID. Auto-generated as UUID4 if
+                not provided. Returned on success for both new runs and
+                steer/followup.
+            **kwargs: Additional arguments passed to the turn runner
+                (e.g. input_provider).
 
         Returns:
-            The RunHandle if a new run was started, otherwise None.
+            The ``message_id`` string on success (both new runs and
+            steer/followup), ``None`` for failure or rejection.
         """
+        import warnings
+
+        warnings.warn(
+            "SessionController.receive_request() is deprecated. "
+            "Use SessionPool.send_message() with DeliveryMode instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         session = self.get_session(session_id)
         if session is None:
             return None
@@ -1030,35 +1131,15 @@ class SessionController:
         agent = await self.get_or_create_session_agent(session_id, input_provider=input_provider)
         if agent is None:
             return None
-        # RunHandle path (always)
-        resolved = {"steer": "asap", "followup": "when_idle"}.get(priority, priority)
-        # Convert content to string safely. Empty list (from ACP handler when
-        # user sends only a slash command) must become "" not "[]".
-        # Lists with content should be joined, not str()'d (which produces "['hello']").
-        if isinstance(content, list):
-            content_str = " ".join(str(c) for c in content) if content else ""
-        elif not content:
-            content_str = ""
-        else:
-            content_str = str(content)
-        async with session._request_lock:
-            if session.closing or session.is_closing:
-                return None
-            # Stale-run detection: if current_run_id points to a missing
-            # or terminal run, clear it and start a new run.
-            if session.current_run_id is not None:
-                existing_run = self._runs.get(session.current_run_id)
-                if existing_run is None or existing_run._run_state == RunState.DONE:
-                    session.current_run_id = None
-            if session.current_run_id is None:
-                return self._start_run_handle(session, agent, session_id, content_str, deps=deps)
-            run = self._runs.get(session.current_run_id) if session.current_run_id else None
-            if run is not None:
-                if resolved == "asap":
-                    run.steer(content_str)
-                else:
-                    run.followup(content_str)
-        return None
+        return await self._route_message(
+            session,
+            agent,
+            session_id,
+            content,
+            priority=priority,
+            deps=deps,
+            message_id=message_id,
+        )
 
     def cancel_run_for_session(self, session_id: str) -> None:
         """Cancel the active run for a session.
@@ -1076,6 +1157,65 @@ class SessionController:
         if run_handle is None:
             return
         run_handle.cancel()
+
+    def revoke_inject(self, session_id: str, message_id: str) -> bool:
+        """Revoke a pending steer or followup message by ID.
+
+        Delegates to ``RunHandle.revoke()`` on the session's active run.
+        A message can be revoked if still pending in the CommChannel queue
+        or PydanticAI ``pending_messages`` list. Once delivered to the
+        model, revocation returns ``False``.
+
+        Args:
+            session_id: The session containing the message.
+            message_id: The ID of the message to revoke.
+
+        Returns:
+            ``True`` if revoked or already gone (idempotent), ``False``
+            if the session/run is not found or the message was already
+            delivered.
+        """
+        session = self.get_session(session_id)
+        if session is None or session.current_run_id is None:
+            return False
+        run_handle = self._runs.get(session.current_run_id)
+        if run_handle is None:
+            return False
+        return run_handle.revoke(message_id)
+
+    async def wait_for_completion(self, session_id: str, timeout: float | None = None) -> str:
+        """Wait for the active run on a session to complete.
+
+        Looks up the active run via ``session.current_run_id`` and awaits
+        ``run_handle.complete_event`` with the given timeout. Decouples
+        callers from the ``RunHandle`` type entirely.
+
+        Args:
+            session_id: The session to wait for.
+            timeout: Maximum seconds to wait. ``None`` waits indefinitely.
+
+        Returns:
+            The ``session_id`` on completion.
+
+        Raises:
+            SessionNotFoundError: If the session does not exist.
+            asyncio.TimeoutError: If the run does not complete within
+                ``timeout`` seconds.
+        """
+        session = self.get_session(session_id)
+        if session is None:
+            raise SessionNotFoundError(session_id)
+        run_id = session.current_run_id
+        if run_id is None:
+            return session_id
+        run_handle = self._runs.get(run_id)
+        if run_handle is None:
+            return session_id
+        if timeout is not None:
+            await asyncio.wait_for(run_handle.complete_event.wait(), timeout=timeout)
+        else:
+            await run_handle.complete_event.wait()
+        return session_id
 
     def _cleanup_run(self, run_id: str) -> None:
         """Clean up a run after it completes.

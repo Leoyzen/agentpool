@@ -79,7 +79,7 @@ async def test_steer_callback_is_set_after_start() -> None:
 @pytest.mark.unit
 async def test_steer_callback_delegates_to_handle_steer() -> None:
     """Given steer_callback is set, calling it with (session_id, message)
-    delegates to RunHandle.steer(message) and returns True.
+    delegates to RunHandle.steer(message) and returns the message_id.
     """  # noqa: D205
     run_ctx = AgentRunContext()
     handle = _make_handle(run_ctx=run_ctx)
@@ -90,7 +90,7 @@ async def test_steer_callback_delegates_to_handle_steer() -> None:
         async for _ in gen:
             assert run_ctx.steer_callback is not None
             result = await run_ctx.steer_callback("any-session", "steer me")
-            assert result is True
+            assert result is not None
             break
 
     consumer = asyncio.create_task(_consume())

@@ -119,7 +119,8 @@ async def test_start_run_handle_creates_protocol_trigger() -> None:
     controller._sessions["s1"] = session
     controller._session_agents["s1"] = agent
 
-    run_handle = controller._start_run_handle(session, agent, "s1", "hello")
+    controller._start_run_handle(session, agent, "s1", "hello")
+    run_handle = controller._runs[session.current_run_id]
 
     assert isinstance(run_handle._trigger_source, ProtocolTrigger)
     assert run_handle._trigger_source is not None
@@ -142,7 +143,8 @@ async def test_start_run_handle_creates_protocol_channel() -> None:
     controller._sessions["s1"] = session
     controller._session_agents["s1"] = agent
 
-    run_handle = controller._start_run_handle(session, agent, "s1", "hello")
+    controller._start_run_handle(session, agent, "s1", "hello")
+    run_handle = controller._runs[session.current_run_id]
 
     assert isinstance(run_handle._comm_channel, ProtocolChannel)
     assert run_handle._comm_channel is not None
@@ -167,7 +169,8 @@ async def test_start_run_handle_protocol_channel_has_journal() -> None:
     controller._sessions["s1"] = session
     controller._session_agents["s1"] = agent
 
-    run_handle = controller._start_run_handle(session, agent, "s1", "hello")
+    controller._start_run_handle(session, agent, "s1", "hello")
+    run_handle = controller._runs[session.current_run_id]
 
     assert isinstance(run_handle._comm_channel, ProtocolChannel)
     assert isinstance(run_handle._comm_channel._journal, MemoryJournal)
@@ -195,11 +198,16 @@ async def test_steer_delivers_feedback_to_protocol_channel() -> None:
     controller._sessions["s1"] = session
     controller._session_agents["s1"] = agent
 
-    run_handle = controller._start_run_handle(session, agent, "s1", "hello")
+    controller._start_run_handle(session, agent, "s1", "hello")
+    run_handle = controller._runs[session.current_run_id]
+
+    # Drain the initial prompt feedback if present (placed by _start_run_handle
+    # via followup() per D17). The background task may have consumed it already.
+    run_handle._comm_channel.recv()
 
     # Steer should deliver feedback to the ProtocolChannel.
     result = run_handle.steer("change direction")
-    assert result is True
+    assert result is not None
 
     # Verify feedback was enqueued.
     assert isinstance(run_handle._comm_channel, ProtocolChannel)
@@ -227,10 +235,15 @@ async def test_followup_delivers_feedback_to_protocol_channel() -> None:
     controller._sessions["s1"] = session
     controller._session_agents["s1"] = agent
 
-    run_handle = controller._start_run_handle(session, agent, "s1", "hello")
+    controller._start_run_handle(session, agent, "s1", "hello")
+    run_handle = controller._runs[session.current_run_id]
+
+    # Drain the initial prompt feedback if present (placed by _start_run_handle
+    # via followup() per D17). The background task may have consumed it already.
+    run_handle._comm_channel.recv()
 
     result = run_handle.followup("next question")
-    assert result is True
+    assert result is not None
 
     assert isinstance(run_handle._comm_channel, ProtocolChannel)
     feedback = run_handle._comm_channel.recv()
@@ -264,7 +277,8 @@ async def test_close_session_calls_run_handle_close() -> None:
     controller._session_scopes["s1"] = anyio.CancelScope()
 
     # Create a run handle but don't start its background task.
-    run_handle = controller._start_run_handle(session, agent, "s1", "hello")
+    controller._start_run_handle(session, agent, "s1", "hello")
+    run_handle = controller._runs[session.current_run_id]
 
     # Give the background task a moment to start.
     await asyncio.sleep(0.01)
@@ -543,7 +557,7 @@ async def test_close_session_with_active_run_completes() -> None:
     controller._session_scopes["s1"] = anyio.CancelScope()
 
     # Create run handle.
-    _run_handle = controller._start_run_handle(session, agent, "s1", "hello")
+    controller._start_run_handle(session, agent, "s1", "hello")
 
     # Give background task a moment.
     await asyncio.sleep(0.01)

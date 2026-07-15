@@ -171,10 +171,10 @@ class AgentRunContext:
     child_done_events: dict[str, anyio.Event] = field(default_factory=dict)
     """Per-child-session done events for tracking subagent completion."""
 
-    queued_steer_messages: list[str] = field(default_factory=list)
+    queued_steer_messages: list[str | list[Any]] = field(default_factory=list)
     """Steer messages queued during post-iteration wait window."""
 
-    steer_callback: Callable[[str, str], Awaitable[bool]] | None = None
+    steer_callback: Callable[[str, str], Awaitable[str | None]] | None = None
     """Set by RunHandle.start(), allows tools to call steer() via run_ctx."""
 
     turn_id: str | None = None

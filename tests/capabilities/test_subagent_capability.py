@@ -54,14 +54,24 @@ class FakeDelegationService:
 
 
 def _make_ctx(delegation: DelegationService) -> Any:
-    """Create a RunContext-like object with AgentContext as deps."""
+    """Create a RunContext-like object with AgentContext as deps.
+
+    Sets ``host.session_pool = None`` so the fallback delegation path
+    is exercised (matching pre-migration behavior). The
+    ``agent_registry.list_names`` is wired to the delegation service's
+    ``get_available_agents()`` so ``get_available_agents`` tests work.
+    """
+    host = MagicMock()
+    host.session_pool = None
+    agent_registry = MagicMock()
+    agent_registry.list_names = MagicMock(return_value=delegation.get_available_agents())
     ctx = MagicMock()
     ctx.deps = AgentContext(
-        agent_registry=MagicMock(),
+        agent_registry=agent_registry,
         delegation=delegation,
         session=MagicMock(),
         scope=RunScope(),
-        host=MagicMock(),
+        host=host,
     )
     return ctx
 

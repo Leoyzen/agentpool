@@ -62,7 +62,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionPool, SessionState
-    from agentpool.orchestrator.run import RunHandle
     from agentpool.sessions.models import PendingDeferredCall, SessionData
     from agentpool_server.opencode_server.state import ServerState
 
@@ -592,6 +591,9 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
         # Populated by external orchestrator before start_event_consumer() is
         # called for a resumed session. Consumed (popped) by _before_consumer_loop.
         self._resume_contexts: dict[str, dict[str, Any]] = {}
+        # Pending canonical message IDs from REST handlers (D14).
+        # Populated by route_message(), consumed by _before_consumer_loop.
+        self._pending_message_ids: dict[str, str] = {}
 
     async def create_session(
         self,
@@ -679,8 +681,9 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
         priority: str = "when_idle",
         input_provider: Any | None = None,
         agent_name: str | None = None,
+        message_id: str | None = None,
         **kwargs: Any,
-    ) -> RunHandle | None:
+    ) -> str | None:
         """Route a message through SessionPool.receive_request().
 
         Creates the session if it does not yet exist. Stores the input
@@ -696,11 +699,14 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
             priority: "when_idle" to queue, "asap" to inject into active turn.
             input_provider: Optional input provider for the agent.
             agent_name: Agent to bind if the session must be created.
+            message_id: Optional canonical message ID from the REST handler.
+                Stored as pending so ``_before_consumer_loop`` can reuse it
+                instead of generating an independent ``assistant_msg_id``.
             **kwargs: Additional arguments passed to the turn runner.
                 Supports ``deferred_tool_results`` for checkpoint replay.
 
         Returns:
-            The RunHandle if a new run was started, otherwise None.
+            The ``message_id`` string on success, ``None`` on failure.
         """
         # --- Checkpoint replay: resume session before new input ----------
         deferred_results = kwargs.pop("deferred_tool_results", None)
@@ -712,6 +718,11 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
                     deferred_results,
                     source="opencode_route_message",
                 )
+
+        # Store the canonical message_id so _before_consumer_loop can reuse it
+        # instead of generating an independent assistant_msg_id (D14).
+        if message_id is not None:
+            self._pending_message_ids[session_id] = message_id
 
         session_state = self.session_pool.sessions.get_session(session_id)
         if session_state is None:
@@ -733,6 +744,7 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
             content=content,
             priority=priority,
             input_provider=input_provider,
+            message_id=message_id,
             **kwargs,
         )
 
@@ -929,7 +941,12 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
             return
 
         # --- Fresh context (original behaviour) -------------------------------
-        assistant_msg_id = identifier.ascending("message")
+        # D14: Use the canonical message_id from the REST handler if available
+        # instead of generating an independent one. This resolves the dual
+        # assistant_msg_id split-message issue.
+        assistant_msg_id = self._pending_message_ids.pop(session_id, None)
+        if assistant_msg_id is None:
+            assistant_msg_id = identifier.ascending("message")
         assistant_msg = MessageWithParts.assistant(
             message_id=assistant_msg_id,
             session_id=session_id,
@@ -1151,6 +1168,14 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
             ctx = self._contexts.get(session_id)
             if ctx is None:
                 return
+
+            # D14: Update ctx.assistant_msg_id from event message_id if the
+            # context still has a placeholder or auto-generated ID. This ensures
+            # all parts created by the EventProcessor use the canonical
+            # message_id from the event pipeline.
+            event_message_id = getattr(event, "message_id", "")
+            if event_message_id and ctx.assistant_msg_id != event_message_id:
+                ctx.assistant_msg_id = event_message_id
 
             # Register assistant message on first non-spawn event
             if not self._message_registered.get(session_id, False):

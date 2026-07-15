@@ -192,7 +192,7 @@ async def test_run_handle_steer_for_acp_path() -> None:
 
     # Steer while running — should queue to queued_steer_messages
     result = handle.steer("steered message")
-    assert result is True
+    assert result is not None
     assert "steered message" in handle.run_ctx.queued_steer_messages
 
     # Release the turn so it can complete

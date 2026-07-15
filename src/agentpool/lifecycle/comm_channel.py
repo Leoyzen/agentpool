@@ -18,6 +18,7 @@ Two implementations are provided:
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from typing import TYPE_CHECKING, Any
 
 from agentpool.agents.events import (
@@ -183,6 +184,35 @@ class DirectChannel:
         """
         return False
 
+    def revoke(self, message_id: str) -> bool:
+        """No-op revoke for unidirectional channel.
+
+        DirectChannel has no feedback queue, so there is nothing to
+        revoke. Always returns ``False``.
+
+        Args:
+            message_id: Ignored.
+
+        Returns:
+            Always ``False``.
+        """
+        return False
+
+    def replace(self, message_id: str, new_content: str | list[Any]) -> bool:
+        """No-op replace for unidirectional channel.
+
+        DirectChannel has no feedback queue, so there is nothing to
+        replace. Always returns ``False``.
+
+        Args:
+            message_id: Ignored.
+            new_content: Ignored.
+
+        Returns:
+            Always ``False``.
+        """
+        return False
+
     def close(self) -> None:
         """Drain the queue and mark the channel as closed.
 
@@ -202,7 +232,21 @@ class ProtocolChannel:
 
     Publishes events to the ``EventBus`` for consumption by protocol
     servers (ACP, OpenCode, AG-UI, etc.). Maintains a feedback queue
-    for steer/followup messages injected by ``SessionController``.
+    (``collections.deque``) for steer/followup messages injected by
+    ``SessionController``.
+
+    The feedback queue is backed by ``deque`` (not ``asyncio.Queue``)
+    to support O(1) removal by value via ``revoke()``. Three tracking
+    structures provide ID-based lifecycle management:
+
+    - ``_pending``: ``dict[str, Feedback]`` — feedback waiting in the
+      queue, keyed by ``message_id``.
+    - ``_revoked``: ``set[str]`` — revoked message IDs; rejected if
+      re-delivered.
+    - ``_delivered``: ``set[str]`` — delivered message IDs; ``revoke()``
+      returns ``False`` for these.
+    - ``_enqueued``: ``dict[str, list]`` — ``PendingMessage`` references
+      for PydanticAI-layer revoke, keyed by ``message_id``.
 
     Events are journaled (append or upsert) before delivery, unless
     ``_replaying`` is ``True``.
@@ -224,7 +268,11 @@ class ProtocolChannel:
         self._journal: Journal = journal
         self._event_bus: EventBus = event_bus
         self._session_id: str = session_id
-        self._feedback_queue: asyncio.Queue[Feedback] = asyncio.Queue()
+        self._feedback_queue: deque[Feedback] = deque()
+        self._pending: dict[str, Feedback] = {}
+        self._revoked: set[str] = set()
+        self._delivered: set[str] = set()
+        self._enqueued: dict[str, list[Any]] = {}
         self._replaying: bool = False
         self._closed: bool = False
         self._run_loop: Any = None
@@ -304,18 +352,25 @@ class ProtocolChannel:
     def recv(self) -> Feedback | None:
         """Non-blocking dequeue from the feedback queue.
 
+        Transitions the dequeued feedback from ``_pending`` to
+        ``_delivered`` to prevent revoking already-delivered messages.
+
         Returns:
             The next ``Feedback`` if available, or ``None``.
         """
-        try:
-            return self._feedback_queue.get_nowait()
-        except asyncio.QueueEmpty:
+        if not self._feedback_queue:
             return None
+        feedback = self._feedback_queue.popleft()
+        msg_id = feedback.message_id
+        self._pending.pop(msg_id, None)
+        self._delivered.add(msg_id)
+        return feedback
 
     def deliver_feedback(self, feedback: Feedback) -> bool:
         """Enqueue feedback from SessionController.
 
         This is how steer/followup messages arrive at the RunLoop.
+        Revoked messages are rejected.
 
         Args:
             feedback: The feedback to enqueue.
@@ -323,21 +378,135 @@ class ProtocolChannel:
         Returns:
             Always ``True`` (ProtocolChannel supports feedback delivery).
         """
-        self._feedback_queue.put_nowait(feedback)
+        if feedback.message_id in self._revoked:
+            return True
+        self._feedback_queue.append(feedback)
+        self._pending[feedback.message_id] = feedback
         return True
 
+    def revoke(self, message_id: str) -> bool:
+        """Revoke a pending feedback message by ID.
+
+        Operates at two layers:
+
+        1. **CommChannel layer** (``_pending``): If the feedback is
+           still in the queue, remove it from both ``_feedback_queue``
+           and ``_pending``, add to ``_revoked``, and return ``True``.
+        2. **PydanticAI layer** (``_enqueued``): If the feedback was
+           already enqueued into ``agent_run.pending_messages`` via
+           ``steer()``, remove each ``PendingMessage`` from the live
+           list via ``list.remove(pm)``. If ``list.remove()`` raises
+           ``ValueError`` (already drained), catch it and treat as
+           success. Clean up the ``_enqueued`` entry.
+        3. If already in ``_delivered``, return ``False``.
+        4. Otherwise, return ``True`` (idempotent unknown).
+
+        Args:
+            message_id: The ID of the feedback message to revoke.
+
+        Returns:
+            ``True`` if revoked or already gone, ``False`` if delivered.
+        """
+        # Layer 3: Already delivered — cannot revoke.
+        if message_id in self._delivered:
+            return False
+
+        # Layer 1: Still pending in CommChannel queue.
+        if message_id in self._pending:
+            feedback = self._pending.pop(message_id)
+            self._feedback_queue.remove(feedback)
+            self._revoked.add(message_id)
+            return True
+
+        # Layer 2: Already enqueued into PydanticAI pending_messages.
+        if message_id in self._enqueued:
+            pending_items = self._enqueued.pop(message_id)
+            for pm in pending_items:
+                try:
+                    # pm is a PendingMessage from agent_run.pending_messages.
+                    # list.remove() uses identity (is) comparison.
+                    # The run_loop holds the agent_run with pending_messages.
+                    if self._run_loop is not None:
+                        run_loop: Any = self._run_loop
+                        agent_run: Any = run_loop._active_agent_run
+                        if agent_run is not None:
+                            agent_run.pending_messages.remove(pm)
+                except ValueError:
+                    # Already drained by _drain_by_priority() — same
+                    # end state as revoke. Idempotent.
+                    pass
+            self._revoked.add(message_id)
+            return True
+
+        # Layer 4: Unknown message_id — idempotent success.
+        return True
+
+    def replace(self, message_id: str, new_content: str | list[Any]) -> bool:
+        """Replace the content of a pending feedback message in-place.
+
+        Updates the content of a feedback message that is still pending
+        in the channel's feedback queue, preserving its position. When
+        ``new_content`` is a ``list``, updates ``Feedback.content_blocks``;
+        when ``str``, updates ``Feedback.content``.
+
+        Returns ``False`` if the message has already been enqueued into
+        the PydanticAI layer (past CommChannel scope) or already
+        delivered.
+
+        Args:
+            message_id: The ID of the feedback message to replace.
+            new_content: New content (``str`` or ``list[Any]``).
+
+        Returns:
+            ``True`` if replaced, ``False`` if past CommChannel scope.
+        """
+        # Cannot replace if already enqueued or delivered.
+        if message_id in self._enqueued or message_id in self._delivered:
+            return False
+
+        if message_id not in self._pending:
+            # Unknown message_id — nothing to replace.
+            return False
+
+        feedback = self._pending[message_id]
+        if isinstance(new_content, list):
+            feedback.content_blocks = new_content
+            feedback.content = ""
+        else:
+            feedback.content = new_content
+            feedback.content_blocks = None
+        return True
+
+    def _track_enqueued(self, message_id: str, items: list[Any]) -> None:
+        """Track PendingMessage references for PydanticAI-layer revoke.
+
+        Called by ``RunHandle.steer()`` after ``agent_run.enqueue()``.
+        Stores the newly appended ``PendingMessage`` references so
+        ``revoke()`` can remove them from ``agent_run.pending_messages``
+        via ``list.remove(pm)`` (identity comparison).
+
+        Args:
+            message_id: The feedback message ID associated with the
+                enqueued items.
+            items: List of ``PendingMessage`` references appended by
+                ``enqueue()``.
+        """
+        if not items:
+            return
+        self._enqueued[message_id] = items
+
     def close(self) -> None:
-        """Clean up the feedback queue and mark as closed.
+        """Clean up all tracking structures and mark as closed.
 
         After ``close()``, further calls to ``publish()`` raise
         ``RuntimeError``.
         """
         self._closed = True
-        while not self._feedback_queue.empty():
-            try:
-                self._feedback_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
+        self._feedback_queue.clear()
+        self._pending.clear()
+        self._revoked.clear()
+        self._delivered.clear()
+        self._enqueued.clear()
 
 
 __all__ = [

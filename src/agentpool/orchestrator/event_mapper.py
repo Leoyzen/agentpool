@@ -87,11 +87,15 @@ class EventMapper:
                 # ``isinstance(base, subclass)`` is False.
                 if isinstance(event, PyAIPartDeltaEvent) and not isinstance(event, PartDeltaEvent):
                     return _normalize_thinking_event(
-                        PartDeltaEvent(index=event.index, delta=event.delta)
+                        PartDeltaEvent(
+                            index=event.index, delta=event.delta, message_id=self._message_id
+                        )
                     )
                 if isinstance(event, PyAIPartStartEvent) and not isinstance(event, PartStartEvent):
                     return _normalize_thinking_event(
-                        PartStartEvent(index=event.index, part=event.part)
+                        PartStartEvent(
+                            index=event.index, part=event.part, message_id=self._message_id
+                        )
                     )
                 return event if self._is_rich_event(event) else None
 

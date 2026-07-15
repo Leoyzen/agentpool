@@ -53,13 +53,13 @@ async def test_conversation_preserved_after_run_failure(
         await session_pool.create_session(session_id, agent_name="test_agent")
 
         # --- Step 1: Successful first prompt ---
-        run_handle = await session_pool.receive_request(
+        msg_id = await session_pool.receive_request(
             session_id,
             "Hello, what is 2+2?",
             priority="when_idle",
         )
-        assert run_handle is not None, "First prompt should start a run"
-        await run_handle.complete_event.wait()
+        assert msg_id is not None, "First prompt should start a run"
+        await session_pool.wait_for_completion(session_id)
 
         # Get the per-session agent and check conversation
         agent1 = await session_pool.sessions.get_or_create_session_agent(session_id)
@@ -86,13 +86,13 @@ async def test_conversation_preserved_after_run_failure(
         with patch.object(
             NativeTurn, "execute", side_effect=RuntimeError("Simulated model API error")
         ):
-            run_handle2 = await session_pool.receive_request(
+            msg_id2 = await session_pool.receive_request(
                 session_id,
                 "What is 3+3?",
                 priority="when_idle",
             )
-            assert run_handle2 is not None, "Second prompt should start a run"
-            await run_handle2.complete_event.wait()
+            assert msg_id2 is not None, "Second prompt should start a run"
+            await session_pool.wait_for_completion(session_id)
 
         # Give time for cleanup
         await asyncio.sleep(0.1)
@@ -117,13 +117,13 @@ async def test_conversation_preserved_after_run_failure(
         )
 
         # --- Step 3: Third prompt (should have full context) ---
-        run_handle3 = await session_pool.receive_request(
+        msg_id3 = await session_pool.receive_request(
             session_id,
             "What was the first question I asked?",
             priority="when_idle",
         )
-        assert run_handle3 is not None, "Third prompt should start a run"
-        await run_handle3.complete_event.wait()
+        assert msg_id3 is not None, "Third prompt should start a run"
+        await session_pool.wait_for_completion(session_id)
 
         # Check conversation after third run
         agent3 = await session_pool.sessions.get_or_create_session_agent(session_id)
@@ -165,9 +165,9 @@ async def test_agent_identity_preserved_after_failure(
         await session_pool.create_session(session_id, agent_name="test_agent")
 
         # First successful run
-        run_handle = await session_pool.receive_request(session_id, "Hello")
-        assert run_handle is not None
-        await run_handle.complete_event.wait()
+        msg_id = await session_pool.receive_request(session_id, "Hello")
+        assert msg_id is not None
+        await session_pool.wait_for_completion(session_id)
 
         agent_before = await session_pool.sessions.get_or_create_session_agent(session_id)
         agent_id_before = id(agent_before)
@@ -175,9 +175,9 @@ async def test_agent_identity_preserved_after_failure(
 
         # Second run — simulate failure during turn execution (after user msg saved)
         with patch.object(NativeTurn, "execute", side_effect=RuntimeError("Simulated failure")):
-            run_handle2 = await session_pool.receive_request(session_id, "Fail me")
-            assert run_handle2 is not None
-            await run_handle2.complete_event.wait()
+            msg_id2 = await session_pool.receive_request(session_id, "Fail me")
+            assert msg_id2 is not None
+            await session_pool.wait_for_completion(session_id)
 
         await asyncio.sleep(0.1)
 

@@ -246,13 +246,21 @@ async def test_new_runhandle_bridges_conversation() -> None:
     mock_pool.manifest.agents = {"test-bridge": MagicMock()}
     controller.pool = mock_pool  # type: ignore[attr-defined]
 
-    # Call _start_run_handle directly
-    run_handle = controller._start_run_handle(
+    # Call _start_run_handle directly — returns message_id (str | None)
+    message_id = controller._start_run_handle(
         session=session,
         agent=agent,
         session_id="test-bridge-session",
         content="new prompt",
     )
+
+    assert message_id is not None, "Expected a message_id from _start_run_handle"
+
+    # Get the RunHandle from controller._runs
+    session_state = controller.get_session("test-bridge-session")
+    assert session_state is not None
+    assert session_state.current_run_id is not None
+    run_handle = controller._runs[session_state.current_run_id]
 
     # RunHandle._message_history should contain ModelMessages from conversation
     # BUG: This fails because _start_run_handle doesn't bridge conversation.
@@ -418,12 +426,20 @@ async def test_multi_turn_preserves_context_via_consume_run() -> None:
 
     # First RunHandle (simulating prior turn that already completed)
     # Second RunHandle (new request on same session)
-    second_handle = controller._start_run_handle(
+    message_id = controller._start_run_handle(
         session=session,
         agent=agent,
         session_id="test-multi-session",
         content="follow up question",
     )
+
+    assert message_id is not None
+
+    # Get the RunHandle from controller._runs
+    session_state = controller.get_session("test-multi-session")
+    assert session_state is not None
+    assert session_state.current_run_id is not None
+    second_handle = controller._runs[session_state.current_run_id]
 
     # The second RunHandle should have history from agent.conversation
     # BUG: This fails because _start_run_handle doesn't bridge conversation
@@ -510,12 +526,20 @@ async def test_bridged_history_injects_cancelled_tool_results() -> None:
     mock_pool.manifest.agents = {"test-cancel-tool": MagicMock()}
     controller.pool = mock_pool  # type: ignore[attr-defined]
 
-    run_handle = controller._start_run_handle(
+    message_id = controller._start_run_handle(
         session=session,
         agent=agent,
         session_id="test-cancel-tool-session",
         content="follow up",
     )
+
+    assert message_id is not None
+
+    # Get the RunHandle from controller._runs
+    session_state = controller.get_session("test-cancel-tool-session")
+    assert session_state is not None
+    assert session_state.current_run_id is not None
+    run_handle = controller._runs[session_state.current_run_id]
 
     # The bridged history must have:
     # 1. ModelRequest (user prompt)

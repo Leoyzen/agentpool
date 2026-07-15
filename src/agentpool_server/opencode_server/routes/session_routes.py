@@ -201,7 +201,8 @@ async def _execute_slashed_command(  # noqa: PLR0915
 
     # Create assistant message (before execution)
     now = now_ms()
-    assistant_msg_id = identifier.ascending("message")
+    # D14: Use request.message_id if provided for end-to-end ID consistency.
+    assistant_msg_id = identifier.ascending("message", request.message_id)
     assistant_message = AssistantMessage(
         id=assistant_msg_id,
         session_id=session_id,
@@ -292,6 +293,7 @@ async def _execute_slashed_command(  # noqa: PLR0915
                     agent_prompt,
                     scope="session",
                     input_provider=input_provider,
+                    message_id=assistant_msg_id,
                 )
             else:
                 # Fallback to direct agent if SessionPool not available
@@ -429,7 +431,8 @@ async def _execute_skill_command(  # noqa: PLR0915
         await state.broadcast_event(MessageUpdatedEvent.create(user_message))
 
         # Create assistant message (for response)
-        assistant_msg_id = identifier.ascending("message")
+        # D14: Use request.message_id if provided for end-to-end ID consistency.
+        assistant_msg_id = identifier.ascending("message", request.message_id)
         assistant_message = AssistantMessage(
             id=assistant_msg_id,
             session_id=session_id,
@@ -466,7 +469,12 @@ async def _execute_skill_command(  # noqa: PLR0915
 
             session_pool = state.pool.session_pool if state.pool else None
             if session_pool is not None:
-                iterator = session_pool.run_stream(session_id, user_prompt, scope="session")
+                iterator = session_pool.run_stream(
+                    session_id,
+                    user_prompt,
+                    scope="session",
+                    message_id=assistant_msg_id,
+                )
             else:
                 # Fallback to direct agent if session_pool is not available
                 agent = state.agent
@@ -1480,7 +1488,12 @@ async def summarize_session(  # noqa: PLR0915
                 msg = "SessionPool is not available"
                 raise RuntimeError(msg)
             try:
-                stream = session_pool.run_stream(session_id, SUMMARIZE_PROMPT, scope="session")
+                stream = session_pool.run_stream(
+                    session_id,
+                    SUMMARIZE_PROMPT,
+                    scope="session",
+                    message_id=assistant_msg_id,
+                )
                 async for event in stream:
                     match event:
                         # Text streaming start
@@ -1873,7 +1886,8 @@ async def execute_command(  # noqa: PLR0915
 
         now = now_ms()
         # Create assistant message
-        assistant_msg_id = identifier.ascending("message")
+        # D14: Use request.message_id if provided for end-to-end ID consistency.
+        assistant_msg_id = identifier.ascending("message", request.message_id)
         assistant_message = AssistantMessage(
             id=assistant_msg_id,
             session_id=session_id,
@@ -1926,24 +1940,22 @@ async def execute_command(  # noqa: PLR0915
                 session_pool = state.pool.session_pool if state.pool is not None else None
                 if session_pool is not None:
                     input_provider = state.ensure_input_provider(session_id)
-                    run_handle = await session_pool.receive_request(
+                    message_id = await session_pool.receive_request(
                         session_id=session_id,
                         content=prompt_text,
                         priority="when_idle",
                         input_provider=input_provider,
+                        message_id=assistant_msg_id,
                     )
-                    if run_handle is not None:
-                        run_handles = getattr(state, "_run_handles", {})
-                        run_handles[session_id] = run_handle
-                        state._run_handles = run_handles
+                    if message_id is not None:
                         # Wait for the background run to complete before finalizing
                         try:
-                            await asyncio.wait_for(run_handle.complete_event.wait(), timeout=30.0)
+                            await session_pool.wait_for_completion(session_id, timeout=30.0)
                         except TimeoutError:
-                            run_handle.cancel()
+                            session_pool.sessions.cancel_run_for_session(session_id)
                             output_text = "Error: command execution timed out"
                         except asyncio.CancelledError:
-                            run_handle.cancel()
+                            session_pool.sessions.cancel_run_for_session(session_id)
                             raise
                         else:
                             output_text = ""

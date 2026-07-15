@@ -426,8 +426,14 @@ async def test_receive_request_flag_on_delegates_to_session_controller(
     result = await session_pool.receive_request("sess-rr-1", "hello")
 
     assert result is not None
-    assert isinstance(result, RunHandle)
-    assert result.agent is agent
+    assert isinstance(result, str)  # message_id
+    # Verify a RunHandle was created
+    session = session_pool.sessions.get_session("sess-rr-1")
+    assert session is not None
+    assert session.current_run_id is not None
+    run_handle = session_pool.sessions._runs.get(session.current_run_id)
+    assert run_handle is not None
+    assert run_handle.agent is agent
 
 
 # === process_prompt ===
@@ -516,11 +522,11 @@ async def test_inject_prompt_flag_on_delegates_to_run_handle_steer(
 
 
 @pytest.mark.anyio
-async def test_inject_prompt_flag_on_no_run_returns_false(
+async def test_inject_prompt_flag_on_no_run_returns_none(
     session_pool: SessionPool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When flag is ON and no active run, inject_prompt returns False."""
+    """When flag is ON and no active run, inject_prompt returns None."""
     monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
     agent = _make_mock_agent()
     _setup_session_with_agent(session_pool, "sess-ip-2", agent)
@@ -528,7 +534,7 @@ async def test_inject_prompt_flag_on_no_run_returns_false(
 
     result = await session_pool.inject_prompt("sess-ip-2", "message")
 
-    assert result is False
+    assert result is None
 
 
 # === queue_prompt ===
@@ -553,11 +559,11 @@ async def test_queue_prompt_flag_on_delegates_to_run_handle_followup(
 
 
 @pytest.mark.anyio
-async def test_queue_prompt_flag_on_no_run_returns_false(
+async def test_queue_prompt_flag_on_no_run_returns_none(
     session_pool: SessionPool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When flag is ON and no active run, queue_prompt returns False."""
+    """When flag is ON and no active run, queue_prompt returns None."""
     monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
     agent = _make_mock_agent()
     _setup_session_with_agent(session_pool, "sess-qp-2", agent)
@@ -565,7 +571,7 @@ async def test_queue_prompt_flag_on_no_run_returns_false(
 
     result = await session_pool.queue_prompt("sess-qp-2", "message")
 
-    assert result is False
+    assert result is None
 
 
 # === steer ===
@@ -590,11 +596,11 @@ async def test_steer_flag_on_delegates_to_run_handle_steer(
 
 
 @pytest.mark.anyio
-async def test_steer_flag_on_no_run_returns_false(
+async def test_steer_flag_on_no_run_returns_none(
     session_pool: SessionPool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When flag is ON and no active run, steer returns False."""
+    """When flag is ON and no active run, steer returns None."""
     monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
     agent = _make_mock_agent()
     _setup_session_with_agent(session_pool, "sess-st-2", agent)
@@ -602,7 +608,7 @@ async def test_steer_flag_on_no_run_returns_false(
 
     result = await session_pool.steer("sess-st-2", "message")
 
-    assert result is False
+    assert result is None
 
 
 # === followup ===
@@ -627,11 +633,11 @@ async def test_followup_flag_on_delegates_to_run_handle_followup(
 
 
 @pytest.mark.anyio
-async def test_followup_flag_on_no_run_returns_false(
+async def test_followup_flag_on_no_run_returns_none(
     session_pool: SessionPool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When flag is ON and no active run, followup returns False."""
+    """When flag is ON and no active run, followup returns None."""
     monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
     agent = _make_mock_agent()
     _setup_session_with_agent(session_pool, "sess-fu-2", agent)
@@ -639,7 +645,7 @@ async def test_followup_flag_on_no_run_returns_false(
 
     result = await session_pool.followup("sess-fu-2", "message")
 
-    assert result is False
+    assert result is None
 
 
 # === Helpers ===

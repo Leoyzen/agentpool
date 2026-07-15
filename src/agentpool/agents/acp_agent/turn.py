@@ -122,6 +122,7 @@ class ACPTurn(HookAwareTurn, Turn):
         self._hooks = hooks
         self._agent_env = env
         self._prompt_response: PromptResponse | None = None
+        self._message_id = uuid4().hex
 
     @property
     def _hook_env(self) -> Any | None:
@@ -166,7 +167,7 @@ class ACPTurn(HookAwareTurn, Turn):
                 self._final_message = ChatMessage[str](
                     content="",
                     role="assistant",
-                    message_id=str(uuid4()),
+                    message_id=self._message_id,
                     session_id=self._session_id,
                 )
                 yield StreamCompleteEvent(cancelled=True, message=self._final_message)
@@ -258,7 +259,7 @@ class ACPTurn(HookAwareTurn, Turn):
                 self._final_message = ChatMessage[str](
                     content="",
                     role="assistant",
-                    message_id=str(uuid4()),
+                    message_id=self._message_id,
                     session_id=self._session_id,
                 )
 

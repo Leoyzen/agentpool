@@ -198,7 +198,7 @@ async def test_steer_while_idle_queues_and_wakes() -> None:
 
     # Steer while idle
     result = handle.steer("steered message")
-    assert result is True
+    assert result is not None
     assert "steered message" in handle._message_queue
     assert handle._idle_event.is_set()
 
@@ -233,7 +233,7 @@ async def test_followup_while_idle_queues() -> None:
     assert handle._run_state == RunState.IDLE
 
     result = handle.followup("followup message")
-    assert result is True
+    assert result is not None
     assert "followup message" in handle._message_queue
     assert handle._idle_event.is_set()
 
@@ -282,7 +282,7 @@ async def test_steer_returns_false_when_closing() -> None:
     handle.close()
 
     result = handle.steer("message")
-    assert result is False
+    assert result is None
 
 
 @pytest.mark.unit
@@ -292,7 +292,7 @@ async def test_followup_returns_false_when_closing() -> None:
     handle.close()
 
     result = handle.followup("message")
-    assert result is False
+    assert result is None
 
 
 @pytest.mark.unit
@@ -304,7 +304,7 @@ async def test_steer_while_running_with_agent_run() -> None:
     handle.active_agent_run = mock_agent_run
 
     result = handle.steer("inject me")
-    assert result is True
+    assert result is not None
     mock_agent_run.enqueue.assert_called_once_with("inject me", priority="asap")
 
 
@@ -316,7 +316,7 @@ async def test_steer_while_running_without_agent_run() -> None:
     handle.active_agent_run = None
 
     result = handle.steer("queue me")
-    assert result is True
+    assert result is not None
     assert "queue me" in handle.run_ctx.queued_steer_messages
 
 
@@ -368,7 +368,7 @@ async def test_followup_while_running_does_not_set_idle_event() -> None:
     handle._idle_event.clear()
 
     result = handle.followup("queued")
-    assert result is True
+    assert result is not None
     assert "queued" in handle._message_queue
     assert not handle._idle_event.is_set()
 
@@ -502,8 +502,8 @@ async def test_multiple_followups_queued_all_become_next_turn_prompts() -> None:
     assert handle._run_state == RunState.IDLE
 
     # Queue two followups
-    assert handle.followup("first followup") is True
-    assert handle.followup("second followup") is True
+    assert handle.followup("first followup") is not None
+    assert handle.followup("second followup") is not None
 
     # Both should be in the queue
     assert "first followup" in handle._message_queue
@@ -550,7 +550,7 @@ async def test_steer_returns_false_when_done_status() -> None:
     handle._closing = True
 
     result = handle.steer("message")
-    assert result is False
+    assert result is None
 
 
 @pytest.mark.unit
@@ -561,7 +561,7 @@ async def test_followup_returns_false_when_done_status() -> None:
     handle._closing = True
 
     result = handle.followup("message")
-    assert result is False
+    assert result is None
 
 
 @pytest.mark.unit

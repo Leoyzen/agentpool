@@ -373,8 +373,8 @@ class TestInjectPromptWithSessionPool:
         # inject_prompt should queue and trigger auto-resume
         result = await pool.inject_prompt("test-sid", "test message")
 
-        # inject_prompt returns False when queued (no active run_ctx)
-        assert result is False
+        # inject_prompt returns None when queued (no active run_ctx)
+        assert result is None
 
 
 @pytest.mark.manual

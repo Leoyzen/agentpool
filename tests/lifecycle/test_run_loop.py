@@ -698,7 +698,7 @@ async def test_steer_when_idle_direct_channel() -> None:
 
     result = handle.steer("steer message")
 
-    assert result is True
+    assert result is not None
     assert "steer message" in handle._message_queue
     assert handle._idle_event.is_set()
 
@@ -716,7 +716,7 @@ async def test_steer_when_running_direct_channel_with_agent_run() -> None:
 
     result = handle.steer("steer message")
 
-    assert result is True
+    assert result is not None
     mock_agent_run.enqueue.assert_called_once_with("steer message", priority="asap")
 
 
@@ -729,7 +729,7 @@ async def test_steer_when_running_direct_channel_without_agent_run() -> None:
 
     result = handle.steer("steer message")
 
-    assert result is True
+    assert result is not None
     assert "steer message" in handle.run_ctx.queued_steer_messages
 
 
@@ -742,7 +742,7 @@ async def test_followup_during_active_turn() -> None:
 
     result = handle.followup("followup message")
 
-    assert result is True
+    assert result is not None
     assert "followup message" in handle._message_queue
     # _idle_event should NOT be set when running (no need to wake).
     assert not handle._idle_event.is_set()
@@ -756,7 +756,7 @@ async def test_followup_when_idle() -> None:
 
     result = handle.followup("followup message")
 
-    assert result is True
+    assert result is not None
     assert "followup message" in handle._message_queue
     assert handle._idle_event.is_set()
 
@@ -811,7 +811,7 @@ async def test_followup_after_close_returns_false() -> None:
     handle.close()
 
     result = handle.followup("should fail")
-    assert result is False
+    assert result is None
 
 
 @pytest.mark.unit
@@ -822,7 +822,7 @@ async def test_steer_when_closing_returns_false() -> None:
     handle._closed = False
 
     result = handle.steer("should fail")
-    assert result is False
+    assert result is None
 
 
 @pytest.mark.unit
@@ -908,7 +908,7 @@ async def test_steer_with_protocol_channel_routes_via_deliver_feedback() -> None
 
     result = handle.steer("protocol steer")
 
-    assert result is True
+    assert result is not None
     # Feedback should be in the ProtocolChannel's feedback queue.
     feedback = channel.recv()
     assert feedback is not None
@@ -929,7 +929,7 @@ async def test_followup_with_protocol_channel_routes_via_deliver_feedback() -> N
 
     result = handle.followup("protocol followup")
 
-    assert result is True
+    assert result is not None
     feedback = channel.recv()
     assert feedback is not None
     assert feedback.content == "protocol followup"
@@ -950,7 +950,7 @@ async def test_steer_protocol_channel_when_idle_sets_idle_event() -> None:
 
     result = handle.steer("idle steer")
 
-    assert result is True
+    assert result is not None
     assert handle._idle_event.is_set()
     # Feedback should be in the channel's queue.
     feedback = channel.recv()
@@ -1047,7 +1047,7 @@ async def test_steer_direct_channel_does_not_use_deliver_feedback() -> None:
     handle._run_state = RunState.IDLE
     result = handle.steer("direct steer")
 
-    assert result is True
+    assert result is not None
     assert "direct steer" in handle._message_queue
 
 
@@ -1059,7 +1059,7 @@ async def test_followup_direct_channel_does_not_use_deliver_feedback() -> None:
 
     result = handle.followup("direct followup")
 
-    assert result is True
+    assert result is not None
     assert "direct followup" in handle._message_queue
 
 
@@ -1076,7 +1076,7 @@ async def test_steer_protocol_channel_does_not_touch_message_queue() -> None:
 
     result = handle.steer("protocol steer")
 
-    assert result is True
+    assert result is not None
     # _message_queue should be empty — feedback went to ProtocolChannel.
     assert len(handle._message_queue) == 0
     # Feedback is in the channel.
@@ -1096,7 +1096,7 @@ async def test_followup_protocol_channel_does_not_touch_message_queue() -> None:
 
     result = handle.followup("protocol followup")
 
-    assert result is True
+    assert result is not None
     assert len(handle._message_queue) == 0
     assert channel.recv() is not None
 
@@ -1214,7 +1214,7 @@ async def test_followup_protocol_channel_wakes_idle_loop() -> None:
 
     result = handle.followup("idle followup")
 
-    assert result is True
+    assert result is not None
     assert handle._idle_event.is_set()
     feedback = channel.recv()
     assert feedback is not None
