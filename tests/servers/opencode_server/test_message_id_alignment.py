@@ -10,14 +10,12 @@ Tests that:
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from agentpool_server.opencode_server.event_processor_context import EventProcessorContext
-from agentpool_server.opencode_server.models import MessageWithParts, MessageTime, MessagePath
+from agentpool_server.opencode_server.models import MessagePath, MessageTime, MessageWithParts
 from agentpool_server.opencode_server.models.message import (
     CommandRequest,
     MessageRequest,
@@ -276,14 +274,14 @@ class TestHandleEventUpdatesMessageId:
     @pytest.mark.asyncio
     async def test_handle_event_updates_ctx_message_id_from_event(self):
         """_handle_event should update ctx.assistant_msg_id from event.message_id."""
+        from pydantic_ai.messages import TextPart as PydanticTextPart
+
+        from agentpool.agents.events import PartStartEvent
+        from agentpool.orchestrator.event_bus import EventEnvelope
+        from agentpool_server.opencode_server.models import MessageWithParts
         from agentpool_server.opencode_server.session_pool_integration import (
             OpenCodeSessionPoolIntegration,
         )
-        from agentpool_server.opencode_server.models import MessageWithParts
-        from agentpool_server.opencode_server.models.message import AssistantMessage
-        from agentpool.orchestrator.event_bus import EventEnvelope
-        from agentpool.agents.events import PartStartEvent
-        from pydantic_ai.messages import TextPart as PydanticTextPart
 
         session_pool = Mock()
         server_state = Mock()
@@ -315,9 +313,11 @@ class TestHandleEventUpdatesMessageId:
 
         # Mock the adapter to avoid full event processing
         mock_adapter = Mock()
+
         async def _empty_convert(event):
             return
-            yield  # noqa: RET504 -- never reached, but makes this an async generator
+            yield
+
         mock_adapter.convert_event = _empty_convert
         integration._adapters["test-session"] = mock_adapter
 
@@ -340,11 +340,11 @@ class TestHandleEventUpdatesMessageId:
     @pytest.mark.asyncio
     async def test_handle_event_does_not_update_when_event_has_no_message_id(self):
         """_handle_event should not update ctx.assistant_msg_id when event has no message_id."""
+        from agentpool.agents.events import RunStartedEvent
+        from agentpool.orchestrator.event_bus import EventEnvelope
         from agentpool_server.opencode_server.session_pool_integration import (
             OpenCodeSessionPoolIntegration,
         )
-        from agentpool.orchestrator.event_bus import EventEnvelope
-        from agentpool.agents.events import RunStartedEvent
 
         session_pool = Mock()
         server_state = Mock()
@@ -374,9 +374,11 @@ class TestHandleEventUpdatesMessageId:
         integration._message_registered["test-session"] = False
 
         mock_adapter = Mock()
+
         async def _empty_convert(event):
             return
-            yield  # noqa: RET504
+            yield
+
         mock_adapter.convert_event = _empty_convert
         integration._adapters["test-session"] = mock_adapter
 
