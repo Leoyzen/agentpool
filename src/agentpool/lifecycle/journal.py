@@ -21,6 +21,7 @@ from enum import Enum
 import json
 from typing import TYPE_CHECKING, Any
 
+import logfire
 from pydantic import BaseModel
 from sqlalchemy import Column, Text, create_engine, event as sa_event, text
 from sqlalchemy.orm import Session
@@ -431,6 +432,7 @@ class DurableJournal:
         """Create tables if they don't exist."""
         SQLModel.metadata.create_all(self._engine)
 
+    @logfire.instrument("lifecycle.journal.append")
     def append(self, event: Any) -> int:
         """Create a new journal entry for a delta event.
 
@@ -455,6 +457,7 @@ class DurableJournal:
             session.refresh(entry)
             return entry.seq
 
+    @logfire.instrument("lifecycle.journal.upsert")
     def upsert(self, key: str, event: Any) -> int:
         """Replace or create an entity-state entry by key.
 
@@ -530,6 +533,7 @@ class DurableJournal:
                 continue
             yield _deserialize_event(row.event_json)
 
+    @logfire.instrument("lifecycle.journal.resume")
     def resume(self, snapshot_store: SnapshotStore) -> ResumeResult | None:
         """Coordinate snapshot and journal for crash recovery.
 

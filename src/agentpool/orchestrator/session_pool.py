@@ -12,6 +12,8 @@ import time
 from typing import TYPE_CHECKING, Any, Final
 import uuid
 
+import logfire
+
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     RunErrorEvent,
@@ -1026,6 +1028,7 @@ class SessionPool:
         agent: BaseAgent[Any, Any],
         session_id: str,
         *,
+        deps: Any = None,
         cached_elicitation_responses: dict[str, Any] | None = None,
         deferred_tool_results: Any = None,
         message_history: list[ModelMessage] | None = None,
@@ -1054,6 +1057,8 @@ class SessionPool:
             session: The session state.
             agent: The agent instance (native or ACP).
             session_id: The session identifier.
+            deps: Optional dependencies to pass to the agent run context
+                (e.g. delegation_depth from BackgroundTaskCapability).
             cached_elicitation_responses: Pre-populated elicitation
                 responses for crash recovery resume.
             deferred_tool_results: Deferred tool results for resolving
@@ -1082,7 +1087,7 @@ class SessionPool:
                 raise SessionBusyError(session_id, session.current_run_id)
 
         event_bus = self.event_bus
-        run_ctx = AgentRunContext(session_id=session_id, event_bus=event_bus)
+        run_ctx = AgentRunContext(session_id=session_id, event_bus=event_bus, deps=deps)
         if cached_elicitation_responses is not None:
             run_ctx.cached_elicitation_responses = cached_elicitation_responses
 
@@ -1263,13 +1268,21 @@ class SessionPool:
                 stacklevel=2,
             )
             mode = DeliveryMode.QUEUE
+        # Forward deps and input_provider from kwargs to send_message so
+        # they are not silently dropped. This mirrors the old
+        # SessionController.receive_request() behavior.
+        deps = kwargs.pop("deps", None)
+        input_provider = kwargs.pop("input_provider", None)
         return await self.send_message(
             session_id,
             content,
             mode=mode,
             message_id=message_id,
+            deps=deps,
+            input_provider=input_provider,
         )
 
+    @logfire.instrument("session.send_message")
     async def send_message(
         self,
         session_id: str,
@@ -1278,13 +1291,14 @@ class SessionPool:
         mode: DeliveryMode = DeliveryMode.QUEUE,
         message_id: str | None = None,
         deps: Any = None,
+        input_provider: Any = None,
     ) -> str | None:
         """Send a message to a session using the typed ``DeliveryMode`` enum.
 
         Maps ``DeliveryMode.STEER`` → ``priority="asap"`` (inject into
         active turn) and ``DeliveryMode.QUEUE`` → ``priority="when_idle"``
         (queue for next turn), then delegates to
-        :meth:`SessionController.receive_request`.
+        :meth:`SessionController._route_message`.
 
         Args:
             session_id: Target session.
@@ -1297,6 +1311,8 @@ class SessionPool:
                 not provided. Returned on success.
             deps: Optional dependencies to pass to the agent run context
                 (e.g. delegation_depth from BackgroundTaskCapability).
+            input_provider: Optional input provider for the agent run
+                (e.g. ACPInputProvider for elicitation/tool confirmation).
 
         Returns:
             The ``message_id`` string on success (both new runs and
@@ -1310,7 +1326,15 @@ class SessionPool:
         if session is None:
             return None
         session.last_active_at = time.monotonic()
-        agent = await self.sessions.get_or_create_session_agent(session_id)
+        # Set input_provider on session BEFORE get_or_create_session_agent()
+        # so the agent is created with the correct input_provider and the
+        # session state is consistent — mirrors SessionController.receive_request().
+        if input_provider is not None:
+            session.input_provider = input_provider
+        agent = await self.sessions.get_or_create_session_agent(
+            session_id,
+            input_provider=input_provider,
+        )
         if agent is None:
             return None
         return await self.sessions._route_message(
@@ -1533,6 +1557,10 @@ class SessionPool:
         input_provider = kwargs.pop("input_provider", None)
         if input_provider is not None:
             session.input_provider = input_provider
+        # Extract deps from kwargs so they are passed to AgentRunContext
+        # for the child agent run (e.g. delegation_depth from
+        # BackgroundTaskCapability._task_async).
+        deps = kwargs.pop("deps", None)
         # Extract resume parameters — only set by resume_session().
         cached_elicitation_responses: dict[str, Any] | None = kwargs.pop(
             "cached_elicitation_responses", None
@@ -1603,6 +1631,7 @@ class SessionPool:
                 session,
                 agent,
                 session_id,
+                deps=deps,
                 cached_elicitation_responses=cached_elicitation_responses,
                 deferred_tool_results=deferred_tool_results,
                 message_history=message_history,
@@ -1671,6 +1700,7 @@ class SessionPool:
             return run_handle.followup(str(message))
         return None
 
+    @logfire.instrument("session.steer")
     async def steer(self, session_id: str, message: str, **kwargs: Any) -> str | None:
         """Inject a steer message with agent-type-aware routing.
 
@@ -1689,6 +1719,7 @@ class SessionPool:
             return run_handle.steer(message)
         return None
 
+    @logfire.instrument("session.followup")
     async def followup(self, session_id: str, message: str, **kwargs: Any) -> str | None:
         """Queue a follow-up message with agent-type-aware routing.
 

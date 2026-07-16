@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self
 import uuid
 
+import logfire
+
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     RunErrorEvent,
@@ -32,6 +34,7 @@ from agentpool.lifecycle import (
 )
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
+from agentpool.observability.spans import safe_span
 
 
 if TYPE_CHECKING:
@@ -371,7 +374,9 @@ class RunHandle:
     # New session-level lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self, initial_prompt: str = "") -> AsyncGenerator[RichAgentStreamEvent[Any]]:
+    async def start(  # noqa: PLR0915
+        self, initial_prompt: str = ""
+    ) -> AsyncGenerator[RichAgentStreamEvent[Any]]:
         """Start the idle/wake/turn loop as an async generator.
 
         Yields :class:`RichAgentStreamEvent` tokens from each turn's
@@ -413,56 +418,72 @@ class RunHandle:
 
         recovered_prompt = await self._handle_recovery()
 
-        try:
-            async with session.turn_lock:
-                # For "retry" recovery, prepend the recovered prompt.
-                if recovered_prompt is not None:
-                    current_prompts: list[str | list[Any]] = [recovered_prompt]
-                else:
-                    # CRITICAL: empty string must produce [] not [""].
-                    # [""] is a non-empty list that bypasses _idle_loop()
-                    # and executes a spurious empty-prompt turn.
-                    current_prompts = [initial_prompt] if initial_prompt else []
-                while not self._closing:
-                    if not current_prompts:
-                        current_prompts = await self._idle_loop()
+        with safe_span(
+            "orchestration.run_handle.start",
+            session_id=self.session_id,
+            agent_type=self.agent_type,
+        ):
+            from agentpool.observability.trace import get_trace_id
+
+            logfire.info(
+                "RunLoop started",
+                trace_id=get_trace_id(),
+                session_id=self.session_id,
+                agent_type=self.agent_type,
+            )
+            try:
+                async with session.turn_lock:
+                    # For "retry" recovery, prepend the recovered prompt.
+                    if recovered_prompt is not None:
+                        current_prompts: list[str | list[Any]] = [recovered_prompt]
+                    else:
+                        # CRITICAL: empty string must produce [] not [""].
+                        # [""] is a non-empty list that bypasses _idle_loop()
+                        # and executes a spurious empty-prompt turn.
+                        current_prompts = [initial_prompt] if initial_prompt else []
+                    while not self._closing:
                         if not current_prompts:
+                            current_prompts = await self._idle_loop()
+                            if not current_prompts:
+                                continue
+
+                        async with contextlib.aclosing(
+                            self._execute_turn(
+                                agent,
+                                event_bus,
+                                session,
+                                current_prompts,
+                            ),
+                        ) as turn_gen:
+                            async for event in turn_gen:
+                                yield event
+
+                        action = await self._handle_turn_result(event_bus)
+                        if action == "continue":
+                            current_prompts = []  # Prevent re-execution of cancelled prompt
                             continue
+                        if action == "break":
+                            break
 
-                    async for event in self._execute_turn(
-                        agent,
-                        event_bus,
-                        session,
-                        current_prompts,
-                    ):
-                        yield event
+                        current_prompts = await self._drain_events()
 
-                    action = await self._handle_turn_result(event_bus)
-                    if action == "continue":
-                        current_prompts = []  # Prevent re-execution of cancelled prompt
-                        continue
-                    if action == "break":
-                        break
-
-                    current_prompts = await self._drain_events()
-
-        finally:
-            self._closed = True
-            # Lifecycle state transition: → DONE.
-            with contextlib.suppress(Exception):
-                await self._transition(RunState.DONE)
-            self._turn_complete_event.set()
-            self.complete_event.set()
-            # Close lifecycle dimensions.
-            with contextlib.suppress(Exception):
-                if self._trigger_source is not None:
-                    self._trigger_source.close()
-            with contextlib.suppress(Exception):
-                if self._comm_channel is not None:
-                    self._comm_channel.close()
-            with contextlib.suppress(Exception):
-                if self._event_transport is not None:
-                    self._event_transport.close()
+            finally:
+                self._closed = True
+                # Lifecycle state transition: → DONE.
+                with contextlib.suppress(Exception):
+                    await self._transition(RunState.DONE)
+                self._turn_complete_event.set()
+                self.complete_event.set()
+                # Close lifecycle dimensions.
+                with contextlib.suppress(Exception):
+                    if self._trigger_source is not None:
+                        self._trigger_source.close()
+                with contextlib.suppress(Exception):
+                    if self._comm_channel is not None:
+                        self._comm_channel.close()
+                with contextlib.suppress(Exception):
+                    if self._event_transport is not None:
+                        self._event_transport.close()
 
     async def _handle_recovery(self) -> str | None:
         """Perform crash recovery and subscribe lifecycle dimensions.
@@ -697,58 +718,64 @@ class RunHandle:
         self._current_turn_failed = False
         turn_failed = False
         stream_complete_saved = False
-        try:
-            async for event in turn.execute():
+        with safe_span(
+            "orchestration.run_handle.execute_turn",
+            turn_id=turn_id,
+            session_id=self.session_id,
+        ):
+            try:
+                async with contextlib.aclosing(turn.execute()) as event_gen:
+                    async for event in event_gen:
+                        if not self._comm_channel.publishes_to_event_bus:
+                            await event_bus.publish(self.session_id, event)
+                        await self._comm_channel.publish(event)
+                        # Save assistant final message to conversation BEFORE
+                        # yielding. The _consume_run caller closes the generator
+                        # immediately after receiving StreamCompleteEvent, which
+                        # prevents any code after `yield event` from executing.
+                        if isinstance(event, StreamCompleteEvent) and event.message is not None:
+                            agent.conversation.add_chat_messages(
+                                [event.message],
+                                extend_last=True,
+                            )
+                            stream_complete_saved = True
+                        yield event
+                        if isinstance(event, RunErrorEvent):
+                            turn_failed = True
+                            break
+                        if isinstance(event, StreamCompleteEvent):
+                            break
+            except Exception as e:  # noqa: BLE001
+                turn_failed = True
+                error_event = RunErrorEvent(
+                    message=str(e),
+                    run_id=self.run_id,
+                    agent_name=self.agent_type,
+                )
                 if not self._comm_channel.publishes_to_event_bus:
-                    await event_bus.publish(self.session_id, event)
-                await self._comm_channel.publish(event)
-                # Save assistant final message to conversation BEFORE
-                # yielding. The _consume_run caller closes the generator
-                # immediately after receiving StreamCompleteEvent, which
-                # prevents any code after `yield event` from executing.
-                if isinstance(event, StreamCompleteEvent) and event.message is not None:
+                    await event_bus.publish(self.session_id, error_event)
+                await self._comm_channel.publish(error_event)
+                yield error_event
+            finally:
+                self._current_turn_failed = turn_failed
+                # Preserve partial history for ALL non-StreamCompleteEvent
+                # exit paths. Without this:
+                #
+                # - RunErrorEvent (generic Exception): agent.conversation
+                #   has only the user message — next turn loses context.
+                # - CancelledError (cooperative cancel): _final_message IS
+                #   set by NativeTurn but no StreamCompleteEvent is yielded,
+                #   so the StreamCompleteEvent branch never fires.
+                #
+                # Use the private attribute to avoid raising when
+                # _final_message was never set (e.g. generic Exception
+                # before any output was produced).  Skip if the
+                # StreamCompleteEvent branch already saved.
+                if not stream_complete_saved and turn._final_message is not None:
                     agent.conversation.add_chat_messages(
-                        [event.message],
+                        [turn._final_message],
                         extend_last=True,
                     )
-                    stream_complete_saved = True
-                yield event
-                if isinstance(event, RunErrorEvent):
-                    turn_failed = True
-                    break
-                if isinstance(event, StreamCompleteEvent):
-                    break
-        except Exception as e:  # noqa: BLE001
-            turn_failed = True
-            error_event = RunErrorEvent(
-                message=str(e),
-                run_id=self.run_id,
-                agent_name=self.agent_type,
-            )
-            if not self._comm_channel.publishes_to_event_bus:
-                await event_bus.publish(self.session_id, error_event)
-            await self._comm_channel.publish(error_event)
-            yield error_event
-        finally:
-            self._current_turn_failed = turn_failed
-            # Preserve partial history for ALL non-StreamCompleteEvent
-            # exit paths. Without this:
-            #
-            # - RunErrorEvent (generic Exception): agent.conversation
-            #   has only the user message — next turn loses context.
-            # - CancelledError (cooperative cancel): _final_message IS
-            #   set by NativeTurn but no StreamCompleteEvent is yielded,
-            #   so the StreamCompleteEvent branch never fires.
-            #
-            # Use the private attribute to avoid raising when
-            # _final_message was never set (e.g. generic Exception
-            # before any output was produced).  Skip if the
-            # StreamCompleteEvent branch already saved.
-            if not stream_complete_saved and turn._final_message is not None:
-                agent.conversation.add_chat_messages(
-                    [turn._final_message],
-                    extend_last=True,
-                )
 
     async def _handle_turn_result(self, event_bus: EventBus) -> str:
         """Handle cancel and error outcomes after turn execution.
@@ -910,6 +937,7 @@ class RunHandle:
         self._turn_complete_event.set()
         return prompts
 
+    @logfire.instrument("orchestration.run_handle.steer")
     def steer(
         self,
         message: str | list[Any],
@@ -1015,6 +1043,7 @@ class RunHandle:
 
         return None
 
+    @logfire.instrument("orchestration.run_handle.followup")
     def followup(
         self,
         message: str | list[Any],
