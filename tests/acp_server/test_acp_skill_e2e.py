@@ -306,9 +306,7 @@ async def test_e2e_execute_skill_command_injects_instructions(
     assert "special instructions" in staged_text, (
         f"Skill instructions not found in staged content: {staged_text}"
     )
-    assert "test-args" in staged_text, (
-        f"User args not found in staged content: {staged_text}"
-    )
+    assert "test-args" in staged_text, f"User args not found in staged content: {staged_text}"
 
 
 @pytest.mark.integration
@@ -457,9 +455,9 @@ async def test_regression_send_update_includes_both_manifest_and_skill_commands(
     mock_client: AsyncMock,
     mock_acp_agent: MagicMock,
 ) -> None:
-    """T11.3: Test send_available_commands_update() includes
+    """T11.3: Test send_available_commands_update() includes both manifest and skill commands.
 
-    both manifest commands AND skill commands.
+    Verifies both manifest commands AND skill commands appear in update.
     """
     pool, agent = pool_and_agent
     skill = _make_skill(name="skill-cmd", description="A skill command")
@@ -543,13 +541,12 @@ async def test_regression_load_skills_false_pool_skills_still_registered(
     mock_acp_agent: MagicMock,
 ) -> None:
     """T11.5: Test ACP session with load_skills=False config.
-    -> pool skills still registered, client skills NOT discovered.
 
+    Pool skills still registered, client skills NOT discovered.
     _register_skill_commands() is always called in __post_init__
-    regardless of load_skills.
-    init_client_skills() is gated by should_load_skills in acp_agent.py.
-    This test verifies pool skills are registered
-    even when client skill discovery is skipped.
+    regardless of load_skills. init_client_skills() is gated by
+    should_load_skills in acp_agent.py. This test verifies pool skills
+    are registered even when client skill discovery is skipped.
     """
     pool, agent = pool_and_agent
     pool_skill = _make_skill(name="pool-skill", description="A pool-level skill")
@@ -587,8 +584,7 @@ async def test_regression_50_plus_skills_registration_performance(
     """
     pool, agent = pool_and_agent
     skills = [
-        _make_skill(name=f"skill-{i:03d}", description=f"Skill number {i}")
-        for i in range(50)
+        _make_skill(name=f"skill-{i:03d}", description=f"Skill number {i}") for i in range(50)
     ]
     _mock_skills_on_pool(pool, skills)
 

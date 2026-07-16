@@ -342,24 +342,40 @@ class ACPSession:
         Builds SkillCommand objects from the skills registry, feeds them
         through ACPSkillBridge, and registers the resulting SlashedCommand
         objects in command_store with replace=True for idempotent updates.
+        Also removes stale commands that are no longer present or invocable.
         """
         from agentpool.skills.command import SkillCommand
 
         ctx = self.host_context
         skills_registry = ctx.skills_registry
         skills = skills_registry.list_skills()
-        cmd_count = 0
+
+        # Build current set of invocable skill commands
+        new_cmds: list[SkillCommand] = []
         for skill in skills:
             if not skill.user_invocable:
                 continue
-            skill_cmd = SkillCommand(
-                name=skill.name,
-                description=skill.description,
-                skill=skill,
-                skill_uri=f"skill://{skill.name}",
+            new_cmds.append(
+                SkillCommand(
+                    name=skill.name,
+                    description=skill.description,
+                    skill=skill,
+                    skill_uri=f"skill://{skill.name}",
+                )
             )
-            self._skill_bridge.handle_change(skill_cmd.name, skill_cmd)
-            cmd_count += 1
+        new_names = {cmd.name for cmd in new_cmds}
+
+        # Remove stale commands no longer in the registry
+        old_names = self._skill_bridge.get_command_names()
+        stale_names = old_names - new_names
+        for stale in stale_names:
+            self._skill_bridge.handle_change(stale, None)
+            self.command_store.unregister_command(stale)
+            self.log.debug("Unregistered stale skill command", name=stale)
+
+        # Add/update commands through the bridge
+        for cmd in new_cmds:
+            self._skill_bridge.handle_change(cmd.name, cmd)
 
         # Register all bridge commands in command_store with replace=True
         for slashed_cmd in self._skill_bridge.get_commands():
@@ -369,9 +385,13 @@ class ACPSession:
                 name=slashed_cmd.name,
             )
 
-        if cmd_count > 0:
+        if new_cmds or stale_names:
             self._notify_command_update()
-            self.log.info("Registered skill commands", count=cmd_count)
+            self.log.info(
+                "Synced skill commands",
+                added=len(new_cmds),
+                removed=len(stale_names),
+            )
 
     def _start_skill_change_watcher(self) -> None:
         """Start watching for dynamic skill changes from ExtensionRegistry."""
@@ -395,9 +415,7 @@ class ACPSession:
         if ctx.extension_registry is None:
             return
 
-        stream = ctx.extension_registry.merge_change_streams(
-            Scope(level=ScopeLevel.POOL)
-        )
+        stream = ctx.extension_registry.merge_change_streams(Scope(level=ScopeLevel.POOL))
         if stream is None:
             self.log.debug("No skill change streams to watch")
             return

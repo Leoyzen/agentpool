@@ -1,8 +1,8 @@
-"""Unit tests for ACPSession skill lifecycle: init_client_skills,.
-_watch_skill_changes, and skill command execution.
+"""Unit tests for ACPSession skill lifecycle.
 
-Covers tasks T7.1-T7.4 (init_client_skills integration), T8.1-T8.5 (dynamic skill updates),
-and T9.1-T9.5 (skill command execution).
+Covers init_client_skills, _watch_skill_changes, and skill command execution.
+Tasks T7.1-T7.4 (init_client_skills integration), T8.1-T8.5 (dynamic skill
+updates), and T9.1-T9.5 (skill command execution).
 """
 
 from __future__ import annotations
@@ -115,18 +115,14 @@ def _make_mock_session(
     # Bind real methods
     from agentpool_server.acp_server.session import ACPSession
 
-    session._register_skill_commands = (
-        ACPSession._register_skill_commands.__get__(session, ACPSession)
+    session._register_skill_commands = ACPSession._register_skill_commands.__get__(
+        session, ACPSession
     )
-    session._start_skill_change_watcher = (
-        ACPSession._start_skill_change_watcher.__get__(session, ACPSession)
+    session._start_skill_change_watcher = ACPSession._start_skill_change_watcher.__get__(
+        session, ACPSession
     )
-    session._watch_skill_changes = (
-        ACPSession._watch_skill_changes.__get__(session, ACPSession)
-    )
-    session.init_client_skills = (
-        ACPSession.init_client_skills.__get__(session, ACPSession)
-    )
+    session._watch_skill_changes = ACPSession._watch_skill_changes.__get__(session, ACPSession)
+    session.init_client_skills = ACPSession.init_client_skills.__get__(session, ACPSession)
     session.send_available_commands_update = ACPSession.send_available_commands_update.__get__(
         session, ACPSession
     )
@@ -164,7 +160,8 @@ def _async_iter(events: list[Any | None]):
 @pytest.mark.unit
 async def test_init_client_skills_registers_client_skills_in_command_store() -> None:
     """T7.1: After init_client_skills() completes.
-    client-discovered skills appear in command_store.
+
+    Client-discovered skills appear in command_store.
     """
     skill = _make_skill(name="client-skill", description="A client-side skill")
     session = _make_mock_session(skills_list=[skill])
@@ -239,7 +236,8 @@ async def test_pool_and_client_skills_coexist_without_duplicates() -> None:
 @pytest.mark.unit
 async def test_watch_skill_changes_calls_register_on_skills_changed_event() -> None:
     """T8.1: _watch_skill_changes() calls _register_skill_commands().
-    when skills_changed event arrives.
+
+    Called when skills_changed event arrives.
     """
     event = ChangeEvent(capability_name="test-cap", kind="skills_changed")
     mock_stream = _async_iter([event, None])
@@ -282,6 +280,7 @@ async def test_watch_skill_changes_ignores_non_skills_changed_events() -> None:
 @pytest.mark.unit
 async def test_watcher_task_cancelled_on_close() -> None:
     """T8.3: Watcher task is cancelled when close() is called."""
+
     # Create a task that blocks forever (simulating a long-running watcher)
     async def _block_forever() -> None:
         await asyncio.Event().wait()
@@ -298,7 +297,8 @@ async def test_watcher_task_cancelled_on_close() -> None:
 @pytest.mark.unit
 async def test_watch_skill_changes_handles_none_stream_no_crash() -> None:
     """T8.4: _watch_skill_changes() handles merge_change_streams().
-    returning None (no crash, task exits).
+
+    Returns None (no crash, task exits).
     """
     mock_ext_registry = MagicMock()
     mock_ext_registry.merge_change_streams.return_value = None
@@ -316,7 +316,8 @@ async def test_watch_skill_changes_handles_none_stream_no_crash() -> None:
 @pytest.mark.unit
 async def test_concurrent_register_skill_commands_serialized_by_lock() -> None:
     """T8.5: Concurrent _register_skill_commands() calls are serialized.
-    by lock (no duplicate commands).
+
+    Serialized by lock (no duplicate commands).
     """
     skill = _make_skill(name="concurrent-skill", description="Concurrent skill")
     session = _make_mock_session(skills_list=[skill])
@@ -340,7 +341,8 @@ async def test_concurrent_register_skill_commands_serialized_by_lock() -> None:
 @pytest.mark.unit
 async def test_execute_slash_command_finds_and_executes_skill() -> None:
     """T9.1: execute_slash_command finds skill in command_store.
-    and executes it.
+
+    Finds and executes it.
     """
     skill = _make_skill(
         name="my-skill",
@@ -364,7 +366,8 @@ async def test_execute_slash_command_finds_and_executes_skill() -> None:
 @pytest.mark.unit
 async def test_skill_executor_loads_instructions_and_injects_into_staged_content() -> None:
     """T9.2: Skill executor loads instructions via skill.load_instructions().
-    and injects into staged_content.
+
+    Injects into staged_content.
     """
     from agentpool_server.opencode_server.skill_bridge import create_skill_command
 
@@ -398,7 +401,8 @@ async def test_skill_executor_loads_instructions_and_injects_into_staged_content
 @pytest.mark.unit
 async def test_skill_executor_with_load_instructions_raising_value_error() -> None:
     """T9.3: Skill executor with load_instructions() raising ValueError.
-    sends 'no instructions' message, no injection.
+
+    Sends 'no instructions' message, no injection.
     """
     from agentpool_server.opencode_server.skill_bridge import create_skill_command
 
