@@ -212,6 +212,20 @@ class AgentFactory:
         if isinstance(cfg, NativeAgentConfig):
             caps.extend(cfg.get_tool_providers())
 
+        # 4. Team communication capability — shared instance with session_metadata=None.
+        #    Per-session instance with actual metadata is created in create_session_agent().
+        from agentpool_config.team_mode import resolve_team_mode
+
+        global_tm = host_context.manifest.team_mode
+        agent_tm = cfg.team_mode
+        resolved_tm = resolve_team_mode(global_tm, agent_tm)
+        if resolved_tm is not None and resolved_tm.enabled:
+            eligible = resolved_tm.lead_eligible + resolved_tm.member_eligible
+            if agent_name in eligible:
+                from agentpool.capabilities.team_comm_capability import TeamCommCapability
+
+                caps.append(TeamCommCapability(resolved_tm, agent_name))
+
         # MCP servers are NOT compiled here — they are handled by MCPManager
         # which creates MCPCapability instances. MCPCapability is now
         # deprecated; McpServerCap (agentpool.capabilities.mcp_server_cap)
@@ -354,6 +368,25 @@ class AgentFactory:
 
             if isinstance(agent, _NativeAgent):
                 agent._extra_capabilities = list(caps)
+
+        # Per-session TeamCommCapability with actual session metadata.
+        from agentpool_config.team_mode import resolve_team_mode
+
+        global_tm = host_context.manifest.team_mode
+        agent_tm = cfg.team_mode
+        resolved_tm = resolve_team_mode(global_tm, agent_tm)
+        if resolved_tm is not None and resolved_tm.enabled:
+            eligible = resolved_tm.lead_eligible + resolved_tm.member_eligible
+            if agent_name in eligible:
+                from agentpool.agents.native_agent import Agent as _NativeAgent2
+                from agentpool.capabilities.team_comm_capability import TeamCommCapability
+
+                team_cap = TeamCommCapability(resolved_tm, agent_name, session.metadata)
+                if isinstance(agent, _NativeAgent2):
+                    agent._extra_capabilities = [
+                        team_cap if isinstance(c, TeamCommCapability) else c
+                        for c in agent._extra_capabilities
+                    ]
 
         # Start hot-swap listeners for capabilities with on_change().
         await self._start_hot_swap_listeners(agent_name, agent, caps)
