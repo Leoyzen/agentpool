@@ -15,6 +15,7 @@ import pytest
 
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
 from agentpool.agents.native_agent.turn import NativeTurn
+from agentpool.lifecycle.types import DeliveryMode
 
 
 pytestmark = pytest.mark.integration
@@ -53,10 +54,10 @@ async def test_conversation_preserved_after_run_failure(
         await session_pool.create_session(session_id, agent_name="test_agent")
 
         # --- Step 1: Successful first prompt ---
-        msg_id = await session_pool.receive_request(
+        msg_id = await session_pool.send_message(
             session_id,
             "Hello, what is 2+2?",
-            priority="when_idle",
+            mode=DeliveryMode.QUEUE,
         )
         assert msg_id is not None, "First prompt should start a run"
         await session_pool.wait_for_completion(session_id)
@@ -86,10 +87,10 @@ async def test_conversation_preserved_after_run_failure(
         with patch.object(
             NativeTurn, "execute", side_effect=RuntimeError("Simulated model API error")
         ):
-            msg_id2 = await session_pool.receive_request(
+            msg_id2 = await session_pool.send_message(
                 session_id,
                 "What is 3+3?",
-                priority="when_idle",
+                mode=DeliveryMode.QUEUE,
             )
             assert msg_id2 is not None, "Second prompt should start a run"
             await session_pool.wait_for_completion(session_id)
@@ -117,10 +118,10 @@ async def test_conversation_preserved_after_run_failure(
         )
 
         # --- Step 3: Third prompt (should have full context) ---
-        msg_id3 = await session_pool.receive_request(
+        msg_id3 = await session_pool.send_message(
             session_id,
             "What was the first question I asked?",
-            priority="when_idle",
+            mode=DeliveryMode.QUEUE,
         )
         assert msg_id3 is not None, "Third prompt should start a run"
         await session_pool.wait_for_completion(session_id)
@@ -165,7 +166,7 @@ async def test_agent_identity_preserved_after_failure(
         await session_pool.create_session(session_id, agent_name="test_agent")
 
         # First successful run
-        msg_id = await session_pool.receive_request(session_id, "Hello")
+        msg_id = await session_pool.send_message(session_id, "Hello")
         assert msg_id is not None
         await session_pool.wait_for_completion(session_id)
 
@@ -175,7 +176,7 @@ async def test_agent_identity_preserved_after_failure(
 
         # Second run — simulate failure during turn execution (after user msg saved)
         with patch.object(NativeTurn, "execute", side_effect=RuntimeError("Simulated failure")):
-            msg_id2 = await session_pool.receive_request(session_id, "Fail me")
+            msg_id2 = await session_pool.send_message(session_id, "Fail me")
             assert msg_id2 is not None
             await session_pool.wait_for_completion(session_id)
 

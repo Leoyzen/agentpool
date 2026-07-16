@@ -7,82 +7,53 @@ Combines session and turn management for protocol handlers.
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 import contextlib
 import time
 from typing import TYPE_CHECKING, Any, Final
-import uuid
 
-import logfire
-
-from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
-    RunErrorEvent,
     SessionResumeEvent,
-    StreamCompleteEvent,
 )
-from agentpool.lifecycle.types import DeliveryMode
 from agentpool.log import get_logger
 from agentpool.orchestrator.event_bus import EventBus
-from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.session_controller import (
     CheckpointMismatchError,
     SessionBusyError,
-    SessionClosedError,
     SessionController,
     SessionNotFoundError,
     SessionState,
 )
+from agentpool.orchestrator.session_pool_config import SessionPoolConfig
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator, Sequence
-
-    from pydantic_ai.messages import ModelMessage
+    from collections.abc import AsyncIterator
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.agents.native_agent import Agent
     from agentpool.agents.native_agent.checkpoint import CheckpointData
     from agentpool.delegation import AgentPool
-    from agentpool.delegation.base_team import BaseTeam
     from agentpool.messaging import ChatMessage
-    from agentpool.messaging.messagenode import MessageNode
     from agentpool.sessions.models import ElicitationResumePayload, PendingDeferredCall, SessionData
-    from agentpool.sessions.store import SessionStore
-    from agentpool_config.teams import TeamConfig
+    from agentpool_storage.protocols import SessionPersistence
 
 
 logger = get_logger(__name__)
 
 DEFAULT_MAX_AUTO_RESUME: Final[int] = 10
 
-
-def _build_team_from_config(
-    name: str,
-    team_config: TeamConfig,
-    nodes: Sequence[MessageNode[Any, Any]],
-) -> BaseTeam[Any, Any]:
-    """Construct a ``BaseTeam`` from a ``TeamConfig`` and pre-resolved nodes.
-
-    This replaces the deprecated ``TeamConfig.get_team()`` method, keeping
-    team instantiation in the core layer instead of the config layer.
-    """
-    from agentpool.delegation.base_team import BaseTeam
-
-    member_configs = team_config.get_member_configs()
-
-    return BaseTeam(
-        nodes,
-        mode=team_config.mode,
-        name=name,
-        display_name=team_config.display_name,
-        shared_prompt=team_config.shared_prompt,
-        mcp_servers=team_config.get_mcp_servers(),
-        member_prompt_templates=member_configs or None,
-        member_timeout=team_config.member_timeout,
-    )
+# Mixin imports placed after session_controller imports to avoid circular issues.
+from agentpool.orchestrator.session_pool_messaging import SessionPoolMessagingMixin  # noqa: E402
+from agentpool.orchestrator.session_pool_runs import SessionPoolRunsMixin  # noqa: E402
+from agentpool.orchestrator.session_pool_teams import SessionPoolTeamsMixin  # noqa: E402
 
 
-class SessionPool:
+class SessionPool(
+    SessionPoolMessagingMixin,
+    SessionPoolRunsMixin,
+    SessionPoolTeamsMixin,
+):
     """High-level session pool combining session and turn management.
 
     This is the main interface used by protocol handlers.
@@ -91,12 +62,13 @@ class SessionPool:
     def __init__(
         self,
         pool: AgentPool[Any],
-        store: SessionStore | None = None,
+        store: SessionPersistence | None = None,
         enable_auto_resume: bool = True,
         enable_event_bus: bool = True,
         max_auto_resume: int = DEFAULT_MAX_AUTO_RESUME,
         max_concurrent_runs: int | None = None,
         replay_buffer_size: int = 100,
+        config: SessionPoolConfig | None = None,
     ) -> None:
         """Initialize the session pool.
 
@@ -108,13 +80,20 @@ class SessionPool:
             max_auto_resume: Maximum auto-resume iterations.
             max_concurrent_runs: Maximum number of concurrent runs across all sessions.
             replay_buffer_size: Maximum number of events retained per session for replay.
+            config: Optional SessionPoolConfig for tunable parameters
+                (message cache size, TTL intervals). Defaults to
+                ``SessionPoolConfig()`` with standard defaults.
         """
         self.pool = pool
+        self._config = config or SessionPoolConfig()
         self.sessions = SessionController(
             pool,
             store=store,
             cleanup_callback=self.close_session,
             max_concurrent_runs=max_concurrent_runs,
+            session_ttl_seconds=self._config.session_ttl_seconds,
+            cleanup_interval_seconds=self._config.cleanup_interval_seconds,
+            deferred_cleanup_interval_seconds=self._config.deferred_cleanup_interval_seconds,
         )
         self._event_bus = EventBus(
             session_controller=self.sessions,
@@ -126,7 +105,8 @@ class SessionPool:
         self._runs_lock: asyncio.Lock = asyncio.Lock()
         self._resume_locks: dict[str, asyncio.Lock] = {}
         self._resume_locks_lock = asyncio.Lock()
-        self._message_cache: dict[str, list[ChatMessage[Any]]] = {}
+        self._message_cache: OrderedDict[str, list[ChatMessage[Any]]] = OrderedDict()
+        self._message_cache_maxsize: int = self._config.message_cache_maxsize
         self._elicitation_registries: dict[str, Any] = {}
 
     async def start(self) -> None:
@@ -174,7 +154,7 @@ class SessionPool:
             The session state.
         """
         if parent_session_id is not None and self.sessions.store is not None:
-            parent_data = await self.sessions.store.load(parent_session_id)
+            parent_data = await self.sessions.store.load_session(parent_session_id)
             if parent_data is not None:
                 metadata.setdefault("project_id", parent_data.project_id)
                 metadata.setdefault("cwd", parent_data.cwd)
@@ -183,59 +163,46 @@ class SessionPool:
         )
         return state
 
-    async def create_team_from_config(
+    async def create_child_session(
         self,
-        team_name: str,
-        team_config: TeamConfig,
-    ) -> BaseTeam[Any, Any]:
-        """Create a team from config using session-level agent resolution.
+        parent_session_id: str,
+        agent_name: str,
+        agent_type: str = "native",
+        *,
+        session_id: str | None = None,
+        lifecycle_policy: str | None = None,
+        **metadata: Any,
+    ) -> SessionState:
+        """Create a child session linked to a parent session.
 
-        For each member in the team config, resolves the agent via
-        :meth:`SessionController.get_or_create_session_agent`, then
-        constructs a :class:`BaseTeam` with ``mode`` set to the
-        configured execution mode.
-
-        Member names are stored on the resulting team nodes; actual
-        session agents are created per-execution by
-        :meth:`BaseTeam._resolve_scoped_team_nodes`.
+        This is a first-class API for hierarchical session creation.
+        The child session inherits the parent's ``project_id`` and ``cwd``
+        automatically. A sortable session ID is generated via
+        :func:`agentpool.utils.identifiers.generate_session_id` when not
+        provided.
 
         Args:
-            team_name: Name for the created team.
-            team_config: Team configuration from the manifest.
+            parent_session_id: The parent session ID to link to.
+            agent_name: Name of the agent for the child session.
+            agent_type: Type of the agent (``"native"``, ``"acp"``, etc.).
+            session_id: Optional explicit session ID (generated if None).
+            lifecycle_policy: Optional lifecycle policy override.
+            **metadata: Additional metadata to attach to the child session.
 
         Returns:
-            A ``BaseTeam`` instance with the configured execution mode.
-
-        Raises:
-            ValueError: If a member name is not found in the manifest
-                agents or teams section.
+            The child session state.
         """
-        from agentpool_config.context import ConfigContextManager
+        from agentpool.utils.identifiers import generate_session_id
 
-        member_names = [team_config.get_member_name(m) for m in team_config.members]
-
-        nodes: list[MessageNode[Any, Any]] = []
-        for member_name in member_names:
-            cfg = self.pool.manifest.agents.get(member_name)
-            if cfg is not None:
-                # Create a stateless agent without entering its async context.
-                # This avoids spawning MCP subprocesses for temporary template
-                # agents — actual per-session agents are created later by
-                # BaseTeam._resolve_scoped_team_nodes() during execution.
-                if cfg.name is None:
-                    cfg = cfg.model_copy(update={"name": member_name})
-                with ConfigContextManager(self.pool._config_file_path):
-                    agent: MessageNode[Any, Any] = cfg.get_agent(pool=self.pool)
-                nodes.append(agent)
-            elif member_name in self.pool.manifest.teams:
-                nested_config = self.pool.manifest.teams[member_name]
-                nested_team = await self.create_team_from_config(member_name, nested_config)
-                nodes.append(nested_team)
-            else:
-                msg = f"Team member {member_name!r} not found in manifest agents or teams"
-                raise ValueError(msg)
-
-        return _build_team_from_config(team_name, team_config, nodes)
+        child_session_id = session_id or generate_session_id()
+        metadata.setdefault("agent_type", agent_type)
+        return await self.create_session(
+            child_session_id,
+            agent_name=agent_name,
+            parent_session_id=parent_session_id,
+            lifecycle_policy=lifecycle_policy,
+            **metadata,
+        )
 
     async def _get_resume_lock(self, session_id: str) -> asyncio.Lock:
         """Get or create per-session lock for resume serialization.
@@ -283,7 +250,7 @@ class SessionPool:
                 raise SessionBusyError(session_id, session.current_run_id)
 
             if self.sessions.store is not None:
-                current_data = await self.sessions.store.load(session_id)
+                current_data = await self.sessions.store.load_session(session_id)
                 # When allow_active_run is True (in-process elicitation
                 # resume), the persisted status may still be "active"
                 # because the elicitation bridge checkpoint saves
@@ -745,7 +712,7 @@ class SessionPool:
             raise SessionNotFoundError(session_id)
 
         # Load persisted session data
-        data = await store.load(session_id)
+        data = await store.load_session(session_id)
         if data is None:
             raise SessionNotFoundError(session_id)
 
@@ -836,7 +803,7 @@ class SessionPool:
                             }
                         )
                         data.touch()
-                        await store.save(data)
+                        await store.save_session(data)
 
                         if session is not None:
                             session.last_active_at = time.monotonic()
@@ -869,7 +836,7 @@ class SessionPool:
 
                 # Mark session as resuming
                 data = data.model_copy(update={"status": "resuming"})
-                await store.save(data)
+                await store.save_session(data)
 
                 # Route to appropriate resume path
                 if agent_type == "acp":
@@ -890,7 +857,7 @@ class SessionPool:
                     }
                 )
                 data.touch()
-                await store.save(data)
+                await store.save_session(data)
 
                 # Update live session if one exists
                 if session is not None:
@@ -918,69 +885,51 @@ class SessionPool:
                 # On failure, keep status as checkpointed and do NOT clear pending calls
                 data = data.model_copy(update={"status": "checkpointed"})
                 data.touch()
-                await store.save(data)
+                await store.save_session(data)
                 raise
 
     async def close_session(self, session_id: str) -> None:
         """Close a session.
 
-        Waits for any active run to complete before proceeding.
-        Order: wait for run, reject elicitation futures, session cleanup,
-        event bus, then turn state.
+        Delegates to :meth:`SessionController.close_session()` which
+        implements the standardized 7-step cleanup ordering. If the
+        delegate does not respond within 15 seconds, falls back to
+        direct RunHandle cancellation and retries.
+
+        SessionPool-level cleanup (message cache, EventBus safety net)
+        is performed in the ``finally`` block regardless of outcome.
 
         Args:
             session_id: The session to close.
         """
-        session = self.sessions.get_session(session_id)
-        run_handle: RunHandle | None = None
-        if session is not None:
-            async with session._request_lock:
-                session.closing = True
-                run_id = session.current_run_id
-                if run_id is not None:
-                    run_handle = self.sessions._runs.get(run_id)
-
-            if run_handle is not None:
-                # Signal the RunHandle to stop its idle/wake loop so that
-                # start()'s finally block can set complete_event promptly.
-                run_handle.close()
-                # Unblock any background-task wait loop inside the run so
-                # complete_event can be set promptly instead of waiting.
-                if run_handle.run_ctx is not None:
-                    run_handle.run_ctx.cancelled = True
-                    # Snapshot values before setting to avoid dict mutation race.
-                    for ev in list(run_handle.run_ctx.child_done_events.values()):
-                        ev.set()
-                    run_handle.run_ctx.child_done_events.clear()
-                try:
-                    await asyncio.wait_for(run_handle.complete_event.wait(), timeout=2.0)
-                except TimeoutError:
-                    self.cancel_run(run_handle.run_id)
-                    await asyncio.sleep(0.1)
-                except asyncio.CancelledError:
-                    # May be raised by anyio cancel scope cleanup from
-                    # pydantic-ai's Agent.iter() during GeneratorExit.
-                    # The run is already closing — proceed with cleanup.
-                    self.cancel_run(run_handle.run_id)
-
-        # Reject all pending elicitation futures so blocked MCP tool calls
-        # unblock immediately instead of hanging on a closed session.
-        if run_handle is not None and run_handle.run_ctx is not None:
-            registry = run_handle.run_ctx.elicitation_registry
-            if registry is not None:
-                registry.reject_all(SessionClosedError(session_id))
-
         try:
-            await self.sessions.close_session(session_id)
-        except Exception:
-            logger.exception(
-                "Failed to close session in controller",
+            async with asyncio.timeout(15):
+                await self.sessions.close_session(session_id)
+        except TimeoutError:
+            logger.warning(
+                "SessionController.close_session() timed out (15s), "
+                "falling back to direct RunHandle cancellation",
                 session_id=session_id,
             )
+            # Fallback: directly cancel RunHandle
+            session = self.sessions.get_session(session_id)
+            if session is not None and session.current_run_id is not None:
+                run_handle = self.sessions._runs.get(session.current_run_id)
+                if run_handle is not None:
+                    run_handle.cancel()
+            # Retry close after cancellation
+            try:
+                await self.sessions.close_session(session_id)
+            except Exception:
+                logger.exception(
+                    "Fallback close also failed",
+                    session_id=session_id,
+                )
         finally:
-            # EventBus and message cache cleanup may be interrupted by
-            # CancelledError from garbage-collected async generator cleanup.
-            # Suppress these spurious cancellations so shutdown proceeds.
+            # SessionPool-level cleanup (not handled by SessionController)
+            self._message_cache.pop(session_id, None)
+            # EventBus cleanup as safety net (idempotent if already
+            # done by _close_session_unlocked step 6)
             try:
                 await self.event_bus.close_session(session_id)
             except asyncio.CancelledError:
@@ -993,8 +942,6 @@ class SessionPool:
                     "Failed to close event bus session",
                     session_id=session_id,
                 )
-
-            self._message_cache.pop(session_id, None)
 
     async def _await_inflight_checkpoints(self) -> None:
         """Wait for any in-flight checkpoint operations to complete.
@@ -1012,878 +959,31 @@ class SessionPool:
         # within SessionController.close_session() under its lock.
         logger.debug("No in-flight checkpoint operations to await")
 
-    # ------------------------------------------------------------------
-    # RunHandle delegation helpers
-    # ------------------------------------------------------------------
+    def _evict_message_cache(self) -> None:
+        """Evict least-recently-used entries from ``_message_cache``.
 
-    def _get_active_run_handle(self, session_id: str) -> RunHandle | None:
-        """Get the active RunHandle for a session, if any.
-
-        Returns:
-            The RunHandle, or None if no active run exists.
+        Evicts entries for **inactive** sessions only (sessions with no
+        active run). Active sessions' messages are never evicted.
+        Called after each cache insertion to enforce ``maxsize``.
         """
-        session = self.sessions.get_session(session_id)
-        if session is None or session.current_run_id is None:
-            return None
-        return self.sessions._runs.get(session.current_run_id)
-
-    def _create_run_handle(
-        self,
-        session: SessionState,
-        agent: BaseAgent[Any, Any],
-        session_id: str,
-        *,
-        deps: Any = None,
-        cached_elicitation_responses: dict[str, Any] | None = None,
-        deferred_tool_results: Any = None,
-        message_history: list[ModelMessage] | None = None,
-    ) -> RunHandle:
-        """Create and register a RunHandle without a background task.
-
-        Unlike :meth:`SessionController._start_run_handle`, this does
-        NOT create an asyncio task to consume ``start()``. The caller
-        is responsible for draining ``start()``.
-
-        Creates the RunHandle with ProtocolTrigger and ProtocolChannel
-        lifecycle dimensions for protocol server integration, matching
-        the pattern in :meth:`SessionController._start_run_handle`.
-
-        Also wires ``_host_context`` and ``_agent_registry`` so that
-        ``get_agentlet()`` can create a ``CheckpointManager`` and
-        ``SubagentCapability`` can resolve agents — matching the
-        infrastructure provided by ``_start_run_handle()``.
-
-        Resume parameters (``cached_elicitation_responses``,
-        ``deferred_tool_results``, ``message_history``) are only set
-        by ``resume_session()``. Normal turns pass ``None`` for all
-        three — runtime behavior is unchanged.
-
-        Args:
-            session: The session state.
-            agent: The agent instance (native or ACP).
-            session_id: The session identifier.
-            deps: Optional dependencies to pass to the agent run context
-                (e.g. delegation_depth from BackgroundTaskCapability).
-            cached_elicitation_responses: Pre-populated elicitation
-                responses for crash recovery resume.
-            deferred_tool_results: Deferred tool results for resolving
-                pending deferred calls during resume.
-            message_history: Message history from checkpoint to
-                initialize ``RunHandle._message_history``.
-
-        Returns:
-            The newly created and registered RunHandle.
-
-        Raises:
-            SessionBusyError: If the session already has an active run
-                that is not ``DONE``.
-        """
-        from agentpool.lifecycle import (
-            MemoryJournal,
-            ProtocolChannel,
-            ProtocolTrigger,
-        )
-        from agentpool.lifecycle.types import RunState
-
-        # Staleness check: prevent silently overwriting an active run.
-        if session.current_run_id is not None and session.current_run_id in self.sessions._runs:
-            existing = self.sessions._runs[session.current_run_id]
-            if existing._run_state != RunState.DONE:
-                raise SessionBusyError(session_id, session.current_run_id)
-
-        event_bus = self.event_bus
-        run_ctx = AgentRunContext(session_id=session_id, event_bus=event_bus, deps=deps)
-        if cached_elicitation_responses is not None:
-            run_ctx.cached_elicitation_responses = cached_elicitation_responses
-
-        trigger = ProtocolTrigger()
-        comm_channel: ProtocolChannel | None = None
-        if event_bus is not None:
-            journal = MemoryJournal()
-            comm_channel = ProtocolChannel(
-                journal=journal,
-                event_bus=event_bus,
-                session_id=session_id,
-            )
-
-        # Wire _host_context and _agent_registry, matching the pattern
-        # in SessionController._start_run_handle() (session_controller.py:950-972).
-        from agentpool.host.registry import AgentRegistry
-
-        host_ctx = self.pool.get_context()
-        agent_registry = AgentRegistry(
-            dict.fromkeys(self.pool.manifest.agents),  # type: ignore[arg-type]
-        )
-
-        run_handle = RunHandle(
-            run_id=uuid.uuid4().hex,
-            session_id=session_id,
-            agent_type=agent.AGENT_TYPE,
-            agent=agent,
-            event_bus=event_bus,
-            session=session,
-            run_ctx=run_ctx,
-            _trigger_source=trigger,
-            _comm_channel=comm_channel,
-            _host_context=host_ctx,
-            _agent_registry=agent_registry,
-        )
-        if message_history is not None:
-            # Handle both list[ModelMessage] and MessageHistory objects.
-            # Some callers (e.g. subagent_tools.py) pass MessageHistory()
-            # which is not directly iterable as list[ModelMessage].
-            from agentpool.messaging.message_history import MessageHistory
-
-            if isinstance(message_history, MessageHistory):
-                model_msgs: list[ModelMessage] = []
-                for chat_msg in message_history.get_history():
-                    model_msgs.extend(chat_msg.messages)
-                run_handle._message_history = model_msgs
-            else:
-                run_handle._message_history = list(message_history)
-        if deferred_tool_results is not None:
-            run_handle._resume_deferred_tool_results = deferred_tool_results
-        self.sessions._runs[run_handle.run_id] = run_handle
-        session.current_run_id = run_handle.run_id
-        return run_handle
-
-    async def _process_prompt_run_turn(
-        self,
-        session_id: str,
-        *prompts: Any,
-        **kwargs: Any,
-    ) -> None:
-        """Handle process_prompt via the RunHandle path.
-
-        If no active run exists, creates a RunHandle and drains
-        ``start()`` to completion. If a run is active, steers the
-        message into it.
-        """
-        session, _ = await self.sessions.get_or_create_session(session_id)
-        if session.is_closing:
+        if len(self._message_cache) <= self._message_cache_maxsize:
             return
-        # Extract input_provider from kwargs and set on session BEFORE
-        # get_or_create_session_agent() so the agent is created with the
-        # correct input_provider and the session state is consistent.
-        input_provider = kwargs.pop("input_provider", None)
-        if input_provider is not None:
-            session.input_provider = input_provider
-        agent = await self.sessions.get_or_create_session_agent(
-            session_id, input_provider=input_provider
-        )
-        if agent is None:
-            return
-        content = " ".join(str(p) for p in prompts) if prompts else ""
-
-        run_id = session.current_run_id
-        if run_id is not None:
-            run_handle = self.sessions._runs.get(run_id)
-            if run_handle is not None:
-                run_handle.steer(content)
-            return
-
-        run_handle = self._create_run_handle(session, agent, session_id)
-        gen = run_handle.start(content)
-        try:
-            async for _event in gen:
-                if isinstance(_event, StreamCompleteEvent | RunErrorEvent):
+        # Evict from the front (oldest) for inactive sessions only.
+        while len(self._message_cache) > self._message_cache_maxsize:
+            # Find the oldest inactive session entry.
+            evicted = False
+            for session_id in list(self._message_cache.keys()):
+                session = self.sessions.get_session(session_id)
+                # Evict only if session is inactive or doesn't exist.
+                if session is None or session.current_run_id is None:
+                    self._message_cache.pop(session_id, None)
+                    evicted = True
                     break
-        finally:
-            await gen.aclose()
-            session.current_run_id = None
-            self.sessions._runs.pop(run_handle.run_id, None)
-
-    # ------------------------------------------------------------------
-    # SessionPool public methods
-    # ------------------------------------------------------------------
-
-    async def process_prompt(
-        self,
-        session_id: str,
-        *prompts: Any,
-        **kwargs: Any,
-    ) -> None:
-        """Process a prompt through the RunHandle lifecycle.
-
-        Main entry point for protocol handlers.
-        Events are delivered exclusively via EventBus.
-
-        Args:
-            session_id: The session to process the prompt for.
-            *prompts: Prompts to process.
-            **kwargs: Additional arguments passed to the agent.
-        """
-        await self._process_prompt_run_turn(session_id, *prompts, **kwargs)
-
-    async def receive_request(
-        self,
-        session_id: str,
-        content: str | list[Any],
-        *,
-        priority: str = "when_idle",
-        message_id: str | None = None,
-        **kwargs: Any,
-    ) -> str | None:
-        """Route an incoming request for a session (fire-and-forget).
-
-        .. deprecated::
-            Use :meth:`send_message` with ``DeliveryMode`` instead.
-            This method maps ``priority`` to ``DeliveryMode`` and
-            delegates to :meth:`send_message`.
-
-        Creates a background task that processes the prompt through
-        the RunHandle lifecycle. Protocol handlers should subscribe to the
-        EventBus *before* calling this method so no events are dropped.
-
-        Idle sessions create a RunHandle, busy sessions call
-        ``RunHandle.steer()`` or ``RunHandle.followup()``.
-
-        Args:
-            session_id: Target session.
-            content: Message / prompt content (text or structured content
-                blocks). List content is passed through without
-                stringification.
-            priority: ``"when_idle"`` to queue, ``"asap"`` to inject into
-                active turn. Unknown values default to ``"when_idle"``.
-            message_id: Optional message ID. Auto-generated as UUID4 if
-                not provided.
-            **kwargs: Additional arguments passed to the turn runner.
-
-        Returns:
-            The ``message_id`` string on success, ``None`` on failure.
-        """
-        import warnings
-
-        warnings.warn(
-            "SessionPool.receive_request() is deprecated. "
-            "Use send_message() with DeliveryMode instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        # Map priority string to DeliveryMode enum.
-        if priority == "asap":
-            mode = DeliveryMode.STEER
-        elif priority == "when_idle":
-            mode = DeliveryMode.QUEUE
-        else:
-            warnings.warn(
-                f"Unknown priority {priority!r}; defaulting to QUEUE. "
-                "Use send_message() with DeliveryMode for type safety.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            mode = DeliveryMode.QUEUE
-        # Forward deps and input_provider from kwargs to send_message so
-        # they are not silently dropped. This mirrors the old
-        # SessionController.receive_request() behavior.
-        deps = kwargs.pop("deps", None)
-        input_provider = kwargs.pop("input_provider", None)
-        return await self.send_message(
-            session_id,
-            content,
-            mode=mode,
-            message_id=message_id,
-            deps=deps,
-            input_provider=input_provider,
-        )
-
-    @logfire.instrument("session.send_message")
-    async def send_message(
-        self,
-        session_id: str,
-        content: str | list[Any],
-        *,
-        mode: DeliveryMode = DeliveryMode.QUEUE,
-        message_id: str | None = None,
-        deps: Any = None,
-        input_provider: Any = None,
-    ) -> str | None:
-        """Send a message to a session using the typed ``DeliveryMode`` enum.
-
-        Maps ``DeliveryMode.STEER`` → ``priority="asap"`` (inject into
-        active turn) and ``DeliveryMode.QUEUE`` → ``priority="when_idle"``
-        (queue for next turn), then delegates to
-        :meth:`SessionController._route_message`.
-
-        Args:
-            session_id: Target session.
-            content: Message / prompt content (text or structured content
-                blocks). List content is stored as ``Feedback.content_blocks``
-                without stringification.
-            mode: Delivery mode — ``STEER`` for mid-turn injection,
-                ``QUEUE`` for next-turn queue (default).
-            message_id: Optional message ID. Auto-generated as UUID4 if
-                not provided. Returned on success.
-            deps: Optional dependencies to pass to the agent run context
-                (e.g. delegation_depth from BackgroundTaskCapability).
-            input_provider: Optional input provider for the agent run
-                (e.g. ACPInputProvider for elicitation/tool confirmation).
-
-        Returns:
-            The ``message_id`` string on success (both new runs and
-            steer/followup), ``None`` on failure.
-        """
-        priority = "asap" if mode is DeliveryMode.STEER else "when_idle"
-        # Delegate directly to _route_message() to avoid the deprecated
-        # receive_request() path. This requires session+agent resolution,
-        # which mirrors what SessionController.receive_request() does.
-        session = self.sessions.get_session(session_id)
-        if session is None:
-            return None
-        session.last_active_at = time.monotonic()
-        # Set input_provider on session BEFORE get_or_create_session_agent()
-        # so the agent is created with the correct input_provider and the
-        # session state is consistent — mirrors SessionController.receive_request().
-        if input_provider is not None:
-            session.input_provider = input_provider
-        agent = await self.sessions.get_or_create_session_agent(
-            session_id,
-            input_provider=input_provider,
-        )
-        if agent is None:
-            return None
-        return await self.sessions._route_message(
-            session,
-            agent,
-            session_id,
-            content,
-            priority=priority,
-            deps=deps,
-            message_id=message_id,
-        )
-
-    async def run_agent(
-        self,
-        agent: str,
-        prompt: str,
-        parent_session_id: str | None = None,
-        **metadata: Any,
-    ) -> str:
-        """Run an agent to completion and return the result text.
-
-        Creates a temporary session, sends the prompt via
-        :meth:`send_message` with ``DeliveryMode.QUEUE``, subscribes to
-        the EventBus to capture the ``StreamCompleteEvent``, waits for
-        run completion, then closes the session. The session is always
-        cleaned up via ``try/finally`` even on error.
-
-        Args:
-            agent: Name of the agent to run.
-            prompt: Input prompt for the agent.
-            parent_session_id: Optional parent session for hierarchical
-                sessions (e.g. subagent delegation).
-            **metadata: Arbitrary metadata attached to the session.
-
-        Returns:
-            The final assistant response text.
-
-        Raises:
-            SessionNotFoundError: If the session cannot be created.
-            asyncio.TimeoutError: If the run does not complete within
-                the default timeout.
-            Exception: Any error from the agent run is re-raised after
-                session cleanup.
-        """
-        import uuid
-
-        from agentpool.agents.events import RunErrorEvent
-
-        session_id = str(uuid.uuid4())
-        await self.create_session(
-            session_id,
-            agent_name=agent,
-            parent_session_id=parent_session_id,
-            **metadata,
-        )
-
-        # Subscribe to EventBus BEFORE sending the message to avoid
-        # missing the StreamCompleteEvent in a race.
-        bus_queue = await self.event_bus.subscribe(session_id, scope="session")
-        result_text: str = ""
-        try:
-            msg_id = await self.send_message(
-                session_id,
-                prompt,
-                mode=DeliveryMode.QUEUE,
-            )
-            if msg_id is None:
-                msg = f"Failed to send message to session {session_id}"
-                raise RuntimeError(msg)
-
-            # Drain events from the EventBus until we capture the
-            # StreamCompleteEvent or RunErrorEvent.
-            while True:
-                try:
-                    envelope = await asyncio.wait_for(bus_queue.get(), timeout=120.0)
-                except TimeoutError:
-                    logger.warning(
-                        "Agent execution timed out after 120 seconds in run_agent",
-                        session_id=session_id,
-                    )
-                    msg = f"Agent execution timed out after 120 seconds for session {session_id}"
-                    raise TimeoutError(msg) from None
-                event = envelope.event
-                if isinstance(event, StreamCompleteEvent):
-                    content = event.message.content
-                    result_text = content if isinstance(content, str) else str(content)
-                    break
-                if isinstance(event, RunErrorEvent):
-                    raise RuntimeError(event.message)  # noqa: TRY004
-
-            # Ensure the run has fully completed before closing.
-            await self.wait_for_completion(session_id, timeout=10.0)
-        finally:
-            try:
-                await self.event_bus.unsubscribe(session_id, bus_queue)
-            except Exception:
-                logger.exception("Failed to unsubscribe from EventBus", session_id=session_id)
-            try:
-                await self.close_session(session_id)
-            except Exception:
-                logger.exception("Failed to close session", session_id=session_id)
-
-        return result_text
-
-    async def wait_for_completion(
-        self,
-        session_id: str,
-        timeout: float | None = None,
-    ) -> str:
-        """Wait for the active run on a session to complete.
-
-        Args:
-            session_id: The session to wait for.
-            timeout: Maximum seconds to wait. ``None`` waits indefinitely.
-
-        Returns:
-            The ``session_id`` on completion.
-
-        Raises:
-            SessionNotFoundError: If the session does not exist.
-            asyncio.TimeoutError: If the run does not complete within
-                ``timeout`` seconds.
-        """
-        return await self.sessions.wait_for_completion(session_id, timeout=timeout)
-
-    def revoke_message(self, session_id: str, message_id: str) -> bool:
-        """Revoke a pending steer or followup message by ID.
-
-        Args:
-            session_id: The session containing the message.
-            message_id: The ID of the message to revoke.
-
-        Returns:
-            ``True`` if revoked, ``False`` if already delivered or not found.
-        """
-        return self.sessions.revoke_inject(session_id, message_id)
-
-    @property
-    def active_runs(self) -> list[RunHandle]:
-        """Get all currently active (running) RunHandles."""
-        return [rh for rh in self.sessions._runs.values() if rh.is_running]
-
-    def get_run(self, run_id: str) -> RunHandle | None:
-        """Get a RunHandle by ID.
-
-        Args:
-            run_id: The run ID to look up.
-
-        Returns:
-            The RunHandle, or None if not found.
-        """
-        return self.sessions._runs.get(run_id)
-
-    def cancel_run(self, run_id: str) -> None:
-        """Cancel a run by ID.
-
-        Args:
-            run_id: The run ID to cancel.
-
-        Raises:
-            ValueError: If no active run with the given ID exists.
-        """
-        run_handle = self.sessions._runs.get(run_id)
-        if run_handle is None:
-            raise ValueError("No active run found with ID: " + run_id)
-        run_handle.cancel()
-
-    async def run_stream(
-        self,
-        session_id: str,
-        *prompts: Any,
-        scope: str = "session",
-        **kwargs: Any,
-    ) -> AsyncIterator[Any]:
-        """Process prompts and yield events.
-
-        Convenience method for tests and standalone clients that want
-        an async iterator over session events. Yields events directly
-        from ``RunHandle.start()`` when no active run exists. If a run
-        is already active, steers the message and falls back to EventBus.
-
-        Args:
-            session_id: The session to process the prompt for.
-            *prompts: Prompts to process.
-            scope: Subscription scope - "session" (exact match),
-                "descendants" (self + children), or "subtree" (self + parent + siblings).
-            **kwargs: Additional arguments passed to the turn runner
-                (e.g. ``input_provider``).
-
-        Yields:
-            Events published to the EventBus for this session.
-        """
-        async with contextlib.aclosing(
-            self._run_stream_run_turn(session_id, *prompts, scope=scope, **kwargs),
-        ) as gen:
-            async for event in gen:
-                yield event
-
-    async def _run_stream_run_turn(  # noqa: PLR0915
-        self,
-        session_id: str,
-        *prompts: Any,
-        scope: str = "session",
-        **kwargs: Any,
-    ) -> AsyncGenerator[Any]:
-        """Handle run_stream via the RunHandle path.
-
-        If no active run exists, creates a RunHandle and yields events
-        directly from ``start()``. If a run is active, steers the
-        message and yields from the EventBus subscription.
-
-        Resume parameters (``cached_elicitation_responses``,
-        ``deferred_tool_results``, ``message_history``) are extracted
-        from ``**kwargs`` and forwarded to ``_create_run_handle()``.
-        Only set by ``resume_session()``; normal turns pass ``None``.
-        """
-        session, _ = await self.sessions.get_or_create_session(session_id)
-        if session.is_closing:
-            return
-        # Extract input_provider from kwargs and set on session BEFORE
-        # get_or_create_session_agent() so the agent is created with the
-        # correct input_provider and the session state is consistent.
-        input_provider = kwargs.pop("input_provider", None)
-        if input_provider is not None:
-            session.input_provider = input_provider
-        # Extract deps from kwargs so they are passed to AgentRunContext
-        # for the child agent run (e.g. delegation_depth from
-        # BackgroundTaskCapability._task_async).
-        deps = kwargs.pop("deps", None)
-        # Extract resume parameters — only set by resume_session().
-        cached_elicitation_responses: dict[str, Any] | None = kwargs.pop(
-            "cached_elicitation_responses", None
-        )
-        deferred_tool_results: Any = kwargs.pop("deferred_tool_results", None)
-        message_history: list[ModelMessage] | None = kwargs.pop("message_history", None)
-        agent = await self.sessions.get_or_create_session_agent(
-            session_id, input_provider=input_provider
-        )
-        if agent is None:
-            return
-        content = " ".join(str(p) for p in prompts) if prompts else ""
-
-        run_id = session.current_run_id
-        if run_id is not None:
-            # Active run — steer and use EventBus
-            run_handle = self.sessions._runs.get(run_id)
-            if run_handle is not None:
-                run_handle.steer(content)
-            queue = await self.event_bus.subscribe(session_id, scope=scope)
-            try:
-                while True:
-                    try:
-                        event = await queue.get()
-                    except asyncio.QueueShutDown:
-                        break
-                    yield event.event
-                    raw_event = getattr(event, "event", event)
-                    if isinstance(raw_event, StreamCompleteEvent | RunErrorEvent):
-                        break
-            finally:
-                await self.event_bus.unsubscribe(session_id, queue)
-            return
-
-        # No active run — create RunHandle and yield from start().
-        # Acquire _request_lock to prevent race with concurrent
-        # receive_request() → _start_run_handle() on the same session.
-        # Without this, both paths could see current_run_id is None and
-        # create overlapping RunHandles.
-        async with session._request_lock:
-            # Re-check current_run_id inside the lock — another caller
-            # may have created a run while we waited.
-            if session.current_run_id is not None:
-                # Active run appeared — steer and use EventBus
-                run_handle = self.sessions._runs.get(session.current_run_id)
-                if run_handle is not None:
-                    run_handle.steer(content)
-                queue = await self.event_bus.subscribe(session_id, scope=scope)
-                try:
-                    while True:
-                        try:
-                            event = await queue.get()
-                        except asyncio.QueueShutDown:
-                            break
-                        yield event.event
-                        raw_event = getattr(event, "event", event)
-                        if isinstance(raw_event, StreamCompleteEvent | RunErrorEvent):
-                            break
-                finally:
-                    await self.event_bus.unsubscribe(session_id, queue)
-                return
-
-            # Also subscribe to EventBus so that events published by tools
-            # during turn execution (e.g. SpawnSessionStart from task() →
-            # create_child_session()) are delivered to the consumer, not
-            # just events yielded directly by start().
-            run_handle = self._create_run_handle(
-                session,
-                agent,
-                session_id,
-                deps=deps,
-                cached_elicitation_responses=cached_elicitation_responses,
-                deferred_tool_results=deferred_tool_results,
-                message_history=message_history,
-            )
-            self.event_bus.clear_replay_buffer(session_id)
-            bus_queue = await self.event_bus.subscribe(session_id, scope=scope)
-            gen = run_handle.start(content)
-        # Lock released — the run is now registered and can be steered
-        # by concurrent receive_request() calls.
-        try:
-            async for evt in gen:
-                # Drain any tool-published events from EventBus before
-                # yielding the start() event. This ensures SpawnSessionStart
-                # and similar events appear before the StreamCompleteEvent.
-                with contextlib.suppress(asyncio.QueueEmpty):
-                    while True:
-                        envelope = bus_queue.get_nowait()
-                        yield envelope.event
-                yield evt
-                if isinstance(evt, StreamCompleteEvent | RunErrorEvent):
-                    break
-        finally:
-            # gen.aclose() and subsequent cleanup may raise CancelledError
-            # or RuntimeError from pydantic-ai's anyio cancel scope cleanup
-            # during GeneratorExit. Suppress these so session state is
-            # always cleaned up (run_id cleared, handle removed).
-            with contextlib.suppress(asyncio.CancelledError, RuntimeError):
-                await gen.aclose()
-            with contextlib.suppress(asyncio.CancelledError, RuntimeError):
-                await self.event_bus.unsubscribe(session_id, bus_queue)
-            session.current_run_id = None
-            self.sessions._runs.pop(run_handle.run_id, None)
-
-    async def inject_prompt(self, session_id: str, message: str, **kwargs: Any) -> str | None:
-        """Inject a message into a session.
-
-        If the session has an active run, injects immediately via
-        ``RunHandle.steer()``. Otherwise, returns None.
-
-        Does NOT acquire session.turn_lock.
-
-        Args:
-            session_id: The session to inject into.
-            message: The message to inject.
-            **kwargs: Additional arguments passed to the agent run.
-
-        Returns:
-            message_id if injected into active turn, None otherwise.
-        """
-        run_handle = self._get_active_run_handle(session_id)
-        if run_handle is not None:
-            return run_handle.steer(message)
-        return None
-
-    async def queue_prompt(self, session_id: str, *prompts: Any, **kwargs: Any) -> str | None:
-        """Queue prompts for a session.
-
-        Similar to inject_prompt but for full prompts.
-        Does NOT acquire session.turn_lock.
-
-        Args:
-            session_id: The session to queue prompts for.
-            *prompts: Prompts to queue.
-            **kwargs: Additional arguments passed to the agent run.
-
-        Returns:
-            message_id if queued into active turn, None otherwise.
-        """
-        run_handle = self._get_active_run_handle(session_id)
-        if run_handle is not None:
-            message = prompts[0] if prompts else ""
-            return run_handle.followup(str(message))
-        return None
-
-    @logfire.instrument("session.steer")
-    async def steer(self, session_id: str, message: str, **kwargs: Any) -> str | None:
-        """Inject a steer message with agent-type-aware routing.
-
-        Delegates to ``RunHandle.steer()`` when an active run exists.
-
-        Args:
-            session_id: Target session.
-            message: The steer message to deliver.
-            **kwargs: Additional arguments (ignored).
-
-        Returns:
-            message_id if delivered into active turn, None otherwise.
-        """
-        run_handle = self._get_active_run_handle(session_id)
-        if run_handle is not None:
-            return run_handle.steer(message)
-        return None
-
-    @logfire.instrument("session.followup")
-    async def followup(self, session_id: str, message: str, **kwargs: Any) -> str | None:
-        """Queue a follow-up message with agent-type-aware routing.
-
-        Delegates to ``RunHandle.followup()`` when an active run exists.
-
-        Args:
-            session_id: Target session.
-            message: The follow-up message to deliver.
-            **kwargs: Additional arguments (ignored).
-
-        Returns:
-            message_id if delivered into active turn, None otherwise.
-        """
-        run_handle = self._get_active_run_handle(session_id)
-        if run_handle is not None:
-            return run_handle.followup(message)
-        return None
-
-    async def get_messages(
-        self,
-        session_id: str,
-    ) -> list[ChatMessage[Any]]:
-        """Get message history for a session.
-
-        Results are cached per session_id (full message list) to avoid
-        repeated storage queries. Cache is invalidated by append_message,
-        truncate_messages, and copy_messages.
-
-        Args:
-            session_id: The session to retrieve messages for.
-
-        Returns:
-            List of messages ordered by timestamp (oldest first).
-
-        Raises:
-            KeyError: If the session does not exist.
-        """
-        session = self.sessions.get_session(session_id)
-        if session is None:
-            raise KeyError(session_id)
-
-        if session_id in self._message_cache:
-            return list(self._message_cache[session_id])
-
-        storage = self.pool.storage
-        if storage is not None:
-            messages = await storage.get_session_messages(session_id)
-            self._message_cache[session_id] = list(messages)
-            return messages
-
-        return []
-
-    async def append_message(
-        self,
-        session_id: str,
-        message: ChatMessage[Any],
-    ) -> str:
-        """Append a message to a session's history.
-
-        Args:
-            session_id: The session to append to.
-            message: The message to append.
-
-        Returns:
-            The ID of the appended message.
-
-        Raises:
-            KeyError: If the session does not exist.
-        """
-        session = self.sessions.get_session(session_id)
-        if session is None:
-            raise KeyError(session_id)
-
-        storage = self.pool.storage
-        if storage is not None:
-            await storage.log_message(message=message)
-
-        self._message_cache.pop(session_id, None)
-        return message.message_id
-
-    async def copy_messages(
-        self,
-        source_session_id: str,
-        target_session_id: str,
-        *,
-        up_to_message_id: str | None = None,
-    ) -> str | None:
-        """Copy messages from one session to another.
-
-        Used by share_session (copy all) and revert_session (copy up to
-        a specific message).
-
-        Args:
-            source_session_id: Session to copy from.
-            target_session_id: Session to copy to.
-            up_to_message_id: If set, only copy messages up to and
-                including this message ID. If None, copy all messages.
-
-        Returns:
-            The ID of the fork point message (last copied message),
-            or None if no messages were copied.
-
-        Raises:
-            KeyError: If either session does not exist.
-        """
-        if self.sessions.get_session(source_session_id) is None:
-            raise KeyError(source_session_id)
-        if self.sessions.get_session(target_session_id) is None:
-            raise KeyError(target_session_id)
-
-        storage = self.pool.storage
-        if storage is not None:
-            result = await storage.fork_conversation(
-                source_session_id=source_session_id,
-                new_session_id=target_session_id,
-                fork_from_message_id=up_to_message_id,
-            )
-            self._message_cache.pop(target_session_id, None)
-            return result
-
-        return None
-
-    async def truncate_messages(
-        self,
-        session_id: str,
-        up_to_message_id: str,
-    ) -> int:
-        """Truncate messages after a specific message ID.
-
-        Used by revert_session to remove messages after the revert point.
-
-        Args:
-            session_id: The session to truncate.
-            up_to_message_id: Keep messages up to and including this ID,
-                remove everything after.
-
-        Returns:
-            Number of messages removed.
-
-        Raises:
-            KeyError: If the session does not exist.
-        """
-        session = self.sessions.get_session(session_id)
-        if session is None:
-            raise KeyError(session_id)
-
-        storage = self.pool.storage
-        if storage is not None:
-            removed = await storage.truncate_messages(session_id, up_to_message_id)
-            self._message_cache.pop(session_id, None)
-            return removed
-
-        return 0
+            if not evicted:
+                # All cached sessions are active — cannot evict.
+                logger.warning(
+                    "Message cache at maxsize but all sessions are active",
+                    cache_size=len(self._message_cache),
+                    maxsize=self._message_cache_maxsize,
+                )
+                break

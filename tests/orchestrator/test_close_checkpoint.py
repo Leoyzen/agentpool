@@ -80,9 +80,9 @@ def controller(mock_pool: MagicMock) -> SessionController:
 def mock_store() -> MagicMock:
     """Return a mocked SessionStore."""
     store = MagicMock()
-    store.load = AsyncMock(return_value=None)
-    store.save = AsyncMock(return_value=None)
-    store.delete = AsyncMock(return_value=None)
+    store.load_session = AsyncMock(return_value=None)
+    store.save_session = AsyncMock(return_value=None)
+    store.delete_session = AsyncMock(return_value=None)
     return store
 
 
@@ -134,14 +134,16 @@ class TestCloseSessionWithoutPendingCalls:
     @pytest.mark.anyio
     async def test_marks_closed_in_store(self, mock_pool: MagicMock, mock_store: MagicMock) -> None:
         """When a store exists, the session is marked as closed (not deleted)."""
-        mock_store.load = AsyncMock(return_value=make_session_data())
-        mock_store.save = AsyncMock(return_value=None)
+        mock_store.load_session = AsyncMock(return_value=make_session_data())
+        mock_store.save_session = AsyncMock(return_value=None)
         ctrl = SessionController(pool=mock_pool, store=mock_store)
         await ctrl.get_or_create_session("sess-1")
         await ctrl.close_session("sess-1")
-        mock_store.delete.assert_not_awaited()
+        mock_store.delete_session.assert_not_awaited()
         closed_saves = [
-            call for call in mock_store.save.await_args_list if call[0][0].status == "closed"
+            call
+            for call in mock_store.save_session.await_args_list
+            if call[0][0].status == "closed"
         ]
         assert len(closed_saves) >= 1, "Expected save() with status='closed'"
 
@@ -150,13 +152,15 @@ class TestCloseSessionWithoutPendingCalls:
         self, mock_pool: MagicMock, mock_store: MagicMock
     ) -> None:
         """Without pending calls, save is NOT called for checkpoint status."""
-        mock_store.load = AsyncMock(return_value=make_session_data())
+        mock_store.load_session = AsyncMock(return_value=make_session_data())
         ctrl = SessionController(pool=mock_pool, store=mock_store)
         await ctrl.get_or_create_session("sess-1")
         await ctrl.close_session("sess-1")
         # save can still be called for other reasons, but never with "checkpointed" status
         for call in (
-            mock_store.save.await_args_list if hasattr(mock_store.save, "await_args_list") else []
+            mock_store.save_session.await_args_list
+            if hasattr(mock_store.save_session, "await_args_list")
+            else []
         ):
             args, _ = call
             if hasattr(args[0], "status") and args[0].status == "checkpointed":
@@ -177,8 +181,8 @@ class TestCloseSessionWithPendingCalls:
     ) -> None:
         """When pending deferred calls exist, session data is saved as checkpointed."""
         data = make_session_data(pending=[make_pending_call()])
-        mock_store.load = AsyncMock(return_value=data)
-        mock_store.save = AsyncMock(return_value=None)
+        mock_store.load_session = AsyncMock(return_value=data)
+        mock_store.save_session = AsyncMock(return_value=None)
         ctrl = SessionController(pool=mock_pool, store=mock_store)
 
         await ctrl.get_or_create_session("sess-1")
@@ -187,7 +191,7 @@ class TestCloseSessionWithPendingCalls:
         # Should save with checkpointed status
         saved_calls = [
             call
-            for call in mock_store.save.await_args_list
+            for call in mock_store.save_session.await_args_list
             if call[0][0].session_id == "sess-1" and call[0][0].status == "checkpointed"
         ]
         assert len(saved_calls) >= 1, "Expected save() with checkpointed status"
@@ -203,13 +207,13 @@ class TestCloseSessionWithPendingCalls:
     ) -> None:
         """When checkpointed, store.delete is NOT called."""
         data = make_session_data(pending=[make_pending_call()])
-        mock_store.load = AsyncMock(return_value=data)
+        mock_store.load_session = AsyncMock(return_value=data)
         ctrl = SessionController(pool=mock_pool, store=mock_store)
 
         await ctrl.get_or_create_session("sess-1")
         await ctrl.close_session("sess-1")
 
-        mock_store.delete.assert_not_awaited()
+        mock_store.delete_session.assert_not_awaited()
 
     @pytest.mark.anyio
     async def test_releases_inmemory_resources(
@@ -217,7 +221,7 @@ class TestCloseSessionWithPendingCalls:
     ) -> None:
         """Even when checkpointed, in-memory session state is cleaned up."""
         data = make_session_data(pending=[make_pending_call()])
-        mock_store.load = AsyncMock(return_value=data)
+        mock_store.load_session = AsyncMock(return_value=data)
         ctrl = SessionController(pool=mock_pool, store=mock_store)
 
         await ctrl.get_or_create_session("sess-1")
@@ -231,7 +235,7 @@ class TestCloseSessionWithPendingCalls:
     ) -> None:
         """If checkpoint save fails, session resources are NOT released."""
         data = make_session_data(pending=[make_pending_call()])
-        mock_store.load = AsyncMock(return_value=data)
+        mock_store.load_session = AsyncMock(return_value=data)
         # Make save fail for the checkpointed update
         orig_save = AsyncMock(return_value=None)
 
@@ -240,7 +244,7 @@ class TestCloseSessionWithPendingCalls:
                 raise RuntimeError("Storage unavailable")
             await orig_save(obj)
 
-        mock_store.save = AsyncMock(side_effect=failing_save)
+        mock_store.save_session = AsyncMock(side_effect=failing_save)
         ctrl = SessionController(pool=mock_pool, store=mock_store)
 
         await ctrl.get_or_create_session("sess-1")
@@ -250,7 +254,7 @@ class TestCloseSessionWithPendingCalls:
         assert ctrl.get_session("sess-1") is not None, (
             "Session should survive when checkpoint save fails"
         )
-        mock_store.delete.assert_not_awaited()
+        mock_store.delete_session.assert_not_awaited()
 
 
 # ===================================================================
@@ -292,14 +296,14 @@ class TestSaveCloseCheckpoint:
     ) -> None:
         """_save_close_checkpoint saves session data as checkpointed."""
         data = make_session_data(pending=[make_pending_call()])
-        mock_store.load = AsyncMock(return_value=data)
+        mock_store.load_session = AsyncMock(return_value=data)
         ctrl = SessionController(pool=mock_pool, store=mock_store)
 
         result = await ctrl._save_close_checkpoint("sess-1", data)
 
         assert result is True
-        mock_store.save.assert_awaited_once()
-        saved_data = mock_store.save.await_args[0][0]
+        mock_store.save_session.assert_awaited_once()
+        saved_data = mock_store.save_session.await_args[0][0]
         assert saved_data.status == "checkpointed"
         assert len(saved_data.pending_deferred_calls) == 1
 
@@ -309,7 +313,7 @@ class TestSaveCloseCheckpoint:
     ) -> None:
         """_save_close_checkpoint returns False when save fails."""
         data = make_session_data(pending=[make_pending_call()])
-        mock_store.save = AsyncMock(side_effect=RuntimeError("Storage error"))
+        mock_store.save_session = AsyncMock(side_effect=RuntimeError("Storage error"))
         ctrl = SessionController(pool=mock_pool, store=mock_store)
 
         result = await ctrl._save_close_checkpoint("sess-1", data)

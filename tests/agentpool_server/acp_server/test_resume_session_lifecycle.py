@@ -7,6 +7,7 @@ _acp_sessions) and creates a fresh session with new MCP resources
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -46,9 +47,12 @@ async def test_resume_closes_old_session() -> None:
     mock_sessions: MagicMock = MagicMock()
     mock_pool.session_pool.sessions = mock_sessions
 
-    # Mock session_store.load to return persisted SessionData
+    # Mock _get_resume_lock to return a real asyncio.Lock (awaitable)
+    mock_pool.session_pool._get_resume_lock = AsyncMock(return_value=asyncio.Lock())
+
+    # Mock session_store.load_session to return persisted SessionData
     mock_store: AsyncMock = AsyncMock()
-    mock_store.load = AsyncMock(
+    mock_store.load_session = AsyncMock(
         return_value=SessionData(
             session_id=session_id,
             agent_name="test_agent",

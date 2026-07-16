@@ -49,7 +49,7 @@ async def _receive_and_get_handle(
     receive_request() now returns str | None (message_id), but many tests
     need the RunHandle to inspect state. This helper bridges the gap.
     """
-    message_id = await session_pool.receive_request(session_id, content, **kwargs)
+    message_id = await session_pool.send_message(session_id, content, **kwargs)
     assert message_id is not None, "receive_request should return a message_id for idle session"
     handle = session_pool._get_active_run_handle(session_id)
     assert handle is not None, "Expected an active RunHandle after receive_request"
@@ -245,7 +245,7 @@ async def test_cancel_then_new_prompt_full_flow(
     # --- Step 3: Send a new prompt via receive_request ---
     # Use asyncio.wait_for to catch hangs.
     second_msg_id = await asyncio.wait_for(
-        session_pool.receive_request(session_id, "second prompt"),
+        session_pool.send_message(session_id, "second prompt"),
         timeout=30.0,
     )
 
@@ -447,7 +447,7 @@ async def test_double_cancel(mock_pool: MagicMock) -> None:
 
     # Send a new prompt — should not hang
     await asyncio.wait_for(
-        session_pool.receive_request(session_id, "second prompt"),
+        session_pool.send_message(session_id, "second prompt"),
         timeout=30.0,
     )
 
@@ -516,7 +516,7 @@ async def test_cancel_during_idle_then_new_prompt(mock_pool: MagicMock) -> None:
 
     # Send a new prompt — should work normally
     await asyncio.wait_for(
-        session_pool.receive_request(session_id, "second prompt"),
+        session_pool.send_message(session_id, "second prompt"),
         timeout=30.0,
     )
 
@@ -725,7 +725,7 @@ async def test_double_cancel_then_new_prompt(mock_pool: MagicMock) -> None:
 
     # Send a new prompt — should not hang
     await asyncio.wait_for(
-        session_pool.receive_request(session_id, "second prompt"),
+        session_pool.send_message(session_id, "second prompt"),
         timeout=30.0,
     )
 
@@ -774,7 +774,7 @@ async def test_runhandle_dies_in_idle_loop(mock_pool: MagicMock) -> None:
     # was already closed by _consume_run). We need a new receive_request
     # to trigger the second create_turn which raises RuntimeError.
     await asyncio.wait_for(
-        session_pool.receive_request(session_id, "trigger error"),
+        session_pool.send_message(session_id, "trigger error"),
         timeout=30.0,
     )
 
@@ -792,7 +792,7 @@ async def test_runhandle_dies_in_idle_loop(mock_pool: MagicMock) -> None:
 
     # Next receive_request should create a new RunHandle
     second_msg_id = await asyncio.wait_for(
-        session_pool.receive_request(session_id, "new prompt after crash"),
+        session_pool.send_message(session_id, "new prompt after crash"),
         timeout=30.0,
     )
     assert second_msg_id is not None, "receive_request should return a new message_id after cleanup"

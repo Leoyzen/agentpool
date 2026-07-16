@@ -152,8 +152,8 @@ async def test_resume_session_creates_session_if_not_found(
 
     # Mock session_store to return None (session not in persistent store)
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=None)
-    mock_store.list_sessions = AsyncMock(return_value=[])
+    mock_store.load_session = AsyncMock(return_value=None)
+    mock_store.list_session_ids = AsyncMock(return_value=[])
     with patch.object(
         type(mock_acp_agent.session_manager),
         "session_store",
@@ -580,7 +580,7 @@ async def test_session_data_preserved_after_resume(
 ):
     """session_store.save is NOT called during resume_session (data is preserved)."""
     mock_store = MagicMock()
-    mock_store.save = AsyncMock()
+    mock_store.save_session = AsyncMock()
 
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=None)
     mock_acp_agent.session_manager.resume_session = AsyncMock(return_value=mock_session)
@@ -596,4 +596,4 @@ async def test_session_data_preserved_after_resume(
     ):
         await mock_acp_agent.resume_session(resume_session_request)
 
-    mock_store.save.assert_not_called()
+    mock_store.save_session.assert_not_called()

@@ -16,6 +16,8 @@ from agentpool.agents.acp_agent import ACPAgent
 from agentpool.lifecycle import RunState
 from agentpool.orchestrator.core import EventBus, SessionController
 from agentpool.orchestrator.run import RunHandle
+from tests._controller_helpers import send_via_controller
+from agentpool.lifecycle.types import DeliveryMode
 
 
 pytestmark = pytest.mark.unit
@@ -54,6 +56,7 @@ def mock_acp_agent() -> MagicMock:
     """Return a MagicMock that isinstance-checks as ACPAgent."""
     agent = MagicMock(spec=ACPAgent)
     agent.AGENT_TYPE = "acp"
+    agent.conversation = None  # No conversation history in mock
     return agent
 
 
@@ -94,7 +97,7 @@ async def test_acp_idle_creates_run_handle_and_returns_message_id(
     # Patch _consume_run so asyncio.create_task doesn't block
     controller._consume_run = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
-    result = await controller.receive_request("sess-1", "hello")
+    result = await send_via_controller(controller, "sess-1", "hello")
 
     # receive_request() now returns str | None (message_id)
     assert result is not None
@@ -132,7 +135,7 @@ async def test_acp_busy_asap_calls_steer(
     controller._runs["existing-run-id"] = existing_run
     controller.get_session("sess-2").current_run_id = "existing-run-id"  # type: ignore[union-attr]
 
-    result = await controller.receive_request("sess-2", "urgent", priority="asap")
+    result = await send_via_controller(controller, "sess-2", "urgent", mode=DeliveryMode.STEER)
 
     assert result == "msg-steer-id"
     existing_run.steer.assert_called_once_with("urgent", message_id=None)
@@ -162,7 +165,7 @@ async def test_acp_busy_when_idle_calls_followup(
     controller._runs["existing-run-id"] = existing_run
     controller.get_session("sess-3").current_run_id = "existing-run-id"  # type: ignore[union-attr]
 
-    result = await controller.receive_request("sess-3", "later", priority="when_idle")
+    result = await send_via_controller(controller, "sess-3", "later", mode=DeliveryMode.QUEUE)
 
     assert result == "msg-followup-id"
     existing_run.followup.assert_called_once_with("later", message_id=None)
@@ -190,7 +193,7 @@ async def test_stale_current_run_id_detected(
     # Patch _consume_run so asyncio.create_task doesn't block
     controller._consume_run = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
-    result = await controller.receive_request("sess-stale", "test prompt")
+    result = await send_via_controller(controller, "sess-stale", "test prompt")
 
     assert result is not None
     assert isinstance(result, str)
@@ -230,7 +233,7 @@ async def test_cancel_then_receive_request_starts_new_run(
     # Patch _consume_run so asyncio.create_task doesn't block
     controller._consume_run = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
-    result = await controller.receive_request("sess-cancel", "new prompt")
+    result = await send_via_controller(controller, "sess-cancel", "new prompt")
 
     assert result is not None
     assert isinstance(result, str)

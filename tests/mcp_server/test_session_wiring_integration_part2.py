@@ -21,6 +21,8 @@ Category D — Error Path Tests (5 tests):
 
 from __future__ import annotations
 
+import asyncio
+
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -81,6 +83,8 @@ def _make_mock_pool() -> MagicMock:
     mock_sessions: MagicMock = MagicMock()
     mock_pool.session_pool.sessions = mock_sessions
     mock_sessions.close_session = AsyncMock()
+    mock_pool.session_pool.close_session = AsyncMock()
+    mock_pool.session_pool._get_resume_lock = AsyncMock(return_value=__import__("asyncio").Lock())
     return mock_pool
 
 
@@ -225,7 +229,7 @@ async def test_after_resume_session_old_connection_cleaned_new_registered() -> N
 
     # Mock session_store.load to return session data
     mock_store: AsyncMock = AsyncMock()
-    mock_store.load = AsyncMock(
+    mock_store.load_session = AsyncMock(
         return_value=SessionData(
             session_id=session_id,
             agent_name="test_agent",
@@ -424,7 +428,7 @@ async def test_close_all_sessions_for_connection_one_raises_others_still_closed(
     assert connection_id not in manager._connection_sessions
 
     # Assert: controller.close_session called for both
-    assert mock_pool.session_pool.sessions.close_session.await_count == 2
+    assert mock_pool.session_pool.close_session.await_count == 2
 
 
 @pytest.mark.integration
@@ -498,7 +502,7 @@ async def test_resume_session_old_close_raises_new_still_created() -> None:
 
     # Mock session_store.load
     mock_store: AsyncMock = AsyncMock()
-    mock_store.load = AsyncMock(
+    mock_store.load_session = AsyncMock(
         return_value=SessionData(
             session_id=session_id,
             agent_name="test_agent",

@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, Literal, Self
 
 from acp.schema import ClientCapabilities
 from agentpool.log import get_logger
-from agentpool.sessions import SessionData
 from agentpool_server.acp_server.session import ACPSession
 
 
@@ -18,9 +17,9 @@ if TYPE_CHECKING:
     from acp.schema import Implementation, McpServer
     from agentpool import AgentPool
     from agentpool.orchestrator import SessionController
-    from agentpool.sessions import SessionStore
     from agentpool.storage.manager import StorageManager
     from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+    from agentpool_storage.protocols import SessionPersistence
 
 
 logger = get_logger(__name__)
@@ -53,7 +52,7 @@ class ACPSessionManager:
         return self._pool.storage
 
     @property
-    def session_store(self) -> SessionStore | None:
+    def session_store(self) -> SessionPersistence | None:
         """Get the pool's session store for session CRUD operations."""
         if self._pool.session_pool is not None:
             return self._pool.session_pool.sessions.store
@@ -66,7 +65,7 @@ class ACPSessionManager:
             return self._pool.session_pool.sessions
         return None
 
-    async def create_session(
+    async def create_session(  # noqa: PLR0915
         self,
         agent_name: str,
         cwd: str,
@@ -136,34 +135,51 @@ class ACPSessionManager:
 
             # Load persisted child data to get inherited cwd
             if self.session_store is not None:
-                child_data = await self.session_store.load(child_session_id)
+                child_data = await self.session_store.load_session(child_session_id)
                 if child_data is not None and child_data.cwd is not None:
                     cwd = child_data.cwd
             effective_cwd = cwd
         else:
-            # Top-level session path: compute project_id from cwd.
-            # Generate session ID if not provided
-            if session_id is None:
-                session_id = self.storage.generate_session_id()
+            # Top-level session path: delegate to SessionPool.create_session()
+            # which persists SessionData via SessionController.get_or_create_session().
+            if self._pool.session_pool is not None:
+                from agentpool.utils.identifiers import generate_session_id
 
-            # Compute project_id from cwd so that ACP sessions are
-            # correctly associated with the project in the TUI sidebar.
-            # Without this, project_id defaults to None which breaks
-            # per-project session filtering.
-            from agentpool_storage.opencode_provider.helpers import compute_project_id
+                if session_id is None:
+                    session_id = generate_session_id()
 
-            project_id = compute_project_id(cwd)
+                # Compute project_id from cwd so that ACP sessions are
+                # correctly associated with the project in the TUI sidebar.
+                from agentpool_storage.opencode_provider.helpers import compute_project_id
 
-            # Create and persist session data directly
-            data = SessionData(
-                session_id=session_id,
-                agent_name=agent_name,
-                cwd=cwd,
-                project_id=project_id,
-                metadata={"protocol": "acp", "mcp_server_count": len(mcp_servers or [])},
-            )
-            if self.session_store:
-                await self.session_store.save(data)
+                project_id = compute_project_id(cwd)
+
+                await self._pool.session_pool.create_session(
+                    session_id,
+                    agent_name=agent_name,
+                    cwd=cwd,
+                    project_id=project_id,
+                    metadata={"protocol": "acp", "mcp_server_count": len(mcp_servers or [])},
+                )
+            else:
+                # Fallback: no SessionPool (tests only) — persist directly.
+                from agentpool.sessions import SessionData
+                from agentpool_storage.opencode_provider.helpers import compute_project_id
+
+                # Use storage.generate_session_id for backward compat with
+                # tests that mock it.
+                if session_id is None:
+                    session_id = self.storage.generate_session_id()
+                project_id = compute_project_id(cwd)
+                data = SessionData(
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    cwd=cwd,
+                    project_id=project_id,
+                    metadata={"protocol": "acp", "mcp_server_count": len(mcp_servers or [])},
+                )
+                if self.session_store:
+                    await self.session_store.save_session(data)
             effective_cwd = cwd
 
         # Use per-session agent from SessionPool so that
@@ -253,6 +269,58 @@ class ACPSessionManager:
         Returns:
             Resumed ACPSession if found, None otherwise
         """
+        # Route through SessionPool._resume_locks to prevent concurrent
+        # resume race condition. Two concurrent resume_session() calls for
+        # the same session_id would both close the existing session and
+        # recreate it, leading to duplicate ACPSession objects and leaked
+        # MCP connections.
+        if self._pool.session_pool is not None:
+            resume_lock = await self._pool.session_pool._get_resume_lock(session_id)
+        else:
+            # No SessionPool — create an ephemeral lock for safety.
+            resume_lock = asyncio.Lock()
+        async with resume_lock:
+            return await self._resume_session_locked(
+                session_id=session_id,
+                client=client,
+                acp_agent=acp_agent,
+                client_capabilities=client_capabilities,
+                client_info=client_info,
+                subagent_display_mode=subagent_display_mode,
+                raw_input_mode=raw_input_mode,
+                mcp_servers=mcp_servers,
+                connection_id=connection_id,
+            )
+
+    async def _resume_session_locked(
+        self,
+        session_id: str,
+        client: Client,
+        acp_agent: AgentPoolACPAgent,
+        client_capabilities: ClientCapabilities | None,
+        client_info: Implementation | None,
+        subagent_display_mode: Literal["legacy", "zed", "qwen"],
+        raw_input_mode: Literal["dict", "skip", "json_str"],
+        mcp_servers: Sequence[McpServer] | None,
+        connection_id: str | None,
+    ) -> ACPSession | None:
+        """Resume a session from storage (called under resume lock).
+
+        Args:
+            session_id: Session identifier
+            client: ACP client connection
+            acp_agent: ACP agent instance
+            client_capabilities: Client capabilities
+            client_info: Client implementation info (name, version)
+            subagent_display_mode: Display mode for subagent outputs
+            raw_input_mode: How to emit tool call raw_input
+            mcp_servers: MCP server configurations to (re-)initialize
+            connection_id: Optional WebSocket connection ID for tracking
+                sessions per connection.
+
+        Returns:
+            Resumed ACPSession if found, None otherwise
+        """
         # Close existing session if active, then recreate fresh.
         # This prevents stale MCP connections, toolset caches, and agent state
         # from leaking across session resume cycles.
@@ -292,7 +360,7 @@ class ACPSessionManager:
                     session_id=session_id,
                 )
         # Try to load from pool's session store
-        data = await self.session_store.load(session_id) if self.session_store else None
+        data = await self.session_store.load_session(session_id) if self.session_store else None
         if data is None:
             logger.warning("Session not found in store", session_id=session_id)
             return None
@@ -307,7 +375,7 @@ class ACPSessionManager:
             data = data.model_copy(update={"status": "active"})
             data.touch()
             if self.session_store:
-                await self.session_store.save(data)
+                await self.session_store.save_session(data)
             logger.info("Reset session status to active on resume", session_id=session_id)
 
         # Validate agent still exists
@@ -355,7 +423,14 @@ class ACPSessionManager:
     async def close_session(self, session_id: str, *, delete: bool = False) -> None:
         """Close and optionally delete a session.
 
-        Checkpoint-aware close: when ``delete=True`` but the session has
+        Performs ACP-specific cleanup first (closing ACP client connections,
+        stopping session signals), then delegates to
+        :meth:`SessionPool.close_session()` for the standardized 7-step
+        cleanup ordering (RunHandle cancellation, MCP cleanup, agent
+        __aexit__, session persistence, EventBus unsubscription, cascade
+        children).
+
+        Checkpoint-aware: when ``delete=True`` but the session has
         pending deferred calls (``pending_deferred_calls`` is non-empty),
         the session is preserved with ``status='checkpointed'`` instead of
         being deleted.  This allows the session to be resumed later.
@@ -364,27 +439,47 @@ class ACPSessionManager:
             session_id: Session identifier to close
             delete: Whether to also delete from persistent storage
         """
+        # Step 1: ACP-specific cleanup (close ACP client connections,
+        # send session-ended notifications, stop signals).
         session = self._acp_sessions.pop(session_id, None)
-
-        if session:
-            await session.close()
+        if session is not None:
+            try:
+                await session.close()
+            except Exception:
+                logger.exception(
+                    "Failed to close ACPSession",
+                    session_id=session_id,
+                )
             logger.info("Closed ACP session", session_id=session_id)
 
+        # Step 2: Delegate to SessionPool.close_session() for standardized
+        # 7-step cleanup (RunHandle cancel, MCP, agent __aexit__, persistence,
+        # EventBus, cascade children).
+        if self._pool.session_pool is not None:
+            try:
+                await self._pool.session_pool.close_session(session_id)
+            except Exception:
+                logger.exception(
+                    "Failed to close session via SessionPool",
+                    session_id=session_id,
+                )
+
+        # Step 3: Optional deletion from persistent storage.
         if delete and self.session_store:
             # Checkpoint-aware: if the session has pending deferred calls,
             # preserve it as "checkpointed" instead of deleting.
-            data = await self.session_store.load(session_id)
+            data = await self.session_store.load_session(session_id)
             if data is not None and data.pending_deferred_calls:
                 data = data.model_copy(update={"status": "checkpointed"})
                 data.touch()
-                await self.session_store.save(data)
+                await self.session_store.save_session(data)
                 logger.info(
                     "Session checkpointed before close (pending deferred calls)",
                     session_id=session_id,
                     pending_call_count=len(data.pending_deferred_calls),
                 )
             else:
-                await self.session_store.delete(session_id)
+                await self.session_store.delete_session(session_id)
                 logger.info("Deleted session from store", session_id=session_id)
 
     async def update_session_agent(self, session_id: str, agent_name: str) -> None:
@@ -397,10 +492,10 @@ class ACPSessionManager:
         if not self._acp_sessions.get(session_id):
             return
         # Load, update, and save session data
-        data = await self.session_store.load(session_id) if self.session_store else None
+        data = await self.session_store.load_session(session_id) if self.session_store else None
         if data and self.session_store:
             updated = data.with_agent(agent_name)
-            await self.session_store.save(updated)
+            await self.session_store.save_session(updated)
 
     async def list_sessions(self, *, active_only: bool = False) -> list[str]:
         """List session IDs.
@@ -424,7 +519,7 @@ class ACPSessionManager:
             return [sid for sid in controller_ids if sid in self._acp_sessions]
 
         if self.session_store:
-            return await self.session_store.list_sessions()
+            return await self.session_store.list_session_ids()
         return []
 
     async def close_all_sessions(self) -> int:
@@ -454,8 +549,9 @@ class ACPSessionManager:
 
         Called when a WebSocket connection is lost unexpectedly. Iterates
         all sessions tracked for this connection and closes each one via
-        ``SessionController.close_session()`` (RunHandle lifecycle with
-        timeout + cancel) and ``ACPSession.close()`` (ACP-specific cleanup).
+        :meth:`close_session` which performs ACP-specific cleanup then
+        delegates to :meth:`SessionPool.close_session` for the
+        standardized 7-step cleanup ordering.
 
         Idempotent: if ``connection_id`` is not in ``_connection_sessions``,
         returns immediately without error.
@@ -468,27 +564,15 @@ class ACPSessionManager:
         if session_ids is None:
             return
 
-        controller = self._session_controller
         for session_id in session_ids:
-            if controller is not None:
-                try:
-                    await controller.close_session(session_id)
-                except Exception:
-                    logger.exception(
-                        "Failed to close session via SessionController",
-                        session_id=session_id,
-                        connection_id=connection_id,
-                    )
-            session = self._acp_sessions.pop(session_id, None)
-            if session is not None:
-                try:
-                    await session.close()
-                except Exception:
-                    logger.exception(
-                        "Failed to close ACPSession",
-                        session_id=session_id,
-                        connection_id=connection_id,
-                    )
+            try:
+                await self.close_session(session_id)
+            except Exception:
+                logger.exception(
+                    "Failed to close session for connection",
+                    session_id=session_id,
+                    connection_id=connection_id,
+                )
         logger.info(
             "Closed sessions for connection",
             connection_id=connection_id,

@@ -1,7 +1,7 @@
 """Tests for session persistence across close/shutdown/restart.
 
 Verifies that:
-- SQLSessionStore save/load roundtrips the `status` field
+- SQLModelProvider save/load roundtrips the `status` field
 - close_session() marks sessions as "closed" instead of deleting them
 - Sessions survive SessionPool.shutdown() and can be loaded afterwards
 """
@@ -17,7 +17,7 @@ import pytest
 from agentpool.orchestrator.core import SessionController
 from agentpool.sessions.models import SessionData
 from agentpool_config.storage import SQLStorageConfig
-from agentpool_storage.session_store import SQLSessionStore
+from agentpool_storage.sql_provider import SQLModelProvider
 
 
 pytestmark = pytest.mark.unit
@@ -58,13 +58,13 @@ def mock_pool() -> MagicMock:
 
 
 # ===================================================================
-# SQLSessionStore status field roundtrip
+# SQLModelProvider status field roundtrip
 # ===================================================================
 
 
 @pytest.mark.usefixtures("_clear_engine_cache")
-class TestSQLSessionStoreStatusRoundtrip:
-    """SQLSessionStore should persist and restore the status field."""
+class TestSQLModelProviderStatusRoundtrip:
+    """SQLModelProvider should persist and restore the status field."""
 
     @pytest.mark.anyio
     async def test_save_load_status_active(self) -> None:
@@ -73,10 +73,10 @@ class TestSQLSessionStoreStatusRoundtrip:
             db_path = Path(tmpdir) / "test.db"
             config = SQLStorageConfig(url=f"sqlite:///{db_path}")
 
-            async with SQLSessionStore(config) as store:
+            async with SQLModelProvider(config) as store:
                 data = make_session_data(status="active")
-                await store.save(data)
-                loaded = await store.load(data.session_id)
+                await store.save_session(data)
+                loaded = await store.load_session(data.session_id)
 
             assert loaded is not None
             assert loaded.status == "active"
@@ -88,10 +88,10 @@ class TestSQLSessionStoreStatusRoundtrip:
             db_path = Path(tmpdir) / "test.db"
             config = SQLStorageConfig(url=f"sqlite:///{db_path}")
 
-            async with SQLSessionStore(config) as store:
+            async with SQLModelProvider(config) as store:
                 data = make_session_data(status="closed")
-                await store.save(data)
-                loaded = await store.load(data.session_id)
+                await store.save_session(data)
+                loaded = await store.load_session(data.session_id)
 
             assert loaded is not None
             assert loaded.status == "closed"
@@ -103,10 +103,10 @@ class TestSQLSessionStoreStatusRoundtrip:
             db_path = Path(tmpdir) / "test.db"
             config = SQLStorageConfig(url=f"sqlite:///{db_path}")
 
-            async with SQLSessionStore(config) as store:
+            async with SQLModelProvider(config) as store:
                 data = make_session_data(status="checkpointed")
-                await store.save(data)
-                loaded = await store.load(data.session_id)
+                await store.save_session(data)
+                loaded = await store.load_session(data.session_id)
 
             assert loaded is not None
             assert loaded.status == "checkpointed"
@@ -118,18 +118,18 @@ class TestSQLSessionStoreStatusRoundtrip:
             db_path = Path(tmpdir) / "test.db"
             config = SQLStorageConfig(url=f"sqlite:///{db_path}")
 
-            async with SQLSessionStore(config) as store:
+            async with SQLModelProvider(config) as store:
                 session_id = "sess-update-1"
-                await store.save(make_session_data(session_id=session_id, status="active"))
+                await store.save_session(make_session_data(session_id=session_id, status="active"))
 
-                data = await store.load(session_id)
+                data = await store.load_session(session_id)
                 assert data is not None
                 assert data.status == "active"
 
                 updated = data.model_copy(update={"status": "closed"})
-                await store.save(updated)
+                await store.save_session(updated)
 
-                reloaded = await store.load(session_id)
+                reloaded = await store.load_session(session_id)
                 assert reloaded is not None
                 assert reloaded.status == "closed"
 
@@ -146,17 +146,19 @@ class TestCloseSessionMarksClosed:
     async def test_close_marks_closed_not_deleted(self, mock_pool: MagicMock) -> None:
         """close_session() saves with status='closed' and does NOT call delete."""
         mock_store = MagicMock()
-        mock_store.load = AsyncMock(return_value=make_session_data())
-        mock_store.save = AsyncMock(return_value=None)
-        mock_store.delete = AsyncMock(return_value=True)
+        mock_store.load_session = AsyncMock(return_value=make_session_data())
+        mock_store.save_session = AsyncMock(return_value=None)
+        mock_store.delete_session = AsyncMock(return_value=True)
 
         ctrl = SessionController(pool=mock_pool, store=mock_store)
         await ctrl.get_or_create_session("sess-1")
         await ctrl.close_session("sess-1")
 
-        mock_store.delete.assert_not_awaited()
+        mock_store.delete_session.assert_not_awaited()
         closed_saves = [
-            call for call in mock_store.save.await_args_list if call[0][0].status == "closed"
+            call
+            for call in mock_store.save_session.await_args_list
+            if call[0][0].status == "closed"
         ]
         assert len(closed_saves) >= 1
 
@@ -164,17 +166,19 @@ class TestCloseSessionMarksClosed:
     async def test_close_unlocked_marks_closed_not_deleted(self, mock_pool: MagicMock) -> None:
         """_close_session_unlocked() also marks closed instead of deleting."""
         mock_store = MagicMock()
-        mock_store.load = AsyncMock(return_value=make_session_data())
-        mock_store.save = AsyncMock(return_value=None)
-        mock_store.delete = AsyncMock(return_value=True)
+        mock_store.load_session = AsyncMock(return_value=make_session_data())
+        mock_store.save_session = AsyncMock(return_value=None)
+        mock_store.delete_session = AsyncMock(return_value=True)
 
         ctrl = SessionController(pool=mock_pool, store=mock_store)
         await ctrl.get_or_create_session("sess-1")
         await ctrl._close_session_unlocked("sess-1")
 
-        mock_store.delete.assert_not_awaited()
+        mock_store.delete_session.assert_not_awaited()
         closed_saves = [
-            call for call in mock_store.save.await_args_list if call[0][0].status == "closed"
+            call
+            for call in mock_store.save_session.await_args_list
+            if call[0][0].status == "closed"
         ]
         assert len(closed_saves) >= 1
 
@@ -182,17 +186,17 @@ class TestCloseSessionMarksClosed:
     async def test_close_noop_when_not_in_store(self, mock_pool: MagicMock) -> None:
         """_mark_session_closed does nothing if session is not in store."""
         mock_store = MagicMock()
-        mock_store.load = AsyncMock(return_value=None)
-        mock_store.save = AsyncMock(return_value=None)
+        mock_store.load_session = AsyncMock(return_value=None)
+        mock_store.save_session = AsyncMock(return_value=None)
 
         ctrl = SessionController(pool=mock_pool, store=mock_store)
         await ctrl._mark_session_closed("nonexistent-session")
 
-        mock_store.save.assert_not_awaited()
+        mock_store.save_session.assert_not_awaited()
 
 
 # ===================================================================
-# Session survives shutdown via SQLSessionStore
+# Session survives shutdown via SQLModelProvider
 # ===================================================================
 
 
@@ -207,11 +211,13 @@ class TestSessionSurvivesShutdown:
             db_path = Path(tmpdir) / "survive.db"
             config = SQLStorageConfig(url=f"sqlite:///{db_path}")
 
-            async with SQLSessionStore(config) as store:
-                await store.save(make_session_data(session_id="sess-survive", status="active"))
+            async with SQLModelProvider(config) as store:
+                await store.save_session(
+                    make_session_data(session_id="sess-survive", status="active")
+                )
 
-            async with SQLSessionStore(config) as store2:
-                loaded = await store2.load("sess-survive")
+            async with SQLModelProvider(config) as store2:
+                loaded = await store2.load_session("sess-survive")
 
             assert loaded is not None
             assert loaded.session_id == "sess-survive"
@@ -224,28 +230,30 @@ class TestSessionSurvivesShutdown:
             db_path = Path(tmpdir) / "closed.db"
             config = SQLStorageConfig(url=f"sqlite:///{db_path}")
 
-            async with SQLSessionStore(config) as store:
-                await store.save(make_session_data(session_id="sess-closed", status="closed"))
+            async with SQLModelProvider(config) as store:
+                await store.save_session(
+                    make_session_data(session_id="sess-closed", status="closed")
+                )
 
-            async with SQLSessionStore(config) as store2:
-                loaded = await store2.load("sess-closed")
+            async with SQLModelProvider(config) as store2:
+                loaded = await store2.load_session("sess-closed")
 
             assert loaded is not None
             assert loaded.status == "closed"
 
     @pytest.mark.anyio
     async def test_list_sessions_after_restart(self) -> None:
-        """list_sessions() returns sessions that were saved before restart."""
+        """list_session_ids() returns sessions that were saved before restart."""
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "list.db"
             config = SQLStorageConfig(url=f"sqlite:///{db_path}")
 
-            async with SQLSessionStore(config) as store:
-                await store.save(make_session_data(session_id="sess-a", status="closed"))
-                await store.save(make_session_data(session_id="sess-b", status="active"))
+            async with SQLModelProvider(config) as store:
+                await store.save_session(make_session_data(session_id="sess-a", status="closed"))
+                await store.save_session(make_session_data(session_id="sess-b", status="active"))
 
-            async with SQLSessionStore(config) as store2:
-                ids = await store2.list_sessions()
+            async with SQLModelProvider(config) as store2:
+                ids = await store2.list_session_ids()
 
             assert "sess-a" in ids
             assert "sess-b" in ids

@@ -37,6 +37,7 @@ def create_mock_agent() -> MagicMock:
     agent.host_context.storage.save_session = AsyncMock()
     agent.host_context.storage.load_session = AsyncMock(return_value=None)
     agent.host_context.session_pool = MagicMock()
+    agent.host_context.session_pool.create_session = AsyncMock()
     agent.host_context.session_pool.sessions = MagicMock()
     agent.host_context.session_pool.sessions.store = None
     agent.env = MagicMock()
@@ -108,11 +109,11 @@ async def test_store_first_preserves_agent_type_and_pool_id(
 
     # Wire store.load to return the persisted data
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=sd)
+    mock_store.load_session = AsyncMock(return_value=sd)
     mock_state.pool.session_pool.sessions.store = mock_store
 
     # Also mock save so we can verify it's NOT called
-    mock_store.save = AsyncMock()
+    mock_store.save_session = AsyncMock()
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
         session = await ensure_session(mock_state, session_id)
@@ -123,7 +124,7 @@ async def test_store_first_preserves_agent_type_and_pool_id(
     assert session.project_id == "stored-project"
 
     # store.save must NOT be called — data is already persisted
-    mock_store.save.assert_not_awaited()
+    mock_store.save_session.assert_not_awaited()
 
     # Also verify pool.storage.save_session was NOT called
     mock_state.pool.storage.save_session.assert_not_awaited()
@@ -156,8 +157,8 @@ async def test_store_first_child_not_overwritten(mock_state: ServerState) -> Non
     )
 
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=sd)
-    mock_store.save = AsyncMock()
+    mock_store.load_session = AsyncMock(return_value=sd)
+    mock_store.save_session = AsyncMock()
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
@@ -173,7 +174,7 @@ async def test_store_first_child_not_overwritten(mock_state: ServerState) -> Non
     assert session.title != "New Session"
 
     # Must NOT have called save
-    mock_store.save.assert_not_awaited()
+    mock_store.save_session.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -232,8 +233,8 @@ async def test_concurrent_store_first_produces_one_session(
     sd = _make_session_data(session_id)
 
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=sd)
-    mock_store.save = AsyncMock()
+    mock_store.load_session = AsyncMock(return_value=sd)
+    mock_store.save_session = AsyncMock()
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
@@ -278,7 +279,7 @@ async def test_in_memory_session_not_overwritten_by_store(
     # Store has different data
     sd = _make_session_data(session_id, cwd="/store/dir", project_id="store-project")
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=sd)
+    mock_store.load_session = AsyncMock(return_value=sd)
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()) as mock_broadcast:
@@ -290,7 +291,7 @@ async def test_in_memory_session_not_overwritten_by_store(
     assert result.project_id == "in-mem-project"
 
     # Store.load should NOT have been called
-    mock_store.load.assert_not_awaited()
+    mock_store.load_session.assert_not_awaited()
 
     # Only SessionUpdatedEvent should be broadcast (not Created)
     created_events = [
@@ -319,7 +320,7 @@ async def test_store_first_child_skips_agent_binding(
     sd = _make_session_data(child_id, parent_id=parent_id)
 
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=sd)
+    mock_store.load_session = AsyncMock(return_value=sd)
     mock_state.pool.session_pool.sessions.store = mock_store
 
     original_session_id = mock_state.agent.session_id
@@ -353,8 +354,8 @@ async def test_store_miss_fallback_creates_and_persists(
 
     # Store returns None (session not found)
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=None)
-    mock_store.save = AsyncMock()
+    mock_store.load_session = AsyncMock(return_value=None)
+    mock_store.save_session = AsyncMock()
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with (
@@ -371,8 +372,8 @@ async def test_store_miss_fallback_creates_and_persists(
     assert result.id == session_id
     assert result.title == "New Session"
 
-    # Must have persisted via store.save
-    mock_store.save.assert_awaited_once()
+    # Must have persisted via SessionPool.create_session (unified creation path)
+    mock_state.pool.session_pool.create_session.assert_awaited_once()
 
     # Must be in memory
     assert session_id in mock_state.sessions
@@ -393,7 +394,7 @@ async def test_store_first_broadcasts_created_and_updated(
     sd = _make_session_data(session_id)
 
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=sd)
+    mock_store.load_session = AsyncMock(return_value=sd)
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()) as mock_broadcast:
@@ -423,7 +424,7 @@ async def test_store_first_marks_session_idle(mock_state: ServerState) -> None:
     sd = _make_session_data(session_id)
 
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=sd)
+    mock_store.load_session = AsyncMock(return_value=sd)
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()) as mock_broadcast:
@@ -468,7 +469,7 @@ async def test_store_first_creates_runtime_state(mock_state: ServerState) -> Non
     sd = _make_session_data(session_id)
 
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=sd)
+    mock_store.load_session = AsyncMock(return_value=sd)
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
@@ -499,7 +500,7 @@ async def test_store_first_top_level_session_does_not_bind_agent(
     sd = _make_session_data(session_id, parent_id=None)
 
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=sd)
+    mock_store.load_session = AsyncMock(return_value=sd)
     mock_state.pool.session_pool.sessions.store = mock_store
 
     original_session_id = mock_state.agent.session_id

@@ -18,6 +18,8 @@ import pytest
 
 from agentpool.orchestrator.core import EventBus, SessionController
 from agentpool.orchestrator.run import RunHandle
+from tests._controller_helpers import send_via_controller
+from agentpool.lifecycle.types import DeliveryMode
 
 
 pytestmark = pytest.mark.unit
@@ -94,7 +96,7 @@ async def test_idle_creates_run_handle_and_returns_message_id(
     # Patch _consume_run so asyncio.create_task doesn't block
     controller._consume_run = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
-    result = await controller.receive_request("sess-1", "hello")
+    result = await send_via_controller(controller, "sess-1", "hello")
 
     # receive_request() now returns str | None (message_id)
     assert result is not None
@@ -133,7 +135,7 @@ async def test_busy_asap_calls_steer(
     controller._runs["existing-run-id"] = existing_run
     controller.get_session("sess-2").current_run_id = "existing-run-id"  # type: ignore[union-attr]
 
-    result = await controller.receive_request("sess-2", "urgent", priority="asap")
+    result = await send_via_controller(controller, "sess-2", "urgent", mode=DeliveryMode.STEER)
 
     assert result == "msg-steer-123"
     existing_run.steer.assert_called_once_with("urgent", message_id=None)
@@ -163,7 +165,7 @@ async def test_busy_when_idle_calls_followup(
     controller._runs["existing-run-id"] = existing_run
     controller.get_session("sess-3").current_run_id = "existing-run-id"  # type: ignore[union-attr]
 
-    result = await controller.receive_request("sess-3", "later", priority="when_idle")
+    result = await send_via_controller(controller, "sess-3", "later", mode=DeliveryMode.QUEUE)
 
     assert result == "msg-followup-123"
     existing_run.followup.assert_called_once_with("later", message_id=None)
@@ -183,7 +185,7 @@ async def test_session_not_found_returns_none(
     """When the session does not exist, receive_request returns None."""
     controller._event_bus = event_bus
 
-    result = await controller.receive_request("nonexistent-session", "hello")
+    result = await send_via_controller(controller, "nonexistent-session", "hello")
 
     assert result is None
 
@@ -206,7 +208,7 @@ async def test_session_closing_returns_none(
     # Mark session as closing
     controller._sessions["sess-closing"].closing = True
 
-    result = await controller.receive_request("sess-closing", "hello")
+    result = await send_via_controller(controller, "sess-closing", "hello")
 
     assert result is None
 
@@ -234,10 +236,10 @@ async def test_message_id_passed_to_steer(
     controller._runs["existing-run-id"] = existing_run
     controller.get_session("sess-mid").current_run_id = "existing-run-id"  # type: ignore[union-attr]
 
-    result = await controller.receive_request(
+    result = await send_via_controller(controller, 
         "sess-mid",
         "steer me",
-        priority="asap",
+        mode=DeliveryMode.STEER,
         message_id="custom-mid",
     )
 
@@ -269,7 +271,7 @@ async def test_list_content_not_stringified_for_steer(
     controller.get_session("sess-list").current_run_id = "existing-run-id"  # type: ignore[union-attr]
 
     content_list: list[Any] = ["hello", "world"]
-    result = await controller.receive_request("sess-list", content_list, priority="asap")
+    result = await send_via_controller(controller, "sess-list", content_list, mode=DeliveryMode.STEER)
 
     assert result == "msg-id"
     # List should be passed directly, not joined into a string
@@ -318,7 +320,7 @@ async def test_receive_request_uses_get_or_create_session_agent() -> None:
     controller.get_or_create_session_agent = AsyncMock(return_value=mock_agent)  # type: ignore[method-assign]
     controller._consume_run = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
-    result = await controller.receive_request(session_id, "hello")
+    result = await send_via_controller(controller, session_id, "hello")
 
     # get_or_create_session_agent should have been called
     controller.get_or_create_session_agent.assert_called_once_with(session_id, input_provider=None)

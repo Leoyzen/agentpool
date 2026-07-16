@@ -318,7 +318,7 @@ async def _handle_elicitation_deferred(
             store = pool.session_pool.sessions.store
             if store is not None:
                 try:
-                    data = await store.load(session_id)
+                    data = await store.load_session(session_id)
                     if data is not None and data.status == "active":
                         data = data.model_copy(
                             update={
@@ -327,7 +327,7 @@ async def _handle_elicitation_deferred(
                             }
                         )
                         data.touch()
-                        await store.save(data)
+                        await store.save_session(data)
                 except Exception:  # noqa: BLE001
                     logger.debug(
                         "Failed to update session status to checkpointed",

@@ -28,6 +28,7 @@ from agentpool_server.opencode_server.session_pool_integration import (
     ensure_session,
 )
 from agentpool_server.opencode_server.state import ServerState
+from agentpool.lifecycle.types import DeliveryMode
 
 
 def create_mock_agent() -> MagicMock:
@@ -43,7 +44,7 @@ def create_mock_agent() -> MagicMock:
     agent.host_context.session_pool = MagicMock()
     agent.host_context.session_pool.sessions = MagicMock()
     agent.host_context.session_pool.sessions.store = None
-    agent.host_context.session_pool.receive_request = AsyncMock()
+    agent.host_context.session_pool.send_message = AsyncMock()
     agent.host_context.session_pool.resume_session = AsyncMock()
     agent.host_context.session_pool.close_session = AsyncMock()
     agent.host_context.session_pool.sessions.get_or_create_session_agent = AsyncMock()
@@ -157,8 +158,8 @@ async def test_ensure_session_detects_checkpointed_status(mock_state: ServerStat
     )
 
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=sd)
-    mock_store.save = AsyncMock()
+    mock_store.load_session = AsyncMock(return_value=sd)
+    mock_store.save_session = AsyncMock()
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
@@ -175,7 +176,7 @@ async def test_ensure_session_detects_checkpointed_status(mock_state: ServerStat
     assert session_id in mock_state.messages
 
     # store.save should NOT be called (data already persisted)
-    mock_store.save.assert_not_awaited()
+    mock_store.save_session.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -185,7 +186,7 @@ async def test_ensure_session_checkpointed_marks_idle(mock_state: ServerState) -
     sd = _make_session_data(session_id, status="checkpointed")
 
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=sd)
+    mock_store.load_session = AsyncMock(return_value=sd)
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()) as mock_broadcast:
@@ -226,8 +227,8 @@ async def test_ensure_session_reconstructs_tool_parts(mock_state: ServerState) -
     )
 
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=sd)
-    mock_store.save = AsyncMock()
+    mock_store.load_session = AsyncMock(return_value=sd)
+    mock_store.save_session = AsyncMock()
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
@@ -267,7 +268,7 @@ async def test_ensure_session_no_tool_parts_for_no_pending_calls(
     sd = _make_session_data(session_id, status="checkpointed", pending_calls=[])
 
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=sd)
+    mock_store.load_session = AsyncMock(return_value=sd)
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
@@ -313,8 +314,8 @@ async def test_ensure_session_restores_child_topology(mock_state: ServerState) -
     )
 
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=parent_sd)
-    mock_store.save = AsyncMock()
+    mock_store.load_session = AsyncMock(return_value=parent_sd)
+    mock_store.save_session = AsyncMock()
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
@@ -338,8 +339,8 @@ async def test_ensure_session_no_spawn_graph_for_no_children(
     sd = _make_session_data(session_id, status="checkpointed")
 
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=sd)
-    mock_store.save = AsyncMock()
+    mock_store.load_session = AsyncMock(return_value=sd)
+    mock_store.save_session = AsyncMock()
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
@@ -366,8 +367,8 @@ async def test_route_message_replays_deferred_results(mock_state: ServerState) -
     )
 
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=sd)
-    mock_store.save = AsyncMock()
+    mock_store.load_session = AsyncMock(return_value=sd)
+    mock_store.save_session = AsyncMock()
     mock_state.pool.session_pool.sessions.store = mock_store
 
     # Wire up SessionPool
@@ -390,7 +391,7 @@ async def test_route_message_replays_deferred_results(mock_state: ServerState) -
         await integration.route_message(
             session_id,
             content="resume with results",
-            priority="when_idle",
+            mode=DeliveryMode.QUEUE,
             deferred_tool_results=deferred_results,
         )
 
@@ -399,7 +400,7 @@ async def test_route_message_replays_deferred_results(mock_state: ServerState) -
     sp.resume_session.assert_awaited_once()
 
     # receive_request should still be called after resume
-    sp.receive_request.assert_awaited_once()
+    sp.send_message.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -423,13 +424,13 @@ async def test_route_message_skips_resume_when_not_checkpointed(
         await integration.route_message(
             session_id,
             content="hello",
-            priority="when_idle",
+            mode=DeliveryMode.QUEUE,
         )
 
     # resume_session should NOT be called for non-checkpointed sessions
     sp.resume_session.assert_not_awaited()
     # receive_request should be called
-    sp.receive_request.assert_awaited_once()
+    sp.send_message.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -441,7 +442,7 @@ async def test_ensure_session_checkpointed_restores_input_provider(
     sd = _make_session_data(session_id, status="checkpointed")
 
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=sd)
+    mock_store.load_session = AsyncMock(return_value=sd)
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with (

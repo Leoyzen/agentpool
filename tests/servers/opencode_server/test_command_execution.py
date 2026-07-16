@@ -517,7 +517,7 @@ async def test_mcp_prompt_routes_through_session_pool(
         receive_request_calls.append((args, kwargs))
         return None
 
-    mock_agent.host_context.session_pool.receive_request = _mock_receive_request  # type: ignore[attr-defined]
+    mock_agent.host_context.session_pool.send_message = _mock_receive_request  # type: ignore[attr-defined]
 
     response = await async_client.post(
         f"/session/{session_id}/command",

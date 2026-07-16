@@ -50,7 +50,33 @@ def _make_mock_session_pool(store: MemorySessionStore) -> MagicMock:
         await store.save(session_data)
         return MagicMock(session_id=session_id)
 
+    async def mock_create_child_session(
+        parent_session_id: str,
+        agent_name: str,
+        agent_type: str = "native",
+        *,
+        session_id: str | None = None,
+        **kwargs: object,
+    ) -> MagicMock:
+        from agentpool.utils.identifiers import generate_session_id
+
+        child_sid = session_id or generate_session_id()
+        parent_data = None
+        if parent_session_id:
+            parent_data = await store.load(parent_session_id)
+        session_data = SessionData(
+            session_id=child_sid,
+            agent_name=agent_name,
+            parent_id=parent_session_id,
+            agent_type=agent_type,
+            project_id=parent_data.project_id if parent_data else None,
+            cwd=parent_data.cwd if parent_data else None,
+        )
+        await store.save(session_data)
+        return MagicMock(session_id=child_sid)
+
     session_pool.create_session = mock_create_session
+    session_pool.create_child_session = mock_create_child_session
     # get_or_create_session_agent is async; must use AsyncMock so await works
     session_pool.sessions.get_or_create_session_agent = AsyncMock()
     return session_pool

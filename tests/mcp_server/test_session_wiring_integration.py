@@ -84,6 +84,8 @@ def _make_mock_pool() -> MagicMock:
     mock_sessions: MagicMock = MagicMock()
     mock_pool.session_pool.sessions = mock_sessions
     mock_sessions.close_session = AsyncMock()
+    mock_pool.session_pool.close_session = AsyncMock()
+    mock_pool.session_pool._get_resume_lock = AsyncMock(return_value=__import__("asyncio").Lock())
     mock_pool.manifest.agents = {}
     return mock_pool
 
@@ -319,9 +321,9 @@ async def test_close_all_sessions_for_connection_invokes_session_controller_and_
     await manager.close_all_sessions_for_connection(connection_id)
 
     # Assert: controller.close_session called once per session_id
-    assert mock_pool.session_pool.sessions.close_session.await_count == 2
+    assert mock_pool.session_pool.close_session.await_count == 2
     call_args: list[tuple[str, ...]] = [
-        call.args for call in mock_pool.session_pool.sessions.close_session.await_args_list
+        call.args for call in mock_pool.session_pool.close_session.await_args_list
     ]
     assert (session_id_1,) in call_args
     assert (session_id_2,) in call_args
@@ -516,7 +518,7 @@ async def test_websocket_disconnect_closes_all_sessions_on_connection() -> None:
     session_2.close.assert_awaited_once()
 
     # controller.close_session called for both
-    assert mock_pool.session_pool.sessions.close_session.await_count == 2
+    assert mock_pool.session_pool.close_session.await_count == 2
 
     # Connection removed
     assert connection_id not in manager._connection_sessions
@@ -591,7 +593,7 @@ async def test_resume_session_old_closed_new_has_fresh_acp_mcp_manager() -> None
 
     # Mock session_store.load
     mock_store: AsyncMock = AsyncMock()
-    mock_store.load = AsyncMock(
+    mock_store.load_session = AsyncMock(
         return_value=SessionData(
             session_id=session_id,
             agent_name="test_agent",
@@ -600,6 +602,8 @@ async def test_resume_session_old_closed_new_has_fresh_acp_mcp_manager() -> None
     )
     mock_sessions.store = mock_store
     mock_sessions.close_session = AsyncMock()
+    mock_pool.session_pool.close_session = AsyncMock()
+    mock_pool.session_pool._get_resume_lock = AsyncMock(return_value=__import__("asyncio").Lock())
 
     # Mock get_or_create_session_agent — returns a mock agent with mcp
     mock_agent: MagicMock = MagicMock()

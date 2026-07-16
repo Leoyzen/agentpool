@@ -31,6 +31,7 @@ from agentpool.orchestrator.core import SessionPool
 from agentpool.sessions.models import SessionData
 from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 from agentpool_server.opencode_server.state import ServerState
+from agentpool.lifecycle.types import DeliveryMode
 
 
 # =============================================================================
@@ -113,10 +114,10 @@ def mock_agent_pool() -> Mock:
 def mock_session_store() -> Mock:
     """Create a mock SessionStore."""
     store = Mock()
-    store.save = AsyncMock(return_value=None)
-    store.delete = AsyncMock(return_value=None)
-    store.load = AsyncMock(return_value=None)
-    store.list_sessions = AsyncMock(return_value=[])
+    store.save_session = AsyncMock(return_value=None)
+    store.delete_session = AsyncMock(return_value=None)
+    store.load_session = AsyncMock(return_value=None)
+    store.list_session_ids = AsyncMock(return_value=[])
     return store
 
 
@@ -241,8 +242,8 @@ class TestSessionCreation:
             metadata={"project_id": "proj-1", "cwd": "/tmp"},
         )
 
-        mock_session_store.save.assert_awaited()
-        saved_data: SessionData = mock_session_store.save.await_args[0][0]
+        mock_session_store.save_session.assert_awaited()
+        saved_data: SessionData = mock_session_store.save_session.await_args[0][0]
         assert saved_data.session_id == "test-session-002"
         assert saved_data.agent_name == "test-agent"
 
@@ -340,7 +341,7 @@ class TestMessageRouting:
         run_handle_1 = await integration.route_message(
             session_id="test-session-005",
             content="First message",
-            priority="when_idle",
+            mode=DeliveryMode.QUEUE,
         )
         assert run_handle_1 is not None
 
@@ -350,7 +351,7 @@ class TestMessageRouting:
         run_handle_2 = await integration.route_message(
             session_id="test-session-005",
             content="Second message",
-            priority="when_idle",
+            mode=DeliveryMode.QUEUE,
         )
         assert run_handle_2 is not None  # Queued successfully (followup returned message_id)
 
@@ -378,7 +379,7 @@ class TestMessageRouting:
         run_handle = await integration.route_message(
             session_id="test-session-006",
             content="Inject this now",
-            priority="asap",
+            mode=DeliveryMode.STEER,
         )
 
         # ASAP on idle session should still create a run
@@ -759,7 +760,7 @@ class TestSessionFork:
             created_at=__import__("datetime").datetime.now(),
             last_active=__import__("datetime").datetime.now(),
         )
-        mock_session_store.load = AsyncMock(return_value=parent_data)
+        mock_session_store.load_session = AsyncMock(return_value=parent_data)
 
         await integration.create_session(
             session_id=parent_id,

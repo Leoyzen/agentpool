@@ -79,7 +79,7 @@ def _make_state(tmp_path: Any) -> ServerState:
     _run_handle = Mock()
     _run_handle.complete_event = Mock()
     _run_handle.complete_event.wait = AsyncMock()
-    pool.session_pool.receive_request = AsyncMock(return_value=_run_handle)
+    pool.session_pool.send_message = AsyncMock(return_value=_run_handle)
     pool.session_pool.event_bus = Mock()
     from tests._helpers.mock_stream import EmptyReceiveStream
 

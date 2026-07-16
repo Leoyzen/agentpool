@@ -44,6 +44,7 @@ from agentpool.orchestrator.core import EventBus, SessionPool
 from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.session_controller import SessionController
 from agentpool.orchestrator.turn import Turn
+from tests._controller_helpers import send_via_controller
 
 
 pytestmark = pytest.mark.integration
@@ -309,7 +310,7 @@ async def test_receive_request_returns_str_or_none() -> None:
     session_pool.sessions.get_session = MagicMock(return_value=None)  # type: ignore[method-assign]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        result = await session_pool.receive_request("no-such-session", "hello")
+        result = await session_pool.send_message("no-such-session", "hello")
     assert result is None
 
     # Existing session → str (message_id).
@@ -321,7 +322,7 @@ async def test_receive_request_returns_str_or_none() -> None:
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        result2 = await session_pool.receive_request("sess-1", "hello")
+        result2 = await session_pool.send_message("sess-1", "hello")
 
     assert result2 == "msg-id-123"
     assert isinstance(result2, str)
@@ -465,7 +466,7 @@ async def test_send_message_steer_mode_on_active_session() -> None:
 
     Given: A SessionPool with a mock session that has an active run.
     When: send_message is called with DeliveryMode.STEER.
-    Then: _route_message receives priority="asap" and returns the message_id.
+    Then: _route_message receives mode=DeliveryMode.STEER and returns the message_id.
     """
     pool = _make_mock_pool()
     session_pool = SessionPool(pool=pool)
@@ -508,7 +509,7 @@ async def test_send_message_queue_mode_creates_new_run() -> None:
 
     Given: A SessionPool with a mock idle session (no current_run_id).
     When: send_message is called with DeliveryMode.QUEUE (default).
-    Then: _route_message receives priority="when_idle" and returns the
+    Then: _route_message receives mode=DeliveryMode.QUEUE and returns the
         message_id from _start_run_handle.
     """
     pool = _make_mock_pool()
@@ -622,41 +623,12 @@ async def test_run_agent_creates_session_runs_returns_text_cleans_up() -> None:
 
 @pytest.mark.anyio
 async def test_deprecation_warnings_emitted() -> None:  # noqa: PLR0915
-    """DeprecationWarning emitted by receive_request, spawn_subagent, get_available_agents.
+    """DeprecationWarning emitted by spawn_subagent, get_available_agents.
 
-    Given: SessionPool.receive_request(), RunLoopDelegationService.spawn_subagent(),
-        and RunLoopDelegationService.get_available_agents() are called.
-    When: Each method is invoked.
-    Then: Each emits a DeprecationWarning.
+    Note: receive_request() deprecation tests removed — the method was
+    deleted in Phase 6.4 of session-debt-cleanup.
     """
     from agentpool.capabilities.runloop_delegation import RunLoopDelegationService
-
-    # --- SessionPool.receive_request() ---
-    pool = _make_mock_pool()
-    session_pool = SessionPool(pool=pool)
-    session_pool.send_message = AsyncMock(return_value="depr-msg-001")  # type: ignore[method-assign]
-
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        result = await session_pool.receive_request("sess-1", "hello")
-
-    assert result == "depr-msg-001"
-    dep_warnings = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-    assert len(dep_warnings) >= 1
-    assert "deprecated" in str(dep_warnings[0].message).lower()
-
-    # --- SessionController.receive_request() ---
-    controller = SessionController(pool)
-    controller.get_session = MagicMock(return_value=None)  # type: ignore[method-assign]
-
-    with warnings.catch_warnings(record=True) as caught2:
-        warnings.simplefilter("always")
-        result2 = await controller.receive_request("sess-1", "hello")
-
-    assert result2 is None
-    dep_warnings2 = [w for w in caught2 if issubclass(w.category, DeprecationWarning)]
-    assert len(dep_warnings2) >= 1
-    assert "deprecated" in str(dep_warnings2[0].message).lower()
 
     # --- RunLoopDelegationService.get_available_agents() ---
     registry = MagicMock()
@@ -679,7 +651,7 @@ async def test_deprecation_warnings_emitted() -> None:  # noqa: PLR0915
     host2 = MagicMock()
     host2.session_pool = MagicMock()
     host2.session_pool.sessions = MagicMock()
-    host2.session_pool.sessions.receive_request = AsyncMock(return_value="mid")
+    host2.session_pool.send_message = AsyncMock(return_value="mid")
     child_session = MagicMock()
     child_session.current_run_id = "run-1"
     host2.session_pool.sessions.get_session = MagicMock(return_value=child_session)

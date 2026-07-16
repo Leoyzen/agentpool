@@ -122,10 +122,10 @@ async def session_pool(server_state: ServerState):  # type: ignore[no-untyped-de
     pool_mock._config_file_path = None
 
     store_mock = Mock()
-    store_mock.save = AsyncMock(return_value=None)
-    store_mock.delete = AsyncMock(return_value=None)
-    store_mock.load = AsyncMock(return_value=None)
-    store_mock.list_sessions = AsyncMock(return_value=[])
+    store_mock.save_session = AsyncMock(return_value=None)
+    store_mock.delete_session = AsyncMock(return_value=None)
+    store_mock.load_session = AsyncMock(return_value=None)
+    store_mock.list_session_ids = AsyncMock(return_value=[])
 
     sp = SessionPool(
         pool=pool_mock,

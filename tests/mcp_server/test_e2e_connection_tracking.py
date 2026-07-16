@@ -54,6 +54,12 @@ async def test_on_disconnect_full_cleanup_chain_with_real_components() -> None: 
     session_controller = SessionController(pool=mock_pool, store=None)
     mock_pool.session_pool = MagicMock()
     mock_pool.session_pool.sessions = session_controller
+    mock_pool.session_pool.create_session = AsyncMock()
+
+    async def _close_via_controller(sid: str) -> None:
+        await session_controller.close_session(sid)
+
+    mock_pool.session_pool.close_session = _close_via_controller
     mock_pool.storage.generate_session_id = Mock(return_value="g7-session-1")
 
     # --- Mock agent with .mcp = real MCPManager ---
@@ -165,12 +171,15 @@ async def test_connection_id_propagation_create_session_populates_connection_ses
 
     mock_sessions: MagicMock = MagicMock()
     mock_pool.session_pool.sessions = mock_sessions
+    mock_pool.session_pool.create_session = AsyncMock()
+    mock_pool.session_pool.close_session = AsyncMock()
+    mock_pool.session_pool._get_resume_lock = AsyncMock(return_value=__import__("asyncio").Lock())
     mock_sessions.close_session = AsyncMock()
 
     # Mock session_store (returns None for load, save is no-op)
     mock_store: AsyncMock = AsyncMock()
-    mock_store.load = AsyncMock(return_value=None)
-    mock_store.save = AsyncMock()
+    mock_store.load_session = AsyncMock(return_value=None)
+    mock_store.save_session = AsyncMock()
     mock_sessions.store = mock_store
 
     mock_pool.storage.generate_session_id = Mock(return_value="g8-session-1")
@@ -207,7 +216,9 @@ async def test_connection_id_propagation_create_session_populates_connection_ses
         )
 
     # --- Assert _connection_sessions was populated naturally ---
-    assert session_id == "g8-session-1"
+    # Session ID is now generated via identifiers.generate_session_id() (Phase 4)
+    # which produces sortable IDs with 'ses_' prefix.
+    assert session_id.startswith("ses_")
     assert "conn-1" in acp_manager._connection_sessions
     assert session_id in acp_manager._connection_sessions["conn-1"]
     assert session_id in acp_manager._acp_sessions
@@ -282,11 +293,14 @@ async def test_multiple_sessions_same_connection_real_acpsessions() -> None:
 
     mock_sessions: MagicMock = MagicMock()
     mock_pool.session_pool.sessions = mock_sessions
+    mock_pool.session_pool.create_session = AsyncMock()
+    mock_pool.session_pool.close_session = AsyncMock()
+    mock_pool.session_pool._get_resume_lock = AsyncMock(return_value=__import__("asyncio").Lock())
     mock_sessions.close_session = AsyncMock()
 
     mock_store: AsyncMock = AsyncMock()
-    mock_store.load = AsyncMock(return_value=None)
-    mock_store.save = AsyncMock()
+    mock_store.load_session = AsyncMock(return_value=None)
+    mock_store.save_session = AsyncMock()
     mock_sessions.store = mock_store
 
     # Generate unique IDs for each session

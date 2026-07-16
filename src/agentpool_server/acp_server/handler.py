@@ -489,7 +489,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         stored_data = None
         if self.session_manager.session_store is not None:
             try:
-                stored_data = await self.session_manager.session_store.load(session_id)
+                stored_data = await self.session_manager.session_store.load_session(session_id)
                 if stored_data is not None:
                     if stored_data.cwd:
                         cwd = stored_data.cwd
@@ -596,7 +596,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
 
         stop_reason: StopReason = "end_turn"
         try:
-            message_id = await session_pool.receive_request(
+            message_id = await session_pool.send_message(
                 session_id, contents, input_provider=input_provider
             )
             # Legacy clients (no turn_complete support) block until the run finishes
