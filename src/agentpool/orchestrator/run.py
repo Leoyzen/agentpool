@@ -367,6 +367,11 @@ class RunHandle:
             extension_registry=(
                 self._host_context.extension_registry if self._host_context is not None else None
             ),
+            team_mode_config=(
+                self._host_context.manifest.team_mode
+                if self._host_context is not None
+                else None
+            ),
         )
         self.run_ctx.deps = ctx
 
