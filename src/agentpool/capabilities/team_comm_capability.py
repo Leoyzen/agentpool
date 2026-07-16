@@ -33,7 +33,7 @@ from __future__ import annotations
 import datetime
 import json
 import tempfile
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any, cast, override
 import uuid
 
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
@@ -122,7 +122,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         # be a MagicMock(spec=AgentContext). Both work via duck typing.
         if isinstance(deps, AgentContext):
             return deps
-        return deps  # type: ignore[return-value]
+        return cast(AgentContext, deps)
 
     def _get_team_state(self, agent_ctx: AgentContext) -> FileTeamState | None:
         """Create a FileTeamState for the current team, or None if not in a team.
@@ -193,16 +193,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             if not agent_ctx.agent_registry.exists(agent_name):
                 return f"Agent '{agent_name}' not found in registry"
             if agent_name not in self._config.member_eligible:
-                return (
-                    f"Agent '{agent_name}' is not eligible for team membership"
-                )
+                return f"Agent '{agent_name}' is not eligible for team membership"
 
         # Bounds: max_members check.
         if len(members) > self._config.bounds.max_members:
-            return (
-                f"Team exceeds max_members ({len(members)} > "
-                f"{self._config.bounds.max_members})"
-            )
+            return f"Team exceeds max_members ({len(members)} > {self._config.bounds.max_members})"
 
         team_id = str(uuid.uuid4())
         lead_session_id: str = agent_ctx.session.session_id
@@ -263,12 +258,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             except ImportError:
                 pass
             else:
-                logfire.warning(
-                    "auto_init failed: {error}", error=str(exc)
-                )
-            return (
-                f"Auto-init failed: {exc}. Team tools unavailable."
-            )
+                logfire.warning("auto_init failed: {error}", error=str(exc))
+            return f"Auto-init failed: {exc}. Team tools unavailable."
 
         # Write team_id and team_name back to session metadata in-place.
         agent_ctx.session.metadata["team_id"] = team_id
@@ -311,8 +302,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         body_bytes = len(body.encode())
         if body_bytes > self._config.message_max_bytes:
             return (
-                f"Message exceeds max size ({body_bytes} > "
-                f"{self._config.message_max_bytes} bytes)"
+                f"Message exceeds max size ({body_bytes} > {self._config.message_max_bytes} bytes)"
             )
 
         # Auto-urgent: force urgent=True for configured message types.
@@ -376,8 +366,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         state_path = team_state._state_path(team_id)
         if state_path.exists():
-            state: dict[str, Any] = FileTeamState._read_json(state_path)
-            members_state: dict[str, dict[str, Any]] = state.get("members", {})
+            current_state: dict[str, Any] = FileTeamState._read_json(state_path)
+            members_state: dict[str, dict[str, Any]] = current_state.get("members", {})
             member_info: dict[str, Any] = members_state.get(to, {})
             turn_count: int = member_info.get("turn_count", 0)
             if turn_count >= self._config.bounds.max_member_turns:
@@ -397,8 +387,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
             member_info["turn_count"] = turn_count + 1
             members_state[to] = member_info
-            state["members"] = members_state
-            FileTeamState._atomic_write(state_path, state)
+            current_state["members"] = members_state
+            FileTeamState._atomic_write(state_path, current_state)
 
         target_sid = team_state.get_member_session_id(team_id, to)
         if target_sid is None:
@@ -718,16 +708,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             if not agent_ctx.agent_registry.exists(agent_name):
                 return f"Agent '{agent_name}' not found in registry"
             if agent_name not in self._config.member_eligible:
-                return (
-                    f"Agent '{agent_name}' is not eligible for team membership"
-                )
+                return f"Agent '{agent_name}' is not eligible for team membership"
 
         # Bounds: max_members check.
         if len(members) > self._config.bounds.max_members:
-            return (
-                f"Team exceeds max_members ({len(members)} > "
-                f"{self._config.bounds.max_members})"
-            )
+            return f"Team exceeds max_members ({len(members)} > {self._config.bounds.max_members})"
 
         # Generate team_id and create state.
         team_id = str(uuid.uuid4())

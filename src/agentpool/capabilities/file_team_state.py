@@ -94,7 +94,8 @@ class FileTeamState:
     @staticmethod
     def _read_json(path: Path) -> dict[str, Any]:
         """Read and parse a JSON file."""
-        return json.loads(path.read_text(encoding="utf-8"))
+        data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        return data
 
     # ------------------------------------------------------------------
     # Team lifecycle
@@ -258,8 +259,7 @@ class FileTeamState:
                 continue
             deps = [task_by_id.get(dep) for dep in blocked_by]
             t["is_unblocked"] = all(
-                dep is not None and dep.get("status") == "completed"
-                for dep in deps
+                dep is not None and dep.get("status") == "completed" for dep in deps
             )
         return tasks
 
@@ -504,7 +504,7 @@ async def start_team_cleanup_task(
         else:
             from contextlib import nullcontext
 
-            span_ctx = nullcontext()  # type: ignore[assignment]
+            span_ctx = nullcontext()
         with span_ctx:
             while True:
                 removed = FileTeamState.cleanup_expired_teams(base_dir, ttl_hours)
