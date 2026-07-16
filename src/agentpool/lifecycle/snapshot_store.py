@@ -21,6 +21,8 @@ if TYPE_CHECKING:
     from typing import Self
 
 
+import logfire
+
 from agentpool.log import get_logger
 
 
@@ -162,6 +164,7 @@ class DurableSnapshotStore:
                 """,
             )
 
+    @logfire.instrument("lifecycle.snapshot.save")
     def save(self, state: Any) -> int:
         """Persist a full state snapshot with crash-safe atomic write.
 
@@ -189,6 +192,7 @@ class DurableSnapshotStore:
             raise RuntimeError(msg)
         return row_id
 
+    @logfire.instrument("lifecycle.snapshot.load")
     def load(self) -> tuple[Any, int] | None:
         """Return the latest snapshot, rejecting partial/corrupt data.
 

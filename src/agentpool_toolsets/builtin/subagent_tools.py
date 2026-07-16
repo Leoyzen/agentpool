@@ -14,6 +14,7 @@ import datetime
 import re
 from typing import Any, Literal
 
+import logfire
 from pydantic_ai import ModelRetry
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
@@ -362,7 +363,8 @@ class SubagentTools(FunctionToolsetCapability):
         # Wrap with error handling
         async def _safe_background_run() -> None:
             try:
-                await _background_run()
+                with logfire.span("subagent.background_task", task_id=task_id):
+                    await _background_run()
             except Exception:
                 logger.exception("Async task failed", task_id=task_id, agent=agent_or_team)
                 error_content = (
