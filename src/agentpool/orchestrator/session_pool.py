@@ -1282,7 +1282,7 @@ class SessionPool:
             input_provider=input_provider,
         )
 
-    @logfire.instrument("session.send_message {session_id}")
+    @logfire.instrument("session.send_message")
     async def send_message(
         self,
         session_id: str,
@@ -1700,7 +1700,7 @@ class SessionPool:
             return run_handle.followup(str(message))
         return None
 
-    @logfire.instrument("session.steer {session_id}")
+    @logfire.instrument("session.steer")
     async def steer(self, session_id: str, message: str, **kwargs: Any) -> str | None:
         """Inject a steer message with agent-type-aware routing.
 
@@ -1719,7 +1719,7 @@ class SessionPool:
             return run_handle.steer(message)
         return None
 
-    @logfire.instrument("session.followup {session_id}")
+    @logfire.instrument("session.followup")
     async def followup(self, session_id: str, message: str, **kwargs: Any) -> str | None:
         """Queue a follow-up message with agent-type-aware routing.
 

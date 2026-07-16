@@ -102,6 +102,8 @@ async def test_receive_request_priority_mapping(session_pool: SessionPool) -> No
         "x",
         mode=DeliveryMode.STEER,
         message_id=None,
+        deps=None,
+        input_provider=None,
     )
 
 
@@ -127,6 +129,8 @@ async def test_receive_request_unknown_priority(session_pool: SessionPool) -> No
         "x",
         mode=DeliveryMode.QUEUE,
         message_id=None,
+        deps=None,
+        input_provider=None,
     )
 
 

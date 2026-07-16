@@ -837,7 +837,6 @@ class SessionController:
             s for s in self._sessions.values() if s.agent_name == agent_name and not s.is_closing
         ]
 
-    @logfire.instrument("session.consume_run")
     async def _consume_run(self, run_handle: RunHandle, initial_prompt: str) -> None:
         """Drive a RunHandle.start() async generator to completion.
 
@@ -852,40 +851,53 @@ class SessionController:
         the EventBus so that subscribers (e.g. background_output in
         BackgroundTaskCapability) are unblocked instead of waiting forever.
 
+        Uses a manual ``with logfire.span(...)`` instead of
+        ``@logfire.instrument`` because this method is invoked via
+        ``asyncio.create_task()`` from ``_start_run_handle()``. The
+        decorator wrapper may not properly establish the parent-child span
+        relationship when the coroutine runs in a copied contextvars
+        Context. Manual span creation ensures the span is created in the
+        correct context with the correct parent.
+
         Args:
             run_handle: The run handle whose ``start()`` to consume.
             initial_prompt: The first user prompt.
         """
-        gen = run_handle.start(initial_prompt)
-        try:
-            async for event in gen:
-                if isinstance(event, StreamCompleteEvent | RunErrorEvent):
-                    break
-        except Exception as exc:
-            logger.exception(
-                "RunHandle.start() raised for run_id=%s session_id=%s",
-                run_handle.run_id,
-                run_handle.session_id,
-            )
-            error_event = RunErrorEvent(
-                message=f"{type(exc).__name__}: {exc}",
-                run_id=run_handle.run_id,
-                agent_name=run_handle.agent_type,
-            )
-            if self._event_bus is not None:
-                await self._event_bus.publish(run_handle.session_id, error_event)
-                await self._event_bus.publish(
+        with logfire.span(
+            "session.consume_run",
+            session_id=run_handle.session_id,
+            run_id=run_handle.run_id,
+        ):
+            gen = run_handle.start(initial_prompt)
+            try:
+                async for event in gen:
+                    if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                        break
+            except Exception as exc:
+                logger.exception(
+                    "RunHandle.start() raised for run_id=%s session_id=%s",
+                    run_handle.run_id,
                     run_handle.session_id,
-                    RunFailedEvent(
-                        run_id=run_handle.run_id,
-                        session_id=run_handle.session_id,
-                        exception=exc,
-                    ),
                 )
-        finally:
-            await gen.aclose()
+                error_event = RunErrorEvent(
+                    message=f"{type(exc).__name__}: {exc}",
+                    run_id=run_handle.run_id,
+                    agent_name=run_handle.agent_type,
+                )
+                if self._event_bus is not None:
+                    await self._event_bus.publish(run_handle.session_id, error_event)
+                    await self._event_bus.publish(
+                        run_handle.session_id,
+                        RunFailedEvent(
+                            run_id=run_handle.run_id,
+                            session_id=run_handle.session_id,
+                            exception=exc,
+                        ),
+                    )
+            finally:
+                await gen.aclose()
 
-    @logfire.instrument("session.start_run_handle {session_id}")
+    @logfire.instrument("session.start_run_handle")
     def _start_run_handle(
         self,
         session: SessionState,
@@ -1010,7 +1022,7 @@ class SessionController:
         task.add_done_callback(_on_run_done)
         return mid
 
-    @logfire.instrument("session.route_message {session_id}")
+    @logfire.instrument("session.route_message")
     async def _route_message(
         self,
         session: SessionState,
@@ -1076,7 +1088,7 @@ class SessionController:
                 return run.followup(content, message_id=message_id)
         return None
 
-    @logfire.instrument("session.receive_request {session_id}")
+    @logfire.instrument("session.receive_request")
     async def receive_request(
         self,
         session_id: str,
