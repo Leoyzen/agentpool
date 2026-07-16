@@ -1010,6 +1010,7 @@ class SessionController:
         task.add_done_callback(_on_run_done)
         return mid
 
+    @logfire.instrument("session.route_message {session_id}")
     async def _route_message(
         self,
         session: SessionState,
