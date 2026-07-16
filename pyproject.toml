@@ -43,6 +43,7 @@ dependencies = [
   "exxec>=0.1.0",
   "fastapi",
   "fastmcp>=2.12.4",
+  "filelock>=3.13",
   "fsspec",
   "httpx",
   "jinja2",
