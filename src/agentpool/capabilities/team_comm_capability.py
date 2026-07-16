@@ -14,6 +14,12 @@ Universal tools (all members can use):
     - list_blackboard: List all keys on the shared blackboard.
     - team_status: Get the current status of the team.
 
+Lead-only tools (only agents with ``team_role == "lead"``):
+    - team_create: Create a new team with eligible members.
+    - team_delete: Delete the current team and close all member sessions.
+    - delete_blackboard: Delete a key from the shared blackboard.
+    - shutdown_request: Shut down a specific team member.
+
 Per-session instantiation:
     The factory creates a shared instance with ``session_metadata=None``
     during ``_compile_agent_capabilities()``. When a session with a
@@ -27,6 +33,7 @@ from __future__ import annotations
 import json
 import tempfile
 from typing import TYPE_CHECKING, Any, override
+import uuid
 
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
@@ -82,6 +89,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             self.register_tool(self.write_blackboard)
             self.register_tool(self.list_blackboard)
             self.register_tool(self.team_status)
+            # Register lead-only tools
+            self.register_tool(self.team_create)
+            self.register_tool(self.team_delete)
+            self.register_tool(self.delete_blackboard)
+            self.register_tool(self.shutdown_request)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -142,34 +154,89 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     # Universal tools
     # ------------------------------------------------------------------
 
-    async def send_message(
+    async def send_message(  # noqa: PLR0911
         self,
         ctx: Any,
         to: str,
         body: str,
         urgent: bool = False,
+        message_type: str = "",
     ) -> str:
         """Send a message to a teammate's inbox.
 
         Args:
             ctx: RunContext with AgentContext deps.
-            to: Recipient member name (``"*"`` is lead-only — returns error).
+            to: Recipient member name. ``"*"`` broadcasts to all members
+                (lead-only — returns error for non-lead agents).
             body: Message body text.
             urgent: If True, deliver via steer (mid-turn injection);
                 otherwise queue for next turn.
+            message_type: Optional message type tag. If the type is in
+                ``config.auto_urgent``, ``urgent`` is forced to ``True``.
 
         Returns:
             Success or error message string.
         """
+        # Message size enforcement.
+        body_bytes = len(body.encode())
+        if body_bytes > self._config.message_max_bytes:
+            return (
+                f"Message exceeds max size ({body_bytes} > "
+                f"{self._config.message_max_bytes} bytes)"
+            )
+
+        # Auto-urgent: force urgent=True for configured message types.
+        if message_type and message_type in self._config.auto_urgent:
+            urgent = True
+
+        # Broadcast: lead-only.
         if to == "*":
-            return "Broadcast is lead-only"
+            agent_ctx = self._resolve_agent_context(ctx)
+            role: str = agent_ctx.session.metadata.get("team_role", "")
+            if role != "lead":
+                return "Broadcast is lead-only"
+
+            team_state = self._get_team_state(agent_ctx)
+            if team_state is None:
+                return "Not in a team session"
+
+            team_id: str = agent_ctx.session.metadata["team_id"]
+            session_pool = agent_ctx.host.session_pool
+            if session_pool is None:
+                return "SessionPool not available"
+
+            from agentpool.capabilities.file_team_state import FileTeamState
+
+            state_path = team_state._state_path(team_id)
+            if not state_path.exists():
+                return "Team state not found"
+            state: dict[str, Any] = FileTeamState._read_json(state_path)
+            members: dict[str, dict[str, str]] = state.get("members", {})
+
+            from agentpool.lifecycle.types import DeliveryMode
+
+            mode = DeliveryMode.STEER if urgent else DeliveryMode.QUEUE
+            delivered = 0
+            for member_name in members:
+                target_sid = team_state.get_member_session_id(team_id, member_name)
+                if target_sid is None:
+                    continue
+                result = await session_pool.send_message(target_sid, body, mode=mode)
+                if result is not None:
+                    delivered += 1
+                team_state.write_message(
+                    team_id,
+                    member_name,
+                    {"from": self._agent_name, "body": body, "urgent": urgent},
+                )
+            return f"Broadcast sent to {delivered} members"
 
         agent_ctx = self._resolve_agent_context(ctx)
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
             return "Not in a team session"
 
-        team_id: str = agent_ctx.session.metadata["team_id"]
+        team_id = agent_ctx.session.metadata["team_id"]
         session_pool = agent_ctx.host.session_pool
         if session_pool is None:
             return "SessionPool not available"
@@ -414,6 +481,193 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             *member_lines,
         ]
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Lead-only tools
+    # ------------------------------------------------------------------
+
+    async def team_create(
+        self,
+        ctx: Any,
+        name: str,
+        members: list[dict[str, str]],
+    ) -> str:
+        """Create a new team with eligible members (lead-only).
+
+        Args:
+            ctx: RunContext with AgentContext deps.
+            name: Human-readable team name.
+            members: List of member dicts, each with ``agent`` and ``name``
+                keys.
+
+        Returns:
+            Success message with team_id, or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role != "lead":
+            return "Only lead can use team_create"
+
+        # Eligibility checks.
+        for member in members:
+            agent_name: str = member.get("agent", "")
+            if not agent_ctx.agent_registry.exists(agent_name):
+                return f"Agent '{agent_name}' not found in registry"
+            if agent_name not in self._config.member_eligible:
+                return (
+                    f"Agent '{agent_name}' is not eligible for team membership"
+                )
+
+        # Generate team_id and create state.
+        team_id = str(uuid.uuid4())
+        lead_session_id: str = agent_ctx.session.session_id
+
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        base_dir = (
+            agent_ctx.team_mode_config.effective_base_dir
+            if agent_ctx.team_mode_config is not None
+            else tempfile.gettempdir()
+        )
+        team_state = FileTeamState(base_dir)
+        team_state.init(
+            team_id,
+            name,
+            [{"name": m["name"], "agent": m["agent"]} for m in members],
+        )
+
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is None:
+            return "SessionPool not available"
+
+        from agentpool.lifecycle.types import DeliveryMode
+
+        for member in members:
+            member_session_id = str(uuid.uuid4())
+            await session_pool.create_session(
+                member_session_id,
+                agent_name=member["agent"],
+                parent_session_id=lead_session_id,
+                team_id=team_id,
+                team_role="member",
+                team_member_name=member["name"],
+            )
+            team_state.register_member(
+                team_id,
+                member["name"],
+                member_session_id,
+            )
+            await session_pool.send_message(
+                member_session_id,
+                self._config.protocol_template.format(
+                    team_name=name,
+                    role="member",
+                    member_name=member["name"],
+                ),
+                mode=DeliveryMode.QUEUE,
+            )
+
+        return f"Team '{name}' created with {len(members)} members. team_id={team_id}"
+
+    async def team_delete(self, ctx: Any) -> str:
+        """Delete the current team and close all member sessions (lead-only).
+
+        Args:
+            ctx: RunContext with AgentContext deps.
+
+        Returns:
+            ``"Team deleted"`` on success, or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role != "lead":
+            return "Only lead can use team_delete"
+
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return "Not in a team session"
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return "Not in a team session"
+
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        state_path = team_state._state_path(team_id)
+        if not state_path.exists():
+            return "Team state not found"
+        state: dict[str, Any] = FileTeamState._read_json(state_path)
+        members: dict[str, dict[str, str]] = state.get("members", {})
+
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is not None:
+            for member_info in members.values():
+                sid: str = member_info.get("session_id", "")
+                if sid:
+                    await session_pool.close_session(sid)
+
+        team_state.cleanup(team_id)
+        return "Team deleted"
+
+    async def delete_blackboard(self, ctx: Any, key: str) -> str:
+        """Delete a key from the shared blackboard (lead-only).
+
+        Args:
+            ctx: RunContext with AgentContext deps.
+            key: Blackboard key to delete.
+
+        Returns:
+            ``"Blackboard key '{key}' deleted"`` on success, or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role != "lead":
+            return "Only lead can use delete_blackboard"
+
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return "Not in a team session"
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return "Not in a team session"
+
+        team_state.delete_blackboard(team_id, key)
+        return f"Blackboard key '{key}' deleted"
+
+    async def shutdown_request(self, ctx: Any, member_name: str) -> str:
+        """Shut down a specific team member (lead-only).
+
+        Args:
+            ctx: RunContext with AgentContext deps.
+            member_name: Name of the member to shut down.
+
+        Returns:
+            ``"Shutdown completed for {member_name}"`` on success, or error.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role != "lead":
+            return "Only lead can use shutdown_request"
+
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return "Not in a team session"
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return "Not in a team session"
+
+        member_sid = team_state.get_member_session_id(team_id, member_name)
+        if member_sid is None:
+            return f"Member '{member_name}' not found"
+
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is None:
+            return "SessionPool not available"
+
+        await session_pool.close_session(member_sid)
+        return f"Shutdown completed for {member_name}"
 
     # ------------------------------------------------------------------
     # AbstractCapability overrides

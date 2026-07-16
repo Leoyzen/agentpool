@@ -130,13 +130,14 @@ def test_skeleton_get_instructions_returns_none_when_empty_metadata() -> None:
 
 
 @pytest.mark.unit
-async def test_skeleton_get_tools_returns_8_tools_when_enabled() -> None:
-    """Given: enabled config with T7 universal tools registered.
+async def test_skeleton_get_tools_returns_12_tools_when_enabled() -> None:
+    """Given: enabled config with T7 universal tools + T8 lead-only tools.
 
     When: get_tools() is called.
-    Then: returns 8 tools (send_message, task_create, task_list,
+    Then: returns 12 tools (send_message, task_create, task_list,
         task_update, read_blackboard, write_blackboard, list_blackboard,
-        team_status).
+        team_status, team_create, team_delete, delete_blackboard,
+        shutdown_request).
     """
     config = _make_enabled_config()
     cap = TeamCommCapability(config, "worker", _make_session_metadata())
@@ -153,6 +154,10 @@ async def test_skeleton_get_tools_returns_8_tools_when_enabled() -> None:
         "write_blackboard",
         "list_blackboard",
         "team_status",
+        "team_create",
+        "team_delete",
+        "delete_blackboard",
+        "shutdown_request",
     }
 
 
@@ -417,6 +422,8 @@ def _make_run_context(
     session_pool: MagicMock | None = None,
     config: TeamModeConfig | None = None,
     base_dir: str | None = None,
+    agent_registry: MagicMock | None = None,
+    session_id: str | None = None,
 ) -> MagicMock:
     """Create a mock RunContext with AgentContext deps.
 
@@ -425,6 +432,8 @@ def _make_run_context(
         session_pool: Mock SessionPool (or None to test missing pool).
         config: TeamModeConfig (defaults to enabled config).
         base_dir: Optional base_dir override for TeamModeConfig.
+        agent_registry: Mock AgentRegistry (defaults to a permissive mock).
+        session_id: Optional session_id string for the mock SessionState.
 
     Returns:
         A MagicMock whose .deps is a mock AgentContext.
@@ -437,10 +446,22 @@ def _make_run_context(
     agent_ctx.session.metadata = metadata if metadata is not None else _make_session_metadata()
     agent_ctx.host.session_pool = session_pool
     agent_ctx.team_mode_config = cfg
+    agent_ctx.agent_registry = agent_registry or MagicMock()
+    agent_ctx.session.session_id = session_id or "lead_session_001"
 
     ctx = MagicMock()
     ctx.deps = agent_ctx
     return ctx
+
+
+def _make_lead_metadata(team_id: str = "team_123") -> dict[str, Any]:
+    """Create session metadata for a lead agent."""
+    return {
+        "team_id": team_id,
+        "team_name": "alpha_team",
+        "team_role": "lead",
+        "team_member_name": "coordinator",
+    }
 
 
 def _init_team(base_dir: str, team_id: str = "team_123") -> None:
@@ -806,3 +827,330 @@ async def test_disabled_config_registers_no_tools() -> None:
     result = await cap.get_tools()
 
     assert list(result) == []
+
+
+# ---- T8 Lead-only tool tests ----
+
+
+@pytest.mark.unit
+async def test_team_create_success(tmp_path: Any) -> None:
+    """Given: lead agent with eligible members and mock session_pool.
+
+    When: team_create is called with 2 eligible members.
+    Then: returns success message with team_id and creates sessions.
+    """
+    config = _make_enabled_config(
+        member_eligible=["worker", "reviewer"],
+        base_dir=str(tmp_path),
+    )
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=True)
+    mock_pool = MagicMock()
+    mock_pool.create_session = AsyncMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.team_create(
+        ctx,
+        "my_team",
+        [
+            {"agent": "worker", "name": "translator_agent"},
+            {"agent": "reviewer", "name": "reviewer_agent"},
+        ],
+    )
+
+    assert "Team 'my_team' created with 2 members" in result
+    assert "team_id=" in result
+    assert mock_pool.create_session.await_count == 2
+    assert mock_pool.send_message.await_count == 2
+
+
+@pytest.mark.unit
+async def test_team_create_not_lead() -> None:
+    """Given: non-lead agent (team_role='translator').
+
+    When: team_create is called.
+    Then: returns "Only lead can use team_create".
+    """
+    ctx = _make_run_context()
+    cap = TeamCommCapability(_make_enabled_config(), "worker", _make_session_metadata())
+
+    result = await cap.team_create(ctx, "test", [])
+
+    assert result == "Only lead can use team_create"
+
+
+@pytest.mark.unit
+async def test_team_create_agent_not_in_registry(tmp_path: Any) -> None:
+    """Given: lead agent but member agent not in registry.
+
+    When: team_create is called.
+    Then: returns "Agent '{name}' not found in registry".
+    """
+    config = _make_enabled_config(
+        member_eligible=["ghost"],
+        base_dir=str(tmp_path),
+    )
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=False)
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.team_create(
+        ctx,
+        "test_team",
+        [{"agent": "ghost", "name": "ghost_member"}],
+    )
+
+    assert "not found in registry" in result
+
+
+@pytest.mark.unit
+async def test_team_create_agent_not_eligible(tmp_path: Any) -> None:
+    """Given: lead agent, agent exists in registry but not in member_eligible.
+
+    When: team_create is called.
+    Then: returns "Agent '{name}' is not eligible for team membership".
+    """
+    config = _make_enabled_config(
+        member_eligible=["worker"],
+        base_dir=str(tmp_path),
+    )
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=True)
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.team_create(
+        ctx,
+        "test_team",
+        [{"agent": "non_eligible", "name": "member1"}],
+    )
+
+    assert "not eligible for team membership" in result
+
+
+@pytest.mark.unit
+async def test_team_delete_success(tmp_path: Any) -> None:
+    """Given: lead agent with initialized team.
+
+    When: team_delete is called.
+    Then: closes all member sessions and returns "Team deleted".
+    """
+    _init_team(str(tmp_path))
+    mock_pool = MagicMock()
+    mock_pool.close_session = AsyncMock()
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.team_delete(ctx)
+
+    assert result == "Team deleted"
+    # Two members registered in _init_team.
+    assert mock_pool.close_session.await_count == 2
+
+
+@pytest.mark.unit
+async def test_team_delete_not_lead() -> None:
+    """Given: non-lead agent (team_role='translator').
+
+    When: team_delete is called.
+    Then: returns "Only lead can use team_delete".
+    """
+    ctx = _make_run_context()
+    cap = TeamCommCapability(_make_enabled_config(), "worker", _make_session_metadata())
+
+    result = await cap.team_delete(ctx)
+
+    assert result == "Only lead can use team_delete"
+
+
+@pytest.mark.unit
+async def test_shutdown_request_success(tmp_path: Any) -> None:
+    """Given: lead agent with initialized team.
+
+    When: shutdown_request is called with a valid member name.
+    Then: closes the member's session and returns success.
+    """
+    _init_team(str(tmp_path))
+    mock_pool = MagicMock()
+    mock_pool.close_session = AsyncMock()
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.shutdown_request(ctx, "translator_agent")
+
+    assert result == "Shutdown completed for translator_agent"
+    mock_pool.close_session.assert_awaited_once_with("sess_translator")
+
+
+@pytest.mark.unit
+async def test_shutdown_request_not_lead() -> None:
+    """Given: non-lead agent (team_role='translator').
+
+    When: shutdown_request is called.
+    Then: returns "Only lead can use shutdown_request".
+    """
+    ctx = _make_run_context()
+    cap = TeamCommCapability(_make_enabled_config(), "worker", _make_session_metadata())
+
+    result = await cap.shutdown_request(ctx, "some_member")
+
+    assert result == "Only lead can use shutdown_request"
+
+
+@pytest.mark.unit
+async def test_delete_blackboard_success(tmp_path: Any) -> None:
+    """Given: lead agent with a blackboard key written.
+
+    When: delete_blackboard is called.
+    Then: key is removed and returns "Blackboard key '{key}' deleted".
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    # Write a key first so we can delete it.
+    await cap.write_blackboard(ctx, "test_key", "test_value")
+    result = await cap.delete_blackboard(ctx, "test_key")
+
+    assert result == "Blackboard key 'test_key' deleted"
+    # Verify it's gone.
+    read_result = await cap.read_blackboard(ctx, "test_key")
+    assert read_result == "Key not found"
+
+
+@pytest.mark.unit
+async def test_delete_blackboard_not_lead() -> None:
+    """Given: non-lead agent (team_role='translator').
+
+    When: delete_blackboard is called.
+    Then: returns "Only lead can use delete_blackboard".
+    """
+    ctx = _make_run_context()
+    cap = TeamCommCapability(_make_enabled_config(), "worker", _make_session_metadata())
+
+    result = await cap.delete_blackboard(ctx, "some_key")
+
+    assert result == "Only lead can use delete_blackboard"
+
+
+@pytest.mark.unit
+async def test_broadcast_lead(tmp_path: Any) -> None:
+    """Given: lead agent sends broadcast (to='*').
+
+    When: send_message is called with to='*'.
+    Then: all members receive the message.
+    """
+    _init_team(str(tmp_path))
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.send_message(ctx, "*", "announcement")
+
+    assert "Broadcast sent to 2 members" in result
+    assert mock_pool.send_message.await_count == 2
+
+
+@pytest.mark.unit
+async def test_broadcast_not_lead() -> None:
+    """Given: non-lead agent (team_role='translator') sends broadcast.
+
+    When: send_message is called with to='*'.
+    Then: returns "Broadcast is lead-only".
+    """
+    ctx = _make_run_context()
+    cap = TeamCommCapability(_make_enabled_config(), "worker", _make_session_metadata())
+
+    result = await cap.send_message(ctx, "*", "announcement")
+
+    assert result == "Broadcast is lead-only"
+
+
+@pytest.mark.unit
+async def test_message_size_exceeds_limit() -> None:
+    """Given: message body exceeding message_max_bytes.
+
+    When: send_message is called.
+    Then: returns error about message exceeding max size.
+    """
+    config = _make_enabled_config()
+    config = config.model_copy(update={"message_max_bytes": 10})
+    ctx = _make_run_context(config=config)
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    big_body = "x" * 100
+    result = await cap.send_message(ctx, "reviewer_agent", big_body)
+
+    assert "exceeds max size" in result
+    assert "100" in result
+    assert "10" in result
+
+
+@pytest.mark.unit
+async def test_auto_urgent(tmp_path: Any) -> None:
+    """Given: message_type in auto_urgent list.
+
+    When: send_message is called with message_type='escalation'.
+    Then: urgent is forced to True and DeliveryMode.STEER is used.
+    """
+    from agentpool.lifecycle.types import DeliveryMode
+
+    _init_team(str(tmp_path))
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_urgent")
+    ctx = _make_run_context(
+        session_pool=mock_pool,
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    result = await cap.send_message(
+        ctx,
+        "reviewer_agent",
+        "urgent escalation",
+        message_type="escalation",
+    )
+
+    assert result == "Message sent to reviewer_agent"
+    call_kwargs = mock_pool.send_message.call_args
+    assert call_kwargs.kwargs["mode"] is DeliveryMode.STEER
