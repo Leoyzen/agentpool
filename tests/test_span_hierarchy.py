@@ -20,8 +20,7 @@ fix-span-instrumentation change:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Generator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -29,17 +28,17 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 from opentelemetry.sdk.trace.sampling import ALWAYS_ON as ALWAYS_ON_SAMPLER
-from opentelemetry.trace import Tracer
 import pytest
 
 
-type _AttrVal = Any
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+    from opentelemetry.trace import Tracer
 
 
 @pytest.fixture
-def in_memory_tracer() -> (
-    Generator[tuple[Tracer, InMemorySpanExporter]]
-):
+def in_memory_tracer() -> Generator[tuple[Tracer, InMemorySpanExporter]]:
     """Set up an OTel tracer with an in-memory span exporter.
 
     Uses a local ``TracerProvider`` directly (not the global one) to
@@ -94,20 +93,25 @@ def _assert_child_of(
 def test_delegation_span_hierarchy(
     in_memory_tracer: tuple[Tracer, InMemorySpanExporter],
 ) -> None:
-    """Verify the delegation span nesting:
+    """Verify the delegation span nesting.
+
     ``delegation.subagent → orchestration.run_handle.start → turn.native``.
     """
     tracer, exporter = in_memory_tracer
 
-    with tracer.start_as_current_span(
-        "delegation.subagent",
-        attributes={"parent_session_id": "parent", "child_agent_name": "child"},
-    ), tracer.start_as_current_span(
-        "orchestration.run_handle.start",
-        attributes={"session_id": "child", "agent_type": "native"},
-    ), tracer.start_as_current_span(
-        "turn.native",
-        attributes={"turn_id": "t1", "session_id": "child"},
+    with (
+        tracer.start_as_current_span(
+            "delegation.subagent",
+            attributes={"parent_session_id": "parent", "child_agent_name": "child"},
+        ),
+        tracer.start_as_current_span(
+            "orchestration.run_handle.start",
+            attributes={"session_id": "child", "agent_type": "native"},
+        ),
+        tracer.start_as_current_span(
+            "turn.native",
+            attributes={"turn_id": "t1", "session_id": "child"},
+        ),
     ):
         pass  # simulate turn execution
 
@@ -150,8 +154,7 @@ def test_delegation_span_hierarchy(
 def test_team_parallel_span_exists(
     in_memory_tracer: tuple[Tracer, InMemorySpanExporter],
 ) -> None:
-    """Verify that ``team.execute_parallel`` and
-    ``team.execute_sequential`` spans exist and are captured.
+    """Verify that team parallel and sequential spans exist and are captured.
 
     These spans are created via ``@logfire.instrument`` on
     ``base_team._execute_parallel()`` and ``_execute_sequential()``.
@@ -190,17 +193,18 @@ def test_team_parallel_span_exists(
 def test_team_sequential_span_exists(
     in_memory_tracer: tuple[Tracer, InMemorySpanExporter],
 ) -> None:
-    """Verify that ``team.execute_sequential`` span exists and nests
-    child member spans.
-    """
+    """Verify that ``team.execute_sequential`` span exists and nests child member spans."""
     tracer, exporter = in_memory_tracer
 
-    with tracer.start_as_current_span(
-        "team.execute_sequential",
-        attributes={"agent_names": "agent1,agent2,agent3", "mode": "sequential"},
-    ), tracer.start_as_current_span(
-        "agent.run",
-        attributes={"agent_name": "agent1"},
+    with (
+        tracer.start_as_current_span(
+            "team.execute_sequential",
+            attributes={"agent_names": "agent1,agent2,agent3", "mode": "sequential"},
+        ),
+        tracer.start_as_current_span(
+            "agent.run",
+            attributes={"agent_name": "agent1"},
+        ),
     ):
         pass
 
@@ -221,8 +225,7 @@ def test_team_sequential_span_exists(
 def test_background_task_span(
     in_memory_tracer: tuple[Tracer, InMemorySpanExporter],
 ) -> None:
-    """Verify that ``subagent.background_task`` span exists and carries
-    a ``task_id`` attribute.
+    """Verify that ``subagent.background_task`` span exists and carries a ``task_id`` attribute.
 
     This simulates the ``with logfire.span()`` inside the
     ``_safe_background_run()`` nested function in
@@ -231,20 +234,21 @@ def test_background_task_span(
     tracer, exporter = in_memory_tracer
 
     task_id = "bg_task_001"
-    with tracer.start_as_current_span(
-        "subagent.background_task",
-        attributes={
-            "task_id": task_id,
-            "parent_session_id": "ses_parent",
-            "child_agent_name": "researcher",
-        },
-    ):
-        # Simulate work that the background task performs
-        with tracer.start_as_current_span(
+    with (
+        tracer.start_as_current_span(
+            "subagent.background_task",
+            attributes={
+                "task_id": task_id,
+                "parent_session_id": "ses_parent",
+                "child_agent_name": "researcher",
+            },
+        ),
+        tracer.start_as_current_span(
             "agent.run",
             attributes={"agent_name": "researcher"},
-        ):
-            pass
+        ),
+    ):
+        pass
 
     spans = _span_by_name(exporter.get_finished_spans())
 
@@ -330,20 +334,16 @@ async def test_nested_async_generator_span_leak(
     spans = _span_by_name(exporter.get_finished_spans())
 
     # outer span should be ended — its `with` block exits on GeneratorExit
-    assert "orchestration.run_handle.start" in spans, (
-        "outer span should be ended"
-    )
+    assert "orchestration.run_handle.start" in spans, "outer span should be ended"
 
     # BUG: inner spans are NOT ended because their generators are never
     # closed via aclose(). The `async for` loop in the outer generator
     # does NOT close the inner iterator when GeneratorExit is raised.
     assert "orchestration.run_handle.execute_turn" in spans, (
-        "inner span should be ended — "
-        "BUG: _execute_turn() generator is not closed on aclose()"
+        "inner span should be ended — BUG: _execute_turn() generator is not closed on aclose()"
     )
     assert "turn.native" in spans, (
-        "innermost span should be ended — "
-        "BUG: turn.execute() generator is not closed on aclose()"
+        "innermost span should be ended — BUG: turn.execute() generator is not closed on aclose()"
     )
 
 

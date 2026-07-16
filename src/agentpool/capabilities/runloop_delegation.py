@@ -124,7 +124,8 @@ class RunLoopDelegationService:
             from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
 
             bus_queue = await session_pool.event_bus.subscribe(
-                child_session_id, scope="session",
+                child_session_id,
+                scope="session",
             )
             try:
                 while True:

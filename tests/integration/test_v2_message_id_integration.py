@@ -406,6 +406,7 @@ async def test_opencode_delivery_mode_mapping() -> None:
         "s",
         "x",
         priority="asap",
+        deps=None,
         message_id=None,
     )
 
@@ -418,6 +419,7 @@ async def test_opencode_delivery_mode_mapping() -> None:
         "s",
         "x",
         priority="when_idle",
+        deps=None,
         message_id=None,
     )
 
@@ -490,6 +492,7 @@ async def test_send_message_steer_mode_on_active_session() -> None:
         "active-session",
         "interrupt now",
         priority="asap",
+        deps=None,
         message_id="steer-msg-001",
     )
 
@@ -688,6 +691,23 @@ async def test_deprecation_warnings_emitted() -> None:  # noqa: PLR0915
 
     run_handle.start = MagicMock(return_value=_empty_gen())
     host2.session_pool.sessions._runs = {"run-1": run_handle}
+
+    # Mock EventBus for the new EventBus subscription pattern in spawn_subagent
+    import asyncio as _asyncio
+
+    from agentpool.agents.events import StreamCompleteEvent
+    from agentpool.messaging.messagenode import ChatMessage
+    from agentpool.orchestrator.core import EventEnvelope
+
+    event_queue: _asyncio.Queue[Any] = _asyncio.Queue()
+    done_event = StreamCompleteEvent(
+        message=ChatMessage(content="done", role="assistant"),
+    )
+    await event_queue.put(EventEnvelope(source_session_id="sess-1", event=done_event))
+    await event_queue.put(None)  # sentinel to stop the loop
+    host2.session_pool.event_bus = MagicMock()
+    host2.session_pool.event_bus.subscribe = AsyncMock(return_value=event_queue)
+    host2.session_pool.event_bus.unsubscribe = AsyncMock()
 
     service2 = RunLoopDelegationService(registry2, host2, "parent-sess")
 

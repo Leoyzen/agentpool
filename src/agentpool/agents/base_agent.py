@@ -1450,7 +1450,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
                     async for envelope in drain_and_merge(queue):
                         event = envelope.event
-                        with suppress(ValueError, TypeError, RuntimeError, KeyError, AttributeError):  # noqa: E501
+                        with suppress(
+                            ValueError, TypeError, RuntimeError, KeyError, AttributeError
+                        ):
                             await consumer_handler(consumer_context, event)
                         yield event
                         if isinstance(event, StreamCompleteEvent):

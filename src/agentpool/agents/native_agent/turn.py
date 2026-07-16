@@ -118,7 +118,7 @@ class NativeTurn(HookAwareTurn, Turn):
         """The user prompt for this turn."""
         return str(self._prompts)
 
-    async def execute(self) -> AsyncGenerator[RichAgentStreamEvent[Any]]:  # noqa: PLR0915
+    async def execute(self) -> AsyncGenerator[RichAgentStreamEvent[Any]]:  # noqa: PLR0915, PLR0911
         """Execute one reactive cycle of the pydantic-ai agent loop.
 
         Yields:
@@ -355,6 +355,22 @@ class NativeTurn(HookAwareTurn, Turn):
                             session_id=self._run_ctx.session_id,
                             parent_id=self._parent_id,
                         )
+                        return
+                    raise
+
+                except RuntimeError as exc:
+                    # pydantic-ai's Agent.iter() doesn't properly handle
+                    # GeneratorExit when the generator is closed via
+                    # aclose() (from aclosing() in _execute_turn). It
+                    # catches GeneratorExit internally and doesn't
+                    # re-raise, causing Python to raise
+                    # "coroutine ignored GeneratorExit". We catch this
+                    # specific RuntimeError, save message history, and
+                    # return normally so the generator closes cleanly.
+                    if "ignored GeneratorExit" in str(exc):
+                        if agent_run is not None:
+                            with contextlib.suppress(Exception):
+                                self._message_history = agent_run.all_messages()
                         return
                     raise
 

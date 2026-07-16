@@ -367,11 +367,6 @@ class RunHandle:
             extension_registry=(
                 self._host_context.extension_registry if self._host_context is not None else None
             ),
-            team_mode_config=(
-                self._host_context.manifest.team_mode
-                if self._host_context is not None
-                else None
-            ),
         )
         self.run_ctx.deps = ctx
 
@@ -474,19 +469,24 @@ class RunHandle:
 
             finally:
                 self._closed = True
-                # Lifecycle state transition: → DONE.
-                with contextlib.suppress(Exception):
-                    await self._transition(RunState.DONE)
+                # Set complete_event FIRST, before any await that might
+                # raise CancelledError (BaseException, not caught by
+                # suppress(Exception)). Without this, shutdown() hangs
+                # waiting for complete_event when pydantic-ai's anyio
+                # cancel scope triggers CancelledError during cleanup.
                 self._turn_complete_event.set()
                 self.complete_event.set()
+                # Lifecycle state transition: → DONE.
+                with contextlib.suppress(Exception, asyncio.CancelledError):
+                    await self._transition(RunState.DONE)
                 # Close lifecycle dimensions.
-                with contextlib.suppress(Exception):
+                with contextlib.suppress(Exception, asyncio.CancelledError):
                     if self._trigger_source is not None:
                         self._trigger_source.close()
-                with contextlib.suppress(Exception):
+                with contextlib.suppress(Exception, asyncio.CancelledError):
                     if self._comm_channel is not None:
                         self._comm_channel.close()
-                with contextlib.suppress(Exception):
+                with contextlib.suppress(Exception, asyncio.CancelledError):
                     if self._event_transport is not None:
                         self._event_transport.close()
 
@@ -750,6 +750,14 @@ class RunHandle:
                             break
                         if isinstance(event, StreamCompleteEvent):
                             break
+            except (GeneratorExit, asyncio.CancelledError):
+                # GeneratorExit: from aclose() on start() — let safe_span
+                #   __exit__ run in the finally block, then propagate.
+                # CancelledError: may be raised by anyio cancel scope cleanup
+                #   inside pydantic-ai's Agent.iter() during GeneratorExit
+                #   processing, or from task.cancel(). Propagate as-is so
+                #   callers can suppress appropriately.
+                raise
             except Exception as e:  # noqa: BLE001
                 turn_failed = True
                 error_event = RunErrorEvent(

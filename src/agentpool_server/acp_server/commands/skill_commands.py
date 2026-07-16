@@ -6,31 +6,36 @@ from typing import TYPE_CHECKING
 
 import logfire
 
-from acp.schema.slash_commands import AvailableCommand, AvailableCommandInput, CommandInputHint
 from agentpool.log import get_logger
+from agentpool_server.opencode_server.skill_bridge import create_skill_command
 
 
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
+    from slashed import Command as SlashedCommand
+
     from agentpool.skills.command import SkillCommand
 
 
 class ACPSkillBridge:
-    """Bridge class that maps SkillCommand to ACP AvailableCommand.
+    """Bridge class that maps SkillCommand to executable SlashedCommand.
 
     This class exposes skills as ACP slash commands by converting
-    SkillCommand instances to ACP AvailableCommand format. It maintains
-    an internal dictionary of commands and provides methods for
-    handling add/remove changes.
+    SkillCommand instances to SlashedCommand objects that can be
+    registered in a CommandStore and executed via execute_slash_command().
+
+    The executor reuses create_skill_command() from the OpenCode skill
+    bridge, which is protocol-agnostic — it loads skill instructions
+    and injects them into ctx.data.node.staged_content.
 
     Attributes:
-        _commands: Dictionary mapping command names to AvailableCommand instances.
+        _commands: Dictionary mapping command names to SlashedCommand instances.
     """
 
     def __init__(self) -> None:
         """Initialize the bridge with an empty command store."""
-        self._commands: dict[str, AvailableCommand] = {}
+        self._commands: dict[str, SlashedCommand] = {}
 
     @logfire.instrument("acp_skill_bridge_handle_change")
     def handle_change(self, name: str, command: SkillCommand | None) -> None:
@@ -46,48 +51,28 @@ class ACPSkillBridge:
         if command is None:
             self._commands.pop(name, None)
         else:
-            logger.debug("Converting skill command %s to ACP format", name)
-            self._commands[name] = self._to_acp_command(command)
+            logger.debug("Converting skill command %s to SlashedCommand", name)
+            self._commands[name] = create_skill_command(command)
         logger.debug("ACPSkillBridge has %d commands", len(self._commands))
 
-    @logfire.instrument("acp_skill_bridge_convert_command")
-    def _to_acp_command(self, skill_cmd: SkillCommand) -> AvailableCommand:
-        """Convert SkillCommand to ACP AvailableCommand.
-
-        Args:
-            skill_cmd: The SkillCommand to convert.
+    def get_commands(self) -> list[SlashedCommand]:
+        """Return list of executable SlashedCommand objects.
 
         Returns:
-            An AvailableCommand instance representing the skill in ACP format.
-        """
-        input_spec = AvailableCommandInput(root=CommandInputHint(hint=skill_cmd.input_hint))
-        skill_uri = skill_cmd.resolved_skill_uri
-
-        # Build ACP command name with skill:// URI reference
-        # The command name includes the skill URI for proper identification
-        available_cmd = AvailableCommand(
-            name=skill_cmd.name,
-            description=skill_cmd.description,
-            input=input_spec,
-        )
-        logger.debug(
-            "Converted skill command to ACP format",
-            skill_name=skill_cmd.name,
-            skill_uri=skill_uri,
-            has_input_hint=bool(skill_cmd.input_hint),
-        )
-        return available_cmd
-
-    def get_available_commands(self) -> list[AvailableCommand]:
-        """Return list of available commands in ACP format.
-
-        Returns:
-            A list of AvailableCommand instances for all stored commands.
+            A list of SlashedCommand instances for all stored commands.
         """
         commands = list(self._commands.values())
         logger.debug(
-            "Retrieved available ACP commands",
+            "Retrieved ACP skill commands",
             command_count=len(commands),
             command_names=[cmd.name for cmd in commands],
         )
         return commands
+
+    def get_command_names(self) -> set[str]:
+        """Return the set of currently registered command names.
+
+        Returns:
+            A set of command name strings.
+        """
+        return set(self._commands.keys())
