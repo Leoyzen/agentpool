@@ -1,26 +1,31 @@
-"""TeamCommCapability — skeleton capability for dynamic team communication.
+"""TeamCommCapability — capability for dynamic team communication.
 
-This capability provides the protocol instructions and (in future tasks T7/T8)
-team communication tools (send_message, task_create, read_blackboard, etc.)
-to agents that are members of or leads of a dynamic team.
+This capability provides the protocol instructions and team communication
+tools (send_message, task_create, read_blackboard, etc.) to agents that
+are members of or leads of a dynamic team.
 
-At the skeleton stage (T6), ``get_tools()`` returns an empty list — no
-actual tool functions are registered yet. The ``get_instructions()``
-method renders the ``protocol_template`` from :class:`TeamModeConfig`
-using session metadata (team_name, team_role, team_member_name).
+Universal tools (all members can use):
+    - send_message: Send a message to a teammate's inbox.
+    - task_create: Create a task on the shared task board.
+    - task_list: List all tasks on the shared task board.
+    - task_update: Update a task's status or owner.
+    - read_blackboard: Read a key from the shared blackboard.
+    - write_blackboard: Write a key to the shared blackboard.
+    - list_blackboard: List all keys on the shared blackboard.
+    - team_status: Get the current status of the team.
 
 Per-session instantiation:
     The factory creates a shared instance with ``session_metadata=None``
     during ``_compile_agent_capabilities()``. When a session with a
     ``team_id`` in its metadata is created, ``create_session_agent()``
     replaces the shared instance with a per-session instance carrying
-    the actual session metadata. This two-phase approach ensures that
-    the capability is registered at compile time but only produces
-    meaningful instructions when actual team session context exists.
+    the actual session metadata.
 """
 
 from __future__ import annotations
 
+import json
+import tempfile
 from typing import TYPE_CHECKING, Any, override
 
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
@@ -29,6 +34,8 @@ from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from agentpool.capabilities.agent_context import AgentContext
+    from agentpool.capabilities.file_team_state import FileTeamState
     from agentpool.tools.base import Tool
     from agentpool_config.team_mode import TeamModeConfig
 
@@ -65,6 +72,352 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         self._config = config
         self._agent_name = agent_name
         self._session_metadata: dict[str, Any] = session_metadata or {}
+        # Register universal tools (all members can use)
+        if config.enabled:
+            self.register_tool(self.send_message)
+            self.register_tool(self.task_create)
+            self.register_tool(self.task_list)
+            self.register_tool(self.task_update)
+            self.register_tool(self.read_blackboard)
+            self.register_tool(self.write_blackboard)
+            self.register_tool(self.list_blackboard)
+            self.register_tool(self.team_status)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_agent_context(self, ctx: Any) -> AgentContext:
+        """Extract AgentContext from a pydantic-ai RunContext.
+
+        Args:
+            ctx: The RunContext passed to a tool function.
+
+        Returns:
+            The AgentContext from ``ctx.deps``.
+
+        Raises:
+            RuntimeError: If ``ctx.deps`` is None.
+        """
+        from agentpool.capabilities.agent_context import AgentContext
+
+        deps = ctx.deps
+        if deps is None:
+            msg = "TeamCommCapability requires AgentContext as deps. Got: None"
+            raise RuntimeError(msg)
+        # In production, deps is always AgentContext. In tests, deps may
+        # be a MagicMock(spec=AgentContext). Both work via duck typing.
+        if isinstance(deps, AgentContext):
+            return deps
+        return deps  # type: ignore[return-value]
+
+    def _get_team_state(self, agent_ctx: AgentContext) -> FileTeamState | None:
+        """Create a FileTeamState for the current team, or None if not in a team.
+
+        Args:
+            agent_ctx: The per-turn agent context.
+
+        Returns:
+            A FileTeamState rooted at the configured base_dir, or None
+            if no ``team_id`` is present in session metadata.
+        """
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        team_id: str | None = agent_ctx.session.metadata.get("team_id")
+        if team_id is None:
+            return None
+        base_dir = (
+            agent_ctx.team_mode_config.effective_base_dir
+            if agent_ctx.team_mode_config is not None
+            else tempfile.gettempdir()
+        )
+        return FileTeamState(base_dir)
+
+    def _get_team_id(self, agent_ctx: AgentContext) -> str | None:
+        """Return the team_id from session metadata, or None."""
+        team_id: str | None = agent_ctx.session.metadata.get("team_id")
+        return team_id
+
+    # ------------------------------------------------------------------
+    # Universal tools
+    # ------------------------------------------------------------------
+
+    async def send_message(
+        self,
+        ctx: Any,
+        to: str,
+        body: str,
+        urgent: bool = False,
+    ) -> str:
+        """Send a message to a teammate's inbox.
+
+        Args:
+            ctx: RunContext with AgentContext deps.
+            to: Recipient member name (``"*"`` is lead-only — returns error).
+            body: Message body text.
+            urgent: If True, deliver via steer (mid-turn injection);
+                otherwise queue for next turn.
+
+        Returns:
+            Success or error message string.
+        """
+        if to == "*":
+            return "Broadcast is lead-only"
+
+        agent_ctx = self._resolve_agent_context(ctx)
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return "Not in a team session"
+
+        team_id: str = agent_ctx.session.metadata["team_id"]
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is None:
+            return "SessionPool not available"
+
+        target_sid = team_state.get_member_session_id(team_id, to)
+        if target_sid is None:
+            return f"Member '{to}' not found or no session registered"
+
+        from agentpool.lifecycle.types import DeliveryMode
+
+        mode = DeliveryMode.STEER if urgent else DeliveryMode.QUEUE
+        result = await session_pool.send_message(target_sid, body, mode=mode)
+        if result is None:
+            return f"Failed to deliver message to '{to}'"
+
+        # Persist to inbox for audit trail.
+        team_state.write_message(
+            team_id,
+            to,
+            {"from": self._agent_name, "body": body, "urgent": urgent},
+        )
+        return f"Message sent to {to}"
+
+    async def task_create(
+        self,
+        ctx: Any,
+        subject: str,
+        description: str = "",
+        blocked_by: list[str] | None = None,
+    ) -> str:
+        """Create a task on the shared task board.
+
+        Args:
+            ctx: RunContext with AgentContext deps.
+            subject: Short task title.
+            description: Optional longer description.
+            blocked_by: Optional list of task_ids this task depends on.
+
+        Returns:
+            Success message with task_id, or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return "Not in a team session"
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return "Not in a team session"
+
+        task_id = team_state.create_task(
+            team_id,
+            {
+                "subject": subject,
+                "description": description,
+                "blocked_by": blocked_by or [],
+            },
+        )
+        return f"Task created: {task_id}"
+
+    async def task_list(self, ctx: Any) -> str:
+        """List all tasks on the shared task board.
+
+        Args:
+            ctx: RunContext with AgentContext deps.
+
+        Returns:
+            JSON array of tasks (pretty-printed), or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return "Not in a team session"
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return "Not in a team session"
+
+        tasks = team_state.list_tasks(team_id)
+        return json.dumps(tasks, indent=2, default=str)
+
+    async def task_update(
+        self,
+        ctx: Any,
+        task_id: str,
+        status: str = "",
+        owner: str = "",
+    ) -> str:
+        """Update a task's status or owner on the shared task board.
+
+        Args:
+            ctx: RunContext with AgentContext deps.
+            task_id: ID of the task to update.
+            status: New status (e.g. "in_progress", "completed"). Empty = no change.
+            owner: New owner name. Empty = no change.
+
+        Returns:
+            Updated task as JSON, or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return "Not in a team session"
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return "Not in a team session"
+
+        updates: dict[str, Any] = {}
+        if status:
+            updates["status"] = status
+        if owner:
+            updates["owner"] = owner
+        if not updates:
+            return "No updates specified"
+
+        updated = team_state.update_task(team_id, task_id, updates)
+        return json.dumps(updated, indent=2, default=str)
+
+    async def read_blackboard(self, ctx: Any, key: str) -> str:
+        """Read a key from the shared blackboard.
+
+        Args:
+            ctx: RunContext with AgentContext deps.
+            key: Blackboard key to read.
+
+        Returns:
+            JSON value + metadata, or "Key not found" / error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return "Not in a team session"
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return "Not in a team session"
+
+        result = team_state.read_blackboard(team_id, key)
+        if result is None:
+            return "Key not found"
+        return json.dumps(result, indent=2, default=str)
+
+    async def write_blackboard(
+        self,
+        ctx: Any,
+        key: str,
+        value: str,
+        expected_version: int | None = None,
+    ) -> str:
+        """Write a key to the shared blackboard with optimistic locking.
+
+        Args:
+            ctx: RunContext with AgentContext deps.
+            key: Blackboard key to write.
+            value: Value to store.
+            expected_version: Expected current version for optimistic locking.
+                If None, no version check is performed.
+
+        Returns:
+            "Written, version=N" on success, or "Conflict: current version is N".
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return "Not in a team session"
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return "Not in a team session"
+
+        result = team_state.write_blackboard(
+            team_id,
+            key,
+            {"text": value},
+            expected_version=expected_version,
+            written_by=self._agent_name,
+        )
+        return result  # noqa: RET504
+
+    async def list_blackboard(self, ctx: Any) -> str:
+        """List all keys on the shared blackboard.
+
+        Args:
+            ctx: RunContext with AgentContext deps.
+
+        Returns:
+            JSON array of key names, or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return "Not in a team session"
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return "Not in a team session"
+
+        keys = team_state.list_blackboard(team_id)
+        return json.dumps(keys, indent=2)
+
+    async def team_status(self, ctx: Any) -> str:
+        """Get the current status of the team.
+
+        Args:
+            ctx: RunContext with AgentContext deps.
+
+        Returns:
+            Formatted status string with team name, members, and status.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return "Not in a team session"
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return "Not in a team session"
+
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        state_path = team_state._state_path(team_id)
+        if not state_path.exists():
+            return "Team state not found"
+
+        state: dict[str, Any] = FileTeamState._read_json(state_path)
+        team_name: str = state.get("team_name", "unknown")
+        status: str = state.get("status", "unknown")
+        members: dict[str, dict[str, str]] = state.get("members", {})
+
+        member_lines: list[str] = []
+        for name, info in members.items():
+            sid: str = info.get("session_id", "")
+            agent_name: str = info.get("agent", name)
+            session_display = sid if sid else "unregistered"
+            member_lines.append(f"  - {name} (agent={agent_name}, session={session_display})")
+
+        lines = [
+            f"Team: {team_name}",
+            f"Status: {status}",
+            f"Members ({len(members)}):",
+            *member_lines,
+        ]
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # AbstractCapability overrides
+    # ------------------------------------------------------------------
 
     @override
     def get_instructions(self) -> str | None:
@@ -94,8 +447,6 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         """Return the list of team communication tools.
 
         Returns an empty list when ``config.enabled`` is ``False``.
-        At the skeleton stage (T6), no tools are registered yet —
-        T7 and T8 will add ``send_message``, ``task_create``, etc.
         """
         if not self._config.enabled:
             return []
