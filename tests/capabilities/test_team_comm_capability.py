@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agentpool.capabilities.team_comm_capability import TeamCommCapability
-from agentpool_config.team_mode import TeamModeConfig
+from agentpool_config.team_mode import TeamBounds, TeamModeConfig
 
 
 # ---- Helpers ----
@@ -589,6 +589,226 @@ async def test_send_message_urgent_uses_steer(tmp_path: Any) -> None:
     assert call_kwargs.kwargs["mode"] is DeliveryMode.STEER
 
 
+# ---- T9 Bounds enforcement tests ----
+
+
+@pytest.mark.unit
+async def test_bounds_max_members_exceeded(tmp_path: Any) -> None:
+    """Given: lead agent with 4 members but max_members=3.
+
+    When: team_create is called with 4 members.
+    Then: returns error about exceeding max_members.
+    """
+    config = _make_enabled_config(
+        member_eligible=["worker", "reviewer", "editor", "writer"],
+        base_dir=str(tmp_path),
+    )
+    config = config.model_copy(
+        update={"bounds": TeamBounds(max_members=3)}
+    )
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=True)
+    mock_pool = MagicMock()
+    mock_pool.create_session = AsyncMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.team_create(
+        ctx,
+        "big_team",
+        [
+            {"agent": "worker", "name": "m1"},
+            {"agent": "reviewer", "name": "m2"},
+            {"agent": "editor", "name": "m3"},
+            {"agent": "writer", "name": "m4"},
+        ],
+    )
+
+    assert "exceeds max_members" in result
+    assert "4" in result
+    assert "3" in result
+
+
+@pytest.mark.unit
+async def test_bounds_max_members_ok(tmp_path: Any) -> None:
+    """Given: lead agent with 2 members and max_members=3.
+
+    When: team_create is called with 2 members.
+    Then: returns success message (within bounds).
+    """
+    config = _make_enabled_config(
+        member_eligible=["worker", "reviewer"],
+        base_dir=str(tmp_path),
+    )
+    config = config.model_copy(
+        update={"bounds": TeamBounds(max_members=3)}
+    )
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=True)
+    mock_pool = MagicMock()
+    mock_pool.create_session = AsyncMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.team_create(
+        ctx,
+        "ok_team",
+        [
+            {"agent": "worker", "name": "translator_agent"},
+            {"agent": "reviewer", "name": "reviewer_agent"},
+        ],
+    )
+
+    assert "Team 'ok_team' created with 2 members" in result
+
+
+@pytest.mark.unit
+async def test_bounds_started_at_recorded(tmp_path: Any) -> None:
+    """Given: lead agent successfully creates a team.
+
+    When: team_create completes.
+    Then: state.json contains a 'started_at' field with an ISO timestamp.
+    """
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    config = _make_enabled_config(
+        member_eligible=["worker", "reviewer"],
+        base_dir=str(tmp_path),
+    )
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=True)
+    mock_pool = MagicMock()
+    mock_pool.create_session = AsyncMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.team_create(
+        ctx,
+        "timed_team",
+        [
+            {"agent": "worker", "name": "translator_agent"},
+            {"agent": "reviewer", "name": "reviewer_agent"},
+        ],
+    )
+
+    assert "team_id=" in result
+    team_id = result.split("team_id=")[1].strip()
+    state = FileTeamState._read_json(FileTeamState(str(tmp_path))._state_path(team_id))
+    assert "started_at" in state
+    assert state["started_at"] is not None
+    import datetime
+
+    datetime.datetime.fromisoformat(state["started_at"])
+
+
+@pytest.mark.unit
+async def test_bounds_inbox_max_bytes_exceeded(tmp_path: Any) -> None:
+    """Given: team session with inbox_max_bytes set very small.
+
+    When: send_message is called with a body that would exceed the inbox limit.
+    Then: returns error about inbox exceeding max size.
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    config = config.model_copy(update={"inbox_max_bytes": 50})
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    ctx = _make_run_context(
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+    )
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    # First message should succeed (inbox is empty, body is small).
+    result1 = await cap.send_message(ctx, "reviewer_agent", "hi")
+    assert result1 == "Message sent to reviewer_agent"
+
+    # Second message with a large body should exceed the inbox limit.
+    big_body = "x" * 100
+    result2 = await cap.send_message(ctx, "reviewer_agent", big_body)
+
+    assert "Inbox exceeds max size" in result2
+
+
+@pytest.mark.unit
+async def test_bounds_max_member_turns_exceeded(tmp_path: Any) -> None:
+    """Given: team session where recipient has reached max_member_turns.
+
+    When: send_message is called for that recipient.
+    Then: returns error about member exceeding max turns.
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    config = config.model_copy(
+        update={"bounds": TeamBounds(max_member_turns=2)}
+    )
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    ctx = _make_run_context(
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+    )
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    # Send 2 messages (should succeed, turn_count goes 0->1, 1->2).
+    result1 = await cap.send_message(ctx, "reviewer_agent", "msg1")
+    assert result1 == "Message sent to reviewer_agent"
+    result2 = await cap.send_message(ctx, "reviewer_agent", "msg2")
+    assert result2 == "Message sent to reviewer_agent"
+
+    # Third message should be rejected (turn_count=2 >= max_member_turns=2).
+    result3 = await cap.send_message(ctx, "reviewer_agent", "msg3")
+    assert "exceeded max turns" in result3
+    assert "2" in result3
+
+
+@pytest.mark.unit
+async def test_bounds_blackboard_max_size_exceeded(tmp_path: Any) -> None:
+    """Given: team session with max_size_mb=1 (minimum allowed).
+
+    When: write_blackboard is called with > 1MB of data.
+    Then: returns error about blackboard exceeding max size.
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    config = config.model_copy(
+        update={"blackboard": config.blackboard.model_copy(update={"max_size_mb": 1})}
+    )
+    ctx = _make_run_context(
+        config=config,
+        base_dir=str(tmp_path),
+    )
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    # Write > 1MB of data.
+    big_value = "x" * (1024 * 1024 + 1)
+    result = await cap.write_blackboard(ctx, "big_key", big_value)
+
+    assert "Blackboard write exceeds max size" in result
+    assert "MB" in result
 @pytest.mark.unit
 async def test_task_create_happy_path(tmp_path: Any) -> None:
     """Given: team session with initialized state.

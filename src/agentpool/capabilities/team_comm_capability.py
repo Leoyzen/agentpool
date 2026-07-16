@@ -30,6 +30,7 @@ Per-session instantiation:
 
 from __future__ import annotations
 
+import datetime
 import json
 import tempfile
 from typing import TYPE_CHECKING, Any, override
@@ -154,7 +155,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     # Universal tools
     # ------------------------------------------------------------------
 
-    async def send_message(  # noqa: PLR0911
+    async def send_message(  # noqa: PLR0911, PLR0915
         self,
         ctx: Any,
         to: str,
@@ -240,6 +241,35 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         session_pool = agent_ctx.host.session_pool
         if session_pool is None:
             return "SessionPool not available"
+
+        # Bounds: max_member_turns and inbox_max_bytes checks.
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        state_path = team_state._state_path(team_id)
+        if state_path.exists():
+            state: dict[str, Any] = FileTeamState._read_json(state_path)
+            members_state: dict[str, dict[str, Any]] = state.get("members", {})
+            member_info: dict[str, Any] = members_state.get(to, {})
+            turn_count: int = member_info.get("turn_count", 0)
+            if turn_count >= self._config.bounds.max_member_turns:
+                return (
+                    f"Member '{to}' has exceeded max turns "
+                    f"({turn_count} >= {self._config.bounds.max_member_turns})"
+                )
+
+            existing_messages = team_state.read_messages(team_id, to)
+            inbox_size = sum(len(json.dumps(m).encode()) for m in existing_messages)
+            body_bytes_len = len(body.encode())
+            if inbox_size + body_bytes_len > self._config.inbox_max_bytes:
+                return (
+                    f"Inbox exceeds max size ({inbox_size + body_bytes_len} > "
+                    f"{self._config.inbox_max_bytes} bytes)"
+                )
+
+            member_info["turn_count"] = turn_count + 1
+            members_state[to] = member_info
+            state["members"] = members_state
+            FileTeamState._atomic_write(state_path, state)
 
         target_sid = team_state.get_member_session_id(team_id, to)
         if target_sid is None:
@@ -415,7 +445,20 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             expected_version=expected_version,
             written_by=self._agent_name,
         )
-        return result  # noqa: RET504
+
+        # Bounds: max_size_mb check on the resulting blackboard file.
+        if result.startswith("Written"):
+            key_path = team_state._validate_key(key, team_state._blackboard_dir(team_id))
+            file_size = key_path.stat().st_size
+            max_size = self._config.blackboard.max_size_mb * 1024 * 1024
+            if file_size > max_size:
+                return (
+                    f"Blackboard write exceeds max size "
+                    f"({file_size / 1024 / 1024:.1f}MB > "
+                    f"{self._config.blackboard.max_size_mb}MB)"
+                )
+
+        return result
 
     async def list_blackboard(self, ctx: Any) -> str:
         """List all keys on the shared blackboard.
@@ -518,6 +561,13 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     f"Agent '{agent_name}' is not eligible for team membership"
                 )
 
+        # Bounds: max_members check.
+        if len(members) > self._config.bounds.max_members:
+            return (
+                f"Team exceeds max_members ({len(members)} > "
+                f"{self._config.bounds.max_members})"
+            )
+
         # Generate team_id and create state.
         team_id = str(uuid.uuid4())
         lead_session_id: str = agent_ctx.session.session_id
@@ -535,6 +585,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             name,
             [{"name": m["name"], "agent": m["agent"]} for m in members],
         )
+
+        # Record started_at timestamp for wall-clock enforcement.
+        state = team_state._read_json(team_state._state_path(team_id))
+        state["started_at"] = datetime.datetime.now(datetime.UTC).isoformat()
+        team_state._atomic_write(team_state._state_path(team_id), state)
 
         session_pool = agent_ctx.host.session_pool
         if session_pool is None:
