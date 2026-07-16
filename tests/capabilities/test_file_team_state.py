@@ -5,13 +5,14 @@ All tests use ``tmp_path`` for isolation and are marked ``@pytest.mark.unit``.
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import json
 from pathlib import Path
 
 import pytest
 
-from agentpool.capabilities.file_team_state import FileTeamState
+from agentpool.capabilities.file_team_state import FileTeamState, start_team_cleanup_task
 
 pytestmark = pytest.mark.unit
 
@@ -430,3 +431,168 @@ def test_write_blackboard_no_expected_version_always_succeeds(
 
     result = initialized_team.write_blackboard("team-1", "key", {"v": 3})
     assert result == "Written, version=3"
+
+
+# ------------------------------------------------------------------
+# 21. cleanup marks orphaned active teams
+# ------------------------------------------------------------------
+
+
+def test_cleanup_marks_orphaned_active_old(
+    state: FileTeamState,
+    tmp_path: Path,
+) -> None:
+    """Given an active team older than TTL with no ended_at, it is marked orphaned."""
+    state.init("stale-team", "Stale", [{"name": "alice"}])
+
+    state_path = tmp_path / "teams" / "stale-team" / "state.json"
+    state_data = json.loads(state_path.read_text())
+    old_time = (
+        datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=100)
+    ).isoformat()
+    state_data["created_at"] = old_time
+    state_data["ended_at"] = None
+    state_path.write_text(json.dumps(state_data, default=str))
+
+    removed = FileTeamState.cleanup_expired_teams(str(tmp_path), ttl_hours=24)
+    assert removed == 0
+    assert (tmp_path / "teams" / "stale-team").exists()
+
+    updated = json.loads(state_path.read_text())
+    assert updated["status"] == "orphaned"
+
+
+# ------------------------------------------------------------------
+# 22. cleanup preserves active recent teams
+# ------------------------------------------------------------------
+
+
+def test_cleanup_preserves_active_recent(
+    state: FileTeamState,
+    tmp_path: Path,
+) -> None:
+    """Given a recently created active team, it is not modified by cleanup."""
+    state.init("fresh-team", "Fresh", [{"name": "alice"}])
+
+    removed = FileTeamState.cleanup_expired_teams(str(tmp_path), ttl_hours=24)
+    assert removed == 0
+    assert (tmp_path / "teams" / "fresh-team").exists()
+
+    state_path = tmp_path / "teams" / "fresh-team" / "state.json"
+    state_data = json.loads(state_path.read_text())
+    assert state_data["status"] == "active"
+
+
+# ------------------------------------------------------------------
+# 23. cleanup returns correct count of removed directories
+# ------------------------------------------------------------------
+
+
+def test_cleanup_returns_correct_count(
+    state: FileTeamState,
+    tmp_path: Path,
+) -> None:
+    """Given multiple teams (some expired, some not), cleanup returns correct count."""
+    # Team 1: deleted and old -> removed
+    state.init("old-deleted", "Old", [{"name": "alice"}])
+    sp = tmp_path / "teams" / "old-deleted" / "state.json"
+    sd = json.loads(sp.read_text())
+    sd["status"] = "deleted"
+    sd["ended_at"] = (
+        datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=100)
+    ).isoformat()
+    sp.write_text(json.dumps(sd, default=str))
+
+    # Team 2: deleted but recent -> preserved
+    state.init("recent-deleted", "Recent", [{"name": "alice"}])
+    sp = tmp_path / "teams" / "recent-deleted" / "state.json"
+    sd = json.loads(sp.read_text())
+    sd["status"] = "deleted"
+    sd["ended_at"] = datetime.datetime.now(datetime.UTC).isoformat()
+    sp.write_text(json.dumps(sd, default=str))
+
+    # Team 3: active and old -> orphaned, preserved
+    state.init("old-active", "OldActive", [{"name": "alice"}])
+    sp = tmp_path / "teams" / "old-active" / "state.json"
+    sd = json.loads(sp.read_text())
+    sd["created_at"] = (
+        datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=100)
+    ).isoformat()
+    sp.write_text(json.dumps(sd, default=str))
+
+    removed = FileTeamState.cleanup_expired_teams(str(tmp_path), ttl_hours=24)
+    assert removed == 1
+    assert not (tmp_path / "teams" / "old-deleted").exists()
+    assert (tmp_path / "teams" / "recent-deleted").exists()
+    assert (tmp_path / "teams" / "old-active").exists()
+
+
+# ------------------------------------------------------------------
+# 24. cleanup does not orphan active team with ended_at set
+# ------------------------------------------------------------------
+
+
+def test_cleanup_does_not_orphan_with_ended_at(
+    state: FileTeamState,
+    tmp_path: Path,
+) -> None:
+    """Given an old active team with ended_at set, it is not orphaned."""
+    state.init("ended-team", "Ended", [{"name": "alice"}])
+
+    state_path = tmp_path / "teams" / "ended-team" / "state.json"
+    state_data = json.loads(state_path.read_text())
+    old_time = (
+        datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=100)
+    ).isoformat()
+    state_data["created_at"] = old_time
+    state_data["ended_at"] = old_time
+    state_data["status"] = "active"
+    state_path.write_text(json.dumps(state_data, default=str))
+
+    removed = FileTeamState.cleanup_expired_teams(str(tmp_path), ttl_hours=24)
+    assert removed == 0
+
+    updated = json.loads(state_path.read_text())
+    assert updated["status"] == "active"
+
+
+# ------------------------------------------------------------------
+# 25. start_team_cleanup_task returns a cancellable task
+# ------------------------------------------------------------------
+
+
+async def test_start_team_cleanup_task_cancellable(
+    state: FileTeamState,
+    tmp_path: Path,
+) -> None:
+    """Given start_team_cleanup_task, the returned task can be cancelled."""
+    state.init("active-team-2", "Active", [{"name": "alice"}])
+
+    task = await start_team_cleanup_task(
+        base_dir=str(tmp_path),
+        ttl_hours=24,
+        interval_minutes=1,
+    )
+    assert not task.done()
+
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    assert task.done()
+    assert task.cancelled()
+
+
+# ------------------------------------------------------------------
+# 26. cleanup_expired_teams returns 0 for non-existent directory
+# ------------------------------------------------------------------
+
+
+def test_cleanup_returns_zero_for_nonexistent_dir(tmp_path: Path) -> None:
+    """Given a non-existent teams directory, cleanup returns 0."""
+    removed = FileTeamState.cleanup_expired_teams(
+        str(tmp_path / "nonexistent"),
+        ttl_hours=24,
+    )
+    assert removed == 0

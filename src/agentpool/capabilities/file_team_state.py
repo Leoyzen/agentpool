@@ -18,6 +18,8 @@ Directory layout::
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import datetime
 import json
 from pathlib import Path
@@ -29,7 +31,7 @@ import uuid
 from filelock import FileLock
 
 
-__all__ = ["FileTeamState"]
+__all__ = ["FileTeamState", "start_team_cleanup_task"]
 
 _KEY_PATTERN = re.compile(r"^[a-zA-Z0-9_/]+$")
 
@@ -407,11 +409,17 @@ class FileTeamState:
 
     @classmethod
     def cleanup_expired_teams(cls, base_dir: str, ttl_hours: int) -> int:
-        """Remove teams with status ``deleted`` older than *ttl_hours*.
+        """Remove expired team directories and mark orphaned teams.
+
+        Scans ``{base_dir}/teams/`` for ``state.json`` files. Teams with
+        ``status="deleted"`` and ``ended_at`` older than *ttl_hours* are
+        removed entirely. Teams with ``status="active"`` whose
+        ``created_at`` + *ttl_hours* < now and ``ended_at`` is ``None``
+        are marked as ``status="orphaned"`` (best-effort write).
 
         Args:
             base_dir: Root directory containing ``teams/``.
-            ttl_hours: Minimum age (in hours) before cleanup.
+            ttl_hours: Minimum age (in hours) before cleanup or orphaning.
 
         Returns:
             Number of team directories removed.
@@ -427,20 +435,85 @@ class FileTeamState:
             state_path = entry / "state.json"
             if not state_path.exists():
                 continue
-            state = json.loads(state_path.read_text(encoding="utf-8"))
-            if state.get("status") != "deleted":
-                continue
-            ended_at_raw: str | None = state.get("ended_at")
-            if ended_at_raw is None:
-                continue
-            try:
-                ended_at = datetime.datetime.fromisoformat(ended_at_raw)
-            except ValueError:
-                continue
-            if ended_at.tzinfo is None:
-                ended_at = ended_at.replace(tzinfo=datetime.UTC)
-            age_hours = (now - ended_at).total_seconds() / 3600
-            if age_hours >= ttl_hours:
-                shutil.rmtree(entry)
-                removed += 1
+            state = cls._read_json(state_path)
+            status: str = state.get("status", "")
+
+            if status == "deleted":
+                ended_at_raw: str | None = state.get("ended_at")
+                if ended_at_raw is None:
+                    continue
+                try:
+                    ended_at = datetime.datetime.fromisoformat(ended_at_raw)
+                except ValueError:
+                    continue
+                if ended_at.tzinfo is None:
+                    ended_at = ended_at.replace(tzinfo=datetime.UTC)
+                age_hours = (now - ended_at).total_seconds() / 3600
+                if age_hours >= ttl_hours:
+                    shutil.rmtree(entry)
+                    removed += 1
+
+            elif status == "active":
+                created_at_raw: str | None = state.get("created_at")
+                if created_at_raw is None:
+                    continue
+                if state.get("ended_at") is not None:
+                    continue
+                try:
+                    created_at = datetime.datetime.fromisoformat(created_at_raw)
+                except ValueError:
+                    continue
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=datetime.UTC)
+                age_hours = (now - created_at).total_seconds() / 3600
+                if age_hours >= ttl_hours:
+                    state["status"] = "orphaned"
+                    with contextlib.suppress(OSError):
+                        cls._atomic_write(state_path, state)
+
         return removed
+
+
+async def start_team_cleanup_task(
+    base_dir: str,
+    ttl_hours: int,
+    interval_minutes: int = 10,
+) -> asyncio.Task[None]:
+    """Start a background task that periodically cleans up expired teams.
+
+    Args:
+        base_dir: Root directory containing ``teams/``.
+        ttl_hours: Minimum age (in hours) before cleanup or orphaning.
+        interval_minutes: Seconds between cleanup runs, expressed in minutes.
+
+    Returns:
+        The ``asyncio.Task`` for cancellation.
+    """
+    try:
+        import logfire
+    except ImportError:
+        logfire = None  # type: ignore[assignment]
+
+    async def _cleanup_loop() -> None:
+        if logfire is not None:
+            span_ctx = logfire.span(
+                "lifecycle.team_cleanup",
+                base_dir=base_dir,
+                ttl_hours=ttl_hours,
+            )
+        else:
+            from contextlib import nullcontext
+
+            span_ctx = nullcontext()  # type: ignore[assignment]
+        with span_ctx:
+            while True:
+                removed = FileTeamState.cleanup_expired_teams(base_dir, ttl_hours)
+                if removed > 0 and logfire is not None:
+                    logfire.info(
+                        "team_cleanup_removed",
+                        removed=removed,
+                        base_dir=base_dir,
+                    )
+                await asyncio.sleep(interval_minutes * 60)
+
+    return asyncio.create_task(_cleanup_loop())
