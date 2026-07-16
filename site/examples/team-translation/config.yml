@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/phil65/agentpool/refs/heads/main/schema/config-schema.json
+agents:
+  lead_translator:
+    type: native
+    model: openai:gpt-4o
+    system_prompt: |
+      You are the lead translator. Translate text accurately while preserving
+      meaning, tone, and cultural context. When working in a team, coordinate
+      with the reviewer to refine translations. Use available tools to look
+      up terminology and reference materials.
+
+  reviewer:
+    type: native
+    model: openai:gpt-4o
+    system_prompt: |
+      You are a translation reviewer. Review translations for accuracy,
+      fluency, and cultural appropriateness. Provide constructive feedback
+      and suggest improvements. Verify that industry-specific terminology
+      is used correctly.
+
+team_mode:
+  enabled: true
+  lead_eligible:
+    - lead_translator
+  member_eligible:
+    - lead_translator
+    - reviewer
+  auto_init:
+    team_name: "translation_team"
+    members:
+      - name: "translator"
+        agent: "lead_translator"
+      - name: "reviewer"
+        agent: "reviewer"
+  bounds:
+    max_members: 5
+    max_member_turns: 30

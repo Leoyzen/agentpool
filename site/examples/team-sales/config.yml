@@ -1,0 +1,49 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/phil65/agentpool/refs/heads/main/schema/config-schema.json
+agents:
+  sales_lead:
+    type: native
+    model: openai:gpt-4o
+    system_prompt: |
+      You are the sales team lead. Drive the sales process from prospecting
+      to closing. Assign research tasks to the analyst and proposal writing
+      to the writer. Make the final call on pricing and escalation.
+
+  research_analyst:
+    type: native
+    model: openai:gpt-4o
+    system_prompt: |
+      You are a sales research analyst. Research prospects, companies, and
+      market trends. Provide data-driven insights to inform sales strategy.
+      Prepare competitive analysis and account profiles.
+
+  proposal_writer:
+    type: native
+    model: openai:gpt-4o
+    system_prompt: |
+      You are a proposal writer. Create compelling, professional sales
+      proposals tailored to each prospect's needs. Incorporate research
+      findings and align messaging with the sales lead's strategy.
+
+team_mode:
+  enabled: true
+  lead_eligible:
+    - sales_lead
+  member_eligible:
+    - sales_lead
+    - research_analyst
+    - proposal_writer
+  auto_init:
+    team_name: "sales_team"
+    members:
+      - name: "lead"
+        agent: "sales_lead"
+      - name: "analyst"
+        agent: "research_analyst"
+      - name: "writer"
+        agent: "proposal_writer"
+  blackboard:
+    write_policy: "lead_only"
+    max_size_mb: 50
+  auto_urgent:
+    - escalation
+    - pricing_approval
