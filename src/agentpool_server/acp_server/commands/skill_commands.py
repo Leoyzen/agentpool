@@ -68,3 +68,11 @@ class ACPSkillBridge:
             command_names=[cmd.name for cmd in commands],
         )
         return commands
+
+    def get_command_names(self) -> set[str]:
+        """Return the set of currently registered command names.
+
+        Returns:
+            A set of command name strings.
+        """
+        return set(self._commands.keys())
