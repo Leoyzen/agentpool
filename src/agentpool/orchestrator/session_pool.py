@@ -12,6 +12,8 @@ import time
 from typing import TYPE_CHECKING, Any, Final
 import uuid
 
+import logfire
+
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     RunErrorEvent,
@@ -1667,6 +1669,7 @@ class SessionPool:
             return run_handle.followup(str(message))
         return None
 
+    @logfire.instrument("session.steer {session_id}")
     async def steer(self, session_id: str, message: str, **kwargs: Any) -> str | None:
         """Inject a steer message with agent-type-aware routing.
 
@@ -1685,6 +1688,7 @@ class SessionPool:
             return run_handle.steer(message)
         return None
 
+    @logfire.instrument("session.followup {session_id}")
     async def followup(self, session_id: str, message: str, **kwargs: Any) -> str | None:
         """Queue a follow-up message with agent-type-aware routing.
 

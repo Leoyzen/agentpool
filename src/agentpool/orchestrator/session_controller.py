@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Final
 import uuid
 
 import anyio
+import logfire
 
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
@@ -836,6 +837,7 @@ class SessionController:
             s for s in self._sessions.values() if s.agent_name == agent_name and not s.is_closing
         ]
 
+    @logfire.instrument("session.consume_run")
     async def _consume_run(self, run_handle: RunHandle, initial_prompt: str) -> None:
         """Drive a RunHandle.start() async generator to completion.
 
@@ -883,6 +885,7 @@ class SessionController:
         finally:
             await gen.aclose()
 
+    @logfire.instrument("session.start_run_handle {session_id}")
     def _start_run_handle(
         self,
         session: SessionState,
@@ -1072,6 +1075,7 @@ class SessionController:
                 return run.followup(content, message_id=message_id)
         return None
 
+    @logfire.instrument("session.receive_request {session_id}")
     async def receive_request(
         self,
         session_id: str,

@@ -17,6 +17,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 import warnings
 
+from agentpool.observability.spans import safe_span
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -100,27 +102,45 @@ class RunLoopDelegationService:
             raise RuntimeError(msg)
 
         controller = session_pool.sessions
-        message_id = await controller.receive_request(
-            session_id=f"{self._session_id}::child::{name}",
-            content=prompt,
-        )
-        if message_id is None:
-            return
-
-        # Get the RunHandle to consume events from start().
-        # receive_request() already delivered the prompt via followup()
-        # and started a background _consume_run task. We subscribe to
-        # the EventBus to stream events from the child session.
         child_session_id = f"{self._session_id}::child::{name}"
-        child_session = controller.get_session(child_session_id)
-        if child_session is None or child_session.current_run_id is None:
-            return
-        run_handle = controller._runs.get(child_session.current_run_id)
-        if run_handle is None:
-            return
 
-        async for event in run_handle.start(""):
-            yield event
+        with safe_span(
+            "delegation.subagent",
+            parent_session_id=self._session_id,
+            child_agent_name=name,
+        ):
+            message_id = await controller.receive_request(
+                session_id=child_session_id,
+                content=prompt,
+            )
+            if message_id is None:
+                return
+
+            # receive_request() already started a background _consume_run
+            # task that iterates run_handle.start(""). We subscribe to the
+            # EventBus to stream events from the child session instead of
+            # creating a second iteration of run_handle.start("") (which
+            # would cause a race condition on the same RunHandle).
+            from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
+
+            bus_queue = await session_pool.event_bus.subscribe(
+                child_session_id, scope="session",
+            )
+            try:
+                while True:
+                    try:
+                        import asyncio
+
+                        envelope = await asyncio.wait_for(bus_queue.get(), timeout=300.0)
+                    except TimeoutError:
+                        msg = f"Subagent {name} timed out after 300 seconds"
+                        raise TimeoutError(msg) from None
+                    event = envelope.event
+                    yield event
+                    if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                        break
+            finally:
+                await session_pool.event_bus.unsubscribe(child_session_id, bus_queue)
 
     def get_available_agents(self) -> list[str]:
         """Return names of agents available within the current scope.
