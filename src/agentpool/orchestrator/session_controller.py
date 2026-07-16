@@ -25,6 +25,7 @@ from agentpool.agents.events import (
 )
 from agentpool.lifecycle import RunState
 from agentpool.log import get_logger
+from agentpool.observability.spans import safe_span
 from agentpool.orchestrator.run import RunHandle, inject_cancelled_tool_results
 from agentpool.orchestrator.runtime_registry import RuntimeAgentRegistry
 from agentpool.sessions.models import PendingDeferredCall, SessionData
@@ -851,19 +852,19 @@ class SessionController:
         the EventBus so that subscribers (e.g. background_output in
         BackgroundTaskCapability) are unblocked instead of waiting forever.
 
-        Uses a manual ``with logfire.span(...)`` instead of
-        ``@logfire.instrument`` because this method is invoked via
-        ``asyncio.create_task()`` from ``_start_run_handle()``. The
-        decorator wrapper may not properly establish the parent-child span
-        relationship when the coroutine runs in a copied contextvars
-        Context. Manual span creation ensures the span is created in the
-        correct context with the correct parent.
+        Uses ``safe_span(...)`` instead of ``@logfire.instrument`` or raw
+        ``with logfire.span(...)`` because this method is invoked via
+        ``asyncio.create_task()`` from ``_start_run_handle()``. Logfire's
+        ``@handle_internal_errors`` on ``LogfireSpan.__exit__`` can swallow
+        ``ValueError`` from ``_detach()`` and skip ``_end()``, leaving the
+        span unended and unexported. ``safe_span`` calls ``_detach()`` and
+        ``_end()`` separately to prevent this.
 
         Args:
             run_handle: The run handle whose ``start()`` to consume.
             initial_prompt: The first user prompt.
         """
-        with logfire.span(
+        with safe_span(
             "session.consume_run",
             session_id=run_handle.session_id,
             run_id=run_handle.run_id,

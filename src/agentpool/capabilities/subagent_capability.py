@@ -22,6 +22,7 @@ from pydantic_ai.tools import AgentDepsT, RunContext
 from pydantic_ai.toolsets import AgentToolset, FunctionToolset
 
 from agentpool.capabilities.delegation import AgentNotFoundError, DelegationService
+from agentpool.observability.spans import safe_span
 
 
 if TYPE_CHECKING:
@@ -104,7 +105,7 @@ class SubagentCapability(AbstractCapability[AgentDepsT]):
         # Preferred path: use session_pool.run_agent() (D24).
         session_pool = agent_ctx.host.session_pool
         if session_pool is not None:
-            with logfire.span(
+            with safe_span(
                 "delegation.subagent",
                 parent_session_id=agent_ctx.session.session_id,
                 child_agent_name=name,
