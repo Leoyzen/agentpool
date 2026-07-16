@@ -1,0 +1,275 @@
+"""Team mode configuration model.
+
+Defines the :class:`TeamModeConfig` Pydantic model that controls dynamic
+team creation, inter-agent messaging, blackboard state, and bounds
+enforcement for collaborative multi-agent teams.
+
+The model supports per-agent overlay via :func:`resolve_team_mode`,
+which merges a global config with agent-specific overrides.
+
+Example YAML::
+
+    team_mode:
+      enabled: true
+      member_eligible: [translator, reviewer]
+      lead_eligible: [coordinator]
+      bounds:
+        max_members: 5
+        max_wall_clock_minutes: 30
+      auto_init:
+        team_name: translation_team
+        members:
+          - name: translator
+            agent: translator
+"""
+
+from __future__ import annotations
+
+import tempfile
+from typing import Literal
+
+from pydantic import ConfigDict, Field, field_validator, model_validator
+from schemez import Schema
+
+
+_DEFAULT_PROTOCOL_TEMPLATE = """\
+You are {member_name}, a member of team "{team_name}".
+Your role is: {role}.
+
+## Team Communication Protocol
+
+1. Use `send_message` to communicate with other team members.
+2. Use `task_create` and `task_update` to track work items.
+3. Use `read_blackboard` and `write_blackboard` to share context.
+4. Use `team_status` to check the status of all members.
+5. If you are the lead, you may use `team_create` and `team_delete`.
+
+## Guidelines
+
+- Keep messages concise and actionable.
+- Update task status promptly when work is completed.
+- Check the blackboard before starting new work to avoid duplication.
+- Report blockers to the lead via `send_message` with message_type="escalation".
+"""
+
+
+class TeamBounds(Schema):
+    """Bounds limiting team size and execution duration.
+
+    Attributes:
+        max_members: Maximum number of members per team.
+        max_parallel_members: Maximum members running concurrently.
+        max_wall_clock_minutes: Maximum wall-clock time per team.
+        max_member_turns: Maximum turns per member session.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    max_members: int = Field(default=10, ge=1, title="Max members per team")
+    max_parallel_members: int = Field(default=5, ge=1, title="Max parallel members")
+    max_wall_clock_minutes: int = Field(default=60, ge=1, title="Max wall-clock minutes")
+    max_member_turns: int = Field(default=20, ge=1, title="Max member turns")
+
+    @field_validator(
+        "max_members",
+        "max_parallel_members",
+        "max_wall_clock_minutes",
+        "max_member_turns",
+    )
+    @classmethod
+    def must_be_positive(cls, v: int) -> int:
+        """Ensure all bounds are strictly positive."""
+        if v <= 0:
+            msg = f"Bound must be > 0, got {v}"
+            raise ValueError(msg)
+        return v
+
+
+class BlackboardConfig(Schema):
+    """Configuration for the team blackboard.
+
+    Attributes:
+        write_policy: Who can write to the blackboard.
+        max_size_mb: Maximum blackboard size in megabytes.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    write_policy: Literal["open", "lead_only"] = Field(
+        default="open",
+        title="Blackboard write policy",
+    )
+    max_size_mb: int = Field(default=100, ge=1, title="Max blackboard size (MB)")
+
+    @field_validator("max_size_mb")
+    @classmethod
+    def must_be_positive(cls, v: int) -> int:
+        """Ensure max_size_mb is strictly positive."""
+        if v <= 0:
+            msg = f"max_size_mb must be > 0, got {v}"
+            raise ValueError(msg)
+        return v
+
+
+class MemberSpec(Schema):
+    """Specification of a single team member in auto_init.
+
+    Attributes:
+        name: Display name of the member within the team.
+        agent: Agent name to map to in the registry.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str = Field(title="Member name")
+    agent: str = Field(title="Agent name in registry")
+
+
+class AutoInitConfig(Schema):
+    """Auto-initialization configuration for teams.
+
+    When present, the lead agent automatically creates a team on first run.
+
+    Attributes:
+        team_name: Name of the auto-created team.
+        members: List of members to spawn in the team.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    team_name: str = Field(title="Team name")
+    members: list[MemberSpec] = Field(default_factory=list, title="Initial members")
+
+
+class TeamModeConfig(Schema):
+    """Configuration for dynamic team mode.
+
+    Controls whether agents can form ad-hoc teams, message each other,
+    and share state via a blackboard. Supports per-agent overlay via
+    :func:`resolve_team_mode`.
+
+    Attributes:
+        enabled: Whether team mode is active.
+        member_eligible: Agent names eligible to be team members.
+        lead_eligible: Agent names eligible to be team leads.
+        base_dir: Base directory for team state files.
+        ttl_hours: Hours before stale team state is cleaned up.
+        bounds: Limits on team size and execution.
+        blackboard: Blackboard configuration.
+        message_max_bytes: Maximum message size in bytes.
+        inbox_max_bytes: Maximum inbox size in bytes.
+        protocol_template: Template for team protocol instructions.
+        auto_urgent: Message types that default to urgent.
+        auto_init: Optional auto-team creation config.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    enabled: bool = Field(default=False, title="Enable team mode")
+    member_eligible: list[str] = Field(default_factory=list, title="Member-eligible agents")
+    lead_eligible: list[str] = Field(default_factory=list, title="Lead-eligible agents")
+    base_dir: str | None = Field(default=None, title="Base directory for team state")
+    ttl_hours: int = Field(default=72, ge=1, title="TTL in hours")
+    bounds: TeamBounds = Field(default_factory=TeamBounds, title="Team bounds")
+    blackboard: BlackboardConfig = Field(
+        default_factory=BlackboardConfig,
+        title="Blackboard config",
+    )
+    message_max_bytes: int = Field(default=65536, ge=1, title="Max message size (bytes)")
+    inbox_max_bytes: int = Field(default=1048576, ge=1, title="Max inbox size (bytes)")
+    protocol_template: str = Field(
+        default=_DEFAULT_PROTOCOL_TEMPLATE,
+        title="Protocol template",
+    )
+    auto_urgent: list[str] = Field(
+        default_factory=lambda: ["escalation"],
+        title="Auto-urgent message types",
+    )
+    auto_init: AutoInitConfig | None = Field(default=None, title="Auto-init config")
+
+    @field_validator("ttl_hours")
+    @classmethod
+    def must_be_positive(cls, v: int) -> int:
+        """Ensure ttl_hours is strictly positive."""
+        if v <= 0:
+            msg = f"ttl_hours must be > 0, got {v}"
+            raise ValueError(msg)
+        return v
+
+    @model_validator(mode="after")
+    def validate_auto_init_members(self) -> TeamModeConfig:
+        """Ensure all auto_init member names are in member_eligible."""
+        if self.auto_init is None:
+            return self
+        eligible_set = set(self.member_eligible)
+        for member in self.auto_init.members:
+            if member.name not in eligible_set:
+                msg = (
+                    f"auto_init member '{member.name}' is not in "
+                    f"member_eligible list: {self.member_eligible}"
+                )
+                raise ValueError(msg)
+        return self
+
+    @property
+    def effective_base_dir(self) -> str:
+        """Return the base directory, defaulting to the system temp dir."""
+        if self.base_dir is not None:
+            return self.base_dir
+        return tempfile.gettempdir()
+
+
+def resolve_team_mode(
+    global_config: TeamModeConfig | None,
+    agent_config: TeamModeConfig | None,
+) -> TeamModeConfig | None:
+    """Resolve team mode config by merging global and per-agent settings.
+
+    If both are None, returns None. If only one is provided, returns it.
+    If both are provided, agent-specific non-default fields override
+    the global config via model_copy(update=...).
+
+    Args:
+        global_config: The global team_mode config from the manifest.
+        agent_config: The per-agent team_mode overlay.
+
+    Returns:
+        Merged TeamModeConfig, or None if both inputs are None.
+    """
+    match global_config, agent_config:
+        case None, None:
+            return None
+        case None, agent:
+            return agent
+        case global_cfg, None:
+            return global_cfg
+        case _:
+            pass
+
+    # Both non-None: merge agent overrides onto global config.
+    global_dict = global_config.model_dump()
+    agent_dict = agent_config.model_dump()
+
+    # Collect fields where the agent config differs from its own defaults.
+    # We compare against agent defaults to detect which fields were
+    # explicitly set by the user.
+    agent_defaults = TeamModeConfig().model_dump()
+    overrides: dict[str, object] = {}
+    for field_name in global_dict:
+        if agent_dict[field_name] != agent_defaults[field_name]:
+            overrides[field_name] = agent_dict[field_name]
+
+    if not overrides:
+        return global_config
+
+    return global_config.model_copy(update=overrides)
+
+
+__all__ = [
+    "AutoInitConfig",
+    "BlackboardConfig",
+    "MemberSpec",
+    "TeamBounds",
+    "TeamModeConfig",
+    "resolve_team_mode",
+]
