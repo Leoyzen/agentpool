@@ -1343,7 +1343,7 @@ class SessionPool:
             session_id,
             content,
             priority=priority,
-            deps=deps,
+            deps=None,
             message_id=message_id,
         )
 
