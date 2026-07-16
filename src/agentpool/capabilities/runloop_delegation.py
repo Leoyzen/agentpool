@@ -30,9 +30,9 @@ if TYPE_CHECKING:
 class RunLoopDelegationService:
     """Concrete ``DelegationService`` backed by the AgentPool registry.
 
-    .. deprecated::
-        Use ``ctx.host.session_pool.run_agent()`` and
-        ``ctx.agent_registry.list_names()`` instead.
+    ``spawn_subagent()`` and ``get_available_agents()`` are deprecated.
+    ``create_child_session()`` is the recommended way to create a
+    persistent child session with ``SpawnSessionStart`` emission.
 
     Constructed by ``RunHandle`` at turn start using the agent's
     ``HostContext`` and the compiled ``AgentRegistry``. Provides
@@ -61,6 +61,73 @@ class RunLoopDelegationService:
         self._registry = registry
         self._host = host
         self._session_id = session_id
+
+    async def create_child_session(
+        self,
+        agent_name: str,
+        *,
+        parent_session_id: str | None = None,
+        description: str = "",
+        **metadata: Any,
+    ) -> str:
+        """Create a persistent child session and emit ``SpawnSessionStart``.
+
+        Creates a session via ``SessionPool.create_session()`` with the
+        parent session ID, then publishes a ``SpawnSessionStart`` event
+        to the EventBus so protocol servers can discover the child
+        session.
+
+        Unlike ``run_agent()``, this does NOT send a prompt, wait for
+        completion, or close the session. The caller is responsible
+        for sending the initial prompt via ``session_pool.send_message()``
+        and closing the session when done.
+
+        Args:
+            agent_name: Name of the agent for the child session.
+            parent_session_id: Parent session ID. Defaults to the
+                current session ID of this delegation service.
+            description: Optional human-readable description.
+            **metadata: Arbitrary metadata attached to the session
+                (e.g. ``team_id``, ``team_role``, ``team_member_name``).
+
+        Returns:
+            The child session ID.
+
+        Raises:
+            RuntimeError: If SessionPool is not available.
+        """
+        import uuid
+
+        from agentpool.agents.events.events import SpawnSessionStart
+
+        session_pool = self._host.session_pool
+        if session_pool is None:
+            msg = "SessionPool is not available for child session creation"
+            raise RuntimeError(msg)
+
+        parent = parent_session_id or self._session_id
+        child_session_id = str(uuid.uuid4())
+
+        await session_pool.create_session(
+            child_session_id,
+            agent_name=agent_name,
+            parent_session_id=parent,
+            **metadata,
+        )
+
+        spawn_event = SpawnSessionStart(
+            child_session_id=child_session_id,
+            parent_session_id=parent,
+            tool_call_id="",
+            spawn_mechanism="spawn",
+            source_name=agent_name,
+            source_type="agent",
+            depth=1,
+            description=description,
+        )
+        await session_pool.event_bus.publish(parent, spawn_event)
+
+        return child_session_id
 
     async def spawn_subagent(
         self,

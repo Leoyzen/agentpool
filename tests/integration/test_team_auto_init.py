@@ -1,7 +1,8 @@
-"""Integration tests for TeamCommCapability auto_init (T10).
+"""Integration tests for team_create with config default members.
 
-These tests exercise the full auto_init flow end-to-end using real
-FileTeamState on tmp_path, with a mocked SessionPool for async calls.
+These tests exercise the team_create flow with auto_init config providing
+default members when the LLM passes an empty members list. Uses real
+FileTeamState on tmp_path, with mocked SessionPool and DelegationService.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ def _make_run_context(
     session_pool: MagicMock,
     config: TeamModeConfig,
     agent_registry: MagicMock,
+    delegation: MagicMock,
     session_id: str = "lead_session_001",
 ) -> MagicMock:
     """Create a mock RunContext with AgentContext deps for integration tests."""
@@ -48,6 +50,7 @@ def _make_run_context(
     agent_ctx.team_mode_config = config
     agent_ctx.agent_registry = agent_registry
     agent_ctx.session.session_id = session_id
+    agent_ctx.delegation = delegation
 
     ctx = MagicMock()
     ctx.deps = agent_ctx
@@ -55,38 +58,41 @@ def _make_run_context(
 
 
 @pytest.mark.integration
-async def test_auto_init_full_flow(tmp_path: Any) -> None:
-    """Given: TeamCommCapability with auto_init config, lead role, no team_id.
+async def test_team_create_with_config_default_members(tmp_path: Any) -> None:
+    """Given: TeamCommCapability with auto_init config, lead role.
 
-    When: team_status is called (triggers auto_init).
-    Then: team_id written to metadata, FileTeamState has the team.
+    When: team_create is called with empty members.
+    Then: uses auto_init.members to create the team with child sessions.
     """
     from agentpool.capabilities.file_team_state import FileTeamState
 
     config = _make_auto_init_config(str(tmp_path))
 
     mock_pool = MagicMock()
-    mock_pool.create_session = AsyncMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
     mock_pool.close_session = AsyncMock()
 
     mock_registry = MagicMock()
     mock_registry.exists = MagicMock(return_value=True)
 
+    child_ids = iter(["child_translator", "child_reviewer"])
+    mock_delegation = MagicMock()
+    mock_delegation.create_child_session = AsyncMock(
+        side_effect=lambda *a, **kw: next(child_ids),
+    )
+
     lead_metadata: dict[str, Any] = {
         "team_role": "lead",
         "team_member_name": "coordinator",
     }
-    ctx = _make_run_context(lead_metadata, mock_pool, config, mock_registry)
+    ctx = _make_run_context(lead_metadata, mock_pool, config, mock_registry, mock_delegation)
     cap = TeamCommCapability(config, "coordinator", lead_metadata)
 
-    # team_status triggers auto_init, then reads the created team state.
-    await cap.team_status(ctx)
+    result = await cap.team_create(ctx, "my_team", [])
 
-    # Auto-init should have created the team.
-    assert "team_id" in lead_metadata
-    team_id: str = lead_metadata["team_id"]
-    assert lead_metadata["team_name"] == "auto_integration_team"
+    assert "Team 'my_team' created with 2 members" in result
+    assert "team_id=" in result
+    team_id = result.split("team_id=")[1].strip()
 
     # FileTeamState should have the team on disk.
     team_state = FileTeamState(str(tmp_path))
@@ -94,49 +100,54 @@ async def test_auto_init_full_flow(tmp_path: Any) -> None:
     assert state_path.exists()
 
     state = team_state._read_json(state_path)
-    assert state["team_name"] == "auto_integration_team"
+    assert state["team_name"] == "my_team"
     assert "translator" in state["members"]
     assert "reviewer" in state["members"]
 
-    # Session pool should have been called for each member.
-    assert mock_pool.create_session.await_count == 2
+    # Delegation and session pool should have been called for each member.
+    assert mock_delegation.create_child_session.await_count == 2
     assert mock_pool.send_message.await_count == 2
 
 
 @pytest.mark.integration
-async def test_auto_init_graceful_degradation(tmp_path: Any) -> None:
-    """Given: auto_init config, but session_pool.create_session raises.
+async def test_team_create_config_default_members_graceful_degradation(
+    tmp_path: Any,
+) -> None:
+    """Given: auto_init config, but delegation.create_child_session raises.
 
-    When: a tool is called.
-    Then: error message returned, no crash.
+    When: team_create is called with empty members.
+    Then: error message returned, no crash, team state cleaned up.
     """
     config = _make_auto_init_config(str(tmp_path))
 
     mock_pool = MagicMock()
-    mock_pool.create_session = AsyncMock(side_effect=RuntimeError("Session creation failed"))
     mock_pool.send_message = AsyncMock(return_value="msg_id")
+    mock_pool.close_session = AsyncMock()
 
     mock_registry = MagicMock()
     mock_registry.exists = MagicMock(return_value=True)
+
+    mock_delegation = MagicMock()
+    mock_delegation.create_child_session = AsyncMock(
+        side_effect=RuntimeError("Session creation failed"),
+    )
 
     lead_metadata: dict[str, Any] = {
         "team_role": "lead",
         "team_member_name": "coordinator",
     }
-    ctx = _make_run_context(lead_metadata, mock_pool, config, mock_registry)
+    ctx = _make_run_context(lead_metadata, mock_pool, config, mock_registry, mock_delegation)
     cap = TeamCommCapability(config, "coordinator", lead_metadata)
 
-    result = await cap.team_status(ctx)
+    result = await cap.team_create(ctx, "my_team", [])
 
-    assert "Auto-init failed" in result
-    assert "Team tools unavailable" in result
-    # team_id should NOT have been written to metadata on failure.
-    assert "team_id" not in lead_metadata
+    assert "Failed to create team" in result
+    assert "Session creation failed" in result
 
 
 @pytest.mark.integration
-async def test_auto_init_team_can_be_deleted(tmp_path: Any) -> None:
-    """Given: auto_init creates a team on first call.
+async def test_team_create_config_default_members_then_delete(tmp_path: Any) -> None:
+    """Given: team_create with config default members creates a team.
 
     When: team_delete is called afterwards.
     Then: team is successfully deleted.
@@ -146,34 +157,41 @@ async def test_auto_init_team_can_be_deleted(tmp_path: Any) -> None:
     config = _make_auto_init_config(str(tmp_path))
 
     mock_pool = MagicMock()
-    mock_pool.create_session = AsyncMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
     mock_pool.close_session = AsyncMock()
 
     mock_registry = MagicMock()
     mock_registry.exists = MagicMock(return_value=True)
 
+    child_ids = iter(["child_translator", "child_reviewer"])
+    mock_delegation = MagicMock()
+    mock_delegation.create_child_session = AsyncMock(
+        side_effect=lambda *a, **kw: next(child_ids),
+    )
+
     lead_metadata: dict[str, Any] = {
         "team_role": "lead",
         "team_member_name": "coordinator",
     }
-    ctx = _make_run_context(lead_metadata, mock_pool, config, mock_registry)
+    ctx = _make_run_context(lead_metadata, mock_pool, config, mock_registry, mock_delegation)
     cap = TeamCommCapability(config, "coordinator", lead_metadata)
 
-    # First call triggers auto_init.
-    await cap.team_status(ctx)
-    assert "team_id" in lead_metadata
-    team_id: str = lead_metadata["team_id"]
+    # Create the team with empty members (uses auto_init config).
+    create_result = await cap.team_create(ctx, "my_team", [])
+    assert "Team 'my_team' created with 2 members" in create_result
+    team_id = create_result.split("team_id=")[1].strip()
 
     # Verify team exists on disk.
     team_state = FileTeamState(str(tmp_path))
     assert team_state._state_path(team_id).exists()
 
-    # Now delete the team — auto_init should be skipped (team_id exists).
+    # Write team_id into metadata so team_delete can find it.
+    lead_metadata["team_id"] = team_id
+    lead_metadata["team_name"] = "my_team"
+
+    # Now delete the team.
     result = await cap.team_delete(ctx)
 
     assert result == "Team deleted"
-    # Team state should be cleaned up.
     assert not team_state._state_path(team_id).exists()
-    # close_session should have been called for each member.
     assert mock_pool.close_session.await_count == 2

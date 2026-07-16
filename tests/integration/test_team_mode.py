@@ -86,6 +86,7 @@ def _make_run_context(
     base_dir: str | None = None,
     agent_registry: MagicMock | None = None,
     session_id: str = "lead_session_001",
+    delegation: MagicMock | None = None,
 ) -> MagicMock:
     """Create a mock RunContext with AgentContext deps.
 
@@ -96,6 +97,7 @@ def _make_run_context(
         base_dir: Optional base_dir override for TeamModeConfig.
         agent_registry: Mock AgentRegistry (defaults to a permissive mock).
         session_id: Session ID string for the mock SessionState.
+        delegation: Mock DelegationService (defaults to a generic MagicMock).
     """
     from agentpool.capabilities.agent_context import AgentContext
 
@@ -107,6 +109,7 @@ def _make_run_context(
     agent_ctx.team_mode_config = cfg
     agent_ctx.agent_registry = agent_registry or MagicMock()
     agent_ctx.session.session_id = session_id
+    agent_ctx.delegation = delegation or MagicMock()
 
     ctx = MagicMock()
     ctx.deps = agent_ctx
@@ -173,9 +176,10 @@ async def test_e2e_lifecycle_create_message_task_blackboard_delete(
     mock_registry = MagicMock()
     mock_registry.exists = MagicMock(return_value=True)
     mock_pool = MagicMock()
-    mock_pool.create_session = AsyncMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id_001")
     mock_pool.close_session = AsyncMock()
+    mock_delegation = MagicMock()
+    mock_delegation.create_child_session = AsyncMock(return_value="child_session_001")
 
     # --- Step 1: Create team ---
     lead_meta: dict[str, Any] = {
@@ -188,6 +192,7 @@ async def test_e2e_lifecycle_create_message_task_blackboard_delete(
         config=config,
         base_dir=str(tmp_path),
         agent_registry=mock_registry,
+        delegation=mock_delegation,
     )
     cap = TeamCommCapability(config, "coordinator", lead_meta)
 
@@ -208,7 +213,7 @@ async def test_e2e_lifecycle_create_message_task_blackboard_delete(
     # create_session_agent() would perform in production.
     lead_meta["team_id"] = team_id
     lead_meta["team_name"] = "alpha_team"
-    assert mock_pool.create_session.await_count == 2
+    assert mock_delegation.create_child_session.await_count == 2
 
     # Verify team exists on disk
     team_state = FileTeamState(str(tmp_path))
@@ -480,20 +485,19 @@ team_mode:
 
 
 # ---------------------------------------------------------------------------
-# Scenario 6: auto_init + manual team_create coexistence
+# Scenario 6: Config default members in team_create
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
-async def test_auto_init_skipped_when_team_id_already_set(tmp_path: Any) -> None:
-    """Given: auto_init is configured, but team_id is already in metadata.
-
-    The team_id was set from a prior manual team_create call.
+async def test_team_status_with_existing_team_id_no_session_creation(
+    tmp_path: Any,
+) -> None:
+    """Given: team_id is already set in metadata from a prior team_create.
 
     When: team_status is called.
 
-    Then: auto_init is skipped (no extra create_session calls), and the
-        existing team state is used.
+    Then: no new sessions are created, and the existing team state is used.
     """
     config = _make_auto_init_config(str(tmp_path))
 
@@ -501,7 +505,6 @@ async def test_auto_init_skipped_when_team_id_already_set(tmp_path: Any) -> None
     _init_team(str(tmp_path), team_id="manual_team", team_name="manual_team")
 
     mock_pool = MagicMock()
-    mock_pool.create_session = AsyncMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
     mock_pool.close_session = AsyncMock()
 
@@ -521,30 +524,33 @@ async def test_auto_init_skipped_when_team_id_already_set(tmp_path: Any) -> None
 
     result = await cap.team_status(ctx)
 
-    # auto_init should NOT have triggered (no create_session calls).
-    mock_pool.create_session.assert_not_awaited()
     # team_status should show the manually-created team.
     assert "manual_team" in result
 
 
 @pytest.mark.integration
-async def test_auto_init_triggers_when_team_id_is_none(tmp_path: Any) -> None:
-    """Given: auto_init is configured and team_id is None in metadata.
+async def test_team_create_uses_config_default_members_when_empty(tmp_path: Any) -> None:
+    """Given: auto_init config is set, lead calls team_create with empty members.
 
-    When: team_status is called (first tool call).
+    When: team_create is called with members=[].
 
-    Then: auto_init triggers, team_id is written to metadata, sessions
-        are created, and team_status shows the auto-created team.
+    Then: uses auto_init.members from config, creates child sessions, and
+        team_status shows the created team.
     """
     config = _make_auto_init_config(str(tmp_path))
 
     mock_pool = MagicMock()
-    mock_pool.create_session = AsyncMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
     mock_pool.close_session = AsyncMock()
 
     mock_registry = MagicMock()
     mock_registry.exists = MagicMock(return_value=True)
+
+    child_ids = iter(["child_translator", "child_reviewer"])
+    mock_delegation = MagicMock()
+    mock_delegation.create_child_session = AsyncMock(
+        side_effect=lambda *a, **kw: next(child_ids),
+    )
 
     # Lead metadata WITHOUT team_id.
     lead_metadata: dict[str, Any] = {
@@ -557,17 +563,24 @@ async def test_auto_init_triggers_when_team_id_is_none(tmp_path: Any) -> None:
         config=config,
         base_dir=str(tmp_path),
         agent_registry=mock_registry,
+        delegation=mock_delegation,
     )
     cap = TeamCommCapability(config, "coordinator", lead_metadata)
 
-    result = await cap.team_status(ctx)
+    # team_create with empty members should use auto_init config defaults.
+    create_result = await cap.team_create(ctx, "my_team", [])
+    assert "Team 'my_team' created with 2 members" in create_result
+    assert mock_delegation.create_child_session.await_count == 2
+    assert mock_pool.send_message.await_count == 2
 
-    # auto_init should have created the team.
-    assert "team_id" in lead_metadata
-    assert lead_metadata["team_name"] == "auto_integration_team"
-    assert mock_pool.create_session.await_count == 2
-    # team_status should show the auto-created team.
-    assert "auto_integration_team" in result
+    # Set team_id in metadata for subsequent team_status call.
+    team_id = create_result.split("team_id=")[1].strip()
+    lead_metadata["team_id"] = team_id
+    lead_metadata["team_name"] = "my_team"
+
+    # team_status should show the created team.
+    status_result = await cap.team_status(ctx)
+    assert "my_team" in status_result
 
 
 # ---------------------------------------------------------------------------

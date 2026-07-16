@@ -424,6 +424,7 @@ def _make_run_context(
     base_dir: str | None = None,
     agent_registry: MagicMock | None = None,
     session_id: str | None = None,
+    delegation: MagicMock | None = None,
 ) -> MagicMock:
     """Create a mock RunContext with AgentContext deps.
 
@@ -434,6 +435,7 @@ def _make_run_context(
         base_dir: Optional base_dir override for TeamModeConfig.
         agent_registry: Mock AgentRegistry (defaults to a permissive mock).
         session_id: Optional session_id string for the mock SessionState.
+        delegation: Mock DelegationService (defaults to a generic MagicMock).
 
     Returns:
         A MagicMock whose .deps is a mock AgentContext.
@@ -448,6 +450,7 @@ def _make_run_context(
     agent_ctx.team_mode_config = cfg
     agent_ctx.agent_registry = agent_registry or MagicMock()
     agent_ctx.session.session_id = session_id or "lead_session_001"
+    agent_ctx.delegation = delegation or MagicMock()
 
     ctx = MagicMock()
     ctx.deps = agent_ctx
@@ -649,14 +652,16 @@ async def test_bounds_max_members_ok(tmp_path: Any) -> None:
     mock_registry = MagicMock()
     mock_registry.exists = MagicMock(return_value=True)
     mock_pool = MagicMock()
-    mock_pool.create_session = AsyncMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
+    mock_delegation = MagicMock()
+    mock_delegation.create_child_session = AsyncMock(return_value="child_session_001")
     ctx = _make_run_context(
         metadata=_make_lead_metadata(),
         session_pool=mock_pool,
         config=config,
         base_dir=str(tmp_path),
         agent_registry=mock_registry,
+        delegation=mock_delegation,
     )
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
@@ -688,14 +693,16 @@ async def test_bounds_started_at_recorded(tmp_path: Any) -> None:
     mock_registry = MagicMock()
     mock_registry.exists = MagicMock(return_value=True)
     mock_pool = MagicMock()
-    mock_pool.create_session = AsyncMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
+    mock_delegation = MagicMock()
+    mock_delegation.create_child_session = AsyncMock(return_value="child_session_001")
     ctx = _make_run_context(
         metadata=_make_lead_metadata(),
         session_pool=mock_pool,
         config=config,
         base_dir=str(tmp_path),
         agent_registry=mock_registry,
+        delegation=mock_delegation,
     )
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
@@ -1050,10 +1057,10 @@ async def test_disabled_config_registers_no_tools() -> None:
 
 @pytest.mark.unit
 async def test_team_create_success(tmp_path: Any) -> None:
-    """Given: lead agent with eligible members and mock session_pool.
+    """Given: lead agent with eligible members and mock delegation service.
 
     When: team_create is called with 2 eligible members.
-    Then: returns success message with team_id and creates sessions.
+    Then: returns success message with team_id and creates child sessions.
     """
     config = _make_enabled_config(
         member_eligible=["worker", "reviewer"],
@@ -1062,14 +1069,16 @@ async def test_team_create_success(tmp_path: Any) -> None:
     mock_registry = MagicMock()
     mock_registry.exists = MagicMock(return_value=True)
     mock_pool = MagicMock()
-    mock_pool.create_session = AsyncMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
+    mock_delegation = MagicMock()
+    mock_delegation.create_child_session = AsyncMock(return_value="child_session_001")
     ctx = _make_run_context(
         metadata=_make_lead_metadata(),
         session_pool=mock_pool,
         config=config,
         base_dir=str(tmp_path),
         agent_registry=mock_registry,
+        delegation=mock_delegation,
     )
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
@@ -1084,7 +1093,7 @@ async def test_team_create_success(tmp_path: Any) -> None:
 
     assert "Team 'my_team' created with 2 members" in result
     assert "team_id=" in result
-    assert mock_pool.create_session.await_count == 2
+    assert mock_delegation.create_child_session.await_count == 2
     assert mock_pool.send_message.await_count == 2
 
 
@@ -1372,184 +1381,83 @@ async def test_auto_urgent(tmp_path: Any) -> None:
     assert call_kwargs.kwargs["mode"] is DeliveryMode.STEER
 
 
-# ---- T10 Auto-init tests ----
+# ---- Config default members tests ----
 
 
 @pytest.mark.unit
-async def test_auto_init_creates_team_on_first_call(tmp_path: Any) -> None:
-    """Given: config with auto_init, lead role, no team_id in metadata.
+async def test_team_create_uses_config_default_members(tmp_path: Any) -> None:
+    """Given: lead agent with auto_init config, team_create called with empty members.
 
-    When: send_message is called.
-    Then: auto_init triggers — team_id written to metadata, sessions created.
+    When: team_create is called with members=[].
+    Then: uses auto_init.members from config to create the team.
     """
     from agentpool_config.team_mode import AutoInitConfig, MemberSpec
 
     config = _make_enabled_config(
-        member_eligible=["translator"],
+        member_eligible=["translator", "reviewer"],
         base_dir=str(tmp_path),
     ).model_copy(
         update={
             "auto_init": AutoInitConfig(
-                team_name="auto_team",
-                members=[MemberSpec(name="translator", agent="translator")],
+                team_name="default_team",
+                members=[
+                    MemberSpec(name="translator", agent="translator"),
+                    MemberSpec(name="reviewer", agent="reviewer"),
+                ],
             )
         }
     )
-
-    mock_pool = MagicMock()
-    mock_pool.create_session = AsyncMock()
-    mock_pool.send_message = AsyncMock(return_value="msg_id")
     mock_registry = MagicMock()
     mock_registry.exists = MagicMock(return_value=True)
-
-    # Lead metadata WITHOUT team_id — auto_init should create it.
-    lead_metadata: dict[str, Any] = {
-        "team_role": "lead",
-        "team_member_name": "coordinator",
-    }
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    mock_delegation = MagicMock()
+    mock_delegation.create_child_session = AsyncMock(return_value="child_session_001")
     ctx = _make_run_context(
-        metadata=lead_metadata,
+        metadata=_make_lead_metadata(),
         session_pool=mock_pool,
         config=config,
         base_dir=str(tmp_path),
         agent_registry=mock_registry,
+        delegation=mock_delegation,
     )
-    cap = TeamCommCapability(config, "coordinator", lead_metadata)
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    # Call send_message — auto_init should fire first.
-    await cap.send_message(ctx, "translator", "hello")
+    result = await cap.team_create(ctx, "my_team", [])
 
-    # Auto-init should have created the team (team_id written to metadata).
-    assert "team_id" in lead_metadata
-    assert lead_metadata["team_name"] == "auto_team"
-    # create_session should have been called for the member.
-    mock_pool.create_session.assert_awaited_once()
-    mock_pool.send_message.assert_awaited()
+    assert "Team 'my_team' created with 2 members" in result
+    assert mock_delegation.create_child_session.await_count == 2
+    assert mock_pool.send_message.await_count == 2
 
 
 @pytest.mark.unit
-async def test_auto_init_skipped_when_team_id_exists(tmp_path: Any) -> None:
-    """Given: config with auto_init, but team_id already in metadata.
+async def test_team_create_empty_members_no_auto_init(tmp_path: Any) -> None:
+    """Given: lead agent with auto_init=None, team_create called with empty members.
 
-    When: send_message is called.
-    Then: auto_init NOT triggered (no new sessions created).
+    When: team_create is called with members=[].
+    Then: creates team with 0 members (no crash, no auto_init fallback).
     """
-    from agentpool_config.team_mode import AutoInitConfig, MemberSpec
-
     config = _make_enabled_config(
-        member_eligible=["translator"],
+        member_eligible=["worker"],
         base_dir=str(tmp_path),
-    ).model_copy(
-        update={
-            "auto_init": AutoInitConfig(
-                team_name="auto_team",
-                members=[MemberSpec(name="translator", agent="translator")],
-            )
-        }
     )
-
-    _init_team(str(tmp_path), team_id="existing_team")
-
-    mock_pool = MagicMock()
-    mock_pool.create_session = AsyncMock()
-    mock_pool.send_message = AsyncMock(return_value="msg_id")
     mock_registry = MagicMock()
     mock_registry.exists = MagicMock(return_value=True)
-
-    # Lead metadata WITH team_id — auto_init should be skipped.
-    metadata = _make_lead_metadata(team_id="existing_team")
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    mock_delegation = MagicMock()
+    mock_delegation.create_child_session = AsyncMock(return_value="child_001")
     ctx = _make_run_context(
-        metadata=metadata,
+        metadata=_make_lead_metadata(),
         session_pool=mock_pool,
         config=config,
         base_dir=str(tmp_path),
         agent_registry=mock_registry,
+        delegation=mock_delegation,
     )
-    cap = TeamCommCapability(config, "coordinator", metadata)
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    await cap.send_message(ctx, "translator_agent", "hello")
+    result = await cap.team_create(ctx, "empty_team", [])
 
-    # create_session should NOT have been called (auto_init skipped).
-    mock_pool.create_session.assert_not_awaited()
-
-
-@pytest.mark.unit
-async def test_auto_init_skipped_when_not_lead(tmp_path: Any) -> None:
-    """Given: config with auto_init, but team_role != "lead".
-
-    When: send_message is called.
-    Then: auto_init NOT triggered (no new sessions created).
-    """
-    from agentpool_config.team_mode import AutoInitConfig, MemberSpec
-
-    config = _make_enabled_config(
-        member_eligible=["translator"],
-        base_dir=str(tmp_path),
-    ).model_copy(
-        update={
-            "auto_init": AutoInitConfig(
-                team_name="auto_team",
-                members=[MemberSpec(name="translator", agent="translator")],
-            )
-        }
-    )
-
-    mock_pool = MagicMock()
-    mock_pool.create_session = AsyncMock()
-    mock_pool.send_message = AsyncMock(return_value="msg_id")
-    mock_registry = MagicMock()
-    mock_registry.exists = MagicMock(return_value=True)
-
-    # Member metadata (not lead) — auto_init should be skipped.
-    member_metadata: dict[str, Any] = {
-        "team_role": "member",
-        "team_member_name": "translator",
-    }
-    ctx = _make_run_context(
-        metadata=member_metadata,
-        session_pool=mock_pool,
-        config=config,
-        base_dir=str(tmp_path),
-        agent_registry=mock_registry,
-    )
-    cap = TeamCommCapability(config, "translator", member_metadata)
-
-    await cap.send_message(ctx, "reviewer_agent", "hello")
-
-    # auto_init skipped — no team_id written.
-    assert "team_id" not in member_metadata
-    mock_pool.create_session.assert_not_awaited()
-
-
-@pytest.mark.unit
-async def test_auto_init_skipped_when_not_configured(tmp_path: Any) -> None:
-    """Given: config with auto_init=None.
-
-    When: send_message is called.
-    Then: auto_init NOT triggered (no new sessions created).
-    """
-    config = _make_enabled_config(
-        member_eligible=["translator"],
-        base_dir=str(tmp_path),
-    )
-    # auto_init is None by default.
-
-    _init_team(str(tmp_path))
-
-    mock_pool = MagicMock()
-    mock_pool.create_session = AsyncMock()
-    mock_pool.send_message = AsyncMock(return_value="msg_id")
-
-    metadata = _make_session_metadata()
-    ctx = _make_run_context(
-        metadata=metadata,
-        session_pool=mock_pool,
-        config=config,
-        base_dir=str(tmp_path),
-    )
-    cap = TeamCommCapability(config, "worker", metadata)
-
-    await cap.send_message(ctx, "reviewer_agent", "hello")
-
-    # auto_init skipped — no extra create_session calls.
-    mock_pool.create_session.assert_not_awaited()
+    assert "Team 'empty_team' created with 0 members" in result
+    assert mock_delegation.create_child_session.await_count == 0
