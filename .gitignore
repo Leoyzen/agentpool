@@ -65,3 +65,6 @@ test_configs/
 
 # Git worktrees
 .worktrees/
+
+# openspec
+**/openspec/
