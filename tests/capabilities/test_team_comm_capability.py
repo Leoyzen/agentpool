@@ -1374,3 +1374,186 @@ async def test_auto_urgent(tmp_path: Any) -> None:
     assert result == "Message sent to reviewer_agent"
     call_kwargs = mock_pool.send_message.call_args
     assert call_kwargs.kwargs["mode"] is DeliveryMode.STEER
+
+
+# ---- T10 Auto-init tests ----
+
+
+@pytest.mark.unit
+async def test_auto_init_creates_team_on_first_call(tmp_path: Any) -> None:
+    """Given: config with auto_init, lead role, no team_id in metadata.
+
+    When: send_message is called.
+    Then: auto_init triggers — team_id written to metadata, sessions created.
+    """
+    from agentpool_config.team_mode import AutoInitConfig, MemberSpec
+
+    config = _make_enabled_config(
+        member_eligible=["translator"],
+        base_dir=str(tmp_path),
+    ).model_copy(
+        update={
+            "auto_init": AutoInitConfig(
+                team_name="auto_team",
+                members=[MemberSpec(name="translator", agent="translator")],
+            )
+        }
+    )
+
+    mock_pool = MagicMock()
+    mock_pool.create_session = AsyncMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=True)
+
+    # Lead metadata WITHOUT team_id — auto_init should create it.
+    lead_metadata: dict[str, Any] = {
+        "team_role": "lead",
+        "team_member_name": "coordinator",
+    }
+    ctx = _make_run_context(
+        metadata=lead_metadata,
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+    )
+    cap = TeamCommCapability(config, "coordinator", lead_metadata)
+
+    # Call send_message — auto_init should fire first.
+    await cap.send_message(ctx, "translator", "hello")
+
+    # Auto-init should have created the team (team_id written to metadata).
+    assert "team_id" in lead_metadata
+    assert lead_metadata["team_name"] == "auto_team"
+    # create_session should have been called for the member.
+    mock_pool.create_session.assert_awaited_once()
+    mock_pool.send_message.assert_awaited()
+
+
+@pytest.mark.unit
+async def test_auto_init_skipped_when_team_id_exists(tmp_path: Any) -> None:
+    """Given: config with auto_init, but team_id already in metadata.
+
+    When: send_message is called.
+    Then: auto_init NOT triggered (no new sessions created).
+    """
+    from agentpool_config.team_mode import AutoInitConfig, MemberSpec
+
+    config = _make_enabled_config(
+        member_eligible=["translator"],
+        base_dir=str(tmp_path),
+    ).model_copy(
+        update={
+            "auto_init": AutoInitConfig(
+                team_name="auto_team",
+                members=[MemberSpec(name="translator", agent="translator")],
+            )
+        }
+    )
+
+    _init_team(str(tmp_path), team_id="existing_team")
+
+    mock_pool = MagicMock()
+    mock_pool.create_session = AsyncMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=True)
+
+    # Lead metadata WITH team_id — auto_init should be skipped.
+    metadata = _make_lead_metadata(team_id="existing_team")
+    ctx = _make_run_context(
+        metadata=metadata,
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+    )
+    cap = TeamCommCapability(config, "coordinator", metadata)
+
+    await cap.send_message(ctx, "translator_agent", "hello")
+
+    # create_session should NOT have been called (auto_init skipped).
+    mock_pool.create_session.assert_not_awaited()
+
+
+@pytest.mark.unit
+async def test_auto_init_skipped_when_not_lead(tmp_path: Any) -> None:
+    """Given: config with auto_init, but team_role != "lead".
+
+    When: send_message is called.
+    Then: auto_init NOT triggered (no new sessions created).
+    """
+    from agentpool_config.team_mode import AutoInitConfig, MemberSpec
+
+    config = _make_enabled_config(
+        member_eligible=["translator"],
+        base_dir=str(tmp_path),
+    ).model_copy(
+        update={
+            "auto_init": AutoInitConfig(
+                team_name="auto_team",
+                members=[MemberSpec(name="translator", agent="translator")],
+            )
+        }
+    )
+
+    mock_pool = MagicMock()
+    mock_pool.create_session = AsyncMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=True)
+
+    # Member metadata (not lead) — auto_init should be skipped.
+    member_metadata: dict[str, Any] = {
+        "team_role": "member",
+        "team_member_name": "translator",
+    }
+    ctx = _make_run_context(
+        metadata=member_metadata,
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+    )
+    cap = TeamCommCapability(config, "translator", member_metadata)
+
+    await cap.send_message(ctx, "reviewer_agent", "hello")
+
+    # auto_init skipped — no team_id written.
+    assert "team_id" not in member_metadata
+    mock_pool.create_session.assert_not_awaited()
+
+
+@pytest.mark.unit
+async def test_auto_init_skipped_when_not_configured(tmp_path: Any) -> None:
+    """Given: config with auto_init=None.
+
+    When: send_message is called.
+    Then: auto_init NOT triggered (no new sessions created).
+    """
+    config = _make_enabled_config(
+        member_eligible=["translator"],
+        base_dir=str(tmp_path),
+    )
+    # auto_init is None by default.
+
+    _init_team(str(tmp_path))
+
+    mock_pool = MagicMock()
+    mock_pool.create_session = AsyncMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+
+    metadata = _make_session_metadata()
+    ctx = _make_run_context(
+        metadata=metadata,
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+    )
+    cap = TeamCommCapability(config, "worker", metadata)
+
+    await cap.send_message(ctx, "reviewer_agent", "hello")
+
+    # auto_init skipped — no extra create_session calls.
+    mock_pool.create_session.assert_not_awaited()

@@ -151,6 +151,131 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         team_id: str | None = agent_ctx.session.metadata.get("team_id")
         return team_id
 
+    async def _maybe_auto_init(self, ctx: Any) -> str | None:  # noqa: PLR0911
+        """Lazily create a team on first tool call when auto_init is configured.
+
+        Conditions for auto_init:
+            1. ``self._config.auto_init`` is not None.
+            2. Session metadata has no ``team_id`` (not already in a team).
+            3. Session metadata has ``team_role == "lead"``.
+
+        If all conditions are met, executes the same team creation logic
+        as :meth:`team_create`, writes ``team_id`` and ``team_name`` back
+        into the session metadata dict in-place.
+
+        Args:
+            ctx: The RunContext passed to a tool function.
+
+        Returns:
+            ``None`` on success (or if auto_init is not applicable).
+            Error string on failure.
+        """
+        if self._config.auto_init is None:
+            return None
+
+        agent_ctx = self._resolve_agent_context(ctx)
+
+        existing_team_id: str | None = agent_ctx.session.metadata.get("team_id")
+        if existing_team_id is not None:
+            return None
+
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role != "lead":
+            return None
+
+        auto_init = self._config.auto_init
+        members = auto_init.members
+        team_name = auto_init.team_name
+
+        # Eligibility checks (same as team_create).
+        for member in members:
+            agent_name: str = member.agent
+            if not agent_ctx.agent_registry.exists(agent_name):
+                return f"Agent '{agent_name}' not found in registry"
+            if agent_name not in self._config.member_eligible:
+                return (
+                    f"Agent '{agent_name}' is not eligible for team membership"
+                )
+
+        # Bounds: max_members check.
+        if len(members) > self._config.bounds.max_members:
+            return (
+                f"Team exceeds max_members ({len(members)} > "
+                f"{self._config.bounds.max_members})"
+            )
+
+        team_id = str(uuid.uuid4())
+        lead_session_id: str = agent_ctx.session.session_id
+
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        base_dir = (
+            agent_ctx.team_mode_config.effective_base_dir
+            if agent_ctx.team_mode_config is not None
+            else tempfile.gettempdir()
+        )
+        team_state = FileTeamState(base_dir)
+        team_state.init(
+            team_id,
+            team_name,
+            [{"name": m.name, "agent": m.agent} for m in members],
+        )
+
+        # Record started_at timestamp for wall-clock enforcement.
+        state = team_state._read_json(team_state._state_path(team_id))
+        state["started_at"] = datetime.datetime.now(datetime.UTC).isoformat()
+        team_state._atomic_write(team_state._state_path(team_id), state)
+
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is None:
+            return "SessionPool not available"
+
+        from agentpool.lifecycle.types import DeliveryMode
+
+        try:
+            for member in members:
+                member_session_id = str(uuid.uuid4())
+                await session_pool.create_session(
+                    member_session_id,
+                    agent_name=member.agent,
+                    parent_session_id=lead_session_id,
+                    team_id=team_id,
+                    team_role="member",
+                    team_member_name=member.name,
+                )
+                team_state.register_member(
+                    team_id,
+                    member.name,
+                    member_session_id,
+                )
+                await session_pool.send_message(
+                    member_session_id,
+                    self._config.protocol_template.format(
+                        team_name=team_name,
+                        role="member",
+                        member_name=member.name,
+                    ),
+                    mode=DeliveryMode.QUEUE,
+                )
+        except Exception as exc:  # noqa: BLE001
+            try:
+                import logfire
+            except ImportError:
+                pass
+            else:
+                logfire.warning(
+                    "auto_init failed: {error}", error=str(exc)
+                )
+            return (
+                f"Auto-init failed: {exc}. Team tools unavailable."
+            )
+
+        # Write team_id and team_name back to session metadata in-place.
+        agent_ctx.session.metadata["team_id"] = team_id
+        agent_ctx.session.metadata["team_name"] = team_name
+
+        return None
+
     # ------------------------------------------------------------------
     # Universal tools
     # ------------------------------------------------------------------
@@ -178,6 +303,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         Returns:
             Success or error message string.
         """
+        init_result = await self._maybe_auto_init(ctx)
+        if init_result is not None:
+            return init_result
+
         # Message size enforcement.
         body_bytes = len(body.encode())
         if body_bytes > self._config.message_max_bytes:
@@ -308,6 +437,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         Returns:
             Success message with task_id, or error string.
         """
+        init_result = await self._maybe_auto_init(ctx)
+        if init_result is not None:
+            return init_result
+
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
@@ -336,6 +469,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         Returns:
             JSON array of tasks (pretty-printed), or error string.
         """
+        init_result = await self._maybe_auto_init(ctx)
+        if init_result is not None:
+            return init_result
+
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
@@ -366,6 +503,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         Returns:
             Updated task as JSON, or error string.
         """
+        init_result = await self._maybe_auto_init(ctx)
+        if init_result is not None:
+            return init_result
+
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
@@ -396,6 +537,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         Returns:
             JSON value + metadata, or "Key not found" / error string.
         """
+        init_result = await self._maybe_auto_init(ctx)
+        if init_result is not None:
+            return init_result
+
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
@@ -429,6 +574,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         Returns:
             "Written, version=N" on success, or "Conflict: current version is N".
         """
+        init_result = await self._maybe_auto_init(ctx)
+        if init_result is not None:
+            return init_result
+
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
@@ -469,6 +618,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         Returns:
             JSON array of key names, or error string.
         """
+        init_result = await self._maybe_auto_init(ctx)
+        if init_result is not None:
+            return init_result
+
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
@@ -490,6 +643,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         Returns:
             Formatted status string with team name, members, and status.
         """
+        init_result = await self._maybe_auto_init(ctx)
+        if init_result is not None:
+            return init_result
+
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
@@ -529,7 +686,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     # Lead-only tools
     # ------------------------------------------------------------------
 
-    async def team_create(
+    async def team_create(  # noqa: PLR0911
         self,
         ctx: Any,
         name: str,
@@ -546,6 +703,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         Returns:
             Success message with team_id, or error string.
         """
+        init_result = await self._maybe_auto_init(ctx)
+        if init_result is not None:
+            return init_result
+
         agent_ctx = self._resolve_agent_context(ctx)
         role: str = agent_ctx.session.metadata.get("team_role", "")
         if role != "lead":
@@ -633,6 +794,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         Returns:
             ``"Team deleted"`` on success, or error string.
         """
+        init_result = await self._maybe_auto_init(ctx)
+        if init_result is not None:
+            return init_result
+
         agent_ctx = self._resolve_agent_context(ctx)
         role: str = agent_ctx.session.metadata.get("team_role", "")
         if role != "lead":
@@ -674,6 +839,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         Returns:
             ``"Blackboard key '{key}' deleted"`` on success, or error string.
         """
+        init_result = await self._maybe_auto_init(ctx)
+        if init_result is not None:
+            return init_result
+
         agent_ctx = self._resolve_agent_context(ctx)
         role: str = agent_ctx.session.metadata.get("team_role", "")
         if role != "lead":
@@ -690,7 +859,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         team_state.delete_blackboard(team_id, key)
         return f"Blackboard key '{key}' deleted"
 
-    async def shutdown_request(self, ctx: Any, member_name: str) -> str:
+    async def shutdown_request(self, ctx: Any, member_name: str) -> str:  # noqa: PLR0911
         """Shut down a specific team member (lead-only).
 
         Args:
@@ -700,6 +869,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         Returns:
             ``"Shutdown completed for {member_name}"`` on success, or error.
         """
+        init_result = await self._maybe_auto_init(ctx)
+        if init_result is not None:
+            return init_result
+
         agent_ctx = self._resolve_agent_context(ctx)
         role: str = agent_ctx.session.metadata.get("team_role", "")
         if role != "lead":
