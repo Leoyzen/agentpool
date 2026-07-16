@@ -6,13 +6,19 @@ All tests use ``tmp_path`` for isolation and are marked ``@pytest.mark.unit``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentpool.capabilities.file_team_state import FileTeamState, start_team_cleanup_task
+
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 pytestmark = pytest.mark.unit
 
@@ -373,9 +379,7 @@ def test_cleanup_expired_teams_removes_old_deleted(
     state_path = tmp_path / "teams" / "old-team" / "state.json"
     state_data = json.loads(state_path.read_text())
     state_data["status"] = "deleted"
-    old_time = (
-        datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=100)
-    ).isoformat()
+    old_time = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=100)).isoformat()
     state_data["ended_at"] = old_time
     state_path.write_text(json.dumps(state_data, default=str))
 
@@ -447,9 +451,7 @@ def test_cleanup_marks_orphaned_active_old(
 
     state_path = tmp_path / "teams" / "stale-team" / "state.json"
     state_data = json.loads(state_path.read_text())
-    old_time = (
-        datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=100)
-    ).isoformat()
+    old_time = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=100)).isoformat()
     state_data["created_at"] = old_time
     state_data["ended_at"] = None
     state_path.write_text(json.dumps(state_data, default=str))
@@ -541,9 +543,7 @@ def test_cleanup_does_not_orphan_with_ended_at(
 
     state_path = tmp_path / "teams" / "ended-team" / "state.json"
     state_data = json.loads(state_path.read_text())
-    old_time = (
-        datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=100)
-    ).isoformat()
+    old_time = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=100)).isoformat()
     state_data["created_at"] = old_time
     state_data["ended_at"] = old_time
     state_data["status"] = "active"
@@ -576,10 +576,8 @@ async def test_start_team_cleanup_task_cancellable(
     assert not task.done()
 
     task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await task
-    except asyncio.CancelledError:
-        pass
     assert task.done()
     assert task.cancelled()
 

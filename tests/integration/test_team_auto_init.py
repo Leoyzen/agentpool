@@ -113,9 +113,7 @@ async def test_auto_init_graceful_degradation(tmp_path: Any) -> None:
     config = _make_auto_init_config(str(tmp_path))
 
     mock_pool = MagicMock()
-    mock_pool.create_session = AsyncMock(
-        side_effect=RuntimeError("Session creation failed")
-    )
+    mock_pool.create_session = AsyncMock(side_effect=RuntimeError("Session creation failed"))
     mock_pool.send_message = AsyncMock(return_value="msg_id")
 
     mock_registry = MagicMock()

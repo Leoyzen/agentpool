@@ -603,9 +603,7 @@ async def test_bounds_max_members_exceeded(tmp_path: Any) -> None:
         member_eligible=["worker", "reviewer", "editor", "writer"],
         base_dir=str(tmp_path),
     )
-    config = config.model_copy(
-        update={"bounds": TeamBounds(max_members=3)}
-    )
+    config = config.model_copy(update={"bounds": TeamBounds(max_members=3)})
     mock_registry = MagicMock()
     mock_registry.exists = MagicMock(return_value=True)
     mock_pool = MagicMock()
@@ -647,9 +645,7 @@ async def test_bounds_max_members_ok(tmp_path: Any) -> None:
         member_eligible=["worker", "reviewer"],
         base_dir=str(tmp_path),
     )
-    config = config.model_copy(
-        update={"bounds": TeamBounds(max_members=3)}
-    )
+    config = config.model_copy(update={"bounds": TeamBounds(max_members=3)})
     mock_registry = MagicMock()
     mock_registry.exists = MagicMock(return_value=True)
     mock_pool = MagicMock()
@@ -761,9 +757,7 @@ async def test_bounds_max_member_turns_exceeded(tmp_path: Any) -> None:
     """
     _init_team(str(tmp_path))
     config = _make_enabled_config(base_dir=str(tmp_path))
-    config = config.model_copy(
-        update={"bounds": TeamBounds(max_member_turns=2)}
-    )
+    config = config.model_copy(update={"bounds": TeamBounds(max_member_turns=2)})
     mock_pool = MagicMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
     ctx = _make_run_context(
@@ -809,6 +803,8 @@ async def test_bounds_blackboard_max_size_exceeded(tmp_path: Any) -> None:
 
     assert "Blackboard write exceeds max size" in result
     assert "MB" in result
+
+
 @pytest.mark.unit
 async def test_task_create_happy_path(tmp_path: Any) -> None:
     """Given: team session with initialized state.
