@@ -896,7 +896,13 @@ class SessionController:
                         ),
                     )
             finally:
-                await gen.aclose()
+                try:
+                    await gen.aclose()
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to close run generator",
+                        exc_info=True,
+                    )
 
     @logfire.instrument("session.start_run_handle")
     def _start_run_handle(

@@ -358,6 +358,22 @@ class NativeTurn(HookAwareTurn, Turn):
                         return
                     raise
 
+                except RuntimeError as exc:
+                    # pydantic-ai's Agent.iter() doesn't properly handle
+                    # GeneratorExit when the generator is closed via
+                    # aclose() (from aclosing() in _execute_turn). It
+                    # catches GeneratorExit internally and doesn't
+                    # re-raise, causing Python to raise
+                    # "coroutine ignored GeneratorExit". We catch this
+                    # specific RuntimeError, save message history, and
+                    # return normally so the generator closes cleanly.
+                    if "ignored GeneratorExit" in str(exc):
+                        if agent_run is not None:
+                            with contextlib.suppress(Exception):
+                                self._message_history = agent_run.all_messages()
+                        return
+                    raise
+
                 except Exception as exc:
                     # If the while loop completed and _message_history is set,
                     # the error is from agentlet.iter() exit (e.g. MCP toolset

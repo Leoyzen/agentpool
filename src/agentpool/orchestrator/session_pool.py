@@ -957,6 +957,11 @@ class SessionPool:
                 except TimeoutError:
                     self.cancel_run(run_handle.run_id)
                     await asyncio.sleep(0.1)
+                except asyncio.CancelledError:
+                    # May be raised by anyio cancel scope cleanup from
+                    # pydantic-ai's Agent.iter() during GeneratorExit.
+                    # The run is already closing — proceed with cleanup.
+                    self.cancel_run(run_handle.run_id)
 
         # Reject all pending elicitation futures so blocked MCP tool calls
         # unblock immediately instead of hanging on a closed session.
@@ -1527,8 +1532,11 @@ class SessionPool:
         Yields:
             Events published to the EventBus for this session.
         """
-        async for event in self._run_stream_run_turn(session_id, *prompts, scope=scope, **kwargs):
-            yield event
+        async with contextlib.aclosing(
+            self._run_stream_run_turn(session_id, *prompts, scope=scope, **kwargs),
+        ) as gen:
+            async for event in gen:
+                yield event
 
     async def _run_stream_run_turn(  # noqa: PLR0915
         self,
@@ -1654,8 +1662,14 @@ class SessionPool:
                 if isinstance(evt, StreamCompleteEvent | RunErrorEvent):
                     break
         finally:
-            await gen.aclose()
-            await self.event_bus.unsubscribe(session_id, bus_queue)
+            # gen.aclose() and subsequent cleanup may raise CancelledError
+            # or RuntimeError from pydantic-ai's anyio cancel scope cleanup
+            # during GeneratorExit. Suppress these so session state is
+            # always cleaned up (run_id cleared, handle removed).
+            with contextlib.suppress(asyncio.CancelledError, RuntimeError):
+                await gen.aclose()
+            with contextlib.suppress(asyncio.CancelledError, RuntimeError):
+                await self.event_bus.unsubscribe(session_id, bus_queue)
             session.current_run_id = None
             self.sessions._runs.pop(run_handle.run_id, None)
 
