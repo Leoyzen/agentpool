@@ -19,10 +19,10 @@ fix-span-instrumentation change:
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Generator
 from typing import Any
 
-import pytest
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
@@ -30,13 +30,15 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 )
 from opentelemetry.sdk.trace.sampling import ALWAYS_ON as ALWAYS_ON_SAMPLER
 from opentelemetry.trace import Tracer
+import pytest
+
 
 type _AttrVal = Any
 
 
 @pytest.fixture
 def in_memory_tracer() -> (
-    Generator[tuple[Tracer, InMemorySpanExporter], None, None]
+    Generator[tuple[Tracer, InMemorySpanExporter]]
 ):
     """Set up an OTel tracer with an in-memory span exporter.
 
@@ -48,7 +50,7 @@ def in_memory_tracer() -> (
     provider = TracerProvider(sampler=ALWAYS_ON_SAMPLER)
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     tracer = provider.get_tracer("test")
-    yield tracer, exporter
+    return tracer, exporter
 
 
 def _span_by_name(spans: tuple[ReadableSpan, ...]) -> dict[str, ReadableSpan]:
@@ -100,16 +102,14 @@ def test_delegation_span_hierarchy(
     with tracer.start_as_current_span(
         "delegation.subagent",
         attributes={"parent_session_id": "parent", "child_agent_name": "child"},
+    ), tracer.start_as_current_span(
+        "orchestration.run_handle.start",
+        attributes={"session_id": "child", "agent_type": "native"},
+    ), tracer.start_as_current_span(
+        "turn.native",
+        attributes={"turn_id": "t1", "session_id": "child"},
     ):
-        with tracer.start_as_current_span(
-            "orchestration.run_handle.start",
-            attributes={"session_id": "child", "agent_type": "native"},
-        ):
-            with tracer.start_as_current_span(
-                "turn.native",
-                attributes={"turn_id": "t1", "session_id": "child"},
-            ):
-                pass  # simulate turn execution
+        pass  # simulate turn execution
 
     spans = _span_by_name(exporter.get_finished_spans())
 
@@ -191,18 +191,18 @@ def test_team_sequential_span_exists(
     in_memory_tracer: tuple[Tracer, InMemorySpanExporter],
 ) -> None:
     """Verify that ``team.execute_sequential`` span exists and nests
-    child member spans."""
+    child member spans.
+    """
     tracer, exporter = in_memory_tracer
 
     with tracer.start_as_current_span(
         "team.execute_sequential",
         attributes={"agent_names": "agent1,agent2,agent3", "mode": "sequential"},
+    ), tracer.start_as_current_span(
+        "agent.run",
+        attributes={"agent_name": "agent1"},
     ):
-        with tracer.start_as_current_span(
-            "agent.run",
-            attributes={"agent_name": "agent1"},
-        ):
-            pass
+        pass
 
     spans = _span_by_name(exporter.get_finished_spans())
 
@@ -261,3 +261,131 @@ def test_background_task_span(
     # Child agent.run span should nest under background_task
     agent_run_span = spans["agent.run"]
     _assert_child_of(agent_run_span, bg_span)
+
+
+# ---------------------------------------------------------------------------
+# Test 5: Nested async generator span leak on aclose()
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.xfail(
+    reason="Documents the pre-fix bug: async for does not close sub-generators "
+    "on GeneratorExit. The fix uses contextlib.aclosing() — see "
+    "test_nested_async_generator_aclosing_fix.",
+    strict=True,
+)
+async def test_nested_async_generator_span_leak(
+    in_memory_tracer: tuple[Tracer, InMemorySpanExporter],
+) -> None:
+    """Reproduce: closing outer async generator leaks inner generator spans.
+
+    When ``RunHandle.start()`` is closed via ``aclose()`` (from
+    ``_consume_run``'s ``finally`` block), the nested async generators
+    ``_execute_turn()`` and ``turn.execute()`` are NOT automatically
+    closed. Their ``safe_span`` ``finally`` blocks never run, so the
+    spans are never ended → never exported → "Missing Span" in SigNoz.
+
+    This test simulates the chain:
+        start() → _execute_turn() → turn.execute()
+
+    Each level uses ``tracer.start_as_current_span()`` (same pattern as
+    ``safe_span``). The outer generator is closed via ``aclose()``
+    after receiving one event. We assert that ALL spans are ended.
+    """
+    tracer, exporter = in_memory_tracer
+
+    async def turn_execute() -> Any:
+        """Innermost generator — simulates NativeTurn.execute()."""
+        with tracer.start_as_current_span("turn.native"):
+            yield "event"
+            # Keep generator alive (real generator does more work)
+            await asyncio.sleep(999)
+
+    async def execute_turn() -> Any:
+        """Middle generator — simulates RunHandle._execute_turn()."""
+        with tracer.start_as_current_span("orchestration.run_handle.execute_turn"):
+            async for event in turn_execute():
+                yield event
+
+    async def start() -> Any:
+        """Outer generator — simulates RunHandle.start()."""
+        with tracer.start_as_current_span("orchestration.run_handle.start"):
+            async for event in execute_turn():
+                yield event
+
+    gen = start()
+    event = await gen.__anext__()
+    assert event == "event"
+
+    # Close the outer generator — simulates _consume_run's finally block
+    await gen.aclose()
+
+    # Force GC to close any leaked generators (non-deterministic, but
+    # helps expose the issue even when CPython's refcounting is fast)
+    import gc
+
+    gc.collect()
+
+    spans = _span_by_name(exporter.get_finished_spans())
+
+    # outer span should be ended — its `with` block exits on GeneratorExit
+    assert "orchestration.run_handle.start" in spans, (
+        "outer span should be ended"
+    )
+
+    # BUG: inner spans are NOT ended because their generators are never
+    # closed via aclose(). The `async for` loop in the outer generator
+    # does NOT close the inner iterator when GeneratorExit is raised.
+    assert "orchestration.run_handle.execute_turn" in spans, (
+        "inner span should be ended — "
+        "BUG: _execute_turn() generator is not closed on aclose()"
+    )
+    assert "turn.native" in spans, (
+        "innermost span should be ended — "
+        "BUG: turn.execute() generator is not closed on aclose()"
+    )
+
+
+@pytest.mark.asyncio
+async def test_nested_async_generator_aclosing_fix(
+    in_memory_tracer: tuple[Tracer, InMemorySpanExporter],
+) -> None:
+    """Verify that ``contextlib.aclosing()`` fixes the span leak.
+
+    When nested async generators are wrapped with ``aclosing()``, the
+    inner generators are properly closed when the outer generator exits,
+    ensuring all spans are ended and exported.
+    """
+    import contextlib
+
+    tracer, exporter = in_memory_tracer
+
+    async def turn_execute() -> Any:
+        with tracer.start_as_current_span("turn.native"):
+            yield "event"
+            await asyncio.sleep(999)
+
+    async def execute_turn() -> Any:
+        with tracer.start_as_current_span("orchestration.run_handle.execute_turn"):
+            async with contextlib.aclosing(turn_execute()) as inner:
+                async for event in inner:
+                    yield event
+
+    async def start() -> Any:
+        with tracer.start_as_current_span("orchestration.run_handle.start"):
+            async with contextlib.aclosing(execute_turn()) as mid:
+                async for event in mid:
+                    yield event
+
+    gen = start()
+    event = await gen.__anext__()
+    assert event == "event"
+
+    await gen.aclose()
+
+    spans = _span_by_name(exporter.get_finished_spans())
+
+    assert "orchestration.run_handle.start" in spans
+    assert "orchestration.run_handle.execute_turn" in spans
+    assert "turn.native" in spans

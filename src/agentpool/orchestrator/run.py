@@ -447,13 +447,16 @@ class RunHandle:
                             if not current_prompts:
                                 continue
 
-                        async for event in self._execute_turn(
-                            agent,
-                            event_bus,
-                            session,
-                            current_prompts,
-                        ):
-                            yield event
+                        async with contextlib.aclosing(
+                            self._execute_turn(
+                                agent,
+                                event_bus,
+                                session,
+                                current_prompts,
+                            ),
+                        ) as turn_gen:
+                            async for event in turn_gen:
+                                yield event
 
                         action = await self._handle_turn_result(event_bus)
                         if action == "continue":
@@ -721,26 +724,27 @@ class RunHandle:
             session_id=self.session_id,
         ):
             try:
-                async for event in turn.execute():
-                    if not self._comm_channel.publishes_to_event_bus:
-                        await event_bus.publish(self.session_id, event)
-                    await self._comm_channel.publish(event)
-                    # Save assistant final message to conversation BEFORE
-                    # yielding. The _consume_run caller closes the generator
-                    # immediately after receiving StreamCompleteEvent, which
-                    # prevents any code after `yield event` from executing.
-                    if isinstance(event, StreamCompleteEvent) and event.message is not None:
-                        agent.conversation.add_chat_messages(
-                            [event.message],
-                            extend_last=True,
-                        )
-                        stream_complete_saved = True
-                    yield event
-                    if isinstance(event, RunErrorEvent):
-                        turn_failed = True
-                        break
-                    if isinstance(event, StreamCompleteEvent):
-                        break
+                async with contextlib.aclosing(turn.execute()) as event_gen:
+                    async for event in event_gen:
+                        if not self._comm_channel.publishes_to_event_bus:
+                            await event_bus.publish(self.session_id, event)
+                        await self._comm_channel.publish(event)
+                        # Save assistant final message to conversation BEFORE
+                        # yielding. The _consume_run caller closes the generator
+                        # immediately after receiving StreamCompleteEvent, which
+                        # prevents any code after `yield event` from executing.
+                        if isinstance(event, StreamCompleteEvent) and event.message is not None:
+                            agent.conversation.add_chat_messages(
+                                [event.message],
+                                extend_last=True,
+                            )
+                            stream_complete_saved = True
+                        yield event
+                        if isinstance(event, RunErrorEvent):
+                            turn_failed = True
+                            break
+                        if isinstance(event, StreamCompleteEvent):
+                            break
             except Exception as e:  # noqa: BLE001
                 turn_failed = True
                 error_event = RunErrorEvent(
