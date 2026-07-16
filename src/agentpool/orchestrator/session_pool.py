@@ -1277,6 +1277,7 @@ class SessionPool:
         *,
         mode: DeliveryMode = DeliveryMode.QUEUE,
         message_id: str | None = None,
+        deps: Any = None,
     ) -> str | None:
         """Send a message to a session using the typed ``DeliveryMode`` enum.
 
@@ -1294,6 +1295,8 @@ class SessionPool:
                 ``QUEUE`` for next-turn queue (default).
             message_id: Optional message ID. Auto-generated as UUID4 if
                 not provided. Returned on success.
+            deps: Optional dependencies to pass to the agent run context
+                (e.g. delegation_depth from BackgroundTaskCapability).
 
         Returns:
             The ``message_id`` string on success (both new runs and
@@ -1316,6 +1319,7 @@ class SessionPool:
             session_id,
             content,
             priority=priority,
+            deps=deps,
             message_id=message_id,
         )
 

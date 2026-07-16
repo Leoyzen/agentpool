@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from agentpool.common_types import PathReference
     from agentpool.host.context import HostContext
     from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+    from agentpool_server.acp_server.commands.skill_commands import ACPSkillBridge
     from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 logger = get_logger(__name__)
@@ -232,6 +233,13 @@ class ACPSession:
         self._update_callbacks: list[Callable[[], None]] = []
         self._remote_commands: list[AvailableCommand] = []
 
+        # Skill bridge: converts SkillCommand → SlashedCommand for command_store
+        from agentpool_server.acp_server.commands.skill_commands import ACPSkillBridge
+
+        self._skill_bridge: ACPSkillBridge = ACPSkillBridge()
+        self._skill_change_task: asyncio.Task[None] | None = None
+        self._skill_register_lock = asyncio.Lock()
+
         # CRITICAL: Initialize requests and acp_env BEFORE agent mutation
         self.notifications = ACPNotifications(client=self.client, session_id=self.session_id)
         self.requests = ACPRequests(client=self.client, session_id=self.session_id)
@@ -270,6 +278,12 @@ class ACPSession:
         self.agent.state_updated.connect(self._on_state_updated)
         # Register global commands from manifest.commands (e.g., static commands like start_eval)
         self._register_manifest_commands()
+
+        # Register pool-level skills as slash commands
+        self._register_skill_commands()
+
+        # Subscribe to dynamic skill changes from ExtensionRegistry
+        self._start_skill_change_watcher()
 
         self.log.info("Created ACP session", current_agent=self.agent.name)
 
@@ -321,6 +335,107 @@ class ACPSession:
             # Schedule update to notify client of new commands
             self._notify_command_update()
             self.log.info("Registered manifest commands", count=cmd_count)
+
+    def _register_skill_commands(self) -> None:
+        """Register pool-level and client-side skills as slash commands.
+
+        Builds SkillCommand objects from the skills registry, feeds them
+        through ACPSkillBridge, and registers the resulting SlashedCommand
+        objects in command_store with replace=True for idempotent updates.
+        Also removes stale commands that are no longer present or invocable.
+        """
+        from agentpool.skills.command import SkillCommand
+
+        ctx = self.host_context
+        skills_registry = ctx.skills_registry
+        skills = skills_registry.list_skills()
+
+        # Build current set of invocable skill commands
+        new_cmds: list[SkillCommand] = []
+        for skill in skills:
+            if not skill.user_invocable:
+                continue
+            new_cmds.append(
+                SkillCommand(
+                    name=skill.name,
+                    description=skill.description,
+                    skill=skill,
+                    skill_uri=f"skill://{skill.name}",
+                )
+            )
+        new_names = {cmd.name for cmd in new_cmds}
+
+        # Remove stale commands no longer in the registry
+        old_names = self._skill_bridge.get_command_names()
+        stale_names = old_names - new_names
+        for stale in stale_names:
+            self._skill_bridge.handle_change(stale, None)
+            self.command_store.unregister_command(stale)
+            self.log.debug("Unregistered stale skill command", name=stale)
+
+        # Add/update commands through the bridge
+        for cmd in new_cmds:
+            self._skill_bridge.handle_change(cmd.name, cmd)
+
+        # Register all bridge commands in command_store with replace=True
+        for slashed_cmd in self._skill_bridge.get_commands():
+            self.command_store.register_command(slashed_cmd, replace=True)
+            self.log.debug(
+                "Registered skill command in command_store",
+                name=slashed_cmd.name,
+            )
+
+        if new_cmds or stale_names:
+            self._notify_command_update()
+            self.log.info(
+                "Synced skill commands",
+                added=len(new_cmds),
+                removed=len(stale_names),
+            )
+
+    def _start_skill_change_watcher(self) -> None:
+        """Start watching for dynamic skill changes from ExtensionRegistry."""
+        ctx = self.host_context
+        if ctx.extension_registry is None:
+            return
+        self._skill_change_task = asyncio.create_task(
+            self._watch_skill_changes(), name=f"skill_watcher_{self.session_id}"
+        )
+
+    async def _watch_skill_changes(self) -> None:
+        """Watch for skill change events and rebuild skill commands.
+
+        Subscribes to ExtensionRegistry.merge_change_streams() for the
+        POOL scope. When a skills_changed event arrives, rebuilds skill
+        commands and sends an update to the client.
+        """
+        from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+
+        ctx = self.host_context
+        if ctx.extension_registry is None:
+            return
+
+        stream = ctx.extension_registry.merge_change_streams(Scope(level=ScopeLevel.POOL))
+        if stream is None:
+            self.log.debug("No skill change streams to watch")
+            return
+
+        try:
+            async for event in stream:
+                if event.kind != "skills_changed":
+                    continue
+                self.log.info("Skill change detected, rebuilding skill commands")
+                try:
+                    async with self._skill_register_lock:
+                        self._register_skill_commands()
+                    await self.send_available_commands_update()
+                except Exception:
+                    self.log.exception("Failed to rebuild skill commands after change")
+        except asyncio.CancelledError:
+            self.log.debug("Skill change watcher cancelled")
+            raise
+        except Exception:
+            self.log.exception("Skill change watcher error")
 
     async def _on_state_updated(self, state: StateUpdate) -> None:
         """Handle state update signal from agent - forward to ACP client."""
@@ -518,6 +633,9 @@ class ACPSession:
             )
             skills = self.host_context.skills_registry.list_skills()
             self.log.info("Collected client-side skills", skill_count=len(skills))
+            # Bridge newly discovered skills into command_store
+            self._register_skill_commands()
+            await self.send_available_commands_update()
         except Exception as e:
             self.log.exception("Failed to discover client-side skills", error=e)
 
@@ -760,6 +878,13 @@ class ACPSession:
     async def close(self) -> None:
         """Close the session and cleanup resources."""
         try:
+            # Cancel skill change watcher
+            if self._skill_change_task is not None:
+                self._skill_change_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await self._skill_change_task
+                self._skill_change_task = None
+
             # Cleanup MCP session-scoped resources (toolset cache, connection
             # pool, ACP connection manager) before tearing down the agent env.
             # Must run BEFORE acp_env.__aexit__ so the agent context is still live.
