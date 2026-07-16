@@ -666,7 +666,7 @@ async def test_complete_event_set_when_start_cancelled() -> None:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(Exception, GeneratorExit):
             await gen.aclose()
 
         # Even on cancel, complete_event should be set

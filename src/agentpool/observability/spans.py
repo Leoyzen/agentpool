@@ -81,7 +81,7 @@ class safe_span:  # noqa: N801
         self._span.__enter__()
         return self._span
 
-    def __exit__(self, *exc_info: object) -> bool:
+    def __exit__(self, *exc_info: object) -> None:
         # Detach context first. This may fail with ValueError when the
         # async generator is closed via GeneratorExit in a different
         # contextvars.Context than where the span was entered.
@@ -93,7 +93,6 @@ class safe_span:  # noqa: N801
         # An unended span is never exported by the OTel exporter,
         # causing "Missing Span" in backends like SigNoz.
         try:
-            self._span._end()  # type: ignore[no-untyped-call]
+            self._span._end()
         except Exception:  # noqa: BLE001
             _log.warning("safe_span _end() failed for %s", self._span.name, exc_info=True)
-        return False

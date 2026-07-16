@@ -35,7 +35,7 @@ from agentpool.orchestrator.session_controller import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 
     from pydantic_ai.messages import ModelMessage
 
@@ -1544,7 +1544,7 @@ class SessionPool:
         *prompts: Any,
         scope: str = "session",
         **kwargs: Any,
-    ) -> AsyncIterator[Any]:
+    ) -> AsyncGenerator[Any]:
         """Handle run_stream via the RunHandle path.
 
         If no active run exists, creates a RunHandle and yields events

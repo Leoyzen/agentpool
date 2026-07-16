@@ -755,9 +755,9 @@ class RunHandle:
                 #   __exit__ run in the finally block, then propagate.
                 # CancelledError: may be raised by anyio cancel scope cleanup
                 #   inside pydantic-ai's Agent.iter() during GeneratorExit
-                #   processing. Convert to GeneratorExit so the generator
-                #   closes cleanly without propagating cancellation to callers.
-                raise GeneratorExit
+                #   processing, or from task.cancel(). Propagate as-is so
+                #   callers can suppress appropriately.
+                raise
             except Exception as e:  # noqa: BLE001
                 turn_failed = True
                 error_event = RunErrorEvent(

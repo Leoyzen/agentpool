@@ -118,7 +118,7 @@ class NativeTurn(HookAwareTurn, Turn):
         """The user prompt for this turn."""
         return str(self._prompts)
 
-    async def execute(self) -> AsyncGenerator[RichAgentStreamEvent[Any]]:  # noqa: PLR0915
+    async def execute(self) -> AsyncGenerator[RichAgentStreamEvent[Any]]:  # noqa: PLR0915, PLR0911
         """Execute one reactive cycle of the pydantic-ai agent loop.
 
         Yields:
