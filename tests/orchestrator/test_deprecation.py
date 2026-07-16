@@ -102,8 +102,6 @@ async def test_receive_request_priority_mapping(session_pool: SessionPool) -> No
         "x",
         mode=DeliveryMode.STEER,
         message_id=None,
-        deps=None,
-        input_provider=None,
     )
 
 
@@ -129,8 +127,6 @@ async def test_receive_request_unknown_priority(session_pool: SessionPool) -> No
         "x",
         mode=DeliveryMode.QUEUE,
         message_id=None,
-        deps=None,
-        input_provider=None,
     )
 
 
@@ -149,23 +145,18 @@ async def test_delegation_service_spawn_subagent_deprecation() -> None:
     host.session_pool.sessions = MagicMock()
     # Make receive_request return a truthy message_id so spawn proceeds.
     host.session_pool.sessions.receive_request = AsyncMock(return_value="mid")
+    child_session = MagicMock()
+    child_session.current_run_id = "run-1"
+    host.session_pool.sessions.get_session = MagicMock(return_value=child_session)
+    run_handle = MagicMock()
 
-    # Mock EventBus for the new EventBus-subscription-based streaming.
-    import asyncio
+    # start() must return an async iterator for `async for` to work.
+    async def _empty_gen() -> Any:
+        return
+        yield  # pragma: no cover -- makes this an async generator
 
-    from agentpool.agents.events import StreamCompleteEvent
-    from agentpool.messaging import ChatMessage
-    from agentpool.orchestrator.event_bus import EventEnvelope
-
-    bus_queue: asyncio.Queue[Any] = asyncio.Queue()
-    bus_queue.put_nowait(
-        EventEnvelope(
-            source_session_id="parent-sess::child::agent1",
-            event=StreamCompleteEvent(message=ChatMessage(content="", role="assistant")),  # type: ignore[arg-type]
-        )
-    )
-    host.session_pool.event_bus.subscribe = AsyncMock(return_value=bus_queue)
-    host.session_pool.event_bus.unsubscribe = AsyncMock()
+    run_handle.start = MagicMock(return_value=_empty_gen())
+    host.session_pool.sessions._runs = {"run-1": run_handle}
 
     service = RunLoopDelegationService(registry, host, "parent-sess")
 

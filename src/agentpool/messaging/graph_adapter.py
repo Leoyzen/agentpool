@@ -6,7 +6,6 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
-import logfire
 from pydantic_graph import GraphBuilder, Step, StepContext
 from pydantic_graph.id_types import NodeID
 
@@ -59,7 +58,6 @@ class MessageNodeStep:
         """
         self.node = node
 
-    @logfire.instrument("graph.step.execute")
     async def _execute(self, ctx: StepContext) -> Any:
         """Step function that runs the wrapped node.
 

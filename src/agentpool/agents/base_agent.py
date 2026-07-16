@@ -30,7 +30,6 @@ from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.common_types import IndividualEventHandler
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory, MessageNode
-from agentpool.observability.spans import safe_span
 from agentpool.prompts.convert import convert_prompts
 from agentpool.utils.inspection import call_with_context
 from agentpool.utils.time_utils import get_now
@@ -1406,67 +1405,62 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             )
 
         token: Token[AgentRunContext | None] | None = None
-        with safe_span("agent.run_stream"):
-            try:
-                token = _current_run_ctx_var.set(run_ctx)
+        try:
+            token = _current_run_ctx_var.set(run_ctx)
 
-                producer_error: BaseException | None = None
+            producer_error: BaseException | None = None
 
-                async def _producer() -> None:
-                    nonlocal producer_error
-                    try:
-                        async for event in self._run_stream_once(
-                            run_ctx,
-                            *prompts,
-                            store_history=store_history,
-                            message_id=message_id,
-                            session_id=effective_session_id,
-                            parent_session_id=parent_session_id,
-                            parent_id=parent_id,
-                            message_history=message_history,
-                            input_provider=input_provider,
-                            wait_for_connections=wait_for_connections,
-                            deps=deps,
-                            event_handlers=event_handlers,
-                            _owns_event_bus=_created_local_bus,
-                            **pydantic_ai_kwargs,
-                        ):
-                            await local_bus.publish(effective_session_id, event)
-                    except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
-                        producer_error = exc
-                    finally:
-                        with anyio.CancelScope(shield=True):
-                            if _created_local_bus:
-                                await local_bus.close_session(effective_session_id)
-                            else:
-                                await local_bus.unsubscribe(effective_session_id, queue)
-
-                producer_task = asyncio.ensure_future(_producer())
+            async def _producer() -> None:
+                nonlocal producer_error
                 try:
-                    consumer_handler = self._get_consumer_handler(event_handlers)
-                    consumer_context = self.get_context(
-                        input_provider=input_provider, run_ctx=run_ctx
-                    )
-
-                    async for envelope in drain_and_merge(queue):
-                        event = envelope.event
-                        with suppress(
-                            ValueError, TypeError, RuntimeError, KeyError, AttributeError
-                        ):
-                            await consumer_handler(consumer_context, event)
-                        yield event
-                        if isinstance(event, StreamCompleteEvent):
-                            break
-                        if isinstance(event, RunErrorEvent):
-                            break
+                    async for event in self._run_stream_once(
+                        run_ctx,
+                        *prompts,
+                        store_history=store_history,
+                        message_id=message_id,
+                        session_id=effective_session_id,
+                        parent_session_id=parent_session_id,
+                        parent_id=parent_id,
+                        message_history=message_history,
+                        input_provider=input_provider,
+                        wait_for_connections=wait_for_connections,
+                        deps=deps,
+                        event_handlers=event_handlers,
+                        _owns_event_bus=_created_local_bus,
+                        **pydantic_ai_kwargs,
+                    ):
+                        await local_bus.publish(effective_session_id, event)
+                except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
+                    producer_error = exc
                 finally:
-                    with suppress(asyncio.CancelledError):
-                        await producer_task
+                    with anyio.CancelScope(shield=True):
+                        if _created_local_bus:
+                            await local_bus.close_session(effective_session_id)
+                        else:
+                            await local_bus.unsubscribe(effective_session_id, queue)
 
-                if producer_error is not None:
-                    raise producer_error
+            producer_task = asyncio.ensure_future(_producer())
+            try:
+                consumer_handler = self._get_consumer_handler(event_handlers)
+                consumer_context = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
+
+                async for envelope in drain_and_merge(queue):
+                    event = envelope.event
+                    with suppress(ValueError, TypeError, RuntimeError, KeyError, AttributeError):
+                        await consumer_handler(consumer_context, event)
+                    yield event
+                    if isinstance(event, StreamCompleteEvent):
+                        break
+                    if isinstance(event, RunErrorEvent):
+                        break
             finally:
-                self._cleanup_after_stream(run_ctx, token)
+                with suppress(asyncio.CancelledError):
+                    await producer_task
+
+            if producer_error is not None:
+                raise producer_error
+        finally:
+            self._cleanup_after_stream(run_ctx, token)
 
     async def _run_stream_once(
         self,

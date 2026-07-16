@@ -8,9 +8,6 @@ from importlib.metadata import version as _version
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast as _cast
 
 import anyio
-import logfire
-from opentelemetry.context import attach, detach
-from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from acp import Agent as ACPAgent
 from acp.schema import (
@@ -676,20 +673,10 @@ class AgentPoolACPAgent(ACPAgent):
 
         # Delegate to SessionPool-backed handler when feature flag is enabled
         if self._protocol_handler is not None:
-            # Extract W3C trace context from _meta to link spans to the client's trace
-            context = TraceContextTextMapPropagator().extract(params.field_meta or {})
-            token = attach(context)
-            try:
-                with logfire.span(
-                    "acp.agent.handle_prompt",
-                    session_id=params.session_id,
-                ):
-                    return await self._protocol_handler.handle_prompt(
-                        params.session_id,
-                        params.prompt,
-                    )
-            finally:
-                detach(token)
+            return await self._protocol_handler.handle_prompt(
+                params.session_id,
+                params.prompt,
+            )
         raise RuntimeError("No protocol handler configured for prompt processing")
 
     async def close_session(self, params: CloseSessionRequest) -> CloseSessionResponse:

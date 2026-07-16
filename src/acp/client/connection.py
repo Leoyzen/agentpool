@@ -6,7 +6,6 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Self
 
 import logfire
-from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from acp.agent.protocol import Agent
 from acp.connection import Connection
@@ -190,15 +189,6 @@ class ClientSideConnection(Agent):
     async def prompt(self, params: PromptRequest) -> PromptResponse:
         # Don't exclude_defaults here - the 'type' field in content blocks has a default
         # value but is required for discriminated unions to work
-
-        # Inject W3C trace context into _meta for distributed tracing
-        carrier: dict[str, str] = {}
-        TraceContextTextMapPropagator().inject(carrier)
-        if carrier:
-            existing_meta = params.field_meta or {}
-            existing_meta.update(carrier)
-            params.field_meta = existing_meta
-
         dct = params.model_dump(mode="json", by_alias=True, exclude_none=True)
         resp = await self._conn.send_request("session/prompt", dct)
         return PromptResponse.model_validate(resp)
