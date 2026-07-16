@@ -19,7 +19,6 @@ from xml.sax.saxutils import escape
 from anyenv.async_run import as_generated
 import anyio
 from jinja2 import BaseLoader, Environment
-import logfire
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.events import SpawnSessionStart, SubAgentEvent
@@ -840,7 +839,6 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
         )
         return [rendered]
 
-    @logfire.instrument("team.execute_parallel")
     async def _execute_parallel(
         self,
         *prompts: PromptCompatible | None,
@@ -919,7 +917,6 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
         finally:
             await self._close_scoped_team_nodes(child_session_ids)
 
-    @logfire.instrument("team.execute_sequential")
     async def _execute_sequential(
         self,
         *prompts: PromptCompatible | None,

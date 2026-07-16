@@ -13,7 +13,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
-import logfire
 from pydantic_graph.graph_builder import EndMarker, GraphRun, GraphTask
 
 from agentpool.log import get_logger
@@ -84,7 +83,6 @@ class SignalEmittingGraphRun[StateT, DepsT, OutputT]:
     def __aiter__(self) -> SignalEmittingGraphRun[StateT, DepsT, OutputT]:
         return self
 
-    @logfire.instrument("graph.signal.next")
     async def __anext__(self) -> EndMarker | Sequence[GraphTask]:
         """Advance the graph run and emit signals at step boundaries.
 

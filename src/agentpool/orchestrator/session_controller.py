@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Final
 import uuid
 
 import anyio
-import logfire
 
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
@@ -25,7 +24,6 @@ from agentpool.agents.events import (
 )
 from agentpool.lifecycle import RunState
 from agentpool.log import get_logger
-from agentpool.observability.spans import safe_span
 from agentpool.orchestrator.run import RunHandle, inject_cancelled_tool_results
 from agentpool.orchestrator.runtime_registry import RuntimeAgentRegistry
 from agentpool.sessions.models import PendingDeferredCall, SessionData
@@ -852,53 +850,39 @@ class SessionController:
         the EventBus so that subscribers (e.g. background_output in
         BackgroundTaskCapability) are unblocked instead of waiting forever.
 
-        Uses ``safe_span(...)`` instead of ``@logfire.instrument`` or raw
-        ``with logfire.span(...)`` because this method is invoked via
-        ``asyncio.create_task()`` from ``_start_run_handle()``. Logfire's
-        ``@handle_internal_errors`` on ``LogfireSpan.__exit__`` can swallow
-        ``ValueError`` from ``_detach()`` and skip ``_end()``, leaving the
-        span unended and unexported. ``safe_span`` calls ``_detach()`` and
-        ``_end()`` separately to prevent this.
-
         Args:
             run_handle: The run handle whose ``start()`` to consume.
             initial_prompt: The first user prompt.
         """
-        with safe_span(
-            "session.consume_run",
-            session_id=run_handle.session_id,
-            run_id=run_handle.run_id,
-        ):
-            gen = run_handle.start(initial_prompt)
-            try:
-                async for event in gen:
-                    if isinstance(event, StreamCompleteEvent | RunErrorEvent):
-                        break
-            except Exception as exc:
-                logger.exception(
-                    "RunHandle.start() raised for run_id=%s session_id=%s",
-                    run_handle.run_id,
+        gen = run_handle.start(initial_prompt)
+        try:
+            async for event in gen:
+                if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                    break
+        except Exception as exc:
+            logger.exception(
+                "RunHandle.start() raised for run_id=%s session_id=%s",
+                run_handle.run_id,
+                run_handle.session_id,
+            )
+            error_event = RunErrorEvent(
+                message=f"{type(exc).__name__}: {exc}",
+                run_id=run_handle.run_id,
+                agent_name=run_handle.agent_type,
+            )
+            if self._event_bus is not None:
+                await self._event_bus.publish(run_handle.session_id, error_event)
+                await self._event_bus.publish(
                     run_handle.session_id,
+                    RunFailedEvent(
+                        run_id=run_handle.run_id,
+                        session_id=run_handle.session_id,
+                        exception=exc,
+                    ),
                 )
-                error_event = RunErrorEvent(
-                    message=f"{type(exc).__name__}: {exc}",
-                    run_id=run_handle.run_id,
-                    agent_name=run_handle.agent_type,
-                )
-                if self._event_bus is not None:
-                    await self._event_bus.publish(run_handle.session_id, error_event)
-                    await self._event_bus.publish(
-                        run_handle.session_id,
-                        RunFailedEvent(
-                            run_id=run_handle.run_id,
-                            session_id=run_handle.session_id,
-                            exception=exc,
-                        ),
-                    )
-            finally:
-                await gen.aclose()
+        finally:
+            await gen.aclose()
 
-    @logfire.instrument("session.start_run_handle")
     def _start_run_handle(
         self,
         session: SessionState,
@@ -1023,7 +1007,6 @@ class SessionController:
         task.add_done_callback(_on_run_done)
         return mid
 
-    @logfire.instrument("session.route_message")
     async def _route_message(
         self,
         session: SessionState,
@@ -1089,7 +1072,6 @@ class SessionController:
                 return run.followup(content, message_id=message_id)
         return None
 
-    @logfire.instrument("session.receive_request")
     async def receive_request(
         self,
         session_id: str,

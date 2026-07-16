@@ -16,13 +16,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 import warnings
 
-import logfire
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.tools import AgentDepsT, RunContext
 from pydantic_ai.toolsets import AgentToolset, FunctionToolset
 
 from agentpool.capabilities.delegation import AgentNotFoundError, DelegationService
-from agentpool.observability.spans import safe_span
 
 
 if TYPE_CHECKING:
@@ -105,24 +103,11 @@ class SubagentCapability(AbstractCapability[AgentDepsT]):
         # Preferred path: use session_pool.run_agent() (D24).
         session_pool = agent_ctx.host.session_pool
         if session_pool is not None:
-            with safe_span(
-                "delegation.subagent",
+            return await session_pool.run_agent(
+                name,
+                prompt,
                 parent_session_id=agent_ctx.session.session_id,
-                child_agent_name=name,
-            ):
-                from agentpool.observability.trace import get_trace_id
-
-                logfire.info(
-                    "Delegating to subagent",
-                    trace_id=get_trace_id(),
-                    parent_session_id=agent_ctx.session.session_id,
-                    child_agent_name=name,
-                )
-                return await session_pool.run_agent(
-                    name,
-                    prompt,
-                    parent_session_id=agent_ctx.session.session_id,
-                )
+            )
         # Fallback: old DelegationService path (deprecated).
         warnings.warn(
             "SubagentCapability.spawn_subagent() fell back to the "

@@ -68,7 +68,6 @@ async def test_send_message_queue_mode(session_pool: SessionPool) -> None:
         "sess-1",
         "hello",
         priority="when_idle",
-        deps=None,
         message_id=None,
     )
 
@@ -91,7 +90,6 @@ async def test_send_message_steer_mode(session_pool: SessionPool) -> None:
         "sess-1",
         "steer me",
         priority="asap",
-        deps=None,
         message_id=None,
     )
 
@@ -118,7 +116,6 @@ async def test_send_message_with_message_id(session_pool: SessionPool) -> None:
         "sess-1",
         "hello",
         priority="when_idle",
-        deps=None,
         message_id="custom-id",
     )
 
@@ -142,7 +139,6 @@ async def test_send_message_list_content(session_pool: SessionPool) -> None:
         "sess-1",
         content,
         priority="when_idle",
-        deps=None,
         message_id=None,
     )
 
@@ -174,7 +170,6 @@ async def test_send_message_default_mode_is_queue(session_pool: SessionPool) -> 
         "sess-1",
         "hello",
         priority="when_idle",
-        deps=None,
         message_id=None,
     )
 
