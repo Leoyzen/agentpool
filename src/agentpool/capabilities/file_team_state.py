@@ -348,6 +348,8 @@ class FileTeamState:
         self._locks_dir(team_id).mkdir(parents=True, exist_ok=True)
         key_path = self._validate_key(key, bb_dir)
         lock_path = self._locks_dir(team_id) / f"{key}.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        key_path.parent.mkdir(parents=True, exist_ok=True)
         lock = FileLock(str(lock_path))
         with lock:
             current: dict[str, Any] | None = None

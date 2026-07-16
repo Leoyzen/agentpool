@@ -227,6 +227,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         from agentpool.lifecycle.types import DeliveryMode
 
+        created_sessions: list[str] = []
         try:
             for member in members:
                 member_session_id = str(uuid.uuid4())
@@ -238,6 +239,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     team_role="member",
                     team_member_name=member.name,
                 )
+                created_sessions.append(member_session_id)
                 team_state.register_member(
                     team_id,
                     member.name,
@@ -253,6 +255,13 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     mode=DeliveryMode.QUEUE,
                 )
         except Exception as exc:  # noqa: BLE001
+            import contextlib
+
+            for sid in created_sessions:
+                with contextlib.suppress(Exception):
+                    await session_pool.close_session(sid)
+            with contextlib.suppress(Exception):
+                team_state.cleanup(team_id)
             try:
                 import logfire
             except ImportError:
@@ -743,30 +752,42 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         from agentpool.lifecycle.types import DeliveryMode
 
-        for member in members:
-            member_session_id = str(uuid.uuid4())
-            await session_pool.create_session(
-                member_session_id,
-                agent_name=member["agent"],
-                parent_session_id=lead_session_id,
-                team_id=team_id,
-                team_role="member",
-                team_member_name=member["name"],
-            )
-            team_state.register_member(
-                team_id,
-                member["name"],
-                member_session_id,
-            )
-            await session_pool.send_message(
-                member_session_id,
-                self._config.protocol_template.format(
-                    team_name=name,
-                    role="member",
-                    member_name=member["name"],
-                ),
-                mode=DeliveryMode.QUEUE,
-            )
+        created_sessions: list[str] = []
+        try:
+            for member in members:
+                member_session_id = str(uuid.uuid4())
+                await session_pool.create_session(
+                    member_session_id,
+                    agent_name=member["agent"],
+                    parent_session_id=lead_session_id,
+                    team_id=team_id,
+                    team_role="member",
+                    team_member_name=member["name"],
+                )
+                created_sessions.append(member_session_id)
+                team_state.register_member(
+                    team_id,
+                    member["name"],
+                    member_session_id,
+                )
+                await session_pool.send_message(
+                    member_session_id,
+                    self._config.protocol_template.format(
+                        team_name=name,
+                        role="member",
+                        member_name=member["name"],
+                    ),
+                    mode=DeliveryMode.QUEUE,
+                )
+        except Exception as exc:  # noqa: BLE001
+            import contextlib
+
+            for sid in created_sessions:
+                with contextlib.suppress(Exception):
+                    await session_pool.close_session(sid)
+            with contextlib.suppress(Exception):
+                team_state.cleanup(team_id)
+            return f"Failed to create team: {exc}"
 
         return f"Team '{name}' created with {len(members)} members. team_id={team_id}"
 
