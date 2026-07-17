@@ -107,14 +107,17 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     def _resolve_agent_context(self, ctx: RunContext[Any]) -> AgentContext:
         """Extract AgentContext from a pydantic-ai RunContext.
 
+        In production, PydanticAI wraps our AgentContext inside
+        ``agents.context.AgentContext.data``. This method unwraps it.
+
         Args:
             ctx: The RunContext passed to a tool function.
 
         Returns:
-            The AgentContext from ``ctx.deps``.
+            The AgentContext from ``ctx.deps`` (or ``ctx.deps.data``).
 
         Raises:
-            RuntimeError: If ``ctx.deps`` is None.
+            RuntimeError: If ``ctx.deps`` is None or AgentContext is not found.
         """
         from agentpool.capabilities.agent_context import AgentContext
 
@@ -122,8 +125,18 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if deps is None:
             msg = "TeamCommCapability requires AgentContext as deps. Got: None"
             raise RuntimeError(msg)
-        # In production, deps is always AgentContext. In tests, deps may
-        # be a MagicMock(spec=AgentContext). Both work via duck typing.
+        # In production, deps is agents.context.AgentContext (PydanticAI runtime
+        # context). Our capabilities.agent_context.AgentContext is stored at
+        # deps.data, set by NativeTurn (turn.py: agent_deps.data = run_ctx.deps).
+        from agentpool.agents.context import AgentContext as RuntimeAgentContext
+
+        if isinstance(deps, RuntimeAgentContext):
+            inner = deps.data
+            if inner is None:
+                msg = "TeamCommCapability requires AgentContext at deps.data. Got: None"
+                raise RuntimeError(msg)
+            return cast(AgentContext, inner)
+        # In tests, deps may be directly our AgentContext or a MagicMock(spec=AgentContext).
         if isinstance(deps, AgentContext):
             return deps
         return cast(AgentContext, deps)

@@ -1431,6 +1431,50 @@ async def test_team_create_uses_config_default_members(tmp_path: Any) -> None:
 
 
 @pytest.mark.unit
+async def test_resolve_agent_context_from_runtime_context(tmp_path: Any) -> None:
+    """Test that _resolve_agent_context correctly extracts AgentContext from
+    the PydanticAI runtime AgentContext (agents.context.AgentContext).
+
+    In production, PydanticAI wraps our AgentContext inside agents.context.AgentContext.data.
+    The tool functions receive ctx.deps = agents.context.AgentContext, and our
+    capabilities.agent_context.AgentContext is at ctx.deps.data.
+    """
+    from agentpool.agents.context import AgentContext as RuntimeAgentContext
+    from agentpool.capabilities.agent_context import AgentContext as CapAgentContext
+    from agentpool.orchestrator.session_controller import SessionState
+
+    # Create our capabilities AgentContext (the frozen dataclass).
+    session = SessionState(session_id="test-session-123", agent_name="test_agent")
+    session.metadata = {"team_id": "test-team"}
+    cap_ctx = CapAgentContext(
+        agent_registry=MagicMock(),
+        delegation=MagicMock(),
+        session=session,
+        scope=MagicMock(),
+        host=MagicMock(),
+    )
+
+    # Create the runtime AgentContext (what PydanticAI actually passes to tools).
+    # NodeContext requires a `node` field; AgentContext extends it with `data`.
+    runtime_ctx = RuntimeAgentContext(node=MagicMock())
+    runtime_ctx.data = cap_ctx
+
+    # Create a mock RunContext with deps=runtime_ctx.
+    ctx = MagicMock()
+    ctx.deps = runtime_ctx
+
+    # Create TeamCommCapability.
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "test_agent")
+
+    # This should NOT raise 'AgentContext object has no attribute session'.
+    result = cap._resolve_agent_context(ctx)
+    assert result is cap_ctx
+    assert result.session is not None
+    assert result.session.metadata.get("team_id") == "test-team"
+
+
+@pytest.mark.unit
 async def test_team_create_empty_members_no_defaults(tmp_path: Any) -> None:
     """Given: lead agent with defaults=None, team_create called with empty members.
 
