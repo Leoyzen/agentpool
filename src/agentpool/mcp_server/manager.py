@@ -393,6 +393,12 @@ class MCPManager:
 
         Closes both global cached toolsets and per-session toolset caches
         to ensure no persistent connections are leaked during pool shutdown.
+
+        Each ``__aexit__`` call is wrapped in a timeout
+        (``_MCP_CLEANUP_TIMEOUT``) to prevent hangs when HTTP proxies
+        don't promptly close TCP connections.  Unexpected exceptions are
+        logged but never re-raised so that one failing toolset doesn't
+        block cleanup of the rest.
         """
         # Close global cached MCPToolset instances.
         # MCPToolset has no aclose() — must use __aexit__ for cleanup.
@@ -400,7 +406,13 @@ class MCPManager:
         # (MCPToolset.__aexit__ raises ValueError if __aenter__ wasn't called).
         for toolset in self._toolset_cache.values():
             with contextlib.suppress(ValueError):
-                await toolset.__aexit__(None, None, None)
+                try:
+                    async with asyncio.timeout(_MCP_CLEANUP_TIMEOUT):
+                        await toolset.__aexit__(None, None, None)
+                except TimeoutError:
+                    logger.warning("MCP toolset cleanup timed out (global)")
+                except Exception:
+                    logger.exception("Error cleaning up toolset (global)")
         self._toolset_cache.clear()
 
         # Close per-session toolset caches to avoid leaking persistent
@@ -408,7 +420,13 @@ class MCPManager:
         for ctx in self._session_contexts.values():
             for toolset in ctx.toolset_cache.values():
                 with contextlib.suppress(ValueError):
-                    await toolset.__aexit__(None, None, None)
+                    try:
+                        async with asyncio.timeout(_MCP_CLEANUP_TIMEOUT):
+                            await toolset.__aexit__(None, None, None)
+                    except TimeoutError:
+                        logger.warning("MCP toolset cleanup timed out (session)")
+                    except Exception:
+                        logger.exception("Error cleaning up toolset (session)")
             ctx.toolset_cache.clear()
 
         await self._global_pool.shutdown_all()
@@ -702,6 +720,11 @@ class MCPManager:
                         except TimeoutError:
                             logger.warning(
                                 "MCP toolset cleanup timed out",
+                                session_id=session_id,
+                            )
+                        except Exception:
+                            logger.exception(
+                                "Error cleaning up toolset",
                                 session_id=session_id,
                             )
                 ctx.toolset_cache.clear()
