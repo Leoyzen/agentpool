@@ -699,6 +699,15 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         # keeps the lead session alive for follow-ups).
         self._schedule_member_cleanup(agent_ctx, lead_session_id, list(created_sessions))
 
+        team_dir = team_state._team_dir(team_id)
+        logger.info(
+            "Team created — state at %s",
+            str(team_dir),
+            team_id=team_id,
+            team_name=name,
+            member_count=len(members),
+        )
+
         return f"Team '{name}' created with {len(members)} members. team_id={team_id}"
 
     @staticmethod
