@@ -60,20 +60,11 @@ def _make_assistant_chat_message_with_dict_thinking(
 ) -> ChatMessage[str]:
     """Create a ChatMessage where model messages are dicts (as loaded from storage)."""
     timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
-    # Simulate the dict representation that pydantic TypeAdapter produces
     dict_response = {
         "kind": "response",
         "parts": [
-            {
-                "part_kind": "thinking",
-                "content": thinking_content,
-                "id": None,
-            },
-            {
-                "part_kind": "text",
-                "content": text_content,
-                "id": None,
-            },
+            {"part_kind": "thinking", "content": thinking_content, "id": None},
+            {"part_kind": "text", "content": text_content, "id": None},
         ],
         "usage": {"input_tokens": 0, "output_tokens": 0},
         "model_name": "test-model",
@@ -94,13 +85,12 @@ def _make_assistant_chat_message_with_dict_thinking(
 
 
 # =============================================================================
-# chat_message_to_opencode: ThinkingPart → ReasoningPart
+# chat_message_to_opencode: ThinkingPart -> ReasoningPart
 # =============================================================================
 
 
 def test_chat_message_to_opencode_preserves_thinking_part():
-    """Given a ChatMessage with ThinkingPart, When converted to OpenCode,
-    Then a ReasoningPart should be present with the thinking content."""
+    """Test that ThinkingPart converts to ReasoningPart with correct content."""
     msg = _make_assistant_chat_message_with_thinking(
         thinking_content="I need to consider the trade-offs.",
         text_content="The answer is 42.",
@@ -116,8 +106,7 @@ def test_chat_message_to_opencode_preserves_thinking_part():
 
 
 def test_chat_message_to_opencode_preserves_text_and_thinking():
-    """Given a ChatMessage with both ThinkingPart and TextPart, When converted,
-    Then both ReasoningPart and TextPart should be present."""
+    """Test that both ReasoningPart and TextPart are present after conversion."""
     msg = _make_assistant_chat_message_with_thinking()
     result = chat_message_to_opencode(msg, session_id="s1")
 
@@ -133,8 +122,7 @@ def test_chat_message_to_opencode_preserves_text_and_thinking():
 
 
 def test_chat_message_to_opencode_dict_path_preserves_thinking():
-    """Given a ChatMessage with dict model messages (from storage),
-    When converted to OpenCode, Then thinking content should be preserved."""
+    """Test that dict path (from storage) preserves thinking content."""
     msg = _make_assistant_chat_message_with_dict_thinking(
         thinking_content="Dict reasoning here.",
         text_content="Dict text here.",
@@ -150,8 +138,7 @@ def test_chat_message_to_opencode_dict_path_preserves_thinking():
 
 
 def test_chat_message_to_opencode_no_thinking_no_reasoning_part():
-    """Given a ChatMessage without ThinkingPart, When converted,
-    Then no ReasoningPart should be present."""
+    """Test that no ReasoningPart is created without ThinkingPart."""
     timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
     model_response = ModelResponse(
         parts=[PydanticTextPart(content="Just text, no thinking.")],
@@ -178,26 +165,20 @@ def test_chat_message_to_opencode_no_thinking_no_reasoning_part():
 
 
 # =============================================================================
-# opencode_to_chat_message: ReasoningPart → ThinkingPart
+# opencode_to_chat_message: ReasoningPart -> ThinkingPart
 # =============================================================================
 
 
 def test_opencode_to_chat_message_preserves_reasoning_part():
-    """Given a MessageWithParts with ReasoningPart, When converted to ChatMessage,
-    Then a ThinkingPart should be present in the model messages."""
-    # First create a MessageWithParts with reasoning via the forward converter
+    """Test that ReasoningPart converts back to ThinkingPart."""
     msg = _make_assistant_chat_message_with_thinking()
     opencode_msg = chat_message_to_opencode(msg, session_id="s1")
-
-    # Now convert back
     restored = opencode_to_chat_message(opencode_msg)
 
     thinking_parts: list[PydanticThinkingPart] = []
     for model_msg in restored.messages:
         if isinstance(model_msg, ModelResponse):
-            for part in model_msg.parts:
-                if isinstance(part, PydanticThinkingPart):
-                    thinking_parts.append(part)
+            thinking_parts.extend(p for p in model_msg.parts if isinstance(p, PydanticThinkingPart))
 
     assert len(thinking_parts) == 1, (
         f"Expected 1 ThinkingPart in restored message, got {len(thinking_parts)}"
@@ -206,13 +187,12 @@ def test_opencode_to_chat_message_preserves_reasoning_part():
 
 
 # =============================================================================
-# Round-trip: ChatMessage → OpenCode → ChatMessage
+# Round-trip: ChatMessage -> OpenCode -> ChatMessage
 # =============================================================================
 
 
 def test_thinking_content_survives_round_trip():
-    """Given thinking content in a ChatMessage, When round-tripped through
-    OpenCode converters, Then the thinking content should be preserved."""
+    """Test that thinking content survives a full round-trip through converters."""
     original_thinking = "Round trip thinking content."
     original_text = "Round trip text content."
 
@@ -223,13 +203,12 @@ def test_thinking_content_survives_round_trip():
     opencode_msg = chat_message_to_opencode(msg, session_id="s1")
     restored = opencode_to_chat_message(opencode_msg)
 
-    # Check thinking survived
     restored_thinking: list[str] = []
     for model_msg in restored.messages:
         if isinstance(model_msg, ModelResponse):
-            for part in model_msg.parts:
-                if isinstance(part, PydanticThinkingPart):
-                    restored_thinking.append(part.content)
+            restored_thinking.extend(
+                p.content for p in model_msg.parts if isinstance(p, PydanticThinkingPart)
+            )
 
     assert len(restored_thinking) == 1
     assert restored_thinking[0] == original_thinking
