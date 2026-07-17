@@ -234,7 +234,8 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
                 )
             else:
                 reasoning_parts.extend(
-                    part.content for part in model_msg.parts
+                    part.content
+                    for part in model_msg.parts
                     if isinstance(part, ThinkingPart) and part.content
                 )
 

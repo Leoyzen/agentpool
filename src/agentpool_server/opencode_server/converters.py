@@ -303,9 +303,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
                                 message_id=message_id,
                                 session_id=session_id,
                                 text=content,
-                                time=TimeStartEndOptional(
-                                    start=created_ms, end=completed_ms
-                                ),
+                                time=TimeStartEndOptional(start=created_ms, end=completed_ms),
                             )
                             result.parts.append(reasoning_part)
                 continue
@@ -317,9 +315,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
                             message_id=message_id,
                             session_id=session_id,
                             text=content,
-                            time=TimeStartEndOptional(
-                                start=created_ms, end=completed_ms
-                            ),
+                            time=TimeStartEndOptional(start=created_ms, end=completed_ms),
                         )
                         result.parts.append(reasoning_part)
                     case PydanticTextPart(content=content):
@@ -494,9 +490,7 @@ def opencode_to_chat_message(  # noqa: PLR0915
         for part in msg.parts:
             match part:
                 case ReasoningPart(text=text, id=part_id):
-                    response_parts.append(
-                        PydanticThinkingPart(content=text, id=part_id)
-                    )
+                    response_parts.append(PydanticThinkingPart(content=text, id=part_id))
                 case TextPart(text=text, id=part_id):
                     response_parts.append(PydanticTextPart(content=text, id=part_id))
                 case ToolPart(tool=tool_name, call_id=call_id, state=state):
