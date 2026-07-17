@@ -436,6 +436,7 @@ async def test_child_get_capabilities_finds_inherited_acp_configs() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.real_mcp
 async def test_function_model_discovers_mcp_tools_through_acp_transport() -> None:
     """FunctionModel discovers MCP tools through the real ACP transport.
 

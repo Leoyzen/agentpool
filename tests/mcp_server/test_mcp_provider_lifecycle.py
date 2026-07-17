@@ -727,6 +727,7 @@ class TestFullLifecycle:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.real_mcp
 class TestRealToolCallsViaSnapshot:
     """Exercise real tool calls through the session_id-based capability path.
 
