@@ -290,6 +290,7 @@ class TestEditFileSnapshots:
         assert messages == json_snapshot
 
 
+@pytest.mark.real_mcp
 class TestMCPToolSnapshots:
     """Snapshot tests for MCP tool calls."""
 

@@ -118,7 +118,7 @@ def _mock_session_pool(agent: Agent, run_ctx: AgentRunContext) -> None:
     session_pool = MagicMock()
     session_pool.sessions = session_controller
     session_pool.get_run.return_value = run_handle
-    session_pool.receive_request = AsyncMock()
+    session_pool.send_message = AsyncMock()
     # Mock steer/followup delegation via SessionPool
     session_pool.steer = AsyncMock(return_value=True)
     session_pool.followup = AsyncMock(return_value=True)

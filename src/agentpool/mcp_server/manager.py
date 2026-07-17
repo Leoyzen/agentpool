@@ -39,6 +39,12 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+#: Per-step timeout (seconds) for MCP cleanup operations in ``cleanup_session()``.
+#: Each toolset ``__aexit__``, connection pool cleanup, and ACP MCP cleanup
+#: is wrapped in ``asyncio.timeout(_MCP_CLEANUP_TIMEOUT)`` to prevent hangs
+#: when an HTTP proxy goes silent during teardown.
+_MCP_CLEANUP_TIMEOUT: float = 30.0
+
 # ContextVar for the current session's InputProvider, set by the run loop
 # before agent execution.  Read by the PydanticAI MCP elicitation callback
 # so that agent-level MCP servers can delegate to ACPInputProvider.
@@ -383,15 +389,46 @@ class MCPManager:
         return False
 
     async def disconnect_all(self) -> None:
-        """Disconnect all MCP providers without clearing the servers list."""
-        # Close cached MCPToolset instances before clearing the cache.
+        """Disconnect all MCP providers without clearing the servers list.
+
+        Closes both global cached toolsets and per-session toolset caches
+        to ensure no persistent connections are leaked during pool shutdown.
+
+        Each ``__aexit__`` call is wrapped in a timeout
+        (``_MCP_CLEANUP_TIMEOUT``) to prevent hangs when HTTP proxies
+        don't promptly close TCP connections.  Unexpected exceptions are
+        logged but never re-raised so that one failing toolset doesn't
+        block cleanup of the rest.
+        """
+        # Close global cached MCPToolset instances.
         # MCPToolset has no aclose() — must use __aexit__ for cleanup.
         # Guard against toolsets that were constructed but never entered
         # (MCPToolset.__aexit__ raises ValueError if __aenter__ wasn't called).
         for toolset in self._toolset_cache.values():
             with contextlib.suppress(ValueError):
-                await toolset.__aexit__(None, None, None)
+                try:
+                    async with asyncio.timeout(_MCP_CLEANUP_TIMEOUT):
+                        await toolset.__aexit__(None, None, None)
+                except TimeoutError:
+                    logger.warning("MCP toolset cleanup timed out (global)")
+                except Exception:
+                    logger.exception("Error cleaning up toolset (global)")
         self._toolset_cache.clear()
+
+        # Close per-session toolset caches to avoid leaking persistent
+        # connections from abandoned sessions.
+        for ctx in self._session_contexts.values():
+            for toolset in ctx.toolset_cache.values():
+                with contextlib.suppress(ValueError):
+                    try:
+                        async with asyncio.timeout(_MCP_CLEANUP_TIMEOUT):
+                            await toolset.__aexit__(None, None, None)
+                    except TimeoutError:
+                        logger.warning("MCP toolset cleanup timed out (session)")
+                    except Exception:
+                        logger.exception("Error cleaning up toolset (session)")
+            ctx.toolset_cache.clear()
+
         await self._global_pool.shutdown_all()
         await self.cleanup()
         self.exit_stack = AsyncExitStack()
@@ -490,7 +527,7 @@ class MCPManager:
                 case _:
                     return f"mcp://{server.type}/{server.client_id}"
 
-        def _make_capability(
+        async def _make_capability(
             server: BaseMCPServerConfig,
             transport: Any,
             toolset_cache: dict[str, Any],
@@ -498,14 +535,29 @@ class MCPManager:
             """Create or reuse an MCPToolset and wrap it in an MCP capability.
 
             On first call for a given ``client_id``, a new ``MCPToolset`` is
-            constructed and stored in ``toolset_cache``.  Subsequent calls
-            reuse the cached instance, ensuring one underlying connection per
-            server config.  The ``MCP`` wrapper is always fresh.
+            constructed, eagerly entered via ``__aenter__`` to hold a
+            persistent reference, and stored in ``toolset_cache``.  This
+            ensures the MCP connection survives across turns: pydantic-ai's
+            per-turn ``iter()`` enter/exit goes 1→2→1 instead of 0→1→0,
+            preventing connection teardown and cache clearing between turns.
+
+            Subsequent calls reuse the cached, already-entered toolset.
+            The ``MCP`` wrapper is always fresh.
+
+            If ``__aenter__`` fails, the toolset is NOT cached so that
+            subsequent calls can retry the connection.
             """
             client_id = server.client_id
             toolset = toolset_cache.get(client_id)
             if toolset is None:
                 toolset = MCPToolset(client=transport, **_make_kwargs(server))
+                try:
+                    await toolset.__aenter__()
+                except Exception:
+                    # Eager enter failed — don't cache a broken toolset.
+                    # Subsequent calls can retry.
+                    del toolset  # Help GC
+                    raise
                 toolset_cache[client_id] = toolset
 
             return MCP(
@@ -526,7 +578,7 @@ class MCPManager:
                 if not server.enabled or isinstance(server, AcpMCPServerConfig):
                     continue
                 transport = await self._global_pool.get_transport(server)
-                capabilities.append(_make_capability(server, transport, toolset_cache))
+                capabilities.append(await _make_capability(server, transport, toolset_cache))
 
         async def _process_session_configs(
             snap: McpConfigSnapshot,
@@ -552,7 +604,7 @@ class MCPManager:
                         continue
                 else:
                     transport = await connection_pool.get_transport(server, entry.skill_name)
-                capabilities.append(_make_capability(server, transport, toolset_cache))
+                capabilities.append(await _make_capability(server, transport, toolset_cache))
 
         ctx = self._session_contexts.get(session_id) if session_id is not None else None
 
@@ -575,7 +627,7 @@ class MCPManager:
                 if not server.enabled or isinstance(server, AcpMCPServerConfig):
                     continue
                 transport = await self._global_pool.get_transport(server)
-                capabilities.append(_make_capability(server, transport, self._toolset_cache))
+                capabilities.append(await _make_capability(server, transport, self._toolset_cache))
 
         return capabilities
 
@@ -662,12 +714,30 @@ class MCPManager:
                 # (MCPToolset.__aexit__ raises ValueError if __aenter__ wasn't called).
                 for toolset in ctx.toolset_cache.values():
                     with contextlib.suppress(ValueError):
-                        await toolset.__aexit__(None, None, None)
+                        try:
+                            async with asyncio.timeout(_MCP_CLEANUP_TIMEOUT):
+                                await toolset.__aexit__(None, None, None)
+                        except TimeoutError:
+                            logger.warning(
+                                "MCP toolset cleanup timed out",
+                                session_id=session_id,
+                            )
+                        except Exception:
+                            logger.exception(
+                                "Error cleaning up toolset",
+                                session_id=session_id,
+                            )
                 ctx.toolset_cache.clear()
 
                 if ctx.connection_pool is not None:
                     try:
-                        await ctx.connection_pool.cleanup()
+                        async with asyncio.timeout(_MCP_CLEANUP_TIMEOUT):
+                            await ctx.connection_pool.cleanup()
+                    except TimeoutError:
+                        logger.warning(
+                            "MCP connection pool cleanup timed out",
+                            session_id=session_id,
+                        )
                     except Exception:
                         logger.exception(
                             "Error cleaning up session connection pool",
@@ -676,7 +746,13 @@ class MCPManager:
 
                 if self._acp_mcp_manager is not None:
                     try:
-                        await self._acp_mcp_manager.cleanup_session(session_id)
+                        async with asyncio.timeout(_MCP_CLEANUP_TIMEOUT):
+                            await self._acp_mcp_manager.cleanup_session(session_id)
+                    except TimeoutError:
+                        logger.warning(
+                            "ACP MCP cleanup timed out",
+                            session_id=session_id,
+                        )
                     except Exception:
                         logger.exception(
                             "Error cleaning up ACP MCP connections",

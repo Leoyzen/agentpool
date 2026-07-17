@@ -104,8 +104,8 @@ async def test_background_task_inject_prompt_wakes_lead_agent(
     assert "session_pool" in source, (
         "inject_prompt must reference session_pool to delegate when no run context exists"
     )
-    assert "receive_request" in source or "inject_prompt" in source, (
-        "inject_prompt must call receive_request or session_pool.inject_prompt "
+    assert "send_message" in source or "inject_prompt" in source, (
+        "inject_prompt must call send_message or session_pool.inject_prompt "
         "to trigger auto-resume when no active run context is available"
     )
     assert "fire_and_forget" in source, (

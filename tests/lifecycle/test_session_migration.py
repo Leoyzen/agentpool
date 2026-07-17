@@ -38,6 +38,7 @@ from agentpool.orchestrator.session_controller import (
 )
 from agentpool.orchestrator.session_pool import SessionPool
 from agentpool.orchestrator.turn import Turn
+from tests._controller_helpers import send_via_controller
 
 
 pytestmark = pytest.mark.unit
@@ -420,7 +421,7 @@ async def test_receive_request_closed_session_returns_none() -> None:
     controller._sessions["s1"] = session
     controller._session_agents["s1"] = agent
 
-    result = await controller.receive_request("s1", "hello")
+    result = await send_via_controller(controller, "s1", "hello")
     assert result is None
 
 

@@ -68,6 +68,11 @@ async def test_websocket_disconnect_during_run() -> None:
     session_manager = ACPSessionManager(pool=mock_pool)
     mock_pool.session_pool = Mock()
     mock_pool.session_pool.sessions = controller
+
+    async def _close_via_controller(sid: str) -> None:
+        await controller.close_session(sid)
+
+    mock_pool.session_pool.close_session = _close_via_controller
     session_manager._acp_sessions[session_id] = mock_acp_session
     session_manager._connection_sessions[connection_id] = {session_id}
 

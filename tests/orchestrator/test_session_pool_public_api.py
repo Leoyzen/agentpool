@@ -443,7 +443,7 @@ async def test_wait_for_completion_wrapper(session_pool: SessionPool) -> None:
     result = await session_pool.wait_for_completion("sess-1")
 
     assert result == "sess-1"
-    session_pool.sessions.wait_for_completion.assert_awaited_once_with("sess-1", timeout=None)
+    session_pool.sessions.wait_for_completion.assert_awaited_once_with("sess-1", timeout=300)
 
 
 @pytest.mark.anyio

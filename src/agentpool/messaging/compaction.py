@@ -713,9 +713,10 @@ def _extract_text_content(msg: ModelMessage) -> str:
                     ):
                         parts_text.append(str(content))
                     case UserPromptPart(content=list() as content):
+                        from agentpool.agents.native_agent.helpers import _summarize_content_block
+
                         for item in content:
-                            if isinstance(item, str):
-                                parts_text.append(item)  # noqa: PERF401
+                            parts_text.append(_summarize_content_block(item))  # noqa: PERF401
 
     return "\n".join(parts_text)
 

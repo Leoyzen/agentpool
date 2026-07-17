@@ -329,7 +329,7 @@ def _make_pool_mock(agent: Any) -> Mock:  # noqa: PLR0915
         _task = asyncio.create_task(_background_run())  # noqa: RUF006
         return message_id or "msg_test_run"
 
-    session_pool.receive_request = _mock_receive_request
+    session_pool.send_message = _mock_receive_request
 
     # Mock wait_for_completion to actually wait for the background run
     async def _mock_wait_for_completion(

@@ -198,10 +198,10 @@ def mock_pool(  # noqa: PLR0915
     # absorbs saves and load_session returns None.
     pool.sessions = Mock()
     pool.sessions.store = Mock()
-    pool.sessions.store.save = storage_manager.save_session
-    pool.sessions.store.delete = storage_manager.delete_session
-    pool.sessions.store.load = storage_manager.load_session
-    pool.sessions.store.list_sessions = AsyncMock(return_value=[])
+    pool.sessions.store.save_session = storage_manager.save_session
+    pool.sessions.store.delete_session = storage_manager.delete_session
+    pool.sessions.store.load_session = storage_manager.load_session
+    pool.sessions.store.list_session_ids = AsyncMock(return_value=[])
     # Mirror the same store on session_pool for the new access path
     pool.session_pool = Mock()
 
@@ -243,18 +243,19 @@ def mock_pool(  # noqa: PLR0915
     pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(
         return_value=_mock_session_agent
     )
+    pool.session_pool.sessions.get_session_agent = Mock(return_value=_mock_session_agent)
     pool.session_pool.sessions.get_or_create_session = AsyncMock(return_value=(Mock(), True))
     _run_handle = Mock()
     _run_handle.complete_event = Mock()
     _run_handle.complete_event.wait = AsyncMock()
-    pool.session_pool.receive_request = AsyncMock(return_value=_run_handle)
+    pool.session_pool.send_message = AsyncMock(return_value=_run_handle)
     pool.session_pool.wait_for_completion = AsyncMock(return_value="test-session")
     pool.session_pool.event_bus = _make_functional_event_bus()
     pool.session_pool.sessions.store = Mock()
-    pool.session_pool.sessions.store.save = storage_manager.save_session
-    pool.session_pool.sessions.store.delete = storage_manager.delete_session
-    pool.session_pool.sessions.store.load = storage_manager.load_session
-    pool.session_pool.sessions.store.list_sessions = AsyncMock(return_value=[])
+    pool.session_pool.sessions.store.save_session = storage_manager.save_session
+    pool.session_pool.sessions.store.delete_session = storage_manager.delete_session
+    pool.session_pool.sessions.store.load_session = storage_manager.load_session
+    pool.session_pool.sessions.store.list_session_ids = AsyncMock(return_value=[])
 
     # Message history API mocks (used by share/revert/fork routes)
     # Use an in-memory store so get_messages_for_session / append_message_to_session
@@ -375,8 +376,8 @@ def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
     state.session_pool_integration.create_session = AsyncMock(return_value=Mock())
     state.session_pool_integration.get_session_status = AsyncMock(return_value=None)
 
-    # route_message delegates to session_pool.receive_request so spies/tests
-    # that monitor receive_request call counts work correctly.
+    # route_message delegates to session_pool.send_message so spies/tests
+    # that monitor send_message call counts work correctly.
     async def _mock_route_message(
         session_id: str,
         content: Any,
@@ -384,17 +385,19 @@ def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
         input_provider: Any | None = None,
         **kwargs: Any,
     ) -> Any:
+        from agentpool.lifecycle.types import DeliveryMode
+
         sp = state.pool.session_pool  # type: ignore[union-attr]
         if sp is None:
             return None
         # Ensure session exists (idempotent)
         await sp.sessions.get_or_create_session(session_id)
-        return await sp.receive_request(
+        delivery_mode = DeliveryMode.STEER if priority == "asap" else DeliveryMode.QUEUE
+        return await sp.send_message(
             session_id=session_id,
             content=content,
-            priority=priority,
+            mode=delivery_mode,
             input_provider=input_provider,
-            **kwargs,
         )
 
     state.session_pool_integration.route_message = AsyncMock(side_effect=_mock_route_message)

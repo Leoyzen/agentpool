@@ -14,6 +14,7 @@ from pydantic_ai.messages import (
 )
 import pytest
 
+from agentpool.lifecycle.types import DeliveryMode
 from agentpool.orchestrator.core import EventBus
 from agentpool_server.opencode_server.session_pool_integration import OpenCodeSessionPoolIntegration
 
@@ -37,8 +38,8 @@ class MockSessionPool:
         self.event_bus = EventBus()
         self.sessions = MockSessions()
 
-    async def receive_request(
-        self, session_id, content, priority="when_idle", input_provider=None, **kwargs
+    async def send_message(
+        self, session_id, content, mode=DeliveryMode.QUEUE, input_provider=None, **kwargs
     ):
         return None
 
@@ -166,7 +167,7 @@ async def test_integration_route_message_starts_consumer_for_existing_session():
     await integration.route_message(
         session_id=session_id,
         content="test prompt",
-        priority="when_idle",
+        mode=DeliveryMode.QUEUE,
     )
 
     # Give consumer loop time to subscribe

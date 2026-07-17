@@ -183,7 +183,7 @@ def slow_mock_agent():  # noqa: PLR0915
         _task = asyncio.create_task(_do_run())  # noqa: RUF006
         return message_id or "msg_test_run"
 
-    pool.session_pool.receive_request = AsyncMock(side_effect=_mock_receive_request)
+    pool.session_pool.send_message = AsyncMock(side_effect=_mock_receive_request)
 
     # Mock wait_for_completion to wait for the run to actually finish
     async def _mock_wait_for_completion(

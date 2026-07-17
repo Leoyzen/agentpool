@@ -90,9 +90,21 @@ def _create_transport(config: BaseMCPServerConfig) -> ClientTransport:
             env = config.get_env_vars()
             return StdioTransport(command=command, args=args, env=env)
         case SSEMCPServerConfig(url=url, headers=headers):
-            return SSETransport(url=str(url), headers=headers)
+            from agentpool_config.mcp_server import make_mcp_httpx_client_factory
+
+            return SSETransport(
+                url=str(url),
+                headers=headers,
+                httpx_client_factory=make_mcp_httpx_client_factory(),
+            )
         case StreamableHTTPMCPServerConfig(url=url, headers=headers):
-            return StreamableHttpTransport(url=str(url), headers=headers)
+            from agentpool_config.mcp_server import make_mcp_httpx_client_factory
+
+            return StreamableHttpTransport(
+                url=str(url),
+                headers=headers,
+                httpx_client_factory=make_mcp_httpx_client_factory(),
+            )
         case AcpMCPServerConfig():
             raise NotImplementedError(
                 "ACP-transport MCP servers must use add_transport(). "

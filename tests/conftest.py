@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.models.test import TestModel
 import pytest
 import yamling
 
 from agentpool import Agent, AgentPool, AgentsManifest, NativeAgentConfig
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 TEST_RESPONSE = "I am a test response"
@@ -30,6 +35,46 @@ def vision_model() -> str:
 @pytest.fixture(scope="session", autouse=True)
 def unset_anthropic_api_key():
     os.environ["ANTHROPIC_API_KEY"] = ""
+
+
+@pytest.fixture(autouse=True)
+def _patch_toolset_lifecycle(request: pytest.FixtureRequest) -> AsyncIterator[None]:
+    """Patch MCPToolset.__aenter__/__aexit__ to avoid real MCP connections.
+
+    ``get_capabilities()`` eagerly enters MCPToolset instances on cache miss
+    (issue #175 fix). Without this patch, every test calling
+    ``get_capabilities()`` would try to spawn subprocesses or open network
+    connections.
+
+    The fake implementations track ``_running_count`` exactly like the real
+    pydantic-ai MCPToolset, so tests can verify reference-counting behaviour
+    without real connections.
+
+    Tests that need the real MCPToolset can opt out with
+    ``@pytest.mark.real_mcp``.
+    """
+    if request.node.get_closest_marker("real_mcp"):
+        yield
+        return
+
+    original_aenter = MCPToolset.__aenter__
+    original_aexit = MCPToolset.__aexit__
+
+    async def fake_aenter(self):
+        self._running_count += 1
+        return self
+
+    async def fake_aexit(self, exc_type, exc_val, exc_tb):
+        if self._running_count > 0:
+            self._running_count -= 1
+
+    MCPToolset.__aenter__ = fake_aenter  # type: ignore[assignment]
+    MCPToolset.__aexit__ = fake_aexit  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        MCPToolset.__aenter__ = original_aenter  # type: ignore[assignment]
+        MCPToolset.__aexit__ = original_aexit  # type: ignore[assignment]
 
 
 @pytest.fixture(scope="session", autouse=True)

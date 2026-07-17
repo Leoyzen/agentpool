@@ -68,13 +68,13 @@ async def test_prompt_async_inherits_session_bound_agent(
     )
 
     receive_calls: list[dict] = []
-    original_receive_request = server_state.pool.session_pool.receive_request
+    original_receive_request = server_state.pool.session_pool.send_message
 
     async def spy_receive_request(*args, **kwargs):
         receive_calls.append(kwargs)
         return await original_receive_request(*args, **kwargs)
 
-    server_state.pool.session_pool.receive_request = spy_receive_request
+    server_state.pool.session_pool.send_message = spy_receive_request
 
     response = await async_client.post(
         f"/session/{session_id}/prompt_async",

@@ -280,7 +280,7 @@ async def test_child_session_inherits_acp_configs_and_transports() -> None:
       ``copy_pre_created_transports()``).
     """
     from agentpool.orchestrator.session_pool import SessionPool
-    from agentpool.sessions.store import MemorySessionStore
+    from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
     mcp_manager, _acp_manager, _base_agent, acp_agent, _acp_session, mock_client = (
         _build_test_fixture("test3-parent")
@@ -291,7 +291,7 @@ async def test_child_session_inherits_acp_configs_and_transports() -> None:
         agents={"test_agent": NativeAgentConfig(model="test")},
     )
     pool = AgentPool(manifest)
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
     await session_pool.start()
@@ -372,7 +372,7 @@ async def test_child_get_capabilities_finds_inherited_acp_configs() -> None:
     child's MCPManager should return a non-empty list.
     """
     from agentpool.orchestrator.session_pool import SessionPool
-    from agentpool.sessions.store import MemorySessionStore
+    from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
     mcp_manager, _acp_manager, _base_agent, acp_agent, _acp_session, mock_client = (
         _build_test_fixture("test4-parent")
@@ -382,7 +382,7 @@ async def test_child_get_capabilities_finds_inherited_acp_configs() -> None:
         agents={"test_agent": NativeAgentConfig(model="test")},
     )
     pool = AgentPool(manifest)
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
     await session_pool.start()
@@ -436,6 +436,7 @@ async def test_child_get_capabilities_finds_inherited_acp_configs() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.real_mcp
 async def test_function_model_discovers_mcp_tools_through_acp_transport() -> None:
     """FunctionModel discovers MCP tools through the real ACP transport.
 

@@ -469,7 +469,7 @@ def _make_mock_state_with_session_agent(
     run_handle.outcome = RunOutcome.COMPLETED
     run_handle.complete_event = Mock()
     run_handle.complete_event.wait = AsyncMock(return_value=None)
-    session_pool.receive_request = AsyncMock(return_value=run_handle)
+    session_pool.send_message = AsyncMock(return_value=run_handle)
 
     # EventBus mock
     session_pool.event_bus = Mock()

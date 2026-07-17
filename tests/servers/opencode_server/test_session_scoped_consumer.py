@@ -63,10 +63,10 @@ def mock_agent_pool() -> Mock:
 def mock_session_store() -> Mock:
     """Create a mock SessionStore."""
     store = Mock()
-    store.save = AsyncMock(return_value=None)
-    store.delete = AsyncMock(return_value=None)
-    store.load = AsyncMock(return_value=None)
-    store.list_sessions = AsyncMock(return_value=[])
+    store.save_session = AsyncMock(return_value=None)
+    store.delete_session = AsyncMock(return_value=None)
+    store.load_session = AsyncMock(return_value=None)
+    store.list_session_ids = AsyncMock(return_value=[])
     return store
 
 

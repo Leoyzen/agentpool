@@ -7,6 +7,7 @@ load_session calls.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -40,9 +41,9 @@ def mock_agent() -> MagicMock:
 def mock_session_store() -> MagicMock:
     """Create a mock SessionStore for use with ACPSessionManager."""
     store = MagicMock()
-    store.load = AsyncMock()
-    store.save = AsyncMock()
-    store.list_sessions = AsyncMock(return_value=[])
+    store.load_session = AsyncMock()
+    store.save_session = AsyncMock()
+    store.list_session_ids = AsyncMock(return_value=[])
     return store
 
 
@@ -57,6 +58,7 @@ def session_manager(mock_agent: MagicMock, mock_session_store: MagicMock) -> ACP
     session_pool.sessions = MagicMock()
     session_pool.sessions.store = mock_session_store
     session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=mock_agent)
+    session_pool._get_resume_lock = AsyncMock(return_value=asyncio.Lock())
 
     pool = MagicMock()
     pool.manifest.agents = {"test_agent": mock_agent}
@@ -113,7 +115,7 @@ async def test_create_then_resume_preserves_conversation_history(
     get_or_create_session_agent() when creating per-session agents.
     """
     # Arrange: store session data
-    session_manager.session_store.load = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
+    session_manager.session_store.load_session = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
 
     with patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls:
         mock_session_instance = MagicMock()
@@ -151,7 +153,7 @@ async def test_resume_preserves_created_at_timestamp(
 ) -> None:
     """Resume must NOT overwrite created_at via session_store.save."""
     # Arrange
-    session_manager.session_store.load = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
+    session_manager.session_store.load_session = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
 
     with patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls:
         mock_session_instance = MagicMock()
@@ -170,7 +172,7 @@ async def test_resume_preserves_created_at_timestamp(
 
     # Assert: session_store.save should NOT be called during resume
     # (created_at must remain unchanged from when the session was first created)
-    session_manager.session_store.save.assert_not_awaited()  # type: ignore[union-attr]
+    session_manager.session_store.save_session.assert_not_awaited()  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +188,7 @@ async def test_resume_preserves_status_field(
 ) -> None:
     """Resume must NOT overwrite status='checkpointed' via session_store.save."""
     # Arrange
-    session_manager.session_store.load = AsyncMock(return_value=checkpointed_session_data)  # type: ignore[union-attr]
+    session_manager.session_store.load_session = AsyncMock(return_value=checkpointed_session_data)  # type: ignore[union-attr]
 
     with patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls:
         mock_session_instance = MagicMock()
@@ -204,7 +206,7 @@ async def test_resume_preserves_status_field(
         )
 
     # Assert: session_store.save should NOT be called (status preserved)
-    session_manager.session_store.save.assert_not_awaited()  # type: ignore[union-attr]
+    session_manager.session_store.save_session.assert_not_awaited()  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +222,7 @@ async def test_resume_with_mcp_servers_initializes_connections(
 ) -> None:
     """Resume with mcp_servers must initialize MCP connections."""
     # Arrange
-    session_manager.session_store.load = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
+    session_manager.session_store.load_session = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
     mock_mcp_server = MagicMock()
 
     with patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls:
@@ -278,8 +280,8 @@ async def test_load_session_path_preserves_stored_data(
 
     # Mock session_store property (read-only) to verify it's not called
     session_store = MagicMock()
-    session_store.save = AsyncMock()
-    session_store.load = AsyncMock(return_value=known_session_data)
+    session_store.save_session = AsyncMock()
+    session_store.load_session = AsyncMock(return_value=known_session_data)
 
     request = LoadSessionRequest(session_id="sess-abc-123", cwd="/tmp/test")
 
@@ -292,7 +294,7 @@ async def test_load_session_path_preserves_stored_data(
         response = await acp_agent.load_session(request)
 
     # Assert: session_store.save must NOT be called (data preserved)
-    session_store.save.assert_not_awaited()
+    session_store.save_session.assert_not_awaited()
     # Response should be a valid LoadSessionResponse
     from acp.schema import LoadSessionResponse
 
@@ -316,7 +318,7 @@ async def test_no_duplicate_load_session_call_on_resume(
     get_or_create_session_agent(), not by resume_session directly.
     """
     # Arrange
-    session_manager.session_store.load = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
+    session_manager.session_store.load_session = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
 
     with patch("agentpool_server.acp_server.session_manager.ACPSession") as mock_session_cls:
         mock_session_instance = MagicMock()

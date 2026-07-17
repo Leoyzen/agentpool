@@ -8,7 +8,7 @@ import pytest
 
 from agentpool.agents.context import AgentContext
 from agentpool.sessions import SessionData
-from agentpool.sessions.store import MemorySessionStore
+from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
 
 @pytest.fixture
@@ -24,8 +24,8 @@ def mock_node() -> MagicMock:
     return node
 
 
-def _make_mock_session_pool(store: MemorySessionStore) -> MagicMock:
-    """Create a mock session_pool that persists via MemorySessionStore."""
+def _make_mock_session_pool(store: MemoryStorageProvider) -> MagicMock:
+    """Create a mock session_pool that persists via MemoryStorageProvider."""
     session_pool = MagicMock()
 
     async def mock_create_session(
@@ -38,7 +38,7 @@ def _make_mock_session_pool(store: MemorySessionStore) -> MagicMock:
     ) -> MagicMock:
         parent_data = None
         if parent_session_id:
-            parent_data = await store.load(parent_session_id)
+            parent_data = await store.load_session(parent_session_id)
         session_data = SessionData(
             session_id=session_id,
             agent_name=agent_name,
@@ -47,10 +47,36 @@ def _make_mock_session_pool(store: MemorySessionStore) -> MagicMock:
             project_id=parent_data.project_id if parent_data else None,
             cwd=parent_data.cwd if parent_data else None,
         )
-        await store.save(session_data)
+        await store.save_session(session_data)
         return MagicMock(session_id=session_id)
 
+    async def mock_create_child_session(
+        parent_session_id: str,
+        agent_name: str,
+        agent_type: str = "native",
+        *,
+        session_id: str | None = None,
+        **kwargs: object,
+    ) -> MagicMock:
+        from agentpool.utils.identifiers import generate_session_id
+
+        child_sid = session_id or generate_session_id()
+        parent_data = None
+        if parent_session_id:
+            parent_data = await store.load_session(parent_session_id)
+        session_data = SessionData(
+            session_id=child_sid,
+            agent_name=agent_name,
+            parent_id=parent_session_id,
+            agent_type=agent_type,
+            project_id=parent_data.project_id if parent_data else None,
+            cwd=parent_data.cwd if parent_data else None,
+        )
+        await store.save_session(session_data)
+        return MagicMock(session_id=child_sid)
+
     session_pool.create_session = mock_create_session
+    session_pool.create_child_session = mock_create_child_session
     # get_or_create_session_agent is async; must use AsyncMock so await works
     session_pool.sessions.get_or_create_session_agent = AsyncMock()
     return session_pool
@@ -58,7 +84,7 @@ def _make_mock_session_pool(store: MemorySessionStore) -> MagicMock:
 
 async def test_create_child_session_with_pool(mock_node: MagicMock) -> None:
     """When pool is available, create_child_session delegates to session_pool."""
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     mock_pool = MagicMock()
     mock_pool.manifest.name = "test_pool"
     mock_pool.session_pool = _make_mock_session_pool(store)
@@ -77,15 +103,14 @@ async def test_create_child_session_with_pool(mock_node: MagicMock) -> None:
 
     ctx = AgentContext(node=mock_node)
 
-    async with store:
-        await store.save(parent)
-        child_id = await ctx.create_child_session(
-            agent_name="coder",
-            agent_type="native",
-        )
+    await store.save_session(parent)
+    child_id = await ctx.create_child_session(
+        agent_name="coder",
+        agent_type="native",
+    )
 
     # Verify child was persisted with correct fields
-    child = await store.load(child_id)
+    child = await store.load_session(child_id)
     assert child is not None
     assert child.parent_id == "ses_parent_abc123"
     assert child.agent_name == "coder"
@@ -96,7 +121,7 @@ async def test_create_child_session_with_pool(mock_node: MagicMock) -> None:
 
 async def test_create_child_session_with_explicit_parent(mock_node: MagicMock) -> None:
     """When parent_session_id is provided explicitly, it overrides node.session_id."""
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     mock_pool = MagicMock()
     mock_pool.manifest.name = "test_pool"
     mock_pool.session_pool = _make_mock_session_pool(store)
@@ -115,15 +140,14 @@ async def test_create_child_session_with_explicit_parent(mock_node: MagicMock) -
 
     ctx = AgentContext(node=mock_node)
 
-    async with store:
-        await store.save(other_parent)
-        child_id = await ctx.create_child_session(
-            agent_name="analyst",
-            agent_type="acp",
-            parent_session_id="ses_other_parent",
-        )
+    await store.save_session(other_parent)
+    child_id = await ctx.create_child_session(
+        agent_name="analyst",
+        agent_type="acp",
+        parent_session_id="ses_other_parent",
+    )
 
-    child = await store.load(child_id)
+    child = await store.load_session(child_id)
     assert child is not None
     assert child.parent_id == "ses_other_parent"
     assert child.agent_name == "analyst"
@@ -154,7 +178,7 @@ async def test_create_child_session_no_node_session_id(mock_node: MagicMock) -> 
     """When node has no session_id and no explicit parent, fallback to generate_session_id."""
     mock_node.session_id = None
     mock_node._events.session_id = None
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     mock_pool = MagicMock()
     mock_pool.manifest.name = "test_pool"
     mock_pool.session_pool = _make_mock_session_pool(store)

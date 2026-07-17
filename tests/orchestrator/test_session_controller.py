@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agentpool.lifecycle.types import DeliveryMode
 from agentpool.orchestrator.core import (
     DEFAULT_SESSION_TTL_SECONDS,
     EventBus,
@@ -19,6 +20,7 @@ from agentpool.orchestrator.core import (
     SessionState,
 )
 from agentpool.orchestrator.run import RunHandle
+from tests._controller_helpers import send_via_controller
 
 
 pytestmark = pytest.mark.unit
@@ -508,7 +510,7 @@ async def test_steer_followup_inside_request_lock() -> None:
     fake_run._run_state = MagicMock()  # Not RunState.DONE
     controller._runs["fake-run-id"] = fake_run
 
-    await controller.receive_request(session_id, "steer me", priority="asap")
+    await send_via_controller(controller, session_id, "steer me", mode=DeliveryMode.STEER)
 
     assert lock_was_held_during_steer, (
         "steer() was called outside _request_lock — TOCTOU race possible"

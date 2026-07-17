@@ -3,14 +3,69 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Annotated, Literal, Self
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 
+import httpx
 from pydantic import ConfigDict, Field, HttpUrl, model_validator
 from schemez import Schema
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from fastmcp.client import ClientTransport
+
+
+#: Read timeout (seconds) for MCP HTTP/SSE clients. When the remote server
+#: or an intermediate proxy goes silent, the read timeout fires and raises
+#: ``httpx.ReadTimeout``, unblocking the task group and preventing deadlock.
+_MCP_HTTP_READ_TIMEOUT: float = 60.0
+
+
+def make_mcp_httpx_client_factory(
+    read_timeout: float = _MCP_HTTP_READ_TIMEOUT,
+) -> Callable[..., httpx.AsyncClient]:
+    """Create an httpx client factory for MCP HTTP/SSE transports.
+
+    The factory is compatible with the ``httpx_client_factory`` parameter
+    of ``StreamableHttpTransport`` and ``SSETransport``. It wraps the MCP
+    library's ``create_mcp_http_client`` but overrides the read timeout
+    to ``read_timeout`` seconds (default 60s), which is shorter than the
+    MCP default of 300s. This ensures that a silent proxy or unresponsive
+    server triggers a ``ReadTimeout`` rather than hanging indefinitely.
+
+    Args:
+        read_timeout: Read timeout in seconds.
+
+    Returns:
+        A factory callable suitable for ``httpx_client_factory=``.
+    """
+
+    def factory(
+        headers: dict[str, str] | None = None,
+        timeout: httpx.Timeout | None = None,
+        auth: httpx.Auth | None = None,
+        **kwargs: Any,
+    ) -> httpx.AsyncClient:
+        if timeout is None:
+            timeout = httpx.Timeout(30.0, read=read_timeout)
+        else:
+            timeout = httpx.Timeout(
+                timeout.connect,
+                read=read_timeout,
+                write=timeout.write,
+                pool=timeout.pool,
+            )
+        # fastmcp passes follow_redirects=True via kwargs; don't duplicate it.
+        kwargs.setdefault("follow_redirects", True)
+        return httpx.AsyncClient(
+            headers=headers,
+            timeout=timeout,
+            auth=auth,
+            **kwargs,
+        )
+
+    return factory
 
 
 class MCPServerAuthSettings(Schema):
@@ -324,7 +379,11 @@ class SSEMCPServerConfig(BaseMCPServerConfig):
         """
         from fastmcp.client import SSETransport
 
-        return SSETransport(url=str(self.url), headers=self.headers)
+        return SSETransport(
+            url=str(self.url),
+            headers=self.headers,
+            httpx_client_factory=make_mcp_httpx_client_factory(),
+        )
 
 
 class StreamableHTTPMCPServerConfig(BaseMCPServerConfig):
@@ -390,7 +449,11 @@ class StreamableHTTPMCPServerConfig(BaseMCPServerConfig):
         """
         from fastmcp.client import StreamableHttpTransport
 
-        return StreamableHttpTransport(url=str(self.url), headers=self.headers)
+        return StreamableHttpTransport(
+            url=str(self.url),
+            headers=self.headers,
+            httpx_client_factory=make_mcp_httpx_client_factory(),
+        )
 
 
 class AcpMCPServerConfig(BaseMCPServerConfig):

@@ -122,8 +122,10 @@ async def test_resume_uses_session_manager_resume_when_not_active(
     # Not active
     mocked_acp_agent.session_manager.get_session.return_value = None
     # But exists in store
-    mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
-    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+    mocked_acp_agent.session_manager.session_store.load_session = AsyncMock(
+        return_value=session_data
+    )
+    mocked_acp_agent.session_manager.session_store.list_session_ids = AsyncMock(
         return_value=["resume-test-session"]
     )
     mocked_acp_agent.session_manager.resume_session.return_value = mock_session
@@ -148,8 +150,10 @@ async def test_resume_starts_event_bus_consumer(mocked_acp_agent):
     mock_session.cwd = "/tmp/resume"
 
     mocked_acp_agent.session_manager.get_session.return_value = None
-    mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
-    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+    mocked_acp_agent.session_manager.session_store.load_session = AsyncMock(
+        return_value=session_data
+    )
+    mocked_acp_agent.session_manager.session_store.list_session_ids = AsyncMock(
         return_value=["resume-test-session"]
     )
     mocked_acp_agent.session_manager.resume_session.return_value = mock_session
@@ -176,8 +180,10 @@ async def test_resume_does_not_replay_history(mocked_acp_agent):
     mock_session.notifications.replay = AsyncMock()
 
     mocked_acp_agent.session_manager.get_session.return_value = None
-    mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
-    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+    mocked_acp_agent.session_manager.session_store.load_session = AsyncMock(
+        return_value=session_data
+    )
+    mocked_acp_agent.session_manager.session_store.list_session_ids = AsyncMock(
         return_value=["resume-test-session"]
     )
     mocked_acp_agent.session_manager.resume_session.return_value = mock_session
@@ -195,8 +201,8 @@ async def test_resume_nonexistent_session_returns_error(mocked_acp_agent):
     # Not active
     mocked_acp_agent.session_manager.get_session.return_value = None
     # Not in store either
-    mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=None)
-    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(return_value=[])
+    mocked_acp_agent.session_manager.session_store.load_session = AsyncMock(return_value=None)
+    mocked_acp_agent.session_manager.session_store.list_session_ids = AsyncMock(return_value=[])
 
     request = ResumeSessionRequest(session_id="nonexistent-session", cwd="/tmp")
     response = await mocked_acp_agent.resume_session(request)
@@ -244,8 +250,10 @@ async def test_resume_loads_agent_state(mocked_acp_agent):
     mock_session.cwd = "/tmp/resume"
 
     mocked_acp_agent.session_manager.get_session.return_value = None
-    mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
-    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+    mocked_acp_agent.session_manager.session_store.load_session = AsyncMock(
+        return_value=session_data
+    )
+    mocked_acp_agent.session_manager.session_store.list_session_ids = AsyncMock(
         return_value=["resume-test-session"]
     )
     mocked_acp_agent.session_manager.resume_session.return_value = mock_session
@@ -274,7 +282,7 @@ async def test_handle_prompt_checkpointed_session_resumes(mocked_acp_agent, mock
     mock_ctx.session_pool = MagicMock()
     mock_ctx.session_pool.sessions = MagicMock()
     mock_ctx.session_pool.sessions.store = MagicMock()
-    mock_ctx.session_pool.sessions.store.load = AsyncMock(return_value=session_data)
+    mock_ctx.session_pool.sessions.store.load_session = AsyncMock(return_value=session_data)
     mock_ctx.session_pool.event_bus = MagicMock()
 
     mock_session_manager = mocked_acp_agent.session_manager
@@ -304,7 +312,7 @@ async def test_handle_prompt_checkpointed_session_resumes(mocked_acp_agent, mock
 
     # Mock session_pool methods
     mock_ctx.session_pool.create_session = AsyncMock()
-    mock_ctx.session_pool.receive_request = AsyncMock()
+    mock_ctx.session_pool.send_message = AsyncMock()
     mock_ctx.session_pool.sessions.get_or_create_session_agent = AsyncMock()
 
     from acp.schema.content_blocks import TextContentBlock
@@ -331,7 +339,7 @@ async def test_handle_prompt_active_session_uses_create_session(mocked_acp_agent
     mock_ctx.session_pool = MagicMock()
     mock_ctx.session_pool.sessions = MagicMock()
     mock_ctx.session_pool.sessions.store = MagicMock()
-    mock_ctx.session_pool.sessions.store.load = AsyncMock(return_value=session_data)
+    mock_ctx.session_pool.sessions.store.load_session = AsyncMock(return_value=session_data)
     # Make event_bus.subscribe an AsyncMock
     mock_ctx.session_pool.event_bus = MagicMock()
     _send, _recv = anyio.create_memory_object_stream(max_buffer_size=100)
@@ -364,7 +372,7 @@ async def test_handle_prompt_active_session_uses_create_session(mocked_acp_agent
     handler.start_event_consumer = AsyncMock()  # type: ignore[assignment]
 
     mock_ctx.session_pool.create_session = AsyncMock()
-    mock_ctx.session_pool.receive_request = AsyncMock()
+    mock_ctx.session_pool.send_message = AsyncMock()
     mock_ctx.session_pool.sessions.get_or_create_session_agent = AsyncMock()
 
     from acp.schema.content_blocks import TextContentBlock
@@ -400,7 +408,7 @@ def _setup_session_pool_mock(acp_agent: AgentPoolACPAgent) -> MagicMock:
     mock_ctx = MagicMock()
     session_pool = MagicMock()
     session_pool.create_session = AsyncMock()
-    session_pool.receive_request = AsyncMock()
+    session_pool.send_message = AsyncMock()
     session_pool.sessions = MagicMock()
     session_pool.sessions.get_or_create_session_agent = AsyncMock()
     session_pool.event_bus = MagicMock()
@@ -418,8 +426,10 @@ async def test_resume_creates_per_session_agent_with_history(mocked_acp_agent):
     mock_session = _make_mock_session()
 
     mocked_acp_agent.session_manager.get_session.return_value = None
-    mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
-    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+    mocked_acp_agent.session_manager.session_store.load_session = AsyncMock(
+        return_value=session_data
+    )
+    mocked_acp_agent.session_manager.session_store.list_session_ids = AsyncMock(
         return_value=["resume-test-session"]
     )
     mocked_acp_agent.session_manager.resume_session.return_value = mock_session
@@ -444,8 +454,10 @@ async def test_resume_returns_models_and_modes(mocked_acp_agent):
     mock_session = _make_mock_session()
 
     mocked_acp_agent.session_manager.get_session.return_value = None
-    mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
-    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+    mocked_acp_agent.session_manager.session_store.load_session = AsyncMock(
+        return_value=session_data
+    )
+    mocked_acp_agent.session_manager.session_store.list_session_ids = AsyncMock(
         return_value=["resume-test-session"]
     )
     mocked_acp_agent.session_manager.resume_session.return_value = mock_session
@@ -467,8 +479,10 @@ async def test_resume_injects_session_mcp_providers(mocked_acp_agent):
     mock_session.session_mcp_providers = [mock_provider]
 
     mocked_acp_agent.session_manager.get_session.return_value = None
-    mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
-    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+    mocked_acp_agent.session_manager.session_store.load_session = AsyncMock(
+        return_value=session_data
+    )
+    mocked_acp_agent.session_manager.session_store.list_session_ids = AsyncMock(
         return_value=["resume-test-session"]
     )
     mocked_acp_agent.session_manager.resume_session.return_value = mock_session
@@ -495,8 +509,10 @@ async def test_resume_history_load_failure_does_not_block(mocked_acp_agent):
     mock_session = _make_mock_session()
 
     mocked_acp_agent.session_manager.get_session.return_value = None
-    mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
-    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+    mocked_acp_agent.session_manager.session_store.load_session = AsyncMock(
+        return_value=session_data
+    )
+    mocked_acp_agent.session_manager.session_store.list_session_ids = AsyncMock(
         return_value=["resume-test-session"]
     )
     mocked_acp_agent.session_manager.resume_session.return_value = mock_session
@@ -523,8 +539,10 @@ async def test_resume_then_handle_prompt_no_duplicate_agent_creation(
     mock_session = _make_mock_session()
 
     mocked_acp_agent.session_manager.get_session.return_value = None
-    mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
-    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+    mocked_acp_agent.session_manager.session_store.load_session = AsyncMock(
+        return_value=session_data
+    )
+    mocked_acp_agent.session_manager.session_store.list_session_ids = AsyncMock(
         return_value=["resume-test-session"]
     )
     mocked_acp_agent.session_manager.resume_session.return_value = mock_session

@@ -183,6 +183,12 @@ class RunHandle:
     _cancel_fn: Callable[[], None] | None = None
     _closing: bool = False
     _closed: bool = False
+    _force_cancelling: bool = False
+    """Set by ``cancel()`` before calling ``task.cancel()`` to distinguish
+    internal force-cancel (break through __aexit__ hang) from external
+    ``task.cancel()`` (e.g. test cleanup). In ``start()``, only the
+    force-cancel path catches ``CancelledError`` and continues to idle;
+    external cancellation propagates and exits the loop."""
     _idle_event: asyncio.Event = field(default_factory=_create_set_event)
     _message_queue: list[str | list[Any]] = field(default_factory=list)
     _message_history: list[ModelMessage] = field(default_factory=list)
@@ -375,7 +381,7 @@ class RunHandle:
     # ------------------------------------------------------------------
 
     async def start(  # noqa: PLR0915
-        self, initial_prompt: str = ""
+        self, initial_prompt: str | list[Any] = ""
     ) -> AsyncGenerator[RichAgentStreamEvent[Any]]:
         """Start the idle/wake/turn loop as an async generator.
 
@@ -393,7 +399,8 @@ class RunHandle:
         Args:
             initial_prompt: The first user prompt to process. Empty
                 string (default) triggers idle-first startup via
-                followup/CommChannel.
+                followup/CommChannel. Can be a ``list`` for multimodal
+                content (images, audio, etc.).
         """
         agent = self.agent
         event_bus = self.event_bus
@@ -447,18 +454,33 @@ class RunHandle:
                             if not current_prompts:
                                 continue
 
-                        async with contextlib.aclosing(
-                            self._execute_turn(
-                                agent,
-                                event_bus,
-                                session,
-                                current_prompts,
-                            ),
-                        ) as turn_gen:
-                            async for event in turn_gen:
-                                yield event
+                        try:
+                            async with contextlib.aclosing(
+                                self._execute_turn(
+                                    agent,
+                                    event_bus,
+                                    session,
+                                    current_prompts,
+                                ),
+                            ) as turn_gen:
+                                async for event in turn_gen:
+                                    yield event
 
-                        action = await self._handle_turn_result(event_bus)
+                            action = await self._handle_turn_result(event_bus)
+                        except asyncio.CancelledError:
+                            # Force-cancel was triggered by cancel() to
+                            # break through __aexit__ hangs. Only catch
+                            # if _force_cancelling is set; external
+                            # task.cancel() (e.g. test cleanup) must
+                            # propagate so start() exits.
+                            if not self._force_cancelling:
+                                raise
+                            self._force_cancelling = False
+                            with contextlib.suppress(Exception):
+                                await self._handle_turn_result(event_bus)
+                            current_prompts = []
+                            continue
+
                         if action == "continue":
                             current_prompts = []  # Prevent re-execution of cancelled prompt
                             continue
@@ -521,13 +543,31 @@ class RunHandle:
                 # Apply recovery strategy.
                 if self._recover_strategy == "retry":
                     # Re-queue the interrupted Turn's prompt for re-execution.
-                    # The prompt is extracted from the snapshot state dict
-                    # saved before the Turn started.
+                    # Prefer the full serialized prompts (with multimodal
+                    # content) if available; fall back to text prompt.
                     state_dict = resume_result.state
                     if isinstance(state_dict, dict):
-                        prompt_val: Any = state_dict.get("prompt")
-                        if isinstance(prompt_val, str) and prompt_val:
-                            recovered_prompt = prompt_val
+                        prompts_serialized: Any = state_dict.get("prompts_serialized")
+                        if isinstance(prompts_serialized, str) and prompts_serialized:
+                            from agentpool.storage.serialization import deserialize_prompts
+
+                            deserialized = deserialize_prompts(prompts_serialized)
+                            if deserialized:
+                                # Store the full prompts for the idle loop
+                                # to pick up. We extend the message queue
+                                # so _idle_loop() collects each prompt as
+                                # an individual item, preserving the
+                                # original prompt structure.
+                                self._message_queue.extend(deserialized)
+                            else:
+                                # Fall back to text prompt if deserialization fails
+                                prompt_val: Any = state_dict.get("prompt")
+                                if isinstance(prompt_val, str) and prompt_val:
+                                    recovered_prompt = prompt_val
+                        else:
+                            prompt_val = state_dict.get("prompt")
+                            if isinstance(prompt_val, str) and prompt_val:
+                                recovered_prompt = prompt_val
                 elif self._recover_strategy == "mark_interrupted":
                     # Mark the interrupted Turn's result as interrupted in
                     # the snapshot store so it's not re-detected on next
@@ -697,8 +737,12 @@ class RunHandle:
         # fails or is cancelled. For list prompts (content_blocks),
         # extract text from each block for the ChatMessage.content
         # string representation.
+        from agentpool.agents.native_agent.helpers import _summarize_content_block
+        from agentpool.storage.serialization import serialize_prompts
+
         prompt_text = "\n".join(
-            p if isinstance(p, str) else " ".join(str(b) for b in p) for p in current_prompts
+            p if isinstance(p, str) else " ".join(_summarize_content_block(b) for b in p)
+            for p in current_prompts
         )
         agent.conversation.add_chat_messages([
             ChatMessage(
@@ -711,11 +755,14 @@ class RunHandle:
         # Pre-turn snapshot: save prompt and turn_id for crash
         # recovery. If the process crashes during turn.execute(),
         # this snapshot allows the "retry" strategy to recover.
+        # Save BOTH text prompt (for logging) and full serialized
+        # prompts (for crash recovery with multimodal content).
         self._snapshot_store.save({
             "state": RunState.RUNNING.value,
             "run_id": self.run_id,
             "turn_id": turn_id,
             "prompt": prompt_text,
+            "prompts_serialized": serialize_prompts(current_prompts),
         })
         # Store turn state for downstream sub-methods.
         self._current_turn = turn
@@ -1269,22 +1316,37 @@ class RunHandle:
         return self._turn_was_cancelled
 
     def cancel(self) -> None:
-        """Cancel the run without triggering synchronous cleanup.
+        """Cancel the run cooperatively, then force-cancel if needed.
 
         Sets the cancelled flag on the run context and wakes the idle
         event to unblock the turn loop. Calls the registered cancel
         function (wired in ``start()``) which schedules
         ``agent._interrupt()`` for subclass-specific cleanup.
 
-        The ``start()`` loop task is NOT cancelled here — it must
-        continue running to process the ``cancelled`` flag, emit
-        stream-complete events, and transition to idle/done gracefully.
+        Also force-cancels ``run_ctx.current_task`` to inject
+        ``CancelledError`` into a hung ``__aexit__`` (e.g. MCP
+        streamable-http cleanup stuck behind an HTTP proxy). The
+        ``CancelledError`` is caught by ``NativeTurn.execute()``'s
+        ``except asyncio.CancelledError`` handler which checks
+        ``run_ctx.cancelled`` and exits gracefully. The ``start()``
+        ``finally`` block still runs, setting ``complete_event`` and
+        releasing ``turn_lock``.
         """
         self.run_ctx.cancelled = True
         self._idle_event.set()
 
         if self._cancel_fn is not None:
             self._cancel_fn()
+
+        # Force-cancel the task driving start() to break through __aexit__
+        # hangs. The CancelledError will be caught by NativeTurn's except
+        # handler which checks run_ctx.cancelled and exits gracefully. The
+        # start() finally block will still run, setting complete_event and
+        # releasing turn_lock.
+        task = self.run_ctx.current_task
+        if task is not None and not task.done():
+            self._force_cancelling = True
+            task.cancel()
 
     def _create_cancel_fn(self) -> Callable[[], None]:
         """Create a cancel function that schedules ``agent._interrupt()``.

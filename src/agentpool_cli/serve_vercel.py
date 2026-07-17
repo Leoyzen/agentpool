@@ -5,7 +5,6 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import os
 from typing import TYPE_CHECKING, Annotated, Any
-import uuid
 
 import anyenv
 import typer as t
@@ -136,7 +135,9 @@ def vercel_command(  # noqa: PLR0915
         # Determine which agent to use and create a per-request session
         # Vercel protocol is stateless — new session per HTTP request
         effective_agent_name = agent_name or pool.main_agent_name
-        session_id = uuid.uuid4().hex
+        from agentpool.utils.identifiers import generate_session_id
+
+        session_id = generate_session_id()
         session_pool = pool.session_pool
         assert session_pool is not None, "SessionPool must be initialized"
         await session_pool.create_session(session_id, agent_name=effective_agent_name)

@@ -30,7 +30,7 @@ def mock_pool() -> MagicMock:
 
     session_pool = MagicMock()
     session_pool.create_session = AsyncMock()
-    session_pool.receive_request = AsyncMock()
+    session_pool.send_message = AsyncMock()
     session_pool.wait_for_completion = AsyncMock(return_value="sess-1")
     session_pool.event_bus = MagicMock()
 
@@ -38,7 +38,7 @@ def mock_pool() -> MagicMock:
     sessions_registry = MagicMock()
     sessions_registry.get_or_create_session_agent = AsyncMock(return_value=MagicMock())
     sessions_registry.store = MagicMock()
-    sessions_registry.store.load = AsyncMock(return_value=None)
+    sessions_registry.store.load_session = AsyncMock(return_value=None)
     session_pool.sessions = sessions_registry
 
     from tests._helpers.mock_stream import EmptyReceiveStream
@@ -70,8 +70,8 @@ def mock_client() -> MagicMock:
 def mock_session_manager() -> MagicMock:
     """Return a mocked ACPSessionManager."""
     sm = MagicMock()
-    sm.session_store.load = AsyncMock()
-    sm.session_store.save = AsyncMock()
+    sm.session_store.load_session = AsyncMock()
+    sm.session_store.save_session = AsyncMock()
     return sm
 
 
@@ -128,8 +128,8 @@ class TestHandlePromptInputProvider:
         await handler.handle_prompt("sess-1", prompt)
 
         session_pool = mock_pool.session_pool
-        assert session_pool.receive_request.called
-        call_kwargs = session_pool.receive_request.call_args.kwargs
+        assert session_pool.send_message.called
+        call_kwargs = session_pool.send_message.call_args.kwargs
         assert "input_provider" in call_kwargs
         assert isinstance(call_kwargs["input_provider"], ACPInputProvider)
 
@@ -145,7 +145,7 @@ class TestHandlePromptInputProvider:
         await handler.handle_prompt("sess-1", prompt)
 
         session_pool = mock_pool.session_pool
-        call_kwargs = session_pool.receive_request.call_args.kwargs
+        call_kwargs = session_pool.send_message.call_args.kwargs
         input_provider = call_kwargs["input_provider"]
         assert input_provider.session.requests is not None
 
@@ -161,7 +161,7 @@ class TestHandlePromptInputProvider:
         await handler.handle_prompt("sess-1", prompt)
 
         session_pool = mock_pool.session_pool
-        call_kwargs = session_pool.receive_request.call_args.kwargs
+        call_kwargs = session_pool.send_message.call_args.kwargs
         input_provider = call_kwargs["input_provider"]
         assert input_provider.session.client_capabilities is not None
         assert input_provider.session.client_capabilities.elicitation is None
@@ -178,7 +178,7 @@ class TestHandlePromptInputProvider:
         await handler_with_elicitation.handle_prompt("sess-1", prompt)
 
         session_pool = mock_pool.session_pool
-        call_kwargs = session_pool.receive_request.call_args.kwargs
+        call_kwargs = session_pool.send_message.call_args.kwargs
         input_provider = call_kwargs["input_provider"]
         caps = input_provider.session.client_capabilities
         assert caps.elicitation is not None
@@ -301,7 +301,7 @@ class TestHandlePromptBlockingBehavior:
             session_id="sess-1",
             agent_type="native",
         )
-        mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
+        mock_pool.session_pool.send_message = AsyncMock(return_value=run_handle)
         mock_pool.session_pool._get_active_run_handle = MagicMock(return_value=run_handle)
 
         async def _wait_blocking(session_id: str, timeout: float | None = None) -> str:
@@ -347,7 +347,7 @@ class TestHandlePromptBlockingBehavior:
             agent_type="native",
             complete_event=event,
         )
-        mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
+        mock_pool.session_pool.send_message = AsyncMock(return_value=run_handle)
 
         prompt = [TextContentBlock(text="hello")]
         with patch.object(event, "wait", new_callable=AsyncMock) as mock_wait:
@@ -369,7 +369,7 @@ class TestHandlePromptBlockingBehavior:
             session_id="sess-1",
             agent_type="native",
         )
-        mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
+        mock_pool.session_pool.send_message = AsyncMock(return_value=run_handle)
 
         prompt = [TextContentBlock(text="hello")]
         mock_pool.session_pool.wait_for_completion = AsyncMock(side_effect=asyncio.CancelledError)
@@ -390,7 +390,7 @@ class TestHandlePromptBlockingBehavior:
             session_id="sess-1",
             agent_type="native",
         )
-        mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
+        mock_pool.session_pool.send_message = AsyncMock(return_value=run_handle)
         mock_pool.session_pool._get_active_run_handle = MagicMock(return_value=run_handle)
 
         async def _wait_blocking(session_id: str, timeout: float | None = None) -> str:
@@ -425,7 +425,7 @@ class TestHandlePromptBlockingBehavior:
             agent_type="native",
             _turn_complete_event=turn_event,
         )
-        mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
+        mock_pool.session_pool.send_message = AsyncMock(return_value=run_handle)
         mock_pool.session_pool._get_active_run_handle = MagicMock(return_value=run_handle)
 
         prompt = [TextContentBlock(text="hello")]
@@ -616,7 +616,7 @@ async def test_handle_prompt_splits_and_executes_slash_commands(
     # Since all content was commands and staged_content is empty,
     # handle_prompt should return end_turn without calling receive_request.
     assert result.stop_reason == "end_turn"
-    mock_pool.session_pool.receive_request.assert_not_called()
+    mock_pool.session_pool.send_message.assert_not_called()
 
 
 @pytest.mark.unit
@@ -672,8 +672,8 @@ async def test_handle_prompt_passes_non_command_content_to_receive_request(
     mock_command_store.execute_command.assert_called_once()
 
     # Non-command content should reach receive_request
-    mock_pool.session_pool.receive_request.assert_called_once()
-    call_args = mock_pool.session_pool.receive_request.call_args
+    mock_pool.session_pool.send_message.assert_called_once()
+    call_args = mock_pool.session_pool.send_message.call_args
     # receive_request(session_id, contents, input_provider=...)
     contents_arg = call_args[0][1]  # positional arg 1 = contents list
     assert len(contents_arg) == 1
@@ -706,7 +706,7 @@ async def test_handle_prompt_no_acp_session_skips_command_splitting(
     await handler.handle_prompt("sess-1", content_blocks)
 
     # The raw "/test-skill foo" should reach receive_request (no splitting)
-    mock_pool.session_pool.receive_request.assert_called_once()
-    call_args = mock_pool.session_pool.receive_request.call_args
+    mock_pool.session_pool.send_message.assert_called_once()
+    call_args = mock_pool.session_pool.send_message.call_args
     contents_arg = call_args[0][1]  # positional arg 1 = contents list
     assert "/test-skill foo" in contents_arg

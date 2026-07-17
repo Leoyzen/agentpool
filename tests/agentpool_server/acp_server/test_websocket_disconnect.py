@@ -40,6 +40,7 @@ def _make_mock_pool() -> MagicMock:
     mock_sessions: MagicMock = MagicMock()
     mock_pool.session_pool.sessions = mock_sessions
     mock_sessions.close_session = AsyncMock()
+    mock_pool.session_pool.close_session = AsyncMock()
     mock_pool.manifest.agents = {}
     return mock_pool
 
@@ -90,9 +91,10 @@ async def test_websocket_disconnect_closes_all_sessions() -> None:
     session_a.close.assert_awaited_once()
     session_b.close.assert_awaited_once()
 
-    # SessionController.close_session should have been called for both
-    mock_pool.session_pool.sessions.close_session.assert_awaited()
-    assert mock_pool.session_pool.sessions.close_session.await_count == 2
+    # SessionPool.close_session should have been called for both
+    # (via ACPSessionManager.close_session → SessionPool.close_session)
+    mock_pool.session_pool.close_session.assert_awaited()
+    assert mock_pool.session_pool.close_session.await_count == 2
 
 
 @pytest.mark.integration
@@ -151,10 +153,10 @@ async def test_websocket_disconnect_preserves_other_connections() -> None:
     # Session B's close() should NOT have been called
     session_b.close.assert_not_awaited()
 
-    # SessionController.close_session should have been called only for session A
-    mock_pool.session_pool.sessions.close_session.assert_awaited_once()
+    # SessionPool.close_session should have been called only for session A
+    mock_pool.session_pool.close_session.assert_awaited_once()
     call_args_list: list[tuple[str, ...]] = [
-        call.args for call in mock_pool.session_pool.sessions.close_session.await_args_list
+        call.args for call in mock_pool.session_pool.close_session.await_args_list
     ]
     assert (session_id_a,) in call_args_list
     assert (session_id_b,) not in call_args_list

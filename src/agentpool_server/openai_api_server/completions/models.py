@@ -55,6 +55,8 @@ class OpenAIMessage(Schema):
     name: str | None = None
     function_call: FunctionCall | None = None
     tool_calls: list[ToolCall] | None = None
+    reasoning_content: str | None = None
+    """Thinking/reasoning content from models that support extended thinking."""
 
 
 class ChatCompletionRequest(Schema):

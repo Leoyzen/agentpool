@@ -7,11 +7,21 @@ from typing import TYPE_CHECKING, Any
 from pydantic_ai import (
     BaseToolCallPart,
     BaseToolReturnPart,
+    BinaryContent,
+    BinaryImage,
     FunctionToolCallEvent,
     FunctionToolResultEvent,
     ModelResponse,
     PartStartEvent,
     TextPart,
+)
+from pydantic_ai.messages import (
+    AudioUrl,
+    DocumentUrl,
+    ImageUrl,
+    TextContent,
+    ThinkingPart,
+    VideoUrl,
 )
 
 from agentpool.agents.events import ToolCallCompleteEvent
@@ -90,7 +100,7 @@ def extract_text_from_messages(messages: list[Any], include_interruption_note: b
         for msg in messages
         if isinstance(msg, ModelResponse)
         for part in msg.parts
-        if isinstance(part, TextPart)
+        if isinstance(part, TextPart | ThinkingPart)
     )
     if include_interruption_note:
         if content:
@@ -145,3 +155,37 @@ def get_model_category(current_model: str, models: list[ModelInfo]) -> ModeCateg
         current_mode_id=current_model,
         category="model",
     )
+
+
+def _summarize_content_block(block: Any) -> str:  # noqa: PLR0911
+    """Produce a short text summary of a content block for logging/display.
+
+    Handles all pydantic-ai UserContent variant types, producing meaningful
+    placeholders instead of raw ``repr()`` output for binary/URL types.
+
+    Args:
+        block: A content block from ``UserPromptPart.content`` — may be a
+            ``str``, ``TextContent``, ``BinaryImage``, ``BinaryContent``,
+            ``ImageUrl``, ``AudioUrl``, ``VideoUrl``, ``DocumentUrl``, or
+            any other object.
+
+    Returns:
+        A short text string suitable for display in logs, ChatMessage.content,
+        and other text-only contexts.
+    """
+    if isinstance(block, str):
+        return block
+    if isinstance(block, TextContent):
+        return block.content
+    if isinstance(block, BinaryImage | BinaryContent):
+        media = block.media_type
+        return f"[{media}]"
+    if isinstance(block, ImageUrl):
+        return f"[image: {block.url}]"
+    if isinstance(block, AudioUrl):
+        return f"[audio: {block.url}]"
+    if isinstance(block, VideoUrl):
+        return f"[video: {block.url}]"
+    if isinstance(block, DocumentUrl):
+        return f"[document: {block.url}]"
+    return f"[{type(block).__name__}]"

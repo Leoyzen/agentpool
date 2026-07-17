@@ -831,7 +831,7 @@ class RunHandle:
 
 **`__post_init__()`** initializes any dimension left as `None` to the default in-memory implementation. The journal is injected into the CommChannel so the channel can persist events. When `SessionController` creates a `RunHandle` for a protocol server session, it passes `ProtocolTrigger` and `ProtocolChannel` explicitly, bypassing the defaults.
 
-**State Machine**: `RunHandle._run_state` transitions through `RunState.IDLE`, `RUNNING`, and `DONE`. Transitions are guarded by `_state_lock` (an `asyncio.Lock`). The `on_state_change()` observer is called on the CommChannel on every transition. The old `RunStatus` enum (`pending`, `running`, `completed`, `failed`, `checkpointed`, `idle`, `done`) coexists for legacy code paths.
+**State Machine**: `RunHandle._run_state` transitions through `RunState.IDLE`, `RUNNING`, and `DONE`. Transitions are guarded by `_state_lock` (an `asyncio.Lock`). The `on_state_change()` observer is called on the CommChannel on every transition.
 
 **Lifecycle Flow** (equivalent to the old states):
 
@@ -855,7 +855,28 @@ If `resume_result.is_inflight` is `True`:
 
 During recovery, events since the last snapshot are replayed through the CommChannel with `_replaying = True` (which skips journaling to avoid duplicating entries).
 
-**Legacy methods** (`complete()`, `fail()`, `checkpoint()`) remain for backward compatibility but emit no dimension-driven behavior. The old `RunStatus` enum coexists alongside `RunState`.
+**Legacy methods** (`complete()`, `fail()`, `checkpoint()`) remain for backward compatibility but emit no dimension-driven behavior.
+
+#### Session State Machine Mapping
+
+`SessionData.status` (persisted, survives crashes) and `RunState` (transient, in-memory) are separate state machines with a formal mapping defined in `SessionStateMapper` (`src/agentpool/sessions/state_mapper.py`).
+
+| Scenario | SessionData.status | RunState | Valid? |
+|---|---|---|---|
+| Idle, no active turn | `active` | `IDLE` | ✅ |
+| Idle, no RunHandle | `active` | `None` (no handle) | ✅ |
+| Turn executing | `active` | `RUNNING` | ✅ |
+| Closed | `closed` | `DONE` | ✅ |
+| Closed, no RunHandle | `closed` | `None` (no handle) | ✅ |
+| Checkpointed (post-checkpoint) | `checkpointed` | `None` (no handle) | ✅ (do NOT reconcile) |
+| Resuming (RunHandle being created) | `resuming` | `IDLE` | ✅ |
+| Resuming (crash before RunHandle created) | `resuming` | `None` (no handle) | ❌ → reconcile to `active` |
+| Active + crash left no RunHandle | `active` | `None` (no handle) | ✅ |
+
+**Invariant checker** (`SessionStateMapper.check_invariant()`) validates consistency at Turn boundaries (snapshot save points). Carve-outs:
+- `checkpointed` + no RunHandle = **valid** — do NOT reconcile (normal post-checkpoint state).
+- `resuming` + no RunHandle = **reconcile to `active`** (resume failed, session can accept new prompts).
+- Other mismatches: log warning + reconcile `SessionData.status` to match `RunState` (in-memory is authoritative for transient state).
 
 #### Event Mapping (Native Agents)
 

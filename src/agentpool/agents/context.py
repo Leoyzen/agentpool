@@ -399,7 +399,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                     store = pool.session_pool.sessions.store
                     if store is not None:
                         try:
-                            data = await store.load(run_ctx.session_id)
+                            data = await store.load_session(run_ctx.session_id)
                             if data is not None and data.status == "active":
                                 data = data.model_copy(
                                     update={
@@ -408,7 +408,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                                     }
                                 )
                                 data.touch()
-                                await store.save(data)
+                                await store.save_session(data)
                         except Exception:  # noqa: BLE001
                             logger.debug(
                                 "Failed to update session status to checkpointed",
@@ -686,16 +686,15 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             # Guard against MagicMock auto-generated attributes in tests:
             # _events.session_id may return a Mock when not explicitly set.
             if isinstance(effective_parent, str):
-                from agentpool.utils.identifiers import generate_session_id
-
-                child_sid = generate_session_id()
-                await pool.session_pool.create_session(
-                    session_id=child_sid,
-                    agent_name=agent_name,
+                # Delegate to SessionPool.create_child_session() which
+                # handles ID generation and parent inheritance.
+                state = await pool.session_pool.create_child_session(
                     parent_session_id=effective_parent,
+                    agent_name=agent_name,
                     agent_type=agent_type,
                     **metadata,
                 )
+                child_sid = state.session_id
                 # Eagerly register agent under child session_id so that
                 # receive_request / run_stream can find it without a
                 # separate get_or_create_session_agent call.

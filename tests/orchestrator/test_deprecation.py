@@ -1,13 +1,14 @@
 """Unit tests for Task 12: Deprecation + migration.
 
 Tests that DeprecationWarning is emitted by:
-- SessionPool.receive_request()
-- SessionController.receive_request()
 - RunLoopDelegationService.spawn_subagent()
 - RunLoopDelegationService.get_available_agents()
 
 And that SubagentCapability uses run_agent() when session_pool
 is available, falling back to delegation when it is None.
+
+Note: ``receive_request()`` deprecation tests have been removed since
+the method was deleted in Phase 6.4 of session-debt-cleanup.
 """
 
 from __future__ import annotations
@@ -19,9 +20,6 @@ import warnings
 import pytest
 
 from agentpool.capabilities.runloop_delegation import RunLoopDelegationService
-from agentpool.lifecycle.types import DeliveryMode
-from agentpool.orchestrator.core import SessionPool
-from agentpool.orchestrator.session_controller import SessionController
 
 
 pytestmark = pytest.mark.unit
@@ -45,142 +43,62 @@ def mock_pool() -> MagicMock:
     return pool
 
 
-@pytest.fixture
-def session_pool(mock_pool: MagicMock) -> SessionPool:
-    """Return a SessionPool backed by the mock pool."""
-    return SessionPool(pool=mock_pool)
-
-
-@pytest.fixture
-def mock_session_state() -> MagicMock:
-    """Return a mocked SessionState."""
-    state = MagicMock()
-    state.session_id = "test-session"
-    state.current_run_id = None
-    state.is_closing = False
-    state.closing = False
-    state.last_active_at = 0.0
-    return state
-
-
 # ---------------------------------------------------------------------------
-# 1. SessionPool.receive_request() deprecation
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.anyio
-async def test_receive_request_deprecation_warning(session_pool: SessionPool) -> None:
-    """SessionPool.receive_request() emits DeprecationWarning."""
-    session_pool.send_message = AsyncMock(return_value="msg-123")  # type: ignore[method-assign]
-
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        result = await session_pool.receive_request("sess-1", "hello")
-
-    assert result == "msg-123"
-    dep_warnings = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-    assert len(dep_warnings) >= 1
-    assert "deprecated" in str(dep_warnings[0].message).lower()
-
-
-# ---------------------------------------------------------------------------
-# 2. SessionPool.receive_request() priority mapping
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.anyio
-async def test_receive_request_priority_mapping(session_pool: SessionPool) -> None:
-    """receive_request maps 'asap' → STEER, 'when_idle' → QUEUE."""
-    session_pool.send_message = AsyncMock(return_value="msg-1")  # type: ignore[method-assign]
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        await session_pool.receive_request("s", "x", priority="asap")
-
-    session_pool.send_message.assert_awaited_once_with(
-        "s",
-        "x",
-        mode=DeliveryMode.STEER,
-        message_id=None,
-        deps=None,
-        input_provider=None,
-    )
-
-
-# ---------------------------------------------------------------------------
-# 3. SessionPool.receive_request() unknown priority
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.anyio
-async def test_receive_request_unknown_priority(session_pool: SessionPool) -> None:
-    """Unknown priority defaults to QUEUE with extra DeprecationWarning."""
-    session_pool.send_message = AsyncMock(return_value="msg-2")  # type: ignore[method-assign]
-
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        await session_pool.receive_request("s", "x", priority="bogus")
-
-    dep_warnings = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-    # Two warnings: one for deprecation, one for unknown priority.
-    assert len(dep_warnings) >= 2
-    session_pool.send_message.assert_awaited_once_with(
-        "s",
-        "x",
-        mode=DeliveryMode.QUEUE,
-        message_id=None,
-        deps=None,
-        input_provider=None,
-    )
-
-
-# ---------------------------------------------------------------------------
-# 4. RunLoopDelegationService.spawn_subagent() deprecation
+# 1. RunLoopDelegationService.spawn_subagent() deprecation
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
 async def test_delegation_service_spawn_subagent_deprecation() -> None:
     """RunLoopDelegationService.spawn_subagent() emits DeprecationWarning."""
+    from agentpool.agents.events.events import StreamCompleteEvent
+    from agentpool.orchestrator.core import EventBus
+
     registry = MagicMock()
     registry.exists = MagicMock(return_value=True)
     host = MagicMock()
     host.session_pool = MagicMock()
     host.session_pool.sessions = MagicMock()
-    # Make receive_request return a truthy message_id so spawn proceeds.
-    host.session_pool.sessions.receive_request = AsyncMock(return_value="mid")
-
-    # Mock EventBus for the new EventBus-subscription-based streaming.
-    import asyncio
-
-    from agentpool.agents.events import StreamCompleteEvent
-    from agentpool.messaging import ChatMessage
-    from agentpool.orchestrator.event_bus import EventEnvelope
-
-    bus_queue: asyncio.Queue[Any] = asyncio.Queue()
-    bus_queue.put_nowait(
-        EventEnvelope(
-            source_session_id="parent-sess::child::agent1",
-            event=StreamCompleteEvent(message=ChatMessage(content="", role="assistant")),  # type: ignore[arg-type]
-        )
-    )
-    host.session_pool.event_bus.subscribe = AsyncMock(return_value=bus_queue)
-    host.session_pool.event_bus.unsubscribe = AsyncMock()
+    # Use a real EventBus so subscribe/unsubscribe work properly.
+    event_bus = EventBus()
+    host.session_pool.event_bus = event_bus
+    # Make send_message return a truthy message_id so spawn proceeds.
+    host.session_pool.send_message = AsyncMock(return_value="mid")
 
     service = RunLoopDelegationService(registry, host, "parent-sess")
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        async for _event in service.spawn_subagent("agent1", "do something"):
-            pass
+        gen = service.spawn_subagent("agent1", "do something")
+
+        # Drain the generator in a task so we can push an event.
+        import asyncio
+
+        drained: list[Any] = []
+        task = asyncio.create_task(_drain(gen, drained))
+        await asyncio.sleep(0.05)
+
+        # Push a terminal event so the generator completes.
+        child_session_id = "parent-sess::child::agent1"
+        complete = StreamCompleteEvent(
+            message=MagicMock(),
+            session_id=child_session_id,
+        )
+        await event_bus.publish(child_session_id, complete)
+        await asyncio.wait_for(task, timeout=5.0)
 
     dep_warnings = [w for w in caught if issubclass(w.category, DeprecationWarning)]
     assert len(dep_warnings) >= 1
     assert "spawn_subagent" in str(dep_warnings[0].message).lower()
 
 
+async def _drain(gen: Any, collected: list[Any]) -> None:
+    """Drain an async generator into a list."""
+    collected.extend([event async for event in gen])
+
+
 # ---------------------------------------------------------------------------
-# 5. RunLoopDelegationService.get_available_agents() deprecation
+# 2. RunLoopDelegationService.get_available_agents() deprecation
 # ---------------------------------------------------------------------------
 
 
@@ -202,30 +120,7 @@ def test_delegation_service_get_available_agents_deprecation() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 6. SessionController.receive_request() deprecation
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.anyio
-async def test_session_controller_receive_request_deprecation(
-    mock_pool: MagicMock,
-) -> None:
-    """SessionController.receive_request() emits DeprecationWarning."""
-    controller = SessionController(mock_pool)
-    controller.get_session = MagicMock(return_value=None)  # type: ignore[method-assign]
-
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        result = await controller.receive_request("sess-1", "hello")
-
-    assert result is None
-    dep_warnings = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-    assert len(dep_warnings) >= 1
-    assert "deprecated" in str(dep_warnings[0].message).lower()
-
-
-# ---------------------------------------------------------------------------
-# 7. SubagentCapability uses run_agent() when session_pool available
+# 3. SubagentCapability uses run_agent() when session_pool available
 # ---------------------------------------------------------------------------
 
 
@@ -275,7 +170,7 @@ async def test_subagent_capability_uses_run_agent() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 8. SubagentCapability falls back to delegation when session_pool is None
+# 4. SubagentCapability falls back to delegation when session_pool is None
 # ---------------------------------------------------------------------------
 
 

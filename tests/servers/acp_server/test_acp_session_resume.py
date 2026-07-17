@@ -12,9 +12,9 @@ from agentpool import Agent
 from agentpool.delegation import AgentPool
 from agentpool.orchestrator.core import SessionPool
 from agentpool.sessions import SessionData
-from agentpool.sessions.store import MemorySessionStore
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.session_manager import ACPSessionManager
+from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
 
 @pytest.fixture
@@ -152,8 +152,8 @@ async def test_resume_session_creates_session_if_not_found(
 
     # Mock session_store to return None (session not in persistent store)
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=None)
-    mock_store.list_sessions = AsyncMock(return_value=[])
+    mock_store.load_session = AsyncMock(return_value=None)
+    mock_store.list_session_ids = AsyncMock(return_value=[])
     with patch.object(
         type(mock_acp_agent.session_manager),
         "session_store",
@@ -201,11 +201,11 @@ async def test_resume_session_passes_mcp_servers_to_constructor():
 
     Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
 
-    await store.save(
+    await store.save_session(
         SessionData(
             session_id="test-session-id",
             agent_name="test_agent",
@@ -258,11 +258,11 @@ async def test_resume_session_initializes_mcp_servers():
 
     Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
 
-    await store.save(
+    await store.save_session(
         SessionData(
             session_id="test-session-id",
             agent_name="test_agent",
@@ -310,11 +310,11 @@ async def test_resume_session_with_none_mcp_servers_calls_initialize():
 
     Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
 
-    await store.save(
+    await store.save_session(
         SessionData(
             session_id="test-session-id",
             agent_name="test_agent",
@@ -368,11 +368,11 @@ async def test_resume_session_does_not_call_load_session():
 
     Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
 
-    await store.save(
+    await store.save_session(
         SessionData(
             session_id="test-session-id",
             agent_name="test_agent",
@@ -420,11 +420,11 @@ async def test_resume_session_closes_old_and_recreates():
 
     Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
 
-    await store.save(
+    await store.save_session(
         SessionData(
             session_id="test-session-id",
             agent_name="test_agent",
@@ -580,7 +580,7 @@ async def test_session_data_preserved_after_resume(
 ):
     """session_store.save is NOT called during resume_session (data is preserved)."""
     mock_store = MagicMock()
-    mock_store.save = AsyncMock()
+    mock_store.save_session = AsyncMock()
 
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=None)
     mock_acp_agent.session_manager.resume_session = AsyncMock(return_value=mock_session)
@@ -596,4 +596,4 @@ async def test_session_data_preserved_after_resume(
     ):
         await mock_acp_agent.resume_session(resume_session_request)
 
-    mock_store.save.assert_not_called()
+    mock_store.save_session.assert_not_called()
