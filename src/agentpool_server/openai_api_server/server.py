@@ -221,21 +221,24 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
             raise HTTPException(500, "No response received from agent")
 
         # Extract thinking/reasoning content from model messages if present
-        reasoning_content: str | None = None
         from pydantic_ai import ThinkingPart
 
+        reasoning_parts: list[str] = []
         for model_msg in final_message.messages:
             if isinstance(model_msg, dict):
                 parts = model_msg.get("parts") or []
-                for part_dict in parts:
-                    if isinstance(part_dict, dict) and part_dict.get("part_kind") == "thinking":
-                        content = part_dict.get("content") or ""
-                        if content:
-                            reasoning_content = (reasoning_content or "") + content
+                reasoning_parts.extend(
+                    part_dict.get("content") or ""
+                    for part_dict in parts
+                    if isinstance(part_dict, dict) and part_dict.get("part_kind") == "thinking"
+                )
             else:
-                for part in model_msg.parts:
-                    if isinstance(part, ThinkingPart) and part.content:
-                        reasoning_content = (reasoning_content or "") + part.content
+                reasoning_parts.extend(
+                    part.content for part in model_msg.parts
+                    if isinstance(part, ThinkingPart) and part.content
+                )
+
+        reasoning_content = "\n".join(reasoning_parts) if reasoning_parts else None
 
         msg = OpenAIMessage(
             role="assistant",

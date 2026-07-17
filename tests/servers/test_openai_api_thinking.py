@@ -11,22 +11,24 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-import pytest
 from pydantic_ai import (
     ModelResponse,
     RequestUsage,
     TextPart as PydanticTextPart,
     ThinkingPart as PydanticThinkingPart,
 )
+import pytest
 
 from agentpool.messaging.messages import ChatMessage
 from agentpool_server.openai_api_server.completions.helpers import stream_response
 from agentpool_server.openai_api_server.completions.models import ChatCompletionRequest
 from agentpool_server.openai_api_server.responses.helpers import handle_request
 from agentpool_server.openai_api_server.responses.models import (
+    ResponseMessage,
     ResponseOutputReasoning,
     ResponseRequest,
 )
+
 
 _DONE = "[DONE]"
 
@@ -66,8 +68,7 @@ def _make_assistant_with_thinking(
 
 
 def test_non_streaming_completion_includes_reasoning_content():
-    """Given a ChatMessage with ThinkingPart, When building a non-streaming
-    completion response, Then reasoning_content should be populated."""
+    """Test that reasoning_content is populated from ThinkingPart."""
     from agentpool_server.openai_api_server.completions.models import OpenAIMessage
 
     msg = _make_assistant_with_thinking(
@@ -78,18 +79,20 @@ def test_non_streaming_completion_includes_reasoning_content():
     # Extract reasoning content the same way server.py does
     from pydantic_ai import ThinkingPart
 
-    reasoning_content: str | None = None
+    reasoning_parts: list[str] = []
     for model_msg in msg.messages:
         if isinstance(model_msg, dict):
             continue
-        for part in model_msg.parts:
-            if isinstance(part, ThinkingPart) and part.content:
-                reasoning_content = (reasoning_content or "") + part.content
+        reasoning_parts.extend(
+            part.content
+            for part in model_msg.parts
+            if isinstance(part, ThinkingPart) and part.content
+        )
 
     openai_msg = OpenAIMessage(
         role="assistant",
         content=str(msg.content),
-        reasoning_content=reasoning_content,
+        reasoning_content="\n".join(reasoning_parts) if reasoning_parts else None,
     )
 
     assert openai_msg.reasoning_content == "Deep reasoning here."
@@ -97,8 +100,7 @@ def test_non_streaming_completion_includes_reasoning_content():
 
 
 def test_non_streaming_completion_no_thinking_no_reasoning_content():
-    """Given a ChatMessage without ThinkingPart, When building a non-streaming
-    completion response, Then reasoning_content should be None."""
+    """Test that reasoning_content is None without ThinkingPart."""
     from agentpool_server.openai_api_server.completions.models import OpenAIMessage
 
     timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
@@ -123,18 +125,20 @@ def test_non_streaming_completion_no_thinking_no_reasoning_content():
 
     from pydantic_ai import ThinkingPart
 
-    reasoning_content: str | None = None
+    reasoning_parts: list[str] = []
     for model_msg in msg.messages:
         if isinstance(model_msg, dict):
             continue
-        for part in model_msg.parts:
-            if isinstance(part, ThinkingPart) and part.content:
-                reasoning_content = (reasoning_content or "") + part.content
+        reasoning_parts.extend(
+            part.content
+            for part in model_msg.parts
+            if isinstance(part, ThinkingPart) and part.content
+        )
 
     openai_msg = OpenAIMessage(
         role="assistant",
         content=str(msg.content),
-        reasoning_content=reasoning_content,
+        reasoning_content="\n".join(reasoning_parts) if reasoning_parts else None,
     )
 
     assert openai_msg.reasoning_content is None
@@ -166,8 +170,7 @@ async def _collect_stream_chunks(
 
 @pytest.mark.asyncio
 async def test_streaming_includes_reasoning_content_delta():
-    """Given a stream with ThinkingPartDelta events, When streaming response,
-    Then reasoning_content deltas should appear in SSE chunks."""
+    """Test that ThinkingPartDelta events produce reasoning_content SSE chunks."""
     from pydantic_ai import PartDeltaEvent, TextPartDelta, ThinkingPartDelta
 
     async def event_stream():
@@ -178,17 +181,10 @@ async def test_streaming_includes_reasoning_content_delta():
     request = ChatCompletionRequest(model="test-model", messages=[])
     chunks = await _collect_stream_chunks(event_stream(), request)
 
-    # Find chunks with reasoning_content delta
     reasoning_chunks = [
-        c
-        for c in chunks
-        if "reasoning_content" in c.get("choices", [{}])[0].get("delta", {})
+        c for c in chunks if "reasoning_content" in c.get("choices", [{}])[0].get("delta", {})
     ]
-    text_chunks = [
-        c
-        for c in chunks
-        if "content" in c.get("choices", [{}])[0].get("delta", {})
-    ]
+    text_chunks = [c for c in chunks if "content" in c.get("choices", [{}])[0].get("delta", {})]
 
     assert len(reasoning_chunks) == 2, (
         f"Expected 2 reasoning chunks, got {len(reasoning_chunks)}. "
@@ -208,8 +204,7 @@ async def test_streaming_includes_reasoning_content_delta():
 
 @pytest.mark.asyncio
 async def test_responses_api_includes_reasoning_output():
-    """Given a ChatMessage with ThinkingPart, When using the responses API,
-    Then a ResponseOutputReasoning should be in the output list."""
+    """Test that ResponseOutputReasoning appears before ResponseMessage."""
     msg = _make_assistant_with_thinking(
         thinking_content="Reasoning for responses API.",
         text_content="Response text.",
@@ -217,9 +212,7 @@ async def test_responses_api_includes_reasoning_output():
     request = ResponseRequest(model="test-model", input="test")
     response = await handle_request(request, msg)
 
-    reasoning_outputs = [
-        o for o in response.output if isinstance(o, ResponseOutputReasoning)
-    ]
+    reasoning_outputs = [o for o in response.output if isinstance(o, ResponseOutputReasoning)]
     assert len(reasoning_outputs) == 1, (
         f"Expected 1 ResponseOutputReasoning, got {len(reasoning_outputs)}. "
         f"Output types: {[type(o).__name__ for o in response.output]}"
@@ -227,11 +220,21 @@ async def test_responses_api_includes_reasoning_output():
     assert reasoning_outputs[0].content == "Reasoning for responses API."
     assert reasoning_outputs[0].type == "reasoning"
 
+    # Reasoning should come before the message in the output list
+    # (matches OpenAI Responses API output ordering)
+    reasoning_index = next(
+        i for i, o in enumerate(response.output) if isinstance(o, ResponseOutputReasoning)
+    )
+    message_index = next(i for i, o in enumerate(response.output) if isinstance(o, ResponseMessage))
+    assert reasoning_index < message_index, (
+        f"Reasoning (index {reasoning_index}) should come before message "
+        f"(index {message_index}) in output list"
+    )
+
 
 @pytest.mark.asyncio
 async def test_responses_api_no_thinking_no_reasoning_output():
-    """Given a ChatMessage without ThinkingPart, When using the responses API,
-    Then no ResponseOutputReasoning should be in the output list."""
+    """Test that no ResponseOutputReasoning appears without ThinkingPart."""
     timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
     model_response = ModelResponse(
         parts=[PydanticTextPart(content="No thinking.")],
@@ -254,7 +257,5 @@ async def test_responses_api_no_thinking_no_reasoning_output():
     request = ResponseRequest(model="test-model", input="test")
     response = await handle_request(request, msg)
 
-    reasoning_outputs = [
-        o for o in response.output if isinstance(o, ResponseOutputReasoning)
-    ]
+    reasoning_outputs = [o for o in response.output if isinstance(o, ResponseOutputReasoning)]
     assert len(reasoning_outputs) == 0
