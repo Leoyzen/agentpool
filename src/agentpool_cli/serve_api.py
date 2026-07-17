@@ -30,6 +30,8 @@ def api_command(
     This creates an OpenAI-compatible API server that makes your agents available
     through a standard completions API interface.
     """
+    import asyncio
+
     import uvicorn
 
     from agentpool import AgentPool, AgentsManifest
@@ -68,11 +70,21 @@ def api_command(
     # show_messages is disabled: agent instances are no longer created at pool level.
     # Session-level event monitoring is available via EventBus instead.
 
-    server = OpenAIAPIServer(pool, cors=cors, docs=docs)
-
     # Get log level from the global context
     log_level = ctx.obj.get("log_level", "info") if ctx.obj else "info"
-    uvicorn.run(server.app, host=host, port=port, log_level=log_level.lower())
+
+    async def run_server() -> None:
+        async with pool:
+            server = OpenAIAPIServer(pool, cors=cors, docs=docs)
+            config = uvicorn.Config(
+                server.app,
+                host=host,
+                port=port,
+                log_level=log_level.lower(),
+            )
+            await uvicorn.Server(config).serve()
+
+    asyncio.run(run_server())
 
 
 if __name__ == "__main__":
