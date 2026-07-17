@@ -227,6 +227,24 @@ def remap_hardcoded_test_models():
         yield
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Register the ``--run-real-models`` CLI flag for live model tests."""
+    parser.addoption(
+        "--run-real-models",
+        action="store_true",
+        default=False,
+        help="Run live model tests that make real API calls",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register custom markers for live model tests."""
+    config.addinivalue_line(
+        "markers",
+        "run_real_models: marks tests that require real model API calls",
+    )
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Auto-skip credential-dependent and thinking-incompatible tests.
 
