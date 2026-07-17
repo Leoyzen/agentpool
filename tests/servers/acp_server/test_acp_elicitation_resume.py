@@ -15,27 +15,21 @@ Tests verify:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.agents.events.events import ElicitationDeferredEvent
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.handler import ACPProtocolHandler
 from agentpool_server.acp_server.session_manager import ACPSessionManager
 
+if TYPE_CHECKING:
+    pass
+
 pytestmark = pytest.mark.integration
-
-
-@pytest.fixture
-def mock_pool() -> MagicMock:
-    """Mock AgentPool with SessionPool."""
-    pool = MagicMock()
-    pool.session_pool = MagicMock()
-    pool.session_pool.sessions = MagicMock()
-    pool.session_pool.event_bus = MagicMock()
-    pool.session_pool.resume_session = AsyncMock()
-    return pool
 
 
 @pytest.fixture
@@ -63,14 +57,14 @@ def mock_client() -> MagicMock:
 
 @pytest.fixture
 def acp_handler(
-    mock_pool: MagicMock,
+    minimal_pool: AgentPool,
     mock_session_manager: MagicMock,
     mock_event_converter: MagicMock,
     mock_client: MagicMock,
 ) -> ACPProtocolHandler:
-    """Return an ACPProtocolHandler with mocked dependencies."""
+    """Return an ACPProtocolHandler with real pool context and mocked deps."""
     return ACPProtocolHandler(
-        host_context=mock_pool,
+        host_context=minimal_pool.get_context(),
         session_manager=mock_session_manager,
         event_converter=mock_event_converter,
         client=mock_client,
@@ -103,7 +97,7 @@ class _FakeElicitationResponse:
 @pytest.mark.anyio
 async def test_start_event_consumer_called_before_resume(
     acp_handler: ACPProtocolHandler,
-    mock_pool: MagicMock,
+    minimal_pool: AgentPool,
 ) -> None:
     """start_event_consumer must be called before resume_session.
 
@@ -124,7 +118,9 @@ async def test_start_event_consumer_called_before_resume(
         call_order.append(f"resume_session:{sid}")
 
     acp_handler.start_event_consumer = mock_start_consumer
-    mock_pool.session_pool.resume_session = mock_resume
+    # Monkeypatch the real SessionPool's resume_session
+    assert minimal_pool.session_pool is not None
+    minimal_pool.session_pool.resume_session = mock_resume  # type: ignore[assignment]
 
     # Mock ACPRequests.elicitation_create to return immediately
     with (
@@ -155,7 +151,7 @@ async def test_start_event_consumer_called_before_resume(
 @pytest.mark.anyio
 async def test_resume_not_called_if_start_consumer_fails(
     acp_handler: ACPProtocolHandler,
-    mock_pool: MagicMock,
+    minimal_pool: AgentPool,
 ) -> None:
     """If start_event_consumer raises, resume_session must NOT be called.
 
@@ -176,7 +172,8 @@ async def test_resume_not_called_if_start_consumer_fails(
         resume_called = True
 
     acp_handler.start_event_consumer = mock_start_consumer
-    mock_pool.session_pool.resume_session = mock_resume
+    assert minimal_pool.session_pool is not None
+    minimal_pool.session_pool.resume_session = mock_resume  # type: ignore[assignment]
 
     with patch(
         "agentpool_server.acp_server.handler.ACPRequests",

@@ -1,4 +1,8 @@
-"""Cross-protocol integration validation (Task 17)."""
+"""Cross-protocol integration validation (Task 17).
+
+# TODO: L2 migration — test requires complex mock pool dependencies that
+# cannot be easily replaced with a real pool. Needs investigation.
+"""
 
 from __future__ import annotations
 

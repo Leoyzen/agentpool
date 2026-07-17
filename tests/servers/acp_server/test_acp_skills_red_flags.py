@@ -131,27 +131,41 @@ class TestSkillsIncludeDefault:
         """
         from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 
-        # Create a mock pool with include_default=False
-        mock_pool = MagicMock()
-        mock_pool.manifest.skills.include_default = False
+        # Create a real AgentPool with include_default=False
+        import yamling
 
-        # Create a mock agent with the pool
-        mock_agent = MagicMock()
-        mock_agent.name = "test_agent"
-        mock_agent.host_context = mock_pool
+        from agentpool import AgentPool, AgentsManifest
 
-        # Create ACP agent with load_skills=None
-        acp_agent = AgentPoolACPAgent(
-            client=MagicMock(),
-            default_agent=mock_agent,
-            load_skills=None,
-        )
+        config = """\
+agents:
+  test_agent:
+    type: native
+    model: test
+    system_prompt: "You are a test agent."
+skills:
+  include_default: false
+"""
+        manifest_dict = yamling.load_yaml(config, verify_type=dict)
+        manifest_obj = AgentsManifest.model_validate(manifest_dict)
 
-        # The load_skills should be None, and when checking should_load_skills,
-        # it should resolve to False based on manifest
-        assert acp_agent.load_skills is None
-        assert acp_agent.host_context is not None
-        assert acp_agent.host_context.manifest.skills.include_default is False
+        # Create a mock agent with the pool's host_context
+        async with AgentPool(manifest_obj) as real_pool:
+            mock_agent = MagicMock()
+            mock_agent.name = "test_agent"
+            mock_agent.host_context = real_pool.get_context()
+
+            # Create ACP agent with load_skills=None
+            acp_agent = AgentPoolACPAgent(
+                client=MagicMock(),
+                default_agent=mock_agent,
+                load_skills=None,
+            )
+
+            # The load_skills should be None, and when checking should_load_skills,
+            # it should resolve to False based on manifest
+            assert acp_agent.load_skills is None
+            assert acp_agent.host_context is not None
+            assert acp_agent.host_context.manifest.skills.include_default is False
 
     def test_serve_acp_cli_load_skills_defaults_to_none(self) -> None:
         """serve-acp CLI load_skills defaults to None.

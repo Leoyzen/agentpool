@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.messaging import ChatMessage
 from agentpool.messaging.messagenode import MessageNode
 
@@ -25,22 +25,20 @@ class ConcreteMessageNode(MessageNode[Any, Any]):
 
 
 @pytest.mark.unit
-def test_bind_pool_sets_internal_field() -> None:
+def test_bind_pool_sets_internal_field(minimal_pool: AgentPool) -> None:
     """_bind_pool() sets _agent_pool without emitting DeprecationWarning."""
     node = ConcreteMessageNode(name="test_node")
-    mock_pool = MagicMock()
 
-    node._bind_pool(mock_pool)
+    node._bind_pool(minimal_pool)
 
-    assert node._agent_pool is mock_pool
+    assert node._agent_pool is minimal_pool
 
 
 @pytest.mark.unit
-def test_bind_pool_with_none_clears_field() -> None:
+def test_bind_pool_with_none_clears_field(minimal_pool: AgentPool) -> None:
     """_bind_pool(None) clears the _agent_pool field."""
     node = ConcreteMessageNode(name="test_node")
-    mock_pool = MagicMock()
-    node._bind_pool(mock_pool)
+    node._bind_pool(minimal_pool)
 
     node._bind_pool(None)
 
@@ -48,16 +46,15 @@ def test_bind_pool_with_none_clears_field() -> None:
 
 
 @pytest.mark.unit
-def test_bind_pool_does_not_emit_deprecation_warning() -> None:
+def test_bind_pool_does_not_emit_deprecation_warning(minimal_pool: AgentPool) -> None:
     """_bind_pool() must NOT emit DeprecationWarning (unlike the public setter)."""
     import warnings
 
     node = ConcreteMessageNode(name="test_node")
-    mock_pool = MagicMock()
 
     with warnings.catch_warnings(record=True) as warning_record:
         warnings.simplefilter("always")
-        node._bind_pool(mock_pool)
+        node._bind_pool(minimal_pool)
 
     deprecation_warnings = [w for w in warning_record if issubclass(w.category, DeprecationWarning)]
     assert len(deprecation_warnings) == 0

@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.lifecycle.types import DeliveryMode
 from agentpool.orchestrator.core import (
     DEFAULT_SESSION_TTL_SECONDS,
@@ -32,20 +33,10 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def mock_pool() -> MagicMock:
-    """Return a mocked AgentPool with a main_agent."""
-    pool = MagicMock()
-    pool.main_agent = MagicMock()
-    pool.main_agent.name = "main-agent"
-    pool.manifest = MagicMock()
-    pool.manifest.agents = {}
-    return pool
-
-
-@pytest.fixture
-def controller(mock_pool: MagicMock) -> SessionController:
-    """Return a SessionController backed by the mock pool."""
-    return SessionController(pool=mock_pool)
+def controller(minimal_pool: AgentPool) -> SessionController:
+    """Return a SessionController backed by the real pool."""
+    assert minimal_pool.session_pool is not None
+    return minimal_pool.session_pool.sessions
 
 
 @pytest.fixture
@@ -142,14 +133,14 @@ async def test_list_sessions_returns_session_info(
 @pytest.mark.anyio
 async def test_get_or_create_session_agent_creates_native_agent(
     controller: SessionController,
-    mock_pool: MagicMock,
+    minimal_pool: AgentPool,
     mock_native_agent: MagicMock,
 ) -> None:
     """Per-session agent creation delegates to AgentFactory."""
     cfg = MagicMock()
     cfg.name = "agent-a"
-    mock_pool.manifest.agents = {"agent-a": cfg}
-    mock_pool._factory.create_session_agent = AsyncMock(return_value=mock_native_agent)
+    minimal_pool.manifest.agents = {"agent-a": cfg}
+    minimal_pool._factory.create_session_agent = AsyncMock(return_value=mock_native_agent)
 
     agent = await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
 
@@ -157,27 +148,27 @@ async def test_get_or_create_session_agent_creates_native_agent(
     state = controller.get_session("sess-1")
     assert state is not None
     assert state.is_per_session_agent is True
-    mock_pool._factory.create_session_agent.assert_awaited_once()
+    minimal_pool._factory.create_session_agent.assert_awaited_once()
 
 
 @pytest.mark.anyio
 async def test_get_or_create_session_agent_returns_existing_agent(
     controller: SessionController,
-    mock_pool: MagicMock,
+    minimal_pool: AgentPool,
     mock_native_agent: MagicMock,
 ) -> None:
     """A second call returns the cached per-session agent."""
     cfg = MagicMock()
     cfg.name = "agent-a"
-    mock_pool.manifest.agents = {"agent-a": cfg}
-    mock_pool._factory.create_session_agent = AsyncMock(return_value=mock_native_agent)
+    minimal_pool.manifest.agents = {"agent-a": cfg}
+    minimal_pool._factory.create_session_agent = AsyncMock(return_value=mock_native_agent)
 
     first = await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
     second = await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
 
     assert first is second
     # Factory should only be called once (cached on second call)
-    mock_pool._factory.create_session_agent.assert_awaited_once()
+    minimal_pool._factory.create_session_agent.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -188,14 +179,14 @@ async def test_get_or_create_session_agent_returns_existing_agent(
 @pytest.mark.anyio
 async def test_mcp_count_incremented_and_decremented(
     controller: SessionController,
-    mock_pool: MagicMock,
+    minimal_pool: AgentPool,
     mock_native_agent: MagicMock,
 ) -> None:
     """MCP count tracks per-session agent creation and destruction."""
     cfg = MagicMock()
     cfg.name = "agent-a"
-    mock_pool.manifest.agents = {"agent-a": cfg}
-    mock_pool._factory.create_session_agent = AsyncMock(return_value=mock_native_agent)
+    minimal_pool.manifest.agents = {"agent-a": cfg}
+    minimal_pool._factory.create_session_agent = AsyncMock(return_value=mock_native_agent)
 
     assert controller._mcp_process_count == 0
     await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
@@ -255,14 +246,14 @@ async def test_close_session_sets_closing_flag(
 @pytest.mark.anyio
 async def test_close_session_exits_per_session_agent(
     controller: SessionController,
-    mock_pool: MagicMock,
+    minimal_pool: AgentPool,
     mock_native_agent: MagicMock,
 ) -> None:
     """A per-session agent has its async context exited on close."""
     cfg = MagicMock()
     cfg.name = "agent-a"
-    mock_pool.manifest.agents = {"agent-a": cfg}
-    mock_pool._factory.create_session_agent = AsyncMock(return_value=mock_native_agent)
+    minimal_pool.manifest.agents = {"agent-a": cfg}
+    minimal_pool._factory.create_session_agent = AsyncMock(return_value=mock_native_agent)
 
     await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
 
@@ -272,11 +263,11 @@ async def test_close_session_exits_per_session_agent(
 
 @pytest.mark.anyio
 async def test_cleanup_expired_sessions_calls_callback(
-    mock_pool: MagicMock,
+    minimal_pool: AgentPool,
 ) -> None:
     """The optional cleanup_callback is invoked for expired sessions."""
     callback = AsyncMock()
-    ctrl = SessionController(pool=mock_pool, cleanup_callback=callback)
+    ctrl = SessionController(pool=minimal_pool, cleanup_callback=callback)
     ctrl._session_ttl_seconds = 0.05
     await ctrl.get_or_create_session("sess-1")
     await asyncio.sleep(0.1)
@@ -314,11 +305,11 @@ async def test_cleanup_task_keeps_active_sessions(
 
 @pytest.mark.anyio
 async def test_cleanup_task_uses_callback_when_provided(
-    mock_pool: MagicMock,
+    minimal_pool: AgentPool,
 ) -> None:
     """When cleanup_callback is set, it is used instead of close_session."""
     callback = AsyncMock()
-    ctrl = SessionController(pool=mock_pool, cleanup_callback=callback)
+    ctrl = SessionController(pool=minimal_pool, cleanup_callback=callback)
     ctrl._session_ttl_seconds = 0.05
     await ctrl.get_or_create_session("sess-1")
     await asyncio.sleep(0.1)
@@ -328,9 +319,11 @@ async def test_cleanup_task_uses_callback_when_provided(
 
 @pytest.mark.anyio
 async def test_start_and_stop_cleanup_task(
-    controller: SessionController,
+    minimal_pool: AgentPool,
 ) -> None:
     """start_cleanup_task and stop_cleanup_task manage the background task."""
+    # Create a fresh SessionController that hasn't started its cleanup task yet
+    controller = SessionController(pool=minimal_pool)
     assert controller._cleanup_task is None
     await controller.start_cleanup_task()
     assert controller._cleanup_task is not None
@@ -340,9 +333,10 @@ async def test_start_and_stop_cleanup_task(
 
 @pytest.mark.anyio
 async def test_cleanup_loop_catches_exceptions(
-    controller: SessionController,
+    minimal_pool: AgentPool,
 ) -> None:
     """The cleanup loop survives exceptions and continues running."""
+    controller = SessionController(pool=minimal_pool)
     controller._session_ttl_seconds = 0.01
     await controller.start_cleanup_task()
     # Force an exception by corrupting internal state
@@ -464,7 +458,7 @@ def test_closing_alias_writes_is_closing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_steer_followup_inside_request_lock() -> None:
+async def test_steer_followup_inside_request_lock(minimal_pool: AgentPool) -> None:
     """steer()/followup() must be called inside _request_lock.
 
     Without this, current_run_id can be cleared between the check and
@@ -472,13 +466,7 @@ async def test_steer_followup_inside_request_lock() -> None:
     """
     from agentpool.orchestrator.core import SessionController
 
-    mock_pool = MagicMock()
-    mock_pool.main_agent = MagicMock()
-    mock_pool.main_agent.name = "main-agent"
-    mock_pool.manifest = MagicMock()
-    mock_pool.manifest.agents = {}
-
-    controller = SessionController(pool=mock_pool)
+    controller = SessionController(pool=minimal_pool)
     controller._event_bus = EventBus()
 
     mock_agent = MagicMock()
@@ -561,7 +549,7 @@ def test_closing_property_sets_is_closing() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_background_tasks_initialized_in_init() -> None:
+def test_background_tasks_initialized_in_init(minimal_pool: AgentPool) -> None:
     """SessionController.__init__ must initialize _background_tasks set.
 
     Without early initialization, the first call to _start_run_handle
@@ -569,13 +557,7 @@ def test_background_tasks_initialized_in_init() -> None:
     """
     from agentpool.orchestrator.core import SessionController
 
-    mock_pool = MagicMock()
-    mock_pool.main_agent = MagicMock()
-    mock_pool.main_agent.name = "main-agent"
-    mock_pool.manifest = MagicMock()
-    mock_pool.manifest.agents = {}
-
-    controller = SessionController(pool=mock_pool)
+    controller = SessionController(pool=minimal_pool)
     assert hasattr(controller, "_background_tasks"), (
         "_background_tasks must be initialized in __init__"
     )

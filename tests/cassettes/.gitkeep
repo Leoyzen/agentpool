@@ -1,0 +1,2 @@
+# VCR cassettes are stored under ``vcr/<test_module>/<test_function>.yaml``.
+# This file ensures the directory is tracked by git even when empty.

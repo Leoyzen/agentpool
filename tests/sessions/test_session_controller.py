@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.orchestrator import SessionController
 from agentpool.sessions import SessionData
 from agentpool_config.storage import MemoryStorageConfig, SQLStorageConfig
@@ -288,11 +289,11 @@ class TestSessionControllerPersistence:
     """Tests for SessionController persistence and hierarchy via store."""
 
     @pytest.fixture
-    def mock_pool(self) -> MagicMock:
-        """Create a mock pool."""
-        pool = MagicMock()
-        pool.main_agent.name = "test_agent"
-        return pool
+    def mock_pool(self, minimal_pool: AgentPool) -> AgentPool:
+        """Return the real pool."""
+        return minimal_pool
+    
+
 
     @pytest.fixture
     def store(self) -> MemoryStorageProvider:
@@ -300,10 +301,10 @@ class TestSessionControllerPersistence:
         return MemoryStorageProvider()
 
     async def test_get_or_create_session_saves_to_store(
-        self, mock_pool: MagicMock, store: MemoryStorageProvider
+        self, minimal_pool: AgentPool, store: MemoryStorageProvider
     ) -> None:
         """SessionController saves session to store on creation."""
-        controller = SessionController(pool=mock_pool, store=store)
+        controller = SessionController(pool=minimal_pool, store=store)
 
         state, was_created = await controller.get_or_create_session(
             session_id="test_session",
@@ -320,10 +321,10 @@ class TestSessionControllerPersistence:
         assert loaded.agent_name == "test_agent"
 
     async def test_close_session_marks_closed_in_store(
-        self, mock_pool: MagicMock, store: MemoryStorageProvider
+        self, minimal_pool: AgentPool, store: MemoryStorageProvider
     ) -> None:
         """SessionController marks session as closed in store on close."""
-        controller = SessionController(pool=mock_pool, store=store)
+        controller = SessionController(pool=minimal_pool, store=store)
 
         await controller.get_or_create_session(
             session_id="test_session",
@@ -337,10 +338,10 @@ class TestSessionControllerPersistence:
         assert loaded.status == "closed"
 
     async def test_create_with_parent_tracks_children(
-        self, mock_pool: MagicMock, store: MemoryStorageProvider
+        self, minimal_pool: AgentPool, store: MemoryStorageProvider
     ) -> None:
         """Creating session with parent_session_id tracks in _children."""
-        controller = SessionController(pool=mock_pool, store=store)
+        controller = SessionController(pool=minimal_pool, store=store)
 
         await controller.get_or_create_session(
             session_id="parent_1",
@@ -360,10 +361,10 @@ class TestSessionControllerPersistence:
         assert parent.session_id == "parent_1"
 
     async def test_close_session_cascade_children(
-        self, mock_pool: MagicMock, store: MemoryStorageProvider
+        self, minimal_pool: AgentPool, store: MemoryStorageProvider
     ) -> None:
         """Closing parent cascades to child sessions by default."""
-        controller = SessionController(pool=mock_pool, store=store)
+        controller = SessionController(pool=minimal_pool, store=store)
 
         await controller.get_or_create_session(
             session_id="parent_1",
@@ -387,10 +388,10 @@ class TestSessionControllerPersistence:
         assert child_data.status == "closed"
 
     async def test_child_inherits_project_id_via_metadata(
-        self, mock_pool: MagicMock, store: MemoryStorageProvider
+        self, minimal_pool: AgentPool, store: MemoryStorageProvider
     ) -> None:
         """Child session can receive parent project_id via explicit metadata."""
-        controller = SessionController(pool=mock_pool, store=store)
+        controller = SessionController(pool=minimal_pool, store=store)
 
         await controller.get_or_create_session(
             session_id="parent_1",
@@ -412,9 +413,9 @@ class TestSessionControllerPersistence:
         assert child.cwd == "/path/to/project"
         assert child.parent_id == "parent_1"
 
-    async def test_create_without_store(self, mock_pool: MagicMock) -> None:
+    async def test_create_without_store(self, minimal_pool: AgentPool) -> None:
         """SessionController works without a store."""
-        controller = SessionController(pool=mock_pool, store=None)
+        controller = SessionController(pool=minimal_pool, store=None)
 
         state, _ = await controller.get_or_create_session(
             session_id="test_session",

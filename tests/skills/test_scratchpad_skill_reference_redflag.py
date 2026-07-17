@@ -18,6 +18,10 @@ Bug behavior (before fix):
 - load_skill("systematic-troubleshooting") -> success (bare name search)
 - load_skill("skill://systematic-troubleshooting/references/...") -> fails with
   "Provider 'systematic-troubleshooting' not registered"
+
+
+# TODO: L2 migration — test uses mock_pool as skill data container
+# (skill_resolver, skills), not for SessionController/SessionPool creation.
 """
 
 from __future__ import annotations

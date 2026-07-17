@@ -109,6 +109,8 @@ uv run pytest -m ""
 
 VCR tests replay recorded HTTP interactions (cassettes) so tests are deterministic and network-free in CI.
 
+> **[HUMAN-REQUIRED]**: Cassette recording requires `OPENAI_API_KEY` and must be done by a human. CI never records — it only replays existing cassettes. See steps below.
+
 ### Writing a VCR Test
 
 1. **Create the test file** in `tests/vcr/`:
@@ -218,6 +220,8 @@ tests/
 │   ├── test_acp_subprocess.py
 │   ├── test_opencode_subprocess.py
 │   └── test_acp_tool_call_e2e.py
+├── fixtures/                  # Shared test fixtures (e.g., minimal_pool.py, sample configs)
+│   └── minimal_pool.py        # Minimal AgentPool setup for integration tests
 ├── servers/                   # Server-level integration tests (mocked pool/agent)
 │   ├── acp_server/
 │   └── opencode_server/
@@ -345,9 +349,13 @@ async def test_acp(real_pool):
 
 If your code makes model API calls (directly or through an agent), you MUST have a VCR test. Unit tests with `TestModel` verify logic but not API response format compatibility.
 
-### ❌ Skipping E2E for protocol changes
+### ❌ Skipping L4a for protocol changes
 
-If you change how the ACP server handles sessions, streaming, or tool calls, a VCR test is the minimum. An E2E test is strongly recommended because subprocess-level issues (startup, stdio, signals) are invisible to in-process tests.
+If you change how the ACP server handles sessions, streaming, or tool calls, a VCR test is the minimum. An L4a smoke E2E test is strongly recommended because subprocess-level issues (startup, stdio, signals) are invisible to in-process tests. L4a runs in ~30s and catches "server won't start" regressions before merge.
+
+### ❌ Running VCR tests concurrently
+
+VCR cassettes are stateful — they record a specific sequence of HTTP interactions. Running VCR tests in parallel (e.g., `pytest -n auto` with VCR tests) can cause cassette mismatches, race conditions on shared cassette files, or spurious "unplayed interaction" errors. VCR tests MUST run sequentially. The default `uv run pytest` already excludes parallel execution for `tests/vcr/`, but do not override this with `-n auto` for VCR tests.
 
 ### ❌ Using `as any` or `@ts-ignore` equivalents in tests
 

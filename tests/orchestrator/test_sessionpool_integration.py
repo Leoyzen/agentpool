@@ -665,3 +665,438 @@ async def test_base_agent_not_mutated_by_child_creation() -> None:
         )
 
         await session_pool.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Merged from test_sessionpool_e2e_integration.py (suffix: e2e)
+# ---------------------------------------------------------------------------
+
+import asyncio
+from agentpool_server.opencode_server.session_pool_integration import OpenCodeSessionPoolIntegration
+
+class MockServerState:
+    """Minimal mock of OpenCode ServerState for testing."""
+
+    def __init__(self) -> None:
+        self.messages: dict[str, list[Any]] = {}
+        self.events: list[Any] = []
+        self.working_dir = '/tmp'
+        self.agent = None
+        self.pool = None
+        self.session_status: dict[str, Any] = {}
+
+    async def broadcast_event(self, event: Any) -> None:
+        self.events.append(event)
+
+@pytest.mark.integration
+async def test_e2e_reasoning_events_through_sessionpool() -> None:
+    """End-to-end: AgentPool -> SessionPool -> OpenCode events.
+
+    Verifies that when a model produces reasoning output, the events flow
+    through the entire pipeline and reach the SSE broadcast layer.
+    """
+    agent_config = NativeAgentConfig(name='test_agent', model='test', system_prompt='You are a test agent')
+    manifest = AgentsManifest(agents={'test_agent': agent_config})
+    async with AgentPool(manifest) as pool:
+        session_pool = pool.session_pool
+        assert session_pool is not None
+        server_state = MockServerState()
+        server_state.pool = pool
+        integration = OpenCodeSessionPoolIntegration(session_pool=session_pool, server_state=server_state)
+        session_id = 'test-session'
+        message_id = await integration.route_message(session_id=session_id, content='hello', priority='when_idle')
+        if message_id is not None:
+            await session_pool.wait_for_completion(session_id)
+            await asyncio.sleep(0.2)
+        await integration._stop_event_consumer(session_id)
+        assert len(server_state.events) > 0, f'Expected SSE events to be broadcast, got {len(server_state.events)}. Event consumer may not have been started.'
+        event_types = [type(e).__name__ for e in server_state.events]
+        print(f'Broadcast events: {event_types}')
+        from agentpool_server.opencode_server.models import PartUpdatedEvent
+        part_events = [e for e in server_state.events if isinstance(e, PartUpdatedEvent)]
+        assert len(part_events) > 0, f'Expected PartUpdatedEvent in broadcast, got: {event_types}. Events may not be flowing through EventProcessor.'
+
+@pytest.mark.integration
+@pytest.mark.slow
+async def test_e2e_pre_existing_session_consumer_started() -> None:
+    """Consumer must start even when session already exists in SessionPool."""
+    agent_config = NativeAgentConfig(name='test_agent', model='test', system_prompt='You are a test agent')
+    manifest = AgentsManifest(agents={'test_agent': agent_config})
+    async with AgentPool(manifest) as pool:
+        session_pool = pool.session_pool
+        assert session_pool is not None
+        server_state = MockServerState()
+        server_state.pool = pool
+        integration = OpenCodeSessionPoolIntegration(session_pool=session_pool, server_state=server_state)
+        session_id = 'pre-existing-session'
+        await session_pool.create_session(session_id, agent_name='test_agent')
+        message_id = await integration.route_message(session_id=session_id, content='hello', priority='when_idle')
+        if message_id is not None:
+            await session_pool.wait_for_completion(session_id)
+            await asyncio.sleep(0.2)
+        await integration._stop_event_consumer(session_id)
+        assert len(server_state.events) > 0, f'Expected SSE events for pre-existing session, got {len(server_state.events)}'
+
+
+# ---------------------------------------------------------------------------
+# Merged from test_sessionpool_end_to_end_redflag.py (suffix: etr)
+# ---------------------------------------------------------------------------
+
+import asyncio
+from pydantic_ai.messages import PartStartEvent, ThinkingPart
+from agentpool.lifecycle.types import DeliveryMode
+from agentpool.orchestrator.core import EventBus
+from agentpool_server.opencode_server.session_pool_integration import OpenCodeSessionPoolIntegration
+
+class MockServerState:
+    """Mock OpenCode ServerState for testing."""
+
+    def __init__(self):
+        self.messages = {}
+        self.events = []
+        self.working_dir = '/tmp'
+
+    async def broadcast_event(self, event):
+        self.events.append(event)
+
+class MockSessionPool:
+    """Mock SessionPool for testing."""
+
+    def __init__(self):
+        self.event_bus = EventBus()
+        self.sessions = MockSessions()
+
+    async def send_message(self, session_id, content, mode=DeliveryMode.QUEUE, input_provider=None, **kwargs):
+        return None
+
+class MockSessions:
+    """Mock Sessions manager."""
+
+    def __init__(self):
+        self._sessions = {}
+        self._session_agents = {}
+
+    async def get_or_create_session(self, session_id, agent_name=None, **metadata):
+        if session_id not in self._sessions:
+            from agentpool.orchestrator.core import SessionState
+            state = SessionState(session_id=session_id, agent_name=agent_name or 'default')
+            self._sessions[session_id] = state
+            return (state, True)
+        return (self._sessions[session_id], False)
+
+    def get_session(self, session_id):
+        return self._sessions.get(session_id)
+
+@pytest.mark.asyncio
+async def test_send_message_async_does_not_start_consumer():
+    """Red-flag: send_message_async calls session_pool.receive_request directly.
+
+    Without going through integration.route_message, so the event consumer
+    is never started for new sessions.
+    """
+    server_state = MockServerState()
+    session_pool = MockSessionPool()
+    OpenCodeSessionPoolIntegration(session_pool=session_pool, server_state=server_state)
+    session_id = 'test_session'
+    await session_pool.sessions.get_or_create_session(session_id, agent_name='default')
+    thinking_event = PartStartEvent(index=0, part=ThinkingPart(content='Let me think...'))
+    await session_pool.event_bus.publish(session_id, thinking_event)
+    await asyncio.sleep(0.1)
+    assert len(server_state.events) == 0, f'Expected NO OpenCode events (consumer not started), got: {server_state.events}'
+
+@pytest.mark.asyncio
+async def test_integration_route_message_starts_consumer():
+    """Verify that integration.route_message starts the event consumer.
+
+    And events are broadcast.
+    """
+    server_state = MockServerState()
+    session_pool = MockSessionPool()
+    integration = OpenCodeSessionPoolIntegration(session_pool=session_pool, server_state=server_state)
+    session_id = 'test_session'
+    await integration.create_session(session_id, agent_name='default')
+    thinking_event = PartStartEvent(index=0, part=ThinkingPart(content='Let me think...'))
+    await session_pool.event_bus.publish(session_id, thinking_event)
+    await asyncio.sleep(0.1)
+    assert len(server_state.events) > 0, f'Expected OpenCode events (consumer started), got: {server_state.events}'
+    await integration._stop_event_consumer(session_id)
+
+@pytest.mark.asyncio
+async def test_integration_route_message_starts_consumer_for_existing_session():
+    """Red-flag: route_message must start consumer even for pre-existing sessions.
+
+    Sessions created via other paths (e.g. get_or_load_session) don't have
+    the consumer started, which would leave EventBus events unconsumed.
+    """
+    server_state = MockServerState()
+    session_pool = MockSessionPool()
+    integration = OpenCodeSessionPoolIntegration(session_pool=session_pool, server_state=server_state)
+    session_id = 'test_session'
+    await session_pool.sessions.get_or_create_session(session_id, agent_name='default')
+    assert session_id not in integration._session_groups
+    await integration.route_message(session_id=session_id, content='test prompt', mode=DeliveryMode.QUEUE)
+    await asyncio.sleep(0)
+    thinking_event = PartStartEvent(index=0, part=ThinkingPart(content='Let me think...'))
+    await session_pool.event_bus.publish(session_id, thinking_event)
+    await asyncio.sleep(0.1)
+    assert len(server_state.events) > 0, f'Expected OpenCode events (consumer started), got: {server_state.events}'
+    await integration._stop_event_consumer(session_id)
+
+@pytest.mark.asyncio
+async def test_consumer_restarted_after_crash():
+    """Red-flag: If consumer loop crashes, _start_event_consumer should restart it.
+
+    By cleaning up the old task and starting a new one.
+    """
+    server_state = MockServerState()
+    session_pool = MockSessionPool()
+    integration = OpenCodeSessionPoolIntegration(session_pool=session_pool, server_state=server_state)
+    session_id = 'test_session'
+    await integration._start_event_consumer(session_id)
+    assert session_id in integration._session_groups
+    assert session_id in integration._consumer_streams
+    await integration.stop_event_consumer(session_id)
+    await integration._start_event_consumer(session_id)
+    assert session_id in integration._session_groups
+    assert session_id in integration._consumer_streams
+    await asyncio.sleep(0)
+    thinking_event = PartStartEvent(index=0, part=ThinkingPart(content='Let me think...'))
+    await session_pool.event_bus.publish(session_id, thinking_event)
+    await asyncio.sleep(0.1)
+    assert len(server_state.events) > 0, f'Expected events after restart, got: {server_state.events}'
+    await integration._stop_event_consumer(session_id)
+
+
+# ---------------------------------------------------------------------------
+# Merged from test_sessionpool_subagent_e2e.py (suffix: se)
+# ---------------------------------------------------------------------------
+
+import asyncio
+from agentpool.agents.events import SpawnSessionStart, StreamCompleteEvent
+from agentpool.messaging import ChatMessage
+from agentpool_server.opencode_server.models.parts import ToolPart, ToolStateCompleted, ToolStateRunning
+from agentpool_server.opencode_server.session_pool_integration import OpenCodeSessionPoolIntegration
+
+class MockServerState:
+    """Minimal mock of OpenCode ServerState for testing."""
+
+    def __init__(self) -> None:
+        self.messages: dict[str, list[Any]] = {}
+        self.events: list[Any] = []
+        self.working_dir = '/tmp'
+        self.agent = None
+        self.pool = None
+        self.session_status: dict[str, Any] = {}
+        self.sessions: dict[str, Any] = {}
+        self.session_locks: dict[str, Any] = {}
+
+    async def broadcast_event(self, event: Any) -> None:
+        self.events.append(event)
+
+def _get_last_assistant_message(state: MockServerState, session_id: str) -> Any | None:
+    """Get the last assistant message for a session."""
+    messages = state.messages.get(session_id, [])
+    for msg in reversed(messages):
+        if hasattr(msg, 'info') and hasattr(msg.info, 'role') and (msg.info.role == 'assistant'):
+            return msg
+    return None
+
+def _get_tool_part_for_child(msg: Any, child_session_id: str) -> ToolPart | None:
+    """Find the ToolPart representing a child session."""
+    for part in msg.parts:
+        if isinstance(part, ToolPart) and part.state is not None and hasattr(part.state, 'metadata') and isinstance(part.state.metadata, dict) and (part.state.metadata.get('sessionId') == child_session_id):
+            return part
+    return None
+
+@pytest.mark.integration
+async def test_subagent_toolpart_transitions_running_to_completed() -> None:
+    """Full lifecycle: SpawnSessionStart -> StreamCompleteEvent -> ToolPart Completed.
+
+    This is an end-to-end test that exercises _event_consumer_loop, not just
+    EventProcessor in isolation. The bug only appeared because _event_consumer_loop
+    handled SpawnSessionStart with 'continue' before EventProcessor saw the event.
+    """
+    agent_config = NativeAgentConfig(name='test_agent', model='test', system_prompt='You are a test agent')
+    manifest = AgentsManifest(agents={'test_agent': agent_config})
+    async with AgentPool(manifest) as pool:
+        session_pool = pool.session_pool
+        assert session_pool is not None
+        await session_pool.start()
+        server_state = MockServerState()
+        server_state.pool = pool
+        integration = OpenCodeSessionPoolIntegration(session_pool=session_pool, server_state=server_state)
+        parent_session_id = 'parent-e2e-test'
+        child_session_id = 'child-e2e-test'
+        await session_pool.create_session(parent_session_id, agent_name='test_agent')
+        await session_pool.create_session(child_session_id, parent_session_id=parent_session_id, agent_name='worker')
+        await integration._start_event_consumer(parent_session_id)
+        await asyncio.sleep(0.05)
+        spawn_event = SpawnSessionStart(child_session_id=child_session_id, parent_session_id=parent_session_id, tool_call_id='tc-1', spawn_mechanism='task', source_name='worker', source_type='agent', depth=1, description='Test subagent task', metadata={'prompt': 'do something'}, model_id='test-model')
+        await session_pool.event_bus.publish(parent_session_id, spawn_event)
+        await asyncio.sleep(0.1)
+        assistant_msg = _get_last_assistant_message(server_state, parent_session_id)
+        assert assistant_msg is not None, 'No assistant message found after SpawnSessionStart'
+        tool_part = _get_tool_part_for_child(assistant_msg, child_session_id)
+        assert tool_part is not None, f'No ToolPart found for child session {child_session_id}. SpawnSessionStart handling may have failed to create it.'
+        assert isinstance(tool_part.state, ToolStateRunning), f'Expected ToolStateRunning, got {type(tool_part.state).__name__}'
+        assert tool_part.state.time.start is not None, 'ToolPart should have start time'
+        complete_event = StreamCompleteEvent(message=ChatMessage(role='assistant', content='Task completed successfully'), session_id=child_session_id)
+        await session_pool.event_bus.publish(child_session_id, complete_event)
+        await asyncio.sleep(0.1)
+        assistant_msg = _get_last_assistant_message(server_state, parent_session_id)
+        assert assistant_msg is not None
+        tool_part = _get_tool_part_for_child(assistant_msg, child_session_id)
+        assert tool_part is not None, f'ToolPart for child {child_session_id} disappeared after StreamCompleteEvent'
+        assert isinstance(tool_part.state, ToolStateCompleted), f'Expected ToolStateCompleted after subagent finished, got {type(tool_part.state).__name__}. The ToolPart is stuck in a non-completed state. This usually means _event_consumer_loop or _update_parent_toolpart failed.'
+        assert tool_part.state.time.end is not None, 'Completed ToolPart should have end time set'
+        assert tool_part.state.output == 'Task completed successfully', f'ToolPart output mismatch: {tool_part.state.output}'
+        await integration._stop_event_consumer(parent_session_id)
+        await session_pool.shutdown()
+
+@pytest.mark.integration
+async def test_subagent_toolpart_handles_multiple_child_events() -> None:
+    """Verify ToolPart transitions correctly even with intermediate child events."""
+    agent_config = NativeAgentConfig(name='test_agent', model='test', system_prompt='You are a test agent')
+    manifest = AgentsManifest(agents={'test_agent': agent_config})
+    async with AgentPool(manifest) as pool:
+        session_pool = pool.session_pool
+        assert session_pool is not None
+        await session_pool.start()
+        server_state = MockServerState()
+        server_state.pool = pool
+        integration = OpenCodeSessionPoolIntegration(session_pool=session_pool, server_state=server_state)
+        parent_session_id = 'parent-multi-test'
+        child_session_id = 'child-multi-test'
+        await session_pool.create_session(parent_session_id, agent_name='test_agent')
+        await session_pool.create_session(child_session_id, parent_session_id=parent_session_id, agent_name='analyzer')
+        await integration._start_event_consumer(parent_session_id)
+        await asyncio.sleep(0.05)
+        spawn_event = SpawnSessionStart(child_session_id=child_session_id, parent_session_id=parent_session_id, tool_call_id='tc-2', spawn_mechanism='task', source_name='analyzer', source_type='agent', depth=1, description='Analysis task', metadata={'prompt': 'analyze this'})
+        await session_pool.event_bus.publish(parent_session_id, spawn_event)
+        await asyncio.sleep(0.1)
+        assistant_msg = _get_last_assistant_message(server_state, parent_session_id)
+        assert assistant_msg is not None
+        tool_part = _get_tool_part_for_child(assistant_msg, child_session_id)
+        assert tool_part is not None, 'ToolPart should exist after SpawnSessionStart'
+        assert isinstance(tool_part.state, ToolStateRunning)
+        complete_event = StreamCompleteEvent(message=ChatMessage(role='assistant', content='Analysis done'), session_id=child_session_id)
+        await session_pool.event_bus.publish(child_session_id, complete_event)
+        await asyncio.sleep(0.1)
+        assistant_msg = _get_last_assistant_message(server_state, parent_session_id)
+        assert assistant_msg is not None
+        tool_part = _get_tool_part_for_child(assistant_msg, child_session_id)
+        assert tool_part is not None, 'ToolPart should still exist after completion'
+        assert isinstance(tool_part.state, ToolStateCompleted), f'ToolPart stuck in {type(tool_part.state).__name__} after completion'
+        await integration._stop_event_consumer(parent_session_id)
+        await session_pool.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Merged from test_session_pool_hooks.py (suffix: hk)
+# ---------------------------------------------------------------------------
+
+import asyncio
+from pydantic_ai.models.test import TestModel
+from agentpool import Agent
+from agentpool.agents.context import AgentRunContext
+from agentpool.agents.events import StreamCompleteEvent
+from agentpool.hooks import AgentHooks, CallableHook, HookResult
+from agentpool.orchestrator.core import EventBus, SessionState
+from agentpool.orchestrator.run import RunHandle
+
+hook_calls: list[tuple[str, dict[str, Any]]] = []
+
+def _reset_calls() -> None:
+    hook_calls.clear()
+
+def _make_recorder(event: str) -> CallableHook:
+
+    def _fn(**kwargs: Any) -> HookResult:
+        hook_calls.append((event, kwargs))
+        return {'decision': 'allow'}
+    return CallableHook(event=event, fn=_fn)
+
+def _make_run_handle(agent: Agent[Any, Any], run_ctx: AgentRunContext) -> RunHandle:
+    """Create a RunHandle wired for the SessionPool path."""
+    event_bus = EventBus()
+    session = SessionState(session_id='test-session', agent_name='test-agent')
+    return RunHandle(run_id='test-run', session_id='test-session', agent_type='native', agent=agent, event_bus=event_bus, session=session, run_ctx=run_ctx)
+
+@pytest.mark.integration
+async def test_hooks_fire_through_run_handle_start() -> None:
+    """Given a RunHandle.start() path, hooks fire during turn execution.
+
+    This is the regression test for the bug where hooks didn't fire
+    when going through the SessionPool/RunHandle path.
+    """
+    _reset_calls()
+    hooks = AgentHooks(pre_turn=[_make_recorder('pre_turn')], post_turn=[_make_recorder('post_turn')])
+    agent = Agent(name='test-pool-hooks', model=TestModel(custom_output_text='pool response'), hooks=hooks)
+    async with agent:
+        run_ctx = AgentRunContext(session_id='test-session')
+        handle = _make_run_handle(agent, run_ctx)
+        events: list[Any] = []
+        gen = handle.start('hello')
+
+        async def _consume() -> None:
+            events.extend([event async for event in gen])
+        consumer_task = asyncio.create_task(_consume())
+        await asyncio.sleep(0.1)
+        handle.close()
+        await asyncio.sleep(0.1)
+        await consumer_task
+    event_names = [name for name, _ in hook_calls]
+    assert 'pre_turn' in event_names, 'pre_turn hook must fire through RunHandle.start()'
+    assert any((isinstance(e, StreamCompleteEvent) for e in events))
+
+@pytest.mark.integration
+async def test_hooks_fired_cleared_between_turns() -> None:
+    """Given two sequential turns, turn 2 hooks still fire.
+
+    Previously, ``hooks_fired`` on ``AgentRunContext`` needed to be cleared
+    between turns to prevent turn 1's guard keys from blocking turn 2. With
+    the ``hooks_fired`` guard removed (replaced by per-Turn ``_logged_tools``
+    set), a new Turn instance is created for each turn with a fresh set,
+    so no explicit clearing is needed.
+    """
+    _reset_calls()
+    hooks = AgentHooks(pre_turn=[_make_recorder('pre_turn')], post_turn=[_make_recorder('post_turn')])
+    agent = Agent(name='test-multi-turn-hooks', model=TestModel(custom_output_text='response'), hooks=hooks)
+    async with agent:
+        run_ctx = AgentRunContext(session_id='test-session')
+        handle = _make_run_handle(agent, run_ctx)
+        gen = handle.start('first prompt')
+
+        async def _consume() -> None:
+            _ = [event async for event in gen]
+        consumer_task = asyncio.create_task(_consume())
+        await asyncio.sleep(0.1)
+        handle.close()
+        await asyncio.sleep(0.1)
+        await consumer_task
+    pre_turn_count = sum((1 for name, _ in hook_calls if name == 'pre_turn'))
+    assert pre_turn_count == 1, 'pre_turn must fire in turn 1'
+    from agentpool.agents.native_agent.turn import NativeTurn
+    turn = NativeTurn(agent=agent, prompts=['second prompt'], run_ctx=run_ctx, message_history=[], hooks=hooks)
+    _ = [event async for event in turn.execute()]
+    pre_turn_count = sum((1 for name, _ in hook_calls if name == 'pre_turn'))
+    assert pre_turn_count == 2, 'pre_turn must fire again in turn 2'
+
+@pytest.mark.integration
+async def test_hooks_fire_in_direct_turn_execute() -> None:
+    """Given a NativeTurn created via agent.create_turn(), hooks fire.
+
+    This is a simplified version of the SessionPool path that verifies
+    the create_turn() → turn.execute() pipeline fires hooks correctly.
+    """
+    _reset_calls()
+    hooks = AgentHooks(pre_turn=[_make_recorder('pre_turn')], post_turn=[_make_recorder('post_turn')])
+    agent = Agent(name='test-create-turn-hooks', model=TestModel(custom_output_text='response'), hooks=hooks)
+    async with agent:
+        run_ctx = AgentRunContext(session_id='test-session')
+        turn = agent.create_turn(prompts=['hello'], run_ctx=run_ctx, message_history=[])
+        events = [event async for event in turn.execute()]
+    event_names = [name for name, _ in hook_calls]
+    assert 'pre_turn' in event_names
+    assert 'post_turn' in event_names
+    assert any((isinstance(e, StreamCompleteEvent) for e in events))

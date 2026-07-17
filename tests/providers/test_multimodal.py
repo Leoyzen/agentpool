@@ -10,6 +10,9 @@ from agentpool import Agent
 pytestmark = pytest.mark.unit
 
 
+# Flaky: model-dependent — vision model may not always include "Python" in its
+# response or may exceed the length threshold. Real model calls have nondeterministic
+# output. Keep flaky marker until we switch to VCR cassettes for this test.
 @pytest.mark.flaky(reruns=2)
 async def test_vision(vision_model: str):
     """Test basic vision capability with a small, public image."""

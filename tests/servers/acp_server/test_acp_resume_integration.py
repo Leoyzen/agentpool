@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from acp.schema import LoadSessionRequest, ResumeSessionRequest
+from agentpool import AgentPool
 from agentpool.sessions.models import SessionData
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.session_manager import ACPSessionManager
@@ -48,24 +49,26 @@ def mock_session_store() -> MagicMock:
 
 
 @pytest.fixture
-def session_manager(mock_agent: MagicMock, mock_session_store: MagicMock) -> ACPSessionManager:
-    """Create an ACPSessionManager with mocked pool and session_store.
+def session_manager(
+    minimal_pool: AgentPool,
+    mock_agent: MagicMock,
+    mock_session_store: MagicMock,
+) -> ACPSessionManager:
+    """Create an ACPSessionManager with real pool and controlled session_pool methods.
 
-    session_store is a read-only property derived from pool.session_pool.
-    We mock pool.session_pool to provide our mock_session_store.
+    Uses minimal_pool (real AgentPool) with monkeypatched session_pool methods
+    to provide controlled behavior for resume_session() testing.
     """
-    session_pool = MagicMock()
-    session_pool.sessions = MagicMock()
-    session_pool.sessions.store = mock_session_store
-    session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=mock_agent)
-    session_pool._get_resume_lock = AsyncMock(return_value=asyncio.Lock())
+    assert minimal_pool.session_pool is not None
+    # Monkeypatch session_pool methods that resume_session() calls
+    minimal_pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(  # type: ignore[assignment]
+        return_value=mock_agent,
+    )
+    minimal_pool.session_pool._get_resume_lock = AsyncMock(return_value=asyncio.Lock())  # type: ignore[assignment]
+    # Set the session store to our mock
+    minimal_pool.session_pool.sessions.store = mock_session_store  # type: ignore[assignment]
 
-    pool = MagicMock()
-    pool.manifest.agents = {"test_agent": mock_agent}
-    pool.storage = MagicMock()
-    pool.session_pool = session_pool
-
-    manager = ACPSessionManager(pool=pool)
+    manager = ACPSessionManager(pool=minimal_pool)
     manager._acp_sessions = {}
     return manager
 

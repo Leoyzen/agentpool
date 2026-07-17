@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
 from agentpool.lifecycle.types import DeliveryMode
 from agentpool.messaging import ChatMessage
@@ -27,22 +28,17 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def mock_pool() -> MagicMock:
-    """Return a mocked AgentPool."""
-    pool = MagicMock()
-    pool.storage = None
-    pool.main_agent_name = "default"
-    pool.manifest = MagicMock()
-    pool.manifest.agents = {}
-    pool._config_file_path = None
-    pool.get_context = MagicMock(return_value=MagicMock())
-    return pool
+def mock_pool(minimal_pool: AgentPool) -> AgentPool:
+    """Return the real pool with controlled context for testing."""
+    minimal_pool.get_context = MagicMock(return_value=MagicMock())  # type: ignore[assignment]
+    return minimal_pool
 
 
 @pytest.fixture
-def session_pool(mock_pool: MagicMock) -> SessionPool:
-    """Return a SessionPool backed by the mock pool."""
-    return SessionPool(pool=mock_pool)
+def session_pool(mock_pool: AgentPool) -> SessionPool:
+    """Return a SessionPool backed by the real pool."""
+    assert mock_pool.session_pool is not None
+    return mock_pool.session_pool
 
 
 # ---------------------------------------------------------------------------

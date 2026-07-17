@@ -50,7 +50,7 @@ from pydantic_ai import PartDeltaEvent, TextPartDelta
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent
+from agentpool import Agent, AgentPool
 from agentpool.agents.events import StreamCompleteEvent, ToolCallStartEvent
 from agentpool.orchestrator.core import SessionPool
 
@@ -84,15 +84,10 @@ def tool_call_agent() -> Agent[None]:
     )
 
 
-async def _setup_session_pool(agent: Agent[Any]) -> tuple[SessionPool, str]:
-    """Create a SessionPool with the given agent attached."""
-    mock_pool = MagicMock()
-    mock_pool.main_agent = agent
-    mock_pool.manifest = MagicMock()
-    mock_pool.manifest.agents = {}
-    mock_pool.storage = None
-
-    session_pool = SessionPool(mock_pool, enable_auto_resume=False)
+async def _setup_session_pool(agent: Agent[Any], minimal_pool: AgentPool) -> tuple[SessionPool, str]:
+    """Create a SessionPool with the given agent attached using the real pool."""
+    # Create a new SessionPool with auto_resume disabled for break testing
+    session_pool = SessionPool(minimal_pool, enable_auto_resume=False)
     await session_pool.start()
 
     session_id = f"test-session-{agent.name}"
@@ -102,20 +97,16 @@ async def _setup_session_pool(agent: Agent[Any]) -> tuple[SessionPool, str]:
     state, _ = await session_pool.sessions.get_or_create_session(session_id)
     state.agent = agent
     session_pool.sessions._session_agents[session_id] = agent
-    mock_pool.get_agent.return_value = agent
+    minimal_pool.get_agent = MagicMock(return_value=agent)  # type: ignore[assignment]
 
     # Link agent back to pool so interrupt() can resolve session state
-    mock_pool.session_pool = session_pool
-    # host_context calls _agent_pool.get_context(); configure it to return
-    # a context with the session_pool so interrupt() can resolve session state.
-    mock_pool.get_context.return_value = MagicMock(session_pool=session_pool)
-    agent.agent_pool = mock_pool
+    agent.agent_pool = minimal_pool
     agent.session_id = session_id
 
     return session_pool, session_id
 
 
-async def test_simple_break_after_n_events(break_test_agent: Agent[None]):
+async def test_simple_break_after_n_events(break_test_agent: Agent[None], minimal_pool: AgentPool):
     """Test 1: Simple break after receiving N events.
 
     !!! warning "Known Issue"
@@ -127,7 +118,7 @@ async def test_simple_break_after_n_events(break_test_agent: Agent[None]):
     - _cancelled flag may or may not be set depending on timing
     - Conversation history may be 0 due to cleanup exceptions
     """
-    session_pool, session_id = await _setup_session_pool(break_test_agent)
+    session_pool, session_id = await _setup_session_pool(break_test_agent, minimal_pool)
     try:
         # Capture stderr to check for internal exceptions
         stderr_capture = StringIO()
@@ -151,14 +142,14 @@ async def test_simple_break_after_n_events(break_test_agent: Agent[None]):
         await session_pool.shutdown()
 
 
-async def test_break_with_exception_handling(break_test_agent: Agent[None]):
+async def test_break_with_exception_handling(break_test_agent: Agent[None], minimal_pool: AgentPool):
     """Test 2: Verify exception handling around break.
 
     !!! warning "Known Issue"
         While user code may not see exceptions, internal errors occur during
         generator cleanup that can corrupt agent state.
     """
-    session_pool, session_id = await _setup_session_pool(break_test_agent)
+    session_pool, session_id = await _setup_session_pool(break_test_agent, minimal_pool)
     try:
         user_exception = None
 
@@ -175,14 +166,14 @@ async def test_break_with_exception_handling(break_test_agent: Agent[None]):
         await session_pool.shutdown()
 
 
-async def test_conversation_history_after_break(break_test_agent: Agent[None]):
+async def test_conversation_history_after_break(break_test_agent: Agent[None], minimal_pool: AgentPool):
     """Test 3: Conversation history after break.
 
     !!! warning "Known Issue"
         Due to cleanup exceptions, conversation history is often not preserved
         correctly after a break.
     """
-    session_pool, session_id = await _setup_session_pool(break_test_agent)
+    session_pool, session_id = await _setup_session_pool(break_test_agent, minimal_pool)
     try:
         # Run and break
         async for _event in session_pool.run_stream(session_id, "Test message"):
@@ -195,14 +186,14 @@ async def test_conversation_history_after_break(break_test_agent: Agent[None]):
         await session_pool.shutdown()
 
 
-async def test_subsequent_run_after_break(break_test_agent: Agent[None]):
+async def test_subsequent_run_after_break(break_test_agent: Agent[None], minimal_pool: AgentPool):
     """Test 4: Subsequent run_stream after break.
 
     !!! warning "Known Issue"
         After breaking, subsequent runs may fail with CancelledError due to
         leftover cancel scope state.
     """
-    session_pool, session_id = await _setup_session_pool(break_test_agent)
+    session_pool, session_id = await _setup_session_pool(break_test_agent, minimal_pool)
     try:
         # First run with break
         async for _event in session_pool.run_stream(session_id, "First prompt"):
@@ -239,12 +230,12 @@ async def test_subsequent_run_after_break(break_test_agent: Agent[None]):
     "'asynchronous generator is already running'. Tracked as architecture issue. "
     "Use consume-until-StreamCompleteEvent pattern instead."
 )
-async def test_interrupt_vs_break(break_test_agent: Agent[None]):
+async def test_interrupt_vs_break(break_test_agent: Agent[None], minimal_pool: AgentPool):
     """Test 5: Compare interrupt() vs break behavior.
 
     Shows that interrupt() is the recommended approach instead of break.
     """
-    session_pool, session_id = await _setup_session_pool(break_test_agent)
+    session_pool, session_id = await _setup_session_pool(break_test_agent, minimal_pool)
     try:
         # Test interrupt() method
         events = []
@@ -270,14 +261,14 @@ async def test_interrupt_vs_break(break_test_agent: Agent[None]):
         await session_pool.shutdown()
 
 
-async def test_safe_pattern_complete_consumption(break_test_agent: Agent[None]):
+async def test_safe_pattern_complete_consumption(break_test_agent: Agent[None], minimal_pool: AgentPool):
     """Test 6: Safe pattern - consume until StreamCompleteEvent.
 
     !!! tip "Recommended Pattern"
         Instead of breaking, always consume until StreamCompleteEvent.
         This is the only reliable pattern currently.
     """
-    session_pool, session_id = await _setup_session_pool(break_test_agent)
+    session_pool, session_id = await _setup_session_pool(break_test_agent, minimal_pool)
     try:
         events = []
         final_message = None
@@ -296,14 +287,14 @@ async def test_safe_pattern_complete_consumption(break_test_agent: Agent[None]):
         await session_pool.shutdown()
 
 
-async def test_tool_call_detection_without_break(tool_call_agent: Agent[None]):
+async def test_tool_call_detection_without_break(tool_call_agent: Agent[None], minimal_pool: AgentPool):
     """Test 7: Tool call detection simulation without breaking.
 
     !!! tip "Recommended Pattern"
         For simulation use case, intercept events but do not break.
         Use a flag to track state and let the stream complete.
     """
-    session_pool, session_id = await _setup_session_pool(tool_call_agent)
+    session_pool, session_id = await _setup_session_pool(tool_call_agent, minimal_pool)
     try:
         tool_detected = False
         events = []
@@ -325,14 +316,14 @@ async def test_tool_call_detection_without_break(tool_call_agent: Agent[None]):
         await session_pool.shutdown()
 
 
-async def test_partial_text_collection(break_test_agent: Agent[None]):
+async def test_partial_text_collection(break_test_agent: Agent[None], minimal_pool: AgentPool):
     """Test 8: Collect partial text without breaking.
 
     !!! tip "Recommended Pattern"
         If you need partial results, collect text deltas but still
         consume the full stream.
     """
-    session_pool, session_id = await _setup_session_pool(break_test_agent)
+    session_pool, session_id = await _setup_session_pool(break_test_agent, minimal_pool)
     try:
         text_chunks = []
         final_message = None

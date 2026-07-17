@@ -10,6 +10,8 @@ from agentpool import Agent
 pytestmark = pytest.mark.unit
 
 
+# Flaky: network/subprocess-dependent — uses npx to download and run an external
+# MCP server (context7). Latency from npx install and server startup can vary.
 @pytest.mark.slow
 @pytest.mark.flaky(reruns=2)
 async def test_mcp_tool_call(default_model: str):

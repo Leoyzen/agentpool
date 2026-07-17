@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.host.factory import AgentFactory
 
 
@@ -81,9 +82,9 @@ def _make_session(*, parent_session_id: str | None = None) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def test_compile_returns_empty_registry() -> None:
+def test_compile_returns_empty_registry(minimal_pool: AgentPool) -> None:
     """Given a manifest and host_context, compile() returns empty AgentRegistry."""
-    factory = AgentFactory(pool=MagicMock())
+    factory = AgentFactory(pool=minimal_pool)
     registry = factory.compile(
         manifest=MagicMock(),
         host_context=_make_host_context(),
@@ -98,7 +99,7 @@ def test_compile_returns_empty_registry() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_session_agent_native_main_calls_get_agent_with_pool() -> None:
+async def test_create_session_agent_native_main_calls_get_agent_with_pool(minimal_pool: AgentPool) -> None:
     """When cfg is NativeAgentConfig and no parent, get_agent is called with pool."""
     agent = _make_agent_mock()
     cfg = _make_native_cfg(agent=agent)
@@ -124,13 +125,13 @@ async def test_create_session_agent_native_main_calls_get_agent_with_pool() -> N
 
 
 @pytest.mark.asyncio
-async def test_create_session_agent_native_main_calls_aenter() -> None:
+async def test_create_session_agent_native_main_calls_aenter(minimal_pool: AgentPool) -> None:
     """When creating a native main agent, __aenter__ is called."""
     agent = _make_agent_mock()
     cfg = _make_native_cfg(agent=agent)
     host_context = _make_host_context()
 
-    factory = AgentFactory(pool=MagicMock())
+    factory = AgentFactory(pool=minimal_pool)
 
     with patch("agentpool.models.agents.NativeAgentConfig", (type(cfg),)):
         await factory.create_session_agent(
@@ -145,7 +146,7 @@ async def test_create_session_agent_native_main_calls_aenter() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_session_agent_native_main_no_pool_providers() -> None:
+async def test_create_session_agent_native_main_no_pool_providers(minimal_pool: AgentPool) -> None:
     """When creating a native main agent, no pool providers are added.
 
     (include_aggregating=False)
@@ -157,7 +158,7 @@ async def test_create_session_agent_native_main_no_pool_providers() -> None:
         skills_tools_provider=skills_tools,
     )
 
-    factory = AgentFactory(pool=MagicMock())
+    factory = AgentFactory(pool=minimal_pool)
 
     with patch("agentpool.models.agents.NativeAgentConfig", (type(cfg),)):
         await factory.create_session_agent(
@@ -178,7 +179,7 @@ async def test_create_session_agent_native_main_no_pool_providers() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_session_agent_non_native_builds_snapshot_manually() -> None:
+async def test_create_session_agent_non_native_builds_snapshot_manually(minimal_pool: AgentPool) -> None:
     """When cfg is NOT NativeAgentConfig, MCP snapshot is built from pool."""
     agent = _make_agent_mock()
     # Non-native cfg: not an instance of NativeAgentConfig
@@ -225,7 +226,7 @@ async def test_create_session_agent_non_native_builds_snapshot_manually() -> Non
 
 
 @pytest.mark.asyncio
-async def test_create_session_agent_fixes_missing_name() -> None:
+async def test_create_session_agent_fixes_missing_name(minimal_pool: AgentPool) -> None:
     """When cfg.name is None, model_copy is called to set the name."""
     agent = _make_agent_mock()
     cfg = _make_native_cfg(name=None, agent=agent)
@@ -237,7 +238,7 @@ async def test_create_session_agent_fixes_missing_name() -> None:
     cfg.model_copy = MagicMock(return_value=new_cfg)
 
     host_context = _make_host_context()
-    factory = AgentFactory(pool=MagicMock())
+    factory = AgentFactory(pool=minimal_pool)
 
     with patch("agentpool.models.agents.NativeAgentConfig", (type(new_cfg),)):
         await factory.create_session_agent(
@@ -258,13 +259,13 @@ async def test_create_session_agent_fixes_missing_name() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_session_agent_native_main_loads_session() -> None:
+async def test_create_session_agent_native_main_loads_session(minimal_pool: AgentPool) -> None:
     """When creating a native main agent, load_session is called."""
     agent = _make_agent_mock()
     cfg = _make_native_cfg(agent=agent)
     host_context = _make_host_context()
 
-    factory = AgentFactory(pool=MagicMock())
+    factory = AgentFactory(pool=minimal_pool)
 
     with patch("agentpool.models.agents.NativeAgentConfig", (type(cfg),)):
         await factory.create_session_agent(

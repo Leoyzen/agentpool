@@ -26,24 +26,6 @@ pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def mock_pool() -> MagicMock:
-    """Return a mocked AgentPool."""
-    pool = MagicMock()
-    pool.storage = None
-    pool.main_agent_name = "default"
-    pool.manifest = MagicMock()
-    pool.manifest.agents = {}
-    pool._config_file_path = None
-    pool.get_context = MagicMock(return_value=MagicMock())
-    return pool
-
-
-# ---------------------------------------------------------------------------
 # 1. RunLoopDelegationService.spawn_subagent() deprecation
 # ---------------------------------------------------------------------------
 

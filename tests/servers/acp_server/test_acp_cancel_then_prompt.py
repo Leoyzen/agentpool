@@ -19,10 +19,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.agents.events import RunFailedEvent, RunStartedEvent, StreamCompleteEvent
 from agentpool.lifecycle import RunState
 from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventEnvelope, SessionPool
+from agentpool.orchestrator.core import EventEnvelope
 from agentpool.orchestrator.turn import Turn
 
 
@@ -82,27 +83,17 @@ class _StubTurn(Turn):
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def mock_pool() -> MagicMock:
-    """Return a mocked AgentPool."""
-    pool = MagicMock()
-    pool.main_agent = MagicMock()
-    pool.main_agent.name = "main-agent"
-    pool.manifest = MagicMock()
-    pool.manifest.agents = {}
-    return pool
-
-
 async def _attach_agent(
-    pool: SessionPool,
+    pool: object,
     session_id: str,
     agent: MagicMock,
+    real_pool: AgentPool,
 ) -> None:
     """Attach a mock agent to an existing session."""
-    state, _ = await pool.sessions.get_or_create_session(session_id)
+    state, _ = await pool.sessions.get_or_create_session(session_id)  # type: ignore[union-attr]
     state.agent = agent
-    pool.sessions._session_agents[session_id] = agent
-    pool.pool.get_agent.return_value = agent  # type: ignore[attr-defined]
+    pool.sessions._session_agents[session_id] = agent  # type: ignore[union-attr]
+    real_pool.get_agent = MagicMock(return_value=agent)  # type: ignore[assignment]
 
 
 def _make_cancel_aware_agent() -> MagicMock:
@@ -156,7 +147,7 @@ async def _drain_queue(queue: asyncio.Queue[Any]) -> list[Any]:
 
 @pytest.mark.anyio
 async def test_acp_cancel_then_prompt_no_hang(
-    mock_pool: MagicMock,
+    minimal_pool: AgentPool,
 ) -> None:
     """ACP cancel-then-prompt sequence does not hang at the SessionPool level.
 
@@ -170,14 +161,14 @@ async def test_acp_cancel_then_prompt_no_hang(
 
     Uses ``asyncio.wait_for()`` with a 30s timeout to catch hangs.
     """
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
 
     session_id = "sess-acp-cancel-prompt"
     await session_pool.create_session(session_id, agent_name="test-agent")
 
     agent = _make_cancel_aware_agent()
-    await _attach_agent(session_pool, session_id, agent)
+    await _attach_agent(session_pool, session_id, agent, minimal_pool)
 
     # Subscribe to events BEFORE sending the first prompt
     queue = await session_pool.event_bus.subscribe(session_id)
@@ -255,12 +246,11 @@ async def test_acp_cancel_then_prompt_no_hang(
     # releases turn_lock. Otherwise close_session waits 30s for the lock.
     first_handle.close()
     await asyncio.sleep(0.1)
-    await session_pool.shutdown()
 
 
 @pytest.mark.anyio
 async def test_cancel_does_not_start_spontaneous_turn(
-    mock_pool: MagicMock,
+    minimal_pool: AgentPool,
 ) -> None:
     """After cancel, RunHandle.start() must enter idle — not re-execute the cancelled prompt.
 
@@ -277,8 +267,8 @@ async def test_cancel_does_not_start_spontaneous_turn(
     2. After cancel propagation, ``_status`` is ``idle``.
     3. No new events are published between cancel and the idle check.
     """
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
 
     session_id = "sess-cancel-no-spontaneous"
     await session_pool.create_session(session_id, agent_name="test-agent")
@@ -311,7 +301,7 @@ async def test_cancel_does_not_start_spontaneous_turn(
         )
 
     agent.create_turn = _create_turn
-    await _attach_agent(session_pool, session_id, agent)
+    await _attach_agent(session_pool, session_id, agent, minimal_pool)
 
     queue = await session_pool.event_bus.subscribe(session_id)
 
@@ -389,4 +379,3 @@ async def test_cancel_does_not_start_spontaneous_turn(
     # Cleanup
     first_handle.close()
     await asyncio.sleep(0.1)
-    await session_pool.shutdown()

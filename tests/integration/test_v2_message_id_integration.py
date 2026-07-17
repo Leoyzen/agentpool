@@ -16,6 +16,10 @@ Covers 12 scenarios:
 10. SessionPool.send_message with QUEUE mode creates new run
 11. SessionPool.run_agent creates session, runs, returns text, cleans up
 12. Deprecation warnings emitted for receive_request, spawn_subagent, get_available_agents
+
+
+# TODO: L2 migration — test uses complex inline mock_pool + mock_session_pool
+# patterns that require significant rework for real pool migration.
 """
 
 from __future__ import annotations

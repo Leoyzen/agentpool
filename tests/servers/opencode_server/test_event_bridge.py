@@ -289,8 +289,6 @@ Verifies that when one child's stop_event_consumer raises an exception,
 the remaining children are still stopped (the loop doesn't break).
 """
 
-from __future__ import annotations
-
 from typing import Any
 from unittest.mock import MagicMock
 

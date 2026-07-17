@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.orchestrator.core import SessionController
 from agentpool.sessions.models import PendingDeferredCall, SessionData
 from agentpool.storage.manager import StorageManager
@@ -141,6 +142,7 @@ async def test_e2e_session_lifecycle_with_sql_model_provider(
 
 async def test_e2e_session_controller_with_sql_model_provider(
     sql_e2e_storage: tuple[StorageManager, SQLModelProvider],
+    minimal_pool: AgentPool,
 ) -> None:
     """E2E: SessionController uses SQLModelProvider for session persistence.
 
@@ -149,17 +151,9 @@ async def test_e2e_session_controller_with_sql_model_provider(
     - get_or_create_session saves to SQLModelProvider
     - close_session marks as closed (not deleted)
     """
-    from unittest.mock import MagicMock
-
     _storage_manager, session_store = sql_e2e_storage
 
-    mock_pool = MagicMock()
-    mock_pool.main_agent = MagicMock()
-    mock_pool.main_agent.name = "main-agent"
-    mock_pool.manifest = MagicMock()
-    mock_pool.manifest.agents = {}
-
-    ctrl = SessionController(pool=mock_pool, store=session_store)
+    ctrl = SessionController(pool=minimal_pool, store=session_store)
     session_id = "e2e-ctrl-001"
 
     # Create session

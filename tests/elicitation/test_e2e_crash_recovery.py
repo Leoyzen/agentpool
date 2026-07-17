@@ -10,6 +10,10 @@ Reproduces the production bug where:
 
 This test uses real SQL storage (SQLModelProvider) to
 catch the integration bug that mocked tests missed.
+
+
+# TODO: L2 migration — test requires complex mock pool dependencies that
+# cannot be easily replaced with a real pool. Needs investigation.
 """
 
 from __future__ import annotations

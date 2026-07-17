@@ -14,6 +14,7 @@ import pytest
 from typing import Any
 from unittest.mock import MagicMock
 
+from agentpool import AgentPool
 from agentpool.host.factory import _inject_pool_providers
 
 pytestmark = pytest.mark.integration
@@ -44,7 +45,7 @@ class FakeHostContext:
         self.mcp = FakeMcp()
 
 
-def test_inject_pool_providers_with_skills_tools() -> None:
+def test_inject_pool_providers_with_skills_tools(minimal_pool: AgentPool) -> None:
     """Provider is injected when skills_tools_provider is set.
 
     Given a host context with skills_tools_provider set, When
@@ -54,14 +55,14 @@ def test_inject_pool_providers_with_skills_tools() -> None:
     provider = MagicMock(name="skills_tools_provider")
     agent = FakeAgent()
     host_context = FakeHostContext(skills_tools_provider=provider)
-    pool = MagicMock()
+    pool = minimal_pool
 
     _inject_pool_providers(agent, host_context, pool, include_aggregating=False)
 
     assert provider in agent._external_capabilities
 
 
-def test_inject_pool_providers_without_skills_tools() -> None:
+def test_inject_pool_providers_without_skills_tools(minimal_pool: AgentPool) -> None:
     """No injection when skills_tools_provider is None.
 
     Given a host context with skills_tools_provider=None, When
@@ -70,7 +71,7 @@ def test_inject_pool_providers_without_skills_tools() -> None:
     """
     agent = FakeAgent()
     host_context = FakeHostContext(skills_tools_provider=None)
-    pool = MagicMock()
+    pool = minimal_pool
 
     _inject_pool_providers(agent, host_context, pool, include_aggregating=False)
 
@@ -93,7 +94,7 @@ def test_inject_pool_providers_pool_none_returns_early() -> None:
     assert len(agent._external_capabilities) == 0
 
 
-def test_inject_pool_providers_includes_both_skills_and_mcp() -> None:
+def test_inject_pool_providers_includes_both_skills_and_mcp(minimal_pool: AgentPool) -> None:
     """Both skills and MCP providers injected when configured.
 
     Given both skills_tools_provider and include_aggregating=True, When
@@ -107,7 +108,7 @@ def test_inject_pool_providers_includes_both_skills_and_mcp() -> None:
         skills_tools_provider=skills_provider,
         mcp_aggregating_provider=mcp_provider,
     )
-    pool = MagicMock()
+    pool = minimal_pool
 
     _inject_pool_providers(agent, host_context, pool, include_aggregating=True)
 

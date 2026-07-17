@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 from pydantic_ai.models.test import TestModel
 import pytest
 
+from agentpool import AgentPool
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunErrorEvent, RunStartedEvent, StreamCompleteEvent
 from agentpool.agents.native_agent.agent import Agent
@@ -239,7 +240,7 @@ async def test_create_run_stream_closes_handle_after_completion() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_stream_breaks_on_stream_complete() -> None:
+async def test_run_stream_breaks_on_stream_complete(minimal_pool: AgentPool) -> None:
     """_run_stream_run_turn must break on StreamCompleteEvent in active-run path.
 
     Without the break, the while-True loop blocks indefinitely on
@@ -248,13 +249,13 @@ async def test_run_stream_breaks_on_stream_complete() -> None:
     """
     from agentpool.orchestrator.core import SessionController
 
-    mock_pool = MagicMock()
-    mock_pool.main_agent = MagicMock()
-    mock_pool.main_agent.name = "main-agent"
-    mock_pool.manifest = MagicMock()
-    mock_pool.manifest.agents = {}
 
-    controller = SessionController(pool=mock_pool)
+
+
+
+
+
+    controller = SessionController(pool=minimal_pool)
     event_bus = EventBus()
     controller._event_bus = event_bus
 

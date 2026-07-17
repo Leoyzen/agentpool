@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import SessionPool
 
@@ -22,25 +23,21 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def mock_pool() -> MagicMock:
-    """Return a mocked AgentPool with a mocked StorageManager."""
-    pool = MagicMock()
-    pool.storage = MagicMock()
-    pool.storage.get_session_messages = AsyncMock(return_value=[])
-    pool.storage.log_message = AsyncMock(return_value=None)
-    pool.storage.fork_conversation = AsyncMock(return_value=None)
-    pool.storage.truncate_messages = AsyncMock(return_value=0)
-    pool.main_agent = MagicMock()
-    pool.main_agent.name = "main-agent"
-    pool.manifest = MagicMock()
-    pool.manifest.agents = {}
-    return pool
+def mock_pool(minimal_pool: AgentPool) -> AgentPool:
+    """Return the real pool with monkeypatched storage for testing."""
+    minimal_pool.storage = MagicMock()
+    minimal_pool.storage.get_session_messages = AsyncMock(return_value=[])
+    minimal_pool.storage.log_message = AsyncMock(return_value=None)
+    minimal_pool.storage.fork_conversation = AsyncMock(return_value=None)
+    minimal_pool.storage.truncate_messages = AsyncMock(return_value=0)
+    return minimal_pool
 
 
 @pytest.fixture
-def session_pool(mock_pool: MagicMock) -> SessionPool:
-    """Return a SessionPool backed by the mock pool."""
-    return SessionPool(pool=mock_pool)
+def session_pool(mock_pool: AgentPool) -> SessionPool:
+    """Return a SessionPool backed by the real pool."""
+    assert mock_pool.session_pool is not None
+    return mock_pool.session_pool
 
 
 @pytest.fixture
@@ -57,7 +54,7 @@ def sample_message() -> ChatMessage[str]:
 @pytest.mark.anyio
 async def test_get_messages_returns_storage_messages(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
+    mock_pool: AgentPool,
 ) -> None:
     """get_messages forwards to storage and returns the result."""
     await session_pool.sessions.get_or_create_session("sess-1", agent_name="agent-a")
@@ -82,7 +79,7 @@ async def test_get_messages_raises_keyerror_for_missing_session(
 @pytest.mark.anyio
 async def test_get_messages_empty_when_no_storage(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
+    mock_pool: AgentPool,
 ) -> None:
     """get_messages returns an empty list when storage is None."""
     await session_pool.sessions.get_or_create_session("sess-1", agent_name="agent-a")
@@ -101,7 +98,7 @@ async def test_get_messages_empty_when_no_storage(
 @pytest.mark.anyio
 async def test_append_message_logs_to_storage(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
+    mock_pool: AgentPool,
     sample_message: ChatMessage[str],
 ) -> None:
     """append_message forwards to storage.log_message and returns the message ID."""
@@ -126,7 +123,7 @@ async def test_append_message_raises_keyerror_for_missing_session(
 @pytest.mark.anyio
 async def test_append_message_without_storage(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
+    mock_pool: AgentPool,
     sample_message: ChatMessage[str],
 ) -> None:
     """append_message returns message_id even when storage is None."""
@@ -146,7 +143,7 @@ async def test_append_message_without_storage(
 @pytest.mark.anyio
 async def test_copy_messages_forks_via_storage(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
+    mock_pool: AgentPool,
 ) -> None:
     """copy_messages forwards to storage.fork_conversation and returns fork point."""
     await session_pool.sessions.get_or_create_session("sess-1", agent_name="agent-a")
@@ -166,7 +163,7 @@ async def test_copy_messages_forks_via_storage(
 @pytest.mark.anyio
 async def test_copy_messages_with_up_to_message_id(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
+    mock_pool: AgentPool,
 ) -> None:
     """copy_messages passes up_to_message_id as fork_from_message_id."""
     await session_pool.sessions.get_or_create_session("sess-1", agent_name="agent-a")
@@ -208,7 +205,7 @@ async def test_copy_messages_raises_keyerror_for_missing_target(
 @pytest.mark.anyio
 async def test_copy_messages_without_storage(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
+    mock_pool: AgentPool,
 ) -> None:
     """copy_messages returns None when storage is None."""
     await session_pool.sessions.get_or_create_session("sess-1", agent_name="agent-a")
@@ -228,7 +225,7 @@ async def test_copy_messages_without_storage(
 @pytest.mark.anyio
 async def test_truncate_messages_calls_storage(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
+    mock_pool: AgentPool,
 ) -> None:
     """truncate_messages forwards to storage.truncate_messages and returns count."""
     await session_pool.sessions.get_or_create_session("sess-1", agent_name="agent-a")
@@ -252,7 +249,7 @@ async def test_truncate_messages_raises_keyerror_for_missing_session(
 @pytest.mark.anyio
 async def test_truncate_messages_without_storage(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
+    mock_pool: AgentPool,
 ) -> None:
     """truncate_messages returns 0 when storage is None."""
     await session_pool.sessions.get_or_create_session("sess-1", agent_name="agent-a")
@@ -271,7 +268,7 @@ async def test_truncate_messages_without_storage(
 @pytest.mark.anyio
 async def test_cache_get_messages_returns_cached_data(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
+    mock_pool: AgentPool,
 ) -> None:
     """Second call to get_messages uses cache; storage is only hit once."""
     await session_pool.sessions.get_or_create_session("sess-1", agent_name="agent-a")
@@ -289,7 +286,7 @@ async def test_cache_get_messages_returns_cached_data(
 @pytest.mark.anyio
 async def test_cache_append_message_invalidates_cache(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
+    mock_pool: AgentPool,
 ) -> None:
     """append_message invalidates cache so the next get_messages hits storage."""
     await session_pool.sessions.get_or_create_session("sess-1", agent_name="agent-a")
@@ -312,7 +309,7 @@ async def test_cache_append_message_invalidates_cache(
 @pytest.mark.anyio
 async def test_cache_truncate_messages_invalidates_cache(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
+    mock_pool: AgentPool,
 ) -> None:
     """truncate_messages invalidates cache so the next get_messages hits storage."""
     await session_pool.sessions.get_or_create_session("sess-1", agent_name="agent-a")
@@ -333,7 +330,7 @@ async def test_cache_truncate_messages_invalidates_cache(
 @pytest.mark.anyio
 async def test_cache_copy_messages_invalidates_target_cache(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
+    mock_pool: AgentPool,
 ) -> None:
     """copy_messages invalidates target session cache."""
     await session_pool.sessions.get_or_create_session("sess-1", agent_name="agent-a")

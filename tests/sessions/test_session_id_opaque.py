@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.sessions import SessionData
 from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
@@ -117,17 +118,15 @@ class TestSessionPoolOpaqueChildId:
     """SessionPool must generate opaque child session IDs."""
 
     @pytest.fixture
-    def mock_pool(self) -> MagicMock:
-        pool = MagicMock()
-        pool.manifest.name = "test_pool"
-        return pool
+    def mock_pool(self, minimal_pool: AgentPool) -> AgentPool:
+        return minimal_pool
 
-    async def test_child_session_id_is_opaque_string(self, mock_pool: MagicMock) -> None:
+    async def test_child_session_id_is_opaque_string(self, minimal_pool: AgentPool) -> None:
         """Child session IDs must be non-empty opaque strings."""
         from agentpool.orchestrator import SessionPool
         from agentpool.utils.identifiers import generate_session_id
 
-        session_pool = SessionPool(pool=mock_pool, store=None)
+        session_pool = SessionPool(pool=minimal_pool, store=None)
         state = await session_pool.create_session(
             session_id=generate_session_id(),
             agent_name="coder",
@@ -149,7 +148,7 @@ class TestSessionPoolOpaqueChildId:
         ids=["ascending_parent", "uuid4_parent", "arbitrary_parent"],
     )
     async def test_create_child_with_opaque_parent_id(
-        self, mock_pool: MagicMock, parent_id: str
+        self, minimal_pool: AgentPool, parent_id: str
     ) -> None:
         """create_session must accept any string as parent_session_id."""
         from agentpool.orchestrator import SessionPool
@@ -159,7 +158,7 @@ class TestSessionPoolOpaqueChildId:
         parent = SessionData(session_id=parent_id, agent_name="parent_agent")
         await store.save_session(parent)
 
-        session_pool = SessionPool(pool=mock_pool, store=store)
+        session_pool = SessionPool(pool=minimal_pool, store=store)
         state = await session_pool.create_session(
             session_id=generate_session_id(),
             agent_name="child_agent",
@@ -180,7 +179,7 @@ class TestSessionPoolOpaqueChildId:
         ids=["ascending_parent", "uuid4_parent"],
     )
     async def test_get_child_sessions_with_opaque_parent_id(
-        self, mock_pool: MagicMock, parent_id: str
+        self, minimal_pool: AgentPool, parent_id: str
     ) -> None:
         """get_children must find children by opaque parent ID."""
         from agentpool.orchestrator import SessionPool
@@ -190,7 +189,7 @@ class TestSessionPoolOpaqueChildId:
         parent = SessionData(session_id=parent_id, agent_name="parent_agent")
         await store.save_session(parent)
 
-        session_pool = SessionPool(pool=mock_pool, store=store)
+        session_pool = SessionPool(pool=minimal_pool, store=store)
         state = await session_pool.create_session(
             session_id=generate_session_id(),
             agent_name="child_agent",

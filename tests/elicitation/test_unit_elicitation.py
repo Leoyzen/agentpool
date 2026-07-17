@@ -4,6 +4,10 @@ Covers Tasks 9.1-9.7, 9.14-9.16, 9.18-9.19, 9.21-9.22 from the
 durable-elicitation-bridge plan.
 
 Refs: https://github.com/Leoyzen/agentpool/issues/107
+
+
+# TODO: L2 migration — test uses complex inline mock_pool + mock_session_pool
+# patterns that require significant rework for real pool migration.
 """
 
 from __future__ import annotations

@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.capabilities.extension_registry import (
     ExtensionRegistry,
     Scope,
@@ -202,7 +203,7 @@ async def test_skill_uri_resolution_multiple_skills() -> None:
 # =========================================================================
 
 
-def test_load_skill_available_in_standalone_agent() -> None:
+def test_load_skill_available_in_standalone_agent(minimal_pool: AgentPool) -> None:
     """load_skill available in standalone Agent.from_config() (non-SessionPool path).
 
     Given _inject_pool_providers is called with a non-None
@@ -227,7 +228,7 @@ def test_load_skill_available_in_standalone_agent() -> None:
 
     agent = FakeAgent()
     host_context = FakeHostContext()
-    pool = MagicMock()
+    pool = minimal_pool
 
     _inject_pool_providers(agent, host_context, pool, include_aggregating=False)
 
@@ -241,7 +242,7 @@ def test_load_skill_available_in_standalone_agent() -> None:
 # =========================================================================
 
 
-def test_load_skill_available_in_child_session_agent() -> None:
+def test_load_skill_available_in_child_session_agent(minimal_pool: AgentPool) -> None:
     """load_skill available in child session agent via _inject_pool_providers().
 
     Given _inject_pool_providers is called for a child session agent,
@@ -265,7 +266,7 @@ def test_load_skill_available_in_child_session_agent() -> None:
 
     agent = FakeAgent()
     host_context = FakeHostContext()
-    pool = MagicMock()
+    pool = minimal_pool
 
     _inject_pool_providers(agent, host_context, pool, include_aggregating=True)
 

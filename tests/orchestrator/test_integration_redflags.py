@@ -29,13 +29,13 @@ async def _setup_session(
     controller: SessionController,
     session_id: str,
     agent: Any,
-    mock_pool: Any,
+    real_pool: AgentPool,
 ) -> Any:
     """Create a session and attach the agent."""
     state, _ = await controller.get_or_create_session(session_id)
     state.agent = agent
     controller._session_agents[session_id] = agent
-    mock_pool.get_agent.return_value = agent
+    real_pool.get_agent = MagicMock(return_value=agent)  # type: ignore[assignment]
     return state
 
 
@@ -105,12 +105,9 @@ class TestEventBusSessionTree:
             "but _session_tree is empty so it returns False"
         )
 
-    async def test_publish_delivers_descendant_events_to_parent(self) -> None:
+    async def test_publish_delivers_descendant_events_to_parent(self, minimal_pool: AgentPool) -> None:
         """FIXED: Child session events ARE delivered to parent subscribers via controller."""
-        mock_pool = MagicMock()
-        mock_pool.main_agent.name = "test-agent"
-        mock_pool.manifest.agents = {}
-        controller = SessionController(mock_pool)
+        controller = SessionController(minimal_pool)
         await controller.get_or_create_session("parent-sid")
         await controller.get_or_create_session("child-sid", parent_session_id="parent-sid")
         bus = EventBus(session_controller=controller)
@@ -141,13 +138,9 @@ class TestEventBusSessionTree:
 class TestSessionControllerChildrenVsEventBus:
     """Red flag: SessionController._children and EventBus._session_tree diverge."""
 
-    async def test_children_tracking_works(self) -> None:
+    async def test_children_tracking_works(self, minimal_pool: AgentPool) -> None:
         """SessionController correctly tracks parent-child relationships."""
-        mock_pool = MagicMock()
-        mock_pool.main_agent.name = "test-agent"
-        mock_pool.manifest.agents = {}
-
-        controller = SessionController(mock_pool)
+        controller = SessionController(minimal_pool)
 
         # Create parent session
         parent, _ = await controller.get_or_create_session("parent-sid")
@@ -162,13 +155,9 @@ class TestSessionControllerChildrenVsEventBus:
         # SessionController knows about the relationship
         assert "child-sid" in controller._children.get("parent-sid", [])
 
-    async def test_event_bus_does_not_know_about_children(self) -> None:
+    async def test_event_bus_does_not_know_about_children(self, minimal_pool: AgentPool) -> None:
         """RED FLAG: EventBus has no knowledge of SessionController's children."""
-        mock_pool = MagicMock()
-        mock_pool.main_agent.name = "test-agent"
-        mock_pool.manifest.agents = {}
-
-        controller = SessionController(mock_pool)
+        controller = SessionController(minimal_pool)
         event_bus = EventBus()
 
         # Simulate SessionPool behavior: create sessions via controller
@@ -181,13 +170,9 @@ class TestSessionControllerChildrenVsEventBus:
             "knows about parent-child relationship"
         )
 
-    async def test_is_descendant_with_controller_wired(self) -> None:
+    async def test_is_descendant_with_controller_wired(self, minimal_pool: AgentPool) -> None:
         """With controller wired, _is_descendant works despite empty _session_tree."""
-        mock_pool = MagicMock()
-        mock_pool.main_agent.name = "test-agent"
-        mock_pool.manifest.agents = {}
-
-        controller = SessionController(mock_pool)
+        controller = SessionController(minimal_pool)
         bus = EventBus(session_controller=controller)
 
         # _session_tree is empty (would be always false without controller)
@@ -204,13 +189,9 @@ class TestSessionControllerChildrenVsEventBus:
             "even though _session_tree is empty"
         )
 
-    async def test_should_receive_descendants_with_controller_wired(self) -> None:
+    async def test_should_receive_descendants_with_controller_wired(self, minimal_pool: AgentPool) -> None:
         """With controller wired, descendants scope works despite empty _session_tree."""
-        mock_pool = MagicMock()
-        mock_pool.main_agent.name = "test-agent"
-        mock_pool.manifest.agents = {}
-
-        controller = SessionController(mock_pool)
+        controller = SessionController(minimal_pool)
         bus = EventBus(session_controller=controller)
 
         # _session_tree is empty (would be always false without controller)
@@ -229,12 +210,9 @@ class TestSessionControllerChildrenVsEventBus:
             "even though _session_tree is empty"
         )
 
-    async def test_acp_handler_delivers_child_events(self) -> None:
+    async def test_acp_handler_delivers_child_events(self, minimal_pool: AgentPool) -> None:
         """FIXED: Full ACP handler scenario - subagent events reach parent."""
-        mock_pool = MagicMock()
-        mock_pool.main_agent.name = "test-agent"
-        mock_pool.manifest.agents = {}
-        controller = SessionController(mock_pool)
+        controller = SessionController(minimal_pool)
         await controller.get_or_create_session("parent-sid")
         await controller.get_or_create_session("child-sid", parent_session_id="parent-sid")
         bus = EventBus(session_controller=controller)
@@ -265,12 +243,9 @@ class TestSessionControllerChildrenVsEventBus:
             f"Child events were not delivered to parent subscriber."
         )
 
-    async def test_acp_handler_child_events_have_session_id(self) -> None:
+    async def test_acp_handler_child_events_have_session_id(self, minimal_pool: AgentPool) -> None:
         """Child session events are wrapped in EventEnvelope with source_session_id."""
-        mock_pool = MagicMock()
-        mock_pool.main_agent.name = "test-agent"
-        mock_pool.manifest.agents = {}
-        controller = SessionController(mock_pool)
+        controller = SessionController(minimal_pool)
         await controller.get_or_create_session("parent-sid")
         await controller.get_or_create_session("child-sid", parent_session_id="parent-sid")
         bus = EventBus(session_controller=controller)
@@ -299,20 +274,10 @@ class TestSessionControllerChildrenVsEventBus:
 class TestSessionPoolIntegration:
     """Red flag: SessionPool-level integration tests."""
 
-    async def test_subagent_streaming_events_routed_to_parent(self) -> None:
+    async def test_subagent_streaming_events_routed_to_parent(self, minimal_pool: AgentPool) -> None:
         """FIXED: When SessionPool runs subagent, events reach parent."""
-        mock_pool = MagicMock()
-        mock_pool.main_agent.name = "test-agent"
-        mock_pool.manifest.agents = {}
-        # Make create_child_session an async mock to avoid TypeError
-        mock_pool.session_pool.create_child_session = MagicMock(return_value=asyncio.Future())
-        mock_pool.session_pool.create_child_session.return_value.set_result(None)
-
-        pool = SessionPool(
-            mock_pool,
-            enable_auto_resume=True,
-            enable_event_bus=True,
-        )
+        pool = minimal_pool.session_pool
+        assert pool is not None
 
         # Parent subscribes to events
         parent_queue = await pool.event_bus.subscribe("parent-sid", scope="descendants")
@@ -347,16 +312,10 @@ class TestSessionPoolIntegration:
 class TestInjectPromptWithSessionPool:
     """Red flag: inject_prompt relies on auto-resume, but events still lost."""
 
-    async def test_inject_prompt_triggers_auto_resume(self) -> None:
+    async def test_inject_prompt_triggers_auto_resume(self, minimal_pool: AgentPool) -> None:
         """inject_prompt itself works, but its events are lost due to _session_tree."""
-        mock_pool = MagicMock()
-        mock_pool.main_agent.name = "test-agent"
-        mock_pool.manifest.agents = {}
-        # Make create_child_session an async mock
-        mock_pool.session_pool.create_child_session = MagicMock(return_value=asyncio.Future())
-        mock_pool.session_pool.create_child_session.return_value.set_result(None)
-
-        pool = SessionPool(mock_pool)
+        pool = minimal_pool.session_pool
+        assert pool is not None
 
         # Create a session with an agent that can accept injections
         await pool.create_session("test-sid")
@@ -378,16 +337,10 @@ class TestInjectPromptWithSessionPool:
 
 
 @pytest.mark.manual
-async def test_diagnostic_print_session_tree_state() -> None:
+async def test_diagnostic_print_session_tree_state(minimal_pool: AgentPool) -> None:
     """Print the state of _session_tree for diagnostic purposes."""
-    mock_pool = MagicMock()
-    mock_pool.main_agent.name = "test-agent"
-    mock_pool.manifest.agents = {}
-    # Make create_child_session an async mock
-    mock_pool.session_pool.create_child_session = MagicMock(return_value=asyncio.Future())
-    mock_pool.session_pool.create_child_session.return_value.set_result(None)
-
-    pool = SessionPool(mock_pool)
+    pool = minimal_pool.session_pool
+    assert pool is not None
 
     await pool.create_session("parent-sid")
     await pool.create_session("child-sid", parent_session_id="parent-sid")

@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import SessionPool
@@ -38,25 +39,10 @@ class FakeInputProvider(InputProvider):
 
 
 @pytest.fixture
-def mock_pool() -> MagicMock:
-    """Return a mocked AgentPool with SessionPool enabled."""
-    pool = MagicMock()
-    pool.main_agent = MagicMock()
-    pool.main_agent.name = "main-agent"
-    # main_agent_name must be a real string; the code guards against
-    # MagicMock values by falling back to "default".
-    pool.main_agent_name = "main-agent"
-    pool.manifest = MagicMock()
-    pool.manifest.agents = {}
-    pool.manifest.opencode = MagicMock()
-    pool.manifest.opencode.use_session_pool = True
-    return pool
-
-
-@pytest.fixture
-def session_pool(mock_pool: MagicMock) -> SessionPool:
-    """Return a SessionPool backed by the mock pool."""
-    return SessionPool(pool=mock_pool)
+def session_pool(minimal_pool: AgentPool) -> SessionPool:
+    """Return a SessionPool backed by the real pool."""
+    assert minimal_pool.session_pool is not None
+    return minimal_pool.session_pool
 
 
 @pytest.fixture
@@ -111,7 +97,7 @@ class TestSessionPoolRunStreamInputProvider:
     async def test_run_stream_without_input_provider_does_not_crash(
         self,
         session_pool: SessionPool,
-        mock_pool: MagicMock,
+        minimal_pool: AgentPool,
         mock_agent: MagicMock,
     ) -> None:
         """run_stream() without input_provider should still work (backward compat)."""
@@ -142,7 +128,7 @@ class TestSessionPoolRunStreamInputProvider:
     async def test_process_prompt_forwards_kwargs_to_run_turn(
         self,
         session_pool: SessionPool,
-        mock_pool: MagicMock,
+        minimal_pool: AgentPool,
         mock_agent: MagicMock,
     ) -> None:
         """process_prompt() must forward input_provider to get_or_create_session_agent.
@@ -186,7 +172,7 @@ class TestRunTurnInputProvider:
     async def test_run_turn_passes_input_provider_to_get_or_create_session_agent(
         self,
         session_pool: SessionPool,
-        mock_pool: MagicMock,
+        minimal_pool: AgentPool,
         mock_agent: MagicMock,
     ) -> None:
         """_run_stream_run_turn must pass input_provider to get_or_create_session_agent."""
@@ -225,7 +211,7 @@ class TestRunTurnInputProvider:
     async def test_run_turn_passes_input_provider_to_stream_events(
         self,
         session_pool: SessionPool,
-        mock_pool: MagicMock,
+        minimal_pool: AgentPool,
         mock_agent: MagicMock,
     ) -> None:
         """_run_stream_run_turn must set input_provider on the agent.

@@ -163,8 +163,10 @@ zed = ["zstandard>=0.23.0"]  # Zed IDE storage provider
 dev = [
   "check-jsonschema>=0.35.0",
   "devtools",
+  "dirty-equals>=0.9.0",
   "fastembed>=0.7.4; python_version < '3.14'",
   "import-linter>=2.12",
+  "inline-snapshot>=0.13.0",
   "lancedb>=0.26.0; python_version < '3.14'",
   "openapi_spec_validator",
   "pyinstaller>=6.17.0",
@@ -174,10 +176,12 @@ dev = [
   "pytest-asyncio>=0.24.0",
   "pytest-cov",
   # "pytest-pretty>=1.3.0",
+  "pytest-recording>=0.13.0",
   "pytest-rerunfailures>=16.1",
   "pytest-timeout>=2.4.0",
   "pytest-xdist",
   "syrupy>=4.0.0",
+  "vcrpy>=7.0.0",
 ]
 benchmark = ["pyinstrument"]
 docs = [

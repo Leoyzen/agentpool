@@ -3,6 +3,10 @@
 Consolidated from:
 - test_team_run_stream_session.py (Team.run_stream session/depth tests)
 - test_team_run_stream_depth.py (TeamRun.run_stream depth/session tests)
+
+
+# TODO: L2 migration — test uses complex inline mock_pool + mock_session_pool
+# patterns that require significant rework for real pool migration.
 """
 
 from __future__ import annotations

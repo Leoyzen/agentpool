@@ -11,6 +11,10 @@ Additional cross-provider invariants:
   - Event ordering: SpawnSessionStart index < first SubAgentEvent index
     per child_session_id
   - Non-streaming Team.run() / TeamRun.run() do NOT emit SpawnSessionStart
+
+
+# TODO: L2 migration — test uses complex inline mock_pool + mock_session_pool
+# patterns that require significant rework for real pool migration.
 """
 
 from __future__ import annotations

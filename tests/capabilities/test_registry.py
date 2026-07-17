@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.capabilities.registry import (
     CapabilityNotFoundError,
     discover_entry_point_capabilities,
@@ -153,15 +154,14 @@ def test_resolve_capability_type_not_found_raises() -> None:
 # ---- AgentFactory integration tests ----
 
 
-def test_factory_compile_discovers_entry_point_capabilities() -> None:
+def test_factory_compile_discovers_entry_point_capabilities(minimal_pool: AgentPool) -> None:
     """AgentFactory.compile() populates entry_point_capabilities from discovery."""
     from agentpool.capabilities.function_toolset import FunctionToolsetCapability
     from agentpool.host.factory import AgentFactory
 
     fake_eps = _make_fake_entry_points({"function_tools": FunctionToolsetCapability})
 
-    mock_pool = MagicMock()
-    factory = AgentFactory(mock_pool)
+    factory = AgentFactory(minimal_pool)
 
     with (
         patch(
@@ -179,7 +179,7 @@ def test_factory_compile_discovers_entry_point_capabilities() -> None:
     assert factory.entry_point_capabilities == {"function_tools": FunctionToolsetCapability}
 
 
-def test_factory_resolve_capability_type_known() -> None:
+def test_factory_resolve_capability_type_known(minimal_pool: AgentPool) -> None:
     """AgentFactory.resolve_capability_type resolves a known type."""
     from agentpool.capabilities.function_toolset import FunctionToolsetCapability
     from agentpool.capabilities.subagent_capability import SubagentCapability
@@ -188,8 +188,7 @@ def test_factory_resolve_capability_type_known() -> None:
     fake_eps = _make_fake_entry_points(
         {"function_tools": FunctionToolsetCapability, "subagent": SubagentCapability},
     )
-    mock_pool = MagicMock()
-    factory = AgentFactory(mock_pool)
+    factory = AgentFactory(minimal_pool)
 
     with (
         patch(
@@ -207,14 +206,13 @@ def test_factory_resolve_capability_type_known() -> None:
     assert result is SubagentCapability
 
 
-def test_factory_resolve_capability_type_unknown_raises() -> None:
+def test_factory_resolve_capability_type_unknown_raises(minimal_pool: AgentPool) -> None:
     """AgentFactory.resolve_capability_type raises for unknown type."""
     from agentpool.capabilities.function_toolset import FunctionToolsetCapability
     from agentpool.host.factory import AgentFactory
 
     fake_eps = _make_fake_entry_points({"function_tools": FunctionToolsetCapability})
-    mock_pool = MagicMock()
-    factory = AgentFactory(mock_pool)
+    factory = AgentFactory(minimal_pool)
 
     with (
         patch(

@@ -3,6 +3,10 @@
 These tests ensure that when a parent agent delegates to a subagent or worker,
 the input_provider is properly propagated so that tools requiring user
 interaction (like confirmations) work correctly in the child agent.
+
+
+# TODO: L2 migration — test uses mock_pool as data container with
+# mock session_pool, not for real SessionController/SessionPool creation.
 """
 
 from __future__ import annotations

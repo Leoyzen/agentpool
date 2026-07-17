@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionController
 
 pytestmark = pytest.mark.integration
@@ -24,12 +24,12 @@ def _queue_empty(queue: asyncio.Queue) -> bool:
 class TestEventEnvelopeIntegration:
     """Integration tests for EventEnvelope wrapping behavior."""
 
-    async def test_child_event_routing_source_session_id(self) -> None:
+    async def test_child_event_routing_source_session_id(
+        self, minimal_pool: AgentPool
+    ) -> None:
         """Parent with scope='descendants' receives EventEnvelope with child source_session_id."""
-        mock_pool = MagicMock()
-        mock_pool.main_agent.name = "test-agent"
-        mock_pool.manifest.agents = {}
-        controller = SessionController(mock_pool)
+        assert minimal_pool.session_pool is not None
+        controller = minimal_pool.session_pool.sessions
         await controller.get_or_create_session("parent-sid")
         await controller.get_or_create_session("child-sid", parent_session_id="parent-sid")
         bus = EventBus(session_controller=controller)

@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.orchestrator.core import SessionController
 from agentpool.sessions.models import SessionData
 from agentpool_config.storage import SQLStorageConfig
@@ -44,17 +45,6 @@ def _clear_engine_cache():
     _engine_cache.clear()
     yield
     _engine_cache.clear()
-
-
-@pytest.fixture
-def mock_pool() -> MagicMock:
-    """Return a mocked AgentPool."""
-    pool = MagicMock()
-    pool.main_agent = MagicMock()
-    pool.main_agent.name = "main-agent"
-    pool.manifest = MagicMock()
-    pool.manifest.agents = {}
-    return pool
 
 
 # ===================================================================
@@ -143,14 +133,14 @@ class TestCloseSessionMarksClosed:
     """close_session() should mark sessions as 'closed', not delete them."""
 
     @pytest.mark.anyio
-    async def test_close_marks_closed_not_deleted(self, mock_pool: MagicMock) -> None:
+    async def test_close_marks_closed_not_deleted(self, minimal_pool: AgentPool) -> None:
         """close_session() saves with status='closed' and does NOT call delete."""
         mock_store = MagicMock()
         mock_store.load_session = AsyncMock(return_value=make_session_data())
         mock_store.save_session = AsyncMock(return_value=None)
         mock_store.delete_session = AsyncMock(return_value=True)
 
-        ctrl = SessionController(pool=mock_pool, store=mock_store)
+        ctrl = SessionController(pool=minimal_pool, store=mock_store)
         await ctrl.get_or_create_session("sess-1")
         await ctrl.close_session("sess-1")
 
@@ -163,14 +153,14 @@ class TestCloseSessionMarksClosed:
         assert len(closed_saves) >= 1
 
     @pytest.mark.anyio
-    async def test_close_unlocked_marks_closed_not_deleted(self, mock_pool: MagicMock) -> None:
+    async def test_close_unlocked_marks_closed_not_deleted(self, minimal_pool: AgentPool) -> None:
         """_close_session_unlocked() also marks closed instead of deleting."""
         mock_store = MagicMock()
         mock_store.load_session = AsyncMock(return_value=make_session_data())
         mock_store.save_session = AsyncMock(return_value=None)
         mock_store.delete_session = AsyncMock(return_value=True)
 
-        ctrl = SessionController(pool=mock_pool, store=mock_store)
+        ctrl = SessionController(pool=minimal_pool, store=mock_store)
         await ctrl.get_or_create_session("sess-1")
         await ctrl._close_session_unlocked("sess-1")
 
@@ -183,13 +173,13 @@ class TestCloseSessionMarksClosed:
         assert len(closed_saves) >= 1
 
     @pytest.mark.anyio
-    async def test_close_noop_when_not_in_store(self, mock_pool: MagicMock) -> None:
+    async def test_close_noop_when_not_in_store(self, minimal_pool: AgentPool) -> None:
         """_mark_session_closed does nothing if session is not in store."""
         mock_store = MagicMock()
         mock_store.load_session = AsyncMock(return_value=None)
         mock_store.save_session = AsyncMock(return_value=None)
 
-        ctrl = SessionController(pool=mock_pool, store=mock_store)
+        ctrl = SessionController(pool=minimal_pool, store=mock_store)
         await ctrl._mark_session_closed("nonexistent-session")
 
         mock_store.save_session.assert_not_awaited()

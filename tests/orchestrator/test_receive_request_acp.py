@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.agents.acp_agent import ACPAgent
 from agentpool.lifecycle import RunState
 from agentpool.lifecycle.types import DeliveryMode
@@ -29,20 +30,10 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def mock_pool() -> MagicMock:
-    """Return a mocked AgentPool with a main_agent."""
-    pool = MagicMock()
-    pool.main_agent = MagicMock()
-    pool.main_agent.name = "main-agent"
-    pool.manifest = MagicMock()
-    pool.manifest.agents = {}
-    return pool
-
-
-@pytest.fixture
-def controller(mock_pool: MagicMock) -> SessionController:
-    """Return a SessionController backed by the mock pool."""
-    return SessionController(pool=mock_pool)
+def controller(minimal_pool: AgentPool) -> SessionController:
+    """Return a SessionController backed by the real pool."""
+    assert minimal_pool.session_pool is not None
+    return minimal_pool.session_pool.sessions
 
 
 @pytest.fixture

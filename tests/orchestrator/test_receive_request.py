@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.lifecycle.types import DeliveryMode
 from agentpool.orchestrator.core import EventBus, SessionController
 from agentpool.orchestrator.run import RunHandle
@@ -31,20 +32,10 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def mock_pool() -> MagicMock:
-    """Return a mocked AgentPool with a main_agent."""
-    pool = MagicMock()
-    pool.main_agent = MagicMock()
-    pool.main_agent.name = "main-agent"
-    pool.manifest = MagicMock()
-    pool.manifest.agents = {}
-    return pool
-
-
-@pytest.fixture
-def controller(mock_pool: MagicMock) -> SessionController:
-    """Return a SessionController backed by the mock pool."""
-    return SessionController(pool=mock_pool)
+def controller(minimal_pool: AgentPool) -> SessionController:
+    """Return a SessionController backed by the real pool."""
+    assert minimal_pool.session_pool is not None
+    return minimal_pool.session_pool.sessions
 
 
 @pytest.fixture
@@ -287,7 +278,7 @@ async def test_list_content_not_stringified_for_steer(
 
 
 @pytest.mark.asyncio
-async def test_receive_request_uses_get_or_create_session_agent() -> None:
+async def test_receive_request_uses_get_or_create_session_agent(minimal_pool: AgentPool) -> None:
     """receive_request should use get_or_create_session_agent, not .get().
 
     When agent is not yet cached (new top-level sessions), .get()
@@ -295,13 +286,7 @@ async def test_receive_request_uses_get_or_create_session_agent() -> None:
     """
     from agentpool.orchestrator.core import SessionController
 
-    mock_pool = MagicMock()
-    mock_pool.main_agent = MagicMock()
-    mock_pool.main_agent.name = "main-agent"
-    mock_pool.manifest = MagicMock()
-    mock_pool.manifest.agents = {}
-
-    controller = SessionController(pool=mock_pool)
+    controller = SessionController(pool=minimal_pool)
     event_bus = EventBus()
     controller._event_bus = event_bus
 

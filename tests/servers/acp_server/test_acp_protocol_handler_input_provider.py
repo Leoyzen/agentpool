@@ -5,6 +5,12 @@ protocol instead of falling back to StdlibInputProvider when using the
 SessionPool path.
 """
 
+# TODO: L2 migration — test fails with real pool, needs investigation.
+# This file has 26 call_args assertions and 3 side_effect patterns that
+# require significant assertion rewrite to use a real pool.
+# The mock_pool provides deeply controlled session_pool behavior that
+# would need to be replaced with real SessionPool interactions.
+
 from __future__ import annotations
 
 import asyncio
