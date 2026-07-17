@@ -11,6 +11,7 @@ from pydantic_ai import (
     RequestUsage,
     RetryPromptPart,
     TextPart as PydanticTextPart,
+    ThinkingPart as PydanticThinkingPart,
     ToolCallPart as PydanticToolCallPart,
     ToolReturnPart as PydanticToolReturnPart,
     UserPromptPart,
@@ -20,6 +21,7 @@ from agentpool import log
 from agentpool.messaging.messages import ChatMessage
 from agentpool.sessions.models import SessionData
 from agentpool.tools.exceptions import ToolError
+from agentpool.utils import identifiers as identifier
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict, to_user_content_or_path_ref
 from agentpool.utils.time_utils import datetime_to_ms, ms_to_datetime
 from agentpool_server.opencode_server.models import (
@@ -30,6 +32,7 @@ from agentpool_server.opencode_server.models import (
     MessagePath,
     MessageTime,
     MessageWithParts,
+    ReasoningPart,
     Session,
     SessionRevert,
     SessionShare,
@@ -292,9 +295,29 @@ def chat_message_to_opencode(  # noqa: PLR0915
                         if content:
                             ts_opt = TimeStartEndOptional(start=created_ms, end=completed_ms)
                             result.add_text_part(content, time=ts_opt)
+                    elif isinstance(part_dict, dict) and part_dict.get("part_kind") == "thinking":
+                        content = part_dict.get("content") or ""
+                        if content:
+                            reasoning_part = ReasoningPart(
+                                id=identifier.ascending("part"),
+                                message_id=message_id,
+                                session_id=session_id,
+                                text=content,
+                                time=TimeStartEndOptional(start=created_ms, end=completed_ms),
+                            )
+                            result.parts.append(reasoning_part)
                 continue
             for p in model_msg.parts:
                 match p:
+                    case PydanticThinkingPart(content=content):
+                        reasoning_part = ReasoningPart(
+                            id=identifier.ascending("part"),
+                            message_id=message_id,
+                            session_id=session_id,
+                            text=content,
+                            time=TimeStartEndOptional(start=created_ms, end=completed_ms),
+                        )
+                        result.parts.append(reasoning_part)
                     case PydanticTextPart(content=content):
                         ts_opt = TimeStartEndOptional(start=created_ms, end=completed_ms)
                         result.add_text_part(content, time=ts_opt)
@@ -466,6 +489,8 @@ def opencode_to_chat_message(  # noqa: PLR0915
         tool_returns: list[PydanticToolReturnPart] = []
         for part in msg.parts:
             match part:
+                case ReasoningPart(text=text, id=part_id):
+                    response_parts.append(PydanticThinkingPart(content=text, id=part_id))
                 case TextPart(text=text, id=part_id):
                     response_parts.append(PydanticTextPart(content=text, id=part_id))
                 case ToolPart(tool=tool_name, call_id=call_id, state=state):
