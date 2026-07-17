@@ -29,6 +29,16 @@ from agentpool.host.context import HostContext, RunScope
 class _StubDelegationService:
     """Minimal implementation of DelegationService protocol for testing."""
 
+    async def create_child_session(
+        self,
+        agent_name: str,
+        *,
+        parent_session_id: str | None = None,
+        description: str = "",
+        **metadata: Any,
+    ) -> str:
+        return "child_session_001"
+
     async def spawn_subagent(self, name: str, prompt: str) -> AsyncIterator[Any]:
         if name == "missing":
             raise AgentNotFoundError(name)
