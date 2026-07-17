@@ -383,10 +383,20 @@ class AgentFactory:
 
                 team_cap = TeamCommCapability(resolved_tm, agent_name, session.metadata)
                 if isinstance(agent, _NativeAgent2):
-                    agent._extra_capabilities = [
-                        team_cap if isinstance(c, TeamCommCapability) else c
-                        for c in agent._extra_capabilities
-                    ]
+                    # Replace shared TeamCommCapability with per-session
+                    # instance, or append if not already present (compile
+                    # step may not have added the shared instance).
+                    new_caps: list[AbstractCapability[Any]] = []
+                    replaced = False
+                    for c in agent._extra_capabilities:
+                        if isinstance(c, TeamCommCapability):
+                            new_caps.append(team_cap)
+                            replaced = True
+                        else:
+                            new_caps.append(c)
+                    if not replaced:
+                        new_caps.append(team_cap)
+                    agent._extra_capabilities = new_caps
 
         # Start hot-swap listeners for capabilities with on_change().
         await self._start_hot_swap_listeners(agent_name, agent, caps)

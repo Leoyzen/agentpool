@@ -202,14 +202,14 @@ class TeamModeConfig(Schema):
 
     @model_validator(mode="after")
     def validate_defaults_members(self) -> TeamModeConfig:
-        """Ensure all defaults member names are in member_eligible."""
+        """Ensure all defaults member agents are in member_eligible."""
         if self.defaults is None:
             return self
         eligible_set = set(self.member_eligible)
         for member in self.defaults.members:
-            if member.name not in eligible_set:
+            if member.agent not in eligible_set:
                 msg = (
-                    f"defaults member '{member.name}' is not in "
+                    f"defaults member agent '{member.agent}' is not in "
                     f"member_eligible list: {self.member_eligible}"
                 )
                 raise ValueError(msg)

@@ -45,7 +45,7 @@ def test_construct_with_custom_values() -> None:
     blackboard = BlackboardConfig(write_policy="lead_only", max_size_mb=50)
     defaults = TeamDefaultsConfig(
         team_name="squad_alpha",
-        members=[MemberSpec(name="coder", agent="code_agent")],
+        members=[MemberSpec(name="coder", agent="coder")],
     )
 
     config = TeamModeConfig(
@@ -81,7 +81,7 @@ def test_construct_with_custom_values() -> None:
     assert config.defaults is not None
     assert config.defaults.team_name == "squad_alpha"
     assert config.defaults.members[0].name == "coder"
-    assert config.defaults.members[0].agent == "code_agent"
+    assert config.defaults.members[0].agent == "coder"
 
 
 @pytest.mark.unit
@@ -101,8 +101,8 @@ def test_defaults_with_member_in_eligible_succeeds() -> None:
     defaults = TeamDefaultsConfig(
         team_name="translation_team",
         members=[
-            MemberSpec(name="translator", agent="translator_agent"),
-            MemberSpec(name="reviewer", agent="reviewer_agent"),
+            MemberSpec(name="translator", agent="translator"),
+            MemberSpec(name="reviewer", agent="reviewer"),
         ],
     )
 
