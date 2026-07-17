@@ -200,8 +200,10 @@ class ACPTurn(HookAwareTurn, Turn):
                     for p in self._prompts:
                         if isinstance(p, str):
                             flattened_prompts.append(p)
-                        else:
+                        elif isinstance(p, list):
                             flattened_prompts.extend(p)
+                        else:
+                            flattened_prompts.append(p)
                 content = convert_to_acp_content(flattened_prompts)
 
                 # --- Phase 1: Send prompt ---

@@ -48,6 +48,9 @@ class ACPSessionLifecycleMixin:
         acp_agent: Any  # AgentPoolACPAgent
         mcp_servers: Any  # Sequence[McpServer] | None
         client_capabilities: Any  # ClientCapabilities
+        command_store: Any  # CommandStore
+        subagent_display_mode: Any  # Literal["legacy", "zed", "qwen"]
+        raw_input_mode: Any  # Literal["dict", "skip", "json_str"]
         _task_lock: Any  # asyncio.Lock
         _cancelled: bool
         _current_converter: ACPEventConverter | None
@@ -62,6 +65,9 @@ class ACPSessionLifecycleMixin:
         @property
         def host_context(self) -> Any: ...
         def get_cwd_context(self) -> str: ...
+        async def _register_mcp_prompts_as_commands(self) -> None: ...
+        async def execute_slash_command(self, command_text: str) -> None: ...
+        async def _on_state_updated(self, state: Any) -> None: ...
 
     async def initialize(self) -> None:
         """Initialize async resources. Must be called after construction."""
@@ -72,7 +78,7 @@ class ACPSessionLifecycleMixin:
         if not self.client_capabilities.terminal:
             import platform
 
-            self.acp_env._os_type = platform.system()  # type: ignore[assignment]
+            self.acp_env._os_type = platform.system()
         await self.acp_env.__aenter__()
 
     def _make_provider_name(self, display_name: str) -> str:

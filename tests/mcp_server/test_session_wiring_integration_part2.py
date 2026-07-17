@@ -21,8 +21,6 @@ Category D — Error Path Tests (5 tests):
 
 from __future__ import annotations
 
-import asyncio
-
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 

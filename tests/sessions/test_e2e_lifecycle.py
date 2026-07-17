@@ -16,8 +16,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentpool.orchestrator.core import EventBus, SessionController
-from agentpool.orchestrator.session_pool import SessionPool
+from agentpool.orchestrator.core import SessionController
 from agentpool.sessions.models import PendingDeferredCall, SessionData
 from agentpool.storage.manager import StorageManager
 from agentpool_config.storage import SQLStorageConfig, StorageConfig
@@ -26,7 +25,6 @@ from agentpool_storage.sql_provider import SQLModelProvider
 
 if TYPE_CHECKING:
     from pathlib import Path
-    from unittest.mock import MagicMock
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -62,8 +60,6 @@ async def test_e2e_session_lifecycle_with_sql_model_provider(
     4. Load session — verify status and pending_deferred_calls restored
     5. Load checkpoint — verify data preserved
     """
-    from unittest.mock import MagicMock
-
     storage_manager, session_store = sql_e2e_storage
     session_id = "e2e-lifecycle-001"
     agent_name = "test-agent"
@@ -167,7 +163,7 @@ async def test_e2e_session_controller_with_sql_model_provider(
     session_id = "e2e-ctrl-001"
 
     # Create session
-    state, created = await ctrl.get_or_create_session(session_id, "test-agent")
+    _state, created = await ctrl.get_or_create_session(session_id, "test-agent")
     assert created is True
 
     # Verify persisted

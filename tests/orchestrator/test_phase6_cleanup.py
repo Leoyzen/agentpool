@@ -17,7 +17,7 @@ Tests for tasks 6.9-6.16 of the session-debt-cleanup change:
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+import contextlib
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -25,10 +25,6 @@ import pytest
 from agentpool.orchestrator.core import EventBus, SessionController, SessionState
 from agentpool.orchestrator.session_pool import SessionPool
 from agentpool.orchestrator.session_pool_config import SessionPoolConfig
-
-
-if TYPE_CHECKING:
-    pass
 
 
 pytestmark = [pytest.mark.unit]
@@ -84,7 +80,7 @@ async def test_no_event_bus_leaks_after_close(mock_pool: MagicMock) -> None:
     await session_pool.create_session(session_id, agent_name="test-agent")
 
     # Subscribe to EventBus
-    queue = await session_pool.event_bus.subscribe(session_id)
+    await session_pool.event_bus.subscribe(session_id)
     assert session_id in session_pool.event_bus._subscribers
 
     await session_pool.close_session(session_id)
@@ -161,7 +157,7 @@ async def test_close_during_mcp_tool_call_runhandle_cancel_first(mock_pool: Magi
     run_handle.run_id = "run-mcp-1"
     run_handle.run_ctx = None
     run_handle.complete_event = asyncio.Event()
-    run_handle.close = MagicMock(side_effect=lambda: run_handle.complete_event.set())
+    run_handle.close = MagicMock(side_effect=run_handle.complete_event.set)
     run_handle.cancel = MagicMock()
     controller._runs["run-mcp-1"] = run_handle
     session.current_run_id = "run-mcp-1"
@@ -240,10 +236,8 @@ async def test_concurrent_resume_and_close_no_deadlock(mock_pool: MagicMock) -> 
     async def fake_resume() -> None:
         # Simulate a resume attempt (just try to create the session again)
         await asyncio.sleep(0.1)
-        try:
+        with contextlib.suppress(Exception):
             await session_pool.create_session(session_id, agent_name="test-agent")
-        except Exception:
-            pass
 
     # Should complete within 5 seconds (no deadlock)
     async with asyncio.timeout(5):

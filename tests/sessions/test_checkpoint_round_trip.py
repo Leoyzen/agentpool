@@ -8,10 +8,16 @@ Verifies:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from agentpool.sessions.models import SessionData
-from agentpool_storage.sql_provider import SQLModelProvider
+
+
+if TYPE_CHECKING:
+    from agentpool_storage.sql_provider import SQLModelProvider
+
 
 pytestmark = pytest.mark.unit
 

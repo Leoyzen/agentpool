@@ -20,8 +20,12 @@ from agentpool.log import get_logger
 if TYPE_CHECKING:
     from collections import OrderedDict
 
+    from agentpool.agents.base_agent import BaseAgent
+    from agentpool.delegation import AgentPool
     from agentpool.messaging import ChatMessage
-    from agentpool.orchestrator.session_controller import SessionController
+    from agentpool.orchestrator.event_bus import EventBus
+    from agentpool.orchestrator.run import RunHandle
+    from agentpool.orchestrator.session_controller import SessionController, SessionState
 
 
 logger = get_logger(__name__)
@@ -38,8 +42,45 @@ class SessionPoolMessagingMixin:
     """
 
     sessions: SessionController
+    pool: AgentPool[Any]
+
+    @property
+    def event_bus(self) -> EventBus: ...  # type: ignore[empty-body]
+
     _message_cache: OrderedDict[str, list[ChatMessage[Any]]]
     _message_cache_maxsize: int
+
+    if TYPE_CHECKING:
+
+        def _create_run_handle(
+            self,
+            session: SessionState,
+            agent: BaseAgent[Any, Any],
+            session_id: str,
+            *,
+            cached_elicitation_responses: dict[str, Any] | None = None,
+            deferred_tool_results: Any = None,
+            message_history: list[Any] | None = None,
+        ) -> RunHandle: ...
+
+        async def create_session(
+            self,
+            session_id: str,
+            agent_name: str | None = None,
+            parent_session_id: str | None = None,
+            lifecycle_policy: str | None = None,
+            **metadata: Any,
+        ) -> SessionState: ...
+
+        async def close_session(self, session_id: str) -> None: ...
+
+        def _get_active_run_handle(self, session_id: str) -> RunHandle | None: ...
+
+        async def wait_for_completion(
+            self,
+            session_id: str,
+            timeout: float | None = None,
+        ) -> str: ...
 
     def _evict_message_cache(self) -> None:
         """Evict LRU entries from _message_cache (provided by SessionPool)."""

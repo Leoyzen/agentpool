@@ -26,6 +26,8 @@ if TYPE_CHECKING:
     from pydantic_ai.messages import ModelMessage
 
     from agentpool.agents.base_agent import BaseAgent
+    from agentpool.delegation import AgentPool
+    from agentpool.orchestrator.event_bus import EventBus
     from agentpool.orchestrator.session_controller import SessionController, SessionState
 
 
@@ -42,6 +44,10 @@ class SessionPoolRunsMixin:
     """
 
     sessions: SessionController
+    pool: AgentPool[Any]
+
+    @property
+    def event_bus(self) -> EventBus: ...  # type: ignore[empty-body]
 
     def _get_active_run_handle(self, session_id: str) -> RunHandle | None:
         """Get the active RunHandle for a session, if any.

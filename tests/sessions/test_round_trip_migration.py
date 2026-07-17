@@ -9,11 +9,17 @@ Verifies that save_session() → load_session() preserves:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from agentpool.sessions.models import PendingDeferredCall, SessionData
 from agentpool_storage.protocols import CheckpointStore, SessionPersistence
-from agentpool_storage.sql_provider import SQLModelProvider
+
+
+if TYPE_CHECKING:
+    from agentpool_storage.sql_provider import SQLModelProvider
+
 
 pytestmark = pytest.mark.unit
 

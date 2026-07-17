@@ -15,13 +15,13 @@ import pytest
 
 from agentpool.lifecycle.types import RunState
 from agentpool.sessions.state_mapper import (
-    InvariantResult,
     SESSION_STATUS_ACTIVE,
     SESSION_STATUS_CHECKPOINTED,
     SESSION_STATUS_CLOSED,
     SESSION_STATUS_RESUMING,
-    SessionStateMapper,
     VALID_SESSION_STATUSES,
+    InvariantResult,
+    SessionStateMapper,
 )
 
 
@@ -80,7 +80,7 @@ class TestCheckInvariantNormal:
     """Tests for normal (valid) state combinations."""
 
     def test_active_idle_with_run_handle(self) -> None:
-        """active + IDLE + RunHandle = valid."""
+        """Active + IDLE + RunHandle = valid."""
         result = SessionStateMapper.check_invariant(
             SESSION_STATUS_ACTIVE,
             RunState.IDLE,
@@ -90,7 +90,7 @@ class TestCheckInvariantNormal:
         assert result.action == "none"
 
     def test_active_running_with_run_handle(self) -> None:
-        """active + RUNNING + RunHandle = valid."""
+        """Active + RUNNING + RunHandle = valid."""
         result = SessionStateMapper.check_invariant(
             SESSION_STATUS_ACTIVE,
             RunState.RUNNING,
@@ -100,7 +100,7 @@ class TestCheckInvariantNormal:
         assert result.action == "none"
 
     def test_closed_done_with_run_handle(self) -> None:
-        """closed + DONE + RunHandle = valid."""
+        """Closed + DONE + RunHandle = valid."""
         result = SessionStateMapper.check_invariant(
             SESSION_STATUS_CLOSED,
             RunState.DONE,
@@ -110,7 +110,7 @@ class TestCheckInvariantNormal:
         assert result.action == "none"
 
     def test_active_no_run_handle(self) -> None:
-        """active + no RunHandle = valid (idle session)."""
+        """Active + no RunHandle = valid (idle session)."""
         result = SessionStateMapper.check_invariant(
             SESSION_STATUS_ACTIVE,
             None,
@@ -121,7 +121,7 @@ class TestCheckInvariantNormal:
         assert "idle" in result.message.lower()
 
     def test_closed_no_run_handle(self) -> None:
-        """closed + no RunHandle = valid (session was closed)."""
+        """Closed + no RunHandle = valid (session was closed)."""
         result = SessionStateMapper.check_invariant(
             SESSION_STATUS_CLOSED,
             None,
@@ -169,7 +169,7 @@ class TestCheckInvariantCarveOuts:
         assert result.action == "none"
 
     def test_checkpointed_with_run_handle_idle_is_mismatch(self) -> None:
-        """checkpointed + RunHandle(IDLE) = mismatch, reconcile to active.
+        """Checkpointed + RunHandle(IDLE) = mismatch, reconcile to active.
 
         When a RunHandle exists with IDLE state, the session status should
         have already been updated to 'resuming' or 'active'. 'checkpointed'
@@ -189,7 +189,7 @@ class TestCheckInvariantMismatches:
     """Tests for mismatched state combinations."""
 
     def test_closed_with_running_state_reconciles_to_active(self) -> None:
-        """closed + RUNNING = mismatch, reconcile to active (RunState is authoritative)."""
+        """Closed + RUNNING = mismatch, reconcile to active (RunState is authoritative)."""
         result = SessionStateMapper.check_invariant(
             SESSION_STATUS_CLOSED,
             RunState.RUNNING,
@@ -200,7 +200,7 @@ class TestCheckInvariantMismatches:
         assert result.reconciled_status == SESSION_STATUS_ACTIVE
 
     def test_checkpointed_with_running_state_reconciles_to_active(self) -> None:
-        """checkpointed + RUNNING = mismatch, reconcile to active."""
+        """Checkpointed + RUNNING = mismatch, reconcile to active."""
         result = SessionStateMapper.check_invariant(
             SESSION_STATUS_CHECKPOINTED,
             RunState.RUNNING,
@@ -211,7 +211,7 @@ class TestCheckInvariantMismatches:
         assert result.reconciled_status == SESSION_STATUS_ACTIVE
 
     def test_resuming_with_running_state_reconciles_to_active(self) -> None:
-        """resuming + RUNNING = mismatch, reconcile to active."""
+        """Resuming + RUNNING = mismatch, reconcile to active."""
         result = SessionStateMapper.check_invariant(
             SESSION_STATUS_RESUMING,
             RunState.RUNNING,
@@ -222,7 +222,7 @@ class TestCheckInvariantMismatches:
         assert result.reconciled_status == SESSION_STATUS_ACTIVE
 
     def test_active_with_done_state_reconciles_to_closed(self) -> None:
-        """active + DONE = mismatch, reconcile to closed."""
+        """Active + DONE = mismatch, reconcile to closed."""
         result = SessionStateMapper.check_invariant(
             SESSION_STATUS_ACTIVE,
             RunState.DONE,

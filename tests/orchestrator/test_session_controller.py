@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agentpool.lifecycle.types import DeliveryMode
 from agentpool.orchestrator.core import (
     DEFAULT_SESSION_TTL_SECONDS,
     EventBus,
@@ -20,7 +21,6 @@ from agentpool.orchestrator.core import (
 )
 from agentpool.orchestrator.run import RunHandle
 from tests._controller_helpers import send_via_controller
-from agentpool.lifecycle.types import DeliveryMode
 
 
 pytestmark = pytest.mark.unit

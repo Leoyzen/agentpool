@@ -56,6 +56,8 @@ class SessionControllerAgentMixin:
     _todo_lock: asyncio.Lock
     _runtime_registry: RuntimeAgentRegistry
 
+    def _increment_mcp_count(self, _agent: Any) -> None: ...
+
     async def get_or_create_session(
         self,
         session_id: str,

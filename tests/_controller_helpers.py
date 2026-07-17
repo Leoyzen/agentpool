@@ -51,9 +51,7 @@ async def send_via_controller(
     session.last_active_at = time.monotonic()
     if input_provider is not None:
         session.input_provider = input_provider
-    agent = await controller.get_or_create_session_agent(
-        session_id, input_provider=input_provider
-    )
+    agent = await controller.get_or_create_session_agent(session_id, input_provider=input_provider)
     if agent is None:
         return None
     priority = "asap" if mode is DeliveryMode.STEER else "when_idle"

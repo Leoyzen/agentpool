@@ -14,18 +14,22 @@ from __future__ import annotations
 
 from pathlib import Path
 import tempfile
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentpool.lifecycle.journal import DurableJournal
 from agentpool.lifecycle.snapshot_store import DurableSnapshotStore
-from agentpool.lifecycle.types import RunState
 from agentpool.sessions.state_mapper import (
     SESSION_STATUS_ACTIVE,
     SESSION_STATUS_CHECKPOINTED,
     SESSION_STATUS_RESUMING,
     SessionStateMapper,
 )
+
+
+if TYPE_CHECKING:
+    from agentpool.lifecycle.types import RunState
 
 
 pytestmark = pytest.mark.integration

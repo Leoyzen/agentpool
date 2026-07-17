@@ -10,7 +10,7 @@ lifecycle.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from agentpool.agents.events.events import (
     RunErrorEvent,
@@ -96,10 +96,31 @@ class OpenCodeEventBridgeMixin:
     _resume_contexts: dict[str, dict[str, Any]]
     _pending_message_ids: dict[str, str]
 
+    if TYPE_CHECKING:
+
+        def get_session_context_data(self, session_id: str) -> dict[str, Any] | None: ...
+        async def _create_subagent_tool_part(self, session_id: str, event: Any) -> Any: ...
+        async def start_event_consumer(self, session_id: str) -> None: ...
+        async def stop_event_consumer(self, session_id: str) -> None: ...
+        async def _update_parent_toolpart(
+            self,
+            parent_session_id: str,
+            child_session_id: str,
+            spawn_event: SpawnSessionStart,
+            event: Any,
+        ) -> None: ...
+        async def _update_parent_toolpart_error(
+            self,
+            parent_session_id: str,
+            child_session_id: str,
+            spawn_event: SpawnSessionStart,
+            event: Any,
+        ) -> None: ...
+
     @property
     def event_bus(self) -> EventBus:
         """Return the EventBus instance to subscribe to."""
-        return self.session_pool.event_bus
+        return cast("EventBus", self.session_pool.event_bus)
 
     def _get_subscription_scope(self) -> str:
         """Return the EventBus subscription scope.

@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from agentpool.lifecycle.types import DeliveryMode
 from agentpool_server.opencode_server.event_processor_context import EventProcessorContext
 from agentpool_server.opencode_server.models import MessagePath, MessageTime, MessageWithParts
 from agentpool_server.opencode_server.models.message import (
@@ -21,7 +22,6 @@ from agentpool_server.opencode_server.models.message import (
     MessageRequest,
     TextPartInput,
 )
-from agentpool.lifecycle.types import DeliveryMode
 
 
 # =============================================================================

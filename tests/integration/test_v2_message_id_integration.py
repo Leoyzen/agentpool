@@ -42,9 +42,7 @@ from agentpool.lifecycle import (
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, SessionPool
 from agentpool.orchestrator.run import RunHandle
-from agentpool.orchestrator.session_controller import SessionController
 from agentpool.orchestrator.turn import Turn
-from tests._controller_helpers import send_via_controller
 
 
 pytestmark = pytest.mark.integration
@@ -622,7 +620,7 @@ async def test_run_agent_creates_session_runs_returns_text_cleans_up() -> None:
 
 
 @pytest.mark.anyio
-async def test_deprecation_warnings_emitted() -> None:  # noqa: PLR0915
+async def test_deprecation_warnings_emitted() -> None:
     """DeprecationWarning emitted by spawn_subagent, get_available_agents.
 
     Note: receive_request() deprecation tests removed — the method was

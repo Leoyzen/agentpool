@@ -49,6 +49,8 @@ class SessionControllerCloseMixin:
     _runs: dict[str, RunHandle]
     _event_bus: EventBus | None
 
+    def _decrement_mcp_count(self, _agent: Any) -> None: ...
+
     async def _close_session_unlocked(self, session_id: str) -> None:  # noqa: PLR0915
         """Close a session with standardized 7-step cleanup ordering.
 

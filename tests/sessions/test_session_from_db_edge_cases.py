@@ -9,13 +9,17 @@ Tests that _session_from_db() handles:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from agentpool.sessions.models import SessionData
-from agentpool_storage.sql_provider import SQLModelProvider
 from agentpool_storage.sql_provider.models import Conversation
+
+
+if TYPE_CHECKING:
+    from agentpool_storage.sql_provider import SQLModelProvider
+
 
 pytestmark = pytest.mark.unit
 

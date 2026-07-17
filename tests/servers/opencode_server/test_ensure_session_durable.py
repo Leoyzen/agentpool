@@ -14,6 +14,7 @@ import pytest
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.native_agent.checkpoint import CheckpointData
+from agentpool.lifecycle.types import DeliveryMode
 from agentpool.sessions.models import PendingDeferredCall, SessionData
 from agentpool_server.opencode_server.models import (
     MessageWithParts,
@@ -28,7 +29,6 @@ from agentpool_server.opencode_server.session_pool_integration import (
     ensure_session,
 )
 from agentpool_server.opencode_server.state import ServerState
-from agentpool.lifecycle.types import DeliveryMode
 
 
 def create_mock_agent() -> MagicMock:

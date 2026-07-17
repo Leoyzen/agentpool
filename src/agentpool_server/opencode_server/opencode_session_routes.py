@@ -348,6 +348,14 @@ class OpenCodeSessionRoutesMixin:
     session_pool: SessionPool
     server_state: ServerState
     _pending_message_ids: dict[str, str]
+    _session_groups: dict[str, Any]
+    _resume_contexts: dict[str, dict[str, Any]]
+
+    if TYPE_CHECKING:
+
+        async def _start_event_consumer(self, session_id: str) -> None: ...
+        async def _stop_event_consumer(self, session_id: str) -> None: ...
+        async def stop_event_consumer(self, session_id: str) -> None: ...
 
     async def create_session(
         self,

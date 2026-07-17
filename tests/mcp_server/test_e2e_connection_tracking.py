@@ -280,7 +280,7 @@ async def test_get_capabilities_during_concurrent_cleanup() -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_multiple_sessions_same_connection_real_acpsessions() -> None:
+async def test_multiple_sessions_same_connection_real_acpsessions() -> None:  # noqa: PLR0915
     """Two sessions on same connection_id both tracked; closing one preserves other.
 
     Creates two sessions via ``create_session(connection_id="conn-1")`` and

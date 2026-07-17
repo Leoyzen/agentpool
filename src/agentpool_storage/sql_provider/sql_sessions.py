@@ -65,6 +65,16 @@ class SQLSessionsMixin:
     engine: AsyncEngine
     session: AsyncSession | None
 
+    if TYPE_CHECKING:
+
+        def aggregate_stats(
+            self,
+            rows: Any,
+            group_by: str,
+        ) -> dict[str, dict[str, Any]]: ...
+
+        async def _init_database(self, auto_migrate: bool = True) -> None: ...
+
     def _get_insert_stmt(self) -> Any:
         """Get appropriate insert statement for database dialect.
 

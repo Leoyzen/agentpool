@@ -16,10 +16,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agentpool.lifecycle.types import DeliveryMode
 from agentpool.orchestrator.core import EventBus, SessionController
 from agentpool.orchestrator.run import RunHandle
 from tests._controller_helpers import send_via_controller
-from agentpool.lifecycle.types import DeliveryMode
 
 
 pytestmark = pytest.mark.unit
@@ -236,7 +236,8 @@ async def test_message_id_passed_to_steer(
     controller._runs["existing-run-id"] = existing_run
     controller.get_session("sess-mid").current_run_id = "existing-run-id"  # type: ignore[union-attr]
 
-    result = await send_via_controller(controller, 
+    result = await send_via_controller(
+        controller,
         "sess-mid",
         "steer me",
         mode=DeliveryMode.STEER,
@@ -271,7 +272,9 @@ async def test_list_content_not_stringified_for_steer(
     controller.get_session("sess-list").current_run_id = "existing-run-id"  # type: ignore[union-attr]
 
     content_list: list[Any] = ["hello", "world"]
-    result = await send_via_controller(controller, "sess-list", content_list, mode=DeliveryMode.STEER)
+    result = await send_via_controller(
+        controller, "sess-list", content_list, mode=DeliveryMode.STEER
+    )
 
     assert result == "msg-id"
     # List should be passed directly, not joined into a string

@@ -27,11 +27,11 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 from agentpool.lifecycle import RunState
+from agentpool.lifecycle.types import DeliveryMode
 from agentpool.orchestrator.core import SessionPool
 from agentpool.sessions.models import SessionData
 from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 from agentpool_server.opencode_server.state import ServerState
-from agentpool.lifecycle.types import DeliveryMode
 
 
 # =============================================================================

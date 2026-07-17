@@ -55,6 +55,8 @@ class SessionControllerRunsMixin:
     _event_bus: EventBus | None
     _background_tasks: set[asyncio.Task[Any]]
 
+    def get_session(self, session_id: str) -> SessionState | None: ...
+
     async def _consume_run(self, run_handle: RunHandle, initial_prompt: str) -> None:
         """Drive a RunHandle.start() async generator to completion.
 

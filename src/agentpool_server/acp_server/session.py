@@ -15,7 +15,7 @@ import asyncio
 from contextlib import suppress
 from dataclasses import dataclass, field
 import re
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from exxec.acp_provider import ACPExecutionEnvironment
 from slashed import CommandStore
@@ -263,7 +263,10 @@ class ACPSession(
                 params: RequestPermissionRequest,
             ) -> RequestPermissionResponse:
                 forwarded = params.model_copy(update={"session_id": self.session_id})
-                return await self.requests.client.request_permission(forwarded)
+                return cast(
+                    "RequestPermissionResponse",
+                    await self.requests.client.request_permission(forwarded),
+                )
 
             self.agent.acp_permission_callback = permission_callback
 
@@ -290,7 +293,7 @@ class ACPSession(
         Returns:
             True if the task lock is held (active prompt processing).
         """
-        return self._task_lock.locked()
+        return cast("bool", self._task_lock.locked())
 
     @property
     def host_context(self) -> HostContext:

@@ -54,6 +54,7 @@ class ACPSessionAgentMgmtMixin:
         input_provider: Any  # ACPInputProvider
         acp_env: Any  # ACPExecutionEnvironment
         notifications: Any  # ACPNotifications
+        fs: Any  # ACPFileSystem
         _skill_bridge: Any  # ACPSkillBridge
         _skill_change_task: asyncio.Task[None] | None
         _skill_register_lock: asyncio.Lock
@@ -75,6 +76,7 @@ class ACPSessionAgentMgmtMixin:
             duration: int | None = None,
             action: dict[str, str] | None = None,
         ) -> None: ...
+        async def _on_state_updated(self, state: Any) -> None: ...
 
     def _register_manifest_commands(self) -> None:
         """Register global commands from manifest to command_store.

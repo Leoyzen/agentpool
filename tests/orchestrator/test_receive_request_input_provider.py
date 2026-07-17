@@ -19,7 +19,6 @@ import pytest
 
 from agentpool.orchestrator.core import EventBus, SessionController
 from tests._controller_helpers import send_via_controller
-from agentpool.lifecycle.types import DeliveryMode
 
 
 if TYPE_CHECKING:
@@ -166,8 +165,8 @@ async def test_input_provider_stored_on_session_for_cached_agent(
     controller._consume_run = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
     # First call — sets input_provider
-    await send_via_controller(controller, 
-        "sess-ip-4", "first message", input_provider=mock_input_provider
+    await send_via_controller(
+        controller, "sess-ip-4", "first message", input_provider=mock_input_provider
     )
 
     session = controller.get_session("sess-ip-4")
@@ -180,8 +179,8 @@ async def test_input_provider_stored_on_session_for_cached_agent(
     # Second call — input_provider should be updated on session
     # (even though agent is already cached)
     second_provider = MagicMock()
-    result2 = await send_via_controller(controller, 
-        "sess-ip-4", "second message", input_provider=second_provider
+    result2 = await send_via_controller(
+        controller, "sess-ip-4", "second message", input_provider=second_provider
     )
 
     assert result2 is not None
