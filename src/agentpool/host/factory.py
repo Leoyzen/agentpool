@@ -381,6 +381,14 @@ class AgentFactory:
                 from agentpool.agents.native_agent import Agent as _NativeAgent2
                 from agentpool.capabilities.team_comm_capability import TeamCommCapability
 
+                # Set team_role metadata so tools can check lead/member permissions.
+                # Protocol servers don't set this — factory is the right place.
+                if agent_name in resolved_tm.lead_eligible:
+                    session.metadata.setdefault("team_role", "lead")
+                else:
+                    session.metadata.setdefault("team_role", "member")
+                session.metadata.setdefault("team_member_name", agent_name)
+
                 team_cap = TeamCommCapability(resolved_tm, agent_name, session.metadata)
                 if isinstance(agent, _NativeAgent2):
                     # Replace shared TeamCommCapability with per-session
