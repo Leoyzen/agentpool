@@ -172,7 +172,6 @@ class SessionControllerAgentMixin:
         # Use dedicated lock to prevent race conditions with concurrent sessions
         if (
             parent_session_id is None
-            and hasattr(self.pool, "todos")
             and self.pool.todos is not None
         ):
             _entries = self.pool.todos.entries

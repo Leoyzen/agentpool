@@ -347,8 +347,7 @@ class SessionPoolRunsMixin:
                     except asyncio.QueueShutDown:
                         break
                     yield event.event
-                    raw_event = getattr(event, "event", event)
-                    if isinstance(raw_event, StreamCompleteEvent | RunErrorEvent):
+                    if isinstance(event.event, StreamCompleteEvent | RunErrorEvent):
                         break
             finally:
                 await self.event_bus.unsubscribe(session_id, queue)
@@ -375,8 +374,7 @@ class SessionPoolRunsMixin:
                         except asyncio.QueueShutDown:
                             break
                         yield event.event
-                        raw_event = getattr(event, "event", event)
-                        if isinstance(raw_event, StreamCompleteEvent | RunErrorEvent):
+                        if isinstance(event.event, StreamCompleteEvent | RunErrorEvent):
                             break
                 finally:
                     await self.event_bus.unsubscribe(session_id, queue)
