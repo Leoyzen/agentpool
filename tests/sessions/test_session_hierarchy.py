@@ -45,7 +45,7 @@ class TestSessionHierarchy:
     """Tests for session parent-child hierarchy."""
 
     async def test_create_with_parent_id(
-        self,         mock_pool: MagicMock, memory_store: MemoryStorageProvider
+        self, mock_pool: MagicMock, memory_store: MemoryStorageProvider
     ) -> None:
         """Test that parent_id is persisted correctly via create_session."""
         session_pool = SessionPool(pool=mock_pool, store=memory_store)
@@ -159,7 +159,7 @@ class TestSessionHierarchy:
             assert "parent_1" not in children
 
     async def test_create_with_invalid_parent(
-        self,         mock_pool: MagicMock, memory_store: MemoryStorageProvider
+        self, mock_pool: MagicMock, memory_store: MemoryStorageProvider
     ) -> None:
         """Test that creating with non-existent parent_id succeeds (permissive)."""
         session_pool = SessionPool(pool=mock_pool, store=memory_store)

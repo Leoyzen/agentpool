@@ -214,4 +214,3 @@ class TestProviderProtocolConformance:
             assert isinstance(provider, p), (
                 f"MemoryStorageProvider failed isinstance for {p.__name__}"
             )
-

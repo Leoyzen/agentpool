@@ -9,8 +9,8 @@ from agentpool import Agent
 from agentpool.delegation import AgentPool
 from agentpool.orchestrator.core import SessionPool
 from agentpool.sessions import SessionData
-from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 from agentpool_server.acp_server.session_manager import ACPSessionManager
+from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
 
 def _make_pool_with_sessions() -> tuple[AgentPool, Agent, SessionPool, MemoryStorageProvider]:

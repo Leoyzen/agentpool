@@ -484,7 +484,7 @@ async def test_resume_session_status_transitions_checkpointed_to_resuming_to_act
         observed_statuses.append(data.status)
         await original_save(data)
 
-    store.save_session = tracking_save  # type: ignore[method-assign]  # type: ignore[method-assign]
+    store.save_session = tracking_save  # type: ignore[method-assign]
 
     mock_native = MagicMock()
     mock_native.name = "test-agent"
@@ -546,7 +546,7 @@ async def test_resume_session_status_reverts_to_checkpointed_on_failure(
         observed_statuses.append(data.status)
         await original_save(data)
 
-    store.save_session = tracking_save  # type: ignore[method-assign]  # type: ignore[method-assign]
+    store.save_session = tracking_save  # type: ignore[method-assign]
 
     mock_native = MagicMock()
     mock_native.name = "test-agent"
