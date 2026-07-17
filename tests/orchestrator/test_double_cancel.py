@@ -18,22 +18,23 @@ Fix: Three-layer defense:
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+import contextlib
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+from pydantic_ai.models.test import TestModel
 import pytest
 
+from agentpool import Agent
+from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     StreamCompleteEvent,
 )
 from agentpool.lifecycle import RunState
 from agentpool.messaging import ChatMessage
+from agentpool.orchestrator.core import EventBus, SessionState
 from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
-
-
-if TYPE_CHECKING:
-    from agentpool.agents.context import AgentRunContext
 
 
 pytestmark = pytest.mark.unit
@@ -321,3 +322,116 @@ async def test_cancelled_event_loop_survives_idle_cancel() -> None:
     handle.close()
     await asyncio.sleep(0.05)
     await consumer_task
+
+
+# ---------------------------------------------------------------------------
+# Integration test: real Agent + TestModel (exercises real pydantic-ai path)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_double_cancel_then_resume_with_real_agent() -> None:
+    """Double cancel during idle, then resume with new prompt via real Agent.
+
+    This integration test exercises the full pydantic-ai execution path
+    for the resumed turn: Agent → NativeTurn → agentlet.iter() → TestModel
+
+    Steps:
+        1. Create a real Agent with TestModel (fast completion).
+        2. Start the RunHandle generator — first turn completes immediately.
+        3. After the first turn, RunHandle is idle. Call cancel() twice.
+        4. Send a followup message.
+        5. Verify the second turn executes through real pydantic-ai path
+           by checking RunHandle state and conversation history.
+
+    The key assertion: the generator survives the double cancel and the
+    second turn runs through the real pydantic-ai execution path.
+    """
+    model = TestModel(custom_output_text="Hello from TestModel")
+    agent = Agent(name="double-cancel-integration", model=model, session=False)
+    async with agent:
+        event_bus = EventBus()
+        session = SessionState(
+            session_id="test-dc-integration",
+            agent_name="double-cancel-integration",
+        )
+        run_ctx = AgentRunContext(
+            session_id="test-dc-integration",
+            event_bus=event_bus,
+        )
+        handle = RunHandle(
+            run_id="test-dc-int-run",
+            session_id="test-dc-integration",
+            agent_type="native",
+            agent=agent,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=run_ctx,
+        )
+
+        events: list[Any] = []
+        gen = handle.start("first prompt")
+
+        async def _consume() -> None:
+            async for event in gen:
+                events.append(event)  # noqa: PERF401
+
+        consumer_task = asyncio.create_task(_consume())
+
+        # Wait for the first turn to complete (TestModel is fast but has overhead)
+        await asyncio.wait_for(handle._turn_complete_event.wait(), timeout=10.0)
+
+        # First turn should have produced events through real pydantic-ai
+        assert len(events) > 0, "First turn should have produced events"
+        assert handle._run_state == RunState.IDLE, (
+            f"RunHandle should be idle after first turn, got {handle._run_state}"
+        )
+
+        # Capture the first turn's ID for comparison
+        first_turn_id = handle.run_ctx.turn_id
+        first_event_count = len(events)
+
+        # Double cancel during idle (simulates abort_session double cancel)
+        handle.cancel()
+        await asyncio.sleep(0.1)
+        handle.cancel()
+        await asyncio.sleep(0.1)
+
+        # Generator must survive — not closed, still in IDLE state
+        assert not handle._closed, (
+            "Generator must survive double cancel through real pydantic-ai path"
+        )
+        assert handle._run_state == RunState.IDLE, (
+            f"RunHandle should still be idle after double cancel, got {handle._run_state}"
+        )
+
+        # Send a followup — the second turn runs through real pydantic-ai
+        msg_id = handle.followup("second prompt")
+        assert msg_id is not None, "followup() must succeed after double cancel"
+
+        # Wait for the second turn to complete through real pydantic-ai path
+        handle._turn_complete_event.clear()
+        await asyncio.wait_for(handle._turn_complete_event.wait(), timeout=10.0)
+
+        # The second turn must have produced new events (through real pydantic-ai)
+        assert len(events) > first_event_count, (
+            f"Second turn should have produced new events, "
+            f"before: {first_event_count}, after: {len(events)}"
+        )
+
+        # The turn_id should have changed (new turn was executed)
+        assert handle.run_ctx.turn_id != first_turn_id, (
+            "turn_id should have changed after second turn"
+        )
+
+        # RunHandle should be back to idle after second turn
+        assert handle._run_state == RunState.IDLE, (
+            f"RunHandle should be idle after resumed turn, got {handle._run_state}"
+        )
+
+        # Clean up
+        handle.close()
+        await asyncio.sleep(0.05)
+        with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+            await consumer_task
