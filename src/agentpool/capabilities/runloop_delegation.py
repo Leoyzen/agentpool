@@ -14,6 +14,7 @@ machinery in ``SessionController``.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 import warnings
 
@@ -127,12 +128,21 @@ class RunLoopDelegationService:
                 return
             bus_queue = await event_bus.subscribe(child_session_id, scope="session")
             try:
-                while True:
-                    envelope = await bus_queue.get()
-                    event = envelope.event
-                    yield event
-                    if isinstance(event, StreamCompleteEvent | RunErrorEvent):
-                        break
+                async with asyncio.timeout(300):
+                    while True:
+                        envelope = await bus_queue.get()
+                        event = envelope.event
+                        yield event
+                        if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                            break
+            except TimeoutError:
+                from agentpool.agents.events import RunErrorEvent
+
+                yield RunErrorEvent(
+                    message=f"Subagent '{name}' timed out after 300s",
+                    run_id="",
+                    agent_name=name,
+                )
             finally:
                 await event_bus.unsubscribe(child_session_id, bus_queue)
 

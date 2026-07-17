@@ -397,16 +397,16 @@ async def test_crash_recovery_restores_multimodal_prompts() -> None:
 
     result = await handle._handle_recovery()
 
-    # The retry strategy appends deserialized prompts to _message_queue
-    # and returns None (recovered_prompt is only set for text fallback).
+    # The retry strategy extends _message_queue with individual prompts
+    # (not nested as a single list) and returns None (recovered_prompt
+    # is only set for text fallback).
     assert result is None
-    assert len(handle._message_queue) == 1
-    recovered = handle._message_queue[0]
-    assert isinstance(recovered, list)
-    assert recovered[0] == "hello"
-    assert isinstance(recovered[1], list)
-    assert recovered[1][0] == "describe this"
-    restored_img = recovered[1][1]
+    assert len(handle._message_queue) == 2
+    assert handle._message_queue[0] == "hello"
+    recovered_list = handle._message_queue[1]
+    assert isinstance(recovered_list, list)
+    assert recovered_list[0] == "describe this"
+    restored_img = recovered_list[1]
     assert isinstance(restored_img, BinaryImage)
     assert restored_img.media_type == "image/png"
     assert restored_img.data == b"\x89PNG\r\n\x1a\n"

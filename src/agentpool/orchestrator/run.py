@@ -533,9 +533,11 @@ class RunHandle:
                             deserialized = deserialize_prompts(prompts_serialized)
                             if deserialized:
                                 # Store the full prompts for the idle loop
-                                # to pick up. We append to the message queue
-                                # so _idle_loop() collects them.
-                                self._message_queue.append(deserialized)
+                                # to pick up. We extend the message queue
+                                # so _idle_loop() collects each prompt as
+                                # an individual item, preserving the
+                                # original prompt structure.
+                                self._message_queue.extend(deserialized)
                             else:
                                 # Fall back to text prompt if deserialization fails
                                 prompt_val: Any = state_dict.get("prompt")

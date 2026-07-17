@@ -973,22 +973,21 @@ class SessionPool(
         """
         if len(self._message_cache) <= self._message_cache_maxsize:
             return
-        # Evict from the front (oldest) for inactive sessions only.
-        while len(self._message_cache) > self._message_cache_maxsize:
-            # Find the oldest inactive session entry.
-            evicted = False
-            for session_id in list(self._message_cache.keys()):
-                session = self.sessions.get_session(session_id)
-                # Evict only if session is inactive or doesn't exist.
-                if session is None or session.current_run_id is None:
-                    self._message_cache.pop(session_id, None)
-                    evicted = True
-                    break
-            if not evicted:
-                # All cached sessions are active — cannot evict.
-                logger.warning(
-                    "Message cache at maxsize but all sessions are active",
-                    cache_size=len(self._message_cache),
-                    maxsize=self._message_cache_maxsize,
-                )
-                break
+        # Single-pass: collect all evictable session IDs (inactive or
+        # non-existent sessions), then pop in bulk.
+        candidates = [
+            sid
+            for sid in list(self._message_cache.keys())
+            if (s := self.sessions.get_session(sid)) is None or s.current_run_id is None
+        ]
+        for sid in candidates:
+            self._message_cache.pop(sid, None)
+            if len(self._message_cache) <= self._message_cache_maxsize:
+                return
+        if len(self._message_cache) > self._message_cache_maxsize:
+            # All cached sessions are active — cannot evict inactive ones.
+            logger.warning(
+                "Message cache at maxsize but all sessions are active",
+                cache_size=len(self._message_cache),
+                maxsize=self._message_cache_maxsize,
+            )
