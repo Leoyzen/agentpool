@@ -648,6 +648,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 team_state.cleanup(team_id)
             return f"Failed to create team: {exc}"
 
+        # Write team_id back to session metadata so subsequent tool calls
+        # can access the team state without requiring a new session.
+        agent_ctx.session.metadata["team_id"] = team_id
+        agent_ctx.session.metadata["team_name"] = name
+
         return f"Team '{name}' created with {len(members)} members. team_id={team_id}"
 
     async def team_delete(self, ctx: RunContext[Any]) -> str:
