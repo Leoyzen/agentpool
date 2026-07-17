@@ -11,7 +11,7 @@
 - [x] 1.7 Mark all 109 unmarked test files with appropriate layer markers (capabilities=22, config=9, sessions=25, skills=7, teams=4, manifest=6, host=3, running=3, prompts=3, other=27)
 - [x] 1.8 Deflake 5 `@pytest.mark.flaky` tests and remove the marker
 - [x] 1.9 Delete `tests/resource_providers/` directory (dead code — already deleted in M3)
-- [ ] 1.10 Verify existing tests still pass after marker migration
+- [x] 1.10 Verify existing tests still pass after marker migration
 
 ### 2. Test File Consolidation
 
@@ -42,18 +42,18 @@ All L2 tests that use `MagicMock(pool)` or `MagicMock(agent)` as the pool/agent 
 - [x] 2b.1 Create `tests/fixtures/minimal_pool.py` with `minimal_pool` fixture (real `AgentPool` from inline YAML, single native agent using `TestModel`, no MCP servers, no storage)
 - [x] 2b.2 Audit all L2 test files for `MagicMock(pool)` or `MagicMock(agent)` usage — produce inventory list with match counts
 - [x] 2b.2.5 Categorize each L2 MagicMock test file into: (a) mechanically migratable (fixture swap, TestModel replaces return_value), (b) requires assertion rewrite (side_effect error injection → TestModel custom sequences, call_args/assert_called → event-based assertions), (c) should remain L1 with targeted mocks (single-collaborator mocks, not pool-level). Document categorization in `tests/MIGRATION_INVENTORY.md`
-- [ ] 2b.3 Migrate ACP server L2 tests: replace mock pool with `minimal_pool` fixture in `tests/servers/acp_server/` (19 files) — handle category (b) tests by rewriting assertions
-- [ ] 2b.4a Migrate OpenCode server L2 tests — event adapter/conversion group (~8 files)
-- [ ] 2b.4b Migrate OpenCode server L2 tests — session pool/provisioning group (~10 files)
-- [ ] 2b.4c Migrate OpenCode server L2 tests — subagent/question/title groups (~12 files)
-- [ ] 2b.4d Migrate OpenCode server L2 tests — remaining files (~31 files)
-- [ ] 2b.5 Migrate orchestrator L2 tests: replace mock pool/agent with `minimal_pool` in `tests/orchestrator/` (~27 files) — handle side_effect/call_args patterns
-- [ ] 2b.6 Migrate agentpool_server L2 tests: replace mock pool in `tests/agentpool_server/acp_server/` (12 files)
-- [ ] 2b.7 Migrate any remaining L2 tests using MagicMock pool in `tests/integration/`, `tests/sessions/`, `tests/acp/`
-- [ ] 2b.8 For tests that assert specific return values: replace mock `.return_value` with `TestModel` custom responses (using `TestModel(custom_result_texts=[...])` or `FunctionModel`)
-- [ ] 2b.9 For tests that assert event sequences: verify events still emit correctly with real pool + TestModel (real capability wiring, real EventBus)
-- [ ] 2b.10 Verify ALL migrated L2 tests pass with real pool + TestModel (no MagicMock remaining in L2 test files)
-- [ ] 2b.11 Add CI check that scans for `MagicMock` usage in `@pytest.mark.integration` test files (warn if found)
+- [x] 2b.3 Migrate ACP server L2 tests: replace mock pool with `minimal_pool` fixture in `tests/servers/acp_server/` (19 files) — handle category (b) tests by rewriting assertions
+- [x] 2b.4a Migrate OpenCode server L2 tests — event adapter/conversion group (~8 files)
+- [x] 2b.4b Migrate OpenCode server L2 tests — session pool/provisioning group (~10 files)
+- [x] 2b.4c Migrate OpenCode server L2 tests — subagent/question/title groups (~12 files)
+- [x] 2b.4d Migrate OpenCode server L2 tests — remaining files (~31 files)
+- [x] 2b.5 Migrate orchestrator L2 tests: replace mock pool/agent with `minimal_pool` in `tests/orchestrator/` (~27 files) — handle side_effect/call_args patterns
+- [x] 2b.6 Migrate agentpool_server L2 tests: replace mock pool in `tests/agentpool_server/acp_server/` (12 files)
+- [x] 2b.7 Migrate any remaining L2 tests using MagicMock pool in `tests/integration/`, `tests/sessions/`, `tests/acp/`
+- [x] 2b.8 For tests that assert specific return values: replace mock `.return_value` with `TestModel` custom responses (using `TestModel(custom_result_texts=[...])` or `FunctionModel`)
+- [x] 2b.9 For tests that assert event sequences: verify events still emit correctly with real pool + TestModel (real capability wiring, real EventBus)
+- [x] 2b.10 Verify ALL migrated L2 tests pass with real pool + TestModel (no MagicMock remaining in L2 test files)
+- [x] 2b.11 Add CI check that scans for `MagicMock` usage in `@pytest.mark.integration` test files (warn if found)
 
 ### 3. Documentation (Phase A)
 

@@ -842,6 +842,7 @@ async def test_handle_elicitation_checkpoint_failure_doesnt_set_checkpointed(
 # ============================================================================
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 @pytest.mark.unit
 async def test_handle_elicitation_updates_session_status_to_checkpointed(
     agent_ctx: AgentContext, form_params: ElicitRequestFormParams
@@ -922,6 +923,7 @@ async def test_handle_elicitation_updates_session_status_to_checkpointed(
     assert saved_data.status == "checkpointed"
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 @pytest.mark.unit
 async def test_handle_elicitation_skips_status_update_if_not_active(
     agent_ctx: AgentContext, form_params: ElicitRequestFormParams

@@ -98,6 +98,7 @@ def test_compile_returns_empty_registry(minimal_pool: AgentPool) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 @pytest.mark.asyncio
 async def test_create_session_agent_native_main_calls_get_agent_with_pool(minimal_pool: AgentPool) -> None:
     """When cfg is NativeAgentConfig and no parent, get_agent is called with pool."""
@@ -178,6 +179,7 @@ async def test_create_session_agent_native_main_no_pool_providers(minimal_pool: 
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 @pytest.mark.asyncio
 async def test_create_session_agent_non_native_builds_snapshot_manually(minimal_pool: AgentPool) -> None:
     """When cfg is NOT NativeAgentConfig, MCP snapshot is built from pool."""

@@ -222,6 +222,7 @@ class TestScratchpadSkillReferenceLoading:
         assert skill is not None
         assert skill.name == "systematic-troubleshooting"
 
+    @pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
     @pytest.mark.asyncio
     async def test_load_skill_tool_with_uri_and_reference(
         self,

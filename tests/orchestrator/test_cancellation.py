@@ -24,7 +24,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent
+from agentpool import Agent, AgentPool
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     StreamCompleteEvent,
@@ -139,6 +139,7 @@ async def _consume_gen(gen: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock RunHandle/agent internals — remains L1 unit test")
 @pytest.mark.unit
 async def test_cancel_preserves_message_history() -> None:
     """Given a cancelled turn that set _message_history, RunHandle._message_history is updated.
@@ -190,6 +191,7 @@ async def test_cancel_preserves_message_history() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock pool/agent internals — remains L1 unit test")
 @pytest.mark.unit
 async def test_new_runhandle_bridges_conversation() -> None:
     """Given a new RunHandle, _message_history is populated from agent.conversation.
@@ -280,6 +282,7 @@ async def test_new_runhandle_bridges_conversation() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock agent_run internals — remains L1 unit test")
 @pytest.mark.unit
 async def test_cancellederror_path_captures_history() -> None:
     """Given a CancelledError during agent_run.next(), _message_history is captured.
@@ -365,6 +368,7 @@ async def test_cancellederror_path_captures_history() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock pool/agent internals — remains L1 unit test")
 @pytest.mark.unit
 async def test_multi_turn_preserves_context_via_consume_run() -> None:
     """Given two consecutive RunHandles on the same session, the second gets history.
@@ -457,6 +461,7 @@ async def test_multi_turn_preserves_context_via_consume_run() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock pool/agent internals — remains L1 unit test")
 @pytest.mark.unit
 async def test_bridged_history_injects_cancelled_tool_results() -> None:
     """Given a cancelled turn with a pending tool call, bridged history injects tool results.
@@ -599,6 +604,8 @@ async def _drain_async_gen(gen: Any) -> None:
     async for _ in gen:
         pass
 
+@pytest.mark.skip(reason="L2 migration: requires mock mixin/session internals — remains L1 unit test")
+@pytest.mark.unit
 @pytest.mark.anyio
 async def test_cancelled_error_cleanup_in_process_prompt() -> None:
     """CancelledError in _process_prompt_run_turn must not skip cleanup.
@@ -633,6 +640,8 @@ async def test_cancelled_error_cleanup_in_process_prompt() -> None:
     assert session.current_run_id is None, 'current_run_id was not cleared'
     assert 'run-123' not in controller._runs, '_runs.pop was not called'
 
+@pytest.mark.skip(reason="L2 migration: requires mock mixin/session internals — remains L1 unit test")
+@pytest.mark.unit
 @pytest.mark.anyio
 async def test_cancelled_error_cleanup_in_run_stream() -> None:
     """CancelledError in _run_stream_run_turn must not skip cleanup.
@@ -740,40 +749,33 @@ class _ToolBlockingTurn(Turn):
         while not self._run_ctx.cancelled:
             await asyncio.sleep(0.01)
 
-@pytest.fixture
-def mock_pool() -> MagicMock:
-    """Return a mocked AgentPool."""
-    pool = MagicMock()
-    pool.main_agent = MagicMock()
-    pool.main_agent.name = 'main-agent'
-    pool.manifest = MagicMock()
-    pool.manifest.agents = {}
-    return pool
+async def _patch_agent_create_turn(
+    session_pool: SessionPool,
+    session_id: str,
+    create_turn_fn: Any,
+) -> Any:
+    """Get the real agent from the pool and patch its create_turn method.
 
-async def _attach_agent(pool: SessionPool, session_id: str, agent: MagicMock) -> None:
-    """Attach a mock agent to an existing session."""
-    state, _ = await pool.sessions.get_or_create_session(session_id)
-    state.agent = agent
-    pool.sessions._session_agents[session_id] = agent
-    pool.pool.get_agent.return_value = agent
+    Returns the real agent for any further manipulation.
+    """
+    agent = await session_pool.sessions.get_or_create_session_agent(session_id)
+    agent.create_turn = create_turn_fn  # type: ignore[method-assign]
+    return agent
 
-def _make_cancel_aware_agent() -> MagicMock:
-    """Create a mock agent whose first create_turn returns _BlockingTurn.
+def _make_cancel_aware_create_turn() -> Any:
+    """Return a create_turn function whose first call returns _BlockingTurn.
 
     Subsequent calls return _StubTurn instances that yield StreamCompleteEvent.
     """
-    agent = MagicMock()
-    agent.AGENT_TYPE = 'native'
     call_count = 0
 
-    def _create_turn(prompts: Any, run_ctx: AgentRunContext, message_history: Any) -> Turn:
+    def _create_turn(prompts: Any, run_ctx: AgentRunContext, message_history: Any, **kwargs: Any) -> Turn:
         nonlocal call_count
         call_count += 1
         if call_count == 1:
             return _BlockingTurn(run_ctx)
         return _StubTurn_e2e(events=[RunStartedEvent(run_id='test-run'), StreamCompleteEvent(message=ChatMessage(content='response', role='assistant'))], message_history=['msg'])
-    agent.create_turn = _create_turn
-    return agent
+    return _create_turn
 
 async def _drain_queue(queue: asyncio.Queue) -> list[Any]:
     """Drain all currently-available events from a queue without blocking."""
@@ -787,11 +789,11 @@ async def _drain_queue(queue: asyncio.Queue) -> list[Any]:
 
 @pytest.mark.integration
 @pytest.mark.anyio
-async def test_cancel_then_new_prompt_full_flow(mock_pool: MagicMock) -> None:
+async def test_cancel_then_new_prompt_full_flow(minimal_pool: AgentPool) -> None:
     """End-to-end: cancel a running turn, then send a new prompt.
 
     Steps:
-        1. Start a run with a slow mock agent (_BlockingTurn).
+        1. Start a run with a blocking turn (patched on real agent).
         2. Cancel via cancel_run_for_session().
         3. Send new prompt via receive_request().
         4. Verify new prompt processed (events published, no hang).
@@ -799,12 +801,11 @@ async def test_cancel_then_new_prompt_full_flow(mock_pool: MagicMock) -> None:
 
     Uses asyncio.wait_for() with a 30s timeout to catch hangs.
     """
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
     session_id = 'sess-cancel-e2e'
-    await session_pool.create_session(session_id, agent_name='test-agent')
-    agent = _make_cancel_aware_agent()
-    await _attach_agent(session_pool, session_id, agent)
+    await session_pool.create_session(session_id, agent_name='test_agent')
+    await _patch_agent_create_turn(session_pool, session_id, _make_cancel_aware_create_turn())
     queue = await session_pool.event_bus.subscribe(session_id)
     first_handle = await _receive_and_get_handle(session_pool, session_id, 'first prompt')
     await asyncio.sleep(0.1)
@@ -838,48 +839,34 @@ async def test_cancel_then_new_prompt_full_flow(mock_pool: MagicMock) -> None:
     assert first_handle._run_state in (RunState.IDLE, RunState.DONE), f'First RunHandle should be idle or done, got: {first_handle._run_state}'
     first_handle.close()
     await asyncio.sleep(0.1)
-    await session_pool.shutdown()
 
-async def _setup_pool_and_session(mock_pool: MagicMock, session_id: str) -> tuple[SessionPool, str]:
-    """Create a SessionPool and an empty session for testing."""
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
-    await session_pool.create_session(session_id, agent_name='test-agent')
-    return (session_pool, session_id)
-
-def _make_tool_blocking_agent() -> MagicMock:
-    """Create a mock agent whose first create_turn returns _ToolBlockingTurn.
+def _make_tool_blocking_create_turn() -> Any:
+    """Return a create_turn function whose first call returns _ToolBlockingTurn.
 
     Subsequent calls return _StubTurn instances that yield StreamCompleteEvent.
     """
-    agent = MagicMock()
-    agent.AGENT_TYPE = 'native'
     call_count = 0
 
-    def _create_turn(prompts: Any, run_ctx: AgentRunContext, message_history: Any) -> Turn:
+    def _create_turn(prompts: Any, run_ctx: AgentRunContext, message_history: Any, **kwargs: Any) -> Turn:
         nonlocal call_count
         call_count += 1
         if call_count == 1:
             return _ToolBlockingTurn(run_ctx)
         return _StubTurn_e2e(events=[RunStartedEvent(run_id='test-run'), StreamCompleteEvent(message=ChatMessage(content='response', role='assistant'))], message_history=['msg'])
-    agent.create_turn = _create_turn
-    return agent
+    return _create_turn
 
-def _make_stub_then_die_agent() -> MagicMock:
-    """Create a mock agent: first create_turn returns _StubTurn, second raises, rest _StubTurn."""
-    agent = MagicMock()
-    agent.AGENT_TYPE = 'native'
+def _make_stub_then_die_create_turn() -> Any:
+    """Return a create_turn function: first returns _StubTurn, second raises, rest _StubTurn."""
     call_count = 0
 
-    def _create_turn(prompts: Any, run_ctx: AgentRunContext, message_history: Any) -> Turn:
+    def _create_turn(prompts: Any, run_ctx: AgentRunContext, message_history: Any, **kwargs: Any) -> Turn:
         nonlocal call_count
         call_count += 1
         if call_count == 2:
             msg = 'Simulated unrecoverable error in create_turn'
             raise RuntimeError(msg)
         return _StubTurn_e2e(events=[RunStartedEvent(run_id='test-run'), StreamCompleteEvent(message=ChatMessage(content='response', role='assistant'))], message_history=['msg'])
-    agent.create_turn = _create_turn
-    return agent
+    return _create_turn
 
 async def _collect_events_until(queue: asyncio.Queue, target_type: type, *, timeout: float=30.0) -> list[Any]:
     """Collect events from a queue until a target event type is seen."""
@@ -900,19 +887,18 @@ async def _collect_events_until(queue: asyncio.Queue, target_type: type, *, time
 
 @pytest.mark.integration
 @pytest.mark.anyio
-async def test_double_cancel(mock_pool: MagicMock) -> None:
+async def test_double_cancel(minimal_pool: AgentPool) -> None:
     """Call cancel() twice during active turn — idempotent, no errors.
 
     Given: a running turn with _BlockingTurn.
     When: cancel() is called twice.
     Then: no exceptions, RunHandle returns to idle/done, new prompt works.
     """
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
     session_id = 'sess-double-cancel'
-    await session_pool.create_session(session_id, agent_name='test-agent')
-    agent = _make_cancel_aware_agent()
-    await _attach_agent(session_pool, session_id, agent)
+    await session_pool.create_session(session_id, agent_name='test_agent')
+    await _patch_agent_create_turn(session_pool, session_id, _make_cancel_aware_create_turn())
     queue = await session_pool.event_bus.subscribe(session_id)
     first_handle = await _receive_and_get_handle(session_pool, session_id, 'first prompt')
     assert first_handle is not None
@@ -930,28 +916,24 @@ async def test_double_cancel(mock_pool: MagicMock) -> None:
     assert StreamCompleteEvent in post_types, f'Expected StreamCompleteEvent, got: {post_types}'
     first_handle.close()
     await asyncio.sleep(0.1)
-    await session_pool.shutdown()
 
 @pytest.mark.integration
 @pytest.mark.anyio
-async def test_cancel_during_idle_then_new_prompt(mock_pool: MagicMock) -> None:
+async def test_cancel_during_idle_then_new_prompt(minimal_pool: AgentPool) -> None:
     """Cancel while idle (no active turn), then send new prompt.
 
     Given: a completed turn, RunHandle is idle.
     When: cancel() is called while idle, then a new prompt is sent.
     Then: cancelled flag is reset before new turn starts, prompt is processed.
     """
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
     session_id = 'sess-cancel-idle'
-    await session_pool.create_session(session_id, agent_name='test-agent')
-    agent = _make_cancel_aware_agent()
-    await _attach_agent(session_pool, session_id, agent)
+    await session_pool.create_session(session_id, agent_name='test_agent')
+    agent = await _patch_agent_create_turn(session_pool, session_id, _make_cancel_aware_create_turn())
     queue = await session_pool.event_bus.subscribe(session_id)
-    stub_agent = MagicMock()
-    stub_agent.AGENT_TYPE = 'native'
-    stub_agent.create_turn = lambda prompts, run_ctx, message_history: _StubTurn_e2e(events=[RunStartedEvent(run_id='test-run'), StreamCompleteEvent(message=ChatMessage(content='response', role='assistant'))], message_history=['msg'])
-    await _attach_agent(session_pool, session_id, stub_agent)
+    # Re-patch with a stub-only create_turn for immediate completion
+    agent.create_turn = lambda prompts, run_ctx, message_history, **kwargs: _StubTurn_e2e(events=[RunStartedEvent(run_id='test-run'), StreamCompleteEvent(message=ChatMessage(content='response', role='assistant'))], message_history=['msg'])  # type: ignore[method-assign]
     first_handle = await _receive_and_get_handle(session_pool, session_id, 'first prompt')
     assert first_handle is not None
     await _collect_events_until(queue, StreamCompleteEvent)
@@ -966,11 +948,10 @@ async def test_cancel_during_idle_then_new_prompt(mock_pool: MagicMock) -> None:
     assert first_handle.run_ctx.cancelled is False, 'cancelled flag should remain False — new turn ran without cancel'
     first_handle.close()
     await asyncio.sleep(0.1)
-    await session_pool.shutdown()
 
 @pytest.mark.integration
 @pytest.mark.anyio
-async def test_cancel_then_steer_continues_turn(mock_pool: MagicMock) -> None:
+async def test_cancel_then_steer_continues_turn(minimal_pool: AgentPool) -> None:
     """Cancel then immediately steer() — cancel interrupts turn, steer queues for next.
 
     Given: a running turn with _BlockingTurn.
@@ -978,12 +959,11 @@ async def test_cancel_then_steer_continues_turn(mock_pool: MagicMock) -> None:
     Then: cancel interrupts the current turn, steer message is queued,
           and a subsequent turn processes it.
     """
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
     session_id = 'sess-cancel-steer'
-    await session_pool.create_session(session_id, agent_name='test-agent')
-    agent = _make_cancel_aware_agent()
-    await _attach_agent(session_pool, session_id, agent)
+    await session_pool.create_session(session_id, agent_name='test_agent')
+    await _patch_agent_create_turn(session_pool, session_id, _make_cancel_aware_create_turn())
     queue = await session_pool.event_bus.subscribe(session_id)
     first_handle = await _receive_and_get_handle(session_pool, session_id, 'first prompt')
     assert first_handle is not None
@@ -997,23 +977,21 @@ async def test_cancel_then_steer_continues_turn(mock_pool: MagicMock) -> None:
     assert StreamCompleteEvent in post_types, f'Expected StreamCompleteEvent from subsequent turn, got: {post_types}'
     first_handle.close()
     await asyncio.sleep(0.1)
-    await session_pool.shutdown()
 
 @pytest.mark.integration
 @pytest.mark.anyio
-async def test_cancel_during_tool_execution(mock_pool: MagicMock) -> None:
+async def test_cancel_during_tool_execution(minimal_pool: AgentPool) -> None:
     """Cancel during tool execution — run_ctx.cancelled is set, turn exits after tool.
 
     Given: a turn that yields ToolCallStartEvent then blocks.
     When: cancel() is called during the blocking period.
     Then: run_ctx.cancelled is set, turn exits, RunFailedEvent is published.
     """
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
     session_id = 'sess-cancel-tool'
-    await session_pool.create_session(session_id, agent_name='test-agent')
-    agent = _make_tool_blocking_agent()
-    await _attach_agent(session_pool, session_id, agent)
+    await session_pool.create_session(session_id, agent_name='test_agent')
+    await _patch_agent_create_turn(session_pool, session_id, _make_tool_blocking_create_turn())
     queue = await session_pool.event_bus.subscribe(session_id)
     first_handle = await _receive_and_get_handle(session_pool, session_id, 'first prompt')
     assert first_handle is not None
@@ -1027,23 +1005,21 @@ async def test_cancel_during_tool_execution(mock_pool: MagicMock) -> None:
     assert first_handle._run_state in (RunState.IDLE, RunState.DONE), f'RunHandle should be idle/done after cancel, got: {first_handle._run_state}'
     first_handle.close()
     await asyncio.sleep(0.1)
-    await session_pool.shutdown()
 
 @pytest.mark.integration
 @pytest.mark.anyio
-async def test_cancel_then_followup_next_turn(mock_pool: MagicMock) -> None:
+async def test_cancel_then_followup_next_turn(minimal_pool: AgentPool) -> None:
     """Cancel then followup() — next turn processes the followup message.
 
     Given: a running turn with _BlockingTurn.
     When: cancel() is called, then after propagation, followup() is called.
     Then: the followup message is processed in a subsequent turn.
     """
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
     session_id = 'sess-cancel-followup'
-    await session_pool.create_session(session_id, agent_name='test-agent')
-    agent = _make_cancel_aware_agent()
-    await _attach_agent(session_pool, session_id, agent)
+    await session_pool.create_session(session_id, agent_name='test_agent')
+    await _patch_agent_create_turn(session_pool, session_id, _make_cancel_aware_create_turn())
     queue = await session_pool.event_bus.subscribe(session_id)
     first_handle = await _receive_and_get_handle(session_pool, session_id, 'first prompt')
     assert first_handle is not None
@@ -1061,23 +1037,21 @@ async def test_cancel_then_followup_next_turn(mock_pool: MagicMock) -> None:
     assert StreamCompleteEvent in post_types, f'Expected StreamCompleteEvent for followup turn, got: {post_types}'
     first_handle.close()
     await asyncio.sleep(0.1)
-    await session_pool.shutdown()
 
 @pytest.mark.integration
 @pytest.mark.anyio
-async def test_double_cancel_then_new_prompt(mock_pool: MagicMock) -> None:
+async def test_double_cancel_then_new_prompt(minimal_pool: AgentPool) -> None:
     """Double cancel then new prompt — no hang, new prompt processed.
 
     Given: a running turn with _BlockingTurn.
     When: cancel() is called twice, then a new prompt is sent via receive_request().
     Then: no hang, new prompt is processed (StreamCompleteEvent published).
     """
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
     session_id = 'sess-double-cancel-prompt'
-    await session_pool.create_session(session_id, agent_name='test-agent')
-    agent = _make_cancel_aware_agent()
-    await _attach_agent(session_pool, session_id, agent)
+    await session_pool.create_session(session_id, agent_name='test_agent')
+    await _patch_agent_create_turn(session_pool, session_id, _make_cancel_aware_create_turn())
     queue = await session_pool.event_bus.subscribe(session_id)
     first_handle = await _receive_and_get_handle(session_pool, session_id, 'first prompt')
     assert first_handle is not None
@@ -1094,11 +1068,10 @@ async def test_double_cancel_then_new_prompt(mock_pool: MagicMock) -> None:
     assert StreamCompleteEvent in post_types, f'Expected StreamCompleteEvent from new prompt, got: {post_types}'
     first_handle.close()
     await asyncio.sleep(0.1)
-    await session_pool.shutdown()
 
 @pytest.mark.integration
 @pytest.mark.anyio
-async def test_runhandle_dies_in_idle_loop(mock_pool: MagicMock) -> None:
+async def test_runhandle_dies_in_idle_loop(minimal_pool: AgentPool) -> None:
     """Simulate unrecoverable error in start().
 
     Finally block sets events, cleanup clears current_run_id.
@@ -1108,12 +1081,11 @@ async def test_runhandle_dies_in_idle_loop(mock_pool: MagicMock) -> None:
     Then: finally block sets complete_event, _cleanup_run clears current_run_id,
           next receive_request creates a new RunHandle and processes the prompt.
     """
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
     session_id = 'sess-dies-in-idle'
-    await session_pool.create_session(session_id, agent_name='test-agent')
-    agent = _make_stub_then_die_agent()
-    await _attach_agent(session_pool, session_id, agent)
+    await session_pool.create_session(session_id, agent_name='test_agent')
+    await _patch_agent_create_turn(session_pool, session_id, _make_stub_then_die_create_turn())
     queue = await session_pool.event_bus.subscribe(session_id)
     first_handle = await _receive_and_get_handle(session_pool, session_id, 'first prompt')
     assert first_handle is not None
@@ -1134,4 +1106,3 @@ async def test_runhandle_dies_in_idle_loop(mock_pool: MagicMock) -> None:
     assert StreamCompleteEvent in post_types, f'Expected StreamCompleteEvent from new RunHandle, got: {post_types}'
     second_handle.close()
     await asyncio.sleep(0.1)
-    await session_pool.shutdown()

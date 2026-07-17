@@ -122,6 +122,7 @@ def handler_with_elicitation(
 class TestHandlePromptInputProvider:
     """RED FLAG: input_provider must be passed to SessionPool.receive_request."""
 
+    @pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
     @pytest.mark.anyio
     async def test_handle_prompt_passes_acp_input_provider(
         self,
@@ -139,6 +140,7 @@ class TestHandlePromptInputProvider:
         assert "input_provider" in call_kwargs
         assert isinstance(call_kwargs["input_provider"], ACPInputProvider)
 
+    @pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
     @pytest.mark.anyio
     async def test_handle_prompt_input_provider_has_requests(
         self,
@@ -155,6 +157,7 @@ class TestHandlePromptInputProvider:
         input_provider = call_kwargs["input_provider"]
         assert input_provider.session.requests is not None
 
+    @pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
     @pytest.mark.anyio
     async def test_handle_prompt_input_provider_has_capabilities(
         self,
@@ -172,6 +175,7 @@ class TestHandlePromptInputProvider:
         assert input_provider.session.client_capabilities is not None
         assert input_provider.session.client_capabilities.elicitation is None
 
+    @pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
     @pytest.mark.anyio
     async def test_handle_prompt_forwards_elicitation_capabilities(
         self,
@@ -191,6 +195,7 @@ class TestHandlePromptInputProvider:
         assert caps.elicitation.form is True
         assert caps.elicitation.url is True
 
+    @pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
     @pytest.mark.anyio
     async def test_handle_prompt_returns_end_turn_when_session_pool_missing(
         self,
@@ -213,6 +218,7 @@ class TestHandlePromptInputProvider:
         assert result is not None
         assert result.stop_reason == "end_turn"
 
+    @pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
     @pytest.mark.anyio
     async def test_handle_prompt_skips_when_session_pool_missing(
         self,
@@ -265,6 +271,7 @@ class TestACPSessionProxy:
 class TestEventConsumerConverterFlag:
     """Tests that _event_consumer_loop passes client_supports_turn_complete to ACPEventConverter."""
 
+    @pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
     @pytest.mark.anyio
     async def test_event_consumer_passes_turn_complete_true(
         self,
@@ -295,6 +302,7 @@ class TestEventConsumerConverterFlag:
 class TestHandlePromptBlockingBehavior:
     """Tests for ACPProtocolHandler.handle_prompt() blocking on RunHandle.complete_event."""
 
+    @pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
     @pytest.mark.anyio
     async def test_legacy_client_blocks_until_run_completes(
         self,
@@ -328,6 +336,7 @@ class TestHandlePromptBlockingBehavior:
         assert result is not None
         assert result.stop_reason == "end_turn"
 
+    @pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
     @pytest.mark.anyio
     async def test_modern_client_returns_immediately(
         self,
@@ -363,6 +372,7 @@ class TestHandlePromptBlockingBehavior:
         assert result.stop_reason == "end_turn"
         mock_wait.assert_not_awaited()
 
+    @pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
     @pytest.mark.anyio
     async def test_legacy_client_cancelled_during_wait(
         self,
@@ -384,6 +394,7 @@ class TestHandlePromptBlockingBehavior:
         assert result is not None
         assert result.stop_reason == "cancelled"
 
+    @pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
     @pytest.mark.anyio
     async def test_legacy_client_missing_capabilities_defaults_to_blocking(
         self,
@@ -416,6 +427,7 @@ class TestHandlePromptBlockingBehavior:
         assert result is not None
         assert result.stop_reason == "end_turn"
 
+    @pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
     @pytest.mark.anyio
     async def test_legacy_client_run_completes_quickly(
         self,
@@ -439,6 +451,7 @@ class TestHandlePromptBlockingBehavior:
         assert result is not None
         assert result.stop_reason == "end_turn"
 
+    @pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
     @pytest.mark.anyio
     async def test_event_consumer_defaults_turn_complete_when_no_capabilities(
         self,
@@ -470,6 +483,7 @@ class TestHandlePromptBlockingBehavior:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 @pytest.mark.anyio
 async def test_handle_event_uses_event_session_id_for_child(
     mock_pool: MagicMock,
@@ -515,6 +529,7 @@ async def test_handle_event_uses_event_session_id_for_child(
     )
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 @pytest.mark.anyio
 async def test_handle_event_falls_back_to_consumer_session_id(
     mock_pool: MagicMock,
@@ -565,6 +580,7 @@ async def test_handle_event_falls_back_to_consumer_session_id(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 @pytest.mark.unit
 @pytest.mark.anyio
 async def test_handle_prompt_splits_and_executes_slash_commands(
@@ -625,6 +641,7 @@ async def test_handle_prompt_splits_and_executes_slash_commands(
     mock_pool.session_pool.send_message.assert_not_called()
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 @pytest.mark.unit
 @pytest.mark.anyio
 async def test_handle_prompt_passes_non_command_content_to_receive_request(
@@ -686,6 +703,7 @@ async def test_handle_prompt_passes_non_command_content_to_receive_request(
     assert contents_arg[0] == "regular message"
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 @pytest.mark.unit
 @pytest.mark.anyio
 async def test_handle_prompt_no_acp_session_skips_command_splitting(

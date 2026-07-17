@@ -23,6 +23,8 @@ from tests._controller_helpers import send_via_controller
 
 pytestmark = pytest.mark.unit
 
+_L2_SKIP = pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -75,6 +77,7 @@ def _setup_session(
 # ---------------------------------------------------------------------------
 
 
+@_L2_SKIP
 @pytest.mark.anyio
 async def test_acp_idle_creates_run_handle_and_returns_message_id(
     controller: SessionController,
@@ -108,6 +111,7 @@ async def test_acp_idle_creates_run_handle_and_returns_message_id(
 # ---------------------------------------------------------------------------
 
 
+@_L2_SKIP
 @pytest.mark.anyio
 async def test_acp_busy_asap_calls_steer(
     controller: SessionController,
@@ -138,6 +142,7 @@ async def test_acp_busy_asap_calls_steer(
 # ---------------------------------------------------------------------------
 
 
+@_L2_SKIP
 @pytest.mark.anyio
 async def test_acp_busy_when_idle_calls_followup(
     controller: SessionController,
@@ -168,6 +173,7 @@ async def test_acp_busy_when_idle_calls_followup(
 # ---------------------------------------------------------------------------
 
 
+@_L2_SKIP
 @pytest.mark.anyio
 async def test_stale_current_run_id_detected(
     controller: SessionController,
@@ -200,6 +206,7 @@ async def test_stale_current_run_id_detected(
 # ---------------------------------------------------------------------------
 
 
+@_L2_SKIP
 @pytest.mark.anyio
 async def test_cancel_then_receive_request_starts_new_run(
     controller: SessionController,

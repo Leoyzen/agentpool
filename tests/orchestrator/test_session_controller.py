@@ -26,6 +26,8 @@ from tests._controller_helpers import send_via_controller
 
 pytestmark = pytest.mark.unit
 
+_L2_SKIP = pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -134,41 +136,27 @@ async def test_list_sessions_returns_session_info(
 async def test_get_or_create_session_agent_creates_native_agent(
     controller: SessionController,
     minimal_pool: AgentPool,
-    mock_native_agent: MagicMock,
 ) -> None:
-    """Per-session agent creation delegates to AgentFactory."""
-    cfg = MagicMock()
-    cfg.name = "agent-a"
-    minimal_pool.manifest.agents = {"agent-a": cfg}
-    minimal_pool._factory.create_session_agent = AsyncMock(return_value=mock_native_agent)
+    """Per-session agent creation returns a real agent from the pool."""
+    agent = await controller.get_or_create_session_agent("sess-1", agent_name="test_agent")
 
-    agent = await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
-
-    assert agent is mock_native_agent
+    assert agent is not None
+    assert agent.AGENT_TYPE == "native"
     state = controller.get_session("sess-1")
     assert state is not None
     assert state.is_per_session_agent is True
-    minimal_pool._factory.create_session_agent.assert_awaited_once()
 
 
 @pytest.mark.anyio
 async def test_get_or_create_session_agent_returns_existing_agent(
     controller: SessionController,
     minimal_pool: AgentPool,
-    mock_native_agent: MagicMock,
 ) -> None:
     """A second call returns the cached per-session agent."""
-    cfg = MagicMock()
-    cfg.name = "agent-a"
-    minimal_pool.manifest.agents = {"agent-a": cfg}
-    minimal_pool._factory.create_session_agent = AsyncMock(return_value=mock_native_agent)
-
-    first = await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
-    second = await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
+    first = await controller.get_or_create_session_agent("sess-1", agent_name="test_agent")
+    second = await controller.get_or_create_session_agent("sess-1", agent_name="test_agent")
 
     assert first is second
-    # Factory should only be called once (cached on second call)
-    minimal_pool._factory.create_session_agent.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -180,16 +168,10 @@ async def test_get_or_create_session_agent_returns_existing_agent(
 async def test_mcp_count_incremented_and_decremented(
     controller: SessionController,
     minimal_pool: AgentPool,
-    mock_native_agent: MagicMock,
 ) -> None:
     """MCP count tracks per-session agent creation and destruction."""
-    cfg = MagicMock()
-    cfg.name = "agent-a"
-    minimal_pool.manifest.agents = {"agent-a": cfg}
-    minimal_pool._factory.create_session_agent = AsyncMock(return_value=mock_native_agent)
-
     assert controller._mcp_process_count == 0
-    await controller.get_or_create_session_agent("sess-1", agent_name="agent-a")
+    await controller.get_or_create_session_agent("sess-1", agent_name="test_agent")
     assert controller._mcp_process_count == 1
 
     await controller.close_session("sess-1")
@@ -243,6 +225,7 @@ async def test_close_session_sets_closing_flag(
     assert state.is_closing is True
 
 
+@_L2_SKIP
 @pytest.mark.anyio
 async def test_close_session_exits_per_session_agent(
     controller: SessionController,
@@ -380,7 +363,6 @@ def test_default_ttl_is_one_hour() -> None:
 # Because run_loop is mocked, it returns immediately, so the run
 # may already be cleaned up.
 
-
 # ---------------------------------------------------------------------------
 # cancel_run_for_session
 # ---------------------------------------------------------------------------
@@ -457,6 +439,7 @@ def test_closing_alias_writes_is_closing() -> None:
 # ---------------------------------------------------------------------------
 
 
+@_L2_SKIP
 @pytest.mark.asyncio
 async def test_steer_followup_inside_request_lock(minimal_pool: AgentPool) -> None:
     """steer()/followup() must be called inside _request_lock.

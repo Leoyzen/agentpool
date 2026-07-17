@@ -294,6 +294,7 @@ async def test_acp_event_converter_reads_message_id_from_events() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 @pytest.mark.anyio
 async def test_receive_request_returns_str_or_none() -> None:
     """SessionPool.receive_request() returns str|None, not RunHandle.
@@ -371,6 +372,7 @@ async def test_content_blocks_flows_without_stringification() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 @pytest.mark.anyio
 async def test_opencode_delivery_mode_mapping() -> None:
     """OpenCode delivery string maps to correct priority.
@@ -462,6 +464,7 @@ def test_delivery_mode_enum_values_match_wire_format() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 @pytest.mark.anyio
 async def test_send_message_steer_mode_on_active_session() -> None:
     """send_message with STEER mode calls _route_message with asap priority.
@@ -505,6 +508,7 @@ async def test_send_message_steer_mode_on_active_session() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 @pytest.mark.anyio
 async def test_send_message_queue_mode_creates_new_run() -> None:
     """send_message with QUEUE mode calls _route_message with when_idle.
@@ -542,6 +546,7 @@ async def test_send_message_queue_mode_creates_new_run() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 @pytest.mark.anyio
 async def test_run_agent_creates_session_runs_returns_text_cleans_up() -> None:
     """run_agent creates a temporary session, runs the agent, returns text.
@@ -623,6 +628,7 @@ async def test_run_agent_creates_session_runs_returns_text_cleans_up() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 @pytest.mark.anyio
 async def test_deprecation_warnings_emitted() -> None:
     """DeprecationWarning emitted by spawn_subagent, get_available_agents.

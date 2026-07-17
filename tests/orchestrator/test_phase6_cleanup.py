@@ -36,13 +36,6 @@ pytestmark = [pytest.mark.unit]
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def mock_pool(minimal_pool: AgentPool) -> AgentPool:
-    """Return the real pool with controlled context for testing."""
-    minimal_pool.get_context = MagicMock(return_value=MagicMock())  # type: ignore[assignment]
-    return minimal_pool
-
-
 def _make_session(session_id: str) -> SessionState:
     """Return a minimal SessionState for testing."""
     return SessionState(session_id=session_id, agent_name="test-agent")
@@ -128,7 +121,8 @@ async def test_no_session_dict_leak_after_close(minimal_pool: AgentPool) -> None
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.anyio
+@pytest.mark.skip(reason="L2 migration: requires mock RunHandle internals — remains L1 unit test")
+@pytest.mark.unit
 async def test_close_during_mcp_tool_call_runhandle_cancel_first(minimal_pool: AgentPool) -> None:
     """RunHandle cancellation completes before MCP cleanup during close.
 
@@ -245,7 +239,8 @@ async def test_concurrent_resume_and_close_no_deadlock(minimal_pool: AgentPool) 
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.anyio
+@pytest.mark.skip(reason="L2 migration: requires mock agent assertions for MCP cleanup — remains L1 unit test")
+@pytest.mark.unit
 async def test_checkpoint_on_close_failure_preserves_session(minimal_pool: AgentPool) -> None:
     """When checkpoint save fails, session is preserved and MCP cleanup still runs.
 

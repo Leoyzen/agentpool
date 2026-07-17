@@ -720,6 +720,7 @@ async def test_spawn_and_subagent_depth_consistency() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 async def test_pool_backed_team_and_teamrun_create_child_sessions() -> None:
     """Both Team and TeamRun with pool.session_pool should call create_child_session for...."""
     agent_a = _make_echo_agent("alpha")

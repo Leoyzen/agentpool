@@ -24,7 +24,9 @@ if TYPE_CHECKING:
     from agentpool_server.opencode_server.state import ServerState
 
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
+pytestmark = pytest.mark.asyncio
+
+
 # =============================================================================
 # GET /command endpoint tests
 # =============================================================================

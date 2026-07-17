@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agentpool import AgentPool
 from agentpool.agents.events.events import SessionResumeEvent
 from agentpool.orchestrator.core import SessionPool
 from agentpool.sessions.models import PendingDeferredCall, SessionData
@@ -119,26 +120,12 @@ class _FakeDeferredResults:
 
 
 @pytest.fixture
-def mock_pool() -> MagicMock:
-    """Return a mocked AgentPool."""
-    pool = MagicMock()
-    pool.storage = MagicMock()
-    pool.storage.get_session_messages = AsyncMock(return_value=[])
-    pool.storage.log_message = AsyncMock(return_value=None)
-    pool.main_agent = MagicMock()
-    pool.main_agent.name = "main-agent"
-    pool.manifest = MagicMock()
-    pool.manifest.agents = {}
-    return pool
-
-
-@pytest.fixture
-async def session_pool(mock_pool: MagicMock) -> SessionPool:
-    """Return a SessionPool backed by a MemoryStorageProvider."""
+async def session_pool(minimal_pool: AgentPool) -> SessionPool:
+    """Return a SessionPool backed by a real AgentPool with MemoryStorageProvider."""
     from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
     store = MemoryStorageProvider()
-    return SessionPool(pool=mock_pool, store=store)
+    return SessionPool(pool=minimal_pool, store=store)
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +224,6 @@ async def test_resume_session_raises_mismatch_error_extra_results(
 @pytest.mark.anyio
 async def test_resume_session_serialized_via_resume_lock(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
 ) -> None:
     """Concurrent resume_session calls are serialized via per-session lock."""
     store = session_pool.sessions.store
@@ -267,7 +253,6 @@ async def test_resume_session_serialized_via_resume_lock(
 @pytest.mark.anyio
 async def test_resume_native_agent_loads_checkpoint_and_runs(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
 ) -> None:
     """resume_session for native agent loads checkpoint, reconstructs agent.
 
@@ -339,7 +324,6 @@ async def test_resume_native_agent_loads_checkpoint_and_runs(
 @pytest.mark.anyio
 async def test_resume_native_agent_clears_pending_after_success(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
 ) -> None:
     """pending_deferred_calls are cleared ONLY after agent.run() succeeds."""
     store = session_pool.sessions.store
@@ -387,7 +371,6 @@ async def test_resume_native_agent_clears_pending_after_success(
 @pytest.mark.anyio
 async def test_resume_native_agent_does_not_clear_pending_on_failure(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
 ) -> None:
     """pending_deferred_calls are NOT cleared if agent.run() fails."""
     store = session_pool.sessions.store
@@ -442,7 +425,6 @@ async def test_resume_native_agent_does_not_clear_pending_on_failure(
 @pytest.mark.anyio
 async def test_resume_session_emits_resume_event(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
 ) -> None:
     """resume_session emits SessionResumeEvent on successful resume."""
     store = session_pool.sessions.store
@@ -512,7 +494,6 @@ async def test_resume_session_emits_resume_event(
 @pytest.mark.anyio
 async def test_resume_session_transitions_status_to_active(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
 ) -> None:
     """resume_session transitions status from 'checkpointed' to 'active' on success."""
     store = session_pool.sessions.store
@@ -564,7 +545,6 @@ async def test_resume_session_transitions_status_to_active(
 @pytest.mark.anyio
 async def test_resume_session_keeps_checkpointed_status_on_failure(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
 ) -> None:
     """resume_session keeps status as 'checkpointed' when agent.run() fails."""
     store = session_pool.sessions.store
@@ -617,7 +597,6 @@ async def test_resume_session_keeps_checkpointed_status_on_failure(
 @pytest.mark.anyio
 async def test_resume_acp_agent_reopens_subprocess(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
 ) -> None:
     """resume_session for ACP agent reopens subprocess and sends session/resume."""
     store = session_pool.sessions.store
@@ -638,8 +617,6 @@ async def test_resume_acp_agent_reopens_subprocess(
     mock_acp.name = "acp-agent"
     mock_acp.run = AsyncMock(return_value=MagicMock())
     mock_acp._resume_session = AsyncMock(return_value=None)
-
-    mock_pool.get_agent = MagicMock(return_value=mock_acp)
 
     from agentpool.agents.native_agent.checkpoint import CheckpointData
 
@@ -672,7 +649,6 @@ async def test_resume_acp_agent_reopens_subprocess(
 @pytest.mark.anyio
 async def test_resume_session_with_empty_pending_calls(
     session_pool: SessionPool,
-    mock_pool: MagicMock,
 ) -> None:
     """resume_session handles empty pending_deferred_calls gracefully."""
     store = session_pool.sessions.store
@@ -735,24 +711,11 @@ async def _fail_gen_rc(*args: Any, **kwargs: Any) -> Any:
     yield
 
 @pytest.fixture
-def mock_pool_rc() -> MagicMock:
-    """Return a mocked AgentPool."""
-    pool = MagicMock()
-    pool.storage = MagicMock()
-    pool.storage.get_session_messages = AsyncMock(return_value=[])
-    pool.storage.log_message = AsyncMock(return_value=None)
-    pool.main_agent = MagicMock()
-    pool.main_agent.name = 'main-agent'
-    pool.manifest = MagicMock()
-    pool.manifest.agents = {}
-    return pool
-
-@pytest.fixture
-async def session_pool_rc(mock_pool_rc: MagicMock) -> SessionPool:
-    """Return a SessionPool backed by a MemoryStorageProvider."""
+async def session_pool_rc(minimal_pool: AgentPool) -> SessionPool:
+    """Return a SessionPool backed by a real AgentPool with MemoryStorageProvider."""
     from agentpool_storage.memory_provider.provider import MemoryStorageProvider
     store = MemoryStorageProvider()
-    return SessionPool(pool=mock_pool_rc, store=store)
+    return SessionPool(pool=minimal_pool, store=store)
 
 @pytest.mark.anyio
 async def test_with_resume_lock_acquires_lock(session_pool_rc: SessionPool) -> None:
@@ -794,7 +757,7 @@ async def test_with_resume_lock_allows_checkpointed_session(session_pool_rc: Ses
         assert session is None
 
 @pytest.mark.anyio
-async def test_resume_session_concurrent_calls_serialize(session_pool_rc: SessionPool, mock_pool_rc: MagicMock) -> None:
+async def test_resume_session_concurrent_calls_serialize(session_pool_rc: SessionPool) -> None:
     """Concurrent resume_session calls serialize via per-session lock.
 
     The second call receives SessionBusyError while the first is in progress.
@@ -827,7 +790,7 @@ async def test_resume_session_concurrent_calls_serialize(session_pool_rc: Sessio
             await task2
 
 @pytest.mark.anyio
-async def test_resume_session_rejects_second_after_success(session_pool_rc: SessionPool, mock_pool_rc: MagicMock) -> None:
+async def test_resume_session_rejects_second_after_success(session_pool_rc: SessionPool) -> None:
     """A second resume_session call after a successful resume gets SessionBusyError.
 
     Verifies the status re-check inside the lock catches already-resumed sessions.
@@ -848,7 +811,7 @@ async def test_resume_session_rejects_second_after_success(session_pool_rc: Sess
             await session_pool_rc.resume_session('sess-1', make_deferred_tool_results([]))
 
 @pytest.mark.anyio
-async def test_resume_session_does_not_clear_pending_on_failure(session_pool_rc: SessionPool, mock_pool_rc: MagicMock) -> None:
+async def test_resume_session_does_not_clear_pending_on_failure(session_pool_rc: SessionPool) -> None:
     """pending_deferred_calls are NOT cleared if agent.run() fails.
 
     Status reverts to 'checkpointed' so the session can be retried.
@@ -873,7 +836,7 @@ async def test_resume_session_does_not_clear_pending_on_failure(session_pool_rc:
     assert session_data.status == 'checkpointed'
 
 @pytest.mark.anyio
-async def test_resume_session_allows_retry_after_failure(session_pool_rc: SessionPool, mock_pool_rc: MagicMock) -> None:
+async def test_resume_session_allows_retry_after_failure(session_pool_rc: SessionPool) -> None:
     """A second resume_session call succeeds after a failed attempt.
 
     Verifies that when the first resume fails and reverts status to
@@ -912,7 +875,7 @@ async def test_resume_session_allows_retry_after_failure(session_pool_rc: Sessio
         assert session_data.pending_deferred_calls == []
 
 @pytest.mark.anyio
-async def test_resume_session_status_transitions_checkpointed_to_resuming_to_active(session_pool_rc: SessionPool, mock_pool_rc: MagicMock) -> None:
+async def test_resume_session_status_transitions_checkpointed_to_resuming_to_active(session_pool_rc: SessionPool) -> None:
     """Status transitions: checkpointed -> resuming -> active on success."""
     store = session_pool_rc.sessions.store
     assert store is not None
@@ -938,7 +901,7 @@ async def test_resume_session_status_transitions_checkpointed_to_resuming_to_act
     assert observed_statuses[-1] == 'active'
 
 @pytest.mark.anyio
-async def test_resume_session_status_reverts_to_checkpointed_on_failure(session_pool_rc: SessionPool, mock_pool_rc: MagicMock) -> None:
+async def test_resume_session_status_reverts_to_checkpointed_on_failure(session_pool_rc: SessionPool) -> None:
     """Status reverts from resuming to checkpointed on agent.run() failure."""
     store = session_pool_rc.sessions.store
     assert store is not None
