@@ -209,8 +209,10 @@ async def test_multi_turn_conversation(e2e_config: Path) -> None:
         assert len(notifs2) > 0
 
         # Both responses should have valid stop reasons.
-        assert resp1.stop_reason == resp2.stop_reason or True, (
-            "TestModel should produce consistent stop reasons"
+        assert resp1.stop_reason is not None, "First response should have a stop reason"
+        assert resp2.stop_reason is not None, "Second response should have a stop reason"
+        assert resp1.stop_reason == resp2.stop_reason, (
+            f"TestModel should produce consistent stop reasons: {resp1.stop_reason} != {resp2.stop_reason}"
         )
 
 

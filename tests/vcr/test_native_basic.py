@@ -72,4 +72,8 @@ async def test_basic_completion_streaming(vcr_pool: AgentPool) -> None:
     last_event = events[-1]
     assert isinstance(last_event, StreamCompleteEvent)
     assert last_event.message is not None
-    assert last_event.message.content == IsPartialDict() or last_event.message.content
+    # content may be a str or a list of content blocks; verify non-empty.
+    if isinstance(last_event.message.content, str):
+        assert last_event.message.content == IsStr(min_length=1)
+    else:
+        assert len(last_event.message.content) > 0
