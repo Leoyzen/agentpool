@@ -1025,7 +1025,13 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
         sp_session = state.session_controller.get_session(session_id)
 
     if sp_session is not None:
-        # Native agents: interrupt the per-session agent
+        # Native agents: interrupt the per-session agent.
+        # interrupt() internally calls cancel_run_for_session() which
+        # calls run_handle.cancel() — so we MUST NOT call
+        # session_pool.cancel_run() again for per-session agents.
+        # A double cancel() kills the start() generator because the
+        # second cancel throws CancelledError at _idle_event.wait()
+        # inside _idle_loop(), which is OUTSIDE the except handler.
         if sp_session.is_per_session_agent and state.session_controller is not None:
             session_agent = state.session_controller.get_session_agent(session_id)
             if session_agent is not None:
@@ -1034,10 +1040,14 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
                     # Give a moment for the cancellation to propagate
                     await asyncio.sleep(0.1)
                 except Exception:  # noqa: BLE001
-                    pass
-
-        # Cancel the active run via SessionPool
-        if sp_session.current_run_id is not None:
+                    logger.warning(
+                        "interrupt() failed for session %s during abort",
+                        session_id,
+                        exc_info=True,
+                    )
+        # Non-per-session (shared) agents: can't interrupt the shared
+        # agent, so only cancel the RunHandle.
+        elif sp_session.current_run_id is not None:
             session_pool = state.pool.session_pool
             if session_pool is not None:
                 with contextlib.suppress(ValueError):
