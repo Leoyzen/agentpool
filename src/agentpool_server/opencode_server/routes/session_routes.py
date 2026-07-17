@@ -651,7 +651,7 @@ async def _load_sessions_from_store(
 
 
 @router.get("")
-async def list_sessions(
+async def list_sessions(  # noqa: PLR0915
     state: StateDep,
     directory: str | None = None,
     roots: bool | None = None,
@@ -709,7 +709,9 @@ async def list_sessions(
                     sessions_by_id[data.session_id] = session
 
                 # D4: Overlay in-memory cached sessions (fresher status: busy/idle)
-                sessions_by_id.update(in_memory_sessions)
+                for session_id, cached in in_memory_sessions.items():
+                    if session_id in sessions_by_id:
+                        sessions_by_id[session_id] = cached
 
                 # D5: Append in-memory-only sessions not in store results
                 # (newly created, not yet persisted), filtered by cwd
@@ -717,10 +719,7 @@ async def list_sessions(
                 for session_id, cached in in_memory_sessions.items():
                     if session_id not in sessions_by_id and (
                         resolved_cwd is None
-                        or (
-                            cached.directory
-                            and Path(cached.directory).resolve() == resolved_cwd
-                        )
+                        or (cached.directory and Path(cached.directory).resolve() == resolved_cwd)
                     ):
                         sessions_by_id[session_id] = cached
 
@@ -746,9 +745,7 @@ async def list_sessions(
         if effective_cwd:
             resolved_cwd = Path(effective_cwd).resolve()
             sessions = [
-                s
-                for s in sessions
-                if s.directory and Path(s.directory).resolve() == resolved_cwd
+                s for s in sessions if s.directory and Path(s.directory).resolve() == resolved_cwd
             ]
     else:
         # Legacy path: load via agent.list_sessions()

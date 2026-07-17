@@ -73,9 +73,7 @@ def _make_state(
 
     # Session controller
     session_controller = Mock()
-    session_controller.list_sessions = Mock(
-        return_value=session_controller_sessions or []
-    )
+    session_controller.list_sessions = Mock(return_value=session_controller_sessions or [])
     state.session_controller = session_controller
 
     # Agent (legacy path)
@@ -293,11 +291,15 @@ async def test_merged_list_sorted_by_recency():
     """After merge, sessions are sorted by time.updated descending."""
     store_data = [
         _make_session_data(
-            "ses_old", cwd="/test", title="Old",
+            "ses_old",
+            cwd="/test",
+            title="Old",
             updated=datetime(2024, 1, 1, tzinfo=UTC),
         ),
         _make_session_data(
-            "ses_new", cwd="/test", title="New",
+            "ses_new",
+            cwd="/test",
+            title="New",
             updated=datetime(2024, 6, 1, tzinfo=UTC),
         ),
     ]
