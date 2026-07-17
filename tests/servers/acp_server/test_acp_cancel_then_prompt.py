@@ -183,7 +183,7 @@ async def test_acp_cancel_then_prompt_no_hang(
     queue = await session_pool.event_bus.subscribe(session_id)
 
     # --- Step 1: Start a run with the blocking agent (simulates handle_prompt) ---
-    await session_pool.receive_request(session_id, "first prompt")
+    await session_pool.send_message(session_id, "first prompt")
     session_state = session_pool.sessions.get_session(session_id)
     assert session_state is not None
     first_handle = session_pool.sessions._runs.get(session_state.current_run_id)  # type: ignore[union-attr]
@@ -212,7 +212,7 @@ async def test_acp_cancel_then_prompt_no_hang(
     # --- Step 3: Send a new prompt (simulates second handle_prompt) ---
     # Use asyncio.wait_for to catch hangs.
     await asyncio.wait_for(
-        session_pool.receive_request(session_id, "second prompt"),
+        session_pool.send_message(session_id, "second prompt"),
         timeout=30.0,
     )
     session2 = session_pool.sessions.get_session(session_id)
@@ -316,7 +316,7 @@ async def test_cancel_does_not_start_spontaneous_turn(
     queue = await session_pool.event_bus.subscribe(session_id)
 
     # --- Start a blocking run ---
-    await session_pool.receive_request(session_id, "first prompt")
+    await session_pool.send_message(session_id, "first prompt")
     session_state = session_pool.sessions.get_session(session_id)
     assert session_state is not None
     first_handle = session_pool.sessions._runs.get(session_state.current_run_id)  # type: ignore[union-attr]
@@ -374,7 +374,7 @@ async def test_cancel_does_not_start_spontaneous_turn(
     # receive_request() will call followup() on the existing (idle) RunHandle
     # rather than creating a new one. This returns None but queues the message.
     await asyncio.wait_for(
-        session_pool.receive_request(session_id, "second prompt"),
+        session_pool.send_message(session_id, "second prompt"),
         timeout=10.0,
     )
     # second_handle is None because the existing RunHandle is still alive (idle)

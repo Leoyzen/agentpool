@@ -111,7 +111,14 @@ class SessionData(Schema):
     """
 
     status: str = "active"
-    """Session execution status: active, checkpointed, resuming, completed, failed."""
+    """Session execution status.
+
+    Valid values:
+        - ``active``: Session is active and accepting prompts (default).
+        - ``checkpointed``: Session state persisted for later resumption.
+        - ``resuming``: Session is in the process of being resumed from a checkpoint.
+        - ``closed``: Session has been closed and is no longer accepting prompts.
+    """
 
     agent_config_hash: str | None = None
     """Hash of the agent configuration used to start this session.

@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agentpool.orchestrator.core import EventBus, SessionController
+from tests._controller_helpers import send_via_controller
 
 
 if TYPE_CHECKING:
@@ -111,7 +112,7 @@ async def test_input_provider_propagated_to_session(
     controller._use_run_turn = lambda _agent: True  # type: ignore[method-assign]
     controller._consume_run = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
-    await controller.receive_request("sess-ip-1", "hello", input_provider=mock_input_provider)
+    await send_via_controller(controller, "sess-ip-1", "hello", input_provider=mock_input_provider)
 
     session = controller.get_session("sess-ip-1")
     assert session is not None
@@ -133,7 +134,7 @@ async def test_input_provider_none_when_not_passed(
     controller._use_run_turn = lambda _agent: True  # type: ignore[method-assign]
     controller._consume_run = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
-    result = await controller.receive_request("sess-ip-3", "hello")
+    result = await send_via_controller(controller, "sess-ip-3", "hello")
 
     assert result is not None
     session = controller.get_session("sess-ip-3")
@@ -164,8 +165,8 @@ async def test_input_provider_stored_on_session_for_cached_agent(
     controller._consume_run = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
     # First call — sets input_provider
-    await controller.receive_request(
-        "sess-ip-4", "first message", input_provider=mock_input_provider
+    await send_via_controller(
+        controller, "sess-ip-4", "first message", input_provider=mock_input_provider
     )
 
     session = controller.get_session("sess-ip-4")
@@ -178,8 +179,8 @@ async def test_input_provider_stored_on_session_for_cached_agent(
     # Second call — input_provider should be updated on session
     # (even though agent is already cached)
     second_provider = MagicMock()
-    result2 = await controller.receive_request(
-        "sess-ip-4", "second message", input_provider=second_provider
+    result2 = await send_via_controller(
+        controller, "sess-ip-4", "second message", input_provider=second_provider
     )
 
     assert result2 is not None
@@ -214,7 +215,7 @@ async def test_input_provider_not_in_kwargs_after_processing(
 
     controller._consume_run = _track_consume  # type: ignore[method-assign]
 
-    await controller.receive_request("sess-ip-5", "hello", input_provider=mock_input_provider)
+    await send_via_controller(controller, "sess-ip-5", "hello", input_provider=mock_input_provider)
 
     # Verify input_provider was stored on session
     session = controller.get_session("sess-ip-5")

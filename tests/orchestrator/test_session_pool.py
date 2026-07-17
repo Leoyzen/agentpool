@@ -423,7 +423,7 @@ async def test_receive_request_flag_on_delegates_to_session_controller(
     session_pool.sessions._use_run_turn = lambda _agent: True  # type: ignore[method-assign]
     session_pool.sessions._consume_run = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
-    result = await session_pool.receive_request("sess-rr-1", "hello")
+    result = await session_pool.send_message("sess-rr-1", "hello")
 
     assert result is not None
     assert isinstance(result, str)  # message_id

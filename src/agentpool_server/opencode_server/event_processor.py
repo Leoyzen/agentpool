@@ -935,4 +935,10 @@ def _message_content_to_text(content: Any) -> str:
         return content
     if content is None:
         return ""
-    return str(content)
+    if isinstance(content, list):
+        from agentpool.agents.native_agent.helpers import _summarize_content_block
+
+        return " ".join(_summarize_content_block(c) for c in content)
+    from agentpool.agents.native_agent.helpers import _summarize_content_block
+
+    return _summarize_content_block(content)

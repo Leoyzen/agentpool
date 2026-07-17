@@ -24,14 +24,14 @@ class TestPromptAsync:
 
         # Spy on SessionPool.receive_request
         pool = server_state.pool
-        original_receive_request = pool.session_pool.receive_request
+        original_receive_request = pool.session_pool.send_message
         receive_calls: list[dict] = []
 
         async def spy_receive_request(*args, **kwargs):
             receive_calls.append(kwargs)
             return await original_receive_request(*args, **kwargs)
 
-        pool.session_pool.receive_request = spy_receive_request
+        pool.session_pool.send_message = spy_receive_request
 
         request = MessageRequest(
             parts=[TextPartInput(text="first")],

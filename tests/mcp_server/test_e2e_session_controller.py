@@ -13,6 +13,7 @@ Tests:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from unittest.mock import AsyncMock, MagicMock
 
@@ -250,12 +251,15 @@ async def test_resume_session_with_real_acpsession_not_patched() -> None:
     mock_session_pool: MagicMock = MagicMock()
     mock_sessions: MagicMock = MagicMock()
     mock_session_pool.sessions = mock_sessions
+    mock_session_pool.create_session = AsyncMock()
+    mock_session_pool.close_session = AsyncMock()
+    mock_session_pool._get_resume_lock = AsyncMock(return_value=asyncio.Lock())
     pool._session_pool = mock_session_pool
 
     # Mock session store for resume
     mock_store: AsyncMock = AsyncMock()
     session_id = "test-g6-resume-real"
-    mock_store.load = AsyncMock(
+    mock_store.load_session = AsyncMock(
         return_value=SessionData(
             session_id=session_id,
             agent_name="test_agent",

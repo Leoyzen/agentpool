@@ -43,7 +43,7 @@ async def test_init_session_routes_through_session_pool_with_correct_args(
         run_handle_mock.run_id = "test-run-id"
         return run_handle_mock
 
-    mock_pool.session_pool.receive_request = AsyncMock(side_effect=mock_receive_request)
+    mock_pool.session_pool.send_message = AsyncMock(side_effect=mock_receive_request)
 
     response = await async_client.post(f"/session/{session_id}/init")
 
@@ -75,5 +75,5 @@ async def test_init_session_routes_through_session_pool(
     assert response.json() is True
 
     # Verify session_pool.receive_request was called
-    assert hasattr(mock_pool.session_pool.receive_request, "call_count")
-    assert mock_pool.session_pool.receive_request.call_count == 1
+    assert hasattr(mock_pool.session_pool.send_message, "call_count")
+    assert mock_pool.session_pool.send_message.call_count == 1

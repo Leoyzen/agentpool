@@ -409,7 +409,7 @@ class TestShellSessionPoolIsolation:
         # Set up a session_pool receive_request spy
         pool = server_state.agent.host_context
         receive_request_mock = AsyncMock()
-        pool.session_pool.receive_request = receive_request_mock
+        pool.session_pool.send_message = receive_request_mock
 
         server_state.shell_env.execute_command = AsyncMock(
             return_value=Mock(success=True, result="done", error=None)

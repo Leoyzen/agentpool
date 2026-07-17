@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Any
-import uuid
 
 import anyenv
 from fastapi import Header
 
 from agentpool.agents.events import StreamCompleteEvent
 from agentpool.log import get_logger
+from agentpool.utils.identifiers import generate_session_id
 from agentpool_server import BaseServer
 from agentpool_server.mixins import ProtocolEventConsumerMixin
 from agentpool_server.openai_api_server.completions.helpers import stream_response
@@ -191,14 +191,15 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
             raise HTTPException(500, "SessionPool not available")
 
         content = request.messages[-1].content or ""
+
         if request.stream:
-            session_id = f"openai-{uuid.uuid4()}"
+            session_id = generate_session_id()
             await session_pool.create_session(session_id, agent_name=request.model)
             return StreamingResponse(
                 stream_response(session_pool.run_stream(session_id, content), request),
                 media_type="text/event-stream",
             )
-        session_id = f"openai-{uuid.uuid4()}"
+        session_id = generate_session_id()
         await session_pool.create_session(session_id, agent_name=request.model)
         try:
             final_message: Any = None
@@ -253,7 +254,7 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
             case _:
                 raise HTTPException(400, "Invalid input format")
 
-        session_id = f"openai-responses-{uuid.uuid4()}"
+        session_id = generate_session_id()
         await session_pool.create_session(session_id, agent_name=req_body.model)
 
         from agentpool.agents.events import StreamCompleteEvent

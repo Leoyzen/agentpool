@@ -134,10 +134,12 @@ class SQLStorageConfig(BaseStorageProviderConfig):
         return SQLModelProvider(self)
 
     def get_session_store(self) -> Any:
-        """Create a SQL-based session store using this config's database."""
-        from agentpool_storage.session_store import SQLSessionStore
+        """Create a session store using this config's database.
 
-        return SQLSessionStore(self)
+        Returns the SQLModelProvider instance which implements both
+        ``SessionPersistence`` and ``CheckpointStore`` Protocols.
+        """
+        return self.get_provider()
 
 
 class FileStorageConfig(BaseStorageProviderConfig):
@@ -347,7 +349,7 @@ class StorageConfig(Schema):
             Session store if available, MemorySessionStore as fallback, None otherwise.
         """
         for provider in self.effective_providers:
-            if hasattr(provider, "get_session_store"):
+            if isinstance(provider, SQLStorageConfig):
                 return provider.get_session_store()
         # Fallback to MemorySessionStore for compatibility
         return MemorySessionStore()

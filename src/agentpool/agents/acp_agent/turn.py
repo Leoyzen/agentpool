@@ -188,10 +188,23 @@ class ACPTurn(HookAwareTurn, Turn):
                     )
                     yield StreamCompleteEvent(cancelled=True, message=self._final_message)
                     return
-                # Convert all user prompts to ACP ContentBlock list.
-                # Join all prompts instead of taking only the last one.
-                full_prompt = "\n\n".join(str(p) for p in self._prompts) if self._prompts else ""
-                content = convert_to_acp_content([full_prompt])
+                # Flatten prompts into a list of UserContent items for ACP
+                # conversion. String prompts are valid UserContent items. List
+                # prompts contain structured content blocks (TextContent,
+                # ImageUrl, BinaryContent, etc.) that must be flattened into
+                # the top-level sequence.
+                if not self._prompts:
+                    flattened_prompts: list[Any] = [""]
+                else:
+                    flattened_prompts = []
+                    for p in self._prompts:
+                        if isinstance(p, str):
+                            flattened_prompts.append(p)
+                        elif isinstance(p, list):
+                            flattened_prompts.extend(p)
+                        else:
+                            flattened_prompts.append(p)
+                content = convert_to_acp_content(flattened_prompts)
 
                 # --- Phase 1: Send prompt ---
                 try:

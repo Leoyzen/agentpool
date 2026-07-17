@@ -129,8 +129,12 @@ class AGUIServer(HTTPServer, ProtocolEventConsumerMixin):
 
                 sp = self.pool.session_pool
                 if sp is not None:
+                    from agentpool.utils.identifiers import generate_session_id
+
+                    session_id = generate_session_id()
+                    await sp.create_session(session_id, agent_name=agent_name)
                     pool_agent = await sp.sessions.get_or_create_session_agent(
-                        f"agui-{agent_name}", agent_name
+                        session_id, agent_name
                     )
                 else:
                     pool_agent = None

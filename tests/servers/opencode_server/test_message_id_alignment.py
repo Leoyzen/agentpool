@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from agentpool.lifecycle.types import DeliveryMode
 from agentpool_server.opencode_server.event_processor_context import EventProcessorContext
 from agentpool_server.opencode_server.models import MessagePath, MessageTime, MessageWithParts
 from agentpool_server.opencode_server.models.message import (
@@ -68,20 +69,20 @@ class TestDeliveryModeMapping:
     """Tests for delivery-to-priority mapping (D13)."""
 
     def test_steer_maps_to_asap(self):
-        """delivery='steer' should map to priority='asap'."""
+        """delivery='steer' should map to mode=DeliveryMode.STEER."""
         # This is the mapping logic used in message_routes.py
         delivery = "steer"
         priority = "asap" if delivery == "steer" else "when_idle"
         assert priority == "asap"
 
     def test_queue_maps_to_when_idle(self):
-        """delivery='queue' should map to priority='when_idle'."""
+        """delivery='queue' should map to mode=DeliveryMode.QUEUE."""
         delivery = "queue"
         priority = "asap" if delivery == "steer" else "when_idle"
         assert priority == "when_idle"
 
     def test_none_delivery_maps_to_when_idle(self):
-        """delivery=None should map to priority='when_idle' (default)."""
+        """delivery=None should map to mode=DeliveryMode.QUEUE (default)."""
         delivery = None
         priority = "asap" if delivery == "steer" else "when_idle"
         assert priority == "when_idle"
@@ -125,7 +126,7 @@ class TestRouteMessagePassesMessageId:
         session_pool.sessions = Mock()
         session_pool.sessions.get_session = Mock(return_value=Mock())
         session_pool.sessions.get_or_create_session = AsyncMock(return_value=(Mock(), True))
-        session_pool.receive_request = AsyncMock(return_value=None)
+        session_pool.send_message = AsyncMock(return_value=None)
         session_pool.event_bus = Mock()
         session_pool.event_bus.subscribe = AsyncMock()
         session_pool.event_bus.unsubscribe = AsyncMock()
@@ -141,7 +142,7 @@ class TestRouteMessagePassesMessageId:
         await integration.route_message(
             session_id="test-session",
             content="hello",
-            priority="when_idle",
+            mode=DeliveryMode.QUEUE,
             message_id="msg_test123",
         )
 
@@ -162,7 +163,7 @@ class TestRouteMessagePassesMessageId:
         session_pool.sessions = Mock()
         session_pool.sessions.get_session = Mock(return_value=Mock())
         session_pool.sessions.get_or_create_session = AsyncMock(return_value=(Mock(), True))
-        session_pool.receive_request = AsyncMock(return_value=None)
+        session_pool.send_message = AsyncMock(return_value=None)
 
         server_state = Mock()
         server_state.working_dir = "/tmp"
@@ -173,12 +174,12 @@ class TestRouteMessagePassesMessageId:
         await integration.route_message(
             session_id="test-session",
             content="hello",
-            priority="when_idle",
+            mode=DeliveryMode.QUEUE,
             message_id="msg_test456",
         )
 
         # Verify receive_request was called with message_id
-        call_kwargs = session_pool.receive_request.call_args
+        call_kwargs = session_pool.send_message.call_args
         assert call_kwargs.kwargs.get("message_id") == "msg_test456"
 
     @pytest.mark.asyncio
@@ -192,7 +193,7 @@ class TestRouteMessagePassesMessageId:
         session_pool.sessions = Mock()
         session_pool.sessions.get_session = Mock(return_value=Mock())
         session_pool.sessions.get_or_create_session = AsyncMock(return_value=(Mock(), True))
-        session_pool.receive_request = AsyncMock(return_value=None)
+        session_pool.send_message = AsyncMock(return_value=None)
 
         server_state = Mock()
         server_state.working_dir = "/tmp"
@@ -203,10 +204,10 @@ class TestRouteMessagePassesMessageId:
         await integration.route_message(
             session_id="test-session",
             content="hello",
-            priority="when_idle",
+            mode=DeliveryMode.QUEUE,
         )
 
-        call_kwargs = session_pool.receive_request.call_args
+        call_kwargs = session_pool.send_message.call_args
         assert call_kwargs.kwargs.get("message_id") is None
 
 

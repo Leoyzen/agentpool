@@ -14,6 +14,7 @@ machinery in ``SessionController``.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 import warnings
 
@@ -101,47 +102,49 @@ class RunLoopDelegationService:
             msg = "SessionPool is not available for subagent spawning"
             raise RuntimeError(msg)
 
-        controller = session_pool.sessions
         child_session_id = f"{self._session_id}::child::{name}"
+
+        from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
 
         with safe_span(
             "delegation.subagent",
             parent_session_id=self._session_id,
             child_agent_name=name,
         ):
-            message_id = await controller.receive_request(
+            message_id = await session_pool.send_message(
                 session_id=child_session_id,
                 content=prompt,
             )
             if message_id is None:
                 return
 
-            # receive_request() already started a background _consume_run
-            # task that iterates run_handle.start(""). We subscribe to the
-            # EventBus to stream events from the child session instead of
-            # creating a second iteration of run_handle.start("") (which
-            # would cause a race condition on the same RunHandle).
-            from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
-
-            bus_queue = await session_pool.event_bus.subscribe(
-                child_session_id,
-                scope="session",
-            )
+            # send_message() already delivered the prompt and started a
+            # background _consume_run task that calls run_handle.start().
+            # We subscribe to the EventBus to stream events from the child
+            # session instead of calling start("") a second time (which
+            # would race with the background task and corrupt state).
+            event_bus = session_pool.event_bus
+            if event_bus is None:
+                return
+            bus_queue = await event_bus.subscribe(child_session_id, scope="session")
             try:
-                while True:
-                    try:
-                        import asyncio
+                async with asyncio.timeout(300):
+                    while True:
+                        envelope = await bus_queue.get()
+                        event = envelope.event
+                        yield event
+                        if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                            break
+            except TimeoutError:
+                from agentpool.agents.events import RunErrorEvent
 
-                        envelope = await asyncio.wait_for(bus_queue.get(), timeout=300.0)
-                    except TimeoutError:
-                        msg = f"Subagent {name} timed out after 300 seconds"
-                        raise TimeoutError(msg) from None
-                    event = envelope.event
-                    yield event
-                    if isinstance(event, StreamCompleteEvent | RunErrorEvent):
-                        break
+                yield RunErrorEvent(
+                    message=f"Subagent '{name}' timed out after 300s",
+                    run_id="",
+                    agent_name=name,
+                )
             finally:
-                await session_pool.event_bus.unsubscribe(child_session_id, bus_queue)
+                await event_bus.unsubscribe(child_session_id, bus_queue)
 
     def get_available_agents(self) -> list[str]:
         """Return names of agents available within the current scope.

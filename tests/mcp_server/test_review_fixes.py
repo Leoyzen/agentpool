@@ -22,6 +22,7 @@ Round 2:
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -169,10 +170,12 @@ async def test_resume_session_cleans_connection_sessions() -> None:
 
     mock_sessions: MagicMock = MagicMock()
     mock_pool.session_pool.sessions = mock_sessions
+    mock_pool.session_pool._get_resume_lock = AsyncMock(return_value=asyncio.Lock())
+    mock_pool.session_pool.close_session = AsyncMock()
 
     # 4. Mock session_store.load
     mock_store: AsyncMock = AsyncMock()
-    mock_store.load = AsyncMock(
+    mock_store.load_session = AsyncMock(
         return_value=SessionData(
             session_id=session_id,
             agent_name="test_agent",

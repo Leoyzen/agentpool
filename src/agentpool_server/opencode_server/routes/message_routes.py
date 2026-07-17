@@ -555,10 +555,15 @@ async def _process_message_locked(  # noqa: PLR0915
                 message_id=assistant_msg_id,
             )
         else:
-            message_id = await session_pool.receive_request(
+            from agentpool.lifecycle.types import DeliveryMode
+
+            delivery_mode = (
+                DeliveryMode.STEER if delivery_priority == "asap" else DeliveryMode.QUEUE
+            )
+            message_id = await session_pool.send_message(
                 session_id=session_id,
                 content=user_prompt if isinstance(user_prompt, str) else list(user_prompt),
-                priority=delivery_priority,
+                mode=delivery_mode,
                 input_provider=input_provider,
                 message_id=assistant_msg_id,
             )
@@ -587,6 +592,10 @@ async def _process_message_locked(  # noqa: PLR0915
 
             try:
                 await session_pool.wait_for_completion(session_id)
+            except TimeoutError:
+                # Turn hung — cancel the run to break through __aexit__ hang
+                session_pool.sessions.cancel_run_for_session(session_id)
+                raise
             except asyncio.CancelledError:
                 session_pool.sessions.cancel_run_for_session(session_id)
                 raise
@@ -818,10 +827,15 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
             )
             sp_state.input_provider = input_provider
 
-            await session_pool.receive_request(
+            from agentpool.lifecycle.types import DeliveryMode
+
+            delivery_mode = (
+                DeliveryMode.STEER if delivery_priority == "asap" else DeliveryMode.QUEUE
+            )
+            await session_pool.send_message(
                 session_id=session_id,
                 content=user_prompt if isinstance(user_prompt, str) else list(user_prompt),
-                priority=delivery_priority,
+                mode=delivery_mode,
                 input_provider=input_provider,
                 message_id=async_assistant_msg_id,
             )

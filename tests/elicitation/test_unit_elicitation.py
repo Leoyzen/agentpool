@@ -881,8 +881,8 @@ async def test_handle_elicitation_updates_session_status_to_checkpointed(
         agent_type="native",
     )
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=session_data)
-    mock_store.save = AsyncMock()
+    mock_store.load_session = AsyncMock(return_value=session_data)
+    mock_store.save_session = AsyncMock()
 
     # Wire up the store through the mock chain
     mock_pool = MagicMock()
@@ -912,9 +912,9 @@ async def test_handle_elicitation_updates_session_status_to_checkpointed(
     await task
 
     # P2 fix: session store status should be updated to "checkpointed"
-    mock_store.load.assert_awaited()
-    mock_store.save.assert_awaited_once()
-    saved_data = mock_store.save.call_args[0][0]
+    mock_store.load_session.assert_awaited()
+    mock_store.save_session.assert_awaited_once()
+    saved_data = mock_store.save_session.call_args[0][0]
     assert saved_data.status == "checkpointed"
 
 
@@ -960,8 +960,8 @@ async def test_handle_elicitation_skips_status_update_if_not_active(
         agent_type="native",
     )
     mock_store = MagicMock()
-    mock_store.load = AsyncMock(return_value=session_data)
-    mock_store.save = AsyncMock()
+    mock_store.load_session = AsyncMock(return_value=session_data)
+    mock_store.save_session = AsyncMock()
 
     mock_pool = MagicMock()
     mock_session_pool = MagicMock()
@@ -989,8 +989,8 @@ async def test_handle_elicitation_skips_status_update_if_not_active(
     await task
 
     # Store was loaded but NOT saved (status was already "checkpointed")
-    mock_store.load.assert_awaited()
-    mock_store.save.assert_not_awaited()
+    mock_store.load_session.assert_awaited()
+    mock_store.save_session.assert_not_awaited()
 
 
 # ============================================================================

@@ -133,7 +133,7 @@ def cancellable_mock_agent():
     run_handle._run_state = RunState.RUNNING
     run_handle.complete_event = Mock()
     run_handle.complete_event.wait = AsyncMock(side_effect=asyncio.CancelledError)
-    session_pool.receive_request = AsyncMock(return_value=run_handle)
+    session_pool.send_message = AsyncMock(return_value=run_handle)
     # Ensure get_messages returns [] so get_messages_for_session falls back to state.messages
     session_pool.get_messages = AsyncMock(return_value=[])
     # Set up a mock event_bus so _process_message_locked can subscribe

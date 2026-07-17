@@ -26,7 +26,6 @@ from agentpool_server.opencode_server.converters import (
 from agentpool_server.opencode_server.models import Session
 from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
 from agentpool_storage.memory_provider.provider import MemoryStorageProvider
-from agentpool_storage.session_store import SQLSessionStore
 from agentpool_storage.sql_provider.sql_provider import SQLModelProvider
 
 
@@ -114,8 +113,8 @@ class TestConvertersTitleFix:
         assert converted.title == "Round Trip Title"
 
 
-class TestSQLSessionStoreTitleFix:
-    """Tests for session_store.py title field handling."""
+class TestSQLModelProviderTitleFix:
+    """Tests for SQLModelProvider title field handling."""
 
     @pytest.fixture
     def sql_config(self, tmp_path: Path) -> SQLStorageConfig:
@@ -123,36 +122,36 @@ class TestSQLSessionStoreTitleFix:
         db_path = tmp_path / "test_title_fix.db"
         return SQLStorageConfig(url=f"sqlite:///{db_path}")
 
-    async def test_sql_to_db_model_includes_title(self, sql_config: SQLStorageConfig) -> None:
-        """Verify _to_db_model includes title field."""
-        async with SQLSessionStore(sql_config) as store:
+    async def test_sql_save_includes_title(self, sql_config: SQLStorageConfig) -> None:
+        """Verify save_session includes title field in the DB row."""
+        async with SQLModelProvider(sql_config) as store:
             session_data = SessionData(
                 session_id="sql_test_001",
                 agent_name="test_agent",
                 metadata={"title": "SQL Stored Title", "custom_key": "value"},
             )
+            await store.save_session(session_data)
 
-            # Convert to DB model
-            db_model = store._to_db_model(session_data)
+            # Load it back and verify title roundtrips
+            loaded = await store.load_session("sql_test_001")
+            assert loaded is not None
+            assert loaded.title == "SQL Stored Title"
+            # Metadata should still have other keys
+            assert "custom_key" in loaded.metadata
 
-            # Title should be in DB model
-            assert db_model.title == "SQL Stored Title"
-            # Metadata should still have other keys in metadata_json
-            assert "custom_key" in db_model.metadata_json
-
-    async def test_sql_from_db_model_includes_title(self, sql_config: SQLStorageConfig) -> None:
-        """Verify _from_db_model includes title in metadata."""
-        async with SQLSessionStore(sql_config) as store:
+    async def test_sql_from_db_includes_title(self, sql_config: SQLStorageConfig) -> None:
+        """Verify _session_from_db includes title in metadata."""
+        async with SQLModelProvider(sql_config) as store:
             # Create and save a session with title
             session_data = SessionData(
                 session_id="sql_test_002",
                 agent_name="test_agent",
                 metadata={"title": "Original Title"},
             )
-            await store.save(session_data)
+            await store.save_session(session_data)
 
             # Load it back
-            loaded = await store.load("sql_test_002")
+            loaded = await store.load_session("sql_test_002")
 
             assert loaded is not None
             # Title should be in metadata
@@ -163,7 +162,7 @@ class TestSQLSessionStoreTitleFix:
 
     async def test_sql_save_load_roundtrip_title(self, sql_config: SQLStorageConfig) -> None:
         """Verify title survives SQL save/load roundtrip."""
-        async with SQLSessionStore(sql_config) as store:
+        async with SQLModelProvider(sql_config) as store:
             original = SessionData(
                 session_id="sql_test_003",
                 agent_name="test_agent",
@@ -171,10 +170,10 @@ class TestSQLSessionStoreTitleFix:
             )
 
             # Save
-            await store.save(original)
+            await store.save_session(original)
 
             # Load
-            loaded = await store.load("sql_test_003")
+            loaded = await store.load_session("sql_test_003")
 
             assert loaded is not None
             assert loaded.title == "Round Trip Title"

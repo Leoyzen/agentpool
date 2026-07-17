@@ -30,6 +30,7 @@ from agentpool.agents.events.events import StreamCompleteEvent
 from agentpool.agents.native_agent.turn import NativeTurn
 from agentpool.orchestrator.core import EventBus, SessionState
 from agentpool.orchestrator.run import RunHandle
+from tests._controller_helpers import send_via_controller
 
 
 if TYPE_CHECKING:
@@ -230,7 +231,7 @@ async def test_receive_request_empty_list_not_converted_to_string() -> None:
     controller._consume_run = _capture_consume  # type: ignore[method-assign]
 
     # Call receive_request with empty list (what ACP handler passes)
-    result = await controller.receive_request(session_id, [])
+    result = await send_via_controller(controller, session_id, [])
 
     assert result is not None, "Expected a message_id to be returned"
 

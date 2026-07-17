@@ -8,7 +8,7 @@ Reproduces the production bug where:
 5. After fix: Session loads, checkpoint loads, agent re-executes with
    cached_elicitation_responses, tool completes without re-asking.
 
-This test uses real SQL storage (SQLModelProvider + SQLSessionStore) to
+This test uses real SQL storage (SQLModelProvider) to
 catch the integration bug that mocked tests missed.
 """
 
@@ -33,7 +33,7 @@ from agentpool.sessions.models import (
 from agentpool.storage.manager import StorageManager
 from agentpool.ui.base import InputProvider
 from agentpool_config.storage import SQLStorageConfig, StorageConfig
-from agentpool_storage.session_store import SQLSessionStore
+from agentpool_storage.sql_provider import SQLModelProvider
 
 
 if TYPE_CHECKING:
@@ -115,15 +115,15 @@ def _make_elicit_agent() -> Agent[None, str]:
 
 @pytest.fixture
 async def sql_storage(tmp_path: Path) -> Any:
-    """Create real SQL storage: provider + session store + storage manager.
+    """Create real SQL storage: provider + storage manager.
 
-    All three share the same SQLite database file, matching production setup.
-    Returns (provider, session_store, storage_manager).
+    Both share the same SQLite database file, matching production setup.
+    Returns (storage_manager, session_store).
     """
     db_path = tmp_path / "test_e2e_elicitation.db"
     config = SQLStorageConfig(url=f"sqlite:///{db_path}", auto_migration=False)
 
-    session_store = SQLSessionStore(config)
+    session_store = SQLModelProvider(config)
     storage_config = StorageConfig(providers=[config])
     storage_manager = StorageManager(config=storage_config)
 
@@ -148,7 +148,7 @@ async def test_e2e_elicitation_timeout_crash_recovery(  # noqa: PLR0915
     """E2e: elicitation → checkpoint → timeout → crash recovery resume.
 
     Full flow:
-    1. Save session to SQLSessionStore (simulates ACP session creation)
+    1. Save session to SQLModelProvider (simulates ACP session creation)
     2. Agent runs, calls handle_elicitation() → checkpoint saved to SQL
     3. Elicitation times out → RunAbortedError → run ends
     4. resume_session() with elicitation_payloads
@@ -162,18 +162,18 @@ async def test_e2e_elicitation_timeout_crash_recovery(  # noqa: PLR0915
     session_id = "test-e2e-crash-recovery"
     agent_name = "test-elicit-agent"
 
-    # --- Step 1: Save session to SQLSessionStore ---
+    # --- Step 1: Save session to SQLModelProvider ---
     session_data = SessionData(
         session_id=session_id,
         agent_name=agent_name,
         agent_type="native",
         status="active",
     )
-    await session_store.save(session_data)
+    await session_store.save_session(session_data)
 
     # Verify session exists in store
-    loaded = await session_store.load(session_id)
-    assert loaded is not None, "Session should exist in SQLSessionStore"
+    loaded = await session_store.load_session(session_id)
+    assert loaded is not None, "Session should exist in SQLModelProvider"
     assert loaded.session_id == session_id
 
     # --- Step 2: Simulate handle_elicitation() checkpoint ---
@@ -182,7 +182,7 @@ async def test_e2e_elicitation_timeout_crash_recovery(  # noqa: PLR0915
     # This is the critical step that failed before the fix: SQLProvider
     # required a Conversation record but none existed (only SessionStore
     # saved, which uses the same Conversation table — but only if
-    # SQLSessionStore and SQLModelProvider share the same DB).
+    # SQLModelProvider instances share the same DB).
     checkpoint_mgr = CheckpointManager(storage_manager)
 
     pending_call = PendingDeferredCall(
@@ -252,10 +252,10 @@ async def test_e2e_elicitation_timeout_crash_recovery(  # noqa: PLR0915
         }
     )
     session_data.touch()
-    await session_store.save(session_data)
+    await session_store.save_session(session_data)
 
     # Verify pending_deferred_calls was persisted
-    persisted = await session_store.load(session_id)
+    persisted = await session_store.load_session(session_id)
     assert persisted is not None
     assert len(persisted.pending_deferred_calls) == 1
     assert persisted.pending_deferred_calls[0].tool_call_id == "tc-elicit-e2e"
@@ -326,7 +326,7 @@ async def test_e2e_elicitation_timeout_crash_recovery(  # noqa: PLR0915
     ]
 
     # This is the critical call: resume_session() should:
-    # 1. Load session from SQLSessionStore (should succeed)
+    # 1. Load session from SQLModelProvider (should succeed)
     # 2. Try in-process futures → none (timeout removed them)
     # 3. Fall to crash recovery → load checkpoint from SQL (should succeed now)
     # 4. _resume_native_agent routes through pool.run_stream() with
@@ -353,7 +353,7 @@ async def test_e2e_elicitation_timeout_crash_recovery(  # noqa: PLR0915
     )
 
     # --- Step 5: Verify session is active again ---
-    final_data = await session_store.load(session_id)
+    final_data = await session_store.load_session(session_id)
     assert final_data is not None
     assert final_data.status == "active", (
         f"Session should be 'active' after successful resume, got '{final_data.status}'"
@@ -383,9 +383,9 @@ async def test_e2e_checkpoint_save_fails_without_conversation(
     storage_manager, _session_store = sql_storage
     session_id = "test-no-conv-record"
 
-    # Do NOT call session_store.save() — simulate the ACP scenario where
+    # Do NOT call session_store.save_session() — simulate the ACP scenario where
     # only SessionStore (not StorageManager.save_session) is used.
-    # Actually, in production, SQLSessionStore.save() IS called, but
+    # Actually, in production, save_session() IS called, but
     # SQLProvider.save_checkpoint() uses a DIFFERENT engine that may
     # not see the record. Here we test the worst case: no record at all.
 
@@ -440,7 +440,7 @@ async def test_e2e_resume_without_pending_deferred_calls_resolves_zero(
         agent_type="native",
         status="active",
     )
-    await session_store.save(session_data)
+    await session_store.save_session(session_data)
 
     checkpoint_mgr = CheckpointManager(storage_manager)
     pending_call = PendingDeferredCall(
@@ -480,10 +480,10 @@ async def test_e2e_resume_without_pending_deferred_calls_resolves_zero(
     # (this is the bug — the old code only set status, not pending_deferred_calls)
     session_data = session_data.model_copy(update={"status": "checkpointed"})
     session_data.touch()
-    await session_store.save(session_data)
+    await session_store.save_session(session_data)
 
     # Verify: SessionData has no pending_deferred_calls
-    loaded = await session_store.load(session_id)
+    loaded = await session_store.load_session(session_id)
     assert loaded is not None
     assert loaded.status == "checkpointed"
     assert len(loaded.pending_deferred_calls) == 0  # Bug: should have the call
@@ -543,7 +543,7 @@ async def test_e2e_resume_without_pending_deferred_calls_resolves_zero(
         )
 
     # The session is active but the elicitation was NOT resolved
-    final_data = await session_store.load(session_id)
+    final_data = await session_store.load_session(session_id)
     assert final_data is not None
     assert final_data.status == "active"
     # pending_deferred_calls was already empty, so nothing to clear
@@ -582,7 +582,7 @@ async def test_e2e_elicitation_resume_builds_deferred_tool_results(
         agent_type="native",
         status="active",
     )
-    await session_store.save(session_data)
+    await session_store.save_session(session_data)
 
     pending_call = PendingDeferredCall(
         tool_call_id="tc-bug16-001",
@@ -627,7 +627,7 @@ async def test_e2e_elicitation_resume_builds_deferred_tool_results(
         }
     )
     session_data.touch()
-    await session_store.save(session_data)
+    await session_store.save_session(session_data)
 
     # --- Resume with elicitation_payloads ---
     mock_pool = MagicMock()
@@ -735,7 +735,7 @@ async def test_e2e_elicitation_resume_maps_tool_call_id_mismatch(
         agent_type="native",
         status="active",
     )
-    await session_store.save(session_data)
+    await session_store.save_session(session_data)
 
     # PendingDeferredCall uses run_id as tool_call_id (handle_elicitation fallback)
     # AND has empty tool_name (MCP tool without AgentContext param)
@@ -783,7 +783,7 @@ async def test_e2e_elicitation_resume_maps_tool_call_id_mismatch(
         }
     )
     session_data.touch()
-    await session_store.save(session_data)
+    await session_store.save_session(session_data)
 
     # --- Resume ---
     mock_pool = MagicMock()

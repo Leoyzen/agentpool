@@ -165,8 +165,7 @@ class AgentPool[TPoolDeps = None]:
             self.vfs_registry = VFSRegistry()
             for name, resource_config in self.manifest.resources.items():
                 self.vfs_registry.register_from_config(name, resource_config)
-            session_store = self.manifest.storage.get_session_store()
-            self._session_store = session_store
+            self._session_store: Any = None
             self.event_handlers = event_handlers or []
             self.connection_registry = ConnectionRegistry()
             servers = self.manifest.get_mcp_servers()
@@ -291,8 +290,12 @@ class AgentPool[TPoolDeps = None]:
                 await self._rebuild_skill_capabilities()
                 # Initialize storage and sessions sequentially (they share the same DB)
                 await self.exit_stack.enter_async_context(self.storage)
-                if self._session_store is not None:
-                    await self.exit_stack.enter_async_context(self._session_store)
+                # Use the StorageManager's already-initialized provider as session store.
+                # This avoids creating a separate session store that would need its
+                # own __aenter__/__aexit__ lifecycle. The provider implements
+                # SessionPersistence + CheckpointStore Protocols.
+                if self.storage.providers:
+                    self._session_store = self.storage.get_project_provider()
                 # Initialize SessionPool
                 from agentpool.orchestrator import SessionPool
 

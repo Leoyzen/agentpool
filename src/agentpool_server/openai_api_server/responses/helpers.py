@@ -20,7 +20,8 @@ if TYPE_CHECKING:
 
 
 async def handle_request(request: ResponseRequest, message: ChatMessage[Any]) -> Response:
-    text = ResponseOutputText(text=str(message.content))
+    content = message.content if isinstance(message.content, str) else str(message.content)
+    text = ResponseOutputText(text=content)
     output_msg_id = f"msg_{uuid4().hex}"
     output_msg = ResponseMessage(id=output_msg_id, role="assistant", content=[text])
     output: list[ResponseMessage | ResponseToolCall] = [output_msg]

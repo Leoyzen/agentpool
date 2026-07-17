@@ -549,7 +549,7 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
     # Load from SessionPool store when available
     session_pool = state.pool.session_pool
     if session_pool is not None and session_pool.sessions.store is not None:
-        data = await session_pool.sessions.store.load(session_id)
+        data = await session_pool.sessions.store.load_session(session_id)
         if data is not None:
             session = session_data_to_opencode(data)
             state.sessions[session_id] = session
@@ -656,7 +656,7 @@ async def list_sessions(
             else:
                 session_pool = state.pool.session_pool
                 if session_pool is not None and session_pool.sessions.store is not None:
-                    data = await session_pool.sessions.store.load(info.session_id)
+                    data = await session_pool.sessions.store.load_session(info.session_id)
                     if data is not None:
                         session = session_data_to_opencode(data)
                         state.sessions[info.session_id] = session
@@ -835,9 +835,8 @@ async def get_session_children(
     # Query database for child sessions not in memory
     try:
         session_pool = state.pool.session_pool
-        store = session_pool.sessions.store if session_pool else None
-        if store is not None and hasattr(store, "list_sessions"):
-            child_ids = await store.list_sessions(parent_id=session_id)
+        if session_pool is not None:
+            child_ids = session_pool.sessions.get_children(session_id)
             for child_id in child_ids:
                 if child_id not in seen_ids:
                     child_session = await get_or_load_session(state, child_id)
@@ -875,7 +874,7 @@ async def update_session(
     id_ = state.pool.manifest.config_file_path
     session_data = opencode_to_session_data(session, agent_name=state.agent.name, pool_id=id_)
     if state.pool.session_pool and state.pool.session_pool.sessions.store:
-        await state.pool.session_pool.sessions.store.save(session_data)
+        await state.pool.session_pool.sessions.store.save_session(session_data)
     await state.broadcast_event(SessionUpdatedEvent.create(session))
     return session
 
@@ -898,7 +897,7 @@ async def delete_session(session_id: str, state: StateDep) -> bool:
     # Ensure store delete if close_session did not handle it
     session_pool = state.pool.session_pool
     if session_pool is not None and session_pool.sessions.store is not None:
-        await session_pool.sessions.store.delete(session_id)
+        await session_pool.sessions.store.delete_session(session_id)
     await state.broadcast_event(SessionDeletedEvent.create(session_id))
     return True
 
@@ -1168,7 +1167,7 @@ async def init_session(  # noqa: D417,PLR0915
 
         # Fire-and-forget through SessionPool; RunHandle is stored
         # in SessionController._runs for cancellation tracking.
-        await session_pool.receive_request(session_id, init_prompt)
+        await session_pool.send_message(session_id, init_prompt)
         return True
 
     # Fallback: run the agent in the background directly
@@ -1940,10 +1939,9 @@ async def execute_command(  # noqa: PLR0915
                 session_pool = state.pool.session_pool if state.pool is not None else None
                 if session_pool is not None:
                     input_provider = state.ensure_input_provider(session_id)
-                    message_id = await session_pool.receive_request(
+                    message_id = await session_pool.send_message(
                         session_id=session_id,
                         content=prompt_text,
-                        priority="when_idle",
                         input_provider=input_provider,
                         message_id=assistant_msg_id,
                     )

@@ -386,7 +386,10 @@ async def test_initial_status_is_idle() -> None:
 
 @pytest.mark.unit
 async def test_cancel_with_cancel_fn_delegates() -> None:
-    """Given a RunHandle with _cancel_fn set, cancel() calls the cancel function."""
+    """Given a RunHandle with _cancel_fn set, cancel() calls the cancel function.
+
+    Also force-cancels current_task to break through __aexit__ hangs.
+    """
     handle = _make_run_handle()
     cancel_called = False
 
@@ -404,16 +407,17 @@ async def test_cancel_with_cancel_fn_delegates() -> None:
     assert cancel_called is True
     assert handle.run_ctx.cancelled is True
     assert handle._idle_event.is_set()
-    # current_task.cancel() should NOT be called because _cancel_fn took priority
-    mock_task.cancel.assert_not_called()
+    # current_task.cancel() IS called to break through __aexit__ hangs
+    mock_task.cancel.assert_called_once()
 
 
 @pytest.mark.unit
 async def test_cancel_does_not_cancel_current_task() -> None:
     """Given a RunHandle with current_task set and no _cancel_fn, cancel().
 
-    Does NOT cancel current_task — the start() loop must keep running to
-    process the cancelled flag and emit stream-complete events gracefully.
+    Force-cancels current_task to break through __aexit__ hangs. The
+    CancelledError is caught by start()'s except handler which preserves
+    message history and continues to idle.
     """
     handle = _make_run_handle()
     mock_task = MagicMock()
@@ -424,7 +428,7 @@ async def test_cancel_does_not_cancel_current_task() -> None:
 
     assert handle.run_ctx.cancelled is True
     assert handle._idle_event.is_set()
-    mock_task.cancel.assert_not_called()
+    mock_task.cancel.assert_called_once()
 
 
 @pytest.mark.unit

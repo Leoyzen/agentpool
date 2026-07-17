@@ -626,7 +626,6 @@ ignore_imports = [
     "agentpool_config.storage -> agentpool_storage.file_provider",
     "agentpool_config.storage -> agentpool_storage.memory_provider",
     "agentpool_config.storage -> agentpool_storage.opencode_provider",
-    "agentpool_config.storage -> agentpool_storage.session_store",
     "agentpool_config.storage -> agentpool_storage.sql_provider",
     "agentpool_config.storage -> agentpool_storage.zed_provider",
     "agentpool_config.task -> agentpool.agents",

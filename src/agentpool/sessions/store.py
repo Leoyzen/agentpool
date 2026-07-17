@@ -20,6 +20,11 @@ logger = get_logger(__name__)
 class SessionStore(Protocol):
     """Protocol for session persistence backends.
 
+    !!! warning "Deprecated"
+        Use ``SessionPersistence`` from ``agentpool_storage.protocols`` instead.
+        This Protocol is kept for backward compatibility and will be removed
+        in a future version.
+
     Implementations handle storing and retrieving SessionData to/from
     various backends (SQL, file, memory, etc.).
     """
@@ -89,18 +94,6 @@ class SessionStore(Protocol):
         """
         ...
 
-    @abstractmethod
-    async def cleanup_expired(self, max_age_hours: int = 24) -> int:
-        """Remove sessions older than max_age.
-
-        Args:
-            max_age_hours: Maximum session age in hours
-
-        Returns:
-            Number of sessions removed
-        """
-        ...
-
 
 class MemorySessionStore(SessionStore):
     """In-memory session store for testing and development."""
@@ -152,22 +145,57 @@ class MemorySessionStore(SessionStore):
             result.append(session_id)
         return result
 
-    async def cleanup_expired(self, max_age_hours: int = 24) -> int:
-        from agentpool.utils.time_utils import get_now
+    # -- SessionPersistence Protocol conformance -------------------------
 
-        now = get_now()
-        expired = []
-        for session_id, data in self._sessions.items():
-            age_hours = (now - data.last_active).total_seconds() / 3600
-            if age_hours > max_age_hours:
-                expired.append(session_id)
+    async def save_session(self, data: SessionData) -> None:
+        """Alias for ``save`` to conform to ``SessionPersistence`` Protocol."""
+        return await self.save(data)
 
-        for session_id in expired:
-            del self._sessions[session_id]
+    async def load_session(self, session_id: str) -> SessionData | None:
+        """Alias for ``load`` to conform to ``SessionPersistence`` Protocol."""
+        return await self.load(session_id)
 
-        if expired:
-            logger.info("Cleaned up expired sessions", count=len(expired))
-        return len(expired)
+    async def delete_session(self, session_id: str) -> bool:
+        """Alias for ``delete`` to conform to ``SessionPersistence`` Protocol."""
+        return await self.delete(session_id)
+
+    async def list_session_ids(
+        self,
+        *,
+        pool_id: str | None = None,
+        agent_name: str | None = None,
+        cwd: str | None = None,
+    ) -> list[str]:
+        """Alias for ``list_sessions`` to conform to ``SessionPersistence`` Protocol.
+
+        Note: ``MemorySessionStore.list_sessions`` uses ``parent_id`` not ``cwd``.
+        The ``cwd`` parameter is accepted but not filtered (in-memory store
+        does not index by cwd).
+        """
+        return await self.list_sessions(pool_id=pool_id, agent_name=agent_name)
+
+    async def load_sessions_batch(
+        self,
+        session_ids: list[str],
+        *,
+        agent_name: str | None = None,
+    ) -> list[SessionData]:
+        """Load multiple sessions by IDs."""
+        result: list[SessionData] = []
+        for sid in session_ids:
+            session = await self.load(sid)
+            if session is not None:
+                if agent_name is not None and session.agent_name != agent_name:
+                    continue
+                result.append(session)
+        return result
+
+    async def update_sdk_session_id(
+        self,
+        session_id: str,
+        sdk_session_id: str,
+    ) -> None:
+        """No-op for in-memory store."""
 
     async def save_checkpoint(
         self,
