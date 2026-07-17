@@ -1,4 +1,5 @@
 """Session data models."""
+
 from agentpool.sessions.models import ProjectData, SessionData
 from agentpool.sessions.state_mapper import (
     InvariantResult,

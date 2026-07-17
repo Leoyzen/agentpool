@@ -331,5 +331,3 @@ class StorageConfig(Schema):
         if self.providers is None:
             return [MemoryStorageConfig()] if is_pytest() else [SQLStorageConfig()]
         return self.providers
-
-
