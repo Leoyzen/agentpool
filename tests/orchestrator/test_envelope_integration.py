@@ -9,6 +9,8 @@ import pytest
 
 from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionController
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     import asyncio

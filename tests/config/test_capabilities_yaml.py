@@ -11,6 +11,8 @@ from agentpool_config.capabilities import (
     TokenBudgetCapabilityConfig,
 )
 
+pytestmark = pytest.mark.unit
+
 
 YAML_WITH_CAPABILITIES = """\
 agents:

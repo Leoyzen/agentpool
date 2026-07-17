@@ -6,10 +6,14 @@
 
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 
 from agentpool import Agent
 from agentpool_config.mcp_server import StdioMCPServerConfig
+
+pytestmark = pytest.mark.unit
 
 
 async def main():

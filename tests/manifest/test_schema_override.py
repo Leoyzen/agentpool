@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
 from typing import TYPE_CHECKING
 
 from agentpool.tools.base import Tool
+
+pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:

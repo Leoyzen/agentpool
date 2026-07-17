@@ -5,6 +5,8 @@ Tests that RunUsage is instantiated with correct field names and values.
 
 from __future__ import annotations
 
+import pytest
+
 from decimal import Decimal
 from pathlib import Path
 import sys
@@ -18,6 +20,8 @@ sys.path.insert(0, str(sys_path))
 from pydantic_ai.usage import RequestUsage, RunUsage  # noqa: E402
 
 from agentpool.messaging.messages import TokenCost  # noqa: E402
+
+pytestmark = pytest.mark.unit
 
 
 def test_runusage_with_cache_tokens():

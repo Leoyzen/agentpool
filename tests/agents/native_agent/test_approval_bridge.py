@@ -28,6 +28,8 @@ from agentpool.agents.native_agent.approval_bridge import (
     create_approval_bridge_capability,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def mock_agent() -> Agent[Any]:

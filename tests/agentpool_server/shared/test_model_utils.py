@@ -16,6 +16,8 @@ from agentpool_server.shared.model_utils import (
     _extract_provider_from_identifier,
 )
 
+pytestmark = pytest.mark.integration
+
 
 def create_toko_model_info(
     model_id: str,

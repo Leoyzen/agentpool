@@ -15,6 +15,8 @@ Priority order for resolution:
 
 from __future__ import annotations
 
+import pytest
+
 import os
 from pathlib import Path
 
@@ -28,6 +30,8 @@ from agentpool_config.paths import (
     ConfigPath,
     resolve_config_path,
 )
+
+pytestmark = pytest.mark.unit
 
 
 # =============================================================================

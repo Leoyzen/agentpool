@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from datetime import UTC, datetime, timedelta
 
 from agentpool.sessions.models import PendingDeferredCall
@@ -9,6 +11,8 @@ from agentpool.storage.serialization import (
     deserialize_pending_calls,
     serialize_pending_calls,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _make_call(

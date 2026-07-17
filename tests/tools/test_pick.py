@@ -11,6 +11,7 @@ from agentpool import Agent
 pytestmark = [
     pytest.mark.real_model,
     pytest.mark.incompatible_with_thinking,
+    pytest.mark.unit,
 ]
 
 

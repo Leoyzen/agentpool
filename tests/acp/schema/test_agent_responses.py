@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import pytest
+
 from acp.schema.agent_responses import (
     DisableProvidersResponse,
     ListProvidersResponse,
     SetProvidersResponse,
 )
 from acp.schema.providers import ProviderCurrentConfig, ProviderInfo
+
+pytestmark = pytest.mark.unit
 
 
 class TestListProvidersResponse:

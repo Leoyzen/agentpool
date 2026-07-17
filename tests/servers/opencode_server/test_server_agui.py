@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 import argparse
 import asyncio
 from typing import TYPE_CHECKING
@@ -18,6 +20,8 @@ if TYPE_CHECKING:
 
 # Create a simple pydantic-ai agent with TestModel
 from pydantic_ai.models.test import TestModel
+
+pytestmark = pytest.mark.integration
 
 
 def get_weather(city: str) -> str:

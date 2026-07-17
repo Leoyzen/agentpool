@@ -24,6 +24,8 @@ from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.handler import ACPProtocolHandler
 from agentpool_server.acp_server.session_manager import ACPSessionManager
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def mock_pool() -> MagicMock:

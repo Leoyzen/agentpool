@@ -49,6 +49,8 @@ from agentpool.agents.events import (
 )
 from agentpool.messaging import ChatMessage
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

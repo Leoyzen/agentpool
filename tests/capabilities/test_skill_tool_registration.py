@@ -44,6 +44,8 @@ from agentpool.skills.skill import Skill
 from agentpool.skills.skill_tool_manager import SkillToolManager
 from agentpool_config.skills import SkillMcpServerConfig, SkillToolConfig
 
+pytestmark = pytest.mark.unit
+
 
 # ---- Helpers ----
 

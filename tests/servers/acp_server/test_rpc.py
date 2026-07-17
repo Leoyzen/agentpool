@@ -31,6 +31,8 @@ from acp import (
     WriteTextFileRequest,
 )
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     from acp import DefaultACPClient

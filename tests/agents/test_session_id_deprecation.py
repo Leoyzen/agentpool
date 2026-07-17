@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
+
 from dataclasses import asdict
 
 from agentpool.agents.context import AgentRunContext
+
+pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------

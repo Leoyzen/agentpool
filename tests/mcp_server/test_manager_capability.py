@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 import inspect
 from typing import Any
 
@@ -15,6 +17,8 @@ from agentpool_config.mcp_server import (
     StdioMCPServerConfig,
     StreamableHTTPMCPServerConfig,
 )
+
+pytestmark = pytest.mark.unit
 
 
 # =============================================================================

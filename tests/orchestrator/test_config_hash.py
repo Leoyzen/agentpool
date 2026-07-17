@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
+
 from typing import TYPE_CHECKING, Literal
 
 from agentpool.agents.native_agent.checkpoint import compute_agent_config_hash
+
+pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:

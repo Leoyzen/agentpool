@@ -13,6 +13,8 @@ import pytest
 
 from agentpool.tools import ApprovalRequired, CallDeferred
 
+pytestmark = pytest.mark.unit
+
 
 def test_call_deferred_is_exception():
     """CallDeferred should be a proper exception class."""

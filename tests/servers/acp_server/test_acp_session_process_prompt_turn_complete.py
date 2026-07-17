@@ -18,6 +18,8 @@ from agentpool import Agent, AgentPool
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.session import ACPSession
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

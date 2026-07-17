@@ -30,6 +30,8 @@ from agentpool_server.opencode_server.models.parts import (
     ToolStateRunning,
 )
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     from agentpool_server.opencode_server.state import ServerState

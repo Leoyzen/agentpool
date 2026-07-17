@@ -17,8 +17,7 @@ from agentpool_config.mcp_server import StdioMCPServerConfig
 from agentpool_toolsets.mcp_discovery.toolset import MCPDiscoveryToolset
 
 
-pytestmark = pytest.mark.asyncio
-
+pytestmark = [pytest.mark.asyncio, pytest.mark.unit]
 # Test server config for integration tests
 TEST_SERVER_CONFIG = StdioMCPServerConfig(
     command="uv",

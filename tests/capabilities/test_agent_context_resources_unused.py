@@ -7,8 +7,12 @@ This validates that Phase 4 removal (task 4.14) is safe.
 
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 import re
+
+pytestmark = pytest.mark.unit
 
 
 SRC_DIR = Path(__file__).resolve().parent.parent.parent / "src"

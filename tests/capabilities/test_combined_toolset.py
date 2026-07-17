@@ -15,6 +15,8 @@ from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.tools.base import Tool
 
+pytestmark = pytest.mark.unit
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

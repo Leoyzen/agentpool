@@ -13,6 +13,8 @@ import pytest
 
 from agentpool_server.opencode_server.routes.global_routes import get_events, get_global_events
 
+pytestmark = pytest.mark.integration
+
 
 EXPECTED_HEADERS = {
     "cache-control": "no-cache",

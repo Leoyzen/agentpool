@@ -7,6 +7,8 @@ import pytest
 
 from agentpool import AgentPool, AgentsManifest
 
+pytestmark = pytest.mark.integration
+
 
 class ConversationOutput(BaseModel):
     """Test output for conversation flow."""

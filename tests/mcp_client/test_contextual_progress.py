@@ -12,6 +12,8 @@ from agentpool import Agent
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.agents.events import ToolCallProgressEvent
 
+pytestmark = pytest.mark.unit
+
 
 if TYPE_CHECKING:
     from typing import Any

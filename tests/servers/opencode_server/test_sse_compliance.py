@@ -69,6 +69,8 @@ if TYPE_CHECKING:
 
 import contextlib
 
+pytestmark = pytest.mark.integration
+
 
 class _MockEventBus:
     """Minimal EventBus stub that supports subscribe/unsubscribe.

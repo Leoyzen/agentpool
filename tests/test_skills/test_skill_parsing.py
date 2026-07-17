@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 import json
 from textwrap import dedent
 from typing import TYPE_CHECKING
@@ -9,6 +11,8 @@ from typing import TYPE_CHECKING
 from upathtools import UPath
 
 from agentpool.skills.skill import Skill
+
+pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:

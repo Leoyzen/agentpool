@@ -20,6 +20,8 @@ from agentpool.storage.serialization import serialize_messages
 from agentpool_config.storage import MemoryStorageConfig, StorageConfig
 from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
+pytestmark = pytest.mark.unit
+
 
 # ── helpers ──────────────────────────────────────────────────────────────
 

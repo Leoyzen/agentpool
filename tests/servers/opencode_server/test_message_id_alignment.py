@@ -23,6 +23,8 @@ from agentpool_server.opencode_server.models.message import (
     TextPartInput,
 )
 
+pytestmark = pytest.mark.integration
+
 
 # =============================================================================
 # D13: MessageRequest delivery field

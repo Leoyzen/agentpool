@@ -14,6 +14,8 @@ from agentpool_config.toolsets import (
     ProcessManagementToolsetConfig,
 )
 
+pytestmark = pytest.mark.integration
+
 
 def get_echo_command(message: str) -> tuple[str, list[str]]:
     """Get platform-appropriate echo command."""

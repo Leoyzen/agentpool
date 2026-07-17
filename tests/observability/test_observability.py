@@ -14,6 +14,8 @@ from agentpool_config.observability import (
     ObservabilityConfig,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def clean_env():

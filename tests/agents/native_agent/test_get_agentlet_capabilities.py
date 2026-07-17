@@ -17,6 +17,8 @@ from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
 from agentpool.orchestrator.core import EventBus
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def mock_agent() -> Agent[Any]:

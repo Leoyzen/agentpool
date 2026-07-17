@@ -25,6 +25,8 @@ from typing import Any
 import httpx
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 logger = pytest.LogCaptureFixture  # type: ignore[misc,assignment]
 

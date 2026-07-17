@@ -21,6 +21,8 @@ from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapsh
 from agentpool.mcp_server.manager import MCPManager
 from agentpool_config.mcp_server import StdioMCPServerConfig
 
+pytestmark = pytest.mark.unit
+
 
 # =============================================================================
 # Tests: MCPToolset eager enter on cache miss

@@ -6,10 +6,14 @@ expired pending deferred calls based on their timeout and creation time.
 
 from __future__ import annotations
 
+import pytest
+
 from datetime import datetime, timedelta
 
 from agentpool.orchestrator.core import SessionController
 from agentpool.sessions.models import PendingDeferredCall, SessionData
+
+pytestmark = pytest.mark.unit
 
 
 def test_pending_deferred_call_expiry_detection() -> None:

@@ -22,6 +22,8 @@ import pytest
 from agentpool.agents.context import AgentContext, AgentRunContext
 from agentpool.agents.events.events import ToolCallDeferredEvent
 
+pytestmark = pytest.mark.unit
+
 
 # ============================================================================
 # Fixtures

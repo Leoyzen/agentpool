@@ -18,6 +18,8 @@ from agentpool.lifecycle.types import DeliveryMode
 from agentpool.orchestrator.core import EventBus
 from agentpool_server.opencode_server.session_pool_integration import OpenCodeSessionPoolIntegration
 
+pytestmark = pytest.mark.integration
+
 
 class MockServerState:
     """Mock OpenCode ServerState for testing."""

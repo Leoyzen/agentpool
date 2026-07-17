@@ -41,6 +41,8 @@ from tests.fixtures.subagent_events import (
     zed_full_lifecycle_events,
 )
 
+pytestmark = pytest.mark.integration
+
 
 async def collect_updates(converter: ACPEventConverter, event) -> list[dict[str, object]]:
     """Helper to collect all updates from an event and convert to dict for snapshots.

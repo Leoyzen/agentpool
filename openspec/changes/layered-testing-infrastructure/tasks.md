@@ -8,23 +8,23 @@
 - [x] 1.4 Update `pyproject.toml` `addopts` to: `["-m", "not slow and not snapshot and not e2e and not real_model and not real_mcp"]`
 - [x] 1.5 Add `real_model` auto-skip logic: if `OPENAI_API_KEY` not set, skip `@pytest.mark.real_model` tests
 - [x] 1.6 Add CI check script that verifies every test file has at least one layer marker (`unit`, `integration`, `vcr`, or `e2e`)
-- [ ] 1.7 Mark all 109 unmarked test files with appropriate layer markers (capabilities=22, config=9, sessions=25, skills=7, teams=4, manifest=6, host=3, running=3, prompts=3, other=27)
+- [x] 1.7 Mark all 109 unmarked test files with appropriate layer markers (capabilities=22, config=9, sessions=25, skills=7, teams=4, manifest=6, host=3, running=3, prompts=3, other=27)
 - [ ] 1.8 Deflake 5 `@pytest.mark.flaky` tests and remove the marker
 - [x] 1.9 Delete `tests/resource_providers/` directory (dead code — already deleted in M3)
 - [ ] 1.10 Verify existing tests still pass after marker migration
 
 ### 2. Test File Consolidation
 
-- [ ] 2.1 Merge ACP `test_resume_*.py` (3 files) → `test_session_resume.py`
-- [ ] 2.2 Merge ACP `test_ws_disconnect_*.py` (3 files) → `test_websocket_lifecycle.py`
-- [ ] 2.3 Merge ACP `test_turn_complete_*.py` (2 files) → `test_turn_completion.py`
-- [ ] 2.4 Merge OpenCode `test_subagent_*.py` (5 files) → `test_subagent_integration.py`
-- [ ] 2.5 Merge OpenCode `test_question_*.py` (3 files) → `test_question_handling.py`
-- [ ] 2.6 Merge OpenCode `test_title_*.py` (3 files) → `test_title_management.py`
-- [ ] 2.7 Merge OpenCode `test_ensure_session_*.py` (3 files) → `test_session_provisioning.py`
-- [ ] 2.8 Merge OpenCode `test_session_pool_*.py` (5 files) → `test_session_pool_integration.py`
-- [ ] 2.9 Merge OpenCode `test_event_bridge_*.py` (2 files) → `test_event_bridge.py`
-- [ ] 2.10 Merge OpenCode `test_event_adapter*.py` + `test_event_conversion*.py` → `test_event_adaptation.py`
+- [x] 2.1 Merge ACP `test_resume_*.py` (3 files) → `test_session_resume.py` (skipped — no files matching pattern)
+- [x] 2.2 Merge ACP `test_ws_disconnect_*.py` (3 files) → `test_websocket_lifecycle.py` (skipped — no files matching pattern)
+- [x] 2.3 Merge ACP `test_turn_complete_*.py` (2 files) → `test_turn_completion.py` (1 file renamed)
+- [x] 2.4 Merge OpenCode `test_subagent_*.py` (5 files) → `test_subagent_integration.py` (4 files merged, 7 tests)
+- [x] 2.5 Merge OpenCode `test_question_*.py` (3 files) → `test_question_handling.py` (3 files merged, 39 tests)
+- [x] 2.6 Merge OpenCode `test_title_*.py` (3 files) → `test_title_management.py` (1 file renamed)
+- [x] 2.7 Merge OpenCode `test_ensure_session_*.py` (3 files) → `test_session_provisioning.py` (2 files merged, 22 tests)
+- [x] 2.8 Merge OpenCode `test_session_pool_*.py` (5 files) → `test_session_pool_integration.py` (1 file renamed)
+- [x] 2.9 Merge OpenCode `test_event_bridge_*.py` (2 files) → `test_event_bridge.py` (1 file merged into existing, 13 tests)
+- [x] 2.10 Merge OpenCode `test_event_adapter*.py` + `test_event_conversion*.py` → `test_event_adaptation.py` (2 files merged, 47 tests)
 - [ ] 2.11 Merge orchestrator EventBus variant tests → `test_event_bus.py`
 - [ ] 2.12 Merge orchestrator RunHandle variant tests → `test_run_handle.py`
 - [ ] 2.13 Merge orchestrator session close/checkpoint tests → `test_session_lifecycle.py`
@@ -39,9 +39,9 @@
 
 All L2 tests that use `MagicMock(pool)` or `MagicMock(agent)` as the pool/agent dependency SHALL be migrated to use a real `AgentPool` built from a minimal YAML config with `TestModel` as the model. This roots out false confidence at the source.
 
-- [ ] 2b.1 Create `tests/fixtures/minimal_pool.py` with `minimal_pool` fixture (real `AgentPool` from inline YAML, single native agent using `TestModel`, no MCP servers, no storage)
-- [ ] 2b.2 Audit all L2 test files for `MagicMock(pool)` or `MagicMock(agent)` usage — produce inventory list with match counts
-- [ ] 2b.2.5 Categorize each L2 MagicMock test file into: (a) mechanically migratable (fixture swap, TestModel replaces return_value), (b) requires assertion rewrite (side_effect error injection → TestModel custom sequences, call_args/assert_called → event-based assertions), (c) should remain L1 with targeted mocks (single-collaborator mocks, not pool-level). Document categorization in `tests/MIGRATION_INVENTORY.md`
+- [x] 2b.1 Create `tests/fixtures/minimal_pool.py` with `minimal_pool` fixture (real `AgentPool` from inline YAML, single native agent using `TestModel`, no MCP servers, no storage)
+- [x] 2b.2 Audit all L2 test files for `MagicMock(pool)` or `MagicMock(agent)` usage — produce inventory list with match counts
+- [x] 2b.2.5 Categorize each L2 MagicMock test file into: (a) mechanically migratable (fixture swap, TestModel replaces return_value), (b) requires assertion rewrite (side_effect error injection → TestModel custom sequences, call_args/assert_called → event-based assertions), (c) should remain L1 with targeted mocks (single-collaborator mocks, not pool-level). Document categorization in `tests/MIGRATION_INVENTORY.md`
 - [ ] 2b.3 Migrate ACP server L2 tests: replace mock pool with `minimal_pool` fixture in `tests/servers/acp_server/` (19 files) — handle category (b) tests by rewriting assertions
 - [ ] 2b.4a Migrate OpenCode server L2 tests — event adapter/conversion group (~8 files)
 - [ ] 2b.4b Migrate OpenCode server L2 tests — session pool/provisioning group (~10 files)
@@ -57,12 +57,12 @@ All L2 tests that use `MagicMock(pool)` or `MagicMock(agent)` as the pool/agent 
 
 ### 3. Documentation (Phase A)
 
-- [ ] 3.1 Update `tests/AGENTS.md` with L1-L4 conceptual taxonomy table and marker mapping
-- [ ] 3.2 Update `tests/AGENTS.md` marker reference table (including renamed `snapshot`, retired `requires_openai_key`, new `real_model`)
-- [ ] 3.3 Update `tests/AGENTS.md` with marker stacking rule (one primary layer marker; `vcr` tests may add `integration` as secondary)
-- [ ] 3.4 Update `tests/AGENTS.md` with mandatory test layers by feature type table
-- [ ] 3.5 Update root `AGENTS.md` Testing section to reference `tests/AGENTS.md` and reflect L1-L4 taxonomy
-- [ ] 3.6 Update `pyproject.toml` test command examples in root `AGENTS.md` to include `tests/vcr/` and `-m e2e`
+- [x] 3.1 Update `tests/AGENTS.md` with L1-L4 conceptual taxonomy table and marker mapping
+- [x] 3.2 Update `tests/AGENTS.md` marker reference table (including renamed `snapshot`, retired `requires_openai_key`, new `real_model`)
+- [x] 3.3 Update `tests/AGENTS.md` with marker stacking rule (one primary layer marker; `vcr` tests may add `integration` as secondary)
+- [x] 3.4 Update `tests/AGENTS.md` with mandatory test layers by feature type table
+- [x] 3.5 Update root `AGENTS.md` Testing section to reference `tests/AGENTS.md` and reflect L1-L4 taxonomy
+- [x] 3.6 Update `pyproject.toml` test command examples in root `AGENTS.md` to include `tests/vcr/` and `-m e2e`
 
 ## Phase B — VCR Infrastructure + Initial L3 (requires [HUMAN] for cassette recording)
 

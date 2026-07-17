@@ -11,11 +11,15 @@ verify the event sequence matches the expected flow.
 
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from mcp.types import ElicitResult
+
+pytestmark = pytest.mark.integration
 
 
 if TYPE_CHECKING:

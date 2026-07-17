@@ -6,6 +6,8 @@ import pytest
 
 from agentpool.functional import run_agent, run_agent_sync
 
+pytestmark = pytest.mark.unit
+
 
 async def test_agent_pipeline():
     """Test async pipeline."""

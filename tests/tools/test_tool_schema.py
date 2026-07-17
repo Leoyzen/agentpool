@@ -23,6 +23,8 @@ from schemez import OpenAIFunctionDefinition
 from agentpool.log import configure_logging
 from agentpool.tools.base import FunctionTool, Tool
 
+pytestmark = pytest.mark.unit
+
 
 if TYPE_CHECKING:
     from agentpool.agents.context import AgentContext

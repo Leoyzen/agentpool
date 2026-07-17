@@ -7,11 +7,15 @@ for native agents and executes it for non-native agents.
 
 from __future__ import annotations
 
+import pytest
+
 from typing import TYPE_CHECKING, Any, ClassVar
 from unittest.mock import MagicMock
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.orchestrator.turn import Turn
+
+pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:

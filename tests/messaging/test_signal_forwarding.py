@@ -6,6 +6,8 @@ import pytest
 
 from agentpool import Agent, AgentPool, AgentsManifest
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     from pathlib import Path

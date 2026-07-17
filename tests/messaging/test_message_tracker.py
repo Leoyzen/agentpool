@@ -11,6 +11,8 @@ from agentpool import Agent, AgentPool, BaseTeam
 from agentpool.models.agents import NativeAgentConfig
 from agentpool.models.manifest import AgentsManifest
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

@@ -21,6 +21,8 @@ from agentpool_server.opencode_server.routes.message_routes import _process_mess
 from agentpool_server.opencode_server.session_pool_integration import ensure_session
 from agentpool_server.opencode_server.state import ServerState
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

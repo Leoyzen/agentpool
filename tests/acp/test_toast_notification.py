@@ -8,6 +8,8 @@ import pytest
 
 from agentpool.agents.events import ToastInfo
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.unit
 class TestSendToast:

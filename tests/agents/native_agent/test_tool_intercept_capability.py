@@ -31,6 +31,8 @@ from agentpool.agents.native_agent.tool_intercept import ToolInterceptCapability
 from agentpool.hooks import AgentHooks, CallableHook
 from agentpool.hooks.base import HookResult
 
+pytestmark = pytest.mark.unit
+
 
 # ============================================================================
 # Helpers and Fixtures

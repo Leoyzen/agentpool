@@ -37,6 +37,8 @@ from agentpool_config.compaction import (
     WhenMessageCountExceedsConfig,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def sample_messages() -> list[ModelRequest | ModelResponse]:

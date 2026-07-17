@@ -13,6 +13,8 @@ from agentpool_config.storage import MemoryStorageConfig, SQLStorageConfig
 from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 from agentpool_storage.sql_provider import SQLModelProvider
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     from pathlib import Path

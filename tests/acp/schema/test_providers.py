@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import pytest
+
 from acp.schema.providers import (
     ProviderCurrentConfig,
     ProviderInfo,
     ProvidersCapabilities,
     ProviderStatus,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestProviderCurrentConfig:

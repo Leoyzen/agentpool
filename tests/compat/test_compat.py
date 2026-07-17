@@ -17,6 +17,8 @@ import pytest
 from agentpool.hooks.agent_hooks import AgentHooks
 from agentpool.utils.context_wrapping import wrap_instruction
 
+pytestmark = pytest.mark.unit
+
 
 # ============================================================================
 # Backward compatibility (_warn=False)

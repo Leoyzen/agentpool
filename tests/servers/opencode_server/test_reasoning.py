@@ -25,6 +25,8 @@ from agentpool_server.opencode_server.models.parts import (
     TextPart as OpenCodeTextPart,
 )
 
+pytestmark = pytest.mark.integration
+
 
 def _make_processor_and_ctx(
     mock_msg: MagicMock | None = None,

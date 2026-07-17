@@ -13,6 +13,8 @@ from agentpool_config.storage import SQLStorageConfig
 from agentpool_storage.models import QueryFilters, StatsFilters
 from agentpool_storage.sql_provider import SQLModelProvider
 
+pytestmark = pytest.mark.unit
+
 
 # Reference time for all tests
 BASE_TIME = datetime(2024, 1, 1, 12, 0)  # noon on Jan 1, 2024

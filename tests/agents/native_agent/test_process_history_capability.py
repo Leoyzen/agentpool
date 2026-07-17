@@ -16,6 +16,8 @@ from agentpool.agents.native_agent.process_history_capability import (
     _is_run_context_annotation,
 )
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Fixtures

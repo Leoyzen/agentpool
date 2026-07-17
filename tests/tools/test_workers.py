@@ -13,6 +13,8 @@ from agentpool import Agent, AgentPool, AgentsManifest
 from agentpool.agents.events import RunErrorEvent, SpawnSessionStart, StreamCompleteEvent
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

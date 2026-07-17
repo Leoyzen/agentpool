@@ -8,6 +8,8 @@ from upathtools import UPath
 from agentpool.skills.registry import SkillsRegistry
 from agentpool.skills.skill import Skill
 
+pytestmark = pytest.mark.unit
+
 
 def create_test_skill(name: str = "test-skill", description: str = "A test skill") -> Skill:
     """Create a minimal test skill."""

@@ -7,7 +7,11 @@ This is a standalone test that mocks all dependencies to avoid circular imports.
 
 from __future__ import annotations
 
+import pytest
+
 from unittest.mock import MagicMock
+
+pytestmark = pytest.mark.integration
 
 
 def _make_manager_with_controller() -> tuple[object, MagicMock]:

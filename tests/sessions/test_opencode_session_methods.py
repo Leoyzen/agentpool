@@ -23,6 +23,8 @@ from agentpool_server.opencode_server.models import Session, TimeCreatedUpdated
 from agentpool_storage.opencode_provider import OpenCodeStorageProvider
 from agentpool_storage.opencode_provider.helpers import compute_project_id
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 async def provider():

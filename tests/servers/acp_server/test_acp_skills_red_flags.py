@@ -16,6 +16,8 @@ from upathtools import UPath
 from agentpool.skills.manager import SkillsManager
 from agentpool_config.skills import SkillsConfig
 
+pytestmark = pytest.mark.integration
+
 
 class TestSkillsIncludeDefault:
     """Tests: skills loading must respect manifest configuration."""

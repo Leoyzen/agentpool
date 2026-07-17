@@ -21,6 +21,8 @@ import pytest
 from agentpool.sessions import SessionData
 from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
+pytestmark = pytest.mark.integration
+
 
 # ---------------------------------------------------------------------------
 # 1. Session store lookups are opaque

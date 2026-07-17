@@ -21,6 +21,8 @@ from agentpool.capabilities.registry import (
     resolve_capability_type,
 )
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     from pydantic_ai.capabilities import AbstractCapability

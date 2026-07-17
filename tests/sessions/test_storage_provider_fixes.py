@@ -21,6 +21,8 @@ from agentpool_config.storage import OpenCodeStorageConfig, SQLStorageConfig
 from agentpool_storage.opencode_provider import OpenCodeStorageProvider
 from agentpool_storage.sql_provider import SQLModelProvider
 
+pytestmark = pytest.mark.integration
+
 
 class TestSQLProviderLogSession:
     """Tests for SQLProvider.log_session() duplicate handling."""

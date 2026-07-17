@@ -17,6 +17,8 @@ from agentpool.prompts.instructions import (
     SimpleInstruction,
 )
 
+pytestmark = pytest.mark.unit
+
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable

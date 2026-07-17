@@ -14,12 +14,16 @@ Logs are written to /tmp/load_session_test.log for inspection.
 
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 import logging
 from pathlib import Path
 import tempfile
 
 from agentpool.agents.acp_agent import ACPAgent
+
+pytestmark = pytest.mark.unit
 
 
 # Configure logging to file for easy inspection

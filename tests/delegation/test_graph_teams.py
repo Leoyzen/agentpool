@@ -32,6 +32,8 @@ from agentpool.messaging import AgentResponse, ChatMessage, TeamResponse
 from agentpool.messaging.messagenode import MessageNode
 from agentpool.talk import Talk
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -26,6 +26,8 @@ from agentpool.delegation import AgentPool
 from agentpool.models import ACPAgentConfig
 from agentpool_config.agentpool_tools import BashToolConfig
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

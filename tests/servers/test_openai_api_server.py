@@ -16,6 +16,8 @@ from agentpool_server.openai_api_server.server import (
     _serialize_completion_usage,
 )
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator

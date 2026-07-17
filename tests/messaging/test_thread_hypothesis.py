@@ -1,8 +1,12 @@
 """Minimal test to isolate the piping hang."""
 
+import pytest
+
 from pydantic_ai._utils import disable_threads
 
 from agentpool import Agent
+
+pytestmark = pytest.mark.unit
 
 
 async def test_sync_callback_pipe_no_threads():

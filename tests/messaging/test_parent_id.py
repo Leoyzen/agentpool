@@ -7,6 +7,8 @@ import pytest
 
 from agentpool import Agent, ChatMessage
 
+pytestmark = pytest.mark.unit
+
 
 TEST_RESPONSE = "I am a test response"
 

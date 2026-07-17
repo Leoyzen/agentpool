@@ -1,6 +1,10 @@
 """Test that deprecated feature flag fields have been removed from OpenCodeConfig."""
 
+import pytest
+
 from agentpool_config.session_pool import OpenCodeConfig
+
+pytestmark = pytest.mark.unit
 
 
 # The 8 deprecated feature flags that must no longer exist on OpenCodeConfig

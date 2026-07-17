@@ -22,6 +22,8 @@ from agentpool_server.opencode_server.session_pool_integration import (
 )
 from agentpool_server.opencode_server.state import ServerState
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def mock_agent_pool() -> Mock:

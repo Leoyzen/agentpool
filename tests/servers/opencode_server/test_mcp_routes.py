@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from agentpool_server.opencode_server.state import ServerState
 
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
 
 async def test_mcp_status_includes_display_name(

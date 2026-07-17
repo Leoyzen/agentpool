@@ -10,6 +10,8 @@ import importlib
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 REPOMAP_MODULES = [
     "agentpool.repomap.context",

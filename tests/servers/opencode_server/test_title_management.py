@@ -15,6 +15,8 @@ These tests should FAIL before the fix and PASS afterwards.
 
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 import os
 import time
@@ -37,6 +39,8 @@ from agentpool_server.opencode_server.routes.message_routes import (
 )
 from agentpool_server.opencode_server.session_pool_integration import get_messages_for_session
 from agentpool_server.opencode_server.state import ServerState
+
+pytestmark = pytest.mark.integration
 
 
 # ---------------------------------------------------------------------------

@@ -14,6 +14,8 @@ import yaml
 
 from agentpool.delegation.pool import AgentPool
 
+pytestmark = pytest.mark.integration
+
 
 def create_skill(path: Path, name: str, description: str, instructions: str):
     """Create a skill in the specified directory."""

@@ -19,6 +19,8 @@ from acp.tool_call_state import ToolCallState
 from agentpool.agents.events.events import ToolCallDeferredEvent
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     from syrupy import SnapshotAssertion

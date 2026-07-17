@@ -7,6 +7,8 @@ import pytest
 
 from agentpool import Agent
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.flaky(reruns=2)
 async def test_vision(vision_model: str):

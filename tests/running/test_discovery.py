@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
 from agentpool.running import NodeFunction, node_function
+
+pytestmark = pytest.mark.unit
 
 
 async def test_basic_decoration():

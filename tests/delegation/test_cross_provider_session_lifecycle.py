@@ -32,6 +32,8 @@ from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthErr
 from agentpool.sessions import SessionData
 from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

@@ -6,6 +6,8 @@ import pytest
 from agentpool import Agent
 from agentpool.talk.talk import Talk, TeamTalk
 
+pytestmark = pytest.mark.unit
+
 
 async def test_basic_single_connection():
     """Test basic message forwarding between two agents."""

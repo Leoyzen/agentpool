@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
 from typing import TYPE_CHECKING, Any
+
+pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:

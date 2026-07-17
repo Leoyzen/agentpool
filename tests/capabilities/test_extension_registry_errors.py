@@ -18,6 +18,8 @@ from agentpool.capabilities.extension_registry import (
     ScopeLevel,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class CorruptSkillResource:
     """SkillResource that raises on list_skills for corrupted entries."""

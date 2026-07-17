@@ -9,6 +9,8 @@ from agentpool import Agent
 from agentpool.messaging import AgentResponse
 from agentpool.talk.talk import Talk
 
+pytestmark = pytest.mark.unit
+
 
 async def test_agent_piping():
     # Use explicit names for all agents

@@ -6,7 +6,11 @@ by NativeAgentConfig.get_history_processors().
 
 from __future__ import annotations
 
+import pytest
+
 from typing import Any
+
+pytestmark = pytest.mark.unit
 
 
 def keep_recent(messages: list[Any]) -> list[Any]:

@@ -15,6 +15,8 @@ from agentpool_config.commands import (
     StaticCommandConfig,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def test_static_command_get_callable():
     """Test StaticCommandConfig.get_callable() generates proper function."""

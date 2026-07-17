@@ -33,6 +33,8 @@ from agentpool.skills.skill_tool_manager import SkillToolManager
 from agentpool.skills.uri_resolver import SkillURIResolver
 from agentpool_config.skills import SkillToolConfig
 
+pytestmark = pytest.mark.integration
+
 
 # ---- Helpers ----
 

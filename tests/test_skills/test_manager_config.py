@@ -14,6 +14,8 @@ from upathtools import UPath
 from agentpool.skills.manager import SkillsManager
 from agentpool_config.skills import SkillsConfig
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _setup_agentpool_logging() -> None:

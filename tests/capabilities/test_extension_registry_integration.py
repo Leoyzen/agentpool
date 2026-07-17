@@ -14,6 +14,8 @@ from agentpool.capabilities.extension_registry import (
     ScopeLevel,
 )
 
+pytestmark = pytest.mark.integration
+
 
 class FakeSkillCap:
     """Fake SkillResource capability."""

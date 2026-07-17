@@ -6,6 +6,8 @@ import pytest
 from agentpool import Agent, Tool
 from agentpool.ui.mock_provider import MockInputProvider
 
+pytestmark = pytest.mark.unit
+
 
 async def test_tool_confirmation():
     # Create two tools - one requiring confirmation, one not

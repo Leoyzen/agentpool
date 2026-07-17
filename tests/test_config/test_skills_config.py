@@ -7,6 +7,8 @@ from upathtools import UPath
 
 from agentpool_config.skills import DEFAULT_SKILLS_PATHS, SkillsConfig
 
+pytestmark = pytest.mark.unit
+
 
 def test_skills_config_default_values():
     """Test SkillsConfig with default values."""

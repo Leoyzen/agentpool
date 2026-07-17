@@ -33,6 +33,8 @@ from agentpool.sessions.models import SessionData
 from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 from agentpool_server.opencode_server.state import ServerState
 
+pytestmark = pytest.mark.integration
+
 
 # =============================================================================
 # Fixtures

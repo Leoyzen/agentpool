@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from agentpool_server.opencode_server.state import ServerState
 
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
 
 async def test_init_session_routes_through_session_pool_with_correct_args(

@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.slow]
+pytestmark = [pytest.mark.asyncio, pytest.mark.slow, pytest.mark.integration]
 
 
 # ---------------------------------------------------------------------------

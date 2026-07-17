@@ -17,6 +17,8 @@ from agentpool.sessions.models import SessionData
 from agentpool_server.opencode_server.models import Session, SessionUpdatedEvent
 from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     from pathlib import Path

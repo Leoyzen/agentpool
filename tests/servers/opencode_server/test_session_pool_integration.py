@@ -25,6 +25,8 @@ from agentpool_server.opencode_server.models.parts import (
     ToolStateRunning,
 )
 
+pytestmark = pytest.mark.integration
+
 
 def _make_assistant_msg(session_id: str = "parent-test") -> MessageWithParts:
     return MessageWithParts.assistant(

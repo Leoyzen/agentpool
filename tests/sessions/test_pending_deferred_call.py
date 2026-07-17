@@ -9,6 +9,8 @@ import pytest
 
 from agentpool.sessions.models import PendingDeferredCall, SessionData
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # PendingDeferredCall

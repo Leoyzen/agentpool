@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import pytest
+
 from pydantic import BaseModel
 from pydantic_ai.models.test import TestModel
 
 from agentpool import Agent
+
+pytestmark = pytest.mark.unit
 
 
 class Result(BaseModel):

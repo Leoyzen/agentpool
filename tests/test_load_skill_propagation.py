@@ -9,10 +9,14 @@ Verifies that:
 
 from __future__ import annotations
 
+import pytest
+
 from typing import Any
 from unittest.mock import MagicMock
 
 from agentpool.host.factory import _inject_pool_providers
+
+pytestmark = pytest.mark.integration
 
 
 class FakeAgent:

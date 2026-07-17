@@ -20,6 +20,8 @@ from upathtools import UPath
 from agentpool.skills.exceptions import SecurityError
 from agentpool.skills.uri_resolver import ResolvedSkillURI
 
+pytestmark = pytest.mark.unit
+
 
 # =============================================================================
 # Helpers

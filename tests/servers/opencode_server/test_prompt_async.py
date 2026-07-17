@@ -8,6 +8,8 @@ import pytest
 
 from agentpool_server.opencode_server.models import MessageRequest, TextPartInput
 
+pytestmark = pytest.mark.integration
+
 
 class TestPromptAsync:
     """Tests for `/prompt_async` session serialization via SessionPool."""

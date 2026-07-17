@@ -12,6 +12,8 @@ Note: The OpenCode API uses camelCase field names with "ID" suffix:
 
 from __future__ import annotations
 
+import pytest
+
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -24,6 +26,8 @@ from agentpool_server.opencode_server.models.events import (
     SessionIdleEvent,
     SessionStatusEvent,
 )
+
+pytestmark = pytest.mark.integration
 
 
 if TYPE_CHECKING:

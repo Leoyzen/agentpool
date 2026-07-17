@@ -15,6 +15,8 @@ from agentpool.sessions.models import PendingDeferredCall, SessionData
 from agentpool_server.acp_server.converters import to_session_info
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 
+pytestmark = pytest.mark.integration
+
 
 # ============================================================================
 # V2 Extension Points Tests

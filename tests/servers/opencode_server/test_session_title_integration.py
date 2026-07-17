@@ -24,6 +24,8 @@ from agentpool_server.opencode_server.converters import (
 from agentpool_server.opencode_server.models import Session
 from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     from httpx import AsyncClient

@@ -6,6 +6,8 @@ They will PASS after tasks 1.9-1.11 remove the warnings.
 
 from __future__ import annotations
 
+import pytest
+
 from typing import TYPE_CHECKING, Any
 import warnings
 
@@ -15,6 +17,8 @@ from agentpool.messaging import ChatMessage
 from agentpool.messaging.connection_manager import ConnectionManager
 from agentpool.messaging.messagenode import MessageNode
 from agentpool.utils.context_wrapping import wrap_instruction
+
+pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:

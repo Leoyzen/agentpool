@@ -54,18 +54,34 @@ uv sync --extra coding --extra server
 ```
 
 ### Testing
+
+See [`tests/AGENTS.md`](tests/AGENTS.md) for the complete testing guide — layered pyramid, VCR workflow, mandatory layers by feature type, and best practices.
+
+Quick reference:
+- Tests use pytest (not in classes), fixtures in `tests/conftest.py`
+- 4-layer pyramid: Unit (L1) → Integration (L2) → VCR (L3) → E2E (L4)
+- `ALLOW_MODEL_REQUESTS = False` gate blocks all real model calls by default
+- VCR cassettes at `tests/cassettes/` — record with `--record-mode=once`, replay in CI
+- Markers: `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.vcr`, `@pytest.mark.e2e`, `@pytest.mark.slow`, `@pytest.mark.snapshot`, `@pytest.mark.real_model`, `@pytest.mark.real_mcp`, `@pytest.mark.flaky`, `@pytest.mark.incompatible_with_thinking`, `@pytest.mark.security`
+
 ```bash
-# Run all tests (excludes slow and acp_snapshot by default)
+# Run all tests (excludes slow, snapshot, e2e, real_model, real_mcp by default)
 uv run pytest
 
 # Run with coverage
 uv run pytest --cov-report=xml --cov=src/agentpool/ --cov-report=term-missing
 
-# Run specific test markers
-uv run pytest -m unit          # Unit tests only
-uv run pytest -m integration   # Integration tests only
+# Run specific test layers
+uv run pytest -m unit          # L1 unit tests only
+uv run pytest -m integration   # L2 integration tests only
+uv run pytest -m vcr           # L3 VCR cassette replay tests
+uv run pytest -m "e2e and not slow"  # L4a smoke e2e tests (~30s, PR-blocking)
+uv run pytest -m e2e           # L4 full e2e suite (nightly)
 uv run pytest -m slow          # Include slow tests
-uv run pytest -m acp_snapshot  # ACP snapshot tests
+uv run pytest -m snapshot      # Syrupy snapshot tests
+
+# Run VCR tests with recording (requires OPENAI_API_KEY)
+uv run pytest tests/vcr/ --record-mode=once
 
 # Run single test file
 uv run pytest tests/test_specific.py
@@ -75,6 +91,9 @@ uv run pytest -vv
 
 # Run tests in parallel
 uv run pytest -n auto
+
+# CI hygiene: verify all test files have layer markers
+python tests/check_markers.py
 ```
 
 ### Code Quality
@@ -1040,9 +1059,13 @@ The project targets Python 3.13+ and **SHOULD** leverage 3.12+ features where th
 ### Testing
 - Tests use pytest (not in classes)
 - Fixtures in `tests/conftest.py`
+- 4-layer pyramid: Unit (L1) → Integration (L2) → VCR (L3) → E2E (L4) — see `tests/AGENTS.md` for full guide
 - TestModel from pydantic-ai for agent testing
+- `ALLOW_MODEL_REQUESTS = False` gate blocks all real model calls by default
+- VCR cassettes at `tests/cassettes/` — record with `--record-mode=once`, replay in CI
+- New protocol handlers REQUIRE VCR + Protocol VCR tests; bug fixes REQUIRE a reproducing test
 - Disable observability in tests (see conftest.py)
-- Markers: `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.slow`
+- Markers: `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.vcr`, `@pytest.mark.e2e`, `@pytest.mark.slow`, `@pytest.mark.snapshot`, `@pytest.mark.real_model`, `@pytest.mark.real_mcp`, `@pytest.mark.flaky`, `@pytest.mark.incompatible_with_thinking`, `@pytest.mark.security`
 
 ### Import Patterns
 ```python

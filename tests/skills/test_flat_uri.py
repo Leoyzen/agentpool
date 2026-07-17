@@ -25,6 +25,8 @@ from agentpool.capabilities.skill_manager_cap import SkillManagerCap
 from agentpool.skills.skill import Skill
 from agentpool.skills.uri_resolver import ResolvedSkillURI, SkillURIResolver
 
+pytestmark = pytest.mark.unit
+
 
 # ---- Test helpers ----
 

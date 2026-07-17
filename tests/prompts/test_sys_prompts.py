@@ -5,6 +5,8 @@ import pytest
 
 from agentpool import Agent
 
+pytestmark = pytest.mark.unit
+
 
 def add(a: int, b: int) -> int:
     """Add two numbers."""

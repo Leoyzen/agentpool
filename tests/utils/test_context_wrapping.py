@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import pytest
+
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, Mock
 
 from pydantic_ai import RunContext
 
 from agentpool.agents.context import AgentContext
+
+pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:

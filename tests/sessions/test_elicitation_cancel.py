@@ -19,6 +19,8 @@ import pytest
 from agentpool import Agent
 from agentpool.agents.events import StreamCompleteEvent
 
+pytestmark = pytest.mark.unit
+
 
 async def test_user_message_preserved_when_no_assistant_response():
     """Test that user message is saved even when no assistant response is generated.

@@ -10,6 +10,8 @@ import pytest
 from agentpool.messaging import ChatMessage, MessageNode
 from agentpool.messaging.messagenode import SourceType, get_source_type
 
+pytestmark = pytest.mark.unit
+
 
 class StubMessageNode(MessageNode[Any, Any]):
     """Concrete MessageNode for testing unknown subclasses."""

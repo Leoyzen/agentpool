@@ -14,6 +14,8 @@ from acp.client.implementations import HeadlessACPClient
 from acp.filesystem import ACPFileSystem
 from acp.schema import ClientCapabilities
 
+pytestmark = pytest.mark.integration
+
 
 async def test_acp_filesystem_fsspec_operations():
     """Test ACP filesystem with real fsspec operations using headless client."""

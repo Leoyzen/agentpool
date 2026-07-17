@@ -10,6 +10,8 @@ import pytest
 from agentpool import AgentPool, AgentsManifest
 from agentpool.delegation.base_team import BaseTeam
 
+pytestmark = pytest.mark.integration
+
 
 class _TestOutput(BaseModel):
     """Expected output format."""

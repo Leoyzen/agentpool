@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 import sys
 from typing import TYPE_CHECKING, Any
@@ -21,6 +23,8 @@ from agentpool.messaging import ChatMessage, MessageNode
 from agentpool.talk import Talk
 from agentpool.talk.graph_edges import TalkEdgeTranslator
 from agentpool.utils.time_utils import get_now
+
+pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:

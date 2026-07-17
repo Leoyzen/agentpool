@@ -9,6 +9,8 @@ from agentpool_config.storage import MemoryStorageConfig, StorageConfig
 from agentpool_storage.memory_provider import MemoryStorageProvider
 from agentpool_storage.opencode_provider import OpenCodeStorageProvider
 
+pytestmark = pytest.mark.unit
+
 
 def _make_manager_with_providers(*capable: bool) -> StorageManager:
     """Create a StorageManager with mock providers.

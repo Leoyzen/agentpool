@@ -9,6 +9,8 @@ import yamling
 
 from agentpool import AgentsManifest
 
+pytestmark = pytest.mark.unit
+
 
 VALID_AGENT_CONFIG = """\
 responses:

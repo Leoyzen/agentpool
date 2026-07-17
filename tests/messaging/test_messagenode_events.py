@@ -8,6 +8,8 @@ from agentpool.agents.events import PartDeltaEvent
 from agentpool.messaging import ChatMessage
 from agentpool.messaging.messagenode import MessageNode
 
+pytestmark = pytest.mark.unit
+
 
 class ConcreteMessageNode(MessageNode[Any, Any]):
     """Concrete implementation of MessageNode for testing."""

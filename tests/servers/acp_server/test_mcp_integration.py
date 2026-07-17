@@ -17,6 +17,8 @@ from agentpool_server.acp_server.converters import convert_acp_mcp_server_to_con
 from agentpool_server.acp_server.session import ACPSession
 from agentpool_server.acp_server.session_manager import ACPSessionManager
 
+pytestmark = pytest.mark.integration
+
 
 if TYPE_CHECKING:
     from acp import ClientCapabilities

@@ -7,6 +7,8 @@ like store=None, store failures, and cwd filtering.
 
 from __future__ import annotations
 
+import pytest
+
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
@@ -15,6 +17,8 @@ from agentpool.sessions.models import SessionData
 from agentpool_server.opencode_server.models import Session
 from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
 from agentpool_server.opencode_server.routes.session_routes import list_sessions
+
+pytestmark = pytest.mark.integration
 
 
 def _make_session_data(
