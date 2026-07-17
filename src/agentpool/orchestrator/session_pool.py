@@ -126,6 +126,11 @@ class SessionPool(
                     "Failed to close session during shutdown",
                     session_id=session_id,
                 )
+            except asyncio.CancelledError:
+                logger.warning(
+                    "CancelledError during shutdown of session",
+                    session_id=session_id,
+                )
         logger.info("SessionPool shut down")
 
     @property

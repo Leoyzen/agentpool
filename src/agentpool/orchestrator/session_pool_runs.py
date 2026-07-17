@@ -66,6 +66,7 @@ class SessionPoolRunsMixin:
         agent: BaseAgent[Any, Any],
         session_id: str,
         *,
+        deps: Any = None,
         cached_elicitation_responses: dict[str, Any] | None = None,
         deferred_tool_results: Any = None,
         message_history: list[ModelMessage] | None = None,
@@ -94,6 +95,8 @@ class SessionPoolRunsMixin:
             session: The session state.
             agent: The agent instance (native or ACP).
             session_id: The session identifier.
+            deps: Optional dependencies to pass to the agent run context
+                (e.g. delegation_depth from BackgroundTaskCapability).
             cached_elicitation_responses: Pre-populated elicitation
                 responses for crash recovery resume.
             deferred_tool_results: Deferred tool results for resolving
@@ -123,7 +126,7 @@ class SessionPoolRunsMixin:
                 raise SessionBusyError(session_id, session.current_run_id)
 
         event_bus = self.event_bus
-        run_ctx = AgentRunContext(session_id=session_id, event_bus=event_bus)
+        run_ctx = AgentRunContext(session_id=session_id, event_bus=event_bus, deps=deps)
         if cached_elicitation_responses is not None:
             run_ctx.cached_elicitation_responses = cached_elicitation_responses
 
@@ -296,6 +299,10 @@ class SessionPoolRunsMixin:
         input_provider = kwargs.pop("input_provider", None)
         if input_provider is not None:
             session.input_provider = input_provider
+        # Extract deps from kwargs so they are passed to AgentRunContext
+        # for the child agent run (e.g. delegation_depth from
+        # BackgroundTaskCapability._task_async).
+        deps = kwargs.pop("deps", None)
         # Extract resume parameters — only set by resume_session().
         cached_elicitation_responses: dict[str, Any] | None = kwargs.pop(
             "cached_elicitation_responses", None
@@ -381,6 +388,7 @@ class SessionPoolRunsMixin:
                 session,
                 agent,
                 session_id,
+                deps=deps,
                 cached_elicitation_responses=cached_elicitation_responses,
                 deferred_tool_results=deferred_tool_results,
                 message_history=message_history,
@@ -403,7 +411,13 @@ class SessionPoolRunsMixin:
                 if isinstance(evt, StreamCompleteEvent | RunErrorEvent):
                     break
         finally:
-            await gen.aclose()
-            await self.event_bus.unsubscribe(session_id, bus_queue)
+            # gen.aclose() and subsequent cleanup may raise CancelledError
+            # or RuntimeError from pydantic-ai's anyio cancel scope cleanup
+            # during GeneratorExit. Suppress these so session state is
+            # always cleaned up (run_id cleared, handle removed).
+            with contextlib.suppress(asyncio.CancelledError, RuntimeError):
+                await gen.aclose()
+            with contextlib.suppress(asyncio.CancelledError, RuntimeError):
+                await self.event_bus.unsubscribe(session_id, bus_queue)
             session.current_run_id = None
             self.sessions._runs.pop(run_handle.run_id, None)

@@ -58,6 +58,7 @@ class SessionPoolMessagingMixin:
             agent: BaseAgent[Any, Any],
             session_id: str,
             *,
+            deps: Any = None,
             cached_elicitation_responses: dict[str, Any] | None = None,
             deferred_tool_results: Any = None,
             message_history: list[Any] | None = None,
