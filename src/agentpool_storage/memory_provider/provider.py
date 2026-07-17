@@ -423,9 +423,10 @@ class MemoryStorageProvider(StorageProvider):
         return self.sessions.get(session_id)
 
     async def delete_session(self, session_id: str) -> bool:
-        """Delete a session."""
+        """Delete a session and its checkpoint data."""
         if session_id in self.sessions:
             del self.sessions[session_id]
+            self._checkpoints.pop(session_id, None)
             return True
         return False
 
@@ -509,6 +510,13 @@ class MemoryStorageProvider(StorageProvider):
                     continue
                 result.append(session)
         return result
+
+    async def update_sdk_session_id(
+        self,
+        session_id: str,
+        sdk_session_id: str,
+    ) -> None:
+        """No-op for in-memory provider — SDK session IDs are not persisted."""
 
     # Project methods
     # Project methods

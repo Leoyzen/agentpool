@@ -29,7 +29,7 @@ from agentpool.agents.events import (
 )
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 from agentpool.orchestrator.core import EventEnvelope
-from agentpool.sessions.store import MemorySessionStore
+from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 from agentpool_toolsets.builtin.subagent_tools import SubagentTools
 
 
@@ -159,7 +159,7 @@ agents:
 
 async def test_child_session_data_persists_with_parent_id() -> None:
     """Child session created by task() is persisted with correct parent_id."""
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     manifest = AgentsManifest.from_yaml("""
 agents:
   worker:
@@ -198,7 +198,7 @@ agents:
         assert child_session_id_from_spawn is not None, "SpawnSessionStart not emitted"
 
         # Verify child session was persisted (must check before pool shutdown)
-        child_data = await store.load(child_session_id_from_spawn)
+        child_data = await store.load_session(child_session_id_from_spawn)
         assert child_data is not None, (
             f"Child session {child_session_id_from_spawn} was not persisted in store"
         )

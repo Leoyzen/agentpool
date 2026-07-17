@@ -133,13 +133,13 @@ class TestSessionCloseCheckpointAware:
         pending deferred calls, the session should be marked as 'checkpointed'
         and NOT deleted from storage.
         """
-        from agentpool.sessions.store import MemorySessionStore
+        from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
-        store = MemorySessionStore()
+        store = MemoryStorageProvider()
 
-        await store.save(checkpointed_session_data)
+        await store.save_session(checkpointed_session_data)
 
-        loaded = await store.load("checkpointed-sess-1")
+        loaded = await store.load_session("checkpointed-sess-1")
         assert loaded is not None, "Session should exist before close"
         assert loaded.status == "checkpointed"
         assert len(loaded.pending_deferred_calls) == 1
@@ -153,13 +153,13 @@ class TestSessionCloseCheckpointAware:
 
         Normal close (no deferred calls) should delete the session from storage.
         """
-        from agentpool.sessions.store import MemorySessionStore
+        from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
-        store = MemorySessionStore()
+        store = MemoryStorageProvider()
 
-        await store.save(active_session_data)
+        await store.save_session(active_session_data)
 
-        loaded = await store.load("active-sess-1")
+        loaded = await store.load_session("active-sess-1")
         assert loaded is not None, "Session should exist before close"
         assert len(loaded.pending_deferred_calls) == 0
 

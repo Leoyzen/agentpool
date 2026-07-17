@@ -9,12 +9,12 @@ from agentpool import Agent
 from agentpool.delegation import AgentPool
 from agentpool.orchestrator.core import SessionPool
 from agentpool.sessions import SessionData
-from agentpool.sessions.store import MemorySessionStore
 from agentpool_server.acp_server.session_manager import ACPSessionManager
+from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
 
-def _make_pool_with_sessions() -> tuple[AgentPool, Agent, SessionPool, MemorySessionStore]:
-    """Create a pool with a real SessionPool backed by MemorySessionStore."""
+def _make_pool_with_sessions() -> tuple[AgentPool, Agent, SessionPool, MemoryStorageProvider]:
+    """Create a pool with a real SessionPool backed by MemoryStorageProvider."""
     from agentpool.models.agents import NativeAgentConfig
     from agentpool.models.manifest import AgentsManifest
 
@@ -27,7 +27,7 @@ def _make_pool_with_sessions() -> tuple[AgentPool, Agent, SessionPool, MemorySes
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
 
@@ -80,7 +80,7 @@ async def test_top_level_session_has_no_parent():
         )
 
     # Verify the session was persisted via store
-    data = await store.load(session_id)
+    data = await store.load_session(session_id)
     assert data is not None
     assert data.parent_id is None
     assert data.project_id is not None
@@ -102,7 +102,7 @@ async def test_child_session_inherits_parent_project_id():
         cwd=parent_cwd,
         project_id=parent_project_id,
     )
-    await store.save(parent_data)
+    await store.save_session(parent_data)
 
     manager = ACPSessionManager(pool=pool)
     mock_client = MagicMock()
@@ -127,7 +127,7 @@ async def test_child_session_inherits_parent_project_id():
         )
 
     # Load child session data from store
-    child_data = await store.load(session_id)
+    child_data = await store.load_session(session_id)
     assert child_data is not None
     # Child should inherit parent's project_id
     assert child_data.project_id == parent_project_id
@@ -153,7 +153,7 @@ async def test_child_session_uses_effective_cwd_for_acp_session():
         cwd=parent_cwd,
         project_id=parent_project_id,
     )
-    await store.save(parent_data)
+    await store.save_session(parent_data)
 
     manager = ACPSessionManager(pool=pool)
     mock_client = MagicMock()
@@ -211,7 +211,7 @@ async def test_no_parent_session_id_preserves_existing_behavior():
             parent_session_id=None,
         )
 
-    data = await store.load(session_id)
+    data = await store.load_session(session_id)
     assert data is not None
     assert data.parent_id is None
     assert data.project_id is not None

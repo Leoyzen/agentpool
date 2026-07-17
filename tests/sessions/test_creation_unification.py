@@ -15,8 +15,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool.sessions.store import MemorySessionStore
 from agentpool.utils.identifiers import generate_session_id
+from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
 
 if TYPE_CHECKING:
@@ -43,7 +43,7 @@ def _make_mock_pool() -> MagicMock:
 @pytest.mark.anyio
 async def test_session_pool_create_session_registers_in_pool() -> None:
     """SessionPool.create_session() registers the session in the controller."""
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     mock_pool = _make_mock_pool()
     async with store:
         from agentpool.orchestrator.session_controller import SessionController
@@ -63,7 +63,7 @@ async def test_session_pool_create_session_registers_in_pool() -> None:
 @pytest.mark.anyio
 async def test_acp_creation_path_registers_in_pool() -> None:
     """ACP creation path delegates to SessionPool.create_session()."""
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     mock_pool = _make_mock_pool()
     async with store:
         from agentpool.orchestrator.session_controller import SessionController
@@ -89,7 +89,7 @@ async def test_acp_creation_path_registers_in_pool() -> None:
 @pytest.mark.anyio
 async def test_a2a_creation_path_registers_in_pool() -> None:
     """A2A creation path uses SessionPool.create_session() + get_or_create_session_agent."""
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     mock_pool = _make_mock_pool()
     async with store:
         from agentpool.orchestrator.session_controller import SessionController
@@ -105,7 +105,7 @@ async def test_a2a_creation_path_registers_in_pool() -> None:
 @pytest.mark.anyio
 async def test_agui_creation_path_registers_in_pool() -> None:
     """AG-UI creation path uses two-step pattern: create_session + get_or_create_session_agent."""
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     mock_pool = _make_mock_pool()
     async with store:
         from agentpool.orchestrator.session_controller import SessionController
@@ -121,7 +121,7 @@ async def test_agui_creation_path_registers_in_pool() -> None:
 @pytest.mark.anyio
 async def test_openai_api_creation_path_registers_in_pool() -> None:
     """OpenAI API creation path uses generate_session_id()."""
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     mock_pool = _make_mock_pool()
     async with store:
         from agentpool.orchestrator.session_controller import SessionController
@@ -141,7 +141,7 @@ async def test_openai_api_creation_path_registers_in_pool() -> None:
 @pytest.mark.anyio
 async def test_child_session_inherits_parent_project_id_and_cwd() -> None:
     """Child session created via SessionPool inherits parent's project_id and cwd."""
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     mock_pool = _make_mock_pool()
     async with store:
         from agentpool.orchestrator.session_controller import SessionController
@@ -179,7 +179,7 @@ async def test_child_session_inherits_parent_project_id_and_cwd() -> None:
 @pytest.mark.anyio
 async def test_create_child_session_api_inherits_parent() -> None:
     """SessionPool.create_child_session() inherits parent's project_id and cwd."""
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     mock_pool = _make_mock_pool()
     async with store:
         from agentpool.orchestrator.session_pool import SessionPool
@@ -265,7 +265,7 @@ def test_session_id_format() -> None:
 @pytest.mark.anyio
 async def test_acp_create_delegates_to_session_pool() -> None:
     """ACP create delegates to SessionPool (no direct store.save_session)."""
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     mock_pool = _make_mock_pool()
     async with store:
         from agentpool.orchestrator.session_controller import SessionController
@@ -303,7 +303,7 @@ async def test_acp_create_delegates_to_session_pool() -> None:
 @pytest.mark.anyio
 async def test_acp_close_delegates_through_chain() -> None:
     """ACP close delegates through SessionController → RunHandle cleanup."""
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     mock_pool = _make_mock_pool()
     async with store:
         from agentpool.orchestrator.session_controller import SessionController
@@ -328,7 +328,7 @@ async def test_acp_close_delegates_through_chain() -> None:
 @pytest.mark.anyio
 async def test_agui_child_consumer_lifecycle() -> None:
     """AG-UI child consumer lifecycle works after create_child_session extraction."""
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     mock_pool = _make_mock_pool()
     async with store:
         from agentpool.orchestrator.session_pool import SessionPool
@@ -355,7 +355,7 @@ async def test_agui_child_consumer_lifecycle() -> None:
 @pytest.mark.anyio
 async def test_openai_api_child_consumer_lifecycle() -> None:
     """OpenAI API session lifecycle works with generate_session_id()."""
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     mock_pool = _make_mock_pool()
     async with store:
         from agentpool.orchestrator.session_controller import SessionController
@@ -385,7 +385,7 @@ async def test_openai_api_child_consumer_lifecycle() -> None:
 @pytest.mark.anyio
 async def test_concurrent_session_creation_multiple_protocols() -> None:
     """Concurrent session creation from ACP + OpenCode + AG-UI clients simultaneously."""
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     mock_pool = _make_mock_pool()
     async with store:
         from agentpool.orchestrator.session_controller import SessionController

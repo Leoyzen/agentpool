@@ -56,11 +56,12 @@ def make_mcp_httpx_client_factory(
                 write=timeout.write,
                 pool=timeout.pool,
             )
+        # fastmcp passes follow_redirects=True via kwargs; don't duplicate it.
+        kwargs.setdefault("follow_redirects", True)
         return httpx.AsyncClient(
             headers=headers,
             timeout=timeout,
             auth=auth,
-            follow_redirects=True,
             **kwargs,
         )
 

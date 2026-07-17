@@ -131,9 +131,9 @@ async def test_session_state_checkpoint_enabled_with_store() -> None:
     When SessionController is constructed with a non-None store,
     create_session() must set SessionState.checkpoint_enabled=True.
     """
-    from agentpool.sessions.store import MemorySessionStore
+    from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     pool = _FakePool()
     controller = SessionController(pool=pool, store=store)  # type: ignore[arg-type]
 

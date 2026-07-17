@@ -30,7 +30,7 @@ from agentpool.agents.events import (
 )
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 from agentpool.sessions import SessionData
-from agentpool.sessions.store import MemorySessionStore
+from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
 
 if TYPE_CHECKING:
@@ -77,7 +77,7 @@ async def test_subagent_child_session_parent_id_in_session_data() -> None:
     This is a cross-provider variant: verifies the child SessionData created
     by SubagentTools has parent_id pointing to the orchestrator's session.
     """
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     manifest = AgentsManifest.from_yaml("""
 agents:
   worker:
@@ -115,7 +115,7 @@ agents:
         parent_session_id = "ses_test"
         assert parent_session_id is not None
 
-        child_data = await store.load(child_session_id_from_spawn)
+        child_data = await store.load_session(child_session_id_from_spawn)
         assert child_data is not None
         assert child_data.parent_id == parent_session_id
         assert child_data.agent_name == "worker"
@@ -349,7 +349,7 @@ async def test_acp_child_session_inherits_parent_project_and_cwd() -> None:
 
     Agent.from_callback(name="acp_agent", callback=simple_callback, agent_pool=pool)
 
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
     pool.storage.generate_session_id = MagicMock(return_value="acp_top_001")  # type: ignore[assignment]
@@ -365,7 +365,7 @@ async def test_acp_child_session_inherits_parent_project_and_cwd() -> None:
         cwd=parent_cwd,
         project_id=parent_project_id,
     )
-    await store.save(parent_data)
+    await store.save_session(parent_data)
 
     manager = ACPSessionManager(pool=pool)
     mock_client = MagicMock()
@@ -389,7 +389,7 @@ async def test_acp_child_session_inherits_parent_project_and_cwd() -> None:
             parent_session_id="acp_parent_001",
         )
 
-    child_data = await store.load(session_id)
+    child_data = await store.load_session(session_id)
     assert child_data is not None
     assert child_data.parent_id == "acp_parent_001"
     assert child_data.project_id == parent_project_id, "Child must inherit parent project_id"
@@ -456,7 +456,7 @@ agents:
 
 async def test_workers_child_session_persisted_with_correct_parent() -> None:
     """TG-15: WorkersTools creates child session with correct parent_session_id and the...."""
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     manifest = AgentsManifest.from_yaml("""
 agents:
   main:
@@ -500,7 +500,7 @@ agents:
 
         assert child_session_id is not None, "No SpawnSessionStart from worker"
 
-        child_data = await store.load(child_session_id)
+        child_data = await store.load_session(child_session_id)
         assert child_data is not None, f"Child session {child_session_id} not persisted"
         assert child_data.agent_name == "worker"
 

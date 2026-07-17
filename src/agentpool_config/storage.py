@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Final, Literal
+from typing import TYPE_CHECKING, Annotated, Final, Literal
 
 from platformdirs import user_data_dir
 from pydantic import ConfigDict, Field
@@ -17,8 +17,6 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
     from agentpool_storage.base import StorageProvider
-
-from agentpool.sessions.store import MemorySessionStore
 
 
 FilterMode = Literal["and", "override"]
@@ -132,14 +130,6 @@ class SQLStorageConfig(BaseStorageProviderConfig):
         from agentpool_storage.sql_provider import SQLModelProvider
 
         return SQLModelProvider(self)
-
-    def get_session_store(self) -> Any:
-        """Create a session store using this config's database.
-
-        Returns the SQLModelProvider instance which implements both
-        ``SessionPersistence`` and ``CheckpointStore`` Protocols.
-        """
-        return self.get_provider()
 
 
 class FileStorageConfig(BaseStorageProviderConfig):
@@ -341,15 +331,3 @@ class StorageConfig(Schema):
         if self.providers is None:
             return [MemoryStorageConfig()] if is_pytest() else [SQLStorageConfig()]
         return self.providers
-
-    def get_session_store(self) -> Any | None:
-        """Get the session store from the first SQL provider.
-
-        Returns:
-            Session store if available, MemorySessionStore as fallback, None otherwise.
-        """
-        for provider in self.effective_providers:
-            if isinstance(provider, SQLStorageConfig):
-                return provider.get_session_store()
-        # Fallback to MemorySessionStore for compatibility
-        return MemorySessionStore()

@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentpool.sessions import SessionData
-from agentpool.sessions.store import MemorySessionStore
+from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
 
 # ---------------------------------------------------------------------------
@@ -27,12 +27,12 @@ from agentpool.sessions.store import MemorySessionStore
 # ---------------------------------------------------------------------------
 
 
-class TestSessionStoreOpaqueLookup:
-    """Session stores must accept any string as a session ID."""
+class TestStorageProviderOpaqueLookup:
+    """Storage providers must accept any string as a session ID."""
 
     @pytest.fixture
-    def store(self) -> MemorySessionStore:
-        return MemorySessionStore()
+    def store(self) -> MemoryStorageProvider:
+        return MemoryStorageProvider()
 
     @pytest.mark.parametrize(
         "session_id",
@@ -51,14 +51,14 @@ class TestSessionStoreOpaqueLookup:
         ids=["ascending", "uuid4", "ulid", "counter", "arbitrary"],
     )
     async def test_store_save_load_opaque_id(
-        self, store: MemorySessionStore, session_id: str
+        self, store: MemoryStorageProvider, session_id: str
     ) -> None:
-        """MemorySessionStore must save/load sessions with any string ID."""
+        """MemoryStorageProvider must save/load sessions with any string ID."""
         data = SessionData(session_id=session_id, agent_name="test_agent")
 
         async with store:
-            await store.save(data)
-            loaded = await store.load(session_id)
+            await store.save_session(data)
+            loaded = await store.load_session(session_id)
 
         assert loaded is not None
         assert loaded.session_id == session_id
@@ -72,13 +72,15 @@ class TestSessionStoreOpaqueLookup:
         ],
         ids=["ascending", "uuid4", "arbitrary"],
     )
-    async def test_store_delete_opaque_id(self, store: MemorySessionStore, session_id: str) -> None:
-        """MemorySessionStore.delete must work with any string ID."""
+    async def test_store_delete_opaque_id(
+        self, store: MemoryStorageProvider, session_id: str
+    ) -> None:
+        """MemoryStorageProvider.delete_session must work with any string ID."""
         data = SessionData(session_id=session_id, agent_name="test_agent")
 
         async with store:
-            await store.save(data)
-            deleted = await store.delete(session_id)
+            await store.save_session(data)
+            deleted = await store.delete_session(session_id)
 
         assert deleted is True
 
@@ -92,14 +94,14 @@ class TestSessionStoreOpaqueLookup:
         ids=["ascending", "uuid4", "arbitrary"],
     )
     async def test_store_list_sessions_with_opaque_id(
-        self, store: MemorySessionStore, session_id: str
+        self, store: MemoryStorageProvider, session_id: str
     ) -> None:
-        """MemorySessionStore.list_sessions must return opaque IDs unchanged."""
+        """MemoryStorageProvider.list_session_ids must return opaque IDs unchanged."""
         data = SessionData(session_id=session_id, agent_name="test_agent", pool_id="pool1")
 
         async with store:
-            await store.save(data)
-            ids = await store.list_sessions(pool_id="pool1")
+            await store.save_session(data)
+            ids = await store.list_session_ids(pool_id="pool1")
 
         assert session_id in ids
 
@@ -151,9 +153,9 @@ class TestSessionPoolOpaqueChildId:
         from agentpool.orchestrator import SessionPool
         from agentpool.utils.identifiers import generate_session_id
 
-        store = MemorySessionStore()
+        store = MemoryStorageProvider()
         parent = SessionData(session_id=parent_id, agent_name="parent_agent")
-        await store.save(parent)
+        await store.save_session(parent)
 
         session_pool = SessionPool(pool=mock_pool, store=store)
         state = await session_pool.create_session(
@@ -163,7 +165,7 @@ class TestSessionPoolOpaqueChildId:
         )
         child_id = state.session_id
 
-        child = await store.load(child_id)
+        child = await store.load_session(child_id)
         assert child is not None
         assert child.parent_id == parent_id
 
@@ -182,9 +184,9 @@ class TestSessionPoolOpaqueChildId:
         from agentpool.orchestrator import SessionPool
         from agentpool.utils.identifiers import generate_session_id
 
-        store = MemorySessionStore()
+        store = MemoryStorageProvider()
         parent = SessionData(session_id=parent_id, agent_name="parent_agent")
-        await store.save(parent)
+        await store.save_session(parent)
 
         session_pool = SessionPool(pool=mock_pool, store=store)
         state = await session_pool.create_session(

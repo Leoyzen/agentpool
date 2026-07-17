@@ -621,7 +621,6 @@ ignore_imports = [
     "agentpool_config.prompts -> agentpool.log",
     "agentpool_config.session -> agentpool.utils.parse_time",
     "agentpool_config.session -> agentpool.utils.time_utils",
-    "agentpool_config.storage -> agentpool.sessions.store",
     "agentpool_config.storage -> agentpool_storage.acp_provider",
     "agentpool_config.storage -> agentpool_storage.base",
     "agentpool_config.storage -> agentpool_storage.file_provider",

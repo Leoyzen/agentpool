@@ -6,7 +6,6 @@ from agentpool.sessions.state_mapper import (
     SessionStateMapper,
     VALID_SESSION_STATUSES,
 )
-from agentpool.sessions.store import SessionStore
 from agentpool_storage.protocols import SessionPersistence
 
 __all__ = [
@@ -16,5 +15,4 @@ __all__ = [
     "SessionData",
     "SessionPersistence",
     "SessionStateMapper",
-    "SessionStore",
 ]

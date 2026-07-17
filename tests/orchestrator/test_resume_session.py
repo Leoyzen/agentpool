@@ -134,10 +134,10 @@ def mock_pool() -> MagicMock:
 
 @pytest.fixture
 async def session_pool(mock_pool: MagicMock) -> SessionPool:
-    """Return a SessionPool backed by a MemorySessionStore."""
-    from agentpool.sessions.store import MemorySessionStore
+    """Return a SessionPool backed by a MemoryStorageProvider."""
+    from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     return SessionPool(pool=mock_pool, store=store)
 
 
@@ -193,7 +193,7 @@ async def test_resume_session_raises_mismatch_error_missing_results(
 
     store = session_pool.sessions.store
     assert store is not None
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             pending=[make_pending_call("call-1"), make_pending_call("call-2")],
@@ -216,7 +216,7 @@ async def test_resume_session_raises_mismatch_error_extra_results(
 
     store = session_pool.sessions.store
     assert store is not None
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             pending=[make_pending_call("call-1")],
@@ -242,7 +242,7 @@ async def test_resume_session_serialized_via_resume_lock(
     """Concurrent resume_session calls are serialized via per-session lock."""
     store = session_pool.sessions.store
     assert store is not None
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             pending=[make_pending_call("call-1")],
@@ -275,7 +275,7 @@ async def test_resume_native_agent_loads_checkpoint_and_runs(
     """
     store = session_pool.sessions.store
     assert store is not None
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             agent_name="test-agent",
@@ -344,7 +344,7 @@ async def test_resume_native_agent_clears_pending_after_success(
     """pending_deferred_calls are cleared ONLY after agent.run() succeeds."""
     store = session_pool.sessions.store
     assert store is not None
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             agent_type="native",
@@ -379,7 +379,7 @@ async def test_resume_native_agent_clears_pending_after_success(
         await session_pool.resume_session("sess-1", results)
 
     # After successful resume, pending_deferred_calls should be cleared
-    session_data = await store.load("sess-1")
+    session_data = await store.load_session("sess-1")
     assert session_data is not None
     assert session_data.pending_deferred_calls == []
 
@@ -392,7 +392,7 @@ async def test_resume_native_agent_does_not_clear_pending_on_failure(
     """pending_deferred_calls are NOT cleared if agent.run() fails."""
     store = session_pool.sessions.store
     assert store is not None
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             agent_type="native",
@@ -428,7 +428,7 @@ async def test_resume_native_agent_does_not_clear_pending_on_failure(
             await session_pool.resume_session("sess-1", results)
 
     # After failed resume, pending_deferred_calls should NOT be cleared
-    session_data = await store.load("sess-1")
+    session_data = await store.load_session("sess-1")
     assert session_data is not None
     assert len(session_data.pending_deferred_calls) == 1
     assert session_data.pending_deferred_calls[0].tool_call_id == "call-1"
@@ -447,7 +447,7 @@ async def test_resume_session_emits_resume_event(
     """resume_session emits SessionResumeEvent on successful resume."""
     store = session_pool.sessions.store
     assert store is not None
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             agent_type="native",
@@ -517,7 +517,7 @@ async def test_resume_session_transitions_status_to_active(
     """resume_session transitions status from 'checkpointed' to 'active' on success."""
     store = session_pool.sessions.store
     assert store is not None
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             agent_type="native",
@@ -551,7 +551,7 @@ async def test_resume_session_transitions_status_to_active(
         results = make_deferred_tool_results(["call-1"])
         await session_pool.resume_session("sess-1", results)
 
-    session_data = await store.load("sess-1")
+    session_data = await store.load_session("sess-1")
     assert session_data is not None
     assert session_data.status == "active"
 
@@ -569,7 +569,7 @@ async def test_resume_session_keeps_checkpointed_status_on_failure(
     """resume_session keeps status as 'checkpointed' when agent.run() fails."""
     store = session_pool.sessions.store
     assert store is not None
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             agent_type="native",
@@ -604,7 +604,7 @@ async def test_resume_session_keeps_checkpointed_status_on_failure(
         with pytest.raises(RuntimeError, match="Boom"):
             await session_pool.resume_session("sess-1", results)
 
-    session_data = await store.load("sess-1")
+    session_data = await store.load_session("sess-1")
     assert session_data is not None
     assert session_data.status == "checkpointed"
 
@@ -622,7 +622,7 @@ async def test_resume_acp_agent_reopens_subprocess(
     """resume_session for ACP agent reopens subprocess and sends session/resume."""
     store = session_pool.sessions.store
     assert store is not None
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-acp",
             agent_name="acp-agent",
@@ -677,7 +677,7 @@ async def test_resume_session_with_empty_pending_calls(
     """resume_session handles empty pending_deferred_calls gracefully."""
     store = session_pool.sessions.store
     assert store is not None
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             agent_type="native",
@@ -713,6 +713,6 @@ async def test_resume_session_with_empty_pending_calls(
         await session_pool.resume_session("sess-1", results)
 
     # Successful completion implies run_stream was called
-    session_data = await store.load("sess-1")
+    session_data = await store.load_session("sess-1")
     assert session_data is not None
     assert session_data.status == "active"

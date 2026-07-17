@@ -9,9 +9,9 @@ import pytest
 
 from agentpool.orchestrator import SessionPool
 from agentpool.sessions import SessionData
-from agentpool.sessions.store import MemorySessionStore
 from agentpool.utils.identifiers import generate_session_id
 from agentpool_config.storage import SQLStorageConfig
+from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 from agentpool_storage.sql_provider import SQLModelProvider
 
 
@@ -28,9 +28,9 @@ def mock_pool() -> MagicMock:
 
 
 @pytest.fixture
-def memory_store() -> MemorySessionStore:
-    """Create a memory session store for testing."""
-    return MemorySessionStore()
+def memory_store() -> MemoryStorageProvider:
+    """Create a memory storage provider for testing."""
+    return MemoryStorageProvider()
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ class TestSessionHierarchy:
     """Tests for session parent-child hierarchy."""
 
     async def test_create_with_parent_id(
-        self, mock_pool: MagicMock, memory_store: MemorySessionStore
+        self, mock_pool: MagicMock, memory_store: MemoryStorageProvider
     ) -> None:
         """Test that parent_id is persisted correctly via create_session."""
         session_pool = SessionPool(pool=mock_pool, store=memory_store)
@@ -53,7 +53,7 @@ class TestSessionHierarchy:
 
         # Create parent session directly in store
         parent = SessionData(session_id="parent_1", agent_name="coordinator")
-        await memory_store.save(parent)
+        await memory_store.save_session(parent)
 
         # Create child session via session pool
         child_state = await session_pool.create_session(
@@ -64,17 +64,17 @@ class TestSessionHierarchy:
         child_id = child_state.session_id
 
         # Verify child has parent_id
-        child = await memory_store.load(child_id)
+        child = await memory_store.load_session(child_id)
         assert child is not None
         assert child.parent_id == "parent_1"
 
         # Verify when loaded again
-        loaded = await memory_store.load(child_id)
+        loaded = await memory_store.load_session(child_id)
         assert loaded is not None
         assert loaded.parent_id == "parent_1"
 
     async def test_list_by_parent_id_memory(
-        self, mock_pool: MagicMock, memory_store: MemorySessionStore
+        self, mock_pool: MagicMock, memory_store: MemoryStorageProvider
     ) -> None:
         """Test filtering sessions by parent_id with memory store."""
         session_pool = SessionPool(pool=mock_pool, store=memory_store)
@@ -82,10 +82,10 @@ class TestSessionHierarchy:
 
         # Create root and parent sessions directly
         root = SessionData(session_id="root_1", agent_name="root_agent")
-        await memory_store.save(root)
+        await memory_store.save_session(root)
 
         parent = SessionData(session_id="parent_1", agent_name="parent_agent")
-        await memory_store.save(parent)
+        await memory_store.save_session(parent)
 
         # Create child sessions via session pool
         child1_state = await session_pool.create_session(
@@ -101,8 +101,13 @@ class TestSessionHierarchy:
         child1_id = child1_state.session_id
         child2_id = child2_state.session_id
 
-        # List children of parent via store
-        children = await memory_store.list_sessions(parent_id="parent_1")
+        # List children of parent by filtering in Python
+        all_ids = await memory_store.list_session_ids()
+        children: list[str] = []
+        for sid in all_ids:
+            s = await memory_store.load_session(sid)
+            if s is not None and s.parent_id == "parent_1":
+                children.append(s.session_id)
 
         # Verify only children of parent are returned
         assert len(children) == 2
@@ -154,7 +159,7 @@ class TestSessionHierarchy:
             assert "parent_1" not in children
 
     async def test_create_with_invalid_parent(
-        self, mock_pool: MagicMock, memory_store: MemorySessionStore
+        self, mock_pool: MagicMock, memory_store: MemoryStorageProvider
     ) -> None:
         """Test that creating with non-existent parent_id succeeds (permissive)."""
         session_pool = SessionPool(pool=mock_pool, store=memory_store)
@@ -169,25 +174,25 @@ class TestSessionHierarchy:
         child_id = child_state.session_id
 
         # Should succeed (permissive validation)
-        child = await memory_store.load(child_id)
+        child = await memory_store.load_session(child_id)
         assert child is not None
         assert child.parent_id == "nonexistent_parent_id"
 
         # Verify persisted correctly
-        loaded = await memory_store.load(child_id)
+        loaded = await memory_store.load_session(child_id)
         assert loaded is not None
         assert loaded.parent_id == "nonexistent_parent_id"
 
     async def test_list_by_parent_id_with_no_children(
-        self, mock_pool: MagicMock, memory_store: MemorySessionStore
+        self, mock_pool: MagicMock, memory_store: MemoryStorageProvider
     ) -> None:
         """Test filtering by parent_id returns empty list when no children exist."""
         session_pool = SessionPool(pool=mock_pool, store=memory_store)
         await session_pool.start()
 
         # Create parent but no children
-        await memory_store.save(SessionData(session_id="parent_1", agent_name="root_agent"))
-        await memory_store.save(SessionData(session_id="other_1", agent_name="other_agent"))
+        await memory_store.save_session(SessionData(session_id="parent_1", agent_name="root_agent"))
+        await memory_store.save_session(SessionData(session_id="other_1", agent_name="other_agent"))
 
         # List children of non-existent parent via session pool controller
         children = session_pool.sessions.get_children("nonexistent_parent")
@@ -196,7 +201,7 @@ class TestSessionHierarchy:
         assert len(children) == 0
 
     async def test_nested_hierarchy(
-        self, mock_pool: MagicMock, memory_store: MemorySessionStore
+        self, mock_pool: MagicMock, memory_store: MemoryStorageProvider
     ) -> None:
         """Test multi-level hierarchy (grandparent -> parent -> child)."""
         session_pool = SessionPool(pool=mock_pool, store=memory_store)
@@ -204,7 +209,7 @@ class TestSessionHierarchy:
 
         # Create grandparent session directly
         grandparent = SessionData(session_id="gp_1", agent_name="root_agent")
-        await memory_store.save(grandparent)
+        await memory_store.save_session(grandparent)
 
         # Create parent as child of grandparent
         parent_state = await session_pool.create_session(
@@ -222,14 +227,23 @@ class TestSessionHierarchy:
         )
         child_id = child_state.session_id
 
-        # Verify hierarchy through list operations
-        grandparent_children = await memory_store.list_sessions(parent_id="gp_1")
+        # Verify hierarchy by loading all sessions and filtering by parent_id in Python
+        all_ids = await memory_store.list_session_ids()
+
+        # Load all sessions once for filtering
+        loaded_sessions: list[SessionData] = []
+        for sid in all_ids:
+            s = await memory_store.load_session(sid)
+            if s is not None:
+                loaded_sessions.append(s)
+
+        grandparent_children = [s.session_id for s in loaded_sessions if s.parent_id == "gp_1"]
         assert len(grandparent_children) == 1
         assert parent_id in grandparent_children
 
-        parent_children = await memory_store.list_sessions(parent_id=parent_id)
+        parent_children = [s.session_id for s in loaded_sessions if s.parent_id == parent_id]
         assert len(parent_children) == 1
         assert child_id in parent_children
 
-        child_children = await memory_store.list_sessions(parent_id=child_id)
+        child_children = [s.session_id for s in loaded_sessions if s.parent_id == child_id]
         assert len(child_children) == 0
