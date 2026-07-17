@@ -332,3 +332,278 @@ def test_compaction_extract_text_content_uses_summarize() -> None:
     assert "describe this" in result
     assert "[image/png]" in result
     assert "BinaryContent" not in result
+
+
+# ---------------------------------------------------------------------------
+# Integration: crash recovery restores multimodal prompts
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_crash_recovery_restores_multimodal_prompts() -> None:
+    """_handle_recovery() should deserialize prompts_serialized for retry strategy.
+
+    Constructs a RunHandle with MemoryJournal + MemorySnapshotStore, saves a
+    snapshot containing ``prompts_serialized`` with a BinaryImage, adds a
+    journal entry that triggers in-flight detection, then calls
+    ``_handle_recovery()`` and verifies the deserialized multimodal prompts
+    are appended to ``_message_queue``.
+    """
+    from agentpool.lifecycle import (
+        DirectChannel,
+        ImmediateTrigger,
+        InProcessTransport,
+        MemoryJournal,
+        MemorySnapshotStore,
+    )
+    from agentpool.orchestrator.run import RunHandle
+
+    journal = MemoryJournal()
+    snapshot_store = MemorySnapshotStore()
+
+    img = BinaryImage(data=b"\x89PNG\r\n\x1a\n", media_type="image/png")
+    prompts: list[str | list[Any]] = ["hello", ["describe this", img]]
+    prompts_serialized = serialize_prompts(prompts)
+    assert prompts_serialized is not None
+
+    # Add a dummy journal entry first so the real entry's seq exceeds
+    # the snapshot store's seq (they use independent counters).
+    journal.append({"event": "pre-snapshot"})
+
+    # Save a snapshot with multimodal prompts (simulating pre-turn snapshot).
+    snapshot_store.save({
+        "state": "running",
+        "run_id": "test-run",
+        "turn_id": "turn-1",
+        "prompt": "hello\ndescribe this [image/png]",
+        "prompts_serialized": prompts_serialized,
+    })
+
+    # Add a journal entry with turn_id so _detect_inflight_turn finds it.
+    # No turn_result is saved for "turn-1", so it will be detected as in-flight.
+    journal.append({"turn_id": "turn-1"})
+
+    handle = RunHandle(
+        run_id="test-run",
+        session_id="test-session",
+        agent_type="native",
+        _journal=journal,
+        _snapshot_store=snapshot_store,
+        _comm_channel=DirectChannel(journal),
+        _trigger_source=ImmediateTrigger(""),
+        _event_transport=InProcessTransport(),
+        _recover_strategy="retry",
+    )
+
+    result = await handle._handle_recovery()
+
+    # The retry strategy appends deserialized prompts to _message_queue
+    # and returns None (recovered_prompt is only set for text fallback).
+    assert result is None
+    assert len(handle._message_queue) == 1
+    recovered = handle._message_queue[0]
+    assert isinstance(recovered, list)
+    assert recovered[0] == "hello"
+    assert isinstance(recovered[1], list)
+    assert recovered[1][0] == "describe this"
+    restored_img = recovered[1][1]
+    assert isinstance(restored_img, BinaryImage)
+    assert restored_img.media_type == "image/png"
+    assert restored_img.data == b"\x89PNG\r\n\x1a\n"
+
+
+# ---------------------------------------------------------------------------
+# Integration: _message_content_to_text handles lists with binary
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_message_content_to_text_handles_list_with_binary() -> None:
+    """_message_content_to_text should summarize binary items in lists."""
+    from agentpool_server.opencode_server.event_processor import _message_content_to_text
+
+    img = BinaryImage(data=b"\x89PNG\r\n\x1a\n", media_type="image/png")
+    result = _message_content_to_text(["hello", img, "world"])
+    assert "hello" in result
+    assert "world" in result
+    assert "[image/png]" in result
+    assert "BinaryContent" not in result
+    assert "b'\\x89PNG" not in result
+
+
+# ---------------------------------------------------------------------------
+# Integration: serialize_messages fallback returns None on error
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_serialize_messages_fallback_returns_none_on_error() -> None:
+    """serialize_messages should return None (not str()) on serialization failure."""
+    from agentpool.storage.serialization import serialize_messages
+
+    class BadMessage:
+        pass
+
+    result = serialize_messages([BadMessage()])  # type: ignore
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Integration: chat_message_to_opencode with multimodal user message
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_chat_message_to_opencode_with_multimodal_user_message() -> None:
+    """chat_message_to_opencode should not leak raw binary repr for multimodal content.
+
+    When ``msg.content`` is a string summary, the converter uses it directly
+    rather than rendering raw binary content from ``msg.messages``.
+    """
+    from agentpool.messaging import ChatMessage
+    from agentpool_server.opencode_server.converters import chat_message_to_opencode
+
+    img = BinaryImage(data=b"\x89PNG\r\n\x1a\n", media_type="image/png")
+    msg = ChatMessage(
+        content="describe this [image/png]",
+        role="user",
+        messages=[ModelRequest(parts=[UserPromptPart(content=["describe this", img])])],
+    )
+
+    result = chat_message_to_opencode(msg, session_id="test-session")
+    result_str = str(result)
+    assert "BinaryContent" not in result_str
+    assert "b'\\x89PNG" not in result_str
+    assert "\\x89PNG" not in result_str
+
+
+@pytest.mark.unit
+def test_chat_message_to_opencode_fallback_uses_summarize_content_block() -> None:
+    """When msg.content is empty, converter should fall back to messages with summarize."""
+    from agentpool.messaging import ChatMessage
+    from agentpool_server.opencode_server.converters import chat_message_to_opencode
+
+    img = BinaryImage(data=b"\x89PNG\r\n\x1a\n", media_type="image/png")
+    # content="" forces the converter to iterate msg.messages
+    msg = ChatMessage(
+        content="",
+        role="user",
+        messages=[ModelRequest(parts=[UserPromptPart(content=["describe this", img])])],
+    )
+
+    result = chat_message_to_opencode(msg, session_id="test-session")
+    result_str = str(result)
+    assert "describe this" in result_str
+    assert "[image/png]" in result_str
+    assert "BinaryContent" not in result_str
+    assert "b'\\x89PNG" not in result_str
+
+
+# ---------------------------------------------------------------------------
+# Integration: _execute_turn saves multimodal to snapshot
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.xfail(
+    reason=(
+        "Requires full RunHandle setup with mocked agent, event_bus, and session — "
+        "needs integration test fixture. _execute_turn calls agent.create_turn(), "
+        "agent.conversation.add_chat_messages(), and _transition() which all need "
+        "real or mock infrastructure."
+    ),
+    strict=False,
+)
+@pytest.mark.asyncio
+async def test_execute_turn_saves_multimodal_snapshot() -> None:
+    """_execute_turn should save prompts_serialized with BinaryImage in snapshot."""
+    from agentpool.lifecycle import MemorySnapshotStore
+    from agentpool.orchestrator.run import RunHandle
+
+    handle = RunHandle(
+        run_id="test-run",
+        session_id="test-session",
+        agent_type="native",
+    )
+    snapshot_store = MemorySnapshotStore()
+    handle._snapshot_store = snapshot_store
+
+    img = BinaryImage(data=b"\x89PNG\r\n\x1a\n", media_type="image/png")
+    prompts: list[str | list[Any]] = ["hello", ["describe this", img]]
+
+    # This will fail because agent, event_bus, session are None.
+    # The test is xfail to document the architectural limitation.
+    async for _event in handle._execute_turn(
+        agent=None,  # type: ignore[arg-type]
+        event_bus=None,  # type: ignore[arg-type]
+        session=None,  # type: ignore[arg-type]
+        current_prompts=prompts,
+    ):
+        pass
+
+    load_result = snapshot_store.load()
+    assert load_result is not None
+    snapshot, _seq = load_result
+    assert snapshot["prompts_serialized"] is not None
+    restored = deserialize_prompts(snapshot["prompts_serialized"])
+    assert isinstance(restored[1][1], BinaryImage)
+
+
+# ---------------------------------------------------------------------------
+# Integration: full round-trip multimodal prompt through DB
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_multimodal_prompt_round_trip_through_db(tmp_path: Any) -> None:
+    """Multimodal prompt should survive: save to DB -> load from DB -> reconstruct.
+
+    Uses SQLModelProvider with a temp SQLite database. Saves a ChatMessage
+    with ``messages`` containing a ``BinaryImage``, loads it back via
+    ``get_session_messages()``, and verifies the ``BinaryImage`` is
+    preserved with correct data and media_type.
+    """
+    from agentpool.messaging import ChatMessage
+    from agentpool_config.storage import SQLStorageConfig
+    from agentpool_storage.sql_provider import SQLModelProvider
+
+    db_path = tmp_path / "test_multimodal.db"
+    config = SQLStorageConfig(url=f"sqlite:///{db_path}")
+    provider = SQLModelProvider(config)
+
+    # Clear engine cache to avoid cross-test contamination.
+    from agentpool_config.storage import _engine_cache
+
+    _engine_cache.clear()
+
+    async with provider:
+        img = BinaryImage(data=b"\x89PNG\r\n\x1a\n", media_type="image/png")
+        msg = ChatMessage(
+            content="describe this [image/png]",
+            role="user",
+            session_id="test-mm-session",
+            messages=[ModelRequest(parts=[UserPromptPart(content=["describe this", img])])],
+        )
+        await provider.log_message(message=msg)
+
+        loaded = await provider.get_session_messages("test-mm-session")
+        assert len(loaded) == 1
+        loaded_msg = loaded[0]
+        assert loaded_msg.role == "user"
+        assert loaded_msg.content == "describe this [image/png]"
+
+        # Verify messages field contains the deserialized multimodal content.
+        assert len(loaded_msg.messages) == 1
+        model_req = loaded_msg.messages[0]
+        assert isinstance(model_req, ModelRequest)
+        assert len(model_req.parts) == 1
+        part = model_req.parts[0]
+        assert isinstance(part, UserPromptPart)
+        # content should be a list with the string and BinaryImage
+        assert isinstance(part.content, list)
+        assert part.content[0] == "describe this"
+        restored_img = part.content[1]
+        assert isinstance(restored_img, BinaryImage)
+        assert restored_img.media_type == "image/png"
+        assert restored_img.data == b"\x89PNG\r\n\x1a\n"
+
+    _engine_cache.clear()
