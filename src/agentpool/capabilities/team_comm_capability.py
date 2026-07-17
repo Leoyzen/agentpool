@@ -70,6 +70,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         config: TeamModeConfig,
         agent_name: str,
         session_metadata: dict[str, Any] | None = None,
+        agent_descriptions: dict[str, str] | None = None,
     ) -> None:
         """Initialize the team communication capability.
 
@@ -79,11 +80,15 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             session_metadata: Optional per-session metadata containing
                 ``team_name``, ``team_role``, ``team_member_name``, etc.
                 When ``None`` or empty, ``get_instructions()`` returns ``None``.
+            agent_descriptions: Optional mapping of agent name to short
+                description for eligible agents. Used in ``get_instructions()``
+                so the LLM knows what each agent does.
         """
         super().__init__(name="team_comm")
         self._config = config
         self._agent_name = agent_name
         self._session_metadata: dict[str, Any] = session_metadata or {}
+        self._agent_descriptions: dict[str, str] = agent_descriptions or {}
         # Register universal tools (all members can use)
         if config.enabled:
             self.register_tool(self.send_message)
@@ -553,6 +558,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     ) -> str:
         """Create a new team with eligible members (lead-only).
 
+        Pass ``members`` as a list of dicts with ``agent`` (registered agent
+        name) and ``name`` (display name) keys. Only agents listed in
+        ``member_eligible`` can be used. If ``defaults`` is configured and
+        ``members`` is empty, default members from config are used.
+
         Args:
             ctx: RunContext with AgentContext deps.
             name: Human-readable team name.
@@ -773,7 +783,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         """
         if not self._config.enabled or not self._session_metadata:
             return None
-        return self._config.protocol_template.format(
+        base = self._config.protocol_template.format(
             team_name=self._session_metadata.get("team_name", "unknown"),
             role=self._session_metadata.get("team_role", "unknown"),
             member_name=self._session_metadata.get(
@@ -781,6 +791,21 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 self._agent_name,
             ),
         )
+        # Append eligible agent names + descriptions so the LLM knows
+        # which agents can be used as team members in team_create.
+        eligible = self._config.member_eligible
+        if eligible:
+            base += (
+                "\n\n## Eligible Agents\n\n"
+                "The following agents can be used as team members in `team_create`:\n"
+            )
+            for name in eligible:
+                desc = self._agent_descriptions.get(name)
+                if desc:
+                    base += f"- `{name}`: {desc}\n"
+                else:
+                    base += f"- `{name}`\n"
+        return base
 
     @override
     async def get_tools(self) -> Sequence[Tool[Any]]:

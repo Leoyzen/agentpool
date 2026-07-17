@@ -161,6 +161,39 @@ class AgentFactory:
 
         return AgentRegistry()
 
+    @staticmethod
+    def _build_agent_descriptions(
+        host_context: HostContext,
+        eligible: list[str],
+    ) -> dict[str, str]:
+        """Extract short descriptions for eligible agents from the manifest.
+
+        Uses ``description`` field if set, otherwise falls back to the first
+        non-empty line of ``system_prompt`` (for string prompts).
+        """
+        from agentpool.models.agents import NativeAgentConfig
+
+        descriptions: dict[str, str] = {}
+        agents = host_context.manifest.agents
+        for name in eligible:
+            agent_cfg = agents.get(name)
+            if agent_cfg is None:
+                continue
+            desc: str = ""
+            # Prefer explicit description field.
+            if agent_cfg.description:
+                desc = agent_cfg.description.strip()
+            # Fallback: first non-empty line of system_prompt (string only).
+            if not desc and isinstance(agent_cfg, NativeAgentConfig):
+                sp = agent_cfg.system_prompt
+                if isinstance(sp, str):
+                    for line in sp.strip().splitlines():
+                        if line.strip():
+                            desc = line.strip()
+                            break
+            descriptions[name] = desc
+        return descriptions
+
     def _compile_agent_capabilities(
         self,
         agent_name: str,
@@ -224,7 +257,12 @@ class AgentFactory:
             if agent_name in eligible:
                 from agentpool.capabilities.team_comm_capability import TeamCommCapability
 
-                caps.append(TeamCommCapability(resolved_tm, agent_name))
+                agent_descs = self._build_agent_descriptions(host_context, eligible)
+                caps.append(
+                    TeamCommCapability(
+                        resolved_tm, agent_name, agent_descriptions=agent_descs,
+                    )
+                )
 
         # MCP servers are NOT compiled here — they are handled by MCPManager
         # which creates MCPCapability instances. MCPCapability is now
@@ -389,7 +427,10 @@ class AgentFactory:
                     session.metadata.setdefault("team_role", "member")
                 session.metadata.setdefault("team_member_name", agent_name)
 
-                team_cap = TeamCommCapability(resolved_tm, agent_name, session.metadata)
+                agent_descs = self._build_agent_descriptions(host_context, eligible)
+                team_cap = TeamCommCapability(
+                    resolved_tm, agent_name, session.metadata, agent_descriptions=agent_descs,
+                )
                 if isinstance(agent, _NativeAgent2):
                     # Replace shared TeamCommCapability with per-session
                     # instance, or append if not already present (compile
