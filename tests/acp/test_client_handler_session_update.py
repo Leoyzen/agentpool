@@ -27,7 +27,7 @@ from acp.schema import (
 )
 from agentpool.agents.acp_agent import ACPAgent
 from agentpool.agents.acp_agent.client_handler import ACPClientHandler
-from agentpool.agents.acp_agent.session_state import ACPSessionState
+from agentpool.agents.acp_agent.session_state import ACPState
 
 
 def _mock_agent() -> MagicMock:
@@ -54,62 +54,21 @@ def mock_agent() -> MagicMock:
 
 
 @pytest.fixture
-def session_state() -> ACPSessionState:
-    """Provide a fresh ACPSessionState."""
-    return ACPSessionState(session_id="test-session")
+def session_state() -> ACPState:
+    """Provide a fresh ACPState."""
+    return ACPState(session_id="test-session")
 
 
 @pytest.fixture
-def handler(mock_agent: MagicMock, session_state: ACPSessionState) -> ACPClientHandler:
+def handler(mock_agent: MagicMock, session_state: ACPState) -> ACPClientHandler:
     """Provide an ACPClientHandler with mocked agent and real state."""
     return ACPClientHandler(agent=mock_agent, state=session_state)  # type: ignore[reportAbstractUsage]
 
 
 # =============================================================================
-# Stream data updates (should be added to state.updates)
+# Stream data updates are pushed directly to async queue (T3).
+# Verifying queued delivery belongs in the T3 async-queue tests.
 # =============================================================================
-
-
-@pytest.mark.unit
-async def test_user_message_chunk_added_to_updates(
-    handler: ACPClientHandler, session_state: ACPSessionState
-) -> None:
-    """UserMessageChunk should be added to state.updates."""
-    chunk = UserMessageChunk.text("hello")
-    notification = SessionNotification(session_id="test-session", update=chunk)
-
-    await handler.session_update(notification)
-
-    assert len(session_state.updates) == 1
-    assert session_state.updates[0] == chunk
-
-
-@pytest.mark.unit
-async def test_agent_message_chunk_added_to_updates(
-    handler: ACPClientHandler, session_state: ACPSessionState
-) -> None:
-    """AgentMessageChunk should be added to state.updates."""
-    chunk = AgentMessageChunk.text("response")
-    notification = SessionNotification(session_id="test-session", update=chunk)
-
-    await handler.session_update(notification)
-
-    assert len(session_state.updates) == 1
-    assert session_state.updates[0] == chunk
-
-
-@pytest.mark.unit
-async def test_tool_call_start_added_to_updates(
-    handler: ACPClientHandler, session_state: ACPSessionState
-) -> None:
-    """ToolCallStart should be added to state.updates."""
-    tool_call = ToolCallStart(tool_call_id="tc-1", title="Reading file")
-    notification = SessionNotification(session_id="test-session", update=tool_call)
-
-    await handler.session_update(notification)
-
-    assert len(session_state.updates) == 1
-    assert session_state.updates[0] == tool_call
 
 
 # =============================================================================
@@ -119,7 +78,7 @@ async def test_tool_call_start_added_to_updates(
 
 @pytest.mark.unit
 async def test_available_commands_stored_in_state(
-    handler: ACPClientHandler, session_state: ACPSessionState
+    handler: ACPClientHandler, session_state: ACPState
 ) -> None:
     """AvailableCommandsUpdate should be stored in state.available_commands."""
     cmd = AvailableCommand.create(name="test-cmd", description="A test command")
@@ -134,28 +93,27 @@ async def test_available_commands_stored_in_state(
 
 
 @pytest.mark.unit
-async def test_available_commands_added_to_updates(
-    handler: ACPClientHandler, session_state: ACPSessionState
+async def test_available_commands_triggers_update_event(
+    handler: ACPClientHandler, session_state: ACPState
 ) -> None:
-    """AvailableCommandsUpdate should now be added to state.updates (bug fixed)."""
+    """AvailableCommandsUpdate should fire the update event (used for wakeup signalling)."""
     cmd = AvailableCommand.create(name="test-cmd", description="A test command")
     update = AvailableCommandsUpdate(available_commands=[cmd])
     notification = SessionNotification(session_id="test-session", update=update)
 
     await handler.session_update(notification)
 
-    assert len(session_state.updates) == 1
-    assert session_state.updates[0] == update
+    assert handler._update_event.is_set()
 
 
 @pytest.mark.unit
 async def test_available_commands_captured_in_load_updates(
-    handler: ACPClientHandler, session_state: ACPSessionState
+    handler: ACPClientHandler, session_state: ACPState
 ) -> None:
-    """AvailableCommandsUpdate should be captured during load_session (bug fixed).
+    """AvailableCommandsUpdate should be captured in _load_updates during load session.
 
     Previously, session_update() returned early for AvailableCommandsUpdate,
-    so it never called state.add_update(), causing _load_updates to miss it.
+    so it never reached the load-capture logic, causing _load_updates to miss it.
     """
     session_state.start_load()
     cmd = AvailableCommand.create(name="test-cmd", description="A test command")
@@ -171,7 +129,7 @@ async def test_available_commands_captured_in_load_updates(
 
 @pytest.mark.unit
 async def test_stream_updates_captured_in_load_updates(
-    handler: ACPClientHandler, session_state: ACPSessionState
+    handler: ACPClientHandler, session_state: ACPState
 ) -> None:
     """When is_loading=True, stream updates should be captured in _load_updates."""
     session_state.start_load()
@@ -187,7 +145,7 @@ async def test_stream_updates_captured_in_load_updates(
 
 @pytest.mark.unit
 async def test_all_updates_captured_when_is_loading(
-    handler: ACPClientHandler, session_state: ACPSessionState
+    handler: ACPClientHandler, session_state: ACPState
 ) -> None:
     """When is_loading=True, all stream updates should be in _load_updates."""
     session_state.start_load()
@@ -213,7 +171,7 @@ async def test_all_updates_captured_when_is_loading(
 
 @pytest.mark.unit
 async def test_current_mode_update_sets_state(
-    handler: ACPClientHandler, session_state: ACPSessionState
+    handler: ACPClientHandler, session_state: ACPState
 ) -> None:
     """CurrentModeUpdate should set state.current_mode_id and modes.current_mode_id."""
     session_state.modes = SessionModeState(
@@ -227,7 +185,6 @@ async def test_current_mode_update_sets_state(
 
     assert session_state.current_mode_id == "code"
     assert session_state.modes.current_mode_id == "code"
-    assert len(session_state.updates) == 0  # State updates don't go to updates queue
 
 
 @pytest.mark.unit
@@ -237,7 +194,7 @@ async def test_current_mode_update_emits_signal(
     """CurrentModeUpdate should emit state_updated signal with ModeInfo."""
     from agentpool.agents.modes import ModeInfo
 
-    session_state = ACPSessionState(session_id="test-session")
+    session_state = ACPState(session_id="test-session")
     session_state.modes = SessionModeState(
         available_modes=[SessionMode(id="chat", name="Chat", description="Chat mode")],
         current_mode_id="chat",
@@ -256,7 +213,7 @@ async def test_current_mode_update_emits_signal(
 
 @pytest.mark.unit
 async def test_current_model_update_sets_state(
-    handler: ACPClientHandler, session_state: ACPSessionState
+    handler: ACPClientHandler, session_state: ACPState
 ) -> None:
     """CurrentModelUpdate should set state.current_model_id and models.current_model_id."""
     from acp.schema import ModelInfo as ACPModelInfo
@@ -272,7 +229,6 @@ async def test_current_model_update_sets_state(
 
     assert session_state.current_model_id == "gpt-3"
     assert session_state.models.current_model_id == "gpt-3"
-    assert len(session_state.updates) == 0
 
 
 @pytest.mark.unit
@@ -282,7 +238,7 @@ async def test_current_model_update_emits_signal(
     """CurrentModelUpdate should emit state_updated signal with ModelInfo."""
     from tokonomics.model_discovery.model_info import ModelInfo
 
-    session_state = ACPSessionState(session_id="test-session")
+    session_state = ACPState(session_id="test-session")
     from acp.schema import ModelInfo as ACPModelInfo
 
     session_state.models = SessionModelState(
@@ -309,7 +265,7 @@ async def test_current_model_update_emits_signal(
 
 @pytest.mark.unit
 async def test_config_option_update_sets_state(
-    handler: ACPClientHandler, session_state: ACPSessionState
+    handler: ACPClientHandler, session_state: ACPState
 ) -> None:
     """ConfigOptionUpdate should update the matching config option's current_value."""
     session_state.config_options = [
@@ -328,7 +284,6 @@ async def test_config_option_update_sets_state(
     await handler.session_update(notification)
 
     assert session_state.config_options[0].current_value == "light"
-    assert len(session_state.updates) == 0
 
 
 @pytest.mark.unit
@@ -336,7 +291,7 @@ async def test_config_option_update_calls_agent_update_state(
     handler: ACPClientHandler, mock_agent: MagicMock
 ) -> None:
     """ConfigOptionUpdate should call agent.update_state()."""
-    session_state = ACPSessionState(session_id="test-session")
+    session_state = ACPState(session_id="test-session")
     session_state.config_options = [
         SessionConfigOption(
             id="theme",
@@ -366,7 +321,7 @@ async def test_available_commands_captured_in_load_updates_full(
     mock_agent: MagicMock,
 ) -> None:
     """Verify AvailableCommandsUpdate is properly captured during load after fix."""
-    session_state = ACPSessionState(session_id="test-session")
+    session_state = ACPState(session_id="test-session")
     session_state.start_load()
     handler = ACPClientHandler(agent=mock_agent, state=session_state)
 

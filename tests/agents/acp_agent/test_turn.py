@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -36,25 +35,30 @@ class MockACPClient:
         prompt_error: Exception | None = None,
         stream_error: Exception | None = None,
         get_messages_error: Exception | None = None,
+        stop_reason: str | None = "end_turn",
     ) -> None:
         self._updates = updates or []
         self._messages = messages or []
         self._prompt_error = prompt_error
         self._stream_error = stream_error
         self._get_messages_error = get_messages_error
+        self._stop_reason = stop_reason
         self.prompt_calls: list[tuple[str, list[Any]]] = []
 
-    async def prompt(self, session_id: str, content: list[Any]) -> Any:
+    async def prompt(self, session_id: str, content: list[Any]) -> None:
         self.prompt_calls.append((session_id, content))
         if self._prompt_error:
             raise self._prompt_error
-        return MagicMock(name="PromptResponse")
 
-    async def stream_events(self, response: Any) -> AsyncIterator[Any]:
+    async def stream_events(self) -> AsyncIterator[Any]:
         for update in self._updates:
             yield update
         if self._stream_error:
             raise self._stream_error
+
+    @property
+    def stop_reason(self) -> str | None:
+        return self._stop_reason
 
     async def get_messages(self, session_id: str) -> list[Any]:
         if self._get_messages_error:

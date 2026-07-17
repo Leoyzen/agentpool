@@ -12,6 +12,7 @@ from exxec_config import (
 )
 from pydantic import ConfigDict, Field
 
+from agentpool.models.acp_agents.proxy_chain import ProxyChainConfig  # noqa: TC001
 from agentpool.models.fields import EnvVarsField  # noqa: TC001
 from agentpool_config import AnyToolConfig, BaseToolConfig
 from agentpool_config.nodes import BaseAgentConfig
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
     from agentpool.agents.acp_agent import ACPAgent
     from agentpool.common_types import AnyEventHandlerType
     from agentpool.delegation import AgentPool
-    from agentpool.resource_providers import ResourceProvider
+    from agentpool.tools.factory import ToolsetFactory
     from agentpool.ui.base import InputProvider
 
 
@@ -43,6 +44,17 @@ class BaseACPAgentConfig(BaseAgentConfig):
 
     type: Literal["acp"] = Field("acp", init=False)
     """Top-level discriminator for agent type."""
+
+    proxy_chain: list[ProxyChainConfig] | None = Field(
+        default=None,
+        title="Proxy Chain",
+        description=(
+            "Ordered list of proxy configurations that intercept and process "
+            "messages before reaching the terminal ACP agent. Each entry defines "
+            "a middleware-style transformation step in the message pipeline."
+        ),
+    )
+    """Proxy chain configuration for ACP agents."""
 
     cwd: str | None = Field(
         default=None,
@@ -141,19 +153,23 @@ class BaseACPAgentConfig(BaseAgentConfig):
         """Get the ACP registry agent ID, if this is a registry-based agent."""
         return None
 
-    def get_tool_providers(self) -> list[ResourceProvider]:
-        """Get all resource providers for this agent's tools."""
-        from agentpool.resource_providers import StaticResourceProvider
+    def get_tool_factories(self) -> list[ToolsetFactory]:
+        """Get all toolset factories for this agent's tools."""
         from agentpool.tools.base import Tool
+        from agentpool.tools.factory import (
+            AdapterToolsetFactory,
+            StaticToolsetFactory,
+        )
 
-        providers: list[ResourceProvider] = []
+        factories: list[ToolsetFactory] = []
         static_tools: list[Tool] = []
 
         for tool_config in self.tools:
             try:
                 match tool_config:
                     case BaseToolsetConfig():
-                        providers.append(tool_config.get_provider())
+                        provider = tool_config.get_provider()
+                        factories.append(AdapterToolsetFactory(provider))
                     case str():
                         static_tools.append(Tool.from_callable(tool_config))
                     case BaseToolConfig():
@@ -164,9 +180,9 @@ class BaseACPAgentConfig(BaseAgentConfig):
                 continue
 
         if static_tools:
-            providers.append(StaticResourceProvider(name="tools", tools=static_tools))
+            factories.append(StaticToolsetFactory(name="tools", tools=static_tools))
 
-        return providers
+        return factories
 
     def get_protocol_version(self) -> int:
         """Get the ACP protocol version for this agent.

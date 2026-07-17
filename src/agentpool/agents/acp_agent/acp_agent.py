@@ -30,46 +30,34 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from dataclasses import replace
 from datetime import datetime
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 import uuid
 
 import anyio
 from pydantic import HttpUrl
 from pydantic_ai import (
-    ModelRequest,
-    ModelResponse,
-    TextPart,
-    ToolReturnPart,
     UserContent,
-    UserPromptPart,
 )
 
 from acp import InitializeRequest
 from acp.agent import ACPAgentAPI
-from agentpool.agents.acp_agent.session_state import ACPSessionState
+from agentpool.agents.acp_agent.adapter import ACPClientAdapter
+from agentpool.agents.acp_agent.session_state import ACPState
 from agentpool.agents.acp_agent.turn import ACPTurn
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.events import (
     RunStartedEvent,
-    StreamCompleteEvent,
-    ToolCallCompleteEvent,
-    ToolResultMetadataEvent,
 )
-from agentpool.agents.events.processors import event_to_part
 from agentpool.agents.exceptions import (
     AgentNotInitializedError,
     UnknownCategoryError,
     UnknownModeError,
 )
 from agentpool.log import get_logger
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventEnvelope
 from agentpool.utils.subprocess_utils import SubprocessError, run_with_process_monitor
-from agentpool.utils.token_breakdown import calculate_usage_from_parts
 
 
 if TYPE_CHECKING:
@@ -79,28 +67,29 @@ if TYPE_CHECKING:
     from anyio.abc import Process
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
-    from pydantic_ai import ThinkingPart, ToolCallPart, UserContent
+    from pydantic_ai import UserContent
     from pydantic_ai.messages import ModelMessage
     from slashed import BaseCommand
     from tokonomics.model_discovery.model_info import ModelInfo
 
     from acp.client.connection import ClientSideConnection
+    from acp.conductor import Conductor
     from acp.schema import Implementation, RequestPermissionRequest, RequestPermissionResponse
     from acp.schema.capabilities import AgentCapabilities
     from acp.schema.mcp import McpServer
     from agentpool.agents.acp_agent.client_handler import ACPClientHandler
-    from agentpool.agents.acp_agent.turn import ACPClientProtocol
     from agentpool.agents.context import AgentRunContext
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
     from agentpool.common_types import AnyEventHandlerType
     from agentpool.delegation import AgentPool
     from agentpool.hooks import AgentHooks
-    from agentpool.messaging import MessageHistory
+    from agentpool.mcp_server import ToolBridge
+    from agentpool.messaging import ChatMessage, MessageHistory
     from agentpool.models.acp_agents import BaseACPAgentConfig
     from agentpool.orchestrator.turn import Turn
-    from agentpool.resource_providers import ResourceProvider
     from agentpool.sessions import SessionData
+    from agentpool.tools.factory import ToolsetFactory
     from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig
 
@@ -145,7 +134,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         # ACP initialization
         init_request: InitializeRequest | None = None,
         # Tools
-        tool_providers: list[ResourceProvider] | None = None,
+        tool_factories: list[ToolsetFactory] | None = None,
         mcp_servers: Sequence[str | MCPServerConfig] | None = None,
         # Runtime options
         deps_type: type[TDeps] | None = None,
@@ -158,9 +147,9 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         commands: Sequence[BaseCommand] | None = None,
         hooks: AgentHooks | None = None,
         session_id: str | None = None,
+        # Conductor
+        proxy_chain: list[Any] | None = None,
     ) -> None:
-        from agentpool.mcp_server.tool_bridge import ToolManagerBridge
-
         super().__init__(
             name=name or command,
             description=description,
@@ -188,7 +177,8 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         # ACP initialization
         self._init_request = init_request or InitializeRequest.create_for_package("agentpool")
         # Tools
-        self._tool_providers = tool_providers or []
+        self._tool_factories = tool_factories or []
+        self._extra_toolsets: list[Any] = []
         # Provider type for model messages
         self._provider_type = provider_type
         # ACP-specific state
@@ -202,13 +192,17 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         self._agent_info: Implementation | None = None
         self._caps: AgentCapabilities | None = None
         self._sdk_session_id: str | None = session_id
-        self._state: ACPSessionState | None = None
+        self._state: ACPState | None = None
         self._extra_mcp_servers: list[McpServer] = []
         self._sessions_cache: list[SessionData] | None = None
-        # ToolManagerBridge gets injection_manager from node's run context
-        self._tool_bridge = ToolManagerBridge(node=self)
+        # ToolBridge lazily created in _setup_toolsets() when tools exist
+        self._tool_bridge: ToolBridge | None = None
         # Track the prompt task for cancellation
         self._prompt_task: asyncio.Task[Any] | None = None
+        # Conductor
+        self._proxy_chain = proxy_chain
+        self._conductor: Conductor | None = None
+        self._init_response: Any = None
 
     @classmethod
     def from_config(
@@ -244,7 +238,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 allow_file_operations=config.allow_file_operations,
             ),
             # Tools
-            tool_providers=config.get_tool_providers(),
+            tool_factories=config.get_tool_factories(),
             mcp_servers=config.mcp_servers,
             # Runtime options
             event_handlers=merged_handlers or None,
@@ -254,6 +248,8 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             deps_type=deps_type,
             auto_approve=config.auto_approve,
             hooks=config.hooks.get_agent_hooks() if config.hooks else None,
+            # Conductor
+            proxy_chain=config.proxy_chain,
         )
 
     @property
@@ -268,47 +264,137 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
     async def _setup_toolsets(self) -> None:
         """Initialize toolsets and start bridge if needed."""
         from acp.schema import HttpMcpServer
+        from agentpool.mcp_server import create_tool_bridge
+        from agentpool.tools.base import Tool
+        from agentpool.tools.factory import StaticToolsetFactory
 
-        if not self._tool_providers:
+        if not self._tool_factories:
             return
-        # Add all tool providers to tool manager
-        for provider in self._tool_providers:
-            self.tools.add_provider(provider)
+
+        all_tools: list[Any] = []
+        self._extra_toolsets = []
+
+        for factory in self._tool_factories:
+            match factory:
+                case StaticToolsetFactory(tools=factory_tools):
+                    all_tools.extend(factory_tools)
+                case _:
+                    cap = await factory.create_capability()
+                    if cap is not None:
+                        self._extra_toolsets.append(cap)
+
+        if not all_tools:
+            return
+
+        # Register tools with the node's tool manager for bridge discovery
+        for tool in all_tools:
+            if isinstance(tool, Tool):
+                self.tools.register_tool(tool)
+
+        # Lazily create and start the tool bridge
+        self._tool_bridge = create_tool_bridge(node=self)
         await self._tool_bridge.start()
 
         url = HttpUrl(self._tool_bridge.url)
         mcp_config = HttpMcpServer(name=self._tool_bridge.resolved_server_name, url=url)
         self._extra_mcp_servers.append(mcp_config)
 
+    async def _setup_conductor(self) -> None:
+        """Set up Conductor for proxy chain execution.
+
+        Creates ACPState + ACPClientHandler BEFORE entering Conductor
+        (solves chicken-and-egg: Conductor needs the handler to wire
+        notifications). Then enters Conductor, which spawns the subprocess
+        and creates the proxy-chained connection. Finally wires ACPAgent's
+        connection/api to Conductor's connection.
+        """
+        from acp.conductor import Conductor
+
+        # Create ACPState + ACPClientHandler before Conductor enters
+        # (Conductor wires the handler to ClientSideConnection)
+        if self._state is None:
+            self._state = ACPState(session_id="")
+        if self._client_handler is None:
+            from agentpool.agents.acp_agent.client_handler import ACPClientHandler
+
+            self._client_handler = ACPClientHandler(self, self._state, self._input_provider)
+
+        self._conductor = Conductor(
+            name=self.name,
+            command=self._command,
+            args=self._args,
+            cwd=self._cwd,
+            env=dict(self._env_vars),
+            proxy_chain=self._proxy_chain or [],
+            client_handler=self._client_handler,
+            agent_hooks=self.hooks if self.hooks else None,
+        )
+        await self._conductor.__aenter__()
+
+        # Wire ACPAgent's connection/api to Conductor's connection
+        # so that ACPTurn and ACPClientAdapter use the proxy-chained connection.
+        if self._conductor.connection is not None:
+            self._connection = self._conductor.connection
+            from acp.agent.acp_agent_api import ACPAgentAPI
+
+            self._api = ACPAgentAPI(self._connection)
+
     async def __aenter__(self) -> Self:
         """Start subprocess and initialize ACP connection."""
         await super().__aenter__()
         await self._setup_toolsets()
-        process = await self._start_process()
-        try:
-            await run_with_process_monitor(process, self._initialize, context="ACP initialization")
-            # Load existing session or create new one
-            if session_to_load := self._sdk_session_id:
-                self._sdk_session_id = None
-                result = await run_with_process_monitor(
-                    process,
-                    lambda: self.load_session(session_to_load),
-                    context="ACP session load",
+
+        if self._proxy_chain:
+            # Proxy chain mode: Conductor manages subprocess + proxy chain.
+            # ACPAgent wires its connection/api to Conductor's connection.
+            await self._setup_conductor()
+            # Initialize and create session using Conductor's connection.
+            assert self._conductor is not None
+            assert self._conductor.process is not None
+            self._process = self._conductor.process
+            process = self._process
+            try:
+                await run_with_process_monitor(
+                    process, self._initialize, context="ACP initialization"
                 )
-                if result is None:
-                    self.log.warning(
-                        "Failed to load session, creating new one",
-                        session_id=session_to_load,
-                    )
-                    await run_with_process_monitor(
-                        process, self._create_session, context="ACP session creation"
-                    )
-            else:
                 await run_with_process_monitor(
                     process, self._create_session, context="ACP session creation"
                 )
-        except SubprocessError as e:
-            raise RuntimeError(str(e)) from e
+            except SubprocessError as e:
+                await self._cleanup()
+                raise RuntimeError(str(e)) from e
+            except Exception:
+                await self._cleanup()
+                raise
+        else:
+            # Direct mode: ACPAgent manages its own subprocess.
+            process = await self._start_process()
+            try:
+                await run_with_process_monitor(
+                    process, self._initialize, context="ACP initialization"
+                )
+                # Load existing session or create new one
+                if session_to_load := self._sdk_session_id:
+                    self._sdk_session_id = None
+                    result = await run_with_process_monitor(
+                        process,
+                        lambda: self.load_session(session_to_load),
+                        context="ACP session load",
+                    )
+                    if result is None:
+                        self.log.warning(
+                            "Failed to load session, creating new one",
+                            session_id=session_to_load,
+                        )
+                        await run_with_process_monitor(
+                            process, self._create_session, context="ACP session creation"
+                        )
+                else:
+                    await run_with_process_monitor(
+                        process, self._create_session, context="ACP session creation"
+                    )
+            except SubprocessError as e:
+                raise RuntimeError(str(e)) from e
         await anyio.sleep(0.3)
         return self
 
@@ -335,22 +421,42 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         return self._process
 
     async def _initialize(self) -> None:
-        """Initialize the ACP connection."""
+        """Initialize the ACP connection.
+
+        In conductor mode, the connection is already created by Conductor.
+        We only need to create ACPState, ACPClientHandler (if not done),
+        and call initialize on the existing connection.
+
+        In direct mode, creates a new ClientSideConnection from the
+        subprocess stdin/stdout.
+        """
         from acp.client.connection import ClientSideConnection
         from agentpool.agents.acp_agent.client_handler import ACPClientHandler
 
         if not self._process or not self._process.stdin or not self._process.stdout:
             raise RuntimeError("Process not started")
 
-        self._state = ACPSessionState(session_id="")
-        self._client_handler = ACPClientHandler(self, self._state, self._input_provider)
-        self._connection = ClientSideConnection(
-            to_client=self._client_handler,
-            input_stream=self._process.stdin,
-            output_stream=self._process.stdout,
-        )
-        self._api = ACPAgentAPI(self._connection)
+        # Create ACPState if not already created
+        if self._state is None:
+            self._state = ACPState(session_id="")
+
+        # Create ACPClientHandler if not already created (conductor mode
+        # creates it before entering Conductor)
+        if self._client_handler is None:
+            self._client_handler = ACPClientHandler(self, self._state, self._input_provider)
+
+        # Only create new connection if not already set by Conductor
+        if self._connection is None:
+            self._connection = ClientSideConnection(
+                to_client=self._client_handler,
+                input_stream=self._process.stdin,
+                output_stream=self._process.stdout,
+            )
+            self._api = ACPAgentAPI(self._connection)
+
+        # Initialize the ACP connection (sends initialize request)
         init_response = await self._connection.initialize(self._init_request)
+        self._init_response = init_response
         self._agent_info = init_response.agent_info
         self._caps = init_response.agent_capabilities
         self.log.info("ACP connection initialized", agent_info=self._agent_info)
@@ -384,8 +490,13 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
 
     async def _cleanup(self) -> None:
         """Clean up resources."""
-        if self._tool_bridge._mcp is not None:
+        if self._conductor is not None:
+            await self._conductor.__aexit__(None, None, None)
+            self._conductor = None
+        if self._tool_bridge is not None:
             await self._tool_bridge.stop()
+            self._tool_bridge = None
+        self._extra_toolsets.clear()
         self._extra_mcp_servers.clear()
         if self._client_handler:
             await self._client_handler.cleanup()
@@ -409,7 +520,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 self.log.exception("Error terminating ACP process")
             self._process = None
 
-    async def _stream_events(  # noqa: PLR0915
+    async def _stream_events(
         self,
         run_ctx: AgentRunContext,
         prompts: list[UserContent],
@@ -426,33 +537,18 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         wait_for_connections: bool | None = None,
         store_history: bool = True,
     ) -> AsyncIterator[RichAgentStreamEvent[str]]:
-        from agentpool.agents.acp_agent.acp_converters import (
-            convert_to_acp_content,
-            to_finish_reason,
-        )
+        """Stream events by delegating to ACPTurn.execute() via create_turn().
 
-        # Update input provider if provided
+        This is a thin wrapper preserved for backward compatibility.
+        The actual execution logic lives in ACPTurn.execute().
+        """
         if input_provider is not None and self._client_handler:
             self._client_handler._input_provider = input_provider
         if not self._api or not self._sdk_session_id or not self._state:
             raise AgentNotInitializedError
 
-        run_id = str(uuid.uuid4())
-        self._state.clear()
-        model_messages: list[ModelResponse | ModelRequest] = []
-        initial_request = ModelRequest(parts=[UserPromptPart(content=prompts)])
-        model_messages.append(initial_request)
-        current_response_parts: list[TextPart | ThinkingPart | ToolCallPart] = []
-        text_chunks: list[str] = []
-
         assert session_id is not None
-        yield RunStartedEvent(
-            session_id=session_id,
-            run_id=run_id,
-            agent_name=self.name,
-            parent_session_id=parent_session_id,
-        )
-        final_blocks = convert_to_acp_content(prompts)
+
         # Handle ephemeral execution (fork session if store_history=False)
         acp_session_id = self._sdk_session_id
         if not store_history and self._sdk_session_id:
@@ -460,155 +556,31 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             fork_response = await self._api.fork_session(self._sdk_session_id, cwd)
             acp_session_id = fork_response.session_id
             self.log.debug("Forked session", parent=self._sdk_session_id, fork=acp_session_id)
-        self.log.debug("Starting streaming prompt", num_blocks=len(final_blocks))
-        prompt_task = asyncio.create_task(self._api.prompt(acp_session_id, final_blocks))
-        self._prompt_task = prompt_task
 
-        async def poll_acp_events() -> AsyncIterator[RichAgentStreamEvent[str]]:
-            """Poll raw updates from ACP state, convert to events, until prompt completes."""
-            from agentpool.agents.acp_agent.acp_converters import acp_to_native_event
-
-            assert self._state
-            while not prompt_task.done():
-                if self._client_handler:
-                    try:
-                        await self._client_handler._update_event.wait_with_timeout(0.05)
-                        self._client_handler._update_event.clear()
-                    except TimeoutError:
-                        pass
-                while (update := self._state.pop_update()) is not None:
-                    if native_event := acp_to_native_event(update):
-                        yield native_event
-            while (update := self._state.pop_update()) is not None:
-                if native_event := acp_to_native_event(update):
-                    yield native_event
-
-        tool_metadata: dict[str, dict[str, Any]] = {}
-
-        try:
-            agent_ctx = self.get_context(run_ctx=run_ctx, input_provider=input_provider)
-            async with self._tool_bridge.set_run_context(agent_ctx, prompt=prompts):
-                send_stream, receive_stream = anyio.create_memory_object_stream(
-                    max_buffer_size=1000
-                )
-
-                async def _forward_acp_events() -> None:
-                    try:
-                        async for event in poll_acp_events():
-                            try:
-                                await send_stream.send(event)
-                            except (anyio.ClosedResourceError, anyio.BrokenResourceError):
-                                return
-                    finally:
-                        await send_stream.aclose()
-
-                # Do NOT subscribe to run_ctx.event_bus here: in standalone mode
-                # the producer publishes _stream_events() output back into the
-                # same local EventBus, creating a self-echo infinite loop.
-                _bg_tasks: set[asyncio.Task[Any]] = set()
-                task_a = asyncio.create_task(_forward_acp_events())
-                _bg_tasks.add(task_a)
-                task_a.add_done_callback(_bg_tasks.discard)
-
-                try:
-                    async for raw_event in receive_stream:
-                        event = (
-                            raw_event.event if isinstance(raw_event, EventEnvelope) else raw_event
-                        )
-                        if isinstance(event, ToolResultMetadataEvent):
-                            tool_metadata[event.tool_call_id] = event.metadata
-                            continue
-                        if run_ctx.cancelled:
-                            self.log.info("Stream cancelled by user")
-                            break
-                        if isinstance(event, ToolCallCompleteEvent):
-                            enriched_event = event
-                            if not enriched_event.agent_name:
-                                enriched_event = replace(enriched_event, agent_name=self.name)
-                            if (
-                                enriched_event.metadata is None
-                                and enriched_event.tool_call_id in tool_metadata
-                            ):
-                                enriched_event = replace(
-                                    enriched_event,
-                                    metadata=tool_metadata[enriched_event.tool_call_id],
-                                )
-                            output_event = enriched_event
-                        else:
-                            output_event = event
-                        part = event_to_part(output_event)
-                        if isinstance(part, TextPart):
-                            text_chunks.append(part.content)
-                        if part and not isinstance(part, ToolReturnPart):
-                            current_response_parts.append(part)
-                        yield output_event
-                finally:
-                    for t in list(_bg_tasks):
-                        t.cancel()
-                    for t in list(_bg_tasks):
-                        try:
-                            await t
-                        except asyncio.CancelledError:
-                            pass
-                        except Exception:
-                            self.log.exception("Error during background task cleanup")
-        except asyncio.CancelledError:
-            self.log.info("Stream cancelled via task cancellation")
-            run_ctx.cancelled = True
-
-        if run_ctx.cancelled:
-            message = ChatMessage[str](
-                content="".join(text_chunks),
-                role="assistant",
-                name=self.name,
-                message_id=message_id or str(uuid.uuid4()),
-                session_id=session_id,
-                parent_id=user_msg.message_id,
-                model_name=self.model_name,
-                messages=model_messages,
-                metadata={},
-                finish_reason="stop",
-            )
-            yield StreamCompleteEvent(message=message)
-            self._prompt_task = None
-            return
-
-        response = await prompt_task
-        finish_reason = to_finish_reason(response.stop_reason)
-        if current_response_parts:
-            model_messages.append(
-                ModelResponse(
-                    parts=current_response_parts,
-                    finish_reason=finish_reason,
-                    model_name=self.model_name,
-                    provider_name=self._provider_type,
-                )
-            )
-
-        text_content = "".join(text_chunks)
-        usage, cost_info = await calculate_usage_from_parts(
-            input_parts=prompts,
-            response_parts=current_response_parts,
-            text_content=text_content,
-            model_name=self.model_name,
-            provider=self._provider_type,
+        # Delegate to ACPTurn.execute() via create_turn()
+        assert self._api is not None
+        assert self._client_handler is not None
+        turn = self.create_turn(
+            prompts=prompts,
+            run_ctx=run_ctx,
+            message_history=message_history,  # type: ignore[arg-type]
         )
 
-        message = ChatMessage[str](
-            content=text_content,
-            role="assistant",
-            name=self.name,
-            message_id=message_id or str(uuid.uuid4()),
+        run_id = str(uuid.uuid4())
+        yield RunStartedEvent(
             session_id=session_id,
-            parent_id=user_msg.message_id,
-            model_name=self.model_name,
-            messages=model_messages,
-            metadata={},
-            finish_reason=finish_reason,
-            usage=usage,
-            cost_info=cost_info,
+            run_id=run_id,
+            agent_name=self.name,
+            parent_session_id=parent_session_id,
         )
-        yield StreamCompleteEvent(message=message)
+
+        async for event in turn.execute():
+            yield event
+
+        if turn._final_message is not None:
+            self._final_message = turn._final_message
+        if turn._message_history:
+            self._message_history = turn._message_history
 
     @property
     def model_name(self) -> str | None:
@@ -645,14 +617,12 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         Returns:
             An ACPTurn instance for single-cycle execution.
         """
-        # TODO: ACPAgentAPI does not implement ACPClientProtocol fully —
-        # it lacks stream_events() and get_messages(). At runtime this will raise
-        # AttributeError when ACPTurn.execute() calls those methods. An adapter
-        # wrapping ACPAgentAPI with async futures / notification registry is needed
-        # for full integration.
+        assert self._api is not None
+        assert self._client_handler is not None
+        str_prompts: list[str] = [str(p) if not isinstance(p, str) else p for p in prompts]
         return ACPTurn(
-            acp_client=cast("ACPClientProtocol", self._api),
-            prompts=prompts,  # type: ignore[arg-type]
+            acp_client=ACPClientAdapter(self._api, self._client_handler, conductor=self._conductor),
+            prompts=str_prompts,
             run_ctx=run_ctx,
             message_history=message_history,
             session_id=self._sdk_session_id or run_ctx.session_id,
@@ -662,7 +632,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         )
 
     async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
-        """Send CancelNotification to remote ACP server and cancel local tasks.
+        """Send CancelNotification to remote ACP server and mark run as cancelled.
 
         Args:
             run_ctx: Optional per-run context for the stream to interrupt
@@ -673,10 +643,9 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 self.log.info("Sent cancel notification to ACP server")
             except Exception:
                 self.log.exception("Failed to send cancel notification to ACP server")
-
-        if self._prompt_task and not self._prompt_task.done():
-            self._prompt_task.cancel()
-            self.log.info("Cancelled prompt task")
+        if run_ctx is not None:
+            run_ctx.cancelled = True
+            self.log.info("Marked run as cancelled")
 
     async def get_available_models(self) -> list[ModelInfo] | None:
         """Get available models from the ACP session state."""

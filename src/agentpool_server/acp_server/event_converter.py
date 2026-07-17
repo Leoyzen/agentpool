@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 import uuid
 
 from pydantic import BaseModel
@@ -42,6 +42,7 @@ from acp.schema import (
     AgentThoughtChunk,
     ContentToolCallContent,
     Cost,
+    PlanEntry as ACPPlanEntry,
     ToolCallLocation,
     ToolCallProgress,
     ToolCallStart,
@@ -78,7 +79,7 @@ from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Sequence
 
     from acp.schema.tool_call import ToolCallContent, ToolCallKind
     from agentpool.agents.events import RichAgentStreamEvent
@@ -96,6 +97,237 @@ ACPSessionUpdate = (
     | UsageUpdate
     | TurnCompleteUpdate
 )
+
+
+# ============================================================================
+# Stateless Conversion Functions
+#
+# These functions perform pure data transformation with no internal state.
+# They can be called directly during passthrough or composed by a stateful
+# converter (ACPEventConverter). Extracting them enables:
+#   - Zero-conversion passthrough: skip these functions entirely
+#   - Selective conversion: only convert specific event types
+#   - Testability: each function is independently testable
+# ============================================================================
+
+
+def build_text_chunk(delta: str, message_id: str) -> AgentMessageChunk:
+    """Convert a text delta to an AgentMessageChunk.
+
+    Args:
+        delta: The text content delta.
+        message_id: The current message ID for correlation.
+
+    Returns:
+        An AgentMessageChunk containing the text delta.
+    """
+    return AgentMessageChunk.text(delta, message_id=message_id)
+
+
+def build_thought_chunk(delta: str, message_id: str) -> AgentThoughtChunk:
+    """Convert a thinking/reasoning delta to an AgentThoughtChunk.
+
+    Args:
+        delta: The thinking content delta.
+        message_id: The current message ID for correlation.
+
+    Returns:
+        An AgentThoughtChunk containing the thinking delta.
+    """
+    return AgentThoughtChunk.text(delta, message_id=message_id)
+
+
+def build_usage_update(message: Any) -> UsageUpdate:
+    """Extract usage information from a completed stream message.
+
+    Builds a UsageUpdate from the message's usage and cost info.
+    This is a stateless extraction — the caller is responsible for
+    tracking last_usage if needed.
+
+    Args:
+        message: The ChatMessage from a StreamCompleteEvent.
+
+    Returns:
+        A UsageUpdate with token counts and optional cost.
+    """
+    request_usage = message.usage
+    cost_obj: Cost | None = None
+    if message.cost_info and message.cost_info.total_cost:
+        cost_obj = Cost(
+            amount=float(message.cost_info.total_cost),
+            currency="USD",
+        )
+    return UsageUpdate(
+        used=request_usage.total_tokens,
+        size=request_usage.total_tokens,
+        cost=cost_obj,
+    )
+
+
+def build_usage_from_message(message: Any) -> Usage | None:
+    """Extract a Usage object from a completed stream message.
+
+    Args:
+        message: The ChatMessage from a StreamCompleteEvent.
+
+    Returns:
+        A Usage object with token breakdown, or None if extraction fails.
+    """
+    request_usage = message.usage
+    thought = request_usage.details.get("reasoning_tokens") or None
+    return Usage(
+        total_tokens=request_usage.total_tokens,
+        input_tokens=request_usage.input_tokens,
+        output_tokens=request_usage.output_tokens,
+        thought_tokens=thought,
+        cached_read_tokens=request_usage.cache_read_tokens or None,
+        cached_write_tokens=request_usage.cache_write_tokens or None,
+    )
+
+
+def convert_plan_entries(entries: Sequence[Any]) -> AgentPlanUpdate:
+    """Convert plan entries to ACP format.
+
+    Args:
+        entries: A sequence of plan entry objects with content, priority, status.
+
+    Returns:
+        An AgentPlanUpdate with converted entries.
+    """
+    acp_entries = [
+        ACPPlanEntry(content=e.content, priority=e.priority, status=e.status) for e in entries
+    ]
+    return AgentPlanUpdate(entries=acp_entries)
+
+
+def build_error_text(message: str, agent_name: str | None) -> str:
+    """Format an error message for display as agent text.
+
+    Args:
+        message: The error message.
+        agent_name: Optional agent name for prefix.
+
+    Returns:
+        Formatted error text string.
+    """
+    agent_prefix = f"[{agent_name}] " if agent_name else ""
+    return f"\n\n❌ **Error**: {agent_prefix}{message}\n\n"
+
+
+def build_run_failed_text(run_id: str, exc: BaseException) -> str:
+    """Format a run failure message for display as agent text.
+
+    Args:
+        run_id: The failed run's identifier.
+        exc: The exception that caused the failure.
+
+    Returns:
+        Formatted failure text string.
+    """
+    return f"\n\n❌ **Run Failed** [{run_id}]: {exc}\n\n"
+
+
+def is_cancellation_exception(exc: BaseException) -> bool:
+    """Check if an exception represents a cancellation.
+
+    Args:
+        exc: The exception to check.
+
+    Returns:
+        True if the exception is an asyncio.CancelledError or a RuntimeError
+        containing "cancelled" in its message.
+    """
+    import asyncio
+
+    return isinstance(exc, asyncio.CancelledError) or (
+        isinstance(exc, RuntimeError) and "cancelled" in str(exc).lower()
+    )
+
+
+# ============================================================================
+# Event Converter Component Protocol
+#
+# Defines the interface for event conversion components. Implementations may:
+#   - Perform full conversion (ACPEventConverter — stateful, tracks tools)
+#   - Skip conversion entirely during passthrough (zero-conversion)
+#
+# During proxy chain passthrough, a PassthroughEventConverter can be
+# substituted to skip event-to-ACP conversion, forwarding raw events
+# to the next proxy or terminal agent.
+# ============================================================================
+
+
+@runtime_checkable
+class EventConverterComponent(Protocol):
+    """Interface for event conversion components.
+
+    This protocol defines the contract for converting agent stream events
+    to ACP session updates. The ACPEventConverter is the primary implementation;
+    a future PassthroughEventConverter can implement this to skip conversion
+    during proxy chain passthrough (zero-conversion mode).
+
+    Attributes:
+        subagent_display_mode: How to display subagent output.
+        raw_input_mode: How to emit tool call raw_input.
+        subagent_meta: _meta dict for subagent notifications, None for root.
+        last_usage: Usage from the last completed stream, if available.
+    """
+
+    @property
+    def subagent_display_mode(self) -> Literal["legacy", "zed", "qwen"]:
+        """How to display subagent output."""
+        ...
+
+    @property
+    def raw_input_mode(self) -> Literal["dict", "skip", "json_str"]:
+        """How to emit tool call raw_input."""
+        ...
+
+    @property
+    def subagent_meta(self) -> dict[str, Any] | None:
+        """Build _meta dict for subagent notifications. None for root sessions."""
+        ...
+
+    @property
+    def last_usage(self) -> Usage | None:
+        """Usage from the last completed stream, if available."""
+        ...
+
+    def reset(self) -> None:
+        """Reset converter state for a new run."""
+        ...
+
+    async def convert(self, event: RichAgentStreamEvent[Any]) -> AsyncIterator[ACPSessionUpdate]:
+        """Convert an agent event to zero or more ACP session updates.
+
+        Args:
+            event: The agent stream event to convert.
+
+        Yields:
+            ACP session update objects.
+        """
+        ...
+
+    async def cancel_pending_tools(self) -> AsyncIterator[ToolCallProgress]:
+        """Cancel all pending tool calls.
+
+        Yields ToolCallProgress notifications with status="completed" for all
+        tool calls that were started but not completed.
+
+        Yields:
+            ToolCallProgress notifications for each pending tool call.
+        """
+        ...
+
+    async def build_subagent_completed(
+        self, child_session_id: str
+    ) -> AsyncIterator[ToolCallProgress]:
+        """Emit a completion notification for a subagent session.
+
+        Args:
+            child_session_id: The child session ID that has completed.
+        """
+        ...
 
 
 def get_compaction_text(trigger: str) -> str:
@@ -393,7 +625,6 @@ class ACPEventConverter:
         """Convert an agent event to zero or more ACP session updates."""
         from acp.schema import (
             FileEditToolCallContent,
-            PlanEntry as ACPPlanEntry,
             TerminalToolCallContent,
         )
         from agentpool_server.acp_server.syntax_detection import format_zed_code_block
@@ -404,7 +635,7 @@ class ACPEventConverter:
                 PartStartEvent(part=TextPart(content=delta))
                 | PartDeltaEvent(delta=TextPartDelta(content_delta=delta))
             ):
-                yield AgentMessageChunk.text(delta, message_id=self._current_message_id)
+                yield build_text_chunk(delta, self._current_message_id)
 
             # Thinking/reasoning
             case (
@@ -412,7 +643,7 @@ class ACPEventConverter:
                 | PartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta))
             ):
                 if delta is not None:
-                    yield AgentThoughtChunk.text(delta, message_id=self._current_message_id)
+                    yield build_thought_chunk(delta, self._current_message_id)
 
             # Builtin tool call started (e.g., WebSearchTool, CodeExecutionTool)
             case PartStartEvent(part=NativeToolCallPart() as part):
@@ -666,30 +897,11 @@ class ACPEventConverter:
                 pass  # No notification needed
 
             case StreamCompleteEvent(message=message):
-                request_usage = message.usage
-                thought = request_usage.details.get("reasoning_tokens") or None
-                self.last_usage = Usage(
-                    total_tokens=request_usage.total_tokens,
-                    input_tokens=request_usage.input_tokens,
-                    output_tokens=request_usage.output_tokens,
-                    thought_tokens=thought,
-                    cached_read_tokens=request_usage.cache_read_tokens or None,
-                    cached_write_tokens=request_usage.cache_write_tokens or None,
-                )
-                cost_obj: Cost | None = None
-                if message.cost_info and message.cost_info.total_cost:
-                    cost_obj = Cost(
-                        amount=float(message.cost_info.total_cost),
-                        currency="USD",
-                    )
+                self.last_usage = build_usage_from_message(message)
                 # Always yield UsageUpdate on stream completion so clients
                 # know the turn has ended — especially critical for inject-
                 # triggered turns where no PromptResponse(stop_reason) is sent.
-                yield UsageUpdate(
-                    used=request_usage.total_tokens,
-                    size=request_usage.total_tokens,  # best approximation
-                    cost=cost_obj,
-                )
+                yield build_usage_update(message)
                 # Turn-complete signal: explicit end-of-turn barrier for clients.
                 # Based on draft RFD PR #644 (not yet merged into ACP spec).
                 # See: https://github.com/agentclientprotocol/agent-client-protocol/pull/644
@@ -699,11 +911,7 @@ class ACPEventConverter:
                     yield TurnCompleteUpdate(stop_reason="end_turn")
 
             case PlanUpdateEvent(entries=entries):
-                acp_entries = [
-                    ACPPlanEntry(content=e.content, priority=e.priority, status=e.status)
-                    for e in entries
-                ]
-                yield AgentPlanUpdate(entries=acp_entries)
+                yield convert_plan_entries(entries)
 
             case CompactionEvent(trigger=trigger, phase=phase) if phase == "starting":
                 text = get_compaction_text(trigger)
@@ -823,8 +1031,7 @@ class ACPEventConverter:
             case RunErrorEvent(message=message, agent_name=agent_name):
                 # TurnCompleteUpdate is required here — without it, clients
                 # with turn_complete support stay stuck in "running" state.
-                agent_prefix = f"[{agent_name}] " if agent_name else ""
-                error_text = f"\n\n❌ **Error**: {agent_prefix}{message}\n\n"
+                error_text = build_error_text(message, agent_name)
                 yield AgentMessageChunk.text(error_text, message_id=self._current_message_id)
                 async for cancel_update in self.cancel_pending_tools():
                     yield cancel_update
@@ -836,18 +1043,13 @@ class ACPEventConverter:
                 # Unlike RunErrorEvent (agent-level), RunFailedEvent indicates
                 # the run itself crashed — the session cannot continue.
 
-                # Check if this is a cancellation (session/cancel notification)
-                import asyncio
-
-                is_cancellation = isinstance(exc, asyncio.CancelledError) or (
-                    isinstance(exc, RuntimeError) and "cancelled" in str(exc).lower()
-                )
+                is_cancellation = is_cancellation_exception(exc)
 
                 stop_reason: Literal["end_turn", "cancelled"] = (
                     "cancelled" if is_cancellation else "end_turn"
                 )
                 if not is_cancellation:
-                    error_text = f"\n\n❌ **Run Failed** [{run_id}]: {exc}\n\n"
+                    error_text = build_run_failed_text(run_id, exc)
                     yield AgentMessageChunk.text(error_text, message_id=self._current_message_id)
                 async for cancel_update in self.cancel_pending_tools():
                     yield cancel_update
@@ -910,3 +1112,85 @@ class ACPEventConverter:
                 # Graceful fallback for unknown event types
                 # Handles future events like ToolRequiresAuthEvent without crashing
                 logger.debug("Unhandled event", event_type=type(event).__name__)
+
+
+# ============================================================================
+# Passthrough Event Converter
+#
+# A zero-conversion implementation of EventConverterComponent. During proxy
+# chain passthrough, this converter yields nothing — events are forwarded
+# raw to the next proxy or terminal agent without ACP-specific conversion.
+# ============================================================================
+
+
+@dataclass
+class PassthroughEventConverter:
+    """No-op event converter for proxy chain passthrough.
+
+    Implements EventConverterComponent but performs zero conversion.
+    All events are silently consumed (yields nothing). This enables
+    proxy chains to skip the convert→ACP→convert round-trip when
+    the terminal agent handles its own event delivery.
+
+    The converter still tracks usage and provides subagent metadata
+    so the proxy chain can maintain basic accounting.
+    """
+
+    subagent_display_mode: Literal["legacy", "zed", "qwen"] = "legacy"
+    raw_input_mode: Literal["dict", "skip", "json_str"] = "dict"
+    client_supports_turn_complete: bool = False
+    subagent_context: SubagentContext | None = None
+    last_usage: Usage | None = field(default=None, init=False)
+
+    @property
+    def subagent_meta(self) -> dict[str, Any] | None:
+        """Build _meta dict for subagent notifications. None for root sessions."""
+        if self.subagent_context is None:
+            return None
+        return {
+            "parentToolCallId": self.subagent_context.parent_tool_call_id,
+            "subagentType": self.subagent_context.subagent_type,
+            "provenance": "subagent",
+        }
+
+    def reset(self) -> None:
+        """Reset converter state for a new run."""
+        self.last_usage = None
+
+    async def convert(self, event: RichAgentStreamEvent[Any]) -> AsyncIterator[ACPSessionUpdate]:
+        """No-op conversion — yields nothing during passthrough.
+
+        Args:
+            event: The agent stream event (ignored).
+
+        Yields:
+            Nothing — this is a zero-conversion passthrough.
+        """
+        # Extract usage from stream completion for accounting
+        if isinstance(event, StreamCompleteEvent):
+            self.last_usage = build_usage_from_message(event.message)
+        return
+        yield  # Make this an async generator
+
+    async def cancel_pending_tools(self) -> AsyncIterator[ToolCallProgress]:
+        """No-op cancellation — no tools tracked during passthrough.
+
+        Yields:
+            Nothing — no tool state is tracked.
+        """
+        return
+        yield  # Make this an async generator
+
+    async def build_subagent_completed(
+        self, child_session_id: str
+    ) -> AsyncIterator[ToolCallProgress]:
+        """No-op subagent completion — no subagent tracking during passthrough.
+
+        Args:
+            child_session_id: The child session ID (ignored).
+
+        Yields:
+            Nothing — no subagent state is tracked.
+        """
+        return
+        yield  # Make this an async generator

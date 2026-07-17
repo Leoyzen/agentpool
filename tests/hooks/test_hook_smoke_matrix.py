@@ -177,15 +177,18 @@ class _FakeACPClient:
     def __init__(self, updates: list[Any], messages: list[Any]) -> None:
         self._updates = updates
         self._messages = messages
+        self._stop_reason: str | None = "end_turn"
 
-    async def prompt(self, session_id: str, content: list[Any]) -> Any:
-        from acp.schema import PromptResponse
+    async def prompt(self, session_id: str, content: list[Any]) -> None:
+        pass
 
-        return PromptResponse(stop_reason="end_turn")
-
-    async def stream_events(self, response: Any) -> Any:
+    async def stream_events(self) -> Any:
         for update in self._updates:
             yield update
+
+    @property
+    def stop_reason(self) -> str | None:
+        return self._stop_reason
 
     async def get_messages(self, session_id: str) -> list[Any]:
         return list(self._messages)

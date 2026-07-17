@@ -15,7 +15,7 @@ from acp.schema import (
     UserMessageChunk,
 )
 from agentpool.agents.acp_agent import ACPAgent
-from agentpool.agents.acp_agent.session_state import ACPSessionState
+from agentpool.agents.acp_agent.session_state import ACPState
 from agentpool.sessions.models import SessionData
 
 
@@ -31,8 +31,8 @@ def mock_api():
 
 @pytest.fixture
 def mock_state():
-    """Create an ACPSessionState for testing."""
-    return ACPSessionState(session_id="")
+    """Create an ACPState for testing."""
+    return ACPState(session_id="")
 
 
 @pytest.fixture
@@ -90,8 +90,8 @@ async def test_load_session_converts_updates_to_chat_messages(acp_agent, mock_ap
 
     # Add a mock update to the state during load
     async def side_effect(*args, **kwargs):
-        mock_state.add_update(UserMessageChunk.text("Hello from history"))
-        mock_state.add_update(AgentMessageChunk.text("Agent response"))
+        mock_state._load_updates.append(UserMessageChunk.text("Hello from history"))
+        mock_state._load_updates.append(AgentMessageChunk.text("Agent response"))
         return LoadSessionResponse()
 
     mock_api.load_session = AsyncMock(side_effect=side_effect)
@@ -213,7 +213,7 @@ async def test_load_session_clears_existing_chat_messages(acp_agent, mock_api, m
     acp_agent.conversation.chat_messages.append(existing_msg)
 
     async def side_effect(*args, **kwargs):
-        mock_state.add_update(UserMessageChunk.text("Loaded message"))
+        mock_state._load_updates.append(UserMessageChunk.text("Loaded message"))
         return LoadSessionResponse()
 
     mock_api.load_session = AsyncMock(side_effect=side_effect)

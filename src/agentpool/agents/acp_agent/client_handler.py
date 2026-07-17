@@ -42,12 +42,13 @@ if TYPE_CHECKING:
         ReleaseTerminalRequest,
         RequestPermissionRequest,
         SessionNotification,
+        SessionUpdate,
         TerminalOutputRequest,
         WaitForTerminalExitRequest,
         WriteTextFileRequest,
     )
     from agentpool.agents.acp_agent import ACPAgent
-    from agentpool.agents.acp_agent.session_state import ACPSessionState
+    from agentpool.agents.acp_agent.session_state import ACPState
     from agentpool.ui.base import InputProvider
 
 logger = get_logger(__name__)
@@ -71,8 +72,8 @@ class ACPClientHandler(Client):
     - Terminal operations (create, output, kill, release) via ProcessManager
     - Permission request handling via InputProvider
 
-    The handler accumulates session updates in an ACPSessionState instance,
-    allowing the ACPAgent to build the final response from streamed chunks.
+    The handler tracks session state in an ACPState instance.
+    Stream data is pushed directly to an async queue (not accumulated in state).
 
     Uses ExecutionEnvironment for all file and process operations, enabling
     swappable backends (local, Docker, E2B, SSH, etc.).
@@ -84,7 +85,7 @@ class ACPClientHandler(Client):
     def __init__(
         self,
         agent: ACPAgent[Any],
-        state: ACPSessionState,
+        state: ACPState,
         input_provider: InputProvider | None = None,
     ) -> None:
         self._agent = agent
@@ -93,6 +94,11 @@ class ACPClientHandler(Client):
         self._update_event = TimeoutableEvent()
         # Map ACP terminal IDs to process manager IDs (for local execution only)
         self._terminal_to_process: dict[str, str] = {}
+        # Async queue for stream-data updates (set by ACPClientAdapter).
+        # When None, stream data falls back to _load_updates capture during session load.
+        self._stream_queue: asyncio.Queue[SessionUpdate] | None = None
+        # When False, request_permission skips hook firing (HookProxy handles hooks).
+        self._hooks_enabled: bool = True
         # Copy auto_approve from agent (can be updated via set_auto_approve)
 
     @property
@@ -114,6 +120,27 @@ class ACPClientHandler(Client):
     def allow_terminal(self) -> bool:
         caps = self._agent._init_request.client_capabilities
         return bool(caps and caps.terminal)
+
+    def set_stream_queue(self, queue: asyncio.Queue[SessionUpdate]) -> None:
+        """Set the async queue for streaming session updates.
+
+        When set, stream-data updates (text chunks, tool calls, thoughts)
+        are pushed to this queue instead of being collected in state.
+        State updates (mode, model, config, commands) are always processed
+        in-place regardless of the queue.
+        """
+        self._stream_queue = queue
+
+    def set_hooks_enabled(self, enabled: bool) -> None:
+        """Enable or disable hook firing in request_permission.
+
+        When False, request_permission skips hook firing entirely.
+        Used by Conductor when HookProxy is active to prevent double-firing.
+
+        Args:
+            enabled: True to enable hooks, False to disable.
+        """
+        self._hooks_enabled = enabled
 
     async def session_update(self, params: SessionNotification[Any]) -> None:
         """Handle session update notifications from the agent.
@@ -190,7 +217,8 @@ class ACPClientHandler(Client):
                 await self._agent.state_updated.emit(update)
                 logger.debug("Available commands updated", count=len(update.available_commands))
                 # Also capture during load so replay/restoration works correctly
-                self.state.add_update(params.update)
+                if self.state.is_loading:
+                    self.state._load_updates.append(params.update)
                 self._update_event.set()
                 return
 
@@ -201,14 +229,28 @@ class ACPClientHandler(Client):
         # 3. Switch to agent-owned todos instead of pool-owned
         # For now, AgentPlanUpdate falls through to stream data.
 
-        # Store raw update - conversion happens lazily during consumption
-        self.state.add_update(params.update)
+        # Capture during load for replay/restoration.
+        if self.state.is_loading:
+            self.state._load_updates.append(params.update)
+
+        # Push stream-data updates to the async queue if set.
+        # When no queue is set (e.g., during session load without adapter),
+        # stream data is still available via _load_updates replay.
+        if self._stream_queue is not None:
+            await self._stream_queue.put(params.update)
+
         self._update_event.set()
 
     async def request_permission(  # noqa: PLR0911
         self, params: RequestPermissionRequest
     ) -> RequestPermissionResponse:
         """Handle permission requests via InputProvider."""
+        # When hooks are disabled (HookProxy active), skip hook firing
+        # to prevent double-firing. HookProxy handles hooks via proxy_successor.
+        if not self._hooks_enabled:
+            if params.options:
+                return RequestPermissionResponse.allowed(params.options[0].option_id)
+            return RequestPermissionResponse.allowed("")
         tc = params.tool_call
         name = tc.title or "operation"
         logger.info("Permission requested", tool_name=name)
