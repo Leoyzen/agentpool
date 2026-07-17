@@ -9,7 +9,7 @@ from agentpool import Agent
 # These tests use structured output (tool_choice: 'required') which is
 # incompatible with thinking-mode models (DeepSeek, Kimi). See issue #84.
 pytestmark = [
-    pytest.mark.requires_openai_key,
+    pytest.mark.real_model,
     pytest.mark.incompatible_with_thinking,
 ]
 

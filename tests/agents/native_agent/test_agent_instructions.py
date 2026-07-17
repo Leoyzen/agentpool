@@ -59,7 +59,7 @@ async def agent_with_instruction_providers():
     return agent
 
 
-@pytest.mark.requires_openai_key
+@pytest.mark.real_model
 class TestNativeAgentInstructions:
     """Test NativeAgent integration with provider instructions."""
 

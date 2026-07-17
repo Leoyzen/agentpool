@@ -230,7 +230,7 @@ def remap_hardcoded_test_models():
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Auto-skip credential-dependent and thinking-incompatible tests.
 
-    - ``requires_openai_key``: skipped when ``OPENAI_API_KEY`` is not set
+    - ``real_model``: skipped when ``OPENAI_API_KEY`` is not set
     - ``incompatible_with_thinking``: skipped when ``TEST_DEFAULT_MODEL``
       points to a thinking-mode model (deepseek, kimi) — see issue #84
     """
@@ -240,7 +240,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     is_thinking_model = any(p in model for p in _thinking_model_prefixes)
 
     for item in items:
-        if "requires_openai_key" in item.keywords and not os.environ.get("OPENAI_API_KEY"):
+        if "real_model" in item.keywords and not os.environ.get("OPENAI_API_KEY"):
             item.add_marker(
                 pytest.mark.skip(
                     reason="OPENAI_API_KEY not set — skipping credential-dependent test",

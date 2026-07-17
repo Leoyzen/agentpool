@@ -130,7 +130,7 @@ class TestToolBoxModeSnapshots:
     """Snapshot tests for tool_box subagent mode."""
 
     @pytest.mark.anyio
-    @pytest.mark.acp_snapshot
+    @pytest.mark.snapshot
     async def test_text_stream(
         self, tool_box_converter: ACPEventConverter, snapshot: SnapshotAssertion
     ):
@@ -144,7 +144,7 @@ class TestToolBoxModeSnapshots:
         assert all_updates == snapshot
 
     @pytest.mark.anyio
-    @pytest.mark.acp_snapshot
+    @pytest.mark.snapshot
     async def test_thinking_stream(
         self, tool_box_converter: ACPEventConverter, snapshot: SnapshotAssertion
     ):
@@ -158,7 +158,7 @@ class TestToolBoxModeSnapshots:
         assert all_updates == snapshot
 
     @pytest.mark.anyio
-    @pytest.mark.acp_snapshot
+    @pytest.mark.snapshot
     async def test_tool_call(
         self, tool_box_converter: ACPEventConverter, snapshot: SnapshotAssertion
     ):
@@ -172,7 +172,7 @@ class TestToolBoxModeSnapshots:
         assert all_updates == snapshot
 
     @pytest.mark.anyio
-    @pytest.mark.acp_snapshot
+    @pytest.mark.snapshot
     async def test_mixed_events(
         self, tool_box_converter: ACPEventConverter, snapshot: SnapshotAssertion
     ):
@@ -186,7 +186,7 @@ class TestToolBoxModeSnapshots:
         assert all_updates == snapshot
 
     @pytest.mark.anyio
-    @pytest.mark.acp_snapshot
+    @pytest.mark.snapshot
     async def test_tool_call_error(
         self, tool_box_converter: ACPEventConverter, snapshot: SnapshotAssertion
     ):
@@ -200,7 +200,7 @@ class TestToolBoxModeSnapshots:
         assert all_updates == snapshot
 
     @pytest.mark.anyio
-    @pytest.mark.acp_snapshot
+    @pytest.mark.snapshot
     async def test_long_text(
         self, tool_box_converter: ACPEventConverter, snapshot: SnapshotAssertion
     ):
@@ -214,7 +214,7 @@ class TestToolBoxModeSnapshots:
         assert all_updates == snapshot
 
     @pytest.mark.anyio
-    @pytest.mark.acp_snapshot
+    @pytest.mark.snapshot
     async def test_nested_subagents(
         self, tool_box_converter: ACPEventConverter, snapshot: SnapshotAssertion
     ):
@@ -232,7 +232,7 @@ class TestInlineModeSnapshots:
     """Snapshot tests for inline subagent mode."""
 
     @pytest.mark.anyio
-    @pytest.mark.acp_snapshot
+    @pytest.mark.snapshot
     async def test_text_stream(
         self, inline_converter: ACPEventConverter, snapshot: SnapshotAssertion
     ):
@@ -246,7 +246,7 @@ class TestInlineModeSnapshots:
         assert all_updates == snapshot
 
     @pytest.mark.anyio
-    @pytest.mark.acp_snapshot
+    @pytest.mark.snapshot
     async def test_thinking_stream(
         self, inline_converter: ACPEventConverter, snapshot: SnapshotAssertion
     ):
@@ -260,7 +260,7 @@ class TestInlineModeSnapshots:
         assert all_updates == snapshot
 
     @pytest.mark.anyio
-    @pytest.mark.acp_snapshot
+    @pytest.mark.snapshot
     async def test_tool_call(
         self, inline_converter: ACPEventConverter, snapshot: SnapshotAssertion
     ):
@@ -274,7 +274,7 @@ class TestInlineModeSnapshots:
         assert all_updates == snapshot
 
     @pytest.mark.anyio
-    @pytest.mark.acp_snapshot
+    @pytest.mark.snapshot
     async def test_mixed_events(
         self, inline_converter: ACPEventConverter, snapshot: SnapshotAssertion
     ):
@@ -288,7 +288,7 @@ class TestInlineModeSnapshots:
         assert all_updates == snapshot
 
     @pytest.mark.anyio
-    @pytest.mark.acp_snapshot
+    @pytest.mark.snapshot
     async def test_tool_call_error(
         self, inline_converter: ACPEventConverter, snapshot: SnapshotAssertion
     ):
@@ -302,7 +302,7 @@ class TestInlineModeSnapshots:
         assert all_updates == snapshot
 
     @pytest.mark.anyio
-    @pytest.mark.acp_snapshot
+    @pytest.mark.snapshot
     async def test_long_text(
         self, inline_converter: ACPEventConverter, snapshot: SnapshotAssertion
     ):
@@ -316,7 +316,7 @@ class TestInlineModeSnapshots:
         assert all_updates == snapshot
 
     @pytest.mark.anyio
-    @pytest.mark.acp_snapshot
+    @pytest.mark.snapshot
     async def test_nested_subagents(
         self, inline_converter: ACPEventConverter, snapshot: SnapshotAssertion
     ):
@@ -338,7 +338,7 @@ class TestLegacyModeSnapshots:
     """
 
     @pytest.mark.anyio
-    @pytest.mark.acp_snapshot
+    @pytest.mark.snapshot
     async def test_text_stream(
         self, legacy_converter: ACPEventConverter, snapshot: SnapshotAssertion
     ):
@@ -352,7 +352,7 @@ class TestLegacyModeSnapshots:
         assert all_updates == snapshot
 
     @pytest.mark.anyio
-    @pytest.mark.acp_snapshot
+    @pytest.mark.snapshot
     async def test_tool_call(
         self, legacy_converter: ACPEventConverter, snapshot: SnapshotAssertion
     ):
@@ -374,7 +374,7 @@ class TestZedModeSnapshots:
     """
 
     @pytest.mark.anyio
-    @pytest.mark.acp_snapshot
+    @pytest.mark.snapshot
     async def test_full_lifecycle(
         self,
         zed_converter: ACPEventConverter,
