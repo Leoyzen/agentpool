@@ -9,9 +9,8 @@ import pytest
 
 from agentpool.orchestrator import SessionController
 from agentpool.sessions import SessionData
-from agentpool.sessions.store import MemorySessionStore
 from agentpool_config.storage import MemoryStorageConfig, SQLStorageConfig
-from agentpool_storage.memory_provider import MemoryStorageProvider
+from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 from agentpool_storage.sql_provider import SQLModelProvider
 
 
@@ -294,12 +293,12 @@ class TestSessionControllerPersistence:
         return pool
 
     @pytest.fixture
-    def store(self) -> MemorySessionStore:
+    def store(self) -> MemoryStorageProvider:
         """Create a memory session store."""
-        return MemorySessionStore()
+        return MemoryStorageProvider()
 
     async def test_get_or_create_session_saves_to_store(
-        self, mock_pool: MagicMock, store: MemorySessionStore
+        self, mock_pool: MagicMock, store: MemoryStorageProvider
     ) -> None:
         """SessionController saves session to store on creation."""
         controller = SessionController(pool=mock_pool, store=store)
@@ -313,13 +312,13 @@ class TestSessionControllerPersistence:
         assert state.session_id == "test_session"
         assert state.agent_name == "test_agent"
 
-        loaded = await store.load("test_session")
+        loaded = await store.load_session("test_session")
         assert loaded is not None
         assert loaded.session_id == "test_session"
         assert loaded.agent_name == "test_agent"
 
     async def test_close_session_marks_closed_in_store(
-        self, mock_pool: MagicMock, store: MemorySessionStore
+        self, mock_pool: MagicMock, store: MemoryStorageProvider
     ) -> None:
         """SessionController marks session as closed in store on close."""
         controller = SessionController(pool=mock_pool, store=store)
@@ -331,12 +330,12 @@ class TestSessionControllerPersistence:
 
         await controller.close_session("test_session")
 
-        loaded = await store.load("test_session")
+        loaded = await store.load_session("test_session")
         assert loaded is not None
         assert loaded.status == "closed"
 
     async def test_create_with_parent_tracks_children(
-        self, mock_pool: MagicMock, store: MemorySessionStore
+        self, mock_pool: MagicMock, store: MemoryStorageProvider
     ) -> None:
         """Creating session with parent_session_id tracks in _children."""
         controller = SessionController(pool=mock_pool, store=store)
@@ -359,7 +358,7 @@ class TestSessionControllerPersistence:
         assert parent.session_id == "parent_1"
 
     async def test_close_session_cascade_children(
-        self, mock_pool: MagicMock, store: MemorySessionStore
+        self, mock_pool: MagicMock, store: MemoryStorageProvider
     ) -> None:
         """Closing parent cascades to child sessions by default."""
         controller = SessionController(pool=mock_pool, store=store)
@@ -378,15 +377,15 @@ class TestSessionControllerPersistence:
 
         assert controller.get_session("parent_1") is None
         assert controller.get_session("child_1") is None
-        parent_data = await store.load("parent_1")
+        parent_data = await store.load_session("parent_1")
         assert parent_data is not None
         assert parent_data.status == "closed"
-        child_data = await store.load("child_1")
+        child_data = await store.load_session("child_1")
         assert child_data is not None
         assert child_data.status == "closed"
 
     async def test_child_inherits_project_id_via_metadata(
-        self, mock_pool: MagicMock, store: MemorySessionStore
+        self, mock_pool: MagicMock, store: MemoryStorageProvider
     ) -> None:
         """Child session can receive parent project_id via explicit metadata."""
         controller = SessionController(pool=mock_pool, store=store)
@@ -405,7 +404,7 @@ class TestSessionControllerPersistence:
             cwd="/path/to/project",
         )
 
-        child = await store.load("child_1")
+        child = await store.load_session("child_1")
         assert child is not None
         assert child.project_id == "abc123def456"
         assert child.cwd == "/path/to/project"

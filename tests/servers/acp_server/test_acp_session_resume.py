@@ -12,9 +12,9 @@ from agentpool import Agent
 from agentpool.delegation import AgentPool
 from agentpool.orchestrator.core import SessionPool
 from agentpool.sessions import SessionData
-from agentpool.sessions.store import MemorySessionStore
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.session_manager import ACPSessionManager
+from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
 
 @pytest.fixture
@@ -201,11 +201,11 @@ async def test_resume_session_passes_mcp_servers_to_constructor():
 
     Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
 
-    await store.save(
+    await store.save_session(
         SessionData(
             session_id="test-session-id",
             agent_name="test_agent",
@@ -258,11 +258,11 @@ async def test_resume_session_initializes_mcp_servers():
 
     Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
 
-    await store.save(
+    await store.save_session(
         SessionData(
             session_id="test-session-id",
             agent_name="test_agent",
@@ -310,11 +310,11 @@ async def test_resume_session_with_none_mcp_servers_calls_initialize():
 
     Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
 
-    await store.save(
+    await store.save_session(
         SessionData(
             session_id="test-session-id",
             agent_name="test_agent",
@@ -368,11 +368,11 @@ async def test_resume_session_does_not_call_load_session():
 
     Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
 
-    await store.save(
+    await store.save_session(
         SessionData(
             session_id="test-session-id",
             agent_name="test_agent",
@@ -420,11 +420,11 @@ async def test_resume_session_closes_old_and_recreates():
 
     Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
     # pool.register() removed; agent created from callback/config above
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
 
-    await store.save(
+    await store.save_session(
         SessionData(
             session_id="test-session-id",
             agent_name="test_agent",

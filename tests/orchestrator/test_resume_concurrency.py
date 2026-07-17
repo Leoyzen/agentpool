@@ -68,10 +68,10 @@ def mock_pool() -> MagicMock:
 
 @pytest.fixture
 async def session_pool(mock_pool: MagicMock) -> SessionPool:
-    """Return a SessionPool backed by a MemorySessionStore."""
-    from agentpool.sessions.store import MemorySessionStore
+    """Return a SessionPool backed by a MemoryStorageProvider."""
+    from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
-    store = MemorySessionStore()
+    store = MemoryStorageProvider()
     return SessionPool(pool=mock_pool, store=store)
 
 
@@ -121,7 +121,7 @@ async def test_with_resume_lock_raises_busy_for_resumed_session(
     assert store is not None
 
     # Save session data with status "active" (already resumed)
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             agent_name="test-agent",
@@ -143,7 +143,7 @@ async def test_with_resume_lock_allows_checkpointed_session(
     store = session_pool.sessions.store
     assert store is not None
 
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             agent_name="test-agent",
@@ -174,7 +174,7 @@ async def test_resume_session_concurrent_calls_serialize(
     """
     store = session_pool.sessions.store
     assert store is not None
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             agent_type="native",
@@ -251,7 +251,7 @@ async def test_resume_session_rejects_second_after_success(
     """
     store = session_pool.sessions.store
     assert store is not None
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             agent_type="native",
@@ -313,7 +313,7 @@ async def test_resume_session_does_not_clear_pending_on_failure(
     """
     store = session_pool.sessions.store
     assert store is not None
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             agent_type="native",
@@ -353,7 +353,7 @@ async def test_resume_session_does_not_clear_pending_on_failure(
             await session_pool.resume_session("sess-1", results)
 
     # After failed resume, pending_deferred_calls should NOT be cleared
-    session_data = await store.load("sess-1")
+    session_data = await store.load_session("sess-1")
     assert session_data is not None
     assert len(session_data.pending_deferred_calls) == 1
     assert session_data.pending_deferred_calls[0].tool_call_id == "call-1"
@@ -379,7 +379,7 @@ async def test_resume_session_allows_retry_after_failure(
     """
     store = session_pool.sessions.store
     assert store is not None
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             agent_type="native",
@@ -431,7 +431,7 @@ async def test_resume_session_allows_retry_after_failure(
             await session_pool.resume_session("sess-1", results)
 
         # Status should be checkpointed again
-        session_data = await store.load("sess-1")
+        session_data = await store.load_session("sess-1")
         assert session_data is not None
         assert session_data.status == "checkpointed"
         assert len(session_data.pending_deferred_calls) == 1
@@ -440,7 +440,7 @@ async def test_resume_session_allows_retry_after_failure(
         await session_pool.resume_session("sess-1", results)
 
         # Status should now be active
-        session_data = await store.load("sess-1")
+        session_data = await store.load_session("sess-1")
         assert session_data is not None
         assert session_data.status == "active"
         assert session_data.pending_deferred_calls == []
@@ -459,7 +459,7 @@ async def test_resume_session_status_transitions_checkpointed_to_resuming_to_act
     """Status transitions: checkpointed -> resuming -> active on success."""
     store = session_pool.sessions.store
     assert store is not None
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             agent_type="native",
@@ -478,13 +478,13 @@ async def test_resume_session_status_transitions_checkpointed_to_resuming_to_act
 
     # Track status transitions
     observed_statuses: list[str] = []
-    original_save = store.save
+    original_save = store.save_session
 
     async def tracking_save(data: Any) -> None:
         observed_statuses.append(data.status)
         await original_save(data)
 
-    store.save = tracking_save  # type: ignore[method-assign]
+    store.save_session = tracking_save  # type: ignore[method-assign]  # type: ignore[method-assign]
 
     mock_native = MagicMock()
     mock_native.name = "test-agent"
@@ -522,7 +522,7 @@ async def test_resume_session_status_reverts_to_checkpointed_on_failure(
     """Status reverts from resuming to checkpointed on agent.run() failure."""
     store = session_pool.sessions.store
     assert store is not None
-    await store.save(
+    await store.save_session(
         make_session_data(
             session_id="sess-1",
             agent_type="native",
@@ -540,13 +540,13 @@ async def test_resume_session_status_reverts_to_checkpointed_on_failure(
     )
 
     observed_statuses: list[str] = []
-    original_save = store.save
+    original_save = store.save_session
 
     async def tracking_save(data: Any) -> None:
         observed_statuses.append(data.status)
         await original_save(data)
 
-    store.save = tracking_save  # type: ignore[method-assign]
+    store.save_session = tracking_save  # type: ignore[method-assign]  # type: ignore[method-assign]
 
     mock_native = MagicMock()
     mock_native.name = "test-agent"

@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool.sessions.store import MemorySessionStore, SessionStore
 from agentpool_storage.adapter import StorageProviderAdapter
 from agentpool_storage.base import StorageProvider
 from agentpool_storage.protocols import (
@@ -186,6 +185,18 @@ class TestAdapterDelegation:
 class TestProviderProtocolConformance:
     """Test that concrete providers pass isinstance checks."""
 
+    def test_memory_storage_provider_satisfies_session_persistence(self) -> None:
+        from agentpool_storage.memory_provider.provider import MemoryStorageProvider
+
+        provider = MemoryStorageProvider()
+        assert isinstance(provider, SessionPersistence)
+
+    def test_memory_storage_provider_satisfies_checkpoint_store(self) -> None:
+        from agentpool_storage.memory_provider.provider import MemoryStorageProvider
+
+        provider = MemoryStorageProvider()
+        assert isinstance(provider, CheckpointStore)
+
     def test_memory_storage_provider_isinstance(self) -> None:
         from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
@@ -204,40 +215,3 @@ class TestProviderProtocolConformance:
                 f"MemoryStorageProvider failed isinstance for {p.__name__}"
             )
 
-
-# ---------------------------------------------------------------------------
-# MemorySessionStore Protocol conformance
-# ---------------------------------------------------------------------------
-
-
-class TestMemorySessionStoreConformance:
-    """Test that MemorySessionStore passes SessionPersistence isinstance check."""
-
-    def test_isinstance_session_persistence(self) -> None:
-        store = MemorySessionStore()
-        assert isinstance(store, SessionPersistence)
-
-    def test_isinstance_session_store(self) -> None:
-        """Backward compat: MemorySessionStore still passes SessionStore check."""
-        store = MemorySessionStore()
-        assert isinstance(store, SessionStore)
-
-
-# ---------------------------------------------------------------------------
-# Backward compatibility
-# ---------------------------------------------------------------------------
-
-
-class TestBackwardCompat:
-    """Test backward compatibility after deprecation."""
-
-    def test_session_store_protocol_still_works(self) -> None:
-        """SessionStore Protocol is deprecated but still functional."""
-        store = MemorySessionStore()
-        assert isinstance(store, SessionStore)
-
-    def test_session_persistence_re_exported_from_sessions(self) -> None:
-        """SessionPersistence is re-exported from agentpool.sessions."""
-        from agentpool.sessions import SessionPersistence as ReExported
-
-        assert ReExported is SessionPersistence

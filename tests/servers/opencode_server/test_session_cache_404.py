@@ -5,7 +5,7 @@ POST /session/{id}/message returns 404 because get_or_load_session requires
 agent.session_id == session_id for cache hits. Only the last-created session
 matches. For other sessions, it falls through to agent.load_session() which
 reads from StorageManager — but create_session only saves to
-pool.sessions.store (MemorySessionStore), which is a DIFFERENT backend.
+pool.sessions.store (MemoryStorageProvider), which is a DIFFERENT backend.
 
 This means sessions that exist in state.sessions cache are invisible to
 agent.load_session(), causing 404 errors for all but the most recently
@@ -99,7 +99,7 @@ class TestGetOrLoadSessionCacheHit:
         state.messages["ses_s2"] = [_make_dummy_message("ses_s2")]
         state.messages["ses_s3"] = [_make_dummy_message("ses_s3")]
 
-        # agent.load_session returns None (session saved to MemorySessionStore,
+        # agent.load_session returns None (session saved to MemoryStorageProvider,
         # not to StorageManager that agent.load_session reads from)
         state.agent.load_session = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
