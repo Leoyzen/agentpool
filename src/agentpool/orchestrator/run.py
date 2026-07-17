@@ -375,7 +375,7 @@ class RunHandle:
     # ------------------------------------------------------------------
 
     async def start(  # noqa: PLR0915
-        self, initial_prompt: str = ""
+        self, initial_prompt: str | list[Any] = ""
     ) -> AsyncGenerator[RichAgentStreamEvent[Any]]:
         """Start the idle/wake/turn loop as an async generator.
 
@@ -393,7 +393,8 @@ class RunHandle:
         Args:
             initial_prompt: The first user prompt to process. Empty
                 string (default) triggers idle-first startup via
-                followup/CommChannel.
+                followup/CommChannel. Can be a ``list`` for multimodal
+                content (images, audio, etc.).
         """
         agent = self.agent
         event_bus = self.event_bus

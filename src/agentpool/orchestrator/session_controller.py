@@ -13,7 +13,6 @@ import time
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 import anyio
-import logfire
 
 from agentpool.log import get_logger
 from agentpool.orchestrator.runtime_registry import RuntimeAgentRegistry

@@ -301,7 +301,22 @@ class SessionPoolRunsMixin:
         )
         if agent is None:
             return
-        content = " ".join(str(p) for p in prompts) if prompts else ""
+        # Flatten prompts: if any prompt is a list (multimodal content),
+        # preserve structure; otherwise join strings.
+        if not prompts:
+            content: str | list[Any] = ""
+        elif len(prompts) == 1:
+            content = prompts[0]
+        else:
+            # Multiple prompts: flatten into a list, extending list items
+            # and appending string items.
+            flattened: list[Any] = []
+            for p in prompts:
+                if isinstance(p, str):
+                    flattened.append(p)
+                else:
+                    flattened.extend(p)
+            content = flattened
 
         run_id = session.current_run_id
         if run_id is not None:
