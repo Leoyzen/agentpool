@@ -80,7 +80,7 @@ class SessionPoolMessagingMixin:
         async def wait_for_completion(
             self,
             session_id: str,
-            timeout: float = 300,
+            timeout: float | None = 300,
         ) -> str: ...
 
     def _evict_message_cache(self) -> None:

@@ -170,10 +170,7 @@ class SessionControllerAgentMixin:
         # Clear todos for new top-level sessions only (not subagents)
         # This prevents accumulation of todos from previous sessions
         # Use dedicated lock to prevent race conditions with concurrent sessions
-        if (
-            parent_session_id is None
-            and self.pool.todos is not None
-        ):
+        if parent_session_id is None and self.pool.todos is not None:
             _entries = self.pool.todos.entries
             if isinstance(_entries, (list, tuple)) and len(_entries) > 0:
                 async with self._todo_lock:
