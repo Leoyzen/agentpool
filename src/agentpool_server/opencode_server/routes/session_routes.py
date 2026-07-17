@@ -542,11 +542,18 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
     if is_subagent_session and len(await get_messages_for_session(state, session_id)) > 0:
         return cached_session
 
-    # If the session is cached in memory (regardless of subagent status),
+    # If the session is cached in memory AND registered in SessionController,
     # we have it from create_session or a previous load. Since each session
     # now has its own agent instance, we only need to reload history on
     # cold-start recovery after server restart (when cached_session is None).
-    if cached_session is not None:
+    # However, list_sessions may cache session metadata in state.sessions
+    # without registering in SessionController — in that case, we must
+    # continue with the full loading path to create the agent and register.
+    if (
+        cached_session is not None
+        and state.session_controller is not None
+        and state.session_controller.get_session(session_id) is not None
+    ):
         return cached_session
 
     # Load from SessionPool store when available
