@@ -33,6 +33,14 @@ class ResponseOutputText(Schema):
     annotations: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ResponseOutputReasoning(Schema):
+    """Reasoning/thinking output part for models that support extended thinking."""
+
+    type: Literal["reasoning"] = "reasoning"
+    content: str
+    summary: str | None = None
+
+
 class ResponseToolCall(Schema):
     """Tool call in response."""
 
@@ -84,7 +92,7 @@ class Response(Schema):
     status: Literal["completed", "error"] = "completed"
     error: str | None = None
     model: str
-    output: Sequence[ResponseMessage | ResponseToolCall]
+    output: Sequence[ResponseMessage | ResponseToolCall | ResponseOutputReasoning]
 
     # Include all the request parameters
     instructions: str | None = None
