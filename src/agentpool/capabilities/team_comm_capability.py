@@ -36,6 +36,10 @@ import tempfile
 from typing import TYPE_CHECKING, Any, cast, override
 import uuid
 
+from pydantic_ai.tools import (
+    RunContext,  # noqa: TC002  # needed at runtime for PydanticAI type resolution
+)
+
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
 
@@ -100,7 +104,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _resolve_agent_context(self, ctx: Any) -> AgentContext:
+    def _resolve_agent_context(self, ctx: RunContext[Any]) -> AgentContext:
         """Extract AgentContext from a pydantic-ai RunContext.
 
         Args:
@@ -157,7 +161,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
     async def send_message(  # noqa: PLR0911, PLR0915
         self,
-        ctx: Any,
+        ctx: RunContext[Any],
         to: str,
         body: str,
         urgent: bool = False,
@@ -291,7 +295,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
     async def task_create(
         self,
-        ctx: Any,
+        ctx: RunContext[Any],
         subject: str,
         description: str = "",
         blocked_by: list[str] | None = None,
@@ -326,7 +330,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         )
         return f"Task created: {task_id}"
 
-    async def task_list(self, ctx: Any) -> str:
+    async def task_list(self, ctx: RunContext[Any]) -> str:
         """List all tasks on the shared task board.
 
         Args:
@@ -349,7 +353,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
     async def task_update(
         self,
-        ctx: Any,
+        ctx: RunContext[Any],
         task_id: str,
         status: str = "",
         owner: str = "",
@@ -385,7 +389,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         updated = team_state.update_task(team_id, task_id, updates)
         return json.dumps(updated, indent=2, default=str)
 
-    async def read_blackboard(self, ctx: Any, key: str) -> str:
+    async def read_blackboard(self, ctx: RunContext[Any], key: str) -> str:
         """Read a key from the shared blackboard.
 
         Args:
@@ -411,7 +415,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
     async def write_blackboard(
         self,
-        ctx: Any,
+        ctx: RunContext[Any],
         key: str,
         value: str,
         expected_version: int | None = None,
@@ -459,7 +463,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         return result
 
-    async def list_blackboard(self, ctx: Any) -> str:
+    async def list_blackboard(self, ctx: RunContext[Any]) -> str:
         """List all keys on the shared blackboard.
 
         Args:
@@ -480,7 +484,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         keys = team_state.list_blackboard(team_id)
         return json.dumps(keys, indent=2)
 
-    async def team_status(self, ctx: Any) -> str:
+    async def team_status(self, ctx: RunContext[Any]) -> str:
         """Get the current status of the team.
 
         Args:
@@ -530,7 +534,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
     async def team_create(  # noqa: PLR0911
         self,
-        ctx: Any,
+        ctx: RunContext[Any],
         name: str,
         members: list[dict[str, str]],
     ) -> str:
@@ -633,7 +637,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         return f"Team '{name}' created with {len(members)} members. team_id={team_id}"
 
-    async def team_delete(self, ctx: Any) -> str:
+    async def team_delete(self, ctx: RunContext[Any]) -> str:
         """Delete the current team and close all member sessions (lead-only).
 
         Args:
@@ -673,7 +677,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         team_state.cleanup(team_id)
         return "Team deleted"
 
-    async def delete_blackboard(self, ctx: Any, key: str) -> str:
+    async def delete_blackboard(self, ctx: RunContext[Any], key: str) -> str:
         """Delete a key from the shared blackboard (lead-only).
 
         Args:
@@ -699,7 +703,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         team_state.delete_blackboard(team_id, key)
         return f"Blackboard key '{key}' deleted"
 
-    async def shutdown_request(self, ctx: Any, member_name: str) -> str:
+    async def shutdown_request(self, ctx: RunContext[Any], member_name: str) -> str:
         """Shut down a specific team member (lead-only).
 
         Args:
