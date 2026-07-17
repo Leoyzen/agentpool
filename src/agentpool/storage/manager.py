@@ -772,6 +772,7 @@ class StorageManager:
                 model=model,
                 system_prompt=self.config.title_generation_prompt,
                 output_type=SessionMetadata,
+                retries=3,
             )
             logger.debug("Title generation prompt", prompt_text=prompt_text)
             result = await agent.run(prompt_text)
@@ -787,8 +788,8 @@ class StorageManager:
                 title=metadata.title,
             )
             await self.metadata_generated.emit(event)
-        except Exception as e:
-            logger.exception(
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
                 "Failed to generate session title",
                 session_id=session_id,
                 error=str(e),
