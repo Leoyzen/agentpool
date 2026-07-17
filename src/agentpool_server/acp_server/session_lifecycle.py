@@ -406,8 +406,13 @@ class ACPSessionLifecycleMixin:
             # Cancel skill change watcher
             if self._skill_change_task is not None:
                 self._skill_change_task.cancel()
-                with suppress(asyncio.CancelledError):
+                try:
                     await self._skill_change_task
+                except asyncio.CancelledError:
+                    if not self._skill_change_task.cancelled():
+                        raise
+                except Exception:
+                    self.log.exception("Error awaiting cancelled skill change task")
                 self._skill_change_task = None
 
             # Cleanup MCP session-scoped resources (toolset cache, connection

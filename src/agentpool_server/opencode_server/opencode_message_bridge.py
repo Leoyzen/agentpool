@@ -7,7 +7,6 @@ that provides tool-part creation/update methods for subagent sessions.
 
 from __future__ import annotations
 
-import contextlib
 from typing import TYPE_CHECKING, Any
 
 from agentpool.log import get_logger
@@ -78,8 +77,11 @@ async def get_messages_for_session(
             sp_messages = []
         if sp_messages:
             agent = state.agent
-            with contextlib.suppress(Exception):
-                agent = await session_pool.sessions.get_or_create_session_agent(session_id)
+            # Use safe lookup to avoid recreating a phantom session during
+            # message retrieval if the session was already closed.
+            existing_agent = session_pool.sessions.get_session_agent(session_id)
+            if existing_agent is not None:
+                agent = existing_agent
             return [
                 chat_message_to_opencode(
                     chat_msg,

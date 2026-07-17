@@ -44,6 +44,7 @@ class ACPSessionManager:
         self._acp_sessions: dict[str, ACPSession] = {}
         self._connection_sessions: dict[str, set[str]] = {}
         self._command_update_task: asyncio.Task[None] | None = None
+        self._resume_locks: dict[str, asyncio.Lock] = {}
         logger.info("Initialized ACP session manager")
 
     @property
@@ -277,8 +278,9 @@ class ACPSessionManager:
         if self._pool.session_pool is not None:
             resume_lock = await self._pool.session_pool._get_resume_lock(session_id)
         else:
-            # No SessionPool — create an ephemeral lock for safety.
-            resume_lock = asyncio.Lock()
+            # No SessionPool — use a shared per-session lock so concurrent
+            # resume requests for the same session_id are serialized.
+            resume_lock = self._resume_locks.setdefault(session_id, asyncio.Lock())
         async with resume_lock:
             return await self._resume_session_locked(
                 session_id=session_id,

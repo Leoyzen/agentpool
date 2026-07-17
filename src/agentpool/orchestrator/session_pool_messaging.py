@@ -145,8 +145,10 @@ class SessionPoolMessagingMixin:
             for p in prompts:
                 if isinstance(p, str):
                     flattened.append(p)
-                else:
+                elif isinstance(p, list):
                     flattened.extend(p)
+                else:
+                    flattened.append(p)
             content = flattened
 
         run_id = session.current_run_id
@@ -163,7 +165,10 @@ class SessionPoolMessagingMixin:
                 if isinstance(_event, StreamCompleteEvent | RunErrorEvent):
                     break
         finally:
-            await gen.aclose()
+            try:
+                await gen.aclose()
+            except Exception:
+                logger.exception("Failed to close run generator")
             session.current_run_id = None
             self.sessions._runs.pop(run_handle.run_id, None)
 

@@ -243,6 +243,7 @@ def mock_pool(  # noqa: PLR0915
     pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(
         return_value=_mock_session_agent
     )
+    pool.session_pool.sessions.get_session_agent = Mock(return_value=_mock_session_agent)
     pool.session_pool.sessions.get_or_create_session = AsyncMock(return_value=(Mock(), True))
     _run_handle = Mock()
     _run_handle.complete_event = Mock()
