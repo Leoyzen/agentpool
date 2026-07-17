@@ -414,16 +414,26 @@ class SessionPoolRunsMixin:
                     break
         finally:
             # gen.aclose() and subsequent cleanup may raise CancelledError
-            # or RuntimeError from pydantic-ai's anyio cancel scope cleanup
-            # during GeneratorExit. Wrap each step in try-except so session
-            # state is always cleaned up (run_id cleared, handle removed).
+            # (a BaseException, not caught by ``except Exception``) or
+            # RuntimeError from pydantic-ai's anyio cancel scope cleanup
+            # during GeneratorExit. Use save-and-re-raise so cleanup steps
+            # always run (run_id cleared, handle removed) and CancelledError
+            # is re-raised.
+            _cancelled: asyncio.CancelledError | None = None
             try:
                 await gen.aclose()
+            except asyncio.CancelledError as e:
+                _cancelled = e
             except Exception:
                 logger.exception("Failed to close run generator")
             try:
                 await self.event_bus.unsubscribe(session_id, bus_queue)
+            except asyncio.CancelledError as e:
+                if _cancelled is None:
+                    _cancelled = e
             except Exception:
                 logger.exception("Failed to unsubscribe from EventBus")
             session.current_run_id = None
             self.sessions._runs.pop(run_handle.run_id, None)
+            if _cancelled is not None:
+                raise _cancelled

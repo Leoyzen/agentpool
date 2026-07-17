@@ -247,13 +247,6 @@ async def _create_and_persist_session(
                 project_id=project_id,
                 cwd=directory,
             )
-        # Use SessionPersistence Protocol via session_pool when available,
-        # falling back to pool.storage (StorageManager) otherwise.
-        elif (
-            state.pool.session_pool is not None
-            and state.pool.session_pool.sessions.store is not None
-        ):
-            await state.pool.session_pool.sessions.store.save_session(session_data)
         else:
             await state.pool.storage.save_session(session_data)
     except Exception:  # noqa: BLE001

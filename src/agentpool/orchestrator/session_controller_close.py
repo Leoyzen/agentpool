@@ -51,7 +51,9 @@ class SessionControllerCloseMixin:
 
     def _decrement_mcp_count(self, _agent: Any) -> None: ...
 
-    async def _close_session_unlocked(self, session_id: str) -> None:  # noqa: PLR0915
+    async def _close_session_unlocked(  # noqa: PLR0915
+        self, session_id: str, *, checkpointed: bool = False
+    ) -> None:
         """Close a session with standardized 7-step cleanup ordering.
 
         Caller must hold ``self._lock``.
@@ -63,8 +65,16 @@ class SessionControllerCloseMixin:
         3. MCP cleanup (``agent.mcp.cleanup_session``)
         4. Agent ``__aexit__``
         5. Session persistence (save final state as ``"closed"``)
+           — skipped when ``checkpointed=True`` (status already saved
+           as ``"checkpointed"`` by ``_save_close_checkpoint``)
         6. EventBus unsubscription
         7. Cascade close children (respecting lifecycle policies)
+
+        Args:
+            session_id: The session to close.
+            checkpointed: When True, the session was already saved as
+                ``"checkpointed"`` by ``_save_close_checkpoint`` and step 5
+                must NOT overwrite the status with ``"closed"``.
         """
         session = self._sessions.get(session_id)
         if session is None:
@@ -133,7 +143,10 @@ class SessionControllerCloseMixin:
                 self._decrement_mcp_count(agent)
 
         # Step 5: Session persistence (save final state)
-        if self.store is not None:
+        # Skip when checkpointed=True — _save_close_checkpoint already
+        # saved the session with status="checkpointed", and calling
+        # _mark_session_closed() would overwrite it with "closed".
+        if self.store is not None and not checkpointed:
             try:
                 await self._mark_session_closed(session_id)
             except Exception:
@@ -278,6 +291,7 @@ class SessionControllerCloseMixin:
         # Checkpoint-on-close: if pending deferred calls exist, save as
         # checkpointed before releasing resources. If checkpoint fails,
         # keep session in memory so it can be retried.
+        _checkpointed = False
         if self.store is not None:
             _data = await self.store.load_session(session_id)
             if self._should_checkpoint_on_close(_data):
@@ -291,7 +305,7 @@ class SessionControllerCloseMixin:
                     return
 
         async with self._lock:
-            await self._close_session_unlocked(session_id)
+            await self._close_session_unlocked(session_id, checkpointed=_checkpointed)
 
     async def close_session(self, session_id: str) -> None:
         """Close a session and clean up resources.

@@ -101,8 +101,9 @@ class RunLoopDelegationService:
             msg = "SessionPool is not available for subagent spawning"
             raise RuntimeError(msg)
 
-        controller = session_pool.sessions
         child_session_id = f"{self._session_id}::child::{name}"
+
+        from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
 
         with safe_span(
             "delegation.subagent",
@@ -116,19 +117,24 @@ class RunLoopDelegationService:
             if message_id is None:
                 return
 
-            # Get the RunHandle to consume events from start().
-            # send_message() already delivered the prompt via followup()
-            # and started a background _consume_run task. We subscribe to
-            # the EventBus to stream events from the child session.
-            child_session = controller.get_session(child_session_id)
-            if child_session is None or child_session.current_run_id is None:
+            # send_message() already delivered the prompt and started a
+            # background _consume_run task that calls run_handle.start().
+            # We subscribe to the EventBus to stream events from the child
+            # session instead of calling start("") a second time (which
+            # would race with the background task and corrupt state).
+            event_bus = session_pool.event_bus
+            if event_bus is None:
                 return
-            run_handle = controller._runs.get(child_session.current_run_id)
-            if run_handle is None:
-                return
-
-            async for event in run_handle.start(""):
-                yield event
+            bus_queue = await event_bus.subscribe(child_session_id, scope="session")
+            try:
+                while True:
+                    envelope = await bus_queue.get()
+                    event = envelope.event
+                    yield event
+                    if isinstance(event, StreamCompleteEvent | RunErrorEvent):
+                        break
+            finally:
+                await event_bus.unsubscribe(child_session_id, bus_queue)
 
     def get_available_agents(self) -> list[str]:
         """Return names of agents available within the current scope.

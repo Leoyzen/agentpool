@@ -165,12 +165,20 @@ class SessionPoolMessagingMixin:
                 if isinstance(_event, StreamCompleteEvent | RunErrorEvent):
                     break
         finally:
+            # gen.aclose() may raise CancelledError (a BaseException,
+            # not caught by ``except Exception``). Use save-and-re-raise
+            # so cleanup steps always run and CancelledError is re-raised.
+            _cancelled: asyncio.CancelledError | None = None
             try:
                 await gen.aclose()
+            except asyncio.CancelledError as e:
+                _cancelled = e
             except Exception:
                 logger.exception("Failed to close run generator")
             session.current_run_id = None
             self.sessions._runs.pop(run_handle.run_id, None)
+            if _cancelled is not None:
+                raise _cancelled
 
     @logfire.instrument("session.send_message")
     async def send_message(

@@ -439,7 +439,13 @@ class OpenCodeEventBridgeMixin:
         """
         # Stop any child consumers that were started from this session
         for child_id in list(self._children_of.get(session_id, [])):
-            await self.stop_event_consumer(child_id)
+            try:
+                await self.stop_event_consumer(child_id)
+            except Exception:
+                logger.exception(
+                    "Failed to stop child event consumer",
+                    child_id=child_id,
+                )
         self._children_of.pop(session_id, None)
 
         # Clean up per-session state

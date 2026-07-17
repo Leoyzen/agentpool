@@ -51,36 +51,50 @@ def mock_pool() -> MagicMock:
 @pytest.mark.anyio
 async def test_delegation_service_spawn_subagent_deprecation() -> None:
     """RunLoopDelegationService.spawn_subagent() emits DeprecationWarning."""
+    from agentpool.agents.events.events import StreamCompleteEvent
+    from agentpool.orchestrator.core import EventBus
+
     registry = MagicMock()
     registry.exists = MagicMock(return_value=True)
     host = MagicMock()
     host.session_pool = MagicMock()
     host.session_pool.sessions = MagicMock()
+    # Use a real EventBus so subscribe/unsubscribe work properly.
+    event_bus = EventBus()
+    host.session_pool.event_bus = event_bus
     # Make send_message return a truthy message_id so spawn proceeds.
     host.session_pool.send_message = AsyncMock(return_value="mid")
-    child_session = MagicMock()
-    child_session.current_run_id = "run-1"
-    host.session_pool.sessions.get_session = MagicMock(return_value=child_session)
-    run_handle = MagicMock()
-
-    # start() must return an async iterator for `async for` to work.
-    async def _empty_gen() -> Any:
-        return
-        yield  # pragma: no cover -- makes this an async generator
-
-    run_handle.start = MagicMock(return_value=_empty_gen())
-    host.session_pool.sessions._runs = {"run-1": run_handle}
 
     service = RunLoopDelegationService(registry, host, "parent-sess")
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        async for _event in service.spawn_subagent("agent1", "do something"):
-            pass
+        gen = service.spawn_subagent("agent1", "do something")
+
+        # Drain the generator in a task so we can push an event.
+        import asyncio
+
+        drained: list[Any] = []
+        task = asyncio.create_task(_drain(gen, drained))
+        await asyncio.sleep(0.05)
+
+        # Push a terminal event so the generator completes.
+        child_session_id = "parent-sess::child::agent1"
+        complete = StreamCompleteEvent(
+            message=MagicMock(),
+            session_id=child_session_id,
+        )
+        await event_bus.publish(child_session_id, complete)
+        await asyncio.wait_for(task, timeout=5.0)
 
     dep_warnings = [w for w in caught if issubclass(w.category, DeprecationWarning)]
     assert len(dep_warnings) >= 1
     assert "spawn_subagent" in str(dep_warnings[0].message).lower()
+
+
+async def _drain(gen: Any, collected: list[Any]) -> None:
+    """Drain an async generator into a list."""
+    collected.extend([event async for event in gen])
 
 
 # ---------------------------------------------------------------------------
