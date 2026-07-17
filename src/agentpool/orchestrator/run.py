@@ -183,6 +183,12 @@ class RunHandle:
     _cancel_fn: Callable[[], None] | None = None
     _closing: bool = False
     _closed: bool = False
+    _force_cancelling: bool = False
+    """Set by ``cancel()`` before calling ``task.cancel()`` to distinguish
+    internal force-cancel (break through __aexit__ hang) from external
+    ``task.cancel()`` (e.g. test cleanup). In ``start()``, only the
+    force-cancel path catches ``CancelledError`` and continues to idle;
+    external cancellation propagates and exits the loop."""
     _idle_event: asyncio.Event = field(default_factory=_create_set_event)
     _message_queue: list[str | list[Any]] = field(default_factory=list)
     _message_history: list[ModelMessage] = field(default_factory=list)
@@ -463,10 +469,13 @@ class RunHandle:
                             action = await self._handle_turn_result(event_bus)
                         except asyncio.CancelledError:
                             # Force-cancel was triggered by cancel() to
-                            # break through __aexit__ hangs. Run
-                            # _handle_turn_result to preserve message
-                            # history and publish RunFailedEvent, then
-                            # continue to idle for the next turn.
+                            # break through __aexit__ hangs. Only catch
+                            # if _force_cancelling is set; external
+                            # task.cancel() (e.g. test cleanup) must
+                            # propagate so start() exits.
+                            if not self._force_cancelling:
+                                raise
+                            self._force_cancelling = False
                             with contextlib.suppress(Exception):
                                 await self._handle_turn_result(event_bus)
                             current_prompts = []
@@ -1336,6 +1345,7 @@ class RunHandle:
         # releasing turn_lock.
         task = self.run_ctx.current_task
         if task is not None and not task.done():
+            self._force_cancelling = True
             task.cancel()
 
     def _create_cancel_fn(self) -> Callable[[], None]:

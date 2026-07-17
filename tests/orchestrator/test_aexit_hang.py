@@ -25,6 +25,7 @@ from typing import Any
 import httpx
 import pytest
 
+
 logger = pytest.LogCaptureFixture  # type: ignore[misc,assignment]
 
 
@@ -74,20 +75,10 @@ def _make_hanging_transport(proxy_delay: float = 30.0) -> httpx.MockTransport:
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "GET":
-            # Simulate a hanging SSE connection
+            # Simulate a hanging SSE connection.
             # httpx.MockTransport doesn't support streaming, so we just
-            # hang here. The cancellation delay simulates the proxy.
-            event = asyncio.Event()
-
-            # Schedule the event to never fire — the task will hang
-            # until cancelled
-            try:
-                # This will block forever in a real async context
-                # But MockTransport handler is sync... so we return 404
-                # to match real behavior (MCP server doesn't support GET)
-                return httpx.Response(404)
-            except Exception:  # noqa: BLE001
-                raise
+            # return 404 to match real behavior (MCP server doesn't support GET).
+            return httpx.Response(404)
         if request.method == "POST":
             import json
 
@@ -113,6 +104,7 @@ def _make_hanging_transport(proxy_delay: float = 30.0) -> httpx.MockTransport:
 
 
 # ── Test 1: streamable_http_client.__aexit__ completes within timeout ───────
+
 
 @pytest.mark.asyncio
 async def test_mcp_client_aexit_completes_quickly() -> None:
@@ -156,6 +148,7 @@ async def test_mcp_client_aexit_completes_quickly() -> None:
 
 # ── Test 2: MCP cleanup_session has a timeout guard ─────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_mcp_cleanup_session_has_timeout() -> None:
     """Verify that cleanup_session() has a timeout guard.
@@ -169,13 +162,14 @@ async def test_mcp_cleanup_session_has_timeout() -> None:
 
     mock_ctx = McpSessionContext()
     # Mock connection_pool that hangs forever
-    mock_ctx.connection_pool = type("MockPool", (), {"cleanup": staticmethod(
-        lambda: asyncio.Event().wait()
-    )})()
+    mock_ctx.connection_pool = type(
+        "MockPool", (), {"cleanup": staticmethod(lambda: asyncio.Event().wait())}
+    )()
     manager._session_contexts["test-session-hang"] = mock_ctx
 
     # Patch the cleanup timeout to 0.5s so the test doesn't wait 30s
     import agentpool.mcp_server.manager as mgr_mod
+
     original_timeout = mgr_mod._MCP_CLEANUP_TIMEOUT
     mgr_mod._MCP_CLEANUP_TIMEOUT = 0.5
 
@@ -196,6 +190,7 @@ async def test_mcp_cleanup_session_has_timeout() -> None:
 
 
 # ── Test 3: wait_for_completion has a default timeout ───────────────────────
+
 
 @pytest.mark.asyncio
 async def test_wait_for_completion_does_not_hang_forever() -> None:
@@ -230,14 +225,13 @@ async def test_wait_for_completion_does_not_hang_forever() -> None:
 
     # Patch the default timeout to 0.5s so the test is fast.
     # The real default is 300s — too slow for a unit test.
-    import agentpool.orchestrator.session_controller_runs as scr_mod
 
     # Call the unbound method with timeout=None — should be treated as
     # the default (patched to 0.5s) and raise TimeoutError, not hang.
     t0 = time.perf_counter()
     try:
         async with asyncio.timeout(3):
-            result = await SessionControllerRunsMixin.wait_for_completion(
+            await SessionControllerRunsMixin.wait_for_completion(
                 mock_controller,  # type: ignore[arg-type]
                 "test-session",
                 timeout=0.5,
@@ -258,6 +252,7 @@ async def test_wait_for_completion_does_not_hang_forever() -> None:
 
 # ── Test 4: _close_session_unlocked MCP cleanup step has timeout ────────────
 
+
 @pytest.mark.asyncio
 async def test_close_session_mcp_step_has_timeout() -> None:
     """Verify that _close_session_unlocked step 3 (MCP cleanup) has a timeout.
@@ -267,8 +262,9 @@ async def test_close_session_mcp_step_has_timeout() -> None:
     Step 3 should have asyncio.timeout() around the cleanup_session() call.
     """
     # Read the source of _close_session_unlocked and check for timeout
-    from agentpool.orchestrator.session_controller_close import SessionControllerCloseMixin
     import inspect
+
+    from agentpool.orchestrator.session_controller_close import SessionControllerCloseMixin
 
     source = inspect.getsource(SessionControllerCloseMixin._close_session_unlocked)
 
@@ -283,6 +279,7 @@ async def test_close_session_mcp_step_has_timeout() -> None:
 
 
 # ── Test 5: Full MCP client lifecycle with normal server ────────────────────
+
 
 @pytest.mark.asyncio
 async def test_mcp_client_lifecycle_normal() -> None:
@@ -318,6 +315,7 @@ async def test_mcp_client_lifecycle_normal() -> None:
 
 # ── Test 6: source code audit — cancel() can break through __aexit__ ────────
 
+
 @pytest.mark.asyncio
 async def test_cancel_can_break_through_aexit_hang() -> None:
     """Source audit: verify RunHandle.cancel() has a force-close mechanism.
@@ -329,8 +327,9 @@ async def test_cancel_can_break_through_aexit_hang() -> None:
     The fix: cancel() should force-close MCP connections after a timeout,
     not just cancel the iteration task.
     """
-    from agentpool.orchestrator.run import RunHandle
     import inspect
+
+    from agentpool.orchestrator.run import RunHandle
 
     source = inspect.getsource(RunHandle.cancel)
 
