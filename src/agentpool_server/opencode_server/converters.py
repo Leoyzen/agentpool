@@ -250,7 +250,9 @@ def chat_message_to_opencode(  # noqa: PLR0915
                     if isinstance(content, str):
                         text = content
                     else:
-                        text = " ".join(str(c) for c in content if isinstance(c, str))
+                        from agentpool.agents.native_agent.helpers import _summarize_content_block
+
+                        text = " ".join(_summarize_content_block(c) for c in content)
                     if text:
                         ts_opt = TimeStartEndOptional(start=created_ms)
                         result.add_text_part(text, time=ts_opt)

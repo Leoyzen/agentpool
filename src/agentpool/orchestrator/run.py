@@ -522,13 +522,29 @@ class RunHandle:
                 # Apply recovery strategy.
                 if self._recover_strategy == "retry":
                     # Re-queue the interrupted Turn's prompt for re-execution.
-                    # The prompt is extracted from the snapshot state dict
-                    # saved before the Turn started.
+                    # Prefer the full serialized prompts (with multimodal
+                    # content) if available; fall back to text prompt.
                     state_dict = resume_result.state
                     if isinstance(state_dict, dict):
-                        prompt_val: Any = state_dict.get("prompt")
-                        if isinstance(prompt_val, str) and prompt_val:
-                            recovered_prompt = prompt_val
+                        prompts_serialized: Any = state_dict.get("prompts_serialized")
+                        if isinstance(prompts_serialized, str) and prompts_serialized:
+                            from agentpool.storage.serialization import deserialize_prompts
+
+                            deserialized = deserialize_prompts(prompts_serialized)
+                            if deserialized:
+                                # Store the full prompts for the idle loop
+                                # to pick up. We append to the message queue
+                                # so _idle_loop() collects them.
+                                self._message_queue.append(deserialized)
+                            else:
+                                # Fall back to text prompt if deserialization fails
+                                prompt_val: Any = state_dict.get("prompt")
+                                if isinstance(prompt_val, str) and prompt_val:
+                                    recovered_prompt = prompt_val
+                        else:
+                            prompt_val = state_dict.get("prompt")
+                            if isinstance(prompt_val, str) and prompt_val:
+                                recovered_prompt = prompt_val
                 elif self._recover_strategy == "mark_interrupted":
                     # Mark the interrupted Turn's result as interrupted in
                     # the snapshot store so it's not re-detected on next
@@ -698,8 +714,12 @@ class RunHandle:
         # fails or is cancelled. For list prompts (content_blocks),
         # extract text from each block for the ChatMessage.content
         # string representation.
+        from agentpool.agents.native_agent.helpers import _summarize_content_block
+        from agentpool.storage.serialization import serialize_prompts
+
         prompt_text = "\n".join(
-            p if isinstance(p, str) else " ".join(str(b) for b in p) for p in current_prompts
+            p if isinstance(p, str) else " ".join(_summarize_content_block(b) for b in p)
+            for p in current_prompts
         )
         agent.conversation.add_chat_messages([
             ChatMessage(
@@ -712,11 +732,14 @@ class RunHandle:
         # Pre-turn snapshot: save prompt and turn_id for crash
         # recovery. If the process crashes during turn.execute(),
         # this snapshot allows the "retry" strategy to recover.
+        # Save BOTH text prompt (for logging) and full serialized
+        # prompts (for crash recovery with multimodal content).
         self._snapshot_store.save({
             "state": RunState.RUNNING.value,
             "run_id": self.run_id,
             "turn_id": turn_id,
             "prompt": prompt_text,
+            "prompts_serialized": serialize_prompts(current_prompts),
         })
         # Store turn state for downstream sub-methods.
         self._current_turn = turn

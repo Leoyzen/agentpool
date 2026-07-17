@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ConfigDict, TypeAdapter
 from pydantic_ai import ModelMessage, ModelRequestPart, ModelResponsePart
+from pydantic_ai.messages import UserContent
 
 from agentpool.log import get_logger
 from agentpool.sessions.models import PendingDeferredCall
@@ -31,6 +32,12 @@ messages_adapter = TypeAdapter(
 
 # Type adapter for serializing PendingDeferredCall sequences
 deferred_calls_adapter = TypeAdapter(list[PendingDeferredCall])
+
+# Type adapter for serializing prompts (list[str | list[UserContent]])
+prompts_adapter = TypeAdapter(
+    list[str | list[UserContent]],
+    config=ConfigDict(ser_json_bytes="base64", val_json_bytes="base64"),
+)
 
 
 def deserialize_parts(parts_json: str | None) -> Sequence[ModelResponsePart | ModelRequestPart]:
@@ -82,7 +89,7 @@ def serialize_parts(parts: Sequence[ModelResponsePart | ModelRequestPart]) -> st
         return parts_adapter.dump_json(serializable_parts).decode()
     except Exception as e:  # noqa: BLE001
         logger.warning("Failed to serialize message parts", error=e)
-        return str(parts)  # Fallback to string representation
+        return None  # Don't return str() — it's garbage data
 
 
 def deserialize_messages(messages_json: str | None) -> list[ModelMessage]:
@@ -136,7 +143,7 @@ def serialize_messages(messages: Sequence[ModelMessage]) -> str | None:
         return messages_adapter.dump_json(serializable_messages).decode()
     except Exception as e:  # noqa: BLE001
         logger.warning("Failed to serialize model messages", error=e)
-        return str(messages)  # Fallback to string representation
+        return None  # Don't return str() — it's garbage data
 
 
 def serialize_pending_calls(calls: list[PendingDeferredCall]) -> str:
@@ -171,4 +178,52 @@ def deserialize_pending_calls(json_str: str | None) -> list[PendingDeferredCall]
         return deferred_calls_adapter.validate_json(json_str.encode())
     except Exception as e:  # noqa: BLE001
         logger.warning("Failed to deserialize pending deferred calls", error=e)
+        return []
+
+
+def serialize_prompts(prompts: list[str | list[Any]]) -> str | None:
+    """Serialize a prompts list to JSON string with base64 for binary content.
+
+    Each prompt is either a plain ``str`` or a ``list[UserContent]`` containing
+    text, images, audio, video, etc. Binary content is base64-encoded.
+
+    Args:
+        prompts: List of prompts from the RunLoop — each item is a string
+            or a list of UserContent blocks.
+
+    Returns:
+        JSON string representation of the prompts, or ``None`` if empty or
+        serialization fails.
+    """
+    if not prompts:
+        return None
+
+    try:
+        return prompts_adapter.dump_json(prompts).decode()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to serialize prompts", error=e)
+        return None
+
+
+def deserialize_prompts(json_str: str | None) -> list[str | list[Any]]:
+    """Deserialize a prompts list from JSON string.
+
+    Reconstructs the full prompts list with BinaryContent objects restored
+    from base64-encoded data.
+
+    Args:
+        json_str: JSON string representation of prompts or ``None`` if empty.
+
+    Returns:
+        List of prompts (each a ``str`` or ``list[UserContent]``), empty if
+        deserialization fails.
+    """
+    if not json_str:
+        return []
+
+    try:
+        result = prompts_adapter.validate_json(json_str.encode())
+        return list(result)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to deserialize prompts", error=e)
         return []
