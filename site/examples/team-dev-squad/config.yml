@@ -1,4 +1,6 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/phil65/agentpool/refs/heads/main/schema/config-schema.json
+# Team tools (team_create, send_message, task_create, etc.) are auto-wired
+# by the factory for agents in lead_eligible/member_eligible.
 agents:
   tech_lead:
     type: native

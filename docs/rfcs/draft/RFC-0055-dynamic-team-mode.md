@@ -145,7 +145,7 @@ This workflow cannot be expressed as a static DAG because:
 6. File-based persistence in configurable tempdir with TTL cleanup
 7. Reuse existing infrastructure (SessionController, SessionPool, RunHandle, AbstractCapability) with minimal changes
 8. Reference existing `agents:` definitions (no duplicate member template definitions)
-9. Support `auto_init` for pre-initializing teams at session startup — team members are spawned before the first user message, eliminating the `team_create` round-trip for fixed business scenarios
+9. Support `defaults` for pre-defining default team members — when the LLM calls `team_create` without explicit members, these defaults are used, simplifying config for fixed business scenarios
 
 ### Non-Goals (Out of Scope)
 
@@ -167,9 +167,9 @@ This workflow cannot be expressed as a static DAG because:
 - [ ] Team state persists to filesystem and survives process restart within TTL window
 - [ ] `team_delete` cleanly closes all member sessions and removes file state
 - [ ] Existing static team mechanisms (`graph:`, `teams:`) continue to work unchanged
-- [ ] `auto_init` config creates team + spawns members before first user message (no `team_create` tool call needed)
-- [ ] With `auto_init`, lead agent can `send_message` to pre-existing teammates in its first turn
-- [ ] `auto_init` team can be dissolved by LLM calling `team_delete`, and a new team created via `team_create`
+- [ ] `defaults` config provides default members when `team_create` is called with empty members
+- [ ] With `defaults`, lead agent can call `team_create` with empty members and get the pre-configured team
+- [ ] `defaults` team can be dissolved by LLM calling `team_delete`, and a new team created via `team_create`
 - [ ] Total changes to existing files: ≤ 5 lines across ≤ 3 files
 
 ---
@@ -972,10 +972,10 @@ agents:
     model: openai:gpt-4o
     tools: [read, grep]
     system_prompt: "You are an orchestrator. You coordinate teams."
-    # Per-agent team_mode with auto_init
+    # Per-agent team_mode with defaults
     team_mode:
       enabled: true
-      auto_init:
+      defaults:
         team_name: "dev-squad"
         members:
           - name: researcher
@@ -1076,9 +1076,9 @@ flowchart TB
     PerMember --> Done["Return: Team created with N members"]
 ```
 
-### Team Auto-Initialization Flow (auto_init)
+### Default Team Members (defaults)
 
-For fixed business scenarios where team composition is known at config time, `auto_init` pre-creates the team at session startup — before the first user message reaches the lead agent. This eliminates the `team_create` tool-call round-trip, reducing first-response latency.
+For fixed business scenarios where team composition is known at config time, `defaults` provides default members that `team_create` uses when the LLM calls it without explicit members. The LLM must still call `team_create` explicitly — the team is not pre-created.
 
 ```mermaid
 sequenceDiagram
@@ -1090,35 +1090,32 @@ sequenceDiagram
 
     User->>SP: First message (POST /message)
     SP->>RH: create_session + send_message(content, mode=QUEUE)
-    RH->>TCC: before_run hook (first turn)
-    TCC->>TCC: Check auto_init config on team_mode_config
-    Note over TCC: auto_init found → pre-create team
+    RH->>TCC: LLM calls team_create with empty members
+    TCC->>TCC: Check defaults config on team_mode_config
+    Note over TCC: defaults found → use default members
     TCC->>SP: create_session(researcher, parent=lead_sid, team_id=..., team_role=member, team_member_name=researcher)
     TCC->>SP: send_message(researcher_sid, protocol_prompt, mode=QUEUE)
     TCC->>SP: create_session(opinion, parent=lead_sid, team_id=..., team_role=member, team_member_name=opinion)
     TCC->>SP: send_message(opinion_sid, protocol_prompt, mode=QUEUE)
     TCC->>TCC: Write state.json, register members, set lead metadata
     Note over TCC: Team ready — lead has send_message, task_create, etc.
-    RH->>User: First turn starts (lead can delegate immediately)
-    Note over User,Members: Lead calls send_message to pre-existing teammates
+    RH->>User: Team created, lead can delegate immediately
 ```
 
 **Key properties**:
 
-- `auto_init` only affects **creation timing** — runtime capabilities are identical to manually created teams
-- Lead agent can still `team_delete` the auto-initialized team and create a different one via `team_create`
-- If `auto_init` is omitted, the LLM must call `team_create` manually (default behavior)
-- `auto_init` runs in `TeamCommCapability.before_run()` — a lifecycle hook for per-run initialization
+- `defaults` only affects **member selection** when `team_create` is called with empty members — runtime capabilities are identical to manually specified members
+- Lead agent can still `team_delete` the team and create a different one via `team_create` with explicit members
+- If `defaults` is omitted, the LLM must pass explicit members to `team_create` (or create a team with 0 members)
+- The check happens inside `team_create` — no `before_run` hook needed
 
-**Idempotency**: `before_run()` checks `ctx.session.metadata.get("team_id")` before creating. If a `team_id` already exists, auto_init is skipped (team was already created in a previous turn).
+**Idempotency**: Each `team_create` call creates a new team. If the lead wants to reuse the defaults, it simply calls `team_create` again with empty members.
 
-**Failure handling**: If any `create_session()` or `send_message()` call fails during auto_init:
+**Failure handling**: If any `create_session()` or `send_message()` call fails during team creation:
 1. All already-created member sessions are closed (best-effort, errors logged).
 2. An error is logged with the failure reason.
-3. The lead agent's first turn proceeds WITHOUT a team — `get_tools()` returns `[]` for team tools.
-4. The error is injected as a system message in the lead's first turn: "Warning: auto_init failed: {error}. Team tools are disabled."
-
-This is graceful degradation — the lead can still function without team tools.
+3. The lead agent's `team_create` call returns an error string.
+4. The lead can retry `team_create` or proceed without a team.
 
 ### Blackboard Write Flow (open policy with optimistic lock)
 
@@ -1170,13 +1167,13 @@ async def cleanup_expired_teams(base_dir: Path, ttl_hours: int):
 | Legacy teams | `teams:` (deprecated) | Program | Yes — auto-translated to graph: |
 | Agent delegation | `subagent` tool | LLM (one-shot) | Yes — blocking delegation remains |
 | **Dynamic teams (manual)** | `team_mode:` (LLM calls `team_create`) | LLM (persistent) | **New** — this RFC |
-| **Dynamic teams (auto_init)** | `team_mode.auto_init:` (YAML pre-defined) | Program-init + LLM-operated | **New** — this RFC |
+| **Dynamic teams (defaults)** | `team_mode.defaults:` (YAML pre-defined) | LLM-init with defaults | **New** — this RFC |
 
 The mechanisms serve different needs:
 - `graph:` — Deterministic pipeline (analyze → review → format)
 - `subagent` — One-shot delegation (lead delegates single task, waits for result)
 - `team_mode:` (manual) — LLM decides team composition at runtime, creates via tool call
-- `team_mode.auto_init` — Fixed business scenario, team pre-created at session startup, LLM operates the team (send messages, manage tasks) without creation overhead
+- `team_mode.defaults` — Fixed business scenario, default members used when team_create is called with empty members, LLM still calls team_create explicitly
 
 ---
 
@@ -1227,16 +1224,16 @@ No specific regulatory requirements. Team state is ephemeral coordination data, 
 
 #### Phase 2: TeamCommCapability
 
-- **Scope**: TeamCommCapability with all tools, direct SessionPool access, auto_init support
+- **Scope**: TeamCommCapability with all tools, direct SessionPool access, defaults support
 - **Deliverables**:
   - `capabilities/team_comm_capability.py` — Full capability with tool factory methods
   - Protocol template rendering
   - Tool registration conditional on role (lead vs member)
-  - `before_run` hook for `auto_init` team pre-creation
+  - `before_run` hook for `defaults` member pre-selection
   - `capabilities/agent_context.py` — +1 field (team_mode_config)
   - `orchestrator/run.py` — +1 line in _inject_agent_context()
 - **Dependencies**: Phase 1
-- **Testing**: Integration test with TestModel — create team, send message, create task, read/write blackboard, auto_init pre-creation
+- **Testing**: Integration test with TestModel — create team, send message, create task, read/write blackboard, defaults member pre-selection
 
 #### Phase 3: Integration & Polish
 
@@ -1406,7 +1403,7 @@ None. All reviewers converged on Option 2 after analysis of the BT precedent and
 | D3: Message priority | Binary urgent flag (steer vs followup), no multi-level queue | 6-level priority (Qwen Code) collapses to 2 effective levels in practice |
 | D4: Protocol injection | User-configurable `protocol_template` | Balances flexibility (user customizes) with safety (framework provides default) |
 | D5: ACP agent membership | Native only in v1, ACP in future work | ACP agents may not support tool injection for TeamCommCapability |
-| D6: Team pre-initialization | `auto_init` config creates team at session startup | Eliminates team_create round-trip for fixed business scenarios; runtime capabilities unchanged |
+| D6: Team default members | `defaults` config provides default members for team_create | Simplifies team_create for fixed business scenarios; LLM still calls team_create explicitly |
 | Infra: Capability access | Direct SessionPool access (same as RunLoopDelegationService) | Avoids competing abstraction with SessionPool; RunLoopDelegationService precedent proves direct access works |
 | Infra: HostContext | Zero changes (session_pool already exists) | Oracle verified: host/context.py line 77 |
 | Infra: SessionService Protocol | Rejected — SessionPool is the single interface | Full analysis in Appendix D6 |
@@ -1415,7 +1412,7 @@ None. All reviewers converged on Option 2 after analysis of the BT precedent and
 
 | File | Type | LOC (est.) |
 |------|------|-----------|
-| `capabilities/team_comm_capability.py` | New — Capability (direct SessionPool access + auto_init hook) | ~380 |
+| `capabilities/team_comm_capability.py` | New — Capability (direct SessionPool access + defaults hook) | ~380 |
 | `capabilities/file_team_state.py` | New — File I/O | ~250 |
 | `agentpool_config/team_mode.py` | New — Config model | ~80 |
 | `capabilities/agent_context.py` | Modified — +1 field (team_mode_config) | ~1 |

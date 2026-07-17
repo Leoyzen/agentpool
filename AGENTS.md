@@ -417,7 +417,7 @@ team_mode:
     - coordinator
     - researcher
     - writer
-  auto_init:                                 # Optional: lazily create team on first tool call
+  defaults:                                 # Optional: default members for team_create
     team_name: "default_team"
     members:
       - name: "lead"
@@ -454,7 +454,7 @@ team_mode:
 | `shutdown_request` | Request a team member to stop its current activity |
 | `team_status` | Check team health, member status, and resource usage |
 
-**Auto-Init**: When `auto_init:` is configured, the team is created lazily on the first tool call that needs a team context (e.g., `send_message` or `task_create`). The agent does not need to call `team_create` explicitly. The check is stateless and based on `team_id` in session metadata.
+**Default Members**: When `defaults:` is configured, `team_create` uses these members when the LLM calls it without explicit members. The LLM must still call `team_create` explicitly.
 
 **Relationship to `graph:` and `teams:`**:
 

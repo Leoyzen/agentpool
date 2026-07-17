@@ -550,9 +550,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if role != "lead":
             return "Only lead can use team_create"
 
-        # Config default members: when LLM passes empty members, use auto_init config.
-        if not members and self._config.auto_init is not None:
-            members = [{"name": m.name, "agent": m.agent} for m in self._config.auto_init.members]
+        # Config defaults: when LLM passes empty members, use defaults config.
+        if not members and self._config.defaults is not None:
+            members = [{"name": m.name, "agent": m.agent} for m in self._config.defaults.members]
 
         # Eligibility checks.
         for member in members:

@@ -1,6 +1,6 @@
 """Integration tests for team_create with config default members.
 
-These tests exercise the team_create flow with auto_init config providing
+These tests exercise the team_create flow with defaults config providing
 default members when the LLM passes an empty members list. Uses real
 FileTeamState on tmp_path, with mocked SessionPool and DelegationService.
 """
@@ -13,17 +13,17 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agentpool.capabilities.team_comm_capability import TeamCommCapability
-from agentpool_config.team_mode import AutoInitConfig, MemberSpec, TeamModeConfig
+from agentpool_config.team_mode import MemberSpec, TeamDefaultsConfig, TeamModeConfig
 
 
-def _make_auto_init_config(base_dir: str) -> TeamModeConfig:
-    """Create an enabled TeamModeConfig with auto_init for testing."""
+def _make_defaults_config(base_dir: str) -> TeamModeConfig:
+    """Create an enabled TeamModeConfig with defaults for testing."""
     return TeamModeConfig(
         enabled=True,
         member_eligible=["translator", "reviewer"],
         lead_eligible=["coordinator"],
         base_dir=base_dir,
-        auto_init=AutoInitConfig(
+        defaults=TeamDefaultsConfig(
             team_name="auto_integration_team",
             members=[
                 MemberSpec(name="translator", agent="translator"),
@@ -59,14 +59,14 @@ def _make_run_context(
 
 @pytest.mark.integration
 async def test_team_create_with_config_default_members(tmp_path: Any) -> None:
-    """Given: TeamCommCapability with auto_init config, lead role.
+    """Given: TeamCommCapability with defaults config, lead role.
 
     When: team_create is called with empty members.
-    Then: uses auto_init.members to create the team with child sessions.
+    Then: uses defaults.members to create the team with child sessions.
     """
     from agentpool.capabilities.file_team_state import FileTeamState
 
-    config = _make_auto_init_config(str(tmp_path))
+    config = _make_defaults_config(str(tmp_path))
 
     mock_pool = MagicMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
@@ -113,12 +113,12 @@ async def test_team_create_with_config_default_members(tmp_path: Any) -> None:
 async def test_team_create_config_default_members_graceful_degradation(
     tmp_path: Any,
 ) -> None:
-    """Given: auto_init config, but delegation.create_child_session raises.
+    """Given: defaults config, but delegation.create_child_session raises.
 
     When: team_create is called with empty members.
     Then: error message returned, no crash, team state cleaned up.
     """
-    config = _make_auto_init_config(str(tmp_path))
+    config = _make_defaults_config(str(tmp_path))
 
     mock_pool = MagicMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
@@ -154,7 +154,7 @@ async def test_team_create_config_default_members_then_delete(tmp_path: Any) -> 
     """
     from agentpool.capabilities.file_team_state import FileTeamState
 
-    config = _make_auto_init_config(str(tmp_path))
+    config = _make_defaults_config(str(tmp_path))
 
     mock_pool = MagicMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
@@ -176,7 +176,7 @@ async def test_team_create_config_default_members_then_delete(tmp_path: Any) -> 
     ctx = _make_run_context(lead_metadata, mock_pool, config, mock_registry, mock_delegation)
     cap = TeamCommCapability(config, "coordinator", lead_metadata)
 
-    # Create the team with empty members (uses auto_init config).
+    # Create the team with empty members (uses defaults config).
     create_result = await cap.team_create(ctx, "my_team", [])
     assert "Team 'my_team' created with 2 members" in create_result
     team_id = create_result.split("team_id=")[1].strip()

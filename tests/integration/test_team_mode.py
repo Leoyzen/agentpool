@@ -1,7 +1,7 @@
 """Integration tests for the dynamic team mode feature.
 
 Covers end-to-end lifecycle, disabled mode, standalone mode, missing
-team_id, graph/teams coexistence, and auto_init + manual team_create
+team_id, graph/teams coexistence, and defaults + manual team_create
 coexistence scenarios.
 """
 
@@ -18,8 +18,8 @@ from agentpool.capabilities.file_team_state import FileTeamState
 from agentpool.capabilities.team_comm_capability import TeamCommCapability
 from agentpool.models.manifest import AgentsManifest
 from agentpool_config.team_mode import (
-    AutoInitConfig,
     MemberSpec,
+    TeamDefaultsConfig,
     TeamModeConfig,
 )
 
@@ -34,7 +34,7 @@ def _make_enabled_config(
     member_eligible: list[str] | None = None,
     lead_eligible: list[str] | None = None,
     base_dir: str | None = None,
-    auto_init: AutoInitConfig | None = None,
+    defaults: TeamDefaultsConfig | None = None,
 ) -> TeamModeConfig:
     """Create an enabled TeamModeConfig for integration testing."""
     return TeamModeConfig(
@@ -42,7 +42,7 @@ def _make_enabled_config(
         member_eligible=member_eligible or ["worker", "reviewer"],
         lead_eligible=lead_eligible or ["coordinator"],
         base_dir=base_dir,
-        auto_init=auto_init,
+        defaults=defaults,
     )
 
 
@@ -135,13 +135,13 @@ def _init_team(
     state.register_member(team_id, "reviewer_agent", "sess_reviewer")
 
 
-def _make_auto_init_config(base_dir: str) -> TeamModeConfig:
-    """Create an enabled TeamModeConfig with auto_init for testing."""
+def _make_defaults_config(base_dir: str) -> TeamModeConfig:
+    """Create an enabled TeamModeConfig with defaults for testing."""
     return _make_enabled_config(
         member_eligible=["translator", "reviewer"],
         lead_eligible=["coordinator"],
         base_dir=base_dir,
-        auto_init=AutoInitConfig(
+        defaults=TeamDefaultsConfig(
             team_name="auto_integration_team",
             members=[
                 MemberSpec(name="translator", agent="translator"),
@@ -499,7 +499,7 @@ async def test_team_status_with_existing_team_id_no_session_creation(
 
     Then: no new sessions are created, and the existing team state is used.
     """
-    config = _make_auto_init_config(str(tmp_path))
+    config = _make_defaults_config(str(tmp_path))
 
     # Manually create a team first (simulating prior team_create).
     _init_team(str(tmp_path), team_id="manual_team", team_name="manual_team")
@@ -530,14 +530,14 @@ async def test_team_status_with_existing_team_id_no_session_creation(
 
 @pytest.mark.integration
 async def test_team_create_uses_config_default_members_when_empty(tmp_path: Any) -> None:
-    """Given: auto_init config is set, lead calls team_create with empty members.
+    """Given: defaults config is set, lead calls team_create with empty members.
 
     When: team_create is called with members=[].
 
-    Then: uses auto_init.members from config, creates child sessions, and
+    Then: uses defaults.members from config, creates child sessions, and
         team_status shows the created team.
     """
-    config = _make_auto_init_config(str(tmp_path))
+    config = _make_defaults_config(str(tmp_path))
 
     mock_pool = MagicMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
@@ -567,7 +567,7 @@ async def test_team_create_uses_config_default_members_when_empty(tmp_path: Any)
     )
     cap = TeamCommCapability(config, "coordinator", lead_metadata)
 
-    # team_create with empty members should use auto_init config defaults.
+    # team_create with empty members should use defaults config defaults.
     create_result = await cap.team_create(ctx, "my_team", [])
     assert "Team 'my_team' created with 2 members" in create_result
     assert mock_delegation.create_child_session.await_count == 2

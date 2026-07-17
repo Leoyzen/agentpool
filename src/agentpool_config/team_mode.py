@@ -16,7 +16,7 @@ Example YAML::
       bounds:
         max_members: 5
         max_wall_clock_minutes: 30
-      auto_init:
+      defaults:
         team_name: translation_team
         members:
           - name: translator
@@ -112,7 +112,7 @@ class BlackboardConfig(Schema):
 
 
 class MemberSpec(Schema):
-    """Specification of a single team member in auto_init.
+    """Specification of a single team member in defaults.
 
     Attributes:
         name: Display name of the member within the team.
@@ -125,20 +125,21 @@ class MemberSpec(Schema):
     agent: str = Field(title="Agent name in registry")
 
 
-class AutoInitConfig(Schema):
-    """Auto-initialization configuration for teams.
+class TeamDefaultsConfig(Schema):
+    """Default team members for team_create.
 
-    When present, the lead agent automatically creates a team on first run.
+    When present, team_create uses these members when the LLM calls it
+    without explicit members.
 
     Attributes:
-        team_name: Name of the auto-created team.
-        members: List of members to spawn in the team.
+        team_name: Name of the team to create.
+        members: List of default members for the team.
     """
 
     model_config = ConfigDict(frozen=True)
 
     team_name: str = Field(title="Team name")
-    members: list[MemberSpec] = Field(default_factory=list, title="Initial members")
+    members: list[MemberSpec] = Field(default_factory=list, title="Default members")
 
 
 class TeamModeConfig(Schema):
@@ -160,7 +161,7 @@ class TeamModeConfig(Schema):
         inbox_max_bytes: Maximum inbox size in bytes.
         protocol_template: Template for team protocol instructions.
         auto_urgent: Message types that default to urgent.
-        auto_init: Optional auto-team creation config.
+        defaults: Optional default team members for team_create.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -185,7 +186,10 @@ class TeamModeConfig(Schema):
         default_factory=lambda: ["escalation"],
         title="Auto-urgent message types",
     )
-    auto_init: AutoInitConfig | None = Field(default=None, title="Auto-init config")
+    defaults: TeamDefaultsConfig | None = Field(
+        default=None,
+        title="Default team members for team_create",
+    )
 
     @field_validator("ttl_hours")
     @classmethod
@@ -197,15 +201,15 @@ class TeamModeConfig(Schema):
         return v
 
     @model_validator(mode="after")
-    def validate_auto_init_members(self) -> TeamModeConfig:
-        """Ensure all auto_init member names are in member_eligible."""
-        if self.auto_init is None:
+    def validate_defaults_members(self) -> TeamModeConfig:
+        """Ensure all defaults member names are in member_eligible."""
+        if self.defaults is None:
             return self
         eligible_set = set(self.member_eligible)
-        for member in self.auto_init.members:
+        for member in self.defaults.members:
             if member.name not in eligible_set:
                 msg = (
-                    f"auto_init member '{member.name}' is not in "
+                    f"defaults member '{member.name}' is not in "
                     f"member_eligible list: {self.member_eligible}"
                 )
                 raise ValueError(msg)
@@ -266,10 +270,10 @@ def resolve_team_mode(
 
 
 __all__ = [
-    "AutoInitConfig",
     "BlackboardConfig",
     "MemberSpec",
     "TeamBounds",
+    "TeamDefaultsConfig",
     "TeamModeConfig",
     "resolve_team_mode",
 ]

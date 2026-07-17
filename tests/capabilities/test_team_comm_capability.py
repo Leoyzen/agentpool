@@ -1386,19 +1386,19 @@ async def test_auto_urgent(tmp_path: Any) -> None:
 
 @pytest.mark.unit
 async def test_team_create_uses_config_default_members(tmp_path: Any) -> None:
-    """Given: lead agent with auto_init config, team_create called with empty members.
+    """Given: lead agent with defaults config, team_create called with empty members.
 
     When: team_create is called with members=[].
-    Then: uses auto_init.members from config to create the team.
+    Then: uses defaults.members from config to create the team.
     """
-    from agentpool_config.team_mode import AutoInitConfig, MemberSpec
+    from agentpool_config.team_mode import MemberSpec, TeamDefaultsConfig
 
     config = _make_enabled_config(
         member_eligible=["translator", "reviewer"],
         base_dir=str(tmp_path),
     ).model_copy(
         update={
-            "auto_init": AutoInitConfig(
+            "defaults": TeamDefaultsConfig(
                 team_name="default_team",
                 members=[
                     MemberSpec(name="translator", agent="translator"),
@@ -1431,11 +1431,11 @@ async def test_team_create_uses_config_default_members(tmp_path: Any) -> None:
 
 
 @pytest.mark.unit
-async def test_team_create_empty_members_no_auto_init(tmp_path: Any) -> None:
-    """Given: lead agent with auto_init=None, team_create called with empty members.
+async def test_team_create_empty_members_no_defaults(tmp_path: Any) -> None:
+    """Given: lead agent with defaults=None, team_create called with empty members.
 
     When: team_create is called with members=[].
-    Then: creates team with 0 members (no crash, no auto_init fallback).
+    Then: creates team with 0 members (no crash, no defaults fallback).
     """
     config = _make_enabled_config(
         member_eligible=["worker"],

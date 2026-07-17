@@ -6,10 +6,10 @@ from pydantic import ValidationError
 import pytest
 
 from agentpool_config.team_mode import (
-    AutoInitConfig,
     BlackboardConfig,
     MemberSpec,
     TeamBounds,
+    TeamDefaultsConfig,
     TeamModeConfig,
     resolve_team_mode,
 )
@@ -30,7 +30,7 @@ def test_construct_with_all_defaults() -> None:
     assert config.message_max_bytes == 65536
     assert config.inbox_max_bytes == 1048576
     assert config.auto_urgent == ["escalation"]
-    assert config.auto_init is None
+    assert config.defaults is None
 
 
 @pytest.mark.unit
@@ -43,7 +43,7 @@ def test_construct_with_custom_values() -> None:
         max_member_turns=10,
     )
     blackboard = BlackboardConfig(write_policy="lead_only", max_size_mb=50)
-    auto_init = AutoInitConfig(
+    defaults = TeamDefaultsConfig(
         team_name="squad_alpha",
         members=[MemberSpec(name="coder", agent="code_agent")],
     )
@@ -60,7 +60,7 @@ def test_construct_with_custom_values() -> None:
         inbox_max_bytes=524288,
         protocol_template="Custom {team_name} {role} {member_name}",
         auto_urgent=["escalation", "alert"],
-        auto_init=auto_init,
+        defaults=defaults,
     )
 
     assert config.enabled is True
@@ -78,10 +78,10 @@ def test_construct_with_custom_values() -> None:
     assert config.inbox_max_bytes == 524288
     assert config.protocol_template == "Custom {team_name} {role} {member_name}"
     assert config.auto_urgent == ["escalation", "alert"]
-    assert config.auto_init is not None
-    assert config.auto_init.team_name == "squad_alpha"
-    assert config.auto_init.members[0].name == "coder"
-    assert config.auto_init.members[0].agent == "code_agent"
+    assert config.defaults is not None
+    assert config.defaults.team_name == "squad_alpha"
+    assert config.defaults.members[0].name == "coder"
+    assert config.defaults.members[0].agent == "code_agent"
 
 
 @pytest.mark.unit
@@ -96,9 +96,9 @@ def test_construct_with_negative_bounds_raises_validation_error() -> None:
 
 
 @pytest.mark.unit
-def test_auto_init_with_member_in_eligible_succeeds() -> None:
-    """Given auto_init members in member_eligible, construction succeeds."""
-    auto_init = AutoInitConfig(
+def test_defaults_with_member_in_eligible_succeeds() -> None:
+    """Given defaults members in member_eligible, construction succeeds."""
+    defaults = TeamDefaultsConfig(
         team_name="translation_team",
         members=[
             MemberSpec(name="translator", agent="translator_agent"),
@@ -109,17 +109,17 @@ def test_auto_init_with_member_in_eligible_succeeds() -> None:
     config = TeamModeConfig(
         enabled=True,
         member_eligible=["translator", "reviewer"],
-        auto_init=auto_init,
+        defaults=defaults,
     )
 
-    assert config.auto_init is not None
-    assert len(config.auto_init.members) == 2
+    assert config.defaults is not None
+    assert len(config.defaults.members) == 2
 
 
 @pytest.mark.unit
-def test_auto_init_with_member_not_in_eligible_raises_validation_error() -> None:
-    """Given auto_init member not in member_eligible, ValidationError is raised."""
-    auto_init = AutoInitConfig(
+def test_defaults_with_member_not_in_eligible_raises_validation_error() -> None:
+    """Given defaults member not in member_eligible, ValidationError is raised."""
+    defaults = TeamDefaultsConfig(
         team_name="bad_team",
         members=[MemberSpec(name="outsider", agent="outsider_agent")],
     )
@@ -128,7 +128,7 @@ def test_auto_init_with_member_not_in_eligible_raises_validation_error() -> None
         TeamModeConfig(
             enabled=True,
             member_eligible=["translator", "reviewer"],
-            auto_init=auto_init,
+            defaults=defaults,
         )
 
     assert "outsider" in str(exc_info.value)

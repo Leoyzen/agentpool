@@ -1,8 +1,10 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/phil65/agentpool/refs/heads/main/schema/config-schema.json
+# Team tools (team_create, send_message, task_create, etc.) are auto-wired
+# by the factory for agents in lead_eligible/member_eligible.
 agents:
   sales_lead:
     type: native
-    model: openai:gpt-4o
+    model: openai:kimi-k2
     system_prompt: |
       You are the sales team lead. Drive the sales process from prospecting
       to closing. Assign research tasks to the analyst and proposal writing
@@ -10,7 +12,7 @@ agents:
 
   research_analyst:
     type: native
-    model: openai:gpt-4o
+    model: openai:kimi-k2
     system_prompt: |
       You are a sales research analyst. Research prospects, companies, and
       market trends. Provide data-driven insights to inform sales strategy.
@@ -18,7 +20,7 @@ agents:
 
   proposal_writer:
     type: native
-    model: openai:gpt-4o
+    model: openai:kimi-k2
     system_prompt: |
       You are a proposal writer. Create compelling, professional sales
       proposals tailored to each prospect's needs. Incorporate research
@@ -32,7 +34,8 @@ team_mode:
     - sales_lead
     - research_analyst
     - proposal_writer
-  auto_init:
+  # When team_create is called without explicit members, these defaults are used.
+  defaults:
     team_name: "sales_team"
     members:
       - name: "lead"
