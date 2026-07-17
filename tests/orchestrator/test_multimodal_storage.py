@@ -504,48 +504,99 @@ def test_chat_message_to_opencode_fallback_uses_summarize_content_block() -> Non
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Requires full RunHandle setup with mocked agent, event_bus, and session — "
-        "needs integration test fixture. _execute_turn calls agent.create_turn(), "
-        "agent.conversation.add_chat_messages(), and _transition() which all need "
-        "real or mock infrastructure."
-    ),
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_execute_turn_saves_multimodal_snapshot() -> None:
-    """_execute_turn should save prompts_serialized with BinaryImage in snapshot."""
-    from agentpool.lifecycle import MemorySnapshotStore
+    """_execute_turn should save prompts_serialized with BinaryImage in snapshot.
+
+    Uses the same _make_run_handle + _StubTurn pattern as
+    tests/lifecycle/test_run_loop.py to exercise the full start() →
+    _execute_turn() → snapshot path with multimodal prompts.
+    """
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from agentpool.agents.events import StreamCompleteEvent
+    from agentpool.messaging import ChatMessage
+    from agentpool.orchestrator.core import EventBus
     from agentpool.orchestrator.run import RunHandle
+    from agentpool.orchestrator.turn import Turn
+
+    class _StubTurn(Turn):
+        """Minimal Turn that yields StreamCompleteEvent."""
+
+        async def execute(self):  # type: ignore[override]
+            self._message_history = []
+            self._final_message = ChatMessage(content="done", role="assistant")
+            yield StreamCompleteEvent(message=self._final_message)
+
+    turn = _StubTurn()
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=turn)
+    agent.conversation = MagicMock()
+    agent.name = "test-agent"
+    agent.AGENT_TYPE = "native"
+
+    session = MagicMock()
+    session.turn_lock = asyncio.Lock()
+    session.input_provider = None
+    session.parent_session_id = None
+    session.is_closing = False
+
+    event_bus = EventBus()
 
     handle = RunHandle(
         run_id="test-run",
         session_id="test-session",
         agent_type="native",
+        agent=agent,
+        event_bus=event_bus,
+        session=session,
     )
-    snapshot_store = MemorySnapshotStore()
-    handle._snapshot_store = snapshot_store
 
     img = BinaryImage(data=b"\x89PNG\r\n\x1a\n", media_type="image/png")
-    prompts: list[str | list[Any]] = ["hello", ["describe this", img]]
+    multimodal_prompt: list[Any] = ["describe this", img]
 
-    # This will fail because agent, event_bus, session are None.
-    # The test is xfail to document the architectural limitation.
-    async for _event in handle._execute_turn(
-        agent=None,  # type: ignore[arg-type]
-        event_bus=None,  # type: ignore[arg-type]
-        session=None,  # type: ignore[arg-type]
-        current_prompts=prompts,
-    ):
-        pass
+    # Spy on snapshot_store.save() to capture the RUNNING snapshot
+    # (the post-turn IDLE snapshot overwrites it).
+    saved_states: list[dict[str, Any]] = []
+    original_save = handle._snapshot_store.save  # type: ignore[union-attr]
 
-    load_result = snapshot_store.load()
-    assert load_result is not None
-    snapshot, _seq = load_result
-    assert snapshot["prompts_serialized"] is not None
-    restored = deserialize_prompts(snapshot["prompts_serialized"])
-    assert isinstance(restored[1][1], BinaryImage)
+    def _spy_save(state: dict[str, Any]) -> None:
+        saved_states.append(dict(state))
+        original_save(state)
+
+    handle._snapshot_store.save = _spy_save  # type: ignore[method-assign]
+
+    # start() wraps initial_prompt into current_prompts = [initial_prompt]
+    # which _execute_turn saves to the snapshot store.
+    async def _consume() -> list[Any]:
+        return [event async for event in handle.start(multimodal_prompt)]
+
+    consumer = asyncio.create_task(_consume())
+    await asyncio.sleep(0.1)
+    handle.close()
+    await asyncio.sleep(0.1)
+    await consumer
+
+    handle._snapshot_store.save = original_save  # type: ignore[method-assign]
+
+    # Find the RUNNING snapshot saved by _execute_turn.
+    running_snapshots = [s for s in saved_states if s.get("state") == "running"]
+    assert len(running_snapshots) >= 1, (
+        f"No RUNNING snapshot in {[s.get('state') for s in saved_states]}"
+    )
+    running_snapshot = running_snapshots[0]
+
+    assert running_snapshot["prompts_serialized"] is not None
+    restored = deserialize_prompts(running_snapshot["prompts_serialized"])
+    # current_prompts was [multimodal_prompt], so restored is a 1-element list.
+    assert len(restored) == 1
+    assert isinstance(restored[0], list)
+    assert restored[0][0] == "describe this"
+    restored_img = restored[0][1]
+    assert isinstance(restored_img, BinaryImage)
+    assert restored_img.media_type == "image/png"
+    assert restored_img.data == b"\x89PNG\r\n\x1a\n"
 
 
 # ---------------------------------------------------------------------------
