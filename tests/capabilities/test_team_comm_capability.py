@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+from pydantic_ai.tools import ToolDefinition
 import pytest
 
 from agentpool.capabilities.team_comm_capability import TeamCommCapability
@@ -1432,8 +1433,7 @@ async def test_team_create_uses_config_default_members(tmp_path: Any) -> None:
 
 @pytest.mark.unit
 async def test_resolve_agent_context_from_runtime_context(tmp_path: Any) -> None:
-    """Test that _resolve_agent_context correctly extracts AgentContext from
-    the PydanticAI runtime AgentContext (agents.context.AgentContext).
+    """Test _resolve_agent_context extracts AgentContext from runtime context.
 
     In production, PydanticAI wraps our AgentContext inside agents.context.AgentContext.data.
     The tool functions receive ctx.deps = agents.context.AgentContext, and our
@@ -1505,3 +1505,219 @@ async def test_team_create_empty_members_no_defaults(tmp_path: Any) -> None:
 
     assert "Team 'empty_team' created with 0 members" in result
     assert mock_delegation.create_child_session.await_count == 0
+
+
+# ---- prepare_tools role-based filtering tests ----
+
+
+def _make_tool_def(
+    name: str,
+    *,
+    description: str | None = None,
+    to_description: str | None = None,
+) -> ToolDefinition:
+    """Create a minimal ToolDefinition for testing.
+
+    Args:
+        name: Tool name.
+        description: Optional tool description.
+        to_description: Optional description for the ``to`` parameter
+            (only used for ``send_message``).
+
+    Returns:
+        A ToolDefinition with a simple parameters_json_schema.
+    """
+    properties: dict[str, Any] = {}
+    if to_description is not None:
+        properties["to"] = {
+            "type": "string",
+            "description": to_description,
+        }
+    return ToolDefinition(
+        name=name,
+        description=description,
+        parameters_json_schema={
+            "type": "object",
+            "properties": properties,
+            "required": list(properties.keys()),
+        },
+    )
+
+
+def _all_tool_names() -> list[str]:
+    """Return all 12 team tool names."""
+    return [
+        "send_message",
+        "task_create",
+        "task_list",
+        "task_update",
+        "read_blackboard",
+        "write_blackboard",
+        "list_blackboard",
+        "team_status",
+        "team_create",
+        "team_delete",
+        "delete_blackboard",
+        "shutdown_request",
+    ]
+
+
+@pytest.mark.unit
+async def test_prepare_tools_lead_returns_all_tools() -> None:
+    """Given: lead agent with all 12 tool defs.
+
+    When: prepare_tools() is called.
+    Then: all 12 tool defs returned unchanged.
+    """
+    config = _make_enabled_config()
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+    tool_defs = [_make_tool_def(name) for name in _all_tool_names()]
+    ctx = MagicMock()
+
+    result = await cap.prepare_tools(ctx, tool_defs)
+
+    assert len(result) == 12
+    result_names = {td.name for td in result}
+    assert result_names == set(_all_tool_names())
+
+
+@pytest.mark.unit
+async def test_prepare_tools_member_filters_lead_only_tools() -> None:
+    """Given: non-lead member with all 12 tool defs.
+
+    When: prepare_tools() is called.
+    Then: lead-only tools (team_create, team_delete, delete_blackboard,
+        shutdown_request) are filtered out.  8 universal tools remain.
+    """
+    config = _make_enabled_config()
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+    tool_defs = [_make_tool_def(name) for name in _all_tool_names()]
+    ctx = MagicMock()
+
+    result = await cap.prepare_tools(ctx, tool_defs)
+
+    result_names = {td.name for td in result}
+    assert "team_create" not in result_names
+    assert "team_delete" not in result_names
+    assert "delete_blackboard" not in result_names
+    assert "shutdown_request" not in result_names
+    assert len(result) == 8
+    # Universal tools remain.
+    for name in (
+        "send_message",
+        "task_create",
+        "task_list",
+        "task_update",
+        "read_blackboard",
+        "write_blackboard",
+        "list_blackboard",
+        "team_status",
+    ):
+        assert name in result_names
+
+
+@pytest.mark.unit
+async def test_prepare_tools_member_strips_broadcast_from_send_message() -> None:
+    """Given: non-lead member's send_message tool def with broadcast in description.
+
+    When: prepare_tools() is called.
+    Then: send_message ``to`` parameter description is updated to omit
+        broadcast, and a ``pattern`` constraint is added.
+    """
+    config = _make_enabled_config()
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+    send_message_def = _make_tool_def(
+        "send_message",
+        to_description='Recipient member name. "*" broadcasts to all members.',
+    )
+    ctx = MagicMock()
+
+    result = await cap.prepare_tools(ctx, [send_message_def])
+
+    assert len(result) == 1
+    to_prop = result[0].parameters_json_schema["properties"]["to"]
+    assert "broadcast" not in to_prop["description"].lower()
+    assert to_prop["pattern"] == r"^[^*]+$"
+
+
+@pytest.mark.unit
+async def test_prepare_tools_lead_keeps_broadcast_in_send_message() -> None:
+    """Given: lead agent's send_message tool def with broadcast in description.
+
+    When: prepare_tools() is called.
+    Then: send_message ``to`` parameter description is unchanged (no
+        pattern constraint added).
+    """
+    config = _make_enabled_config()
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+    original_desc = 'Recipient member name. "*" broadcasts to all members.'
+    send_message_def = _make_tool_def("send_message", to_description=original_desc)
+    ctx = MagicMock()
+
+    result = await cap.prepare_tools(ctx, [send_message_def])
+
+    assert len(result) == 1
+    to_prop = result[0].parameters_json_schema["properties"]["to"]
+    assert to_prop["description"] == original_desc
+    assert "pattern" not in to_prop
+
+
+@pytest.mark.unit
+async def test_prepare_tools_no_session_metadata_returns_all() -> None:
+    """Given: shared instance with no session metadata (compile time).
+
+    When: prepare_tools() is called.
+    Then: all tool defs returned unchanged (no role to filter by).
+    """
+    config = _make_enabled_config()
+    cap = TeamCommCapability(config, "worker", session_metadata=None)
+    tool_defs = [_make_tool_def(name) for name in _all_tool_names()]
+    ctx = MagicMock()
+
+    result = await cap.prepare_tools(ctx, tool_defs)
+
+    assert len(result) == 12
+
+
+# ---- get_instructions role-specific capabilities tests ----
+
+
+@pytest.mark.unit
+def test_get_instructions_lead_includes_broadcast_capability() -> None:
+    """Given: lead agent session metadata.
+
+    When: get_instructions() is called.
+    Then: instructions include the lead capabilities section mentioning
+        broadcast (to="*") and lead-only tools.
+    """
+    config = _make_enabled_config()
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = cap.get_instructions()
+
+    assert result is not None
+    assert "Your Capabilities (Lead)" in result
+    assert 'to="*"' in result
+    assert "create and delete teams" in result
+
+
+@pytest.mark.unit
+def test_get_instructions_member_includes_individual_messaging_only() -> None:
+    """Given: non-lead member session metadata.
+
+    When: get_instructions() is called.
+    Then: instructions include the member capabilities section that
+        mentions individual messaging and states broadcast is not
+        available.
+    """
+    config = _make_enabled_config()
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    result = cap.get_instructions()
+
+    assert result is not None
+    assert "Your Capabilities (Member)" in result
+    assert "individual" in result.lower()
+    assert "not available" in result.lower()
+    # Should NOT mention lead-only tools in capabilities section.
+    assert "Your Capabilities (Lead)" not in result

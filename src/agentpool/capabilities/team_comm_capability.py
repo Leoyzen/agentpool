@@ -20,12 +20,28 @@ Lead-only tools (only agents with ``team_role == "lead"``):
     - delete_blackboard: Delete a key from the shared blackboard.
     - shutdown_request: Shut down a specific team member.
 
+    Lead-only tools are registered for all agents but filtered out for
+    non-lead members by ``prepare_tools()`` before the model receives the
+    tool list.  Runtime permission checks in each tool body remain as a
+    safety net.
+
 Per-session instantiation:
     The factory creates a shared instance with ``session_metadata=None``
     during ``_compile_agent_capabilities()``. When a session with a
     ``team_id`` in its metadata is created, ``create_session_agent()``
     replaces the shared instance with a per-session instance carrying
     the actual session metadata.
+
+Role-aware tool schema:
+    ``prepare_tools()`` modifies tool definitions based on
+    ``team_role`` from session metadata:
+
+    - **Non-lead members**: Lead-only tools are removed entirely.
+      ``send_message`` has its ``to`` parameter description updated to
+      omit the broadcast (``"*"``) mention, and a ``pattern`` constraint
+      is added to reject ``"*"`` at the schema level.
+
+    - **Lead agents**: All tool definitions are returned unchanged.
 """
 
 from __future__ import annotations
@@ -40,6 +56,7 @@ import uuid
 
 from pydantic_ai.tools import (
     RunContext,  # noqa: TC002  # needed at runtime for PydanticAI type resolution
+    ToolDefinition,  # noqa: TC002  # needed at runtime for PydanticAI type resolution
 )
 
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
@@ -109,7 +126,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             self.register_tool(self.write_blackboard)
             self.register_tool(self.list_blackboard)
             self.register_tool(self.team_status)
-            # Register lead-only tools
+            # Register lead-only tools — filtered out for non-lead members
+            # by prepare_tools() before the model receives the tool list.
             self.register_tool(self.team_create)
             self.register_tool(self.team_delete)
             self.register_tool(self.delete_blackboard)
@@ -875,6 +893,84 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     # AbstractCapability overrides
     # ------------------------------------------------------------------
 
+    # Tool names that only lead agents may use.  Non-lead members never
+    # see these tools — ``prepare_tools`` filters them out before the
+    # model receives the tool list, so the LLM cannot attempt to call
+    # them.  The runtime permission checks in each tool body remain as a
+    # safety net.
+    _LEAD_ONLY_TOOLS: frozenset[str] = frozenset(
+        {
+            "team_create",
+            "team_delete",
+            "delete_blackboard",
+            "shutdown_request",
+        },
+    )
+
+    @override
+    async def prepare_tools(
+        self,
+        ctx: RunContext[Any],
+        tool_defs: list[ToolDefinition],
+    ) -> list[ToolDefinition]:
+        """Filter and modify tool definitions based on the agent's team role.
+
+        For non-lead members:
+            - Lead-only tools (``team_create``, ``team_delete``,
+              ``delete_blackboard``, ``shutdown_request``) are removed
+              entirely so the LLM never sees them.
+            - ``send_message`` has its ``to`` parameter description
+              updated to remove the broadcast (``"*"``) mention, and a
+              ``pattern`` constraint is added to reject ``"*"`` at the
+              schema level.
+
+        For lead agents, all tool definitions are returned unchanged.
+
+        Args:
+            ctx: The PydanticAI run context (unused — role is read from
+                ``self._session_metadata``).
+            tool_defs: The full list of tool definitions for this step.
+
+        Returns:
+            Filtered/modified tool definitions.
+        """
+        # No session metadata = compile-time shared instance; no role
+        # filtering to apply.
+        if not self._session_metadata:
+            return tool_defs
+
+        role: str = self._session_metadata.get("team_role", "")
+        if role == "lead":
+            return tool_defs
+
+        result: list[ToolDefinition] = []
+        for td in tool_defs:
+            if td.name in self._LEAD_ONLY_TOOLS:
+                continue
+            if td.name == "send_message":
+                self._strip_broadcast_from_send_message(td)
+            result.append(td)
+        return result
+
+    @staticmethod
+    def _strip_broadcast_from_send_message(tool_def: ToolDefinition) -> None:
+        """Remove broadcast (``to="*"``) from the send_message tool schema.
+
+        Mutates ``tool_def`` in place:
+            - Updates the ``to`` parameter description to omit the
+              broadcast mention.
+            - Adds a ``pattern`` constraint that rejects ``"*"``.
+
+        Args:
+            tool_def: The ``send_message`` ToolDefinition to modify.
+        """
+        schema = tool_def.parameters_json_schema
+        props = schema.get("properties", {})
+        to_prop = props.get("to")
+        if to_prop is not None and isinstance(to_prop, dict):
+            to_prop["description"] = "Recipient member name."
+            to_prop["pattern"] = r"^[^*]+$"
+
     @override
     def get_instructions(self) -> str | None:
         """Render the team protocol template using session metadata.
@@ -889,14 +985,34 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         """
         if not self._config.enabled or not self._session_metadata:
             return None
+        role: str = self._session_metadata.get("team_role", "unknown")
         base = self._config.protocol_template.format(
             team_name=self._session_metadata.get("team_name", "unknown"),
-            role=self._session_metadata.get("team_role", "unknown"),
+            role=role,
             member_name=self._session_metadata.get(
                 "team_member_name",
                 self._agent_name,
             ),
         )
+
+        # Role-specific capabilities section.
+        if role == "lead":
+            base += (
+                "\n\n## Your Capabilities (Lead)\n\n"
+                "- You can broadcast to all members via `send_message` with "
+                '`to="*"`.\n'
+                "- You can create and delete teams, delete blackboard keys, "
+                "and shut down members.\n"
+            )
+        else:
+            base += (
+                "\n\n## Your Capabilities (Member)\n\n"
+                "- Use `send_message` to send messages to individual members "
+                "by name.\n"
+                '- Broadcast (`to="*"`) is not available to you — send '
+                "individual messages to each member instead.\n"
+            )
+
         # Append eligible agent names + descriptions so the LLM knows
         # which agents can be used as team members in team_create.
         eligible = self._config.member_eligible
