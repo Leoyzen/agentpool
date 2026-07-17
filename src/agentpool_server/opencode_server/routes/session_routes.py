@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from anyenv.text_sharing.opencode import Message, MessagePart, OpenCodeSharer
@@ -73,9 +74,11 @@ from agentpool_server.opencode_server.session_pool_integration import (
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 from agentpool_server.opencode_server.todo_utils import build_opencode_todos
 from agentpool_storage.opencode_provider import helpers
+from agentpool_storage.protocols import SessionPersistence
 
 
 if TYPE_CHECKING:
+    from agentpool.sessions.models import SessionData
     from agentpool_server.opencode_server.state import ServerState
 
 logger = get_logger(__name__)
@@ -620,6 +623,33 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
 router = APIRouter(prefix="/session", tags=["session"])
 
 
+async def _query_store_session_ids(
+    store: SessionPersistence,
+    cwd: str | None,
+) -> list[str]:
+    """Query the store for persisted session IDs, optionally filtered by cwd.
+
+    All current store implementations (SQLModelProvider, MemoryStorageProvider)
+    have ``list_session_ids`` and filter by cwd correctly.
+    """
+    return await store.list_session_ids(cwd=cwd)
+
+
+async def _load_sessions_from_store(
+    store: SessionPersistence,
+    session_ids: list[str],
+) -> list[SessionData]:
+    """Load sessions from the store in batch.
+
+    Delegates to ``store.load_sessions_batch(ids)`` (base class provides
+    default fallback to individual ``load_session`` calls for providers
+    that don't override it). Returns empty list for empty input.
+    """
+    if not session_ids:
+        return []
+    return await store.load_sessions_batch(session_ids)
+
+
 @router.get("")
 async def list_sessions(
     state: StateDep,
@@ -631,8 +661,9 @@ async def list_sessions(
 ) -> list[Session]:
     """List all sessions.
 
-    Prefers SessionController.list_sessions() when available, falling back
-    to agent.list_sessions() for backward compatibility.
+    Queries the session store for persisted sessions (source of truth),
+    then overlays in-memory active sessions for real-time status.
+    Includes newly created sessions not yet persisted.
 
     Query params:
         directory: Filter sessions by directory (overrides default cwd).
@@ -642,35 +673,93 @@ async def list_sessions(
         search: Filter sessions by title (case-insensitive)
         limit: Maximum number of sessions to return
     """
-    # Use directory param if provided, otherwise fall back to state.base_path
-    # which resolves to agent.env.cwd (from YAML environment config) or working_dir
     effective_cwd = directory or state.base_path
     sessions: list[Session] = []
 
-    # Prefer SessionController for active sessions when available
     if state.session_controller is not None:
-        for info in state.session_controller.list_sessions():
-            cached = state.sessions.get(info.session_id)
-            if cached is not None:
-                sessions.append(cached)
-            else:
-                session_pool = state.pool.session_pool
-                if session_pool is not None and session_pool.sessions.store is not None:
-                    data = await session_pool.sessions.store.load_session(info.session_id)
-                    if data is not None:
-                        session = session_data_to_opencode(data)
-                        state.sessions[info.session_id] = session
-                        sessions.append(session)
-        # Apply cwd filter for SessionController path
+        session_pool = state.pool.session_pool
+        store: SessionPersistence | None = (
+            session_pool.sessions.store
+            if session_pool is not None and session_pool.sessions is not None
+            else None
+        )
+
+        if store is not None:
+            try:
+                # Capture in-memory sessions BEFORE store load (store load will
+                # populate state.sessions, overwriting any existing cache entries)
+                in_memory_sessions: dict[str, Session] = {}
+                for info in state.session_controller.list_sessions():
+                    cached = state.sessions.get(info.session_id)
+                    if cached is not None:
+                        in_memory_sessions[info.session_id] = cached
+
+                # D2: Query store first for persisted session IDs
+                session_ids = await _query_store_session_ids(store, effective_cwd)
+                # D3: Batch load all sessions
+                store_session_data = await _load_sessions_from_store(store, session_ids)
+
+                # Convert to OpenCode Session objects and cache in state.sessions
+                sessions_by_id: dict[str, Session] = {}
+                for data in store_session_data:
+                    session = session_data_to_opencode(data)
+                    # Don't overwrite in-memory cached sessions
+                    if data.session_id not in in_memory_sessions:
+                        state.sessions[data.session_id] = session
+                    sessions_by_id[data.session_id] = session
+
+                # D4: Overlay in-memory cached sessions (fresher status: busy/idle)
+                sessions_by_id.update(in_memory_sessions)
+
+                # D5: Append in-memory-only sessions not in store results
+                # (newly created, not yet persisted), filtered by cwd
+                resolved_cwd = Path(effective_cwd).resolve() if effective_cwd else None
+                for session_id, cached in in_memory_sessions.items():
+                    if session_id not in sessions_by_id and (
+                        resolved_cwd is None
+                        or (
+                            cached.directory
+                            and Path(cached.directory).resolve() == resolved_cwd
+                        )
+                    ):
+                        sessions_by_id[session_id] = cached
+
+                sessions = list(sessions_by_id.values())
+            except Exception:  # noqa: BLE001
+                # D7: Store query failure — degrade to in-memory only
+                logger.warning(
+                    "Failed to query store for sessions, falling back to in-memory only",
+                    exc_info=True,
+                )
+                for info in state.session_controller.list_sessions():
+                    cached = state.sessions.get(info.session_id)
+                    if cached is not None:
+                        sessions.append(cached)
+        else:
+            # D9: Store is None — in-memory only
+            for info in state.session_controller.list_sessions():
+                cached = state.sessions.get(info.session_id)
+                if cached is not None:
+                    sessions.append(cached)
+
+        # D6: Python-level cwd filter (defensive safety net for future custom stores)
         if effective_cwd:
-            sessions = [s for s in sessions if s.directory == effective_cwd]
+            resolved_cwd = Path(effective_cwd).resolve()
+            sessions = [
+                s
+                for s in sessions
+                if s.directory and Path(s.directory).resolve() == resolved_cwd
+            ]
     else:
         # Legacy path: load via agent.list_sessions()
         for data in await state.agent.list_sessions(cwd=effective_cwd):
             session = session_data_to_opencode(data)
-            # Cache in state for later use
             state.sessions[data.session_id] = session
             sessions.append(session)
+
+    # D8: Re-sort merged list by time.updated descending
+    sessions.sort(key=lambda s: s.time.updated, reverse=True)
+
     # Apply filters
     if roots:
         sessions = [s for s in sessions if s.parent_id is None]
