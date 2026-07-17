@@ -30,6 +30,8 @@ Per-session instantiation:
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import datetime
 import json
 import tempfile
@@ -41,6 +43,7 @@ from pydantic_ai.tools import (
 )
 
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
@@ -50,6 +53,13 @@ if TYPE_CHECKING:
     from agentpool.capabilities.file_team_state import FileTeamState
     from agentpool.tools.base import Tool
     from agentpool_config.team_mode import TeamModeConfig
+
+
+logger = get_logger(__name__)
+
+# Strong references to cleanup tasks so asyncio does not garbage-collect them
+# while they are awaiting ``RunHandle.complete_event``.
+_cleanup_tasks: set[asyncio.Task[Any]] = set()
 
 
 class TeamCommCapability(FunctionToolsetCapability[Any]):
@@ -649,8 +659,6 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     mode=DeliveryMode.QUEUE,
                 )
         except Exception as exc:  # noqa: BLE001
-            import contextlib
-
             for sid in created_sessions:
                 with contextlib.suppress(Exception):
                     await session_pool.close_session(sid)
@@ -662,8 +670,101 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         # can access the team state without requiring a new session.
         agent_ctx.session.metadata["team_id"] = team_id
         agent_ctx.session.metadata["team_name"] = name
+        # Store member session IDs so the auto-cleanup callback (and
+        # team_delete) can close them without re-reading team state.
+        agent_ctx.session.metadata["team_member_sessions"] = list(created_sessions)
+
+        # Schedule auto-cleanup: when the lead's RunHandle terminates
+        # (complete_event fires), close all member sessions to prevent
+        # leaks.  This covers the scenario where the lead's run finishes
+        # but ``close_session(lead)`` is not called (e.g. protocol server
+        # keeps the lead session alive for follow-ups).
+        self._schedule_member_cleanup(agent_ctx, lead_session_id, list(created_sessions))
 
         return f"Team '{name}' created with {len(members)} members. team_id={team_id}"
+
+    @staticmethod
+    def _schedule_member_cleanup(
+        agent_ctx: AgentContext,
+        lead_session_id: str,
+        member_session_ids: list[str],
+    ) -> None:
+        """Schedule a background task to close member sessions when the lead run ends.
+
+        Awaits ``RunHandle.complete_event`` for the lead's current run.
+        When the event fires, closes every member session whose ID is
+        still recorded in ``session.metadata["team_member_sessions"]``
+        (``team_delete`` clears this list to signal manual cleanup was
+        already performed).
+
+        Args:
+            agent_ctx: The lead agent's per-turn context.
+            lead_session_id: The lead session ID.
+            member_session_ids: Member session IDs to close on run termination.
+        """
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is None:
+            return
+
+        session = session_pool.sessions.get_session(lead_session_id)
+        if session is None or session.current_run_id is None:
+            return
+
+        run_handle = session_pool.sessions._runs.get(session.current_run_id)
+        if run_handle is None:
+            return
+
+        complete_event = run_handle.complete_event
+
+        async def _cleanup_when_run_ends() -> None:
+            """Await lead run completion, then close member sessions."""
+            try:
+                await asyncio.wait_for(complete_event.wait(), timeout=300.0)
+            except TimeoutError:
+                logger.warning(
+                    "Timed out waiting for lead run completion; "
+                    "skipping member session auto-cleanup",
+                    lead_session_id=lead_session_id,
+                )
+                return
+
+            # Check if team_delete already cleaned up (it clears the list).
+            current_session = session_pool.sessions.get_session(lead_session_id)
+            if current_session is None:
+                return  # Lead session already closed — children cascade-closed.
+            remaining = current_session.metadata.get("team_member_sessions")
+            if not remaining:
+                return  # team_delete already closed member sessions.
+
+            # Close each member session.  ``close_session`` is idempotent
+            # for already-closed sessions, so racing with cascade close
+            # in ``_close_session_unlocked`` is safe.
+            for msid in member_session_ids:
+                try:
+                    await session_pool.close_session(msid)
+                except Exception:
+                    logger.exception(
+                        "Failed to auto-close member session",
+                        member_session_id=msid,
+                        lead_session_id=lead_session_id,
+                    )
+
+            # Clear the list so a second cleanup (e.g. cascade close) is a no-op.
+            current_session.metadata["team_member_sessions"] = []
+
+        task = asyncio.create_task(_cleanup_when_run_ends())
+        _cleanup_tasks.add(task)
+
+        def _on_done(t: asyncio.Task[Any]) -> None:
+            _cleanup_tasks.discard(t)
+            if not t.cancelled() and t.exception() is not None:
+                logger.error(
+                    "Member session cleanup task failed: %s",
+                    t.exception(),
+                    lead_session_id=lead_session_id,
+                )
+
+        task.add_done_callback(_on_done)
 
     async def team_delete(self, ctx: RunContext[Any]) -> str:
         """Delete the current team and close all member sessions (lead-only).
@@ -701,6 +802,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 sid: str = member_info.get("session_id", "")
                 if sid:
                     await session_pool.close_session(sid)
+
+        # Clear member session IDs from metadata so the auto-cleanup
+        # callback (scheduled in team_create) knows manual cleanup was
+        # already performed and skips double-closing.
+        agent_ctx.session.metadata["team_member_sessions"] = []
 
         team_state.cleanup(team_id)
         return "Team deleted"
