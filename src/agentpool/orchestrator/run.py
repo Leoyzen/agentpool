@@ -448,18 +448,30 @@ class RunHandle:
                             if not current_prompts:
                                 continue
 
-                        async with contextlib.aclosing(
-                            self._execute_turn(
-                                agent,
-                                event_bus,
-                                session,
-                                current_prompts,
-                            ),
-                        ) as turn_gen:
-                            async for event in turn_gen:
-                                yield event
+                        try:
+                            async with contextlib.aclosing(
+                                self._execute_turn(
+                                    agent,
+                                    event_bus,
+                                    session,
+                                    current_prompts,
+                                ),
+                            ) as turn_gen:
+                                async for event in turn_gen:
+                                    yield event
 
-                        action = await self._handle_turn_result(event_bus)
+                            action = await self._handle_turn_result(event_bus)
+                        except asyncio.CancelledError:
+                            # Force-cancel was triggered by cancel() to
+                            # break through __aexit__ hangs. Run
+                            # _handle_turn_result to preserve message
+                            # history and publish RunFailedEvent, then
+                            # continue to idle for the next turn.
+                            with contextlib.suppress(Exception):
+                                await self._handle_turn_result(event_bus)
+                            current_prompts = []
+                            continue
+
                         if action == "continue":
                             current_prompts = []  # Prevent re-execution of cancelled prompt
                             continue
@@ -1295,22 +1307,36 @@ class RunHandle:
         return self._turn_was_cancelled
 
     def cancel(self) -> None:
-        """Cancel the run without triggering synchronous cleanup.
+        """Cancel the run cooperatively, then force-cancel if needed.
 
         Sets the cancelled flag on the run context and wakes the idle
         event to unblock the turn loop. Calls the registered cancel
         function (wired in ``start()``) which schedules
         ``agent._interrupt()`` for subclass-specific cleanup.
 
-        The ``start()`` loop task is NOT cancelled here — it must
-        continue running to process the ``cancelled`` flag, emit
-        stream-complete events, and transition to idle/done gracefully.
+        Also force-cancels ``run_ctx.current_task`` to inject
+        ``CancelledError`` into a hung ``__aexit__`` (e.g. MCP
+        streamable-http cleanup stuck behind an HTTP proxy). The
+        ``CancelledError`` is caught by ``NativeTurn.execute()``'s
+        ``except asyncio.CancelledError`` handler which checks
+        ``run_ctx.cancelled`` and exits gracefully. The ``start()``
+        ``finally`` block still runs, setting ``complete_event`` and
+        releasing ``turn_lock``.
         """
         self.run_ctx.cancelled = True
         self._idle_event.set()
 
         if self._cancel_fn is not None:
             self._cancel_fn()
+
+        # Force-cancel the task driving start() to break through __aexit__
+        # hangs. The CancelledError will be caught by NativeTurn's except
+        # handler which checks run_ctx.cancelled and exits gracefully. The
+        # start() finally block will still run, setting complete_event and
+        # releasing turn_lock.
+        task = self.run_ctx.current_task
+        if task is not None and not task.done():
+            task.cancel()
 
     def _create_cancel_fn(self) -> Callable[[], None]:
         """Create a cancel function that schedules ``agent._interrupt()``.

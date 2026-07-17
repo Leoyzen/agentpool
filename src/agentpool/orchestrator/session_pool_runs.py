@@ -184,13 +184,13 @@ class SessionPoolRunsMixin:
     async def wait_for_completion(
         self,
         session_id: str,
-        timeout: float | None = None,
+        timeout: float | None = 300,
     ) -> str:
         """Wait for the active run on a session to complete.
 
         Args:
             session_id: The session to wait for.
-            timeout: Maximum seconds to wait. ``None`` waits indefinitely.
+            timeout: Maximum seconds to wait. Defaults to 300 seconds.
 
         Returns:
             The ``session_id`` on completion.

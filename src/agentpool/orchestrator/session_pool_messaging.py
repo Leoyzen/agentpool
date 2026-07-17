@@ -80,7 +80,7 @@ class SessionPoolMessagingMixin:
         async def wait_for_completion(
             self,
             session_id: str,
-            timeout: float | None = None,
+            timeout: float = 300,
         ) -> str: ...
 
     def _evict_message_cache(self) -> None:
@@ -321,7 +321,11 @@ class SessionPoolMessagingMixin:
                     raise RuntimeError(event.message)  # noqa: TRY004
 
             # Ensure the run has fully completed before closing.
-            await self.wait_for_completion(session_id, timeout=10.0)
+            try:
+                await self.wait_for_completion(session_id, timeout=10.0)
+            except TimeoutError:
+                # Turn hung — cancel the run to break through __aexit__ hang
+                self.sessions.cancel_run_for_session(session_id)
         finally:
             try:
                 await self.event_bus.unsubscribe(session_id, bus_queue)

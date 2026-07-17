@@ -592,6 +592,10 @@ async def _process_message_locked(  # noqa: PLR0915
 
             try:
                 await session_pool.wait_for_completion(session_id)
+            except TimeoutError:
+                # Turn hung — cancel the run to break through __aexit__ hang
+                session_pool.sessions.cancel_run_for_session(session_id)
+                raise
             except asyncio.CancelledError:
                 session_pool.sessions.cancel_run_for_session(session_id)
                 raise

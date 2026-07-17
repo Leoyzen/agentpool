@@ -356,7 +356,7 @@ class SessionControllerRunsMixin:
             return False
         return run_handle.revoke(message_id)
 
-    async def wait_for_completion(self, session_id: str, timeout: float | None = None) -> str:
+    async def wait_for_completion(self, session_id: str, timeout: float | None = 300) -> str:
         """Wait for the active run on a session to complete.
 
         Looks up the active run via ``session.current_run_id`` and awaits
@@ -365,7 +365,10 @@ class SessionControllerRunsMixin:
 
         Args:
             session_id: The session to wait for.
-            timeout: Maximum seconds to wait. ``None`` waits indefinitely.
+            timeout: Maximum seconds to wait. Defaults to 300 seconds.
+                ``None`` is treated as 300 seconds. Callers should cancel
+                the run on ``TimeoutError`` to break through ``__aexit__``
+                hangs.
 
         Returns:
             The ``session_id`` on completion.
@@ -377,6 +380,8 @@ class SessionControllerRunsMixin:
         """
         from agentpool.orchestrator.session_controller import SessionNotFoundError
 
+        if timeout is None:
+            timeout = 300
         session = self.get_session(session_id)
         if session is None:
             raise SessionNotFoundError(session_id)
@@ -386,10 +391,7 @@ class SessionControllerRunsMixin:
         run_handle = self._runs.get(run_id)
         if run_handle is None:
             return session_id
-        if timeout is not None:
-            await asyncio.wait_for(run_handle.complete_event.wait(), timeout=timeout)
-        else:
-            await run_handle.complete_event.wait()
+        await asyncio.wait_for(run_handle.complete_event.wait(), timeout=timeout)
         return session_id
 
     def _cleanup_run(self, run_id: str) -> None:

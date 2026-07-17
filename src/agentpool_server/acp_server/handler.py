@@ -606,7 +606,12 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             ):
                 # Get run handle reference before waiting (cleaned up after completion).
                 run_handle = session_pool._get_active_run_handle(session_id)
-                await session_pool.wait_for_completion(session_id)
+                try:
+                    await session_pool.wait_for_completion(session_id)
+                except TimeoutError:
+                    # Turn hung — cancel the run to break through __aexit__ hang
+                    session_pool.sessions.cancel_run_for_session(session_id)
+                    raise
                 # Check if run was cancelled after the turn completed.
                 # When client sends session/cancel, cancel_session() calls
                 # cancel_run_for_session() which sets run_ctx.cancelled.

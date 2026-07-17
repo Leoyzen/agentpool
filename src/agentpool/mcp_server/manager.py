@@ -39,6 +39,12 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+#: Per-step timeout (seconds) for MCP cleanup operations in ``cleanup_session()``.
+#: Each toolset ``__aexit__``, connection pool cleanup, and ACP MCP cleanup
+#: is wrapped in ``asyncio.timeout(_MCP_CLEANUP_TIMEOUT)`` to prevent hangs
+#: when an HTTP proxy goes silent during teardown.
+_MCP_CLEANUP_TIMEOUT: float = 30.0
+
 # ContextVar for the current session's InputProvider, set by the run loop
 # before agent execution.  Read by the PydanticAI MCP elicitation callback
 # so that agent-level MCP servers can delegate to ACPInputProvider.
@@ -662,12 +668,25 @@ class MCPManager:
                 # (MCPToolset.__aexit__ raises ValueError if __aenter__ wasn't called).
                 for toolset in ctx.toolset_cache.values():
                     with contextlib.suppress(ValueError):
-                        await toolset.__aexit__(None, None, None)
+                        try:
+                            async with asyncio.timeout(_MCP_CLEANUP_TIMEOUT):
+                                await toolset.__aexit__(None, None, None)
+                        except TimeoutError:
+                            logger.warning(
+                                "MCP toolset cleanup timed out",
+                                session_id=session_id,
+                            )
                 ctx.toolset_cache.clear()
 
                 if ctx.connection_pool is not None:
                     try:
-                        await ctx.connection_pool.cleanup()
+                        async with asyncio.timeout(_MCP_CLEANUP_TIMEOUT):
+                            await ctx.connection_pool.cleanup()
+                    except TimeoutError:
+                        logger.warning(
+                            "MCP connection pool cleanup timed out",
+                            session_id=session_id,
+                        )
                     except Exception:
                         logger.exception(
                             "Error cleaning up session connection pool",
@@ -676,7 +695,13 @@ class MCPManager:
 
                 if self._acp_mcp_manager is not None:
                     try:
-                        await self._acp_mcp_manager.cleanup_session(session_id)
+                        async with asyncio.timeout(_MCP_CLEANUP_TIMEOUT):
+                            await self._acp_mcp_manager.cleanup_session(session_id)
+                    except TimeoutError:
+                        logger.warning(
+                            "ACP MCP cleanup timed out",
+                            session_id=session_id,
+                        )
                     except Exception:
                         logger.exception(
                             "Error cleaning up ACP MCP connections",
