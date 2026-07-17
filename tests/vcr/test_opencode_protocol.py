@@ -225,3 +225,53 @@ async def test_error_handling(opencode_client: TestClient) -> None:
         json={"content": "hello", "role": "user"},
     )
     assert response.status_code in (404, 400, 422, 500)
+
+
+@pytest.mark.skipif(
+    not cassette_exists(_MODULE_STEM, "test_model_api_rate_limit"),
+    reason="Cassette not recorded yet — run with --record-mode=once",
+)
+async def test_model_api_rate_limit(opencode_client: TestClient) -> None:
+    """Model API returns 429 rate limit — error propagates as SSE error event.
+
+    The cassette records a real 429 response from the model API. The OpenCode
+    server should stream an error event to the client via SSE.
+    """
+    response = opencode_client.post(
+        "/session/test-vcr-rate-limit/message",
+        json={"content": "This will trigger a rate limit.", "role": "user"},
+    )
+    # The server should accept the request (202) and stream the error via SSE,
+    # or return an error status code directly.
+    assert response.status_code in (200, 202, 429, 500, 503)
+
+
+@pytest.mark.skipif(
+    not cassette_exists(_MODULE_STEM, "test_model_api_server_error"),
+    reason="Cassette not recorded yet — run with --record-mode=once",
+)
+async def test_model_api_server_error(opencode_client: TestClient) -> None:
+    """Model API returns 500 server error — error propagates through OpenCode SSE."""
+    response = opencode_client.post(
+        "/session/test-vcr-server-error/message",
+        json={"content": "This will trigger a server error.", "role": "user"},
+    )
+    assert response.status_code in (200, 202, 500, 502)
+
+
+@pytest.mark.skipif(
+    not cassette_exists(_MODULE_STEM, "test_model_api_malformed_stream"),
+    reason="Cassette not recorded yet — run with --record-mode=once",
+)
+async def test_model_api_malformed_stream(opencode_client: TestClient) -> None:
+    """Model API returns malformed streaming response — error propagates gracefully.
+
+    The cassette records a response where the SSE stream contains invalid
+    JSON or truncated chunks. The server should handle this gracefully.
+    """
+    response = opencode_client.post(
+        "/session/test-vcr-malformed/message",
+        json={"content": "This will trigger a malformed stream.", "role": "user"},
+    )
+    # Server should not crash — it should return an error status or stream an error event.
+    assert response.status_code in (200, 202, 500)

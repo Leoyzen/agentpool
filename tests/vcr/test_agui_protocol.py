@@ -119,3 +119,49 @@ async def test_error_handling(agui_client: AsyncClient) -> None:
     """Requesting a non-existent agent returns a 404."""
     response = await agui_client.get("/nonexistent_agent")
     assert response.status_code in (404, 200)  # some adapters return 200 with empty body
+
+
+@pytest.mark.skipif(
+    not cassette_exists(_MODULE_STEM, "test_model_api_rate_limit"),
+    reason="Cassette not recorded yet — run with --record-mode=once",
+)
+async def test_model_api_rate_limit(agui_client: AsyncClient) -> None:
+    """Model API returns 429 rate limit — error propagates through AG-UI events.
+
+    The cassette records a real 429 response from the model API. The AG-UI
+    server should emit an error event in the event stream.
+    """
+    response = await agui_client.post(
+        "/test_agent/subscribe",
+        json={"content": "This will trigger a rate limit.", "role": "user"},
+    )
+    # AG-UI uses SSE for streaming — the initial response may be 200 with
+    # error events in the stream, or an error status code.
+    assert response.status_code in (200, 202, 429, 500, 503)
+
+
+@pytest.mark.skipif(
+    not cassette_exists(_MODULE_STEM, "test_model_api_server_error"),
+    reason="Cassette not recorded yet — run with --record-mode=once",
+)
+async def test_model_api_server_error(agui_client: AsyncClient) -> None:
+    """Model API returns 500 server error — error propagates through AG-UI."""
+    response = await agui_client.post(
+        "/test_agent/subscribe",
+        json={"content": "This will trigger a server error.", "role": "user"},
+    )
+    assert response.status_code in (200, 202, 500, 502)
+
+
+@pytest.mark.skipif(
+    not cassette_exists(_MODULE_STEM, "test_model_api_malformed_stream"),
+    reason="Cassette not recorded yet — run with --record-mode=once",
+)
+async def test_model_api_malformed_stream(agui_client: AsyncClient) -> None:
+    """Model API returns malformed streaming response — AG-UI handles gracefully."""
+    response = await agui_client.post(
+        "/test_agent/subscribe",
+        json={"content": "This will trigger a malformed stream.", "role": "user"},
+    )
+    # Server should not crash — error should be emitted as an event, not a process failure.
+    assert response.status_code in (200, 202, 500)

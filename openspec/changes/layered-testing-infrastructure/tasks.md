@@ -128,7 +128,7 @@ All L2 tests that use `MagicMock(pool)` or `MagicMock(agent)` as the pool/agent 
 - [ ] 8.7 [HUMAN-REQUIRED] Record cassettes for OpenAI API protocol test cases
 - [x] 8.8 Create `tests/vcr/test_acp_subagent.py` — subagent delegation: SpawnSessionStartEvent + SpawnSessionCompleteEvent
 - [ ] 8.9 [HUMAN-REQUIRED] Record cassette for ACP subagent test
-- [ ] 8.10 Add error-path cassettes for each protocol (rate limit 429, server error 500, malformed stream)
+- [x] 8.10 Add error-path cassettes for each protocol (rate limit 429, server error 500, malformed stream)
 - [ ] 8.11 [HUMAN-REQUIRED] Record error-path cassettes
 - [ ] 8.12 Verify all protocol VCR tests pass in CI replay mode
 

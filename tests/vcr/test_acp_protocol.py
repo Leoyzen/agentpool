@@ -10,6 +10,9 @@ Cassettes ([HUMAN-REQUIRED]):
 - ``tests/cassettes/vcr/test_acp_protocol/test_session_init.yaml``
 - ``tests/cassettes/vcr/test_acp_protocol/test_basic_completion.yaml``
 - ``tests/cassettes/vcr/test_acp_protocol/test_streaming_events.yaml``
+- ``tests/cassettes/vcr/test_acp_protocol/test_model_api_rate_limit.yaml``
+- ``tests/cassettes/vcr/test_acp_protocol/test_model_api_server_error.yaml``
+- ``tests/cassettes/vcr/test_acp_protocol/test_model_api_malformed_stream.yaml``
 """
 
 from __future__ import annotations
@@ -315,3 +318,180 @@ async def test_streaming_events(vcr_pool: AgentPool) -> None:
         assert len(notifications) >= 1
         session_ids = {n.session_id for n in notifications}
         assert session_ids == {new_sess.session_id}
+
+
+@pytest.mark.skipif(
+    not cassette_exists(_MODULE_STEM, "test_model_api_rate_limit"),
+    reason="Cassette not recorded yet — run with --record-mode=once",
+)
+async def test_model_api_rate_limit(acp_pipe: _PairedPipe) -> None:
+    """Model API returns 429 rate limit — error propagates through ACP as error event.
+
+    The cassette records a real 429 response from the model API. The ACP
+    protocol stack should convert this to an error notification for the
+    client.
+    """
+    client_conn = ClientSideConnection(
+        _AsyncioWriterAdapter(acp_pipe.client_writer),
+        _AsyncioReaderAdapter(acp_pipe.client_reader),
+    )
+    agent_conn = AgentSideConnection(
+        _AsyncioWriterAdapter(acp_pipe.server_writer),
+        _AsyncioReaderAdapter(acp_pipe.server_reader),
+    )
+    await client_conn.initialize(InitializeRequest(protocol_version=1))
+    new_sess = await client_conn.new_session(
+        NewSessionRequest(mcp_servers=[], cwd="/test")
+    )
+
+    notifications: list[SessionNotification] = []
+
+    async def _collect() -> None:
+        async for notification in acp_pipe.agent.client.notifications:
+            notifications.append(notification)
+            if any(
+                getattr(n.update, "type", None) in ("error", "run_error")
+                or "error" in str(getattr(n.update, "type", "")).lower()
+                for n in notifications
+            ):
+                break
+
+    collector = asyncio.create_task(_collect())
+    await client_conn.session_update(
+        SessionNotification(
+            session_id=new_sess.session_id,
+            update=UserMessageChunk.text("This will trigger a rate limit."),
+        )
+    )
+    try:
+        await asyncio.wait_for(collector, timeout=15.0)
+    except asyncio.TimeoutError:
+        pass
+    finally:
+        collector.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await collector
+
+    # The 429 error should propagate as some form of error event/notification.
+    # Exact structure depends on how ACP converts model API errors.
+    error_events = [
+        n
+        for n in notifications
+        if "error" in str(getattr(n.update, "type", "")).lower()
+        or getattr(n.update, "type", None) == "run_error"
+    ]
+    assert len(error_events) >= 1, "Expected at least one error event from 429 rate limit"
+
+
+@pytest.mark.skipif(
+    not cassette_exists(_MODULE_STEM, "test_model_api_server_error"),
+    reason="Cassette not recorded yet — run with --record-mode=once",
+)
+async def test_model_api_server_error(acp_pipe: _PairedPipe) -> None:
+    """Model API returns 500 server error — error propagates through ACP."""
+    client_conn = ClientSideConnection(
+        _AsyncioWriterAdapter(acp_pipe.client_writer),
+        _AsyncioReaderAdapter(acp_pipe.client_reader),
+    )
+    agent_conn = AgentSideConnection(
+        _AsyncioWriterAdapter(acp_pipe.server_writer),
+        _AsyncioReaderAdapter(acp_pipe.server_reader),
+    )
+    await client_conn.initialize(InitializeRequest(protocol_version=1))
+    new_sess = await client_conn.new_session(
+        NewSessionRequest(mcp_servers=[], cwd="/test")
+    )
+
+    notifications: list[SessionNotification] = []
+
+    async def _collect() -> None:
+        async for notification in acp_pipe.agent.client.notifications:
+            notifications.append(notification)
+            if any(
+                "error" in str(getattr(n.update, "type", "")).lower()
+                for n in notifications
+            ):
+                break
+
+    collector = asyncio.create_task(_collect())
+    await client_conn.session_update(
+        SessionNotification(
+            session_id=new_sess.session_id,
+            update=UserMessageChunk.text("This will trigger a server error."),
+        )
+    )
+    try:
+        await asyncio.wait_for(collector, timeout=15.0)
+    except asyncio.TimeoutError:
+        pass
+    finally:
+        collector.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await collector
+
+    error_events = [
+        n
+        for n in notifications
+        if "error" in str(getattr(n.update, "type", "")).lower()
+    ]
+    assert len(error_events) >= 1, "Expected at least one error event from 500 server error"
+
+
+@pytest.mark.skipif(
+    not cassette_exists(_MODULE_STEM, "test_model_api_malformed_stream"),
+    reason="Cassette not recorded yet — run with --record-mode=once",
+)
+async def test_model_api_malformed_stream(acp_pipe: _PairedPipe) -> None:
+    """Model API returns malformed streaming response — error propagates through ACP.
+
+    The cassette records a response where the SSE stream contains invalid
+    JSON or truncated chunks. The agent should handle this gracefully and
+    emit an error event rather than crashing.
+    """
+    client_conn = ClientSideConnection(
+        _AsyncioWriterAdapter(acp_pipe.client_writer),
+        _AsyncioReaderAdapter(acp_pipe.client_reader),
+    )
+    agent_conn = AgentSideConnection(
+        _AsyncioWriterAdapter(acp_pipe.server_writer),
+        _AsyncioReaderAdapter(acp_pipe.server_reader),
+    )
+    await client_conn.initialize(InitializeRequest(protocol_version=1))
+    new_sess = await client_conn.new_session(
+        NewSessionRequest(mcp_servers=[], cwd="/test")
+    )
+
+    notifications: list[SessionNotification] = []
+
+    async def _collect() -> None:
+        async for notification in acp_pipe.agent.client.notifications:
+            notifications.append(notification)
+            if any(
+                "error" in str(getattr(n.update, "type", "")).lower()
+                for n in notifications
+            ):
+                break
+
+    collector = asyncio.create_task(_collect())
+    await client_conn.session_update(
+        SessionNotification(
+            session_id=new_sess.session_id,
+            update=UserMessageChunk.text("This will trigger a malformed stream."),
+        )
+    )
+    try:
+        await asyncio.wait_for(collector, timeout=15.0)
+    except asyncio.TimeoutError:
+        pass
+    finally:
+        collector.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await collector
+
+    # Malformed stream should result in an error event, not a crash.
+    error_events = [
+        n
+        for n in notifications
+        if "error" in str(getattr(n.update, "type", "")).lower()
+    ]
+    assert len(error_events) >= 1, "Expected at least one error event from malformed stream"

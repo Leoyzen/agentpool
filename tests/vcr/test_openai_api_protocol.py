@@ -172,3 +172,69 @@ async def test_error_handling(openai_api_client: TestClient) -> None:
         },
     )
     assert response.status_code == 401
+
+
+@pytest.mark.skipif(
+    not cassette_exists(_MODULE_STEM, "test_model_api_rate_limit"),
+    reason="Cassette not recorded yet — run with --record-mode=once",
+)
+async def test_model_api_rate_limit(openai_api_client: TestClient) -> None:
+    """Model API returns 429 rate limit — error propagates as HTTP 429 to client.
+
+    The cassette records a real 429 response from the model API. The OpenAI-compatible
+    API server should propagate this as a 429 response to the client.
+    """
+    response = openai_api_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "test_agent",
+            "messages": [{"role": "user", "content": "This will trigger a rate limit."}],
+            "stream": False,
+        },
+    )
+    assert response.status_code == 429
+    data = response.json()
+    assert "error" in data
+
+
+@pytest.mark.skipif(
+    not cassette_exists(_MODULE_STEM, "test_model_api_server_error"),
+    reason="Cassette not recorded yet — run with --record-mode=once",
+)
+async def test_model_api_server_error(openai_api_client: TestClient) -> None:
+    """Model API returns 500 server error — error propagates as HTTP 500 to client."""
+    response = openai_api_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "test_agent",
+            "messages": [{"role": "user", "content": "This will trigger a server error."}],
+            "stream": False,
+        },
+    )
+    assert response.status_code in (500, 502)
+    data = response.json()
+    assert "error" in data
+
+
+@pytest.mark.skipif(
+    not cassette_exists(_MODULE_STEM, "test_model_api_malformed_stream"),
+    reason="Cassette not recorded yet — run with --record-mode=once",
+)
+async def test_model_api_malformed_stream(openai_api_client: TestClient) -> None:
+    """Model API returns malformed streaming response — server handles gracefully.
+
+    The cassette records a response where the SSE stream contains invalid
+    JSON or truncated chunks. The server should terminate the stream cleanly
+    or return an error, not crash.
+    """
+    response = openai_api_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "test_agent",
+            "messages": [{"role": "user", "content": "This will trigger a malformed stream."}],
+            "stream": True,
+        },
+    )
+    # Streaming response may start as 200 but contain error events in the stream.
+    # Non-streaming should return an error status.
+    assert response.status_code in (200, 500)
