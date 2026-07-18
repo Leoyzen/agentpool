@@ -441,12 +441,19 @@ def pytest_recording_configure(config: Any, vcr: VCR) -> None:
 
 
 def before_record_request(request: Any) -> Any:
-    """VCR hook: scrub credentials from a request before recording it.
+    """VCR hook: scrub credentials and filter non-model requests before recording.
 
     Strips API key prefixes (``sk-...``) from the request URI and body so the
-    recorded cassette contains no secrets.
+    recorded cassette contains no secrets. Also filters out litellm price
+    lookup requests (``raw.githubusercontent.com``) which are model-dependent
+    and non-deterministic across environments.
     """
     from tests.vcr.json_body_serializer import scrub_credentials
+
+    # Filter out litellm price lookups — these are model-dependent and may not
+    # be triggered in all environments (e.g., CI with a different model).
+    if hasattr(request, "uri") and "raw.githubusercontent.com" in str(getattr(request, "uri", "")):
+        return None
 
     # Scrub credentials from the URI
     if hasattr(request, "uri") and isinstance(request.uri, str):
