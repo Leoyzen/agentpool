@@ -84,23 +84,9 @@ async def test_invalid_json_body(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="OpenCode server auto-creates sessions on demand via get_or_load_session; "
-    "POST /session/{id}/message to non-existent ID returns 500 instead of 404. See issue #188.",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 @pytest.mark.parametrize("subprocess_server", [_OPENCODE_PARAMS], indirect=True)
 async def test_prompt_nonexistent_session(subprocess_server: SubprocessServer) -> None:
-    """C11.2: POST prompt to a random/non-existent session ID, verify 404.
-
-    The OpenCode server's ``get_or_load_session`` auto-creates sessions on
-    demand, so a non-existent session ID does not return 404. Additionally,
-    the POST /message endpoint returns 500 for auto-created sessions due to
-    missing SessionPool state. This test is xfail until the server properly
-    returns 404 for non-existent sessions.
-    """
+    """C11.2: POST prompt to a random/non-existent session ID, verify 404."""
     base_url = subprocess_server.base_url
 
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -151,15 +137,6 @@ async def test_validation_error(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Requires error injection (server overload during lifecycle "
-        "transition) that TestModel cannot provide. See issue #188."
-    ),
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 @pytest.mark.parametrize("subprocess_server", [_OPENCODE_PARAMS], indirect=True)
 async def test_503_service_unavailable(subprocess_server: SubprocessServer) -> None:
     """Test intent: Send a request during server lifecycle transition.
@@ -174,12 +151,6 @@ async def test_503_service_unavailable(subprocess_server: SubprocessServer) -> N
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="409 Conflict not implemented in OpenCode server. See issue #188.",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 @pytest.mark.parametrize("subprocess_server", [_OPENCODE_PARAMS], indirect=True)
 async def test_409_conflict(subprocess_server: SubprocessServer) -> None:
     """Test intent: Send a prompt to a session with active steer-mode prompt.

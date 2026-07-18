@@ -48,6 +48,7 @@ from acp.schema import (
     TurnCompleteUpdate,
     Usage,
     UsageUpdate,
+    UserMessageChunk,
 )
 from acp.utils import generate_tool_title, infer_tool_kind, to_acp_content_blocks
 from agentpool.agents.events import (
@@ -92,6 +93,7 @@ logger = get_logger(__name__)
 ACPSessionUpdate = (
     AgentMessageChunk
     | AgentThoughtChunk
+    | UserMessageChunk
     | ToolCallStart
     | ToolCallProgress
     | AgentPlanUpdate
@@ -271,6 +273,26 @@ class ACPEventConverter:
         self._child_sessions.clear()
         self._subagent_tool_call_ids.clear()
         self.cleanup()
+
+    @staticmethod
+    def build_user_message_chunks(
+        text: str,
+        *,
+        message_id: str | None = None,
+    ) -> list[UserMessageChunk]:
+        """Build UserMessageChunk notifications for a user's text input.
+
+        Args:
+            text: The user's input text.
+            message_id: Optional message ID for correlating chunks.
+
+        Returns:
+            List of UserMessageChunk session update objects.
+        """
+        if not text:
+            return []
+        mid = message_id or str(uuid.uuid4())
+        return [UserMessageChunk.text(text, message_id=mid)]
 
     def cleanup(self) -> None:
         """Clean up converter state.

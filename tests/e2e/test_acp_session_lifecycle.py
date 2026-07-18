@@ -1,7 +1,7 @@
 """L4 subprocess E2E tests for ACP session lifecycle methods.
 
-Covers 8 session methods: new, load (valid + nonexistent), close (xfail #186),
-close_then_load (xfail #186), list, fork, resume.
+Covers 8 session methods: new, load (valid + nonexistent), close, close_then_load,
+list, fork, resume.
 
 All tests use ``model: test`` (pydantic-ai TestModel) so NO API key is needed.
 L4a smoke tests: pytest -m "e2e and not slow" (~30s)
@@ -178,15 +178,10 @@ async def test_session_load_nonexistent(acp_server: ACPSessionHandle) -> None:
 
 
 # ---------------------------------------------------------------------------
-# B2.4 — session/close then load [xfail #186]
+# B2.4 — session/close then load [fixed #186]
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="depends on close_session which is broken (see #186)",
-    strict=False,
-)
-@pytest.mark.known_bug
 async def test_session_close_then_load(acp_server: ACPSessionHandle) -> None:
     """B2.4: Create, close, attempt load → ResourceNotFound."""
     new_sess = await acp_server.new_session()
@@ -202,7 +197,7 @@ async def test_session_close_then_load(acp_server: ACPSessionHandle) -> None:
 
 
 # ---------------------------------------------------------------------------
-# B2.5 — session/close [xfail #186]
+# B2.5 — session/close [fixed #186]
 # ---------------------------------------------------------------------------
 
 

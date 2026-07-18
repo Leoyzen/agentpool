@@ -44,21 +44,13 @@ AUTH_HEADERS = {"Authorization": "Bearer test-key"}
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="serve-api doesn't init SessionPool (#185)", strict=False, raises=AssertionError
-)
-@pytest.mark.known_bug
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-api", "is_stdio": False}],
     indirect=True,
 )
 async def test_server_startup(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
-    """L4a: Start serve-api, verify HTTP server is responding.
-
-    Note: serve-api doesn't initialize SessionPool (#185), causing 500 errors.
-    This test is xfailed until the bug is fixed.
-    """
+    """L4a: Start serve-api, verify HTTP server is responding."""
     assert subprocess_server.process.returncode is None, "OpenAI API server process exited early"
     assert subprocess_server.port > 0
 
@@ -66,28 +58,24 @@ async def test_server_startup(subprocess_server: SubprocessServer, e2e_config: P
         resp = await client.post(
             f"{subprocess_server.base_url}/v1/chat/completions",
             headers=AUTH_HEADERS,
-            json={"model": "test_agent", "messages": [], "stream": False},
+            json={
+                "model": "test_agent",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": False,
+            },
         )
         assert resp.status_code == 200, (
             f"Server not responding properly: status={resp.status_code}, body={resp.text[:500]}"
         )
 
 
-@pytest.mark.xfail(
-    reason="serve-api doesn't init SessionPool (#185)", strict=False, raises=AssertionError
-)
-@pytest.mark.known_bug
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-api", "is_stdio": False}],
     indirect=True,
 )
 async def test_chat_completion(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
-    """L4a: POST /v1/chat/completions, verify chat completion response.
-
-    Note: serve-api doesn't initialize SessionPool (#185), causing 500 errors.
-    This test is xfailed until the bug is fixed.
-    """
+    """L4a: POST /v1/chat/completions, verify chat completion response."""
     base_url = subprocess_server.base_url
 
     async with httpx.AsyncClient(timeout=30.0) as client:

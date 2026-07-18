@@ -13,6 +13,7 @@ from opentelemetry.context import attach, detach
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from acp import Agent as ACPAgent
+from acp.exceptions import RequestError
 from acp.schema import (
     CloseSessionResponse,
     DisableProvidersRequest,
@@ -484,6 +485,21 @@ class AgentPoolACPAgent(ACPAgent):
             # Get or resume session from storage
             session = self.session_manager.get_session(params.session_id)
             if not session:
+                # Check if the session is closed in storage before attempting
+                # to resume. A closed session should not be loadable via
+                # session/load — clients must use session/resume instead.
+                store = self.session_manager.session_store
+                stored_data = None
+                if store is not None:
+                    try:
+                        stored_data = await store.load_session(params.session_id)
+                    except Exception:
+                        logger.exception(
+                            "Failed to check session status in store",
+                            session_id=params.session_id,
+                        )
+                if stored_data is not None and stored_data.status == "closed":
+                    raise RequestError.resource_not_found(params.session_id) from None  # noqa: TRY301
                 session = await self.session_manager.resume_session(
                     session_id=params.session_id,
                     client=self.client,
@@ -522,6 +538,8 @@ class AgentPoolACPAgent(ACPAgent):
             self.tasks.create_task(session.agent.load_rules(session.cwd))
             logger.info("Session loaded", session_id=params.session_id)
             return LoadSessionResponse(models=models, modes=mode_state, config_options=config_opts)
+        except RequestError:
+            raise
         except Exception:
             logger.exception("Failed to load session", session_id=params.session_id)
             return LoadSessionResponse()

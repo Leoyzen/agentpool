@@ -110,11 +110,6 @@ async def test_get_command(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="GET /command/{name} not implemented in agentpool OpenCode server yet (see #188)",
-    strict=False,
-    raises=AssertionError,
-)
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],

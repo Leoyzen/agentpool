@@ -113,14 +113,6 @@ async def test_providers_list(acp_server: ACPProvidersHandle) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="providers/set with unknown provider id returns Invalid params (-32602). "
-    "The default e2e_config (model: test) has no model_variants, so no providers "
-    "are registered. Setting an unknown provider is rejected by provider_router.",
-    strict=False,
-    raises=RequestError,
-)
-@pytest.mark.known_bug
 async def test_providers_set(acp_server: ACPProvidersHandle) -> None:
     """B4.2: Call providers/set with a valid provider, verify success."""
     response = await acp_server.conn.set_provider(

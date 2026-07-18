@@ -53,12 +53,6 @@ async def _create_session(base_url: str, client: httpx.AsyncClient) -> str:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="POST /session/{id}/message returns 500 due to OTel _IncludedRouter.path bug (see #190)",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
@@ -69,10 +63,6 @@ async def test_steer_delivery(
     e2e_config: Path,
 ) -> None:
     """C4.1: Send prompt, immediately send second with delivery:"steer".
-
-    XFAIL: POST /session/{id}/message returns 500 due to a pre-existing
-    OpenTelemetry FastAPI instrumentation bug. The delivery mode logic is
-    tested but cannot be exercised until the OTel bug is fixed.
 
     The "steer" delivery mode maps to priority "asap", which injects the
     message into the active turn mid-execution via PydanticAI's
@@ -122,12 +112,6 @@ async def test_steer_delivery(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="POST /session/{id}/message returns 500 due to OTel _IncludedRouter.path bug (see #190)",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
@@ -138,10 +122,6 @@ async def test_queue_delivery(
     e2e_config: Path,
 ) -> None:
     """C4.2: Send prompt, immediately send second with delivery:"queue".
-
-    XFAIL: POST /session/{id}/message returns 500 due to a pre-existing
-    OpenTelemetry FastAPI instrumentation bug. The delivery mode logic is
-    tested but cannot be exercised until the OTel bug is fixed.
 
     The "queue" delivery mode maps to priority "when_idle", which queues the
     message for the next turn (processed after the current run completes).

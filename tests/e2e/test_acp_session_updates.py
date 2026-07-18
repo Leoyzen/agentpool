@@ -165,15 +165,6 @@ async def test_agent_message_chunk_notification(e2e_config: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "AgentPool ACP server does not emit user_message_chunk notifications "
-        "(event_converter only emits agent_message_chunk). See issue #188."
-    ),
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 async def test_user_message_chunk_notification(e2e_config: Path) -> None:
     """B9.2: Verify ``user_message_chunk`` SessionUpdate emitted when user message is processed.
 
