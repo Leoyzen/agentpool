@@ -151,12 +151,15 @@ async def test_validation_error(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
+@pytest.mark.xfail(
     reason=(
         "Requires error injection (server overload during lifecycle "
         "transition) that TestModel cannot provide. See issue #188."
-    )
+    ),
+    strict=False,
+    raises=AssertionError,
 )
+@pytest.mark.known_bug
 async def test_503_service_unavailable(server_url: str) -> None:
     """Test intent: Send a request during server lifecycle transition.
 
@@ -170,7 +173,12 @@ async def test_503_service_unavailable(server_url: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="409 Conflict not implemented in OpenCode server. See issue #188.")
+@pytest.mark.xfail(
+    reason="409 Conflict not implemented in OpenCode server. See issue #188.",
+    strict=False,
+    raises=AssertionError,
+)
+@pytest.mark.known_bug
 async def test_409_conflict(server_url: str) -> None:
     """Test intent: Send a prompt to a session with active steer-mode prompt.
 

@@ -28,9 +28,11 @@ pytestmark = [
 ]
 
 
-@pytest.mark.skip(
+@pytest.mark.xfail(
     reason="Permission flow requires tool that triggers permission request; "
-    "TestModel doesn't trigger permission flows"
+    "TestModel doesn't trigger permission flows",
+    strict=False,
+    raises=AssertionError,
 )
 async def test_permission_approved(e2e_config: Path) -> None:
     """Test intent: Trigger a tool call that requires permission. Receive.
@@ -43,9 +45,11 @@ async def test_permission_approved(e2e_config: Path) -> None:
     """
 
 
-@pytest.mark.skip(
+@pytest.mark.xfail(
     reason="Permission flow requires tool that triggers permission request; "
-    "TestModel doesn't trigger permission flows"
+    "TestModel doesn't trigger permission flows",
+    strict=False,
+    raises=AssertionError,
 )
 async def test_permission_cancelled(e2e_config: Path) -> None:
     """Test intent: Trigger a tool call requiring permission, receive.
@@ -57,9 +61,11 @@ async def test_permission_cancelled(e2e_config: Path) -> None:
     """
 
 
-@pytest.mark.skip(
+@pytest.mark.xfail(
     reason="Permission flow requires tool that triggers permission request; "
-    "TestModel doesn't trigger permission flows"
+    "TestModel doesn't trigger permission flows",
+    strict=False,
+    raises=AssertionError,
 )
 async def test_permission_cancel_during_pending(e2e_config: Path) -> None:
     """Test intent: Trigger a tool call requiring permission, receive pending.

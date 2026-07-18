@@ -42,7 +42,11 @@ pytestmark = [
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="AgentPool implements ACP v1, v2 not yet supported")
+@pytest.mark.xfail(
+    reason="AgentPool implements ACP v1, v2 not yet supported",
+    strict=False,
+    raises=AssertionError,
+)
 async def test_v2_empty_prompt_response(e2e_config: Path) -> None:
     """B11.1: Verify PromptResponse is empty in v2 (stop_reason sent via IdleStateUpdate).
 
@@ -61,7 +65,11 @@ async def test_v2_empty_prompt_response(e2e_config: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="AgentPool doesn't emit state_update notifications")
+@pytest.mark.xfail(
+    reason="AgentPool doesn't emit state_update notifications",
+    strict=False,
+    raises=AssertionError,
+)
 async def test_v2_state_update_notification(e2e_config: Path) -> None:
     """B11.2: Verify state_update notification (running→idle) sequence in v2.
 
@@ -80,7 +88,11 @@ async def test_v2_state_update_notification(e2e_config: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="AgentPool uses non-standard TurnCompleteUpdate")
+@pytest.mark.xfail(
+    reason="AgentPool uses non-standard TurnCompleteUpdate",
+    strict=False,
+    raises=AssertionError,
+)
 async def test_v2_standard_update_types(e2e_config: Path) -> None:
     """B11.3: Verify session/update uses only v2's 15 known update types.
 

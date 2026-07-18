@@ -66,8 +66,10 @@ async def test_get_provider(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason="POST /provider not implemented in agentpool OpenCode server yet. See issue #188."
+@pytest.mark.xfail(
+    reason="POST /provider not implemented in agentpool OpenCode server yet. See issue #188.",
+    strict=False,
+    raises=AssertionError,
 )
 async def test_post_provider(server_url: str) -> None:
     """Test intent: POST /provider to set active provider.
@@ -110,8 +112,10 @@ async def test_get_mode(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason="POST /mode endpoint not implemented in agentpool OpenCode server yet. See issue #188."
+@pytest.mark.xfail(
+    reason="POST /mode endpoint not implemented in agentpool OpenCode server yet. See issue #188.",
+    strict=False,
+    raises=AssertionError,
 )
 async def test_post_mode(server_url: str) -> None:
     """Test intent: POST /mode to set mode.

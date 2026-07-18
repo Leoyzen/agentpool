@@ -109,8 +109,10 @@ async def test_post_mcp(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason="DELETE /mcp/{id} not implemented in agentpool OpenCode server yet. See issue #188."
+@pytest.mark.xfail(
+    reason="DELETE /mcp/{id} not implemented in agentpool OpenCode server yet. See issue #188.",
+    strict=False,
+    raises=AssertionError,
 )
 async def test_delete_mcp_by_id(server_url: str) -> None:
     """Test intent: DELETE /mcp/{id} to remove an MCP server entry.
@@ -127,8 +129,10 @@ async def test_delete_mcp_by_id(server_url: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason="PUT /mcp/{id} not implemented in agentpool OpenCode server yet. See issue #188."
+@pytest.mark.xfail(
+    reason="PUT /mcp/{id} not implemented in agentpool OpenCode server yet. See issue #188.",
+    strict=False,
+    raises=AssertionError,
 )
 async def test_put_mcp_by_id(server_url: str) -> None:
     """Test intent: PUT /mcp/{id} to update an MCP server config.
@@ -146,8 +150,10 @@ async def test_put_mcp_by_id(server_url: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason="GET /mcp/tool not implemented in agentpool OpenCode server yet. See issue #188."
+@pytest.mark.xfail(
+    reason="GET /mcp/tool not implemented in agentpool OpenCode server yet. See issue #188.",
+    strict=False,
+    raises=AssertionError,
 )
 async def test_get_mcp_tool(server_url: str) -> None:
     """Test intent: GET /mcp/tool with optional ``server_id`` query param.
@@ -164,8 +170,10 @@ async def test_get_mcp_tool(server_url: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason="POST /mcp/tool not implemented in agentpool OpenCode server yet. See issue #188."
+@pytest.mark.xfail(
+    reason="POST /mcp/tool not implemented in agentpool OpenCode server yet. See issue #188.",
+    strict=False,
+    raises=AssertionError,
 )
 async def test_post_mcp_tool(server_url: str) -> None:
     """Test intent: POST /mcp/tool to execute an MCP tool directly.
@@ -183,8 +191,10 @@ async def test_post_mcp_tool(server_url: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason="GET /mcp/server not implemented in agentpool OpenCode server yet. See issue #188."
+@pytest.mark.xfail(
+    reason="GET /mcp/server not implemented in agentpool OpenCode server yet. See issue #188.",
+    strict=False,
+    raises=AssertionError,
 )
 async def test_get_mcp_server(server_url: str) -> None:
     """Test intent: GET /mcp/server with optional query params.
@@ -200,8 +210,10 @@ async def test_get_mcp_server(server_url: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason="POST /mcp/server not implemented in agentpool OpenCode server yet. See issue #188."
+@pytest.mark.xfail(
+    reason="POST /mcp/server not implemented in agentpool OpenCode server yet. See issue #188.",
+    strict=False,
+    raises=AssertionError,
 )
 async def test_post_mcp_server(server_url: str) -> None:
     """Test intent: POST /mcp/server to add a new MCP server.

@@ -259,8 +259,10 @@ async def test_delete_message_part(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason="Share endpoint requires external service integration not available in e2e"
+@pytest.mark.xfail(
+    reason="Share endpoint requires external service integration not available in e2e",
+    strict=False,
+    raises=AssertionError,
 )
 @pytest.mark.parametrize(
     "subprocess_server",

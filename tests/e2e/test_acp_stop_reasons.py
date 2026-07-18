@@ -157,13 +157,16 @@ async def test_stop_reason_end_turn(e2e_config: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
+@pytest.mark.xfail(
     reason=(
         "ACP server's event_converter.py hardcodes stop_reason based on event type, "
         "not model finish_reason. Cannot inject custom stop reasons via TestModel or "
         "FunctionModel. See issue #188."
-    )
+    ),
+    strict=False,
+    raises=AssertionError,
 )
+@pytest.mark.known_bug
 async def test_stop_reason_max_tokens(e2e_config: Path) -> None:
     """B10.2: Verify ``stop_reason="max_tokens"`` when max tokens reached.
 
@@ -180,13 +183,16 @@ async def test_stop_reason_max_tokens(e2e_config: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
+@pytest.mark.xfail(
     reason=(
         "ACP server's event_converter.py hardcodes stop_reason based on event type, "
         "not model finish_reason. Cannot inject custom stop reasons via TestModel or "
         "FunctionModel. See issue #188."
-    )
+    ),
+    strict=False,
+    raises=AssertionError,
 )
+@pytest.mark.known_bug
 async def test_stop_reason_max_turn_requests(e2e_config: Path) -> None:
     """B10.3: Verify ``stop_reason="max_turn_requests"`` when max turn requests reached.
 
@@ -203,13 +209,16 @@ async def test_stop_reason_max_turn_requests(e2e_config: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
+@pytest.mark.xfail(
     reason=(
         "ACP server's event_converter.py hardcodes stop_reason based on event type, "
         "not model finish_reason. Cannot inject custom stop reasons via TestModel or "
         "FunctionModel. See issue #188."
-    )
+    ),
+    strict=False,
+    raises=AssertionError,
 )
+@pytest.mark.known_bug
 async def test_stop_reason_refusal(e2e_config: Path) -> None:
     """B10.4: Verify ``stop_reason="refusal"`` when model refuses request.
 
@@ -226,13 +235,16 @@ async def test_stop_reason_refusal(e2e_config: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
+@pytest.mark.xfail(
     reason=(
         "ACP server's event_converter.py hardcodes stop_reason based on event type, "
         "not model finish_reason. Cannot inject custom stop reasons via TestModel or "
         "FunctionModel. See issue #188."
-    )
+    ),
+    strict=False,
+    raises=AssertionError,
 )
+@pytest.mark.known_bug
 async def test_stop_reason_cancelled(e2e_config: Path) -> None:
     """B10.5: Verify ``stop_reason="cancelled"`` when turn is cancelled.
 

@@ -110,8 +110,10 @@ async def test_get_command(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason="GET /command/{name} not implemented in agentpool OpenCode server yet (see #188)"
+@pytest.mark.xfail(
+    reason="GET /command/{name} not implemented in agentpool OpenCode server yet (see #188)",
+    strict=False,
+    raises=AssertionError,
 )
 async def test_get_command_by_name(server_url: str) -> None:
     """Test intent: GET /command/{name} with a valid command name from GET /command list.

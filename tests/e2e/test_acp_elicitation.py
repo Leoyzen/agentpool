@@ -26,8 +26,10 @@ pytestmark = [
 ]
 
 
-@pytest.mark.skip(
-    reason="Elicitation requires agent to request input; TestModel doesn't trigger elicitation"
+@pytest.mark.xfail(
+    reason="Elicitation requires agent to request input; TestModel doesn't trigger elicitation",
+    strict=False,
+    raises=AssertionError,
 )
 async def test_elicitation_create(e2e_config: Path) -> None:
     """Test intent: Trigger a scenario where agent requests user input via.

@@ -169,10 +169,12 @@ async def test_get_question(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
+@pytest.mark.xfail(
     reason=(
         "POST /question endpoint not implemented in agentpool OpenCode server yet. See issue #188."
-    )
+    ),
+    strict=False,
+    raises=AssertionError,
 )
 async def test_post_question(server_url: str) -> None:
     """Test intent: POST /question with JSON body containing session_id.
