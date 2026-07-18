@@ -56,6 +56,9 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: uv run --no-group docs pytest --cov-report=xml --cov=src/agentpool/ --cov-report=term-missing
 
+      - name: VCR tests
+        run: uv run pytest tests/vcr/ --strict-vcr-cassette-usage --tb=short --no-cov -q
+
       - name: Upload test results to Codecov
         uses: codecov/codecov-action@v5
         with:

@@ -16,6 +16,9 @@ from agentpool_server.acp_server import ACPServer
 from agentpool_server.acp_server.session import ACPSession
 
 
+pytestmark = pytest.mark.integration
+
+
 @pytest.fixture
 async def agent_pool():
     """Create a real agent pool from config."""

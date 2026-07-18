@@ -18,6 +18,9 @@ from agentpool_server.acp_server.session import ACPSession
 from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 
+pytestmark = pytest.mark.integration
+
+
 if TYPE_CHECKING:
     from acp import ClientCapabilities
     from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent

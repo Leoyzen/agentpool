@@ -21,6 +21,9 @@ from agentpool.agents.events import (
 from agentpool.orchestrator.core import EventBus
 
 
+pytestmark = pytest.mark.unit
+
+
 async def _drain_queue(queue: asyncio.Queue[Any]) -> list[Any]:
     """Drain all items from an asyncio.Queue until QueueShutDown."""
     items: list[Any] = []

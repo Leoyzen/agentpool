@@ -5,9 +5,9 @@ Captures the event sequence from ACP standalone streaming via
 enriched with ``ToolResultMetadataEvent`` metadata.
 
 This is a regression baseline for the pre-M4 protocol cleanup.  The test
-uses **syrupy** for snapshot comparison and is marked ``acp_snapshot``
+uses **syrupy** for snapshot comparison and is marked ``snapshot``
 so it is excluded from the default test run (run explicitly with
-``-m acp_snapshot`` or ``--snapshot-update``).
+``-m snapshot`` or ``--snapshot-update``).
 
 Key event sequence captured:
     1. ``RunStartedEvent``
@@ -48,6 +48,9 @@ from agentpool.agents.events import (
     ToolResultMetadataEvent,
 )
 from agentpool.messaging import ChatMessage
+
+
+pytestmark = pytest.mark.integration
 
 
 if TYPE_CHECKING:
@@ -345,7 +348,7 @@ def _patched_acp_to_native_event(update: Any) -> Any:
 
 
 @pytest.mark.anyio
-@pytest.mark.acp_snapshot
+@pytest.mark.snapshot
 async def test_acp_streaming_event_sequence_with_tool_metadata(
     snapshot: SnapshotAssertion,
 ) -> None:
@@ -442,7 +445,7 @@ async def test_acp_streaming_event_sequence_with_tool_metadata(
 
 
 @pytest.mark.anyio
-@pytest.mark.acp_snapshot
+@pytest.mark.snapshot
 async def test_acp_streaming_text_only_sequence(
     snapshot: SnapshotAssertion,
 ) -> None:

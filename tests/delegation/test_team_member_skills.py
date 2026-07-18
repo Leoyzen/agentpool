@@ -8,6 +8,9 @@ from agentpool import BaseTeam
 from agentpool.skills.exceptions import SkillNotFoundError
 
 
+pytestmark = pytest.mark.unit
+
+
 class _Pool:
     skill_provider = object()
 

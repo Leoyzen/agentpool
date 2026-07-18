@@ -15,6 +15,9 @@ from agentpool_config.observability import (
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture
 def clean_env():
     """Clean OTEL environment variables before and after tests."""

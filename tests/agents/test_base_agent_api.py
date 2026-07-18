@@ -14,6 +14,9 @@ from agentpool.agents.context import AgentRunContext
 from agentpool.orchestrator.core import SessionState
 
 
+pytestmark = pytest.mark.integration
+
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 

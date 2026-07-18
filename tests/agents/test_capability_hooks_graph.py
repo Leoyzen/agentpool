@@ -43,7 +43,7 @@ class _NodeHookTrackerCapability(AbstractCapability[Any]):
         return request_context
 
 
-pytestmark = [pytest.mark.anyio]
+pytestmark = [pytest.mark.anyio, pytest.mark.unit]
 
 
 async def test_capability_hooks_fire_on_graph_run() -> None:

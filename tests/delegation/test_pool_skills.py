@@ -19,6 +19,9 @@ from agentpool.skills.uri_resolver import SkillURIResolver
 from agentpool_config.skills import SkillsConfig
 
 
+pytestmark = pytest.mark.integration
+
+
 if TYPE_CHECKING:
     from pathlib import Path
 

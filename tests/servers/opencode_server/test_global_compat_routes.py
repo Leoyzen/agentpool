@@ -26,6 +26,9 @@ from agentpool_server.opencode_server.routes.global_routes import router as glob
 from agentpool_server.opencode_server.state import ServerState
 
 
+pytestmark = pytest.mark.integration
+
+
 if TYPE_CHECKING:
     from pathlib import Path
 

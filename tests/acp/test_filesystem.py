@@ -10,6 +10,9 @@ from acp.filesystem import ACPFileSystem
 from acp.schema.capabilities import ClientCapabilities
 
 
+pytestmark = pytest.mark.unit
+
+
 if sys.platform == "win32":
     pytest.skip(allow_module_level=True)
 

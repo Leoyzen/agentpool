@@ -7,6 +7,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from pydantic_ai import Agent
+import pytest
 from starlette.applications import Starlette
 from starlette.routing import Route
 
@@ -18,6 +19,9 @@ if TYPE_CHECKING:
 
 # Create a simple pydantic-ai agent with TestModel
 from pydantic_ai.models.test import TestModel
+
+
+pytestmark = pytest.mark.integration
 
 
 def get_weather(city: str) -> str:

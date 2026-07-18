@@ -12,6 +12,9 @@ from agentpool.agents.context import AgentRunContext
 from agentpool_toolsets.builtin.execution_environment import ProcessManagementTools
 
 
+pytestmark = pytest.mark.integration
+
+
 @pytest.fixture
 def test_agent() -> Agent[None]:
     """Create a minimal agent for testing event emission."""

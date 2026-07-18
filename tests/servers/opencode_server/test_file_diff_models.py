@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
+
 from agentpool_server.opencode_server.models.common import FileDiff
+
+
+pytestmark = pytest.mark.integration
 
 
 # Minimal stand-in for FileChange used by from_file_change()

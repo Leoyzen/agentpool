@@ -15,6 +15,9 @@ import pytest
 from agentpool.capabilities.skill_watcher import SkillFilesystemWatcher
 
 
+pytestmark = pytest.mark.unit
+
+
 class TestFilesystemWatcher:
     """Test filesystem watcher for skill hot-reload (task 4.38)."""
 

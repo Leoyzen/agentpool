@@ -40,6 +40,9 @@ from agentpool_server.opencode_server.routes.message_routes import _process_mess
 from agentpool_server.opencode_server.state import ServerState
 
 
+pytestmark = pytest.mark.integration
+
+
 class CancellableAgentMock:
     """Mock agent that raises CancelledError during run_stream.
 

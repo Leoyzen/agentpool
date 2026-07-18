@@ -11,6 +11,9 @@ from agentpool.messaging import ChatMessage, MessageNode
 from agentpool.messaging.messagenode import SourceType, get_source_type
 
 
+pytestmark = pytest.mark.unit
+
+
 class StubMessageNode(MessageNode[Any, Any]):
     """Concrete MessageNode for testing unknown subclasses."""
 
@@ -30,7 +33,7 @@ def test_source_type_literal_values() -> None:
     assert len(valid) == 3
 
 
-@pytest.mark.requires_openai_key
+@pytest.mark.real_model
 def test_get_source_type_native_agent() -> None:
     """Native Agent instances should return 'agent'."""
     from agentpool.agents import Agent
@@ -39,7 +42,7 @@ def test_get_source_type_native_agent() -> None:
     assert get_source_type(agent) == "agent"
 
 
-@pytest.mark.requires_openai_key
+@pytest.mark.real_model
 def test_get_source_type_team() -> None:
     """Team (parallel) instances should return 'team_parallel'."""
     from agentpool.agents import Agent
@@ -51,7 +54,7 @@ def test_get_source_type_team() -> None:
     assert get_source_type(team) == "team_parallel"
 
 
-@pytest.mark.requires_openai_key
+@pytest.mark.real_model
 def test_get_source_type_teamrun() -> None:
     """TeamRun (sequential) instances should return 'team_sequential'."""
     from agentpool.agents import Agent
@@ -73,7 +76,7 @@ def test_get_source_type_unknown_subclass_defaults_to_agent() -> None:
     # The warning only fires for non-MessageNode objects
 
 
-@pytest.mark.requires_openai_key
+@pytest.mark.real_model
 def test_agent_type_property_on_agent() -> None:
     """MessageNode.agent_type on a native Agent returns persistence value."""
     from agentpool.agents import Agent
@@ -82,7 +85,7 @@ def test_agent_type_property_on_agent() -> None:
     assert agent.agent_type == "agent"
 
 
-@pytest.mark.requires_openai_key
+@pytest.mark.real_model
 def test_agent_type_property_on_team() -> None:
     """MessageNode.agent_type on a Team returns the source_type value."""
     from agentpool.agents import Agent
@@ -94,7 +97,7 @@ def test_agent_type_property_on_team() -> None:
     assert team.agent_type == "team_parallel"
 
 
-@pytest.mark.requires_openai_key
+@pytest.mark.real_model
 def test_agent_type_property_on_teamrun() -> None:
     """MessageNode.agent_type on a TeamRun returns the source_type value."""
     from agentpool.agents import Agent

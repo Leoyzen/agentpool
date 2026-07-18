@@ -7,6 +7,9 @@ import pytest
 from agentpool import AgentsManifest
 
 
+pytestmark = pytest.mark.unit
+
+
 if TYPE_CHECKING:
     from pathlib import Path
 

@@ -26,6 +26,9 @@ from agentpool.orchestrator.event_mapper import (
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture
 def mapper() -> EventMapper:
     return EventMapper(agent_name="test_agent", message_id="msg_001")

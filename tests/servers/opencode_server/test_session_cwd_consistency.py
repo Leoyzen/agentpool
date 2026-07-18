@@ -21,6 +21,9 @@ import pytest
 from agentpool.sessions.models import SessionData
 
 
+pytestmark = pytest.mark.integration
+
+
 if TYPE_CHECKING:
     from httpx import AsyncClient
 

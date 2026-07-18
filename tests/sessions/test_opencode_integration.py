@@ -21,6 +21,9 @@ from agentpool_storage.opencode_provider.helpers import compute_project_id
 from agentpool_storage.project_store import generate_project_id
 
 
+pytestmark = pytest.mark.integration
+
+
 @pytest.fixture
 async def provider():
     """Create an OpenCode provider with temp directory."""

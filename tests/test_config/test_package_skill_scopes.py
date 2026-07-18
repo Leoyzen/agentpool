@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import pytest
 import yaml
 
 from agentpool_config import resolution
+
+
+pytestmark = pytest.mark.unit
 
 
 def test_include_package_records_package_skill_scopes(tmp_path, monkeypatch):

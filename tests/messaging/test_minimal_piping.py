@@ -1,6 +1,11 @@
 """Minimal test to isolate the piping hang."""
 
+import pytest
+
 from agentpool import Agent
+
+
+pytestmark = pytest.mark.unit
 
 
 async def test_sync_callback_pipe():

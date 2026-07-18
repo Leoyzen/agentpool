@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from pydantic_ai import ToolReturn
+import pytest
 
 from agentpool.mcp_server.tool_bridge import _convert_to_tool_result
+
+
+pytestmark = pytest.mark.unit
 
 
 def test_bridge_preserves_pydantic_tool_return_content() -> None:

@@ -1,4 +1,8 @@
-"""Tests for AgentContext.create_child_session() convenience API."""
+"""Tests for AgentContext.create_child_session() convenience API.
+
+# TODO: L2 migration — test uses mock_pool as both agent_pool and
+# host_context on mock_node, requires significant rework for real pool.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +13,9 @@ import pytest
 from agentpool.agents.context import AgentContext
 from agentpool.sessions import SessionData
 from agentpool_storage.memory_provider.provider import MemoryStorageProvider
+
+
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture

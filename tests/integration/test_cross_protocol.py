@@ -1,12 +1,21 @@
-"""Cross-protocol integration validation (Task 17)."""
+"""Cross-protocol integration validation (Task 17).
+
+# TODO: L2 migration — test requires complex mock pool dependencies that
+# cannot be easily replaced with a real pool. Needs investigation.
+"""
 
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from agentpool.agents.modes import ModeCategory, ModeInfo
 from agentpool_server.acp_server.acp_agent import get_agent_role_config_option
 from agentpool_server.opencode_server.routes.config_routes import list_modes
+
+
+pytestmark = pytest.mark.integration
 
 
 class TestCrossProtocolAlignment:

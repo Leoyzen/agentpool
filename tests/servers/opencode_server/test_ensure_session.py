@@ -18,6 +18,9 @@ from agentpool_server.opencode_server.session_pool_integration import ensure_ses
 from agentpool_server.opencode_server.state import ServerState
 
 
+pytestmark = pytest.mark.integration
+
+
 def create_mock_agent() -> MagicMock:
     """Create a properly configured mock agent."""
     agent = MagicMock(spec=BaseAgent)

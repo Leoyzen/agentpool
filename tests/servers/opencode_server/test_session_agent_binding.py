@@ -8,6 +8,9 @@ from unittest.mock import Mock
 import pytest
 
 
+pytestmark = pytest.mark.integration
+
+
 if TYPE_CHECKING:
     from httpx import AsyncClient
 

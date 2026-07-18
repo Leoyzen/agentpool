@@ -8,6 +8,9 @@ import pytest
 from agentpool_config.skill_commands import SkillCommandConfig, SkillSlashConfig
 
 
+pytestmark = pytest.mark.unit
+
+
 class TestSkillSlashConfig:
     """Test SkillSlashConfig model."""
 

@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool_config.toolsets import CustomToolsetConfig
+
+
+pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:

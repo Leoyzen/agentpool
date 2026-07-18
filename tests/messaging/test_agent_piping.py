@@ -10,6 +10,9 @@ from agentpool.messaging import AgentResponse
 from agentpool.talk.talk import Talk
 
 
+pytestmark = pytest.mark.unit
+
+
 async def test_agent_piping():
     # Use explicit names for all agents
     agent1 = Agent.from_callback(lambda x: f"model: {x}", name="agent1")

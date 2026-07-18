@@ -1,0 +1,3 @@
+# VCR cassettes for tests under tests/vcr/ are stored here as
+# <test_module>/<test_function>.yaml. This file ensures the directory
+# is tracked by git even when empty.

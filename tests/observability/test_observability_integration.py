@@ -8,6 +8,9 @@ from agentpool import AgentPool, AgentsManifest
 from agentpool.observability import registry
 
 
+pytestmark = pytest.mark.integration
+
+
 @pytest.fixture(autouse=True)
 def reset_registry():
     """Reset the global registry state before each test."""

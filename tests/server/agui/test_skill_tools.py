@@ -17,6 +17,9 @@ from agentpool_server.agui_server.skill_tools import (
 )
 
 
+pytestmark = pytest.mark.integration
+
+
 # Skip all tests in this module if ag_ui is not available
 try:
     import ag_ui  # noqa: F401

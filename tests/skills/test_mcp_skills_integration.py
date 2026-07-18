@@ -4,6 +4,10 @@ This module tests that MCP-based skills are properly exposed through:
 - GET /command endpoint (for OpenCode)
 - load_skill tool
 - list_skills tool
+
+
+# TODO: L2 migration — test requires complex mock pool dependencies that
+# cannot be easily replaced with a real pool. Needs investigation.
 """
 
 from __future__ import annotations
@@ -16,6 +20,9 @@ import pytest
 from agentpool.capabilities.resource_protocols import SkillEntry
 from agentpool.skills.skill import Skill
 from agentpool_toolsets.builtin.skills import list_skills, load_skill
+
+
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture

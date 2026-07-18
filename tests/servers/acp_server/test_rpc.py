@@ -32,6 +32,9 @@ from acp import (
 )
 
 
+pytestmark = pytest.mark.integration
+
+
 if TYPE_CHECKING:
     from acp import DefaultACPClient
     from acp.agent.implementations.testing import TestAgent

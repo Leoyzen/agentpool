@@ -16,6 +16,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 
+pytestmark = pytest.mark.integration
+
+
 if TYPE_CHECKING:
     from pathlib import Path
 

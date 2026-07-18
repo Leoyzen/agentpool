@@ -11,6 +11,9 @@ from agentpool.utils.model_helpers import function_to_model
 from agentpool.utils.time_utils import get_now
 
 
+pytestmark = pytest.mark.integration
+
+
 async def delayed_processor(msg: str, delay: float = 0.1) -> str:
     """Test processor that simulates work with a delay."""
     await anyio.sleep(delay)

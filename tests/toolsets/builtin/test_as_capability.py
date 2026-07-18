@@ -23,6 +23,9 @@ from agentpool_toolsets.builtin import (
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 def _make_run_context() -> RunContext[Any]:
     """Create a minimal RunContext for testing toolset resolution."""
     return RunContext(

@@ -16,6 +16,7 @@ from pydantic_ai import (
     TextPart as PydanticTextPart,
     ThinkingPart as PydanticThinkingPart,
 )
+import pytest
 
 from agentpool.messaging.messages import ChatMessage
 from agentpool_server.opencode_server.converters import (
@@ -23,6 +24,9 @@ from agentpool_server.opencode_server.converters import (
     opencode_to_chat_message,
 )
 from agentpool_server.opencode_server.models import ReasoningPart
+
+
+pytestmark = pytest.mark.integration
 
 
 def _make_assistant_chat_message_with_thinking(

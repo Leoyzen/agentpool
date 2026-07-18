@@ -9,7 +9,7 @@ Covers:
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 from upathtools import UPath
@@ -255,11 +255,16 @@ async def test_command_endpoint_skill_bridge_with_provider_for_virtual_skills(
 
 
 def _setup_pool_sessions(mock_pool: MagicMock) -> None:
-    """Set up mock pool.session_pool.sessions.store so session creation works."""
-    mock_sessions = MagicMock()
-    mock_sessions.store = AsyncMock()
-    mock_pool.session_pool = MagicMock()
-    mock_pool.session_pool.sessions = mock_sessions
+    """Set up mock pool.session_pool for session creation and retrieval.
+
+    Only adds store to the existing sessions mock — does NOT replace
+    session_pool (replacing it loses the create_session AsyncMock from
+    the mock_pool fixture, causing a cascading TypeError).
+    """
+    mock_pool.session_pool.sessions.store = AsyncMock()
+    mock_pool.session_pool.sessions.store.load_session = AsyncMock(return_value=None)
+    # Allow get_or_load_session fast-path: cached session + controller registered
+    mock_pool.session_pool.sessions.get_session = Mock(return_value=Mock())
 
 
 # =============================================================================

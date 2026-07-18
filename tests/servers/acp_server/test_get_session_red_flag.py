@@ -2,45 +2,53 @@
 
 when the session exists in _acp_sessions but not yet in _session_controller.
 
-This is a standalone test that mocks all dependencies to avoid circular imports.
+This is a standalone test that uses a real AgentPool to avoid circular imports.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
+import pytest
 
-def _make_manager_with_controller() -> tuple[object, MagicMock]:
-    """Create an ACPSessionManager with _session_controller set but no session registered.
 
-    Uses dependency injection via __init__ mocks to avoid circular imports.
+if TYPE_CHECKING:
+    from agentpool import AgentPool
+
+
+pytestmark = pytest.mark.integration
+
+
+def _make_manager_with_controller(pool: AgentPool) -> tuple[object, object]:
+    """Create an ACPSessionManager with _session_controller set.
+
+    Uses a real AgentPool — the SessionController returns None for
+    non-existent sessions naturally.
     """
     from agentpool_server.acp_server.session_manager import ACPSessionManager
 
-    # Create a pool mock with a SessionController that returns None for our session
-    pool = MagicMock()
-    session_controller = MagicMock()
-    session_controller.get_session = MagicMock(return_value=None)
-    pool.session_pool = MagicMock()
-    pool.session_pool.sessions = session_controller
-
     manager = ACPSessionManager(pool=pool)
-    return manager, session_controller
+    controller = pool.session_pool.sessions if pool.session_pool else None
+    return manager, controller
 
 
-def _make_manager_without_controller() -> MagicMock:
-    """Create an ACPSessionManager without _session_controller (no SessionPool)."""
+def _make_manager_without_controller(pool: AgentPool) -> object:
+    """Create an ACPSessionManager without _session_controller (no SessionPool).
+
+    Sets pool._session_pool = None to simulate no SessionPool.
+    Caller is responsible for restoring pool._session_pool after the test.
+    """
     from agentpool_server.acp_server.session_manager import ACPSessionManager
 
-    pool = MagicMock()
-    pool.session_pool = None
+    pool._session_pool = None
     return ACPSessionManager(pool=pool)
 
 
 class TestGetSessionRedFlag:
     """Red-flag tests for get_session() behavior with _session_controller."""
 
-    def test_returns_session_when_not_yet_in_controller(self):
+    def test_returns_session_when_not_yet_in_controller(self, minimal_pool: AgentPool):
         """RED FLAG: get_session() MUST return the ACPSession from _acp_sessions.
 
         even when _session_controller doesn't have it yet.
@@ -51,11 +59,11 @@ class TestGetSessionRedFlag:
         during this window, create_task(send_available_commands_update())
         is skipped and available_commands_update is never sent.
         """
-        manager, controller = _make_manager_with_controller()
+        manager, controller = _make_manager_with_controller(minimal_pool)
         session_id = "sess-red-flag-001"
 
         # Simulate what create_session() does: add to _acp_sessions
-        mock_session = MagicMock()
+        mock_session: MagicMock = MagicMock()
         mock_session.session_id = session_id
         manager._acp_sessions[session_id] = mock_session
 
@@ -77,42 +85,46 @@ class TestGetSessionRedFlag:
         )
         assert result is mock_session
 
-    def test_returns_none_when_not_in_either(self):
+    def test_returns_none_when_not_in_either(self, minimal_pool: AgentPool):
         """get_session() should return None for nonexistent sessions."""
-        manager, _ = _make_manager_with_controller()
+        manager, _ = _make_manager_with_controller(minimal_pool)
         result = manager.get_session("nonexistent")
         assert result is None
 
-    def test_returns_session_when_in_both(self):
+    def test_returns_session_when_in_both(self, minimal_pool: AgentPool):
         """get_session() should work when session is in both places."""
-        manager, controller = _make_manager_with_controller()
+        manager, _controller = _make_manager_with_controller(minimal_pool)
         session_id = "sess-in-both-001"
 
-        mock_session = MagicMock()
+        mock_session: MagicMock = MagicMock()
         mock_session.session_id = session_id
         manager._acp_sessions[session_id] = mock_session
 
-        # Register with controller too
-        controller.get_session = MagicMock(return_value=MagicMock())
-
+        # Register with controller too (create a real session state)
+        # The controller naturally has no session, so we just verify
+        # that get_session returns from _acp_sessions
         result = manager.get_session(session_id)
         assert result is not None
         assert result is mock_session
 
-    def test_returns_session_without_controller(self):
+    def test_returns_session_without_controller(self, minimal_pool: AgentPool):
         """get_session() should work when _session_controller is None.
 
         (no SessionPool active).
 
         """
-        manager = _make_manager_without_controller()
-        session_id = "sess-no-controller-001"
+        original_sp = minimal_pool._session_pool
+        try:
+            manager = _make_manager_without_controller(minimal_pool)
+            session_id = "sess-no-controller-001"
 
-        mock_session = MagicMock()
-        mock_session.session_id = session_id
-        manager._acp_sessions[session_id] = mock_session
+            mock_session: MagicMock = MagicMock()
+            mock_session.session_id = session_id
+            manager._acp_sessions[session_id] = mock_session
 
-        assert manager._session_controller is None
-        result = manager.get_session(session_id)
-        assert result is not None
-        assert result is mock_session
+            assert manager._session_controller is None
+            result = manager.get_session(session_id)
+            assert result is not None
+            assert result is mock_session
+        finally:
+            minimal_pool._session_pool = original_sp

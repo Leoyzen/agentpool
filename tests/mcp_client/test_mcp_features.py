@@ -8,8 +8,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from agentpool import Agent
 from agentpool_config.mcp_server import StdioMCPServerConfig
+
+
+pytestmark = pytest.mark.unit
 
 
 async def main():

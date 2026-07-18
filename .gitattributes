@@ -1,3 +1,7 @@
 
 # Use bd merge for beads JSONL files
 .beads/issues.jsonl merge=beads
+
+# VCR cassettes are generated artifacts — hide from GitHub linguist stats
+tests/cassettes/**/*.yaml linguist-generated=true
+tests/cassettes/**/*.yml linguist-generated=true

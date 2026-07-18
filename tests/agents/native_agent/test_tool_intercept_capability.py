@@ -32,6 +32,9 @@ from agentpool.hooks import AgentHooks, CallableHook
 from agentpool.hooks.base import HookResult
 
 
+pytestmark = pytest.mark.unit
+
+
 # ============================================================================
 # Helpers and Fixtures
 # ============================================================================

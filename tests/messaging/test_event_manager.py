@@ -10,6 +10,9 @@ from agentpool.messaging import EventManager
 from agentpool.utils.time_utils import get_now
 
 
+pytestmark = pytest.mark.unit
+
+
 # Timed event tests require croniter (optional dependency)
 _requires_croniter = pytest.mark.skipif(not find_spec("croniter"), reason="croniter not installed")
 

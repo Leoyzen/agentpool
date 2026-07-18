@@ -20,6 +20,9 @@ from agentpool.host.registry import AgentRegistry
 from agentpool.orchestrator.run import RunHandle
 
 
+pytestmark = pytest.mark.unit
+
+
 def _make_host_context() -> HostContext:
     """Build a HostContext with minimal stubs for testing."""
     return HostContext(

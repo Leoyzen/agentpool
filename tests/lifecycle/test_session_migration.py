@@ -6,6 +6,10 @@ and ProtocolChannel dimensions, steer/followup deliver Feedback to
 ProtocolChannel, close_session calls RunLoop.close(), and event
 delivery flows through ProtocolChannel → EventBus →
 ProtocolEventConsumerMixin.
+
+
+# TODO: L2 migration — test requires complex mock pool dependencies that
+# cannot be easily replaced with a real pool. Needs investigation.
 """
 
 from __future__ import annotations

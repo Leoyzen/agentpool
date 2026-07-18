@@ -21,6 +21,9 @@ from agentpool.capabilities.delegation import AgentNotFoundError, DelegationServ
 from agentpool.host.context import HostContext, RunScope
 
 
+pytestmark = pytest.mark.unit
+
+
 # =============================================================================
 # Test doubles
 # =============================================================================

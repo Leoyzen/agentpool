@@ -7,6 +7,9 @@ from agentpool import Agent
 from agentpool.messaging.message_utils import build_message_index, get_message_chain
 
 
+pytestmark = pytest.mark.unit
+
+
 async def test_message_chain():
     """Test that message chain tracks transformations correctly via parent_id."""
     agent_a = Agent("agent-a", model="test")

@@ -7,6 +7,9 @@ from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnection
 from agentpool_server.acp_server.acp_mcp_transport import AcpMcpTransport
 
 
+pytestmark = pytest.mark.integration
+
+
 @pytest.fixture
 async def connection():
     """Create an AcpMcpConnection for transport tests."""

@@ -32,6 +32,9 @@ from agentpool.messaging.streaming_adapter import (
 from agentpool.talk import Talk
 
 
+pytestmark = pytest.mark.unit
+
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
 

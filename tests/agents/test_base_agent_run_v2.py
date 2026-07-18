@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 from pydantic_ai.models.test import TestModel
@@ -19,6 +19,10 @@ from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus
 from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
 
 
 pytestmark = pytest.mark.unit
@@ -239,7 +243,7 @@ async def test_create_run_stream_closes_handle_after_completion() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_stream_breaks_on_stream_complete() -> None:
+async def test_run_stream_breaks_on_stream_complete(minimal_pool: AgentPool) -> None:
     """_run_stream_run_turn must break on StreamCompleteEvent in active-run path.
 
     Without the break, the while-True loop blocks indefinitely on
@@ -248,13 +252,7 @@ async def test_run_stream_breaks_on_stream_complete() -> None:
     """
     from agentpool.orchestrator.core import SessionController
 
-    mock_pool = MagicMock()
-    mock_pool.main_agent = MagicMock()
-    mock_pool.main_agent.name = "main-agent"
-    mock_pool.manifest = MagicMock()
-    mock_pool.manifest.agents = {}
-
-    controller = SessionController(pool=mock_pool)
+    controller = SessionController(pool=minimal_pool)
     event_bus = EventBus()
     controller._event_bus = event_bus
 

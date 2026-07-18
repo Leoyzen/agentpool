@@ -8,6 +8,9 @@ from schemez import OpenAIFunctionDefinition
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
 
+pytestmark = pytest.mark.unit
+
+
 if TYPE_CHECKING:
     from pydantic_ai.capabilities import AbstractCapability
 
