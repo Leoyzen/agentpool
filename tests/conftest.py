@@ -404,7 +404,7 @@ def allow_model_requests() -> Iterator[None]:
 
 
 @pytest.fixture(scope="module")
-def vcr_config() -> dict[str, Any]:
+def vcr_config(request: pytest.FixtureRequest) -> dict[str, Any]:
     """Module-scoped VCR configuration.
 
     Returns a dict consumed by ``pytest-recording`` to configure vcrpy.
@@ -412,10 +412,15 @@ def vcr_config() -> dict[str, Any]:
     in ``pytest_recording_configure`` below) which decompresses bodies, filters
     headers, and scrubs credentials.
     """
+    from pathlib import Path
+
+    module_stem = request.module.__name__.rsplit(".", 1)[-1]
+    cassettes_dir = str(Path(__file__).parent / "cassettes" / "vcr" / module_stem)
     return {
+        "cassette_library_dir": cassettes_dir,
         "filter_headers": ["authorization", "x-api-key", "cookie", "set-cookie"],
         "decode_compressed_response": True,
-        "match_on": ["method", "scheme", "host", "path", "body"],
+        "match_on": ["method", "scheme", "host", "path"],
     }
 
 

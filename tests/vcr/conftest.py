@@ -12,6 +12,7 @@ See ``tests/AGENTS.md`` for the VCR recording workflow and
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,7 +23,8 @@ from agentpool import AgentPool, AgentsManifest
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Iterator
+    from typing import Any
 
 
 # Inline YAML config used by the vcr_pool fixture. Uses openai:gpt-4o-mini
@@ -72,6 +74,46 @@ def _build_manifest(yaml_text: str) -> AgentsManifest:
     return AgentsManifest.model_validate(raw)
 
 
+async def _precreate_agents(pool: AgentPool) -> dict[str, Any]:
+    """Pre-create agent instances for all configured agents in the manifest.
+
+    The old ``AgentPool.get_agent()`` was synchronous. The new session-based
+    API is async (``get_or_create_session_agent``). To preserve the sync
+    ``pool.get_agent(name)`` call pattern in VCR tests, we pre-create all
+    agents during fixture setup (async) and cache them for sync access.
+    """
+    import uuid
+
+    agents: dict[str, Any] = {}
+    assert pool._session_pool is not None
+    for name in pool.manifest.agents:
+        session_id = f"vcr-{name}-{uuid.uuid4()}"
+        agent = await pool._session_pool.sessions.get_or_create_session_agent(
+            session_id, agent_name=name
+        )
+        agents[name] = agent
+    return agents
+
+
+def _attach_get_agent_compat(pool: AgentPool, agents_cache: dict[str, Any]) -> None:
+    """Attach a synchronous ``get_agent`` compatibility method to a pool instance.
+
+    The VCR tests were written against the old ``AgentPool.get_agent()``
+    API which was removed when the pool shifted to session-based agent
+    creation. This shim returns pre-created agent instances from the cache,
+    preserving the sync ``pool.get_agent(name)`` usage pattern.
+    """
+
+    def get_agent(name: str) -> Any:
+        if name not in agents_cache:
+            raise KeyError(
+                f"Agent {name!r} not found. Available: {list(agents_cache.keys())}"
+            )
+        return agents_cache[name]
+
+    setattr(pool, "get_agent", get_agent)
+
+
 @pytest.fixture
 async def vcr_pool() -> AsyncIterator[AgentPool]:
     """Real ``AgentPool`` with VCR-replayed model responses.
@@ -83,6 +125,8 @@ async def vcr_pool() -> AsyncIterator[AgentPool]:
     """
     manifest = _build_manifest(VCR_POOL_CONFIG)
     async with AgentPool(manifest) as pool:
+        _agents = await _precreate_agents(pool)
+        _attach_get_agent_compat(pool, _agents)
         yield pool
 
 
@@ -97,6 +141,8 @@ async def vcr_pool_with_tool() -> AsyncIterator[AgentPool]:
     """
     manifest = _build_manifest(VCR_POOL_CONFIG_WITH_TOOL)
     async with AgentPool(manifest) as pool:
+        _agents = await _precreate_agents(pool)
+        _attach_get_agent_compat(pool, _agents)
         yield pool
 
 
@@ -105,6 +151,8 @@ async def vcr_pool_with_subagent() -> AsyncIterator[AgentPool]:
     """Real ``AgentPool`` with a coordinator + worker for delegation tests."""
     manifest = _build_manifest(VCR_POOL_CONFIG_WITH_SUBAGENT)
     async with AgentPool(manifest) as pool:
+        _agents = await _precreate_agents(pool)
+        _attach_get_agent_compat(pool, _agents)
         yield pool
 
 
@@ -134,8 +182,36 @@ def cassette_exists(test_module_stem: str, test_name: str) -> bool:
     ``tests/cassettes/vcr/<test_module_stem>/<test_name>.yaml`` (see
     ``tests/AGENTS.md``). Tests that have not yet had their cassette
     recorded ([HUMAN-REQUIRED]) use this to skip gracefully in CI.
+
+    When ``VCR_RECORDING`` env var is set (recording mode), always returns
+    True so the skipif guard doesn't prevent the test from running to
+    record the cassette.
     """
+    if os.getenv("VCR_RECORDING"):
+        return True
     cassette_path = (
         Path(__file__).parent.parent / "cassettes" / "vcr" / test_module_stem / f"{test_name}.yaml"
     )
     return cassette_path.exists()
+
+
+@pytest.fixture(autouse=True)
+def _enable_model_requests_for_vcr_recording(
+    request: pytest.FixtureRequest,
+) -> "Iterator[None]":
+    """Enable real model API requests for VCR tests.
+
+    The global ``ALLOW_MODEL_REQUESTS=False`` gate blocks model calls at the
+    pydantic-ai level (before httpx/VCR can intercept). VCR intercepts at the
+    HTTP transport level, so for VCR tests we must lift the gate to let the
+    request reach VCR. During recording (``--record-mode=once``), VCR forwards
+    the request to the real API. During replay (``--record-mode=none``), VCR
+    returns the recorded response without any network access.
+    """
+    if request.node.get_closest_marker("vcr") is None:
+        yield
+        return
+    import pydantic_ai.models
+
+    with pydantic_ai.models.override_allow_model_requests(True):
+        yield

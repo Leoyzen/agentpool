@@ -1,0 +1,26 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - '*/*'
+      accept-encoding:
+      - gzip, deflate, br
+      connection:
+      - keep-alive
+      host:
+      - test
+    method: GET
+    uri: http://test/nonexistent_agent
+  response:
+    body:
+      string: Not Found
+    headers:
+      content-length:
+      - '9'
+      content-type:
+      - text/plain; charset=utf-8
+    status:
+      code: 404
+      message: Not Found
+version: 1

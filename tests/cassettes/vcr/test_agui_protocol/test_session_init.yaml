@@ -1,0 +1,31 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - '*/*'
+      accept-encoding:
+      - gzip, deflate, br
+      connection:
+      - keep-alive
+      host:
+      - test
+    method: GET
+    uri: http://test/
+  response:
+    headers:
+      content-length:
+      - '338'
+      content-type:
+      - application/json
+    parsed_body:
+      agents:
+      - model: type='string' identifier='openai:gpt-4o-mini' max_tokens=None temperature=None top_p=None timeout=None parallel_tool_calls=None
+          seed=None presence_penalty=None frequency_penalty=None logit_bias=None stop_sequences=None extra_headers=None extra_body=None
+        name: test_agent
+        route: /test_agent
+      count: 1
+    status:
+      code: 200
+      message: OK
+version: 1

@@ -1,0 +1,32 @@
+interactions:
+- request:
+    headers:
+      accept:
+      - '*/*'
+      accept-encoding:
+      - gzip, deflate, br
+      connection:
+      - keep-alive
+      content-length:
+      - '68'
+      content-type:
+      - application/json
+      host:
+      - test
+    method: POST
+    parsed_body:
+      content: This will trigger a malformed stream.
+      role: user
+    uri: http://test/test_agent/subscribe
+  response:
+    body:
+      string: Not Found
+    headers:
+      content-length:
+      - '9'
+      content-type:
+      - text/plain; charset=utf-8
+    status:
+      code: 404
+      message: Not Found
+version: 1
