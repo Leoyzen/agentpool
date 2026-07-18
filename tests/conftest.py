@@ -420,7 +420,7 @@ def vcr_config(request: pytest.FixtureRequest) -> dict[str, Any]:
         "cassette_library_dir": cassettes_dir,
         "filter_headers": ["authorization", "x-api-key", "cookie", "set-cookie"],
         "decode_compressed_response": True,
-        "match_on": ["method", "path"],
+        "match_on": ["method"],
     }
 
 
