@@ -220,3 +220,32 @@ async def test_deprecated_complete_tasks_emits_warning() -> None:
         with pytest.warns(DeprecationWarning, match="complete_tasks is deprecated"):
             await tg.complete_tasks()
     assert completed == ["done"]
+
+
+async def test_wait_all_with_concurrent_task_start() -> None:
+    """wait_all() must complete even if new tasks start while waiting.
+
+    Regression test: _start_tracked() previously invalidated _idle_event,
+    causing wait_all() to hang when a new task started during the wait.
+    """
+    async with ManagedTaskGroup() as mtg:
+        started = anyio.Event()
+        finished = anyio.Event()
+
+        async def slow_task() -> None:
+            started.set()
+            await anyio.sleep(0.1)
+            finished.set()
+
+        mtg.start_soon(slow_task)
+        await started.wait()  # ensure task is running
+
+        # Start a second task (this used to invalidate the idle event)
+        mtg.start_soon(anyio.sleep, 0.05)
+
+        # wait_all must complete, not hang
+        with anyio.move_on_after(5) as scope:
+            await mtg.wait_all()
+
+        assert not scope.cancelled_caught, "wait_all() hung — race condition"
+        assert finished.is_set()

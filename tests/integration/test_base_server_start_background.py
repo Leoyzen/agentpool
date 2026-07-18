@@ -84,3 +84,27 @@ async def test_aenter_aexit_closes_task_group() -> None:
 
     assert server._task_group._closed
     assert not server._task_group.is_busy()
+
+
+async def test_safe_close_task_group_filters_exception_group() -> None:
+    """_safe_close_task_group must filter ExceptionGroup and not re-raise.
+
+    When a task in the task group raises an exception, closing the group
+    produces an ExceptionGroup. _safe_close_task_group catches it, filters
+    out CancelledError, and logs real errors instead of propagating.
+    """
+    pool = _make_mock_pool()
+    server = _MinimalServer(pool)
+
+    async def failing_task() -> None:
+        msg = "boom"
+        raise ValueError(msg)
+
+    # Enter the task group and start a task that raises
+    await server._task_group.__aenter__()
+    server._task_group.start_soon(failing_task)
+    await server._task_group.wait_all()
+
+    # _safe_close_task_group should not raise despite the pending exception
+    await server._safe_close_task_group()
+    assert server._task_group._closed

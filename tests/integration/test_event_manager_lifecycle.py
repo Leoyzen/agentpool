@@ -67,3 +67,43 @@ async def test_event_manager_disabled_still_cleans_up() -> None:
     async with manager:
         pass
     assert len(manager._event_tasks) == 0
+
+
+async def test_event_manager_cancels_long_running_tasks() -> None:
+    """__aexit__ must cancel long-running event processing tasks.
+
+    Without cancellation, ``asyncio.gather`` in ``__aexit__`` would hang
+    waiting for a task that never completes.
+    """
+    manager = EventManager(configs=[], enable_events=True)
+    task_was_cancelled = False
+
+    # Create a mock source with an infinite event stream
+    mock_source = MagicMock()
+
+    async def mock_events() -> Any:
+        nonlocal task_was_cancelled
+        try:
+            while True:
+                yield MagicMock()  # infinite stream of events
+                await asyncio.sleep(0.01)
+        except asyncio.CancelledError:
+            task_was_cancelled = True
+            raise
+
+    mock_source.events = mock_events
+    mock_source.__aenter__ = AsyncMock(return_value=mock_source)
+    mock_source.__aexit__ = AsyncMock(return_value=None)
+
+    mock_config = MagicMock()
+    mock_config.name = "test_long_running"
+
+    with patch("evented.base.EventSource.from_config", return_value=mock_source):
+        async with manager:
+            await manager.add_source(mock_config)
+            await asyncio.sleep(0.05)  # let the processing task start
+            assert len(manager._event_tasks) > 0
+
+    # After __aexit__, the long-running task should have been cancelled
+    assert task_was_cancelled, "Long-running event task was not cancelled on __aexit__"
+    assert len(manager._event_tasks) == 0
