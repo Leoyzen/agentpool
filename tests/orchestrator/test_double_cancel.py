@@ -140,8 +140,9 @@ async def test_double_cancel_does_not_kill_generator() -> None:
     await asyncio.sleep(0.05)
 
     # First cancel (simulates interrupt() → cancel_run_for_session())
+    handle._turn_complete_event.clear()
     handle.cancel()
-    await asyncio.sleep(0.1)
+    await asyncio.wait_for(handle._turn_complete_event.wait(), timeout=1.0)
 
     # At this point, the generator should have caught CancelledError,
     # reset _force_cancelling, and entered _idle_loop().
@@ -152,7 +153,7 @@ async def test_double_cancel_does_not_kill_generator() -> None:
     # Second cancel (simulates session_pool.cancel_run())
     # This must NOT kill the generator.
     handle.cancel()
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0)  # Yield to event loop for CancelledError propagation
 
     # Generator must still be alive — _closed should be False
     assert not handle._closed, (
@@ -190,17 +191,19 @@ async def test_double_cancel_then_followup_processes_message() -> None:
     await asyncio.sleep(0.05)
 
     # Double cancel (simulates abort_session)
+    handle._turn_complete_event.clear()
     handle.cancel()
-    await asyncio.sleep(0.1)
+    await asyncio.wait_for(handle._turn_complete_event.wait(), timeout=1.0)
     handle.cancel()
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0)  # Yield to event loop for CancelledError propagation
 
     # Generator survived — now send a followup message
     msg_id = handle.followup("second prompt")
     assert msg_id is not None, "followup() must return a message_id after double cancel"
 
     # Wait for the second turn to execute and the generator to process it
-    await asyncio.sleep(0.3)
+    handle._turn_complete_event.clear()
+    await asyncio.wait_for(handle._turn_complete_event.wait(), timeout=1.0)
 
     # The second turn should have been created (second call to create_turn)
     assert handle.agent.create_turn.call_count >= 2, (
@@ -300,13 +303,14 @@ async def test_cancelled_event_loop_survives_idle_cancel() -> None:
     await asyncio.sleep(0.05)
 
     # First cancel: enters _idle_loop() after handling
+    handle._turn_complete_event.clear()
     handle.cancel()
-    await asyncio.sleep(0.15)
+    await asyncio.wait_for(handle._turn_complete_event.wait(), timeout=1.0)
 
     # Now the generator is in _idle_loop(), waiting on _idle_event
     # Second cancel: throws CancelledError at _idle_event.wait()
     handle.cancel()
-    await asyncio.sleep(0.15)
+    await asyncio.sleep(0)  # Yield to event loop for CancelledError propagation
 
     # Generator must have caught the CancelledError and re-entered idle
     assert handle._run_state == RunState.IDLE, (
@@ -315,8 +319,9 @@ async def test_cancelled_event_loop_survives_idle_cancel() -> None:
     assert not handle._closed, "Generator must survive CancelledError in _idle_loop"
 
     # Send a message — it must be processed
+    handle._turn_complete_event.clear()
     handle.followup("after idle cancel")
-    await asyncio.sleep(0.2)
+    await asyncio.wait_for(handle._turn_complete_event.wait(), timeout=1.0)
 
     # Clean up
     handle.close()
