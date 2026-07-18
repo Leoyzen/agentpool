@@ -260,7 +260,9 @@ class AgentFactory:
                 agent_descs = self._build_agent_descriptions(host_context, eligible)
                 caps.append(
                     TeamCommCapability(
-                        resolved_tm, agent_name, agent_descriptions=agent_descs,
+                        resolved_tm,
+                        agent_name,
+                        agent_descriptions=agent_descs,
                     )
                 )
 
@@ -429,7 +431,10 @@ class AgentFactory:
 
                 agent_descs = self._build_agent_descriptions(host_context, eligible)
                 team_cap = TeamCommCapability(
-                    resolved_tm, agent_name, session.metadata, agent_descriptions=agent_descs,
+                    resolved_tm,
+                    agent_name,
+                    session.metadata,
+                    agent_descriptions=agent_descs,
                 )
                 if isinstance(agent, _NativeAgent2):
                     # Replace shared TeamCommCapability with per-session
