@@ -82,12 +82,10 @@ async def _precreate_agents(pool: AgentPool) -> dict[str, Any]:
     ``pool.get_agent(name)`` call pattern in VCR tests, we pre-create all
     agents during fixture setup (async) and cache them for sync access.
     """
-    import uuid
-
     agents: dict[str, Any] = {}
     assert pool._session_pool is not None
     for name in pool.manifest.agents:
-        session_id = f"vcr-{name}-{uuid.uuid4()}"
+        session_id = f"vcr-{name}"
         agent = await pool._session_pool.sessions.get_or_create_session_agent(
             session_id, agent_name=name
         )

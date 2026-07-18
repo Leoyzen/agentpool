@@ -107,36 +107,19 @@ async def test_real_tool_call_roundtrip(vcr_pool: AgentPool) -> None:
 )
 @pytest.mark.known_bug
 async def test_pre_post_hooks_fire(vcr_pool: AgentPool) -> None:
-    """Pre/post tool hooks fire when a tool is called.
+    """Tool-call stream completes when _temporary_tools is active.
 
-    Registers a callable hook that records tool-call events, then verifies
-    the hook was invoked. VCR replays the model API call that triggers the
-    tool.
+    NOTE: This test is xfail because _temporary_tools doesn't pass tools
+    to the model API (bug #204). The test only asserts the event stream
+    completes, not that hooks fire — hook registration requires the
+    agent's hooks config API which is separate from _temporary_tools.
     """
     agent = vcr_pool.get_agent("test_agent")
     async with agent._temporary_tools(echo):
-        hook_calls: list[str] = []
-
-        # Register a simple pre-tool hook via the agent's hooks config.
-        # The hook records the tool name when invoked.
-        from agentpool.hooks.base import HookResult
-
-        async def pre_tool(tool_name: str, tool_input: Any) -> HookResult:
-            hook_calls.append(f"pre:{tool_name}")
-            return HookResult(decision="allow")
-
-        async def post_tool(tool_name: str, tool_output: Any) -> HookResult:
-            hook_calls.append(f"post:{tool_name}")
-            return HookResult(decision="allow")
-
-        # Run the agent — hooks fire automatically via HookAwareTurn.
         events: list[Any] = [
             event async for event in agent.run_stream("Use the echo tool with the text 'hello'.")
         ]
 
-    # The hooks may or may not have fired depending on whether the model
-    # actually called the tool in the recorded cassette. Assert the event
-    # stream completed.
     completes = [e for e in events if isinstance(e, StreamCompleteEvent)]
     assert len(completes) == 1
 
