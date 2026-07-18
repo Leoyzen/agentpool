@@ -36,7 +36,7 @@ from agentpool.agents.events import (
     ToolCallCompleteEvent,
     ToolCallStartEvent,
 )
-from tests.vcr.conftest import cassette_exists
+from tests.vcr.conftest import cassette_exists  # noqa: F401
 
 
 if TYPE_CHECKING:
@@ -174,12 +174,24 @@ async def _drain_events(stream: AsyncIterator[Any]) -> list[Any]:
 def _skip_if_no_cassette(request: pytest.FixtureRequest) -> None:
     """Skip test if cassette doesn't exist and we're not recording.
 
-    When ``--record-mode=once`` (or any non-``none`` mode) is passed,
-    the test runs even without an existing cassette so it can record.
+    When ``--record-mode`` is not ``none`` (e.g. ``once``), the test runs
+    even without an existing cassette so it can record.
     In replay mode (default), the test is skipped if no cassette exists.
+
+    Checks both the legacy ``tests/cassettes/vcr/`` path and the
+    pytest-recording default ``tests/vcr/cassettes/`` path.
     """
-    record_mode = request.config.getoption("--record-mode", default="none")
-    if record_mode == "none" and not cassette_exists(_MODULE_STEM, "test_team_mode_via_vcr"):
+    from pathlib import Path
+
+    record_mode = request.config.getoption("--record-mode", default="none") or "none"
+    if record_mode != "none":
+        return  # Allow recording
+
+    # Check both possible cassette locations.
+    cassettes_dir = Path(__file__).parent / "cassettes" / _MODULE_STEM
+    legacy_dir = Path(__file__).parent.parent / "cassettes" / "vcr" / _MODULE_STEM
+    has_cassette = any(cassettes_dir.glob("*.yaml")) or any(legacy_dir.glob("*.yaml"))
+    if not has_cassette:
         pytest.skip(
             "Cassette not recorded yet — run with "
             "`OPENAI_API_KEY=... uv run pytest tests/vcr/test_team_mode.py --record-mode=once`",

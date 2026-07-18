@@ -130,13 +130,18 @@ async def vcr_pool_with_subagent() -> AsyncIterator[AgentPool]:
 
 
 @pytest.fixture
-async def vcr_team_pool() -> AsyncIterator[AgentPool]:
+async def vcr_team_pool(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AgentPool]:
     """Real ``AgentPool`` with ``team_mode`` enabled for VCR team-mode tests.
 
     Two agents: ``team_lead`` (lead-eligible) and ``team_member``
     (member-eligible). VCR intercepts model API HTTP calls — the pool,
     agents, capabilities, EventBus, SessionController all run for real.
+
+    A dummy ``OPENAI_API_KEY`` is set via ``monkeypatch`` so the OpenAI
+    client can initialize without error. VCR intercepts all HTTP requests,
+    so the key is never actually used for authentication.
     """
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-for-vcr-replay")
     manifest = _build_manifest(VCR_POOL_CONFIG_TEAM_MODE)
     async with AgentPool(manifest) as pool:
         yield pool
