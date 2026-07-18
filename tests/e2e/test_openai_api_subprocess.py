@@ -44,32 +44,39 @@ AUTH_HEADERS = {"Authorization": "Bearer test-key"}
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.xfail(
+    reason="serve-api doesn't init SessionPool (#185)", strict=False, raises=AssertionError
+)
+@pytest.mark.known_bug
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-api", "is_stdio": False}],
     indirect=True,
 )
 async def test_server_startup(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
-    """L4a: Start serve-api, verify HTTP server is responding."""
+    """L4a: Start serve-api, verify HTTP server is responding.
+
+    Note: serve-api doesn't initialize SessionPool (#185), causing 500 errors.
+    This test is xfailed until the bug is fixed.
+    """
     assert subprocess_server.process.returncode is None, "OpenAI API server process exited early"
     assert subprocess_server.port > 0
 
-    # The server may not have a root endpoint; we check via the completions
-    # endpoint with a minimal request to verify it's up.
-    # Known bug: serve-api doesn't init SessionPool, so 500 may occur.
-    # Valid "server is up" responses: 200 (works), 401 (no auth), 422 (bad request), 500 (known bug)
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(
             f"{subprocess_server.base_url}/v1/chat/completions",
+            headers=AUTH_HEADERS,
             json={"model": "test_agent", "messages": [], "stream": False},
         )
-        # Server is up if we get any HTTP response (not a connection error).
-        # 500 is documented as a known bug (serve-api doesn't init SessionPool).
-        assert resp.status_code < 600, (
+        assert resp.status_code == 200, (
             f"Server not responding properly: status={resp.status_code}, body={resp.text[:500]}"
         )
 
 
+@pytest.mark.xfail(
+    reason="serve-api doesn't init SessionPool (#185)", strict=False, raises=AssertionError
+)
+@pytest.mark.known_bug
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-api", "is_stdio": False}],
@@ -78,10 +85,8 @@ async def test_server_startup(subprocess_server: SubprocessServer, e2e_config: P
 async def test_chat_completion(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
     """L4a: POST /v1/chat/completions, verify chat completion response.
 
-    Note: The serve-api CLI command may not initialize SessionPool in all
-    configurations. We accept 200 (success) or 500 (SessionPool not available)
-    as valid responses — the key assertion is that the server processes the
-    request and returns an HTTP response.
+    Note: serve-api doesn't initialize SessionPool (#185), causing 500 errors.
+    This test is xfailed until the bug is fixed.
     """
     base_url = subprocess_server.base_url
 
@@ -95,19 +100,17 @@ async def test_chat_completion(subprocess_server: SubprocessServer, e2e_config: 
                 "stream": False,
             },
         )
-        # 200 = success, 500 = SessionPool not initialized (known CLI issue).
-        assert resp.status_code in (200, 500), (
+        assert resp.status_code == 200, (
             f"Chat completion unexpected status: {resp.status_code}: {resp.text[:500]}"
         )
-        if resp.status_code == 200:
-            data = resp.json()
-            assert data["model"] == "test_agent", (
-                f"Expected model='test_agent', got: {data.get('model')}"
-            )
-            assert "choices" in data, f"Expected 'choices' in response: {data}"
-            assert len(data["choices"]) > 0, f"Expected at least 1 choice: {data}"
-            content = data["choices"][0].get("message", {}).get("content")
-            assert content is not None, f"Expected content in message: {data['choices'][0]}"
+        data = resp.json()
+        assert data["model"] == "test_agent", (
+            f"Expected model='test_agent', got: {data.get('model')}"
+        )
+        assert "choices" in data, f"Expected 'choices' in response: {data}"
+        assert len(data["choices"]) > 0, f"Expected at least 1 choice: {data}"
+        content = data["choices"][0].get("message", {}).get("content")
+        assert content is not None, f"Expected content in message: {data['choices'][0]}"
 
 
 @pytest.mark.parametrize(

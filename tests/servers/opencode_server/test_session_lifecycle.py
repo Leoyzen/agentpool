@@ -178,7 +178,9 @@ class TestSessionCRUD:
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()
 
-    @pytest.mark.skip(reason="Production bug #191: now_ms() float truncation causes non-monotonic timestamps")
+    @pytest.mark.skip(
+        reason="Production bug #191: now_ms() float truncation causes non-monotonic timestamps"
+    )
     async def test_update_session_title(
         self,
         async_client: AsyncClient,

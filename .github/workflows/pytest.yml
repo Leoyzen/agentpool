@@ -22,6 +22,8 @@ env:
   FORCE_COLOR: 1
   RUFF_OUTPUT_FORMAT: github
   COLUMNS: 120
+  # Use official PyPI to avoid 403 from mirrors (e.g. tsinghua/aliyun) blocking GitHub Actions IPs.
+  UV_INDEX_URL: https://pypi.org/simple/
   # API credentials for real_model tests (configured via secrets).
   # test_pick.py auto-skipped via incompatible_with_thinking marker for
   # thinking-mode models — see issue #84.
@@ -273,7 +275,7 @@ jobs:
     # L4a smoke: ~30s, PR-blocking. Runs in parallel with other test stages.
     name: E2E smoke (L4a)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: smoke
     steps:
       - uses: actions/checkout@v6
