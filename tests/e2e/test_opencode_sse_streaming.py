@@ -107,21 +107,7 @@ async def test_sse_event_sequence_get_event(
             assert sse_response.status_code == 200
 
             # Collect the first event (server.connected).
-            events: list[dict[str, Any]] = []
-            async for line in sse_response.aiter_lines():
-                if not line.startswith("data:"):
-                    continue
-                data_str = line[len("data:") :].strip()
-                if not data_str:
-                    continue
-                try:
-                    event = json.loads(data_str)
-                except json.JSONDecodeError:
-                    continue
-                events.append(event)
-                # We only need the first event for the handshake assertion.
-                if len(events) >= 1:
-                    break
+            events = await _parse_sse_lines(sse_response, max_events=1)
 
             # Send a prompt AFTER subscribing (D4).
             # NOTE: POST /session/{id}/message may return 500 due to a
@@ -172,20 +158,7 @@ async def test_sse_global_event_sequence(
     ):
         assert sse_response.status_code == 200
 
-        events: list[dict[str, Any]] = []
-        async for line in sse_response.aiter_lines():
-            if not line.startswith("data:"):
-                continue
-            data_str = line[len("data:") :].strip()
-            if not data_str:
-                continue
-            try:
-                event = json.loads(data_str)
-            except json.JSONDecodeError:
-                continue
-            events.append(event)
-            if len(events) >= 2:
-                break
+        events = await _parse_sse_lines(sse_response, max_events=2)
 
     assert len(events) >= 1, "No global SSE events received"
     # The first event should be server.connected, wrapped in payload envelope.
@@ -230,19 +203,8 @@ async def test_sse_heartbeat(
     ):
         assert sse_response.status_code == 200
 
-        async for line in sse_response.aiter_lines():
-            if not line.startswith("data:"):
-                continue
-            data_str = line[len("data:") :].strip()
-            if not data_str:
-                continue
-            try:
-                event = json.loads(data_str)
-            except json.JSONDecodeError:
-                continue
-            if event.get("type") == "server.heartbeat":
-                heartbeat_received = True
-                break
+        events = await _parse_sse_lines(sse_response, max_events=50)
+        heartbeat_received = any(event.get("type") == "server.heartbeat" for event in events)
 
     assert heartbeat_received, "No heartbeat event received within 15s of SSE connection"
 
@@ -297,19 +259,7 @@ async def test_sse_reconnect(
         async with client.stream("GET", url) as sse_response:
             assert sse_response.status_code == 200
 
-            async for line in sse_response.aiter_lines():
-                if not line.startswith("data:"):
-                    continue
-                data_str = line[len("data:") :].strip()
-                if not data_str:
-                    continue
-                try:
-                    event = json.loads(data_str)
-                except json.JSONDecodeError:
-                    continue
-                events.append(event)
-                if len(events) >= 1:
-                    break
+            events = await _parse_sse_lines(sse_response, max_events=1)
 
     assert len(events) >= 1, "No events received after reconnect"
     assert events[0].get("type") == "server.connected", (

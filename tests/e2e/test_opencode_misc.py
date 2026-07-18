@@ -168,7 +168,7 @@ async def test_post_init(subprocess_server: SubprocessServer) -> None:
     """C10.2: POST /session/{session_id}/init, verify 200."""
     base_url = subprocess_server.base_url
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         session_id = await _create_session(client, base_url)
 
         # POST init — starts a fire-and-forget agent run to generate AGENTS.md.

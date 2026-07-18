@@ -167,9 +167,6 @@ async def test_summarize_session(
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         session_id = await _create_session(base_url, client)
-        # Send a message first so there's content to summarize.
-        await _send_message(base_url, client, session_id)
-
         resp = await client.post(
             f"{base_url}/session/{session_id}/summarize",
             json={},

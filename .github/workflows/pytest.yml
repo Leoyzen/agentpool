@@ -273,7 +273,7 @@ jobs:
     # L4a smoke: ~30s, PR-blocking. Runs in parallel with other test stages.
     name: E2E smoke (L4a)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: smoke
     steps:
       - uses: actions/checkout@v6

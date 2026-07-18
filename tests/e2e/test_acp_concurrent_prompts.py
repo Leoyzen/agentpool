@@ -50,7 +50,10 @@ class _ACPServerHandle:
     """Handle to a spawned ACP server subprocess with a client connection."""
 
     def __init__(
-        self, conn: ClientSideConnection, process: object, client: DefaultACPClient
+        self,
+        conn: ClientSideConnection,
+        process: asyncio.subprocess.Process,
+        client: DefaultACPClient,
     ) -> None:
         self.conn = conn
         self.process = process
