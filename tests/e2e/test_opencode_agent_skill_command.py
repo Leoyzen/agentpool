@@ -115,7 +115,12 @@ async def test_get_command(subprocess_server: SubprocessServer) -> None:
     strict=False,
     raises=AssertionError,
 )
-async def test_get_command_by_name(server_url: str) -> None:
+@pytest.mark.parametrize(
+    "subprocess_server",
+    [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
+    indirect=True,
+)
+async def test_get_command_by_name(subprocess_server: SubprocessServer) -> None:
     """Test intent: GET /command/{name} with a valid command name from GET /command list.
 
     Verify 200 with response body containing command ``name``, ``description``,

@@ -114,7 +114,12 @@ async def test_post_mcp(subprocess_server: SubprocessServer) -> None:
     strict=False,
     raises=AssertionError,
 )
-async def test_delete_mcp_by_id(server_url: str) -> None:
+@pytest.mark.parametrize(
+    "subprocess_server",
+    [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
+    indirect=True,
+)
+async def test_delete_mcp_by_id(subprocess_server: SubprocessServer) -> None:
     """Test intent: DELETE /mcp/{id} to remove an MCP server entry.
 
     POST /mcp to create MCP server entry and capture returned ``id``. Call
@@ -134,7 +139,12 @@ async def test_delete_mcp_by_id(server_url: str) -> None:
     strict=False,
     raises=AssertionError,
 )
-async def test_put_mcp_by_id(server_url: str) -> None:
+@pytest.mark.parametrize(
+    "subprocess_server",
+    [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
+    indirect=True,
+)
+async def test_put_mcp_by_id(subprocess_server: SubprocessServer) -> None:
     """Test intent: PUT /mcp/{id} to update an MCP server config.
 
     POST /mcp to create MCP server entry, then PUT /mcp/{id} with JSON body
@@ -155,7 +165,12 @@ async def test_put_mcp_by_id(server_url: str) -> None:
     strict=False,
     raises=AssertionError,
 )
-async def test_get_mcp_tool(server_url: str) -> None:
+@pytest.mark.parametrize(
+    "subprocess_server",
+    [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
+    indirect=True,
+)
+async def test_get_mcp_tool(subprocess_server: SubprocessServer) -> None:
     """Test intent: GET /mcp/tool with optional ``server_id`` query param.
 
     Verify 200 with JSON array of MCP tools, each containing ``name``,
@@ -175,7 +190,12 @@ async def test_get_mcp_tool(server_url: str) -> None:
     strict=False,
     raises=AssertionError,
 )
-async def test_post_mcp_tool(server_url: str) -> None:
+@pytest.mark.parametrize(
+    "subprocess_server",
+    [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
+    indirect=True,
+)
+async def test_post_mcp_tool(subprocess_server: SubprocessServer) -> None:
     """Test intent: POST /mcp/tool to execute an MCP tool directly.
 
     Send POST /mcp/tool with JSON body containing ``tool_name``, ``server_id``,
@@ -196,7 +216,12 @@ async def test_post_mcp_tool(server_url: str) -> None:
     strict=False,
     raises=AssertionError,
 )
-async def test_get_mcp_server(server_url: str) -> None:
+@pytest.mark.parametrize(
+    "subprocess_server",
+    [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
+    indirect=True,
+)
+async def test_get_mcp_server(subprocess_server: SubprocessServer) -> None:
     """Test intent: GET /mcp/server with optional query params.
 
     Verify 200 with JSON array of MCP server status objects, each containing
@@ -215,7 +240,12 @@ async def test_get_mcp_server(server_url: str) -> None:
     strict=False,
     raises=AssertionError,
 )
-async def test_post_mcp_server(server_url: str) -> None:
+@pytest.mark.parametrize(
+    "subprocess_server",
+    [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
+    indirect=True,
+)
+async def test_post_mcp_server(subprocess_server: SubprocessServer) -> None:
     """Test intent: POST /mcp/server to add a new MCP server.
 
     Send POST /mcp/server with JSON body containing server config (``name``,

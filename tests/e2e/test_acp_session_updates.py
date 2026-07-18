@@ -271,11 +271,6 @@ async def test_tool_call_start_end_notifications(e2e_config_with_tool: Path) -> 
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="plan SessionUpdate variant not implemented in agentpool ACP server yet",
-    strict=False,
-    raises=AssertionError,
-)
 async def test_plan_notification(e2e_config: Path) -> None:
     """B9.4: Verify ``plan`` SessionUpdate emitted during multi-step task.
 
@@ -294,11 +289,6 @@ async def test_plan_notification(e2e_config: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="session_config SessionUpdate variant not implemented in agentpool ACP server yet",
-    strict=False,
-    raises=AssertionError,
-)
 async def test_session_config_notification(e2e_config: Path) -> None:
     """B9.5: Verify ``session_config`` SessionUpdate emitted on config change.
 
@@ -316,11 +306,6 @@ async def test_session_config_notification(e2e_config: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="mcp_server_added SessionUpdate variant not implemented in agentpool ACP server yet",
-    strict=False,
-    raises=AssertionError,
-)
 async def test_mcp_server_added_notification(e2e_config: Path) -> None:
     """B9.6: Verify ``mcp_server_added`` SessionUpdate emitted on MCP server connect.
 
@@ -337,11 +322,6 @@ async def test_mcp_server_added_notification(e2e_config: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="mcp_server_removed SessionUpdate variant not implemented in agentpool ACP server yet",
-    strict=False,
-    raises=AssertionError,
-)
 async def test_mcp_server_removed_notification(e2e_config: Path) -> None:
     """B9.7: Verify ``mcp_server_removed`` SessionUpdate emitted on MCP server disconnect.
 
@@ -358,11 +338,6 @@ async def test_mcp_server_removed_notification(e2e_config: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="mcp_tool_added SessionUpdate variant not implemented in agentpool ACP server yet",
-    strict=False,
-    raises=AssertionError,
-)
 async def test_mcp_tool_added_notification(e2e_config: Path) -> None:
     """B9.8: Verify ``mcp_tool_added`` SessionUpdate emitted when MCP tool becomes available.
 
@@ -379,11 +354,6 @@ async def test_mcp_tool_added_notification(e2e_config: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="mcp_tool_removed SessionUpdate variant not implemented in agentpool ACP server yet",
-    strict=False,
-    raises=AssertionError,
-)
 async def test_mcp_tool_removed_notification(e2e_config: Path) -> None:
     """B9.9: Verify ``mcp_tool_removed`` SessionUpdate emitted when MCP tool is removed.
 
@@ -400,11 +370,6 @@ async def test_mcp_tool_removed_notification(e2e_config: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="mcp_progress SessionUpdate variant not implemented in agentpool ACP server yet",
-    strict=False,
-    raises=AssertionError,
-)
 async def test_mcp_progress_notification(e2e_config: Path) -> None:
     """B9.10: Verify ``mcp_progress`` SessionUpdate emitted during long-running MCP tool call.
 
@@ -422,11 +387,6 @@ async def test_mcp_progress_notification(e2e_config: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="terminal_output SessionUpdate variant not implemented in agentpool ACP server yet",
-    strict=False,
-    raises=AssertionError,
-)
 async def test_terminal_output_notification(e2e_config: Path) -> None:
     """B9.11: Verify ``terminal_output`` SessionUpdate emitted during bash/shell tool call.
 
@@ -445,11 +405,6 @@ async def test_terminal_output_notification(e2e_config: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="terminal_release SessionUpdate variant not implemented in agentpool ACP server yet",
-    strict=False,
-    raises=AssertionError,
-)
 async def test_terminal_release_notification(e2e_config: Path) -> None:
     """B9.12: Verify ``terminal_release`` SessionUpdate emitted after terminal session ends.
 

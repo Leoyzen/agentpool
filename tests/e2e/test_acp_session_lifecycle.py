@@ -206,11 +206,6 @@ async def test_session_close_then_load(acp_server: ACPSessionHandle) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="ACP close_session Internal error (#186)",
-    strict=False,
-)
-@pytest.mark.known_bug
 async def test_session_close(acp_server: ACPSessionHandle) -> None:
     """B2.5: Create session, close it, verify clean close."""
     new_sess = await acp_server.new_session()

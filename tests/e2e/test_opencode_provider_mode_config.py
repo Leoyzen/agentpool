@@ -71,7 +71,12 @@ async def test_get_provider(subprocess_server: SubprocessServer) -> None:
     strict=False,
     raises=AssertionError,
 )
-async def test_post_provider(server_url: str) -> None:
+@pytest.mark.parametrize(
+    "subprocess_server",
+    [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
+    indirect=True,
+)
+async def test_post_provider(subprocess_server: SubprocessServer) -> None:
     """Test intent: POST /provider to set active provider.
 
     Send POST /provider with JSON body containing provider config (``name``,
@@ -117,7 +122,12 @@ async def test_get_mode(subprocess_server: SubprocessServer) -> None:
     strict=False,
     raises=AssertionError,
 )
-async def test_post_mode(server_url: str) -> None:
+@pytest.mark.parametrize(
+    "subprocess_server",
+    [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
+    indirect=True,
+)
+async def test_post_mode(subprocess_server: SubprocessServer) -> None:
     """Test intent: POST /mode to set mode.
 
     Send POST /mode with JSON body containing mode config (``name``, ``model``,

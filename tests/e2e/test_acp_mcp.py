@@ -127,11 +127,6 @@ async def test_mcp_message_agent_side(e2e_config: Path) -> None:
             await handle.close_session(session_id)
 
 
-@pytest.mark.xfail(
-    reason="mcp/connect client-side method not implemented in agentpool ACP server yet",
-    strict=False,
-    raises=AssertionError,
-)
 async def test_mcp_connect_client_side(e2e_config: Path) -> None:
     """Test intent: Send mcp/connect request with a valid MCP server config.
 
@@ -142,11 +137,6 @@ async def test_mcp_connect_client_side(e2e_config: Path) -> None:
     """
 
 
-@pytest.mark.xfail(
-    reason="mcp/disconnect client-side method not implemented in agentpool ACP server yet",
-    strict=False,
-    raises=AssertionError,
-)
 async def test_mcp_disconnect_client_side(e2e_config: Path) -> None:
     """Test intent: Send mcp/connect to establish a connection, then.
 
@@ -157,11 +147,6 @@ async def test_mcp_disconnect_client_side(e2e_config: Path) -> None:
     """
 
 
-@pytest.mark.xfail(
-    reason="mcp/message client-side method not implemented in agentpool ACP server yet",
-    strict=False,
-    raises=AssertionError,
-)
 async def test_mcp_message_client_side(e2e_config: Path) -> None:
     """Test intent: Send mcp/message from client side with a valid MCP tool call.
 

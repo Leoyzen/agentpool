@@ -160,7 +160,8 @@ async def test_validation_error(subprocess_server: SubprocessServer) -> None:
     raises=AssertionError,
 )
 @pytest.mark.known_bug
-async def test_503_service_unavailable(server_url: str) -> None:
+@pytest.mark.parametrize("subprocess_server", [_OPENCODE_PARAMS], indirect=True)
+async def test_503_service_unavailable(subprocess_server: SubprocessServer) -> None:
     """Test intent: Send a request during server lifecycle transition.
 
     (startup or shutdown) and check for 503 status. Requires timing
@@ -179,7 +180,8 @@ async def test_503_service_unavailable(server_url: str) -> None:
     raises=AssertionError,
 )
 @pytest.mark.known_bug
-async def test_409_conflict(server_url: str) -> None:
+@pytest.mark.parametrize("subprocess_server", [_OPENCODE_PARAMS], indirect=True)
+async def test_409_conflict(subprocess_server: SubprocessServer) -> None:
     """Test intent: Send a prompt to a session with active steer-mode prompt.
 
     Expect HTTP 409 Conflict response.

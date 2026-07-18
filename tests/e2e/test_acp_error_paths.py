@@ -266,12 +266,6 @@ async def test_dollar_cancel_request(e2e_config: Path) -> None:
             await handle.close_session(session_id)
 
 
-@pytest.mark.xfail(
-    reason="Requires error injection (busy session) that TestModel cannot provide. See issue #188.",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 async def test_session_busy_error(e2e_config: Path) -> None:
     """Test intent: Send a long-running ``session/prompt``, then immediately.
 
@@ -281,13 +275,6 @@ async def test_session_busy_error(e2e_config: Path) -> None:
     """
 
 
-@pytest.mark.xfail(
-    reason="Requires error injection (internal server error) that TestModel "
-    "cannot provide. See issue #188.",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 async def test_internal_error_code(e2e_config: Path) -> None:
     """Test intent: Trigger an internal server error (e.g., send a.
 
@@ -298,12 +285,6 @@ async def test_internal_error_code(e2e_config: Path) -> None:
     """
 
 
-@pytest.mark.xfail(
-    reason="Requires mid-turn cancellation control that TestModel cannot provide. See issue #188.",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 async def test_session_cancel_notification(e2e_config: Path) -> None:
     """Test intent: Send a ``session/prompt``, then send a ``session/cancel``.
 

@@ -176,7 +176,8 @@ async def test_get_question(subprocess_server: SubprocessServer) -> None:
     strict=False,
     raises=AssertionError,
 )
-async def test_post_question(server_url: str) -> None:
+@pytest.mark.parametrize("subprocess_server", [_OPENCODE_PARAMS], indirect=True)
+async def test_post_question(subprocess_server: SubprocessServer) -> None:
     """Test intent: POST /question with JSON body containing session_id.
 
     Message string, and optional options array. Verify 200 or 201 with
