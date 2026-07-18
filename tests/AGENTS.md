@@ -431,8 +431,36 @@ Never. Fix the test or fix the code. If a test is legitimately obsolete, mark it
 | `vcr_config` | module | VCR configuration (header filtering, body decoding) |
 | `acp_client` | function | ACP client connected to in-process ACP server |
 | `opencode_client` | function | FastAPI `TestClient` for OpenCode server |
-| `subprocess_server` | function | Spawned `agentpool serve-*` process (for E2E tests) |
+| `subprocess_server` | function | Spawned `agentpool serve-*` process (cached by serve_command; use `--no-server-cache` to bypass) |
 | `minimal_config` | session | Minimal YAML config with single test agent |
+| `session_e2e_config` | session | Session-scoped e2e config with in-memory storage (for cached servers) |
+| `session_e2e_config_with_tool` | session | Session-scoped e2e config with bash tool + in-memory storage |
+
+## Subprocess Server Cache
+
+The `subprocess_server` fixture uses a **session-scoped cache** to reuse `agentpool serve-*` processes across tests with the same `serve_command`. This reduces ~100+ subprocess spawns to ~4-5, cutting L4a e2e time from ~14min to ~4-5min.
+
+### How It Works
+
+- Cached servers use `subprocess.Popen` (event-loop-agnostic) instead of `asyncio.create_subprocess_exec`
+- Cache key: `(serve_command, is_stdio, health_path, extra_args, config_type)`
+- Before yielding a cached server, OpenCode servers get `_clear_sessions()` (GET /session + DELETE each)
+- ACP stdio servers bypass the cache (stdio connections are stateful)
+- Crash detection via `popen.poll()` + socket health check on each cache hit
+
+### Cache Bypass
+
+Use `--no-server-cache` to force fresh subprocess spawning per test (for debugging):
+
+```bash
+uv run pytest -m "e2e and not slow" --no-server-cache
+```
+
+Tests that mutate server-global state should be marked `@pytest.mark.isolated` to bypass the cache.
+
+### xdist Constraint
+
+The cache auto-disables when `pytest-xdist` is detected (`-n` flag). Each worker spawns its own servers.
 
 ## Further Reading
 

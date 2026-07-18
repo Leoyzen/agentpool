@@ -27,6 +27,7 @@ import os
 import shutil
 import signal
 import socket
+import subprocess
 import sys
 from typing import TYPE_CHECKING, Any
 
@@ -70,7 +71,7 @@ class SubprocessServer:
         is_stdio: Whether this is a stdio-based server (ACP default transport).
     """
 
-    process: asyncio.subprocess.Process
+    process: asyncio.subprocess.Process | subprocess.Popen
     host: str
     port: int
     stderr_text: str = ""
@@ -93,9 +94,9 @@ class SubprocessServer:
 class ProcessRegistry:
     """Session-scoped registry of spawned subprocesses for cleanup verification."""
 
-    processes: list[asyncio.subprocess.Process] = field(default_factory=list)
+    processes: list[asyncio.subprocess.Process | subprocess.Popen] = field(default_factory=list)
 
-    def register(self, process: asyncio.subprocess.Process) -> None:
+    def register(self, process: asyncio.subprocess.Process | subprocess.Popen) -> None:
         self.processes.append(process)
 
     def all_terminated(self) -> bool:
@@ -209,12 +210,15 @@ async def _health_check_stdio(process: asyncio.subprocess.Process, timeout: floa
     return process.returncode is None
 
 
-async def _terminate_process(process: asyncio.subprocess.Process) -> str:
+async def _terminate_process(process: asyncio.subprocess.Process | subprocess.Popen) -> str:
     """Terminate a subprocess gracefully: SIGTERM → wait(5s) → SIGKILL.
 
     Returns:
         Captured stderr text.
     """
+    if isinstance(process, subprocess.Popen):
+        return _terminate_popen(process)
+
     stderr_text = ""
     if process.returncode is not None:
         # Already exited; drain stderr.
@@ -254,6 +258,32 @@ async def _terminate_process(process: asyncio.subprocess.Process) -> str:
         pass
 
     return stderr_text
+
+
+def _terminate_popen(process: subprocess.Popen, timeout: float = 5.0) -> str:
+    """Terminate a Popen subprocess gracefully: SIGTERM → wait(timeout) → SIGKILL.
+
+    Returns:
+        Empty string (stderr is DEVNULL for cached servers).
+    """
+    if process.returncode is not None:
+        return ""
+    try:
+        if sys.platform == "win32":
+            process.terminate()
+        else:
+            process.send_signal(signal.SIGTERM)
+    except ProcessLookupError:
+        return ""
+    try:
+        process.wait(timeout=timeout)
+    except TimeoutError:
+        try:
+            process.kill()
+            process.wait(timeout=2.0)
+        except (TimeoutError, ProcessLookupError, OSError):
+            pass
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -334,19 +364,129 @@ def e2e_config_with_tool(tmp_path: Path) -> Path:
     return config_path
 
 
+@pytest.fixture(scope="session")
+def session_e2e_config(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Session-scoped e2e config with in-memory storage.
+
+    Written once to a stable temp path via tmp_path_factory.
+    Includes storage: {providers: [{type: memory}]} to eliminate cross-run SQLite leakage.
+    """
+    config_dir = tmp_path_factory.mktemp("e2e")
+    config_path = config_dir / "e2e_config.yml"
+    config_content = DEFAULT_CONFIG_YAML.strip() + "\n"
+    config_content += "storage:\n  providers:\n    - type: memory\n"
+    config_path.write_text(config_content)
+    return config_path
+
+
+@pytest.fixture(scope="session")
+def session_e2e_config_with_tool(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Session-scoped e2e config with bash tool and in-memory storage."""
+    config_dir = tmp_path_factory.mktemp("e2e")
+    config_path = config_dir / "e2e_config_tool.yml"
+    config = {
+        "agents": {
+            "test_agent": {
+                "type": "native",
+                "model": {
+                    "type": "test",
+                    "call_tools": ["bash"],
+                    "tool_args": {"bash": {"command": "echo hello"}},
+                },
+                "system_prompt": "You are a test assistant with tools.",
+                "tools": [{"name": "bash", "enabled": True}],
+            }
+        },
+        "storage": {"providers": [{"type": "memory"}]},
+    }
+    config_path.write_text(yaml.dump(config, default_flow_style=False))
+    return config_path
+
+
+# ---------------------------------------------------------------------------
+# Subprocess server cache infrastructure
+# ---------------------------------------------------------------------------
+
+
+# Session-scoped cache of subprocess servers, keyed by
+# (serve_command, is_stdio, health_path, str(extra_args), config_type).
+# config_type is "default" or "with_tool" to distinguish config variants.
+_server_cache: dict[tuple[str, bool, str, str, str], subprocess.Popen] = {}
+
+_xdist_cache_disabled: dict[str, bool] = {"disabled": False}
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Add --no-server-cache command-line option."""
+    parser.addoption(
+        "--no-server-cache",
+        action="store_true",
+        default=False,
+        help="Disable subprocess server cache (each test spawns its own server).",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Auto-disable cache if xdist is detected."""
+    numprocesses = config.getoption("numprocesses", default=0)
+    if numprocesses and numprocesses != 0:
+        _xdist_cache_disabled["disabled"] = True
+        import warnings
+
+        warnings.warn(
+            "pytest-xdist detected; subprocess server cache auto-disabled.",
+            stacklevel=2,
+        )
+
+
+async def _clear_sessions(base_url: str) -> None:
+    """Clear all sessions on an OpenCode server via HTTP.
+
+    GET /session then DELETE each session. Catches 404/405 gracefully
+    (treat as 'no sessions to clear'). Uses httpx.AsyncClient.
+    """
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{base_url}/session")
+            if resp.status_code in (404, 405):
+                return  # No session endpoint (stateless server)
+            if resp.status_code >= 500:
+                return  # Server error, skip cleanup
+            sessions = resp.json()
+            for session in sessions:
+                session_id = session.get("id") or session.get("session_id")
+                if session_id:
+                    with contextlib.suppress(httpx.HTTPStatusError, httpx.RequestError):
+                        await client.delete(f"{base_url}/session/{session_id}")
+    except (httpx.RequestError, OSError):
+        pass  # Server may not have /session endpoint
+
+
 # ---------------------------------------------------------------------------
 # subprocess_server fixture (10.1)
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-async def subprocess_server(
+async def subprocess_server(  # noqa: PLR0915
     request: pytest.FixtureRequest,
     process_registry: ProcessRegistry,
-    e2e_config: Path,
+    session_e2e_config: Path,
     allow_model_requests: Any,
 ) -> AsyncIterator[SubprocessServer]:
-    """Spawn an ``agentpool serve-*`` subprocess and wait for it to become healthy.
+    """Spawn an ``agentpool serve-*`` subprocess, reusing cached servers when possible.
+
+    Cache bypass conditions:
+    - ``--no-server-cache`` flag is set
+    - ``is_stdio=True`` (ACP stdio connections are stateful)
+    - ``@pytest.mark.isolated`` is set on the test
+    - pytest-xdist is enabled
+    - A custom ``config_path`` is explicitly provided in params
+
+    For cached servers: uses ``subprocess.Popen`` (event-loop-agnostic),
+    ``_health_check_socket`` for health, and ``_clear_sessions`` for state reset.
 
     Parametrize via ``indirect=True`` with a dict of parameters:
 
@@ -363,9 +503,9 @@ async def subprocess_server(
     Required param keys:
         - ``serve_command``: The CLI subcommand (e.g. ``serve-acp``,
           ``serve-opencode``, ``serve-agui``, ``serve-api``).
-        - ``config_path``: Path to the YAML config file.
 
     Optional param keys:
+        - ``config_path``: Path to the YAML config file (bypasses cache if set).
         - ``host``: Bind host (default ``127.0.0.1``, ignored for stdio ACP).
         - ``port``: Bind port (default: ephemeral, ignored for stdio ACP).
         - ``extra_args``: Additional CLI arguments.
@@ -381,69 +521,168 @@ async def subprocess_server(
         raise TypeError(msg)
 
     serve_command: str = params["serve_command"]
-    # config_path can be provided in params or via the e2e_config fixture.
-    config_path: str = str(params.get("config_path", e2e_config))
     host: str = params.get("host", "127.0.0.1")
     is_stdio: bool = params.get("is_stdio", False)
     health_timeout: float = params.get("health_timeout", 10.0)
     health_path: str = params.get("health_path", "/")
     extra_args: list[str] | None = params.get("extra_args")
 
-    if is_stdio:
-        port = 0
-        cmd = _build_command(
-            serve_command, config_path, host=host, port=port, extra_args=extra_args
+    # Determine if cache should be bypassed
+    no_cache = (
+        bool(request.config.getoption("--no-server-cache", default=False))
+        or is_stdio
+        or _xdist_cache_disabled["disabled"]
+        or request.node.get_closest_marker("isolated") is not None
+        or "config_path" in params
+    )
+
+    config_path: str = str(params.get("config_path", session_e2e_config))
+
+    if no_cache:
+        # --- Non-cached path: existing asyncio flow (unchanged) ---
+        if is_stdio:
+            port = 0
+            cmd = _build_command(
+                serve_command, config_path, host=host, port=port, extra_args=extra_args
+            )
+        else:
+            port = params.get("port") or allocate_ephemeral_port()
+            cmd = _build_command(
+                serve_command, config_path, host=host, port=port, extra_args=extra_args
+            )
+
+        env = os.environ.copy()
+        env["OBSERVABILITY_ENABLED"] = "false"
+        env["LOGFIRE_DISABLE"] = "true"
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
-    else:
-        port = params.get("port") or allocate_ephemeral_port()
-        cmd = _build_command(
-            serve_command, config_path, host=host, port=port, extra_args=extra_args
+        process_registry.register(process)
+
+        server = SubprocessServer(
+            process=process,
+            host=host,
+            port=port,
+            is_stdio=is_stdio,
         )
 
-    # Spawn the subprocess.
+        if is_stdio:
+            healthy = await _health_check_stdio(process, timeout=health_timeout)
+        else:
+            healthy = await _health_check_http(
+                host, port, path=health_path, timeout=health_timeout, interval=0.5
+            )
+
+        if not healthy:
+            stderr_text = await _terminate_process(process)
+            server.stderr_text = stderr_text
+            msg = (
+                f"Server {serve_command} failed to become healthy within "
+                f"{health_timeout}s.\nCommand: {' '.join(cmd)}\n"
+                f"STDERR:\n{stderr_text}"
+            )
+            raise RuntimeError(msg)
+
+        yield server
+
+        stderr_text = await _terminate_process(process)
+        server.stderr_text = stderr_text
+        return
+
+    # --- Cached path ---
+    cache_key = (serve_command, is_stdio, health_path, str(extra_args), "default")
+
+    # Check cache for existing server
+    cached_popen = _server_cache.get(cache_key)
+
+    if cached_popen is not None:
+        # Cache hit: check if process is still alive (Task 3.3)
+        if cached_popen.poll() is not None:
+            # Crashed — remove from cache and fall through to spawn
+            _server_cache.pop(cache_key, None)
+            cached_popen = None
+        else:
+            # Process alive — quick socket health check (Task 3.4)
+            port = cached_popen._e2e_port  # type: ignore[attr-defined]
+            healthy = await _health_check_socket(host, port, timeout=2.0)
+            if not healthy:
+                # Stale — terminate and re-spawn
+                _terminate_popen(cached_popen)
+                _server_cache.pop(cache_key, None)
+                cached_popen = None
+
+    if cached_popen is not None:
+        # Cache hit: clear sessions for OpenCode servers (Task 3.5)
+        cached_port = cached_popen._e2e_port  # type: ignore[attr-defined]
+        base_url = f"http://{host}:{cached_port}"
+        if serve_command == "serve-opencode":
+            await _clear_sessions(base_url)
+
+        server = SubprocessServer(
+            process=cached_popen,
+            host=host,
+            port=cached_port,
+            is_stdio=False,
+        )
+        yield server
+        # Do NOT terminate cached servers (Task 3.6)
+        return
+
+    # Cache miss: spawn new server via Popen (Task 3.2)
+    port = allocate_ephemeral_port()
+    cmd = _build_command(
+        serve_command,
+        str(session_e2e_config),
+        host=host,
+        port=port,
+        extra_args=extra_args,
+    )
+
     env = os.environ.copy()
-    # Disable observability for faster startup.
     env["OBSERVABILITY_ENABLED"] = "false"
     env["LOGFIRE_DISABLE"] = "true"
 
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+    popen = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         env=env,
     )
-    process_registry.register(process)
+    # Store port on the Popen object for later retrieval
+    popen._e2e_port = port  # type: ignore[attr-defined]
+    popen._e2e_host = host  # type: ignore[attr-defined]
 
-    server = SubprocessServer(
-        process=process,
-        host=host,
-        port=port,
-        is_stdio=is_stdio,
-    )
+    process_registry.register(popen)
 
-    # Health check.
-    if is_stdio:
-        healthy = await _health_check_stdio(process, timeout=health_timeout)
-    else:
-        healthy = await _health_check_http(
-            host, port, path=health_path, timeout=health_timeout, interval=0.5
-        )
-
+    # Health check via raw socket (Task 3.2)
+    healthy = await _health_check_socket(host, port, timeout=health_timeout)
     if not healthy:
-        stderr_text = await _terminate_process(process)
-        server.stderr_text = stderr_text
+        _terminate_popen(popen)
         msg = (
             f"Server {serve_command} failed to become healthy within "
-            f"{health_timeout}s.\nCommand: {' '.join(cmd)}\n"
-            f"STDERR:\n{stderr_text}"
+            f"{health_timeout}s.\nCommand: {' '.join(cmd)}"
         )
         raise RuntimeError(msg)
 
-    yield server
+    # Store in cache
+    _server_cache[cache_key] = popen
 
-    # Teardown.
-    stderr_text = await _terminate_process(process)
-    server.stderr_text = stderr_text
+    # Clear sessions for OpenCode (first use of cached server)
+    if serve_command == "serve-opencode":
+        await _clear_sessions(f"http://{host}:{port}")
+
+    server = SubprocessServer(
+        process=popen,
+        host=host,
+        port=port,
+        is_stdio=False,
+    )
+    yield server
+    # Do NOT terminate cached servers (Task 3.6)
 
 
 async def _spawn_server(
@@ -524,13 +763,15 @@ async def _spawn_server(
 async def subprocess_server_with_tool(
     request: pytest.FixtureRequest,
     process_registry: ProcessRegistry,
-    e2e_config_with_tool: Path,
+    session_e2e_config_with_tool: Path,
     allow_model_requests: Any,
 ) -> AsyncIterator[SubprocessServer]:
     """Spawn a server with the tool-enabled config (model: test with call_tools).
 
-    Uses the same parameters as ``subprocess_server`` but with the
-    ``e2e_config_with_tool`` fixture providing the YAML config.
+    Uses the same cache logic as ``subprocess_server`` but with the
+    ``session_e2e_config_with_tool`` fixture providing the YAML config.
+    The cache key uses ``"with_tool"`` as the config type to avoid collisions
+    with the default config cache entries.
     """
     params = getattr(request, "param", {"serve_command": "serve-opencode"})
     serve_command: str = params.get("serve_command", "serve-opencode")
@@ -540,17 +781,118 @@ async def subprocess_server_with_tool(
     health_path: str = params.get("health_path", "/")
     extra_args: list[str] | None = params.get("extra_args")
 
-    async for server in _spawn_server(
-        serve_command,
-        e2e_config_with_tool,
-        process_registry=process_registry,
-        host=host,
-        is_stdio=is_stdio,
-        health_timeout=health_timeout,
-        health_path=health_path,
-        extra_args=extra_args,
-    ):
+    # Determine if cache should be bypassed
+    no_cache = (
+        bool(request.config.getoption("--no-server-cache", default=False))
+        or is_stdio
+        or _xdist_cache_disabled["disabled"]
+        or request.node.get_closest_marker("isolated") is not None
+    )
+
+    if no_cache:
+        async for server in _spawn_server(
+            serve_command,
+            session_e2e_config_with_tool,
+            process_registry=process_registry,
+            host=host,
+            is_stdio=is_stdio,
+            health_timeout=health_timeout,
+            health_path=health_path,
+            extra_args=extra_args,
+        ):
+            yield server
+        return
+
+    # --- Cached path ---
+    cache_key = (serve_command, is_stdio, health_path, str(extra_args), "with_tool")
+
+    # Check cache for existing server
+    cached_popen = _server_cache.get(cache_key)
+
+    if cached_popen is not None:
+        # Cache hit: check if process is still alive
+        if cached_popen.poll() is not None:
+            # Crashed — remove from cache and fall through to spawn
+            _server_cache.pop(cache_key, None)
+            cached_popen = None
+        else:
+            # Process alive — quick socket health check
+            port = cached_popen._e2e_port  # type: ignore[attr-defined]
+            healthy = await _health_check_socket(host, port, timeout=2.0)
+            if not healthy:
+                # Stale — terminate and re-spawn
+                _terminate_popen(cached_popen)
+                _server_cache.pop(cache_key, None)
+                cached_popen = None
+
+    if cached_popen is not None:
+        # Cache hit: clear sessions for OpenCode servers
+        cached_port = cached_popen._e2e_port  # type: ignore[attr-defined]
+        base_url = f"http://{host}:{cached_port}"
+        if serve_command == "serve-opencode":
+            await _clear_sessions(base_url)
+
+        server = SubprocessServer(
+            process=cached_popen,
+            host=host,
+            port=cached_port,
+            is_stdio=False,
+        )
         yield server
+        # Do NOT terminate cached servers
+        return
+
+    # Cache miss: spawn new server via Popen
+    port = allocate_ephemeral_port()
+    cmd = _build_command(
+        serve_command,
+        str(session_e2e_config_with_tool),
+        host=host,
+        port=port,
+        extra_args=extra_args,
+    )
+
+    env = os.environ.copy()
+    env["OBSERVABILITY_ENABLED"] = "false"
+    env["LOGFIRE_DISABLE"] = "true"
+
+    popen = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=env,
+    )
+    # Store port on the Popen object for later retrieval
+    popen._e2e_port = port  # type: ignore[attr-defined]
+    popen._e2e_host = host  # type: ignore[attr-defined]
+
+    process_registry.register(popen)
+
+    # Health check via raw socket
+    healthy = await _health_check_socket(host, port, timeout=health_timeout)
+    if not healthy:
+        _terminate_popen(popen)
+        msg = (
+            f"Server {serve_command} failed to become healthy within "
+            f"{health_timeout}s.\nCommand: {' '.join(cmd)}"
+        )
+        raise RuntimeError(msg)
+
+    # Store in cache
+    _server_cache[cache_key] = popen
+
+    # Clear sessions for OpenCode (first use of cached server)
+    if serve_command == "serve-opencode":
+        await _clear_sessions(f"http://{host}:{port}")
+
+    server = SubprocessServer(
+        process=popen,
+        host=host,
+        port=port,
+        is_stdio=False,
+    )
+    yield server
+    # Do NOT terminate cached servers
 
 
 # ---------------------------------------------------------------------------
@@ -712,15 +1054,22 @@ def verify_no_orphaned_processes(
     After all e2e tests complete, this checks that every process registered
     with the ``process_registry`` has terminated. If any are still running,
     it forcibly kills them and emits a warning.
+
+    For ``subprocess.Popen`` handles (cached servers), uses graceful
+    SIGTERM → wait(5s) → SIGKILL via ``_terminate_popen``.
+    For ``asyncio.subprocess.Process`` handles, uses bare ``proc.kill()``.
     """
     yield
 
-    orphans: list[asyncio.subprocess.Process] = [
+    orphans: list[asyncio.subprocess.Process | subprocess.Popen] = [
         p for p in process_registry.processes if p.returncode is None
     ]
     for proc in orphans:
-        with contextlib.suppress(ProcessLookupError):
-            proc.kill()
+        if isinstance(proc, subprocess.Popen):
+            _terminate_popen(proc)
+        else:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
     if orphans:
         import warnings
 
