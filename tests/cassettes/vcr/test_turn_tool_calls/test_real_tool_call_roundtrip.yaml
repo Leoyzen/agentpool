@@ -8,7 +8,7 @@ interactions:
       connection:
       - keep-alive
       content-length:
-      - '4732'
+      - '5109'
       content-type:
       - application/json
       host:
@@ -16,67 +16,23 @@ interactions:
     method: POST
     parsed_body:
       messages:
-      - content: 'You are test_agent.
-
+      - content: |-
+          You are test_agent.
 
           You are a helpful test assistant for VCR cassette replay.
-
           <available-skills>
-
-          <skill name="example-skill" description="A simple example skill that demonstrates
-          the basic structure and functionality. Use when you need to show how skills
-          work or test skill loading." />
-
-          <skill name="openspec-apply-change" description="Implement tasks from an
-          OpenSpec change. Use when the user wants to start implementing, continue
-          implementation, or work through tasks." />
-
-          <skill name="openspec-explore" description="Enter explore mode - a thinking
-          partner for exploring ideas, investigating problems, and clarifying requirements.
-          Use when the user wants to think through something before or during a change."
-          />
-
-          <skill name="openspec-archive-change" description="Archive a completed change
-          in the experimental workflow. Use when the user wants to finalize and archive
-          a change after implementation is complete." />
-
-          <skill name="openspec-propose" description="Propose a new change with all
-          artifacts generated in one step. Use when the user wants to quickly describe
-          what they want to build and get a complete proposal with design, specs,
-          and tasks ready for implementation." />
-
-          <skill name="systematic-debugging" description="Use when encountering any
-          bug, test failure, or unexpected behavior, before proposing fixes" />
-
-          <skill name="metaskill" description="The meta-skill: create AI agent teams,
-          individual agents, or custom skills for any project. Use when the user wants
-          to generate a complete .claude/ agent team, create a single agent, or create
-          a single skill." />
-
-          <skill name="uv-package-manager" description="Master the uv package manager
-          for fast Python dependency management, virtual environments, and modern
-          Python project workflows. Use when setting up Python projects, managing
-          dependencies, or optimizing Python development workflows with uv." />
-
-          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous
-          skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md
-          files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing
-          with git version control, validates improvements through test prompts, and
-          generates visual result cards. Use when user mentions &quot;优化skill&quot;,
-          &quot;skill评分&quot;, &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;,
-          &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;,
-          &quot;提升skill质量&quot;, &quot;skill review&quot;, &quot;skill打分&quot;." />
-
-          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned
-          with company objectives -- qualitative objectives with measurable key results.
-          Use when setting quarterly OKRs, aligning team goals with company strategy,
-          drafting objectives, or learning how to write effective OKRs." />
-
-          <skill name="code-review-expert" description="Expert code review of current
-          git changes with a senior engineer lens. Detects SOLID violations, security
-          risks, and proposes actionable improvements." />
-
-          </available-skills>'
+          <skill name="example-skill" description="A simple example skill that demonstrates the basic structure and functionality. Use when you need to show how skills work or test skill loading." />
+          <skill name="openspec-apply-change" description="Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks." />
+          <skill name="openspec-explore" description="Enter explore mode - a thinking partner for exploring ideas, investigating problems, and clarifying requirements. Use when the user wants to think through something before or during a change." />
+          <skill name="openspec-archive-change" description="Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete." />
+          <skill name="openspec-propose" description="Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and tasks ready for implementation." />
+          <skill name="systematic-debugging" description="Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes" />
+          <skill name="metaskill" description="The meta-skill: create AI agent teams, individual agents, or custom skills for any project. Use when the user wants to generate a complete .claude/ agent team, create a single agent, or create a single skill." />
+          <skill name="uv-package-manager" description="Master the uv package manager for fast Python dependency management, virtual environments, and modern Python project workflows. Use when setting up Python projects, managing dependencies, or optimizing Python development workflows with uv." />
+          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing with git version control, validates improvements through test prompts, and generates visual result cards. Use when user mentions &quot;优化skill&quot;, &quot;skill评分&quot;, &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;, &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;, &quot;提升skill质量&quot;, &quot;skill review&quot;, &quot;skill打分&quot;." />
+          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned with company objectives -- qualitative objectives with measurable key results. Use when setting quarterly OKRs, aligning team goals with company strategy, drafting objectives, or learning how to write effective OKRs." />
+          <skill name="code-review-expert" description="Expert code review of current git changes with a senior engineer lens. Detects SOLID violations, security risks, and proposes actionable improvements." />
+          </available-skills>
         role: system
       - content:
         - text: Use the echo tool with the text 'hello'.
@@ -89,12 +45,18 @@ interactions:
       tool_choice: auto
       tools:
       - function:
-          description: "Load a Claude Code Skill and return its instructions.\n\n\
-            Args:\n    ctx: Agent context providing access to pool and skills\n  \
-            \  skill_name: Name of the skill to load, or a skill:// URI.\n       \
-            \ Use skill:// URI to load a specific reference file:\n        skill://skill-name/references/file.md\n\
-            \    arguments: Optional space-separated arguments for substitution\n\n\
-            Returns:\n    The full skill instructions for execution"
+          description: |-
+            Load a Claude Code Skill and return its instructions.
+
+            Args:
+                ctx: Agent context providing access to pool and skills
+                skill_name: Name of the skill to load, or a skill:// URI.
+                    Use skill:// URI to load a specific reference file:
+                    skill://skill-name/references/file.md
+                arguments: Optional space-separated arguments for substitution
+
+            Returns:
+                The full skill instructions for execution
           name: load_skill
           parameters:
             additionalProperties: false
@@ -106,203 +68,78 @@ interactions:
                 default: null
                 description: Optional space-separated arguments for substitution
               skill_name:
-                description: 'Name of the skill to load, or a skill:// URI.
-
+                description: |-
+                  Name of the skill to load, or a skill:// URI.
                   Use skill:// URI to load a specific reference file:
-
-                  skill://skill-name/references/file.md'
+                  skill://skill-name/references/file.md
                 type: string
             required:
             - skill_name
             type: object
         type: function
       - function:
-          description: "List all available skills.\n\nReturns:\n    Formatted list\
-            \ of available skills with descriptions and URI information"
+          description: |-
+            List all available skills.
+
+            Returns:
+                Formatted list of available skills with descriptions and URI information
           name: list_skills
           parameters:
             additionalProperties: false
             properties: {}
             type: object
         type: function
+      - function:
+          description: |-
+            Echo the provided text back to the caller.
+
+            Args:
+                text: The text to echo.
+
+            Returns:
+                The same text, unchanged.
+          name: echo
+          parameters:
+            additionalProperties: false
+            properties:
+              text:
+                description: The text to echo.
+                type: string
+            required:
+            - text
+            type: object
+          strict: true
+        type: function
     uri: http://api.ai.rootcloud.info/v1/chat/completions
   response:
     body:
-      string: 'data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+      string: |+
+        data: {"id":"chatcmpl-af63084aa196e834","object":"chat.completion.chunk","created":1784396464,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
 
+        data: {"id":"chatcmpl-af63084aa196e834","created":1784396464,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"The"}}]}
 
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"The"}}]}
+        data: {"id":"chatcmpl-af63084aa196e834","created":1784396464,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" user wants me to use"}}]}
 
+        data: {"id":"chatcmpl-af63084aa196e834","created":1784396464,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" the echo tool with the text '"}}]}
 
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        user wants me"}}]}
+        data: {"id":"chatcmpl-af63084aa196e834","created":1784396464,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"hello'. This"}}]}
 
+        data: {"id":"chatcmpl-af63084aa196e834","created":1784396464,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" is straightforward"}}]}
 
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        to use the \"echo tool"}}]}
+        data: {"id":"chatcmpl-af63084aa196e834","created":1784396464,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"."}}]}
 
+        data: {"id":"chatcmpl-af63084aa196e834","created":1784396464,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-b8bb52747d9464b9","function":{"arguments":"","name":"echo"},"type":"function","index":0}]}}]}
 
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"\"
-        but"}}]}
+        data: {"id":"chatcmpl-af63084aa196e834","created":1784396464,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"{\"text\": \""},"type":"function","index":0}]}}]}
 
+        data: {"id":"chatcmpl-af63084aa196e834","created":1784396464,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"hello\"}"},"type":"function","index":0}]}}]}
 
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        I don''t see"}}]}
+        data: {"id":"chatcmpl-af63084aa196e834","object":"chat.completion.chunk","created":1784396464,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
 
-
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        an echo tool available in my tools"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        list"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".
-        Let me check again"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"..."}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"\n\nMy
-        available tools are:\n1"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".
-        `load_skill`"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        - Load a Claude"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        Code Skill\n2. `list_"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"skills`
-        - List all available skills"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"\n\nThere"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        is no echo"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        tool available. I should let"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        the user know that I don''t have"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        an echo tool accessible"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".","content":"I''m"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        sorry, but I don''t have an"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        **"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"echo**"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        tool available in my current set"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        of tools. \n\n"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"Here"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        are the tools I do"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        have access to:\n\n-"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        **`load_skill`**"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        –"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        Load a Claude Code Skill\n"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"-
-        **`list_skills`**"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        – List all available skills\n\nIs"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        there perhaps"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        another"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        way I"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        can help you?"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        For example, I could"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        load a skill for"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        you or"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        list the"}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        available skills."}}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","object":"chat.completion.chunk","created":1784381119,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
-
-
-        data: {"id":"chatcmpl-aa960bee693eef91","created":1784381119,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":175,"prompt_tokens":1142,"total_tokens":1317,"completion_tokens_details":{"reasoning_tokens":83}}}
-
+        data: {"id":"chatcmpl-af63084aa196e834","created":1784396464,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":63,"prompt_tokens":1225,"total_tokens":1288,"completion_tokens_details":{"reasoning_tokens":19}}}
 
         data: [DONE]
 
-
-        '
     headers:
       cache-control:
       - no-cache
@@ -313,14 +150,194 @@ interactions:
       content-type:
       - text/event-stream; charset=utf-8
       req-arrive-time:
-      - '1784381118988'
+      - '1784396464039'
       req-cost-time:
-      - '568'
+      - '120'
       resp-start-time:
-      - '1784381119556'
+      - '1784396464159'
+      transfer-encoding:
+      - chunked
+    status:
+      code: 200
+      message: OK
+- request:
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, br
+      connection:
+      - keep-alive
+      content-length:
+      - '5494'
+      content-type:
+      - application/json
+      host:
+      - api.ai.rootcloud.info
+    method: POST
+    parsed_body:
+      messages:
+      - content: |-
+          You are test_agent.
+
+          You are a helpful test assistant for VCR cassette replay.
+          <available-skills>
+          <skill name="example-skill" description="A simple example skill that demonstrates the basic structure and functionality. Use when you need to show how skills work or test skill loading." />
+          <skill name="openspec-apply-change" description="Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks." />
+          <skill name="openspec-explore" description="Enter explore mode - a thinking partner for exploring ideas, investigating problems, and clarifying requirements. Use when the user wants to think through something before or during a change." />
+          <skill name="openspec-archive-change" description="Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete." />
+          <skill name="openspec-propose" description="Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and tasks ready for implementation." />
+          <skill name="systematic-debugging" description="Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes" />
+          <skill name="metaskill" description="The meta-skill: create AI agent teams, individual agents, or custom skills for any project. Use when the user wants to generate a complete .claude/ agent team, create a single agent, or create a single skill." />
+          <skill name="uv-package-manager" description="Master the uv package manager for fast Python dependency management, virtual environments, and modern Python project workflows. Use when setting up Python projects, managing dependencies, or optimizing Python development workflows with uv." />
+          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing with git version control, validates improvements through test prompts, and generates visual result cards. Use when user mentions &quot;优化skill&quot;, &quot;skill评分&quot;, &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;, &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;, &quot;提升skill质量&quot;, &quot;skill review&quot;, &quot;skill打分&quot;." />
+          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned with company objectives -- qualitative objectives with measurable key results. Use when setting quarterly OKRs, aligning team goals with company strategy, drafting objectives, or learning how to write effective OKRs." />
+          <skill name="code-review-expert" description="Expert code review of current git changes with a senior engineer lens. Detects SOLID violations, security risks, and proposes actionable improvements." />
+          </available-skills>
+        role: system
+      - content:
+        - text: Use the echo tool with the text 'hello'.
+          type: text
+        role: user
+      - content: null
+        reasoning_content: The user wants me to use the echo tool with the text 'hello'. This is straightforward.
+        role: assistant
+        tool_calls:
+        - function:
+            arguments: '{"text": "hello"}'
+            name: echo
+          id: chatcmpl-tool-b8bb52747d9464b9
+          type: function
+      - content: hello
+        role: tool
+        tool_call_id: chatcmpl-tool-b8bb52747d9464b9
+      model: svc/deepseek-v4-flash
+      stream: true
+      stream_options:
+        include_usage: true
+      tool_choice: auto
+      tools:
+      - function:
+          description: |-
+            Load a Claude Code Skill and return its instructions.
+
+            Args:
+                ctx: Agent context providing access to pool and skills
+                skill_name: Name of the skill to load, or a skill:// URI.
+                    Use skill:// URI to load a specific reference file:
+                    skill://skill-name/references/file.md
+                arguments: Optional space-separated arguments for substitution
+
+            Returns:
+                The full skill instructions for execution
+          name: load_skill
+          parameters:
+            additionalProperties: false
+            properties:
+              arguments:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+                description: Optional space-separated arguments for substitution
+              skill_name:
+                description: |-
+                  Name of the skill to load, or a skill:// URI.
+                  Use skill:// URI to load a specific reference file:
+                  skill://skill-name/references/file.md
+                type: string
+            required:
+            - skill_name
+            type: object
+        type: function
+      - function:
+          description: |-
+            List all available skills.
+
+            Returns:
+                Formatted list of available skills with descriptions and URI information
+          name: list_skills
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+      - function:
+          description: |-
+            Echo the provided text back to the caller.
+
+            Args:
+                text: The text to echo.
+
+            Returns:
+                The same text, unchanged.
+          name: echo
+          parameters:
+            additionalProperties: false
+            properties:
+              text:
+                description: The text to echo.
+                type: string
+            required:
+            - text
+            type: object
+          strict: true
+        type: function
+    uri: http://api.ai.rootcloud.info/v1/chat/completions
+  response:
+    body:
+      string: |+
+        data: {"id":"chatcmpl-ace821580859e1ad","object":"chat.completion.chunk","created":1784396464,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+
+        data: {"id":"chatcmpl-ace821580859e1ad","created":1784396464,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"The"}}]}
+
+        data: {"id":"chatcmpl-ace821580859e1ad","created":1784396464,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" echo tool returned"}}]}
+
+        data: {"id":"chatcmpl-ace821580859e1ad","created":1784396464,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" \"hello\" as expected"}}]}
+
+        data: {"id":"chatcmpl-ace821580859e1ad","created":1784396464,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".","content":"Here"}}]}
+
+        data: {"id":"chatcmpl-ace821580859e1ad","object":"chat.completion.chunk","created":1784396464,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" you"}}]}
+
+        data: {"id":"chatcmpl-ace821580859e1ad","object":"chat.completion.chunk","created":1784396464,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" go! I"}}]}
+
+        data: {"id":"chatcmpl-ace821580859e1ad","object":"chat.completion.chunk","created":1784396464,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" called"}}]}
+
+        data: {"id":"chatcmpl-ace821580859e1ad","object":"chat.completion.chunk","created":1784396464,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" the echo tool with the text"}}]}
+
+        data: {"id":"chatcmpl-ace821580859e1ad","object":"chat.completion.chunk","created":1784396464,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" `'hello'`"}}]}
+
+        data: {"id":"chatcmpl-ace821580859e1ad","object":"chat.completion.chunk","created":1784396464,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" and it returned:\n\n"}}]}
+
+        data: {"id":"chatcmpl-ace821580859e1ad","object":"chat.completion.chunk","created":1784396464,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"```\nhello\n"}}]}
+
+        data: {"id":"chatcmpl-ace821580859e1ad","object":"chat.completion.chunk","created":1784396464,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"```"}}]}
+
+        data: {"id":"chatcmpl-ace821580859e1ad","object":"chat.completion.chunk","created":1784396464,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+        data: {"id":"chatcmpl-ace821580859e1ad","created":1784396464,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":37,"prompt_tokens":1300,"total_tokens":1337,"completion_tokens_details":{"reasoning_tokens":10}}}
+
+        data: [DONE]
+
+    headers:
+      cache-control:
+      - no-cache
+      connection:
+      - close
+      content-security-policy:
+      - frame-ancestors 'none'
+      content-type:
+      - text/event-stream; charset=utf-8
+      req-arrive-time:
+      - '1784396464466'
+      req-cost-time:
+      - '106'
+      resp-start-time:
+      - '1784396464572'
       transfer-encoding:
       - chunked
     status:
       code: 200
       message: OK
 version: 1
+...

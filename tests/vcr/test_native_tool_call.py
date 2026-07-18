@@ -48,13 +48,6 @@ def echo(text: str) -> str:
     not cassette_exists(_MODULE_STEM, "test_tool_call_roundtrip"),
     reason="Cassette not recorded yet — run with --record-mode=once",
 )
-@pytest.mark.xfail(
-    reason="_temporary_tools registers tool on _builtin_provider but it is not "
-    "passed to the model API (bug in get_agentlet capability iteration)",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 async def test_tool_call_roundtrip(vcr_pool: AgentPool) -> None:
     """The model calls the ``echo`` tool and incorporates its result.
 
@@ -91,13 +84,6 @@ async def test_tool_call_roundtrip(vcr_pool: AgentPool) -> None:
     not cassette_exists(_MODULE_STEM, "test_tool_call_event_structure"),
     reason="Cassette not recorded yet — run with --record-mode=once",
 )
-@pytest.mark.xfail(
-    reason="_temporary_tools registers tool on _builtin_provider but it is not "
-    "passed to the model API (bug in get_agentlet capability iteration)",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 async def test_tool_call_event_structure(vcr_pool: AgentPool) -> None:
     """Tool-call events carry the expected structural fields.
 
@@ -122,13 +108,6 @@ async def test_tool_call_event_structure(vcr_pool: AgentPool) -> None:
     not cassette_exists(_MODULE_STEM, "test_tool_result_in_response"),
     reason="Cassette not recorded yet — run with --record-mode=once",
 )
-@pytest.mark.xfail(
-    reason="_temporary_tools registers tool on _builtin_provider but it is not "
-    "passed to the model API (bug in get_agentlet capability iteration)",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 async def test_tool_result_in_response(vcr_pool: AgentPool) -> None:
     """The final assistant message references the tool's output.
 

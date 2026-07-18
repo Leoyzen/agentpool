@@ -101,13 +101,6 @@ async def test_crash_recovery_retry(vcr_pool: AgentPool) -> None:
     not cassette_exists(_MODULE_STEM, "test_tool_execution_log_idempotency"),
     reason="Cassette not recorded yet — run with --record-mode=once",
 )
-@pytest.mark.xfail(
-    reason="_temporary_tools registers tool on _builtin_provider but it is not "
-    "passed to the model API (bug in get_agentlet capability iteration)",
-    strict=False,
-    raises=(AssertionError, AttributeError),
-)
-@pytest.mark.known_bug
 async def test_tool_execution_log_idempotency(vcr_pool: AgentPool) -> None:
     """The tool execution log records completed tool calls for idempotent retry.
 

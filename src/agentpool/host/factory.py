@@ -358,6 +358,13 @@ class AgentFactory:
         # Start hot-swap listeners for capabilities with on_change().
         await self._start_hot_swap_listeners(agent_name, agent, caps)
 
+        # Set the agent's home session context so that run_stream() without
+        # an explicit session_id reuses this session (and this agent instance)
+        # instead of generating a new one. This preserves instance-level
+        # state mutations such as _temporary_tools, /register-tool, and
+        # override(tools=...) — see issue #204.
+        agent.set_session_context(session_id)
+
         # Pass lifecycle config from agent config to the agent instance
         # so the RunLoop can create durable dimensions when configured.
         agent._lifecycle_config = cfg.lifecycle
