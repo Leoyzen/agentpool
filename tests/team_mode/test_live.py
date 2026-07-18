@@ -1,21 +1,24 @@
 """L4 live model tests for the dynamic team mode feature.
 
 These tests exercise the full ``AgentPool`` + ``SessionPool`` stack against
-real model API endpoints.  They are **skipped by default** and only run when
-the ``--run-real-models`` pytest flag is passed, ensuring CI does not incur
-API costs.
+real model API endpoints.  They are **skipped by default** — the
+``@pytest.mark.real_model`` marker auto-skips when neither
+``OPENAI_API_KEY`` nor ``MODEL_GATEWAY_URL`` is set (handled by
+``pytest_collection_modifyitems`` in ``tests/conftest.py``).
 
 Run manually::
 
-    uv run pytest tests/integration/test_team_live.py -v --run-real-models
+    OPENAI_API_KEY=sk-... uv run pytest tests/team_mode/test_live.py \
+        -v -m "real_model and e2e"
 
-Requires one of ``OPENAI_API_KEY`` or ``MODEL_GATEWAY_URL`` environment
-variables to be set.
+Or with a model gateway::
+
+    MODEL_GATEWAY_URL=... uv run pytest tests/team_mode/test_live.py \
+        -v -m "real_model and e2e"
 """
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -24,24 +27,6 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
-
-
-# ---------------------------------------------------------------------------
-# pytest CLI option + fixture
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def run_real_models(request: pytest.FixtureRequest) -> None:
-    """Skip tests unless ``--run-real-models`` is passed and credentials exist.
-
-    Returns:
-        None — the fixture's sole purpose is to gate test execution.
-    """
-    if not request.config.getoption("--run-real-models"):
-        pytest.skip("Needs --run-real-models flag to run")
-    if not os.environ.get("OPENAI_API_KEY") and not os.environ.get("MODEL_GATEWAY_URL"):
-        pytest.skip("Needs OPENAI_API_KEY or MODEL_GATEWAY_URL environment variable")
 
 
 # ---------------------------------------------------------------------------
@@ -81,14 +66,7 @@ team_mode:
 
 
 def _create_test_config(tmp_path: Path) -> Path:
-    """Write the test team-mode config YAML to ``tmp_path``.
-
-    Args:
-        tmp_path: pytest-provided temporary directory.
-
-    Returns:
-        Path to the written YAML config file.
-    """
+    """Write the test team-mode config YAML to ``tmp_path``."""
     config_path = tmp_path / "test-team-live.yaml"
     config_path.write_text(_LIVE_CONFIG_YAML)
     return config_path
@@ -100,28 +78,14 @@ def _create_test_config(tmp_path: Path) -> Path:
 
 
 def _collect_tool_names(events: list[Any]) -> list[str]:
-    """Extract tool names from ``ToolCallStartEvent`` entries.
-
-    Args:
-        events: Collected stream events.
-
-    Returns:
-        Ordered list of tool names that were invoked during the run.
-    """
+    """Extract tool names from ``ToolCallStartEvent`` entries."""
     from agentpool.agents.events.events import ToolCallStartEvent
 
     return [e.tool_name for e in events if isinstance(e, ToolCallStartEvent)]
 
 
 def _collect_text(events: list[Any]) -> str:
-    """Concatenate all text deltas from ``PartDeltaEvent`` entries.
-
-    Args:
-        events: Collected stream events.
-
-    Returns:
-        Full text response from the model.
-    """
+    """Concatenate all text deltas from ``PartDeltaEvent`` entries."""
     from pydantic_ai import TextPartDelta, ThinkingPartDelta
 
     from agentpool.agents.events.events import PartDeltaEvent
@@ -139,19 +103,9 @@ def _collect_text(events: list[Any]) -> str:
     return "".join(parts)
 
 
-async def _drain_events(
-    stream: AsyncIterator[Any],
-) -> list[Any]:
-    """Collect all events from an async iterator into a list.
-
-    Args:
-        stream: An async iterator of stream events.
-
-    Returns:
-        List of all events yielded by the stream.
-    """
-    events: list[Any] = [event async for event in stream]
-    return events
+async def _drain_events(stream: AsyncIterator[Any]) -> list[Any]:
+    """Collect all events from an async iterator into a list."""
+    return [event async for event in stream]
 
 
 # ---------------------------------------------------------------------------
@@ -182,13 +136,10 @@ _REQUIRED_TOOLS = {
 }
 
 
-@pytest.mark.integration
+@pytest.mark.e2e
+@pytest.mark.real_model
 @pytest.mark.slow
-@pytest.mark.run_real_models
-async def test_live_full_team_lifecycle(
-    run_real_models: None,
-    tmp_path: Path,
-) -> None:
+async def test_live_full_team_lifecycle(tmp_path: Path) -> None:
     """Given: a live AgentPool with team mode enabled.
 
     When: the lead agent is asked to create a team, check status, create and
@@ -223,13 +174,10 @@ async def test_live_full_team_lifecycle(
     )
 
 
-@pytest.mark.integration
+@pytest.mark.e2e
+@pytest.mark.real_model
 @pytest.mark.slow
-@pytest.mark.run_real_models
-async def test_live_member_session_cleanup(
-    run_real_models: None,
-    tmp_path: Path,
-) -> None:
+async def test_live_member_session_cleanup(tmp_path: Path) -> None:
     """Given: a live AgentPool with team mode enabled.
 
     When: the lead agent creates a team with one member, then deletes the
@@ -273,13 +221,10 @@ async def test_live_member_session_cleanup(
     )
 
 
-@pytest.mark.integration
+@pytest.mark.e2e
+@pytest.mark.real_model
 @pytest.mark.slow
-@pytest.mark.run_real_models
-async def test_live_team_status_reflects_members(
-    run_real_models: None,
-    tmp_path: Path,
-) -> None:
+async def test_live_team_status_reflects_members(tmp_path: Path) -> None:
     """Given: a live AgentPool with team mode enabled.
 
     When: the lead agent creates a team with two members and checks status.

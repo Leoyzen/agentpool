@@ -65,6 +65,27 @@ agents:
     system_prompt: "You are a worker agent. Complete tasks concisely."
 """
 
+# Config with team_mode enabled for dynamic team mode VCR tests.
+VCR_POOL_CONFIG_TEAM_MODE = """\
+agents:
+  team_lead:
+    type: native
+    model: openai:gpt-4o-mini
+    system_prompt: "You are a team lead. Use team tools to coordinate members."
+  team_member:
+    type: native
+    model: openai:gpt-4o-mini
+    system_prompt: "You are a team member. Follow instructions from the lead."
+
+team_mode:
+  enabled: true
+  lead_eligible:
+    - team_lead
+  member_eligible:
+    - team_lead
+    - team_member
+"""
+
 
 def _build_manifest(yaml_text: str) -> AgentsManifest:
     """Parse inline YAML into an ``AgentsManifest``."""
@@ -104,6 +125,19 @@ async def vcr_pool_with_tool() -> AsyncIterator[AgentPool]:
 async def vcr_pool_with_subagent() -> AsyncIterator[AgentPool]:
     """Real ``AgentPool`` with a coordinator + worker for delegation tests."""
     manifest = _build_manifest(VCR_POOL_CONFIG_WITH_SUBAGENT)
+    async with AgentPool(manifest) as pool:
+        yield pool
+
+
+@pytest.fixture
+async def vcr_team_pool() -> AsyncIterator[AgentPool]:
+    """Real ``AgentPool`` with ``team_mode`` enabled for VCR team-mode tests.
+
+    Two agents: ``team_lead`` (lead-eligible) and ``team_member``
+    (member-eligible). VCR intercepts model API HTTP calls — the pool,
+    agents, capabilities, EventBus, SessionController all run for real.
+    """
+    manifest = _build_manifest(VCR_POOL_CONFIG_TEAM_MODE)
     async with AgentPool(manifest) as pool:
         yield pool
 

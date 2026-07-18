@@ -247,24 +247,6 @@ def remap_hardcoded_test_models():
         yield
 
 
-def pytest_addoption(parser: pytest.Parser) -> None:
-    """Register the ``--run-real-models`` CLI flag for live model tests."""
-    parser.addoption(
-        "--run-real-models",
-        action="store_true",
-        default=False,
-        help="Run live model tests that make real API calls",
-    )
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    """Register custom markers for live model tests."""
-    config.addinivalue_line(
-        "markers",
-        "run_real_models: marks tests that require real model API calls",
-    )
-
-
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Auto-skip credential-dependent and thinking-incompatible tests.
 
@@ -278,7 +260,11 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     is_thinking_model = any(p in model for p in _thinking_model_prefixes)
 
     for item in items:
-        if "real_model" in item.keywords and not os.environ.get("OPENAI_API_KEY"):
+        if (
+            "real_model" in item.keywords
+            and not os.environ.get("OPENAI_API_KEY")
+            and not os.environ.get("MODEL_GATEWAY_URL")
+        ):
             item.add_marker(
                 pytest.mark.skip(
                     reason="OPENAI_API_KEY not set — skipping credential-dependent test",
@@ -624,7 +610,7 @@ def disable_ssrf_protection_for_vcr() -> Iterator[None]:
 
 
 def pytest_addoption(parser: Any) -> None:
-    """Add VCR-related pytest command-line options."""
+    """Register pytest command-line options."""
     parser.addoption(
         "--strict-vcr-cassette-usage",
         action="store_true",
