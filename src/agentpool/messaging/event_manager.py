@@ -356,8 +356,11 @@ class EventManager:
         for name in list(self._sources):
             await self.remove_source(name)
 
-        # Wait for all event processing tasks to complete
+        # Cancel and wait for all event processing tasks, then clear.
         if self._event_tasks:
+            for task in self._event_tasks:
+                if not task.done():
+                    task.cancel()
             await asyncio.gather(*self._event_tasks, return_exceptions=True)
         self._event_tasks.clear()
 

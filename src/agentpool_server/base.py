@@ -107,10 +107,24 @@ class BaseServer:
                 raise
             self.log.exception("Server error", exc_info=e)
         finally:
-            try:
-                await self._task_group.close()
-            finally:
-                await self.shutdown()
+            await self._safe_close_task_group()
+            await self.shutdown()
+
+    async def _safe_close_task_group(self) -> None:
+        """Close the task group, suppressing and logging any errors.
+
+        This prevents cleanup errors from masking the original exception
+        that triggered the finally block.
+        """
+        try:
+            await self._task_group.close()
+        except BaseExceptionGroup as eg:
+            # Filter out CancelledError (expected during shutdown)
+            _, real_errors = eg.split(lambda e: isinstance(e, asyncio.CancelledError))
+            if real_errors is not None:
+                self.log.warning("Errors during task group shutdown", exc_info=real_errors)
+        except Exception as e:  # noqa: BLE001
+            self.log.warning("Unexpected error closing task group", exc_info=e)
 
     async def shutdown(self) -> None:
         """Shutdown server resources.

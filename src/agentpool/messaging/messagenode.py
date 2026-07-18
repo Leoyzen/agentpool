@@ -235,8 +235,11 @@ class MessageNode[TDeps, TResult](ABC):
         await self._events.__aexit__(exc_type, exc_val, exc_tb)
         if not self._mcp_shared:
             await self.mcp.__aexit__(exc_type, exc_val, exc_tb)
-        # Wait for all pending background tasks to complete, then clear.
+        # Cancel and wait for all pending background tasks, then clear.
         if self._pending_tasks:
+            for task in self._pending_tasks:
+                if not task.done():
+                    task.cancel()
             await asyncio.gather(*self._pending_tasks, return_exceptions=True)
         self._pending_tasks.clear()
 

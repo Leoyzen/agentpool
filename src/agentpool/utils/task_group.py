@@ -157,8 +157,6 @@ class ManagedTaskGroup:
         """Start a task on the underlying TG with active-count tracking."""
         assert self._tg is not None
         self._active_count += 1
-        if self._idle_event is not None:
-            self._idle_event = None  # invalidate; will be recreated if needed
 
         async def _tracked() -> None:
             try:

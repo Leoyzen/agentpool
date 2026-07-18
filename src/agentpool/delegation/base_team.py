@@ -288,11 +288,18 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
 
     async def stop(self) -> None:
         """Stop background execution if running."""
-        if self._main_task and not self._main_task.done():
-            self._main_task.cancel()
-            await self._main_task
-        self._main_task = None
-        await self._cleanup_pending_tasks()
+        try:
+            if self._main_task and not self._main_task.done():
+                self._main_task.cancel()
+                try:
+                    await self._main_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:  # noqa: BLE001
+                    self.log.warning("Main task raised during shutdown", exc_info=e)
+        finally:
+            self._main_task = None
+            await self._cleanup_pending_tasks()
 
     async def wait(self) -> ChatMessage[Any] | None:
         """Wait for background execution to complete and return last message."""

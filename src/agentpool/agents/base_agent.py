@@ -1062,9 +1062,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             )
             if effective_session_id is not None:
                 combined = "\n".join(str(p) for p in prompts)
-                self.fire_and_forget(
-                    session_pool.followup(effective_session_id, combined)
-                )
+                self.fire_and_forget(session_pool.followup(effective_session_id, combined))
                 return
 
         # Standalone agents: use injection_manager
@@ -1123,9 +1121,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             sessions = session_pool.sessions.find_sessions_by_agent_name(self.name)
             if sessions:
                 most_recent = max(sessions, key=lambda s: s.last_active_at)
-                self.fire_and_forget(
-                    session_pool.steer(most_recent.session_id, message)
-                )
+                self.fire_and_forget(session_pool.steer(most_recent.session_id, message))
                 return
 
         # Standalone agents: use injection_manager
