@@ -150,11 +150,9 @@ async def test_streaming_part_start_structure(vcr_pool: AgentPool) -> None:
 
     # PartStartEvent.part contains the content part (TextPart, ThinkingPart, etc.).
     first_start = starts[0]
-    assert first_start.part is not None, "PartStartEvent.part should not be None"
     assert isinstance(first_start.part, TextPart | ThinkingPart), (
         f"Expected TextPart or ThinkingPart, got {type(first_start.part).__name__}"
     )
 
     first_complete = completes[0]
-    assert first_complete.message is not None
     assert first_complete.message.content is not None
