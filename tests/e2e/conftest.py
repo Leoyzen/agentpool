@@ -277,11 +277,11 @@ def _terminate_popen(process: subprocess.Popen, timeout: float = 5.0) -> str:
         return ""
     try:
         process.wait(timeout=timeout)
-    except TimeoutError:
+    except subprocess.TimeoutExpired:
         try:
             process.kill()
             process.wait(timeout=2.0)
-        except (TimeoutError, ProcessLookupError, OSError):
+        except (subprocess.TimeoutExpired, ProcessLookupError, OSError):
             pass
     return ""
 
