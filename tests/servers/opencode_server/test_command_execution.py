@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from agentpool_server.opencode_server.state import ServerState
 
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
 
 async def test_execute_slashed_command_success(
@@ -258,7 +258,6 @@ async def test_command_execution_error(
     assert "failed" in response.json()["detail"].lower()
 
 
-@pytest.mark.flaky(reruns=3, reruns_delay=0.5)
 async def test_collision_warning_logged(
     async_client: AsyncClient,
     server_state: ServerState,

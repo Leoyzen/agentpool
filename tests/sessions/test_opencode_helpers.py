@@ -12,6 +12,9 @@ import pytest
 from agentpool_storage.opencode_provider.helpers import convert_user_content_to_parts
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture
 def message_id() -> str:
     """Provide a stable message ID for tests."""

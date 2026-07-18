@@ -23,6 +23,9 @@ from agentpool.prompts.instructions import (
 from agentpool.utils.context_wrapping import wrap_instruction
 
 
+pytestmark = pytest.mark.unit
+
+
 class TestPydanticAIInstructionType:
     """Test PydanticAIInstruction protocol and type compatibility."""
 
@@ -137,7 +140,7 @@ class TestWrapInstructionWithPydanticAISignature:
         assert result == "Be helpful"
 
 
-@pytest.mark.requires_openai_key
+@pytest.mark.real_model
 class TestSystemPromptsPydanticAIConversion:
     """Test SystemPrompts.to_pydantic_ai_instructions()."""
 
@@ -238,7 +241,7 @@ class PydanticAIInstructionProvider(FunctionToolsetCapability):
         )
 
 
-@pytest.mark.requires_openai_key
+@pytest.mark.real_model
 class TestNativeAgentPydanticAIInstructions:
     """Test NativeAgent integration with pydantic-ai compatible instructions."""
 

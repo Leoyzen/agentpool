@@ -10,6 +10,9 @@ import pytest
 from agentpool_toolsets.openapi import OpenAPITools
 
 
+pytestmark = pytest.mark.unit
+
+
 if TYPE_CHECKING:
     from jsonschema_path.typing import Schema
 

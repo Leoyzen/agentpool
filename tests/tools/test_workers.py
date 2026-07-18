@@ -14,6 +14,9 @@ from agentpool.agents.events import RunErrorEvent, SpawnSessionStart, StreamComp
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 
 
+pytestmark = pytest.mark.integration
+
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path

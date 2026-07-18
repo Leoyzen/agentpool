@@ -21,6 +21,9 @@ from agentpool.mcp_server import MCPClient
 from agentpool_config.mcp_server import StdioMCPServerConfig
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture
 async def mcp_client():
     """Create MCP client connected to test server."""

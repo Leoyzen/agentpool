@@ -19,7 +19,12 @@ import logging
 from pathlib import Path
 import tempfile
 
+import pytest
+
 from agentpool.agents.acp_agent import ACPAgent
+
+
+pytestmark = pytest.mark.unit
 
 
 # Configure logging to file for easy inspection

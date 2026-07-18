@@ -18,6 +18,9 @@ from agentpool.skills.uri_resolver import ResolvedSkillURI
 from agentpool.tools.exceptions import ToolError
 
 
+pytestmark = pytest.mark.integration
+
+
 if TYPE_CHECKING:
     from pathlib import Path
 

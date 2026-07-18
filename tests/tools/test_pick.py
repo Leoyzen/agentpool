@@ -9,8 +9,9 @@ from agentpool import Agent
 # These tests use structured output (tool_choice: 'required') which is
 # incompatible with thinking-mode models (DeepSeek, Kimi). See issue #84.
 pytestmark = [
-    pytest.mark.requires_openai_key,
+    pytest.mark.real_model,
     pytest.mark.incompatible_with_thinking,
+    pytest.mark.unit,
 ]
 
 
@@ -25,6 +26,9 @@ async def test_pick_from_options(default_model: str):
     assert len(decision.reason) > 0
 
 
+# Flaky: model-dependent — the LLM may not always pick the expected agent.
+# The assertion checks that the model picks "security_expert" for a security task,
+# which is highly likely but not guaranteed across model versions/temperatures.
 @pytest.mark.flaky(reruns=2)
 async def test_pick_from_agents(default_model: str):
     """Test picking from a team of agents."""

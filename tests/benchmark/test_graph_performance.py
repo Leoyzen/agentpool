@@ -26,6 +26,9 @@ from agentpool.agents.events import RunStartedEvent
 from agentpool.delegation.graph_team import build_team_graph
 
 
+pytestmark = pytest.mark.unit
+
+
 if TYPE_CHECKING:
     from agentpool.messaging import ChatMessage
 

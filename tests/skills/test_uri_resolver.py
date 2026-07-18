@@ -23,6 +23,9 @@ from agentpool.skills.uri_resolver import (
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 # =============================================================================
 # ResolvedSkillURI.parse() - Basic URI Parsing
 # =============================================================================

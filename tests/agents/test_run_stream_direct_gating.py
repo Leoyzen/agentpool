@@ -10,8 +10,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, ClassVar
 from unittest.mock import MagicMock
 
+import pytest
+
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.orchestrator.turn import Turn
+
+
+pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:

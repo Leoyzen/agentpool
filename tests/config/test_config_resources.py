@@ -10,6 +10,9 @@ from agentpool import config_resources
 from agentpool.models.manifest import AgentsManifest
 
 
+pytestmark = pytest.mark.unit
+
+
 def _get_all_yml_constants() -> list[tuple[str, str]]:
     """Get all constants from config_resources that point to .yml files."""
     results = []

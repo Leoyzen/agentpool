@@ -24,6 +24,9 @@ from agentpool_server.opencode_server.routes.permission_routes import (
 from agentpool_server.opencode_server.state import ServerState
 
 
+pytestmark = pytest.mark.integration
+
+
 async def test_ensure_input_provider_stores_on_session_state():
     """A5.1: ensure_input_provider stores provider on SessionState when controller is available."""
     mock_agent = Mock()

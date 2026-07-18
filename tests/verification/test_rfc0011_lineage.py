@@ -13,6 +13,9 @@ from agentpool_storage.sql_provider.models import Conversation
 from agentpool_toolsets.builtin.subagent_tools import SubagentTools
 
 
+pytestmark = pytest.mark.integration
+
+
 def _stream_empty(queue: asyncio.Queue[Any]) -> bool:
     """Check if a subscriber queue has no buffered items."""
     return queue.empty()

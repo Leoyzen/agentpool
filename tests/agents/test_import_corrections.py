@@ -6,6 +6,11 @@ Tests that all imports use the canonical pydantic_ai.usage module location.
 import ast
 from pathlib import Path
 
+import pytest
+
+
+pytestmark = pytest.mark.unit
+
 
 def test_runusage_imports():
     """Test that RunUsage is imported from pydantic_ai.usage, not pydantic_ai."""

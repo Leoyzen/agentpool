@@ -7,6 +7,9 @@ import pytest
 from agentpool.tools.base import FunctionTool, Tool
 
 
+pytestmark = pytest.mark.unit
+
+
 def test_tool_default_deferred_fields():
     """Tool() defaults to deferred=False with correct default kind/strategy."""
     t = Tool(name="test")

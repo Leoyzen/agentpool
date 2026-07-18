@@ -5,6 +5,10 @@ a ``DeprecationWarning`` when calling ``inject_prompt()`` or ``queue_prompt()``,
 guiding users toward ``SessionPool.steer()`` and ``SessionPool.followup()``.
 
 Standalone native agents and non-native agents should NOT emit any warning.
+
+
+# TODO: L2 migration — test requires complex mock pool dependencies that
+# cannot be easily replaced with a real pool. Needs investigation.
 """
 
 from __future__ import annotations
@@ -16,6 +20,9 @@ from pydantic_ai.models.test import TestModel
 import pytest
 
 from agentpool import Agent, AgentPool
+
+
+pytestmark = pytest.mark.integration
 
 
 TEST_RESPONSE = "I am a test response"

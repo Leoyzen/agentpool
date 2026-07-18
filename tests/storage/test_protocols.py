@@ -20,6 +20,9 @@ from agentpool_storage.protocols import (
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 # ---------------------------------------------------------------------------
 # Protocol isinstance checks for StorageProviderAdapter
 # ---------------------------------------------------------------------------

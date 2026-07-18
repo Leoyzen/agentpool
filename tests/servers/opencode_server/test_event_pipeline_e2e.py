@@ -48,6 +48,9 @@ from agentpool_server.opencode_server.session_pool_integration import (
 from agentpool_server.opencode_server.state import ServerState
 
 
+pytestmark = pytest.mark.integration
+
+
 if TYPE_CHECKING:
     from agentpool.orchestrator.core import SessionPool
 

@@ -5,7 +5,12 @@ Tests skill command execution including template processing.
 
 from __future__ import annotations
 
+import pytest
+
 from agentpool_server.opencode_server.routes.session_routes import _process_skill_template
+
+
+pytestmark = pytest.mark.integration
 
 
 class TestProcessSkillTemplate:

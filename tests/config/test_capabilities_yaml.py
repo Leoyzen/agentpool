@@ -12,6 +12,9 @@ from agentpool_config.capabilities import (
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 YAML_WITH_CAPABILITIES = """\
 agents:
   test_agent:

@@ -12,6 +12,9 @@ from fastapi.testclient import TestClient
 import pytest
 
 
+pytestmark = pytest.mark.integration
+
+
 @pytest.fixture
 def otlp_app() -> FastAPI:
     """Create a minimal FastAPI app with only the OTLP sink routes."""

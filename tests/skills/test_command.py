@@ -9,6 +9,9 @@ from agentpool.skills.command import SkillCommand
 from agentpool.skills.skill import Skill
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture
 def sample_skill() -> Skill:
     """Create a sample Skill for testing."""

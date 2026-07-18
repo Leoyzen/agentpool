@@ -8,6 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
+
+pytestmark = pytest.mark.unit
+
 
 def keep_recent(messages: list[Any]) -> list[Any]:
     """Sync processor without context — returns last 10 messages."""

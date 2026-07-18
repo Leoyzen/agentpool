@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import HttpUrl
 from pydantic_ai.mcp import MCPToolset
+import pytest
 
 from agentpool.mcp_server.manager import MCPManager, _make_elicitation_handler
 from agentpool_config.mcp_server import (
@@ -15,6 +16,9 @@ from agentpool_config.mcp_server import (
     StdioMCPServerConfig,
     StreamableHTTPMCPServerConfig,
 )
+
+
+pytestmark = pytest.mark.unit
 
 
 # =============================================================================

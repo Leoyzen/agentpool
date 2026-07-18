@@ -39,6 +39,9 @@ from agentpool_server.opencode_server.state import ServerState
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 
 
+pytestmark = pytest.mark.integration
+
+
 def _setup_session(state: ServerState, session_id: str) -> None:
     """Set up session state manually."""
     now = now_ms()

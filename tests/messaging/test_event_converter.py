@@ -14,6 +14,9 @@ from agentpool.agents.events import RunFailedEvent, ToolCallStartEvent
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 
 
+pytestmark = pytest.mark.integration
+
+
 async def collect_updates(converter: ACPEventConverter, event):
     """Helper to collect all updates from an event."""
     return [u async for u in converter.convert(event)]

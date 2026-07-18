@@ -10,6 +10,11 @@ from __future__ import annotations
 from pathlib import Path
 import re
 
+import pytest
+
+
+pytestmark = pytest.mark.unit
+
 
 SRC_DIR = Path(__file__).resolve().parent.parent.parent / "src"
 

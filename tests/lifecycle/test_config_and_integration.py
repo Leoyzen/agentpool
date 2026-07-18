@@ -16,6 +16,9 @@ from agentpool_config.lifecycle import LifecycleConfig
 from agentpool_config.nodes import BaseAgentConfig
 
 
+pytestmark = pytest.mark.integration
+
+
 # ---------------------------------------------------------------------------
 # LifecycleConfig tests
 # ---------------------------------------------------------------------------

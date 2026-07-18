@@ -16,6 +16,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from mcp.types import ElicitResult
+import pytest
+
+
+pytestmark = pytest.mark.integration
 
 
 if TYPE_CHECKING:

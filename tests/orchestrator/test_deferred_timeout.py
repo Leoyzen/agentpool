@@ -8,8 +8,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+import pytest
+
 from agentpool.orchestrator.core import SessionController
 from agentpool.sessions.models import PendingDeferredCall, SessionData
+
+
+pytestmark = pytest.mark.unit
 
 
 def test_pending_deferred_call_expiry_detection() -> None:

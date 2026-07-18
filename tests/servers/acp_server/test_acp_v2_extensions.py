@@ -16,6 +16,9 @@ from agentpool_server.acp_server.converters import to_session_info
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 
 
+pytestmark = pytest.mark.integration
+
+
 # ============================================================================
 # V2 Extension Points Tests
 # ============================================================================
@@ -122,7 +125,6 @@ class TestSessionCloseCheckpointAware:
             pending_deferred_calls=[],
         )
 
-    @pytest.mark.flaky(reruns=3, reruns_delay=0.5)
     async def test_close_session_preserves_checkpointed_with_pending_calls(
         self,
         checkpointed_session_data: SessionData,
@@ -144,7 +146,6 @@ class TestSessionCloseCheckpointAware:
         assert loaded.status == "checkpointed"
         assert len(loaded.pending_deferred_calls) == 1
 
-    @pytest.mark.flaky(reruns=3, reruns_delay=0.5)
     async def test_close_session_deletes_when_no_pending_calls(
         self,
         active_session_data: SessionData,

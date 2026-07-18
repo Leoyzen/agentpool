@@ -11,6 +11,9 @@ from agentpool.utils.inspection import get_fn_name
 from agentpool_config.session import MemoryConfig
 
 
+pytestmark = pytest.mark.unit
+
+
 # Helper to access the validation method from Agent class
 def _validate_processor_signature(processor):
     """Validate processor signature using Agent's validation method."""
