@@ -558,6 +558,8 @@ async def _process_message_locked(  # noqa: PLR0915
                 input_provider=input_provider,
                 agent_name=agent_name,
                 message_id=assistant_msg_id,
+                model_id=request.model.model_id if request.model else None,
+                provider_id=request.model.provider_id if request.model else None,
             )
         else:
             from agentpool.lifecycle.types import DeliveryMode
