@@ -72,6 +72,41 @@ L4a catches "server won't start" and "basic prompt fails" regressions within min
 | `@pytest.mark.incompatible_with_thinking` | Fails with thinking models | ✅ Run | `@pytest.mark.incompatible_with_thinking` |
 | `@pytest.mark.snapshot` | Syrupy snapshot tests | ❌ Skip | `@pytest.mark.snapshot` (renamed from `acp_snapshot`) |
 | `@pytest.mark.security` | Security-focused tests | ✅ Run | `@pytest.mark.security` |
+| `@pytest.mark.known_bug` | Test that reproduces a known bug (xfail until fixed) | ✅ Run | `@pytest.mark.known_bug` (always paired with `@pytest.mark.xfail`) |
+
+### xfail Strategy
+
+Use `@pytest.mark.xfail` for tests that are expected to fail due to a known bug.
+Always pair it with `@pytest.mark.known_bug` to make known-bug tests easily discoverable.
+
+```python
+@pytest.mark.xfail(reason="serve-api doesn't init SessionPool (#185)", strict=False, raises=AssertionError)
+@pytest.mark.known_bug
+async def test_chat_completion(...):
+    ...
+```
+
+Guidelines:
+- Use `strict=False` — the test should not fail the suite if it unexpectedly passes (bug fixed).
+- Use `raises=ExpectedException` to narrow the xfail to a specific failure type. Unexpected exceptions still fail the test.
+- Include a GitHub issue reference in `reason`.
+- Always add `@pytest.mark.known_bug` alongside `@pytest.mark.xfail`.
+
+### Skip Strategy
+
+Use `@pytest.mark.skip(reason="...")` for features not yet implemented. Unlike `xfail`,
+a skipped test is never executed. The test intent MUST be documented in the docstring
+so the test clearly communicates what behavior is expected once the feature is implemented.
+
+```python
+@pytest.mark.skip(reason="mcp/connect client-side not implemented in agentpool ACP server yet")
+async def test_mcp_connect_client_side(...):
+    """Send mcp/connect request with a valid MCP server config.
+    Expect result.connected = true and result.server_info containing
+    server name and version. Verify mcp_server_added SessionUpdate emitted.
+    Error case: invalid URL or missing required fields → error code -32602."""
+    ...
+```
 
 ### L4 Sub-qualifiers (only with `@pytest.mark.e2e`)
 

@@ -361,6 +361,7 @@ markers = [
   "snapshot: marks tests as syrupy snapshot tests (excluded by default, renamed from acp_snapshot)",
   "unit: marks tests as unit tests",
   "vcr: marks tests as VCR cassette replay tests",
+  "known_bug: Test that reproduces a known bug (xfail until fixed)",
 ]
 minversion = "9.0"
 python_files = ["test_*.py"]

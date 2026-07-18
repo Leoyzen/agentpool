@@ -287,6 +287,28 @@ def e2e_config(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def e2e_multi_agent_config(tmp_path: Path) -> Path:
+    """YAML config with 2 agents (coordinator + worker) using TestModel.
+
+    Returns:
+        Path to the temporary YAML config file.
+    """
+    config = tmp_path / "multi_agent_config.yml"
+    config.write_text("""\
+agents:
+  coordinator:
+    type: native
+    model: test
+    system_prompt: "You are a coordinator agent."
+  worker:
+    type: native
+    model: test
+    system_prompt: "You are a worker agent."
+""")
+    return config
+
+
+@pytest.fixture
 def e2e_config_with_tool(tmp_path: Path) -> Path:
     """Create a temporary YAML config with a simple tool enabled.
 
@@ -529,6 +551,138 @@ async def subprocess_server_with_tool(
         extra_args=extra_args,
     ):
         yield server
+
+
+# ---------------------------------------------------------------------------
+# ACP WebSocket (streamable-http) server fixture (B1.1)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ACPWSServerHandle:
+    """Handle to a spawned ``agentpool serve-acp --transport streamable-http`` server.
+
+    Attributes:
+        process: The asyncio subprocess.
+        host: Bind host.
+        port: Bind port.
+        stderr_text: Captured stderr output (populated on teardown).
+    """
+
+    process: asyncio.subprocess.Process
+    host: str
+    port: int
+    stderr_text: str = ""
+
+    @property
+    def ws_url(self) -> str:
+        """WebSocket URL for the ACP endpoint (``ws://host:port/acp``)."""
+        return f"ws://{self.host}:{self.port}/acp"
+
+    @property
+    def returncode(self) -> int | None:
+        """Process return code (None if still running)."""
+        return self.process.returncode
+
+
+@contextlib.asynccontextmanager
+async def _spawn_acp_ws_server(
+    config_path: Path | str,
+    process_registry: ProcessRegistry,
+    *,
+    host: str = "127.0.0.1",
+    agent: str = "test_agent",
+    health_timeout: float = 15.0,
+) -> AsyncIterator[ACPWSServerHandle]:
+    """Spawn ``agentpool serve-acp --transport streamable-http`` and wait for health.
+
+    Args:
+        config_path: Path to the YAML config file.
+        process_registry: Session-scoped process registry for cleanup verification.
+        host: Bind host.
+        agent: Agent name to use (``--agent``).
+        health_timeout: Health check timeout in seconds.
+
+    Yields:
+        ACPWSServerHandle with the running server.
+    """
+    port = allocate_ephemeral_port()
+    cmd: list[str] = [
+        "agentpool",
+        "serve-acp",
+        str(config_path),
+        "--agent",
+        agent,
+        "--transport",
+        "streamable-http",
+        "--host",
+        host,
+        "--port",
+        str(port),
+    ]
+
+    env = os.environ.copy()
+    env["OBSERVABILITY_ENABLED"] = "false"
+    env["LOGFIRE_DISABLE"] = "true"
+
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+    process_registry.register(process)
+
+    handle = ACPWSServerHandle(process=process, host=host, port=port)
+
+    # Health check: poll the HTTP server until it responds.
+    # Use a raw socket connect instead of httpx to avoid the ALLOW_MODEL_REQUESTS
+    # httpx MockTransport block (the gate intercepts all httpx clients).
+    healthy = await _health_check_socket(host, port, timeout=health_timeout)
+    if not healthy:
+        stderr_text = await _terminate_process(process)
+        handle.stderr_text = stderr_text
+        msg = (
+            f"ACP WS server failed to become healthy within {health_timeout}s.\n"
+            f"Command: {' '.join(cmd)}\nSTDERR:\n{stderr_text}"
+        )
+        raise RuntimeError(msg)
+
+    try:
+        yield handle
+    finally:
+        stderr_text = await _terminate_process(process)
+        handle.stderr_text = stderr_text
+
+
+async def _health_check_socket(
+    host: str,
+    port: int,
+    *,
+    timeout: float = 15.0,
+    interval: float = 0.5,
+) -> bool:
+    """Poll a TCP server until it accepts connections or timeout.
+
+    Uses raw sockets (not httpx) to avoid the ALLOW_MODEL_REQUESTS MockTransport
+    gate that intercepts all httpx clients.
+
+    Args:
+        host: Server host.
+        port: Server port.
+        timeout: Maximum seconds to wait.
+        interval: Polling interval in seconds.
+    """
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(interval)
+                sock.connect((host, port))
+                return True
+        except (OSError, ConnectionRefusedError):
+            await asyncio.sleep(interval)
+    return False
 
 
 # ---------------------------------------------------------------------------

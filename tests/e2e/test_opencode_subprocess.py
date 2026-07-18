@@ -67,6 +67,10 @@ async def test_server_startup(subprocess_server: SubprocessServer, e2e_config: P
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
     indirect=True,
 )
+@pytest.mark.xfail(
+    reason="serve-opencode returns 500 for message POST (#185)", strict=False, raises=AssertionError
+)
+@pytest.mark.known_bug
 async def test_basic_prompt(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
     """L4a: Create session, send message, verify response via HTTP SSE."""
     base_url = subprocess_server.base_url
@@ -89,9 +93,7 @@ async def test_basic_prompt(subprocess_server: SubprocessServer, e2e_config: Pat
             f"{base_url}/session/{session_id}/message",
             json=message_payload,
         )
-        # 200/201/202 = success, 500 = internal error (e.g. SessionPool issue).
-        # The key L4a assertion is that the server accepts and processes the request.
-        assert resp.status_code in (200, 201, 202, 500), (
+        assert resp.status_code in (200, 201, 202), (
             f"Failed to send message: {resp.status_code} {resp.text}"
         )
 
