@@ -336,11 +336,14 @@ class OpenCodeSessionRoutesMixin:
         session_pool: The SessionPool instance (provided by main class).
         server_state: The OpenCode server state (provided by main class).
         _pending_message_ids: Pending canonical message IDs (provided by main class).
+        _pending_message_metadata: Pending model metadata from REST handlers
+            (provided by main class).
     """
 
     session_pool: SessionPool
     server_state: ServerState
     _pending_message_ids: dict[str, str]
+    _pending_message_metadata: dict[str, dict[str, str | None]]
     _session_groups: dict[str, Any]
     _resume_contexts: dict[str, dict[str, Any]]
 
@@ -441,6 +444,8 @@ class OpenCodeSessionRoutesMixin:
         input_provider: Any | None = None,
         agent_name: str | None = None,
         message_id: str | None = None,
+        model_id: str | None = None,
+        provider_id: str | None = None,
         **kwargs: Any,
     ) -> str | None:
         """Route a message through SessionPool.receive_request().
@@ -461,6 +466,12 @@ class OpenCodeSessionRoutesMixin:
             message_id: Optional canonical message ID from the REST handler.
                 Stored as pending so ``_before_consumer_loop`` can reuse it
                 instead of generating an independent ``assistant_msg_id``.
+            model_id: Optional model ID from the REST handler (for agent/model
+                propagation). Stored as pending so ``_before_consumer_loop``
+                can set it on the assistant message instead of hardcoding
+                "default".
+            provider_id: Optional provider ID from the REST handler. Same
+                propagation path as ``model_id``.
             **kwargs: Additional arguments passed to the turn runner.
                 Supports ``deferred_tool_results`` for checkpoint replay.
 
@@ -482,6 +493,14 @@ class OpenCodeSessionRoutesMixin:
         # instead of generating an independent assistant_msg_id (D14).
         if message_id is not None:
             self._pending_message_ids[session_id] = message_id
+        # Store model metadata so _before_consumer_loop can propagate the
+        # real agent/model onto the assistant message instead of hardcoding
+        # "agentpool"/"default"/"agentpool".
+        self._pending_message_metadata[session_id] = {
+            "message_id": message_id,
+            "model_id": model_id,
+            "provider_id": provider_id,
+        }
 
         session_state = self.session_pool.sessions.get_session(session_id)
         if session_state is None:
