@@ -95,6 +95,7 @@ class OpenCodeEventBridgeMixin:
     _children_of: dict[str, set[str]]
     _resume_contexts: dict[str, dict[str, Any]]
     _pending_message_ids: dict[str, str]
+    _pending_message_metadata: dict[str, dict[str, str | None]]
 
     if TYPE_CHECKING:
 
@@ -179,14 +180,35 @@ class OpenCodeEventBridgeMixin:
         assistant_msg_id = self._pending_message_ids.pop(session_id, None)
         if assistant_msg_id is None:
             assistant_msg_id = identifier.ascending("message")
+
+        # Agent/model propagation: look up the real agent_name from the
+        # session state and the model info from pending metadata (provided
+        # by the REST handler via route_message). Falls back to
+        # "agentpool"/"default"/"agentpool" when unavailable (graceful
+        # degradation for sessions created outside the REST handler path).
+        agent_name = "agentpool"
+        model_id = "default"
+        provider_id = "agentpool"
+        session_state = self.session_pool.sessions.get_session(session_id)
+        if session_state is not None:
+            agent_name = session_state.agent_name
+        pending_meta = self._pending_message_metadata.pop(session_id, None)
+        if pending_meta is not None:
+            pending_model_id = pending_meta.get("model_id")
+            if pending_model_id is not None:
+                model_id = pending_model_id
+            pending_provider_id = pending_meta.get("provider_id")
+            if pending_provider_id is not None:
+                provider_id = pending_provider_id
+
         assistant_msg = MessageWithParts.assistant(
             message_id=assistant_msg_id,
             session_id=session_id,
             time=MessageTime(created=now_ms()),
-            agent_name="agentpool",
-            model_id="default",
+            agent_name=agent_name,
+            model_id=model_id,
             parent_id=session_id,
-            provider_id="agentpool",
+            provider_id=provider_id,
             path=MessagePath(cwd=self.server_state.working_dir, root=self.server_state.working_dir),
         )
         ctx = EventProcessorContext(
