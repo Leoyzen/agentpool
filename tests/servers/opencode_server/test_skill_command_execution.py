@@ -9,6 +9,7 @@ import pytest
 
 from agentpool_server.opencode_server.routes.session_routes import _process_skill_template
 
+
 pytestmark = pytest.mark.integration
 
 

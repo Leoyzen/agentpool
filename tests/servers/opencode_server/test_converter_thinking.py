@@ -8,8 +8,6 @@ and converted via chat_message_to_opencode().
 
 from __future__ import annotations
 
-import pytest
-
 from datetime import UTC, datetime
 
 from pydantic_ai import (
@@ -18,6 +16,7 @@ from pydantic_ai import (
     TextPart as PydanticTextPart,
     ThinkingPart as PydanticThinkingPart,
 )
+import pytest
 
 from agentpool.messaging.messages import ChatMessage
 from agentpool_server.opencode_server.converters import (
@@ -25,6 +24,7 @@ from agentpool_server.opencode_server.converters import (
     opencode_to_chat_message,
 )
 from agentpool_server.opencode_server.models import ReasoningPart
+
 
 pytestmark = pytest.mark.integration
 

@@ -35,6 +35,7 @@ from agentpool_server.opencode_server.session_pool_integration import (
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 from agentpool_toolsets.builtin.subagent_tools import SubagentTools
 
+
 pytestmark = pytest.mark.integration
 
 

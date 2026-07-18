@@ -6,6 +6,7 @@ import pytest
 
 from agentpool.utils.dag import DAGNode, dag_iterator, dag_to_list
 
+
 pytestmark = pytest.mark.unit
 
 

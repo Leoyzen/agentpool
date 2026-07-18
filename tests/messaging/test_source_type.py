@@ -10,6 +10,7 @@ import pytest
 from agentpool.messaging import ChatMessage, MessageNode
 from agentpool.messaging.messagenode import SourceType, get_source_type
 
+
 pytestmark = pytest.mark.unit
 
 

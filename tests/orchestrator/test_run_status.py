@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
-
 from enum import Enum
 
+import pytest
+
 from agentpool.lifecycle import RunOutcome, RunState
+
 
 pytestmark = pytest.mark.unit
 

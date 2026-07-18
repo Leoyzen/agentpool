@@ -9,6 +9,7 @@ import pytest
 
 from agentpool import AgentsManifest
 
+
 pytestmark = pytest.mark.unit
 
 

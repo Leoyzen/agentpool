@@ -8,6 +8,7 @@ import pytest
 
 from agentpool.host.registry import AgentRegistry
 
+
 pytestmark = pytest.mark.unit
 
 

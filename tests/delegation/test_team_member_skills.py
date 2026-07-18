@@ -7,6 +7,7 @@ import pytest
 from agentpool import BaseTeam
 from agentpool.skills.exceptions import SkillNotFoundError
 
+
 pytestmark = pytest.mark.unit
 
 

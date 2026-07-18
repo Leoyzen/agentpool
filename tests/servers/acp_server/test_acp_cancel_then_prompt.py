@@ -19,7 +19,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.agents.events import RunFailedEvent, RunStartedEvent, StreamCompleteEvent
 from agentpool.lifecycle import RunState
 from agentpool.messaging import ChatMessage
@@ -28,6 +27,7 @@ from agentpool.orchestrator.turn import Turn
 
 
 if TYPE_CHECKING:
+    from agentpool import AgentPool
     from agentpool.agents.context import AgentRunContext
 
 

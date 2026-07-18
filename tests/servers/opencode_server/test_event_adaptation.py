@@ -8,7 +8,6 @@ Combines tests from:
 from __future__ import annotations
 
 from typing import Any
-
 from unittest.mock import Mock
 
 from pydantic_ai import (
@@ -16,12 +15,10 @@ from pydantic_ai import (
     TextPart as PydanticTextPart,
     TextPartDelta,
 )
-
 from pydantic_ai.messages import (
     PartDeltaEvent as PydanticPartDeltaEvent,
     PartEndEvent,
 )
-
 import pytest
 
 from agentpool.agents.events import (
@@ -30,16 +27,15 @@ from agentpool.agents.events import (
     RunErrorEvent,
     RunStartedEvent,
     StreamCompleteEvent,
+    TextContentItem,
     ToolCallCompleteEvent,
+    ToolCallProgressEvent,
     ToolCallStartEvent,
 )
-
 from agentpool_server.opencode_server.event_adapter import OpenCodeEventAdapter
-
 from agentpool_server.opencode_server.event_processor_context import (
     EventProcessorContext,
 )
-
 from agentpool_server.opencode_server.models import (
     MessagePath,
     MessageTime,
@@ -49,7 +45,6 @@ from agentpool_server.opencode_server.models import (
     SessionErrorEvent,
     SessionStatusEvent,
 )
-
 from agentpool_server.opencode_server.models.parts import (
     ReasoningPart,
     StepFinishPart,
@@ -60,26 +55,6 @@ from agentpool_server.opencode_server.models.parts import (
     ToolStateRunning,
 )
 
-from pydantic_ai.messages import PartDeltaEvent as PydanticPartDeltaEvent
-
-from agentpool.agents.events import (
-    RunErrorEvent,
-    RunStartedEvent,
-    StreamCompleteEvent,
-    TextContentItem,
-    ToolCallCompleteEvent,
-    ToolCallProgressEvent,
-    ToolCallStartEvent,
-)
-
-from agentpool_server.opencode_server.models.parts import (
-    StepFinishPart,
-    TextPart,
-    ToolPart,
-    ToolStateCompleted,
-    ToolStateError,
-    ToolStateRunning,
-)
 
 pytestmark = pytest.mark.integration
 
@@ -864,7 +839,7 @@ class TestOpenCodeEventAdapterExists:
 # =============================================================================
 
 
-class TestPartStartEventConversion_v2:
+class TestPartStartEventConversionV2:
     """Tests for PartStartEvent -> OpenCode PartUpdatedEvent."""
 
     @pytest.mark.asyncio
@@ -927,7 +902,7 @@ class TestPartStartEventConversion_v2:
 # =============================================================================
 
 
-class TestPartDeltaEventConversion_v2:
+class TestPartDeltaEventConversionV2:
     """Tests for PartDeltaEvent -> OpenCode PartDeltaEvent."""
 
     @pytest.mark.asyncio
@@ -1006,7 +981,7 @@ class TestPartDeltaEventConversion_v2:
 # =============================================================================
 
 
-class TestToolCallStartEventConversion_v2:
+class TestToolCallStartEventConversionV2:
     """Tests for ToolCallStartEvent -> OpenCode PartUpdatedEvent (ToolPart)."""
 
     @pytest.mark.asyncio
@@ -1060,7 +1035,7 @@ class TestToolCallStartEventConversion_v2:
 # =============================================================================
 
 
-class TestToolCallCompleteEventConversion_v2:
+class TestToolCallCompleteEventConversionV2:
     """Tests for ToolCallCompleteEvent -> OpenCode PartUpdatedEvent (completed/error)."""
 
     @pytest.mark.asyncio
@@ -1137,7 +1112,7 @@ class TestToolCallCompleteEventConversion_v2:
 # =============================================================================
 
 
-class TestStreamCompleteEventConversion_v2:
+class TestStreamCompleteEventConversionV2:
     """Tests for StreamCompleteEvent -> StepFinishPart + SessionIdleEvent."""
 
     @pytest.mark.asyncio
@@ -1183,7 +1158,7 @@ class TestStreamCompleteEventConversion_v2:
         assert step_finish[0].properties.part.tokens.output == 50
 
 
-class TestRunStartedEventConversion_v2:
+class TestRunStartedEventConversionV2:
     """Tests for RunStartedEvent -> SessionStatusEvent (busy)."""
 
     @pytest.mark.asyncio
@@ -1213,7 +1188,7 @@ class TestRunStartedEventConversion_v2:
 # =============================================================================
 
 
-class TestRunErrorEventConversion_v2:
+class TestRunErrorEventConversionV2:
     """Tests for RunErrorEvent -> SessionErrorEvent."""
 
     @pytest.mark.asyncio
@@ -1307,7 +1282,7 @@ class TestToolCallProgressEventConversion:
 # =============================================================================
 
 
-class TestStreamConversion_v2:
+class TestStreamConversionV2:
     """Tests for OpenCodeEventAdapter.convert_stream."""
 
     @pytest.mark.asyncio
@@ -1332,7 +1307,7 @@ class TestStreamConversion_v2:
 # =============================================================================
 
 
-class TestConversionCompleteness_v2:
+class TestConversionCompletenessV2:
     """Tests verifying all specified AgentPool events are mapped to OpenCode events."""
 
     @pytest.mark.asyncio
@@ -1387,4 +1362,3 @@ class TestConversionCompleteness_v2:
         for e in events:
             # All events should have a 'type' attribute (OpenCode events do)
             assert hasattr(e, "type"), f"Event {type(e).__name__} lacks 'type' attribute"
-

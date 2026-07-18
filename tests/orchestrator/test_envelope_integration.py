@@ -6,14 +6,16 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentpool import AgentPool
-from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionController
+from agentpool.orchestrator.core import EventBus, EventEnvelope
+
 
 pytestmark = pytest.mark.integration
 
 
 if TYPE_CHECKING:
     import asyncio
+
+    from agentpool import AgentPool
 
 
 def _queue_empty(queue: asyncio.Queue) -> bool:
@@ -24,9 +26,7 @@ def _queue_empty(queue: asyncio.Queue) -> bool:
 class TestEventEnvelopeIntegration:
     """Integration tests for EventEnvelope wrapping behavior."""
 
-    async def test_child_event_routing_source_session_id(
-        self, minimal_pool: AgentPool
-    ) -> None:
+    async def test_child_event_routing_source_session_id(self, minimal_pool: AgentPool) -> None:
         """Parent with scope='descendants' receives EventEnvelope with child source_session_id."""
         assert minimal_pool.session_pool is not None
         controller = minimal_pool.session_pool.sessions

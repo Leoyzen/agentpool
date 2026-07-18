@@ -8,17 +8,21 @@ Covers three scenarios:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.agents.acp_agent import ACPAgent
 from agentpool.lifecycle import RunState
 from agentpool.lifecycle.types import DeliveryMode
 from agentpool.orchestrator.core import EventBus, SessionController
 from agentpool.orchestrator.run import RunHandle
 from tests._controller_helpers import send_via_controller
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
 
 
 pytestmark = pytest.mark.unit

@@ -8,6 +8,7 @@ from upathtools import UPath
 from agentpool.skills.command import SkillCommand
 from agentpool.skills.skill import Skill
 
+
 pytestmark = pytest.mark.unit
 
 

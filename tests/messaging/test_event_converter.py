@@ -13,6 +13,7 @@ from acp.schema import AgentMessageChunk, ToolCallProgress, TurnCompleteUpdate
 from agentpool.agents.events import RunFailedEvent, ToolCallStartEvent
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 
+
 pytestmark = pytest.mark.integration
 
 

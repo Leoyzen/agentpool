@@ -7,6 +7,7 @@ from upathtools import UPath
 
 from agentpool_config.skills import DEFAULT_SKILLS_PATHS, SkillsConfig
 
+
 pytestmark = pytest.mark.unit
 
 

@@ -10,15 +10,19 @@ from __future__ import annotations
 
 from pathlib import Path
 import tempfile
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.orchestrator.core import SessionController
 from agentpool.sessions.models import SessionData
 from agentpool_config.storage import SQLStorageConfig
 from agentpool_storage.sql_provider import SQLModelProvider
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
 
 
 pytestmark = pytest.mark.unit

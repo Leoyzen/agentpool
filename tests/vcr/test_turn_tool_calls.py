@@ -25,6 +25,7 @@ from agentpool.agents.events import (
 )
 from tests.vcr.conftest import cassette_exists
 
+
 if TYPE_CHECKING:
     from agentpool import AgentPool
 
@@ -71,9 +72,9 @@ async def test_real_tool_call_roundtrip(vcr_pool: AgentPool) -> None:
     agent = vcr_pool.get_agent("test_agent")
     agent.add_tool(echo)
 
-    events: list[Any] = []
-    async for event in agent.run_stream("Use the echo tool with the text 'hello'."):
-        events.append(event)
+    events: list[Any] = [
+        event async for event in agent.run_stream("Use the echo tool with the text 'hello'.")
+    ]
 
     starts = [e for e in events if isinstance(e, ToolCallStartEvent)]
     completes = [e for e in events if isinstance(e, ToolCallCompleteEvent)]
@@ -105,8 +106,7 @@ async def test_pre_post_hooks_fire(vcr_pool: AgentPool) -> None:
 
     # Register a simple pre-tool hook via the agent's hooks config.
     # The hook records the tool name when invoked.
-    from agentpool.hooks.callable import CallableHook
-    from agentpool.hooks.base import HookResult, HookDecision
+    from agentpool.hooks.base import HookDecision, HookResult
 
     async def pre_tool(tool_name: str, tool_input: Any) -> HookResult:
         hook_calls.append(f"pre:{tool_name}")
@@ -117,9 +117,9 @@ async def test_pre_post_hooks_fire(vcr_pool: AgentPool) -> None:
         return HookResult(decision=HookDecision.ALLOW)
 
     # Run the agent — hooks fire automatically via HookAwareTurn.
-    events: list[Any] = []
-    async for event in agent.run_stream("Use the echo tool with the text 'hello'."):
-        events.append(event)
+    events: list[Any] = [
+        event async for event in agent.run_stream("Use the echo tool with the text 'hello'.")
+    ]
 
     # The hooks may or may not have fired depending on whether the model
     # actually called the tool in the recorded cassette. Assert the event
@@ -142,7 +142,9 @@ async def test_tool_result_injection(vcr_pool: AgentPool) -> None:
     agent = vcr_pool.get_agent("test_agent")
     agent.add_tool(echo)
 
-    result = await agent.run("Use the echo tool with the text 'hello' and tell me what it returned.")
+    result = await agent.run(
+        "Use the echo tool with the text 'hello' and tell me what it returned."
+    )
     assert result is not None
     assert result.content is not None
 
@@ -162,11 +164,12 @@ async def test_multiple_tools_sequential(vcr_pool: AgentPool) -> None:
     agent.add_tool(echo)
     agent.add_tool(reverse)
 
-    events: list[Any] = []
-    async for event in agent.run_stream(
-        "First use echo with 'hello', then use reverse with 'world'."
-    ):
-        events.append(event)
+    events: list[Any] = [
+        event
+        async for event in agent.run_stream(
+            "First use echo with 'hello', then use reverse with 'world'."
+        )
+    ]
 
     starts = [e for e in events if isinstance(e, ToolCallStartEvent)]
     completes = [e for e in events if isinstance(e, ToolCallCompleteEvent)]

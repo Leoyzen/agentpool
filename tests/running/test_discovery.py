@@ -4,6 +4,7 @@ import pytest
 
 from agentpool.running import NodeFunction, node_function
 
+
 pytestmark = pytest.mark.unit
 
 

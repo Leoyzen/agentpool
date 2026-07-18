@@ -48,24 +48,18 @@ pytestmark = [
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
     indirect=True,
 )
-async def test_server_startup(
-    subprocess_server: SubprocessServer, e2e_config: Path
-) -> None:
+async def test_server_startup(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
     """L4a: Start serve-opencode, verify HTTP server is responding."""
     # The fixture already verified health via HTTP polling.
     # Double-check the process is alive.
-    assert subprocess_server.process.returncode is None, (
-        "OpenCode server process exited early"
-    )
+    assert subprocess_server.process.returncode is None, "OpenCode server process exited early"
     assert subprocess_server.port > 0, "Expected non-zero port"
 
     # Verify we can hit the server.
     async with httpx.AsyncClient(timeout=5.0) as client:
         resp = await client.get(f"{subprocess_server.base_url}/")
         # OpenCode server may return 200, 404, or redirect — any non-5xx is fine.
-        assert resp.status_code < 500, (
-            f"Server returned {resp.status_code} on root endpoint"
-        )
+        assert resp.status_code < 500, f"Server returned {resp.status_code} on root endpoint"
 
 
 @pytest.mark.parametrize(
@@ -73,9 +67,7 @@ async def test_server_startup(
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
     indirect=True,
 )
-async def test_basic_prompt(
-    subprocess_server: SubprocessServer, e2e_config: Path
-) -> None:
+async def test_basic_prompt(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
     """L4a: Create session, send message, verify response via HTTP SSE."""
     base_url = subprocess_server.base_url
 
@@ -109,9 +101,7 @@ async def test_basic_prompt(
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
     indirect=True,
 )
-async def test_server_shutdown(
-    subprocess_server: SubprocessServer, e2e_config: Path
-) -> None:
+async def test_server_shutdown(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
     """L4a: Verify server is responsive then shuts down cleanly."""
     base_url = subprocess_server.base_url
 
@@ -167,9 +157,7 @@ async def test_tool_call(
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
     indirect=True,
 )
-async def test_session_close(
-    subprocess_server: SubprocessServer, e2e_config: Path
-) -> None:
+async def test_session_close(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
     """L4b: Create a session, list sessions, verify it appears."""
     base_url = subprocess_server.base_url
 
@@ -186,9 +174,7 @@ async def test_session_close(
         assert resp.status_code == 200
         sessions = resp.json()
         # The session should appear in the list.
-        session_ids = [
-            s.get("id") or s.get("sessionID") for s in sessions
-        ]
+        session_ids = [s.get("id") or s.get("sessionID") for s in sessions]
         assert session_id in session_ids, (
             f"Session {session_id} not found in session list: {session_ids}"
         )
@@ -200,9 +186,7 @@ async def test_session_close(
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
     indirect=True,
 )
-async def test_error_paths(
-    subprocess_server: SubprocessServer, e2e_config: Path
-) -> None:
+async def test_error_paths(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
     """L4b: Verify 404 for non-existent session."""
     base_url = subprocess_server.base_url
 

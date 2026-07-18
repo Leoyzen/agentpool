@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from dirty_equals import IsStr
 import pytest
 
 from agentpool.agents.events import (
@@ -26,6 +25,7 @@ from agentpool.agents.events import (
     SubAgentEvent,
 )
 from tests.vcr.conftest import cassette_exists
+
 
 if TYPE_CHECKING:
     from agentpool import AgentPool
@@ -46,13 +46,16 @@ async def test_real_subagent_spawn(vcr_pool_with_subagent: AgentPool) -> None:
     ``SubAgentEvent`` wrapping one) when the coordinator delegates.
     """
     coordinator = vcr_pool_with_subagent.get_agent("coordinator")
-    events: list[Any] = []
-    async for event in coordinator.run_stream("Delegate to the worker agent: ask it to say hello."):
-        events.append(event)
+    events: list[Any] = [
+        event
+        async for event in coordinator.run_stream(
+            "Delegate to the worker agent: ask it to say hello."
+        )
+    ]
 
     # Look for spawn events.
-    spawn_events = [e for e in events if isinstance(e, SpawnSessionStart)]
-    subagent_events = [e for e in events if isinstance(e, SubAgentEvent)]
+    [e for e in events if isinstance(e, SpawnSessionStart)]
+    [e for e in events if isinstance(e, SubAgentEvent)]
     # The model may or may not actually delegate depending on the cassette.
     # Assert the run completed successfully.
     completes = [e for e in events if isinstance(e, StreamCompleteEvent)]
@@ -71,9 +74,10 @@ async def test_subagent_streaming_events(vcr_pool_with_subagent: AgentPool) -> N
     least one event is emitted (subagent or coordinator).
     """
     coordinator = vcr_pool_with_subagent.get_agent("coordinator")
-    events: list[Any] = []
-    async for event in coordinator.run_stream("Delegate to the worker: ask it to count to 3."):
-        events.append(event)
+    events: list[Any] = [
+        event
+        async for event in coordinator.run_stream("Delegate to the worker: ask it to count to 3.")
+    ]
 
     assert events, "Expected at least one event from the coordinator"
     completes = [e for e in events if isinstance(e, StreamCompleteEvent)]
@@ -110,11 +114,12 @@ async def test_nested_delegation(vcr_pool_with_subagent: AgentPool) -> None:
     the model to attempt it. Asserts the run completes without error.
     """
     coordinator = vcr_pool_with_subagent.get_agent("coordinator")
-    events: list[Any] = []
-    async for event in coordinator.run_stream(
-        "Delegate to the worker. Then ask the worker to delegate back to you."
-    ):
-        events.append(event)
+    events: list[Any] = [
+        event
+        async for event in coordinator.run_stream(
+            "Delegate to the worker. Then ask the worker to delegate back to you."
+        )
+    ]
 
     completes = [e for e in events if isinstance(e, StreamCompleteEvent)]
     assert len(completes) == 1

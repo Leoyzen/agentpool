@@ -31,6 +31,7 @@ from agentpool.messaging.streaming_adapter import (
 )
 from agentpool.talk import Talk
 
+
 pytestmark = pytest.mark.unit
 
 

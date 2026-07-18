@@ -7,10 +7,11 @@ This validates that Phase 4 removal (task 4.14) is safe.
 
 from __future__ import annotations
 
-import pytest
-
 from pathlib import Path
 import re
+
+import pytest
+
 
 pytestmark = pytest.mark.unit
 

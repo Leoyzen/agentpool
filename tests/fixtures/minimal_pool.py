@@ -3,6 +3,7 @@
 Provides a real AgentPool with TestModel — replaces MagicMock(pool) usage
 in L2 tests to surface real integration bugs.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -11,6 +12,7 @@ import pytest
 import yamling
 
 from agentpool import AgentPool, AgentsManifest
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

@@ -15,6 +15,7 @@ from acp import ClientCapabilities
 from agentpool import Agent, AgentPool
 from agentpool_server.acp_server.session import ACPSession
 
+
 pytestmark = pytest.mark.integration
 
 

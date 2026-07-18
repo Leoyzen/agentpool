@@ -9,13 +9,17 @@ Verifies that:
 
 from __future__ import annotations
 
-import pytest
-
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
-from agentpool import AgentPool
+import pytest
+
 from agentpool.host.factory import _inject_pool_providers
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
+
 
 pytestmark = pytest.mark.integration
 

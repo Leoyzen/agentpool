@@ -4,11 +4,12 @@ If the second call hangs, the issue is in the Agent level.
 If it works, the issue is specific to the pydantic-graph TaskGroup interaction.
 """
 
-import pytest
-
 import asyncio
 
+import pytest
+
 from agentpool import Agent
+
 
 pytestmark = pytest.mark.unit
 

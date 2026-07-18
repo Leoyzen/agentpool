@@ -25,6 +25,7 @@ from agentpool.orchestrator.event_mapper import (
     _normalize_thinking_event,
 )
 
+
 pytestmark = pytest.mark.unit
 
 

@@ -6,9 +6,10 @@ by NativeAgentConfig.get_history_processors().
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
-from typing import Any
 
 pytestmark = pytest.mark.unit
 

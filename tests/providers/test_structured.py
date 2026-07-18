@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import pytest
-
 from pydantic import BaseModel
 from pydantic_ai.models.test import TestModel
+import pytest
 
 from agentpool import Agent
+
 
 pytestmark = pytest.mark.unit
 

@@ -17,6 +17,7 @@ from agentpool.sessions.models import ProjectData
 from agentpool_config.storage import OpenCodeStorageConfig
 from agentpool_storage.opencode_provider import OpenCodeStorageProvider
 
+
 pytestmark = pytest.mark.unit
 
 

@@ -12,6 +12,7 @@ from agentpool.capabilities.filtered_toolset import FilteredToolsetCapability
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.tools.base import Tool
 
+
 pytestmark = pytest.mark.unit
 
 

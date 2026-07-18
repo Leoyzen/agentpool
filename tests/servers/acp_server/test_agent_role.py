@@ -15,6 +15,7 @@ from agentpool_server.acp_server.acp_agent import (
     get_agent_role_config_option,
 )
 
+
 pytestmark = pytest.mark.integration
 
 

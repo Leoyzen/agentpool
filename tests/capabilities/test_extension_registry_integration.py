@@ -14,6 +14,7 @@ from agentpool.capabilities.extension_registry import (
     ScopeLevel,
 )
 
+
 pytestmark = pytest.mark.integration
 
 

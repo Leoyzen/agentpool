@@ -24,6 +24,7 @@ from agentpool_storage.file_provider import FileProvider
 from agentpool_storage.memory_provider import MemoryStorageProvider
 from agentpool_storage.sql_provider import SQLModelProvider
 
+
 pytestmark = pytest.mark.integration
 
 

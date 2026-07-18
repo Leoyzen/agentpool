@@ -17,6 +17,7 @@ import pytest
 from agentpool.mcp_server.session_pool import SessionConnectionPool
 from agentpool_config.mcp_server import StdioMCPServerConfig
 
+
 pytestmark = pytest.mark.unit
 
 

@@ -3,22 +3,23 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.orchestrator import SessionController
 from agentpool.sessions import SessionData
 from agentpool_config.storage import MemoryStorageConfig, SQLStorageConfig
 from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 from agentpool_storage.sql_provider import SQLModelProvider
 
+
 pytestmark = pytest.mark.integration
 
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from agentpool import AgentPool
 
 
 class TestSessionData:
@@ -292,8 +293,6 @@ class TestSessionControllerPersistence:
     def mock_pool(self, minimal_pool: AgentPool) -> AgentPool:
         """Return the real pool."""
         return minimal_pool
-    
-
 
     @pytest.fixture
     def store(self) -> MemoryStorageProvider:

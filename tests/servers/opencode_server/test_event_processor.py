@@ -30,6 +30,7 @@ from agentpool_server.opencode_server.models import (
     TextPart,
 )
 
+
 pytestmark = pytest.mark.integration
 
 

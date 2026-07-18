@@ -27,12 +27,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-from pathlib import Path
 import re
 from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from vcr.cassette import Cassette
 
 
@@ -132,10 +133,7 @@ def _vcr_cassette_response_bodies(cassette: Cassette) -> list[str]:
     bodies: list[str] = []
     for response in cassette.responses:  # type: ignore[attr-defined]
         body_field = response.get("body")
-        if isinstance(body_field, dict):
-            raw_body = body_field.get("string")
-        else:
-            raw_body = body_field
+        raw_body = body_field.get("string") if isinstance(body_field, dict) else body_field
         if raw_body is None:
             continue
         if isinstance(raw_body, bytes):
@@ -291,6 +289,4 @@ class CassetteContext:
         return _get_cassette_body_by_index_from_yaml(path, index, kind="response")
 
 
-__all__ = (
-    "CassetteContext",
-)
+__all__ = ("CassetteContext",)

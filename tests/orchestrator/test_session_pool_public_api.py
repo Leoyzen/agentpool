@@ -6,17 +6,20 @@ Tests send_message, run_agent, revoke_message, wait_for_completion
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
 from agentpool.lifecycle.types import DeliveryMode
 from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import SessionPool
 from agentpool.orchestrator.session_controller import SessionNotFoundError
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
+    from agentpool.orchestrator.core import SessionPool
 
 
 pytestmark = pytest.mark.unit

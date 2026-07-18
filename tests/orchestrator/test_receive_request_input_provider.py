@@ -17,12 +17,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.orchestrator.core import EventBus, SessionController
 from tests._controller_helpers import send_via_controller
 
 
 if TYPE_CHECKING:
+    from agentpool import AgentPool
     from agentpool.orchestrator.run import RunHandle
 
 

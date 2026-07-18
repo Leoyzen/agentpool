@@ -6,10 +6,10 @@ history API (SessionPool.get_messages, truncate_messages, copy_messages).
 
 from __future__ import annotations
 
-import pytest
-
 from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.models import (
@@ -24,6 +24,7 @@ from agentpool_server.opencode_server.models import (
 from agentpool_server.opencode_server.session_pool_integration import (
     append_message_to_session,
 )
+
 
 pytestmark = pytest.mark.integration
 

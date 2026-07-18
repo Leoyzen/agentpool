@@ -5,13 +5,17 @@ Tests get_messages, append_message, truncate_messages, and copy_messages.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import SessionPool
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
+    from agentpool.orchestrator.core import SessionPool
 
 
 pytestmark = pytest.mark.unit

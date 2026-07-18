@@ -8,13 +8,12 @@ Tests cover:
 
 from __future__ import annotations
 
-import pytest
-
 from pathlib import PurePosixPath
 from typing import Any, Self
 from unittest.mock import MagicMock
 
 from pydantic_ai.messages import ModelRequest, SystemPromptPart, UserPromptPart
+import pytest
 
 from agentpool.capabilities.resource_protocols import (
     SkillEntry,
@@ -22,6 +21,7 @@ from agentpool.capabilities.resource_protocols import (
 )
 from agentpool.capabilities.skill_manager_cap import SkillManagerCap
 from agentpool.skills.skill import Skill
+
 
 pytestmark = pytest.mark.integration
 

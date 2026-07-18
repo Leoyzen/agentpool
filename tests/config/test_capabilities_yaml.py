@@ -11,6 +11,7 @@ from agentpool_config.capabilities import (
     TokenBudgetCapabilityConfig,
 )
 
+
 pytestmark = pytest.mark.unit
 
 

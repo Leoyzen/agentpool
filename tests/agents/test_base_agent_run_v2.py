@@ -5,13 +5,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import AgentPool
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunErrorEvent, RunStartedEvent, StreamCompleteEvent
 from agentpool.agents.native_agent.agent import Agent
@@ -20,6 +19,10 @@ from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus
 from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
 
 
 pytestmark = pytest.mark.unit
@@ -248,12 +251,6 @@ async def test_run_stream_breaks_on_stream_complete(minimal_pool: AgentPool) -> 
     remains open and EndOfStream is never raised.
     """
     from agentpool.orchestrator.core import SessionController
-
-
-
-
-
-
 
     controller = SessionController(pool=minimal_pool)
     event_bus = EventBus()

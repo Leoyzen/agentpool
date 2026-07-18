@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import pytest
-
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from agentpool.agents.modes import ModeCategory, ModeInfo
 from agentpool_server.opencode_server.routes.config_routes import list_modes
+
 
 pytestmark = pytest.mark.integration
 

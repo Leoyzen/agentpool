@@ -15,17 +15,19 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, SessionPool
 from agentpool.orchestrator.metrics import MetricsCollector
+
 
 pytestmark = pytest.mark.integration
 
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from agentpool import AgentPool
 
 
 # ============================================================================

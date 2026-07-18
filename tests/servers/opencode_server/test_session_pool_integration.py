@@ -25,6 +25,7 @@ from agentpool_server.opencode_server.models.parts import (
     ToolStateRunning,
 )
 
+
 pytestmark = pytest.mark.integration
 
 

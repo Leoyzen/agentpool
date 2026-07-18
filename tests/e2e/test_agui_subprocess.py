@@ -69,21 +69,15 @@ def _build_agui_request(prompt: str = "Hello, test agent!") -> dict[str, Any]:
     [{"serve_command": "serve-agui", "is_stdio": False}],
     indirect=True,
 )
-async def test_server_startup(
-    subprocess_server: SubprocessServer, e2e_config: Path
-) -> None:
+async def test_server_startup(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
     """L4a: Start serve-agui, verify HTTP server is responding."""
-    assert subprocess_server.process.returncode is None, (
-        "AG-UI server process exited early"
-    )
+    assert subprocess_server.process.returncode is None, "AG-UI server process exited early"
     assert subprocess_server.port > 0
 
     # The root endpoint lists available agents.
     async with httpx.AsyncClient(timeout=5.0) as client:
         resp = await client.get(f"{subprocess_server.base_url}/")
-        assert resp.status_code == 200, (
-            f"Root endpoint returned {resp.status_code}: {resp.text}"
-        )
+        assert resp.status_code == 200, f"Root endpoint returned {resp.status_code}: {resp.text}"
         data = resp.json()
         assert "agents" in data, f"Expected 'agents' key in response: {data}"
         assert data["count"] >= 1, f"Expected at least 1 agent: {data}"
@@ -94,9 +88,7 @@ async def test_server_startup(
     [{"serve_command": "serve-agui", "is_stdio": False}],
     indirect=True,
 )
-async def test_event_stream(
-    subprocess_server: SubprocessServer, e2e_config: Path
-) -> None:
+async def test_event_stream(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
     """L4a: POST to agent endpoint, verify SSE event stream response."""
     base_url = subprocess_server.base_url
     request_body = _build_agui_request("Hello from AG-UI e2e test!")
@@ -120,9 +112,7 @@ async def test_event_stream(
     [{"serve_command": "serve-agui", "is_stdio": False}],
     indirect=True,
 )
-async def test_server_shutdown(
-    subprocess_server: SubprocessServer, e2e_config: Path
-) -> None:
+async def test_server_shutdown(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
     """L4a: Verify server is responsive then shuts down cleanly."""
     base_url = subprocess_server.base_url
 

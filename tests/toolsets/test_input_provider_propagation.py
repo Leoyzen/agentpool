@@ -21,6 +21,7 @@ from agentpool.agents.events import StreamCompleteEvent
 from agentpool.messaging.messages import ChatMessage
 from agentpool.ui.base import InputProvider
 
+
 pytestmark = pytest.mark.integration
 
 

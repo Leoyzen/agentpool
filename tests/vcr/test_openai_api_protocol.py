@@ -14,14 +14,15 @@ Cassettes ([HUMAN-REQUIRED]):
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from fastapi.testclient import TestClient
 from dirty_equals import IsPartialDict, IsStr
+from fastapi.testclient import TestClient
 import pytest
 
 from agentpool_server.openai_api_server.server import OpenAIAPIServer
 from tests.vcr.conftest import cassette_exists
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -39,7 +40,7 @@ _AUTH_HEADERS = {"Authorization": "Bearer test-key"}
 async def openai_api_client(vcr_pool: AgentPool) -> AsyncIterator[TestClient]:
     """FastAPI ``TestClient`` against the in-process OpenAI API server."""
     server = OpenAIAPIServer(vcr_pool, docs=False)
-    yield TestClient(server.app)
+    return TestClient(server.app)
 
 
 @pytest.mark.skipif(

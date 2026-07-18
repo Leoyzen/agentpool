@@ -15,7 +15,6 @@ from unittest.mock import MagicMock
 from pydantic_ai import TextPartDelta
 import pytest
 
-from agentpool import AgentPool
 from agentpool.agents.events import (
     PartDeltaEvent,
     RunStartedEvent,
@@ -30,6 +29,7 @@ from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionPool
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from agentpool import AgentPool
     from agentpool.agents.context import AgentRunContext
 
 

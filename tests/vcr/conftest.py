@@ -20,6 +20,7 @@ import yamling
 
 from agentpool import AgentPool, AgentsManifest
 
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
@@ -135,10 +136,6 @@ def cassette_exists(test_module_stem: str, test_name: str) -> bool:
     recorded ([HUMAN-REQUIRED]) use this to skip gracefully in CI.
     """
     cassette_path = (
-        Path(__file__).parent.parent
-        / "cassettes"
-        / "vcr"
-        / test_module_stem
-        / f"{test_name}.yaml"
+        Path(__file__).parent.parent / "cassettes" / "vcr" / test_module_stem / f"{test_name}.yaml"
     )
     return cassette_path.exists()

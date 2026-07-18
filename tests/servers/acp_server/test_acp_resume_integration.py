@@ -9,15 +9,19 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from acp.schema import LoadSessionRequest, ResumeSessionRequest
-from agentpool import AgentPool
 from agentpool.sessions.models import SessionData
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.session_manager import ACPSessionManager
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
 
 
 # ---------------------------------------------------------------------------

@@ -9,6 +9,7 @@ from agentpool import Agent
 from agentpool.messaging import AgentResponse
 from agentpool.talk.talk import Talk
 
+
 pytestmark = pytest.mark.unit
 
 

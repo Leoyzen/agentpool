@@ -18,6 +18,7 @@ Covers three bugs:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -27,12 +28,18 @@ import pytest
 from agentpool import Agent, AgentPool
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
+    RunFailedEvent,
+    RunStartedEvent,
     StreamCompleteEvent,
+    ToolCallStartEvent,
 )
 from agentpool.agents.native_agent.turn import NativeTurn
+from agentpool.lifecycle import RunState
 from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventBus, SessionState
+from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionPool, SessionState
 from agentpool.orchestrator.run import RunHandle
+from agentpool.orchestrator.session_pool_messaging import SessionPoolMessagingMixin
+from agentpool.orchestrator.session_pool_runs import SessionPoolRunsMixin
 from agentpool.orchestrator.turn import Turn
 
 
@@ -139,7 +146,9 @@ async def _consume_gen(gen: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="L2 migration: requires mock RunHandle/agent internals — remains L1 unit test")
+@pytest.mark.skip(
+    reason="L2 migration: requires mock RunHandle/agent internals — remains L1 unit test"
+)
 @pytest.mark.unit
 async def test_cancel_preserves_message_history() -> None:
     """Given a cancelled turn that set _message_history, RunHandle._message_history is updated.
@@ -579,13 +588,11 @@ async def test_bridged_history_injects_cancelled_tool_results() -> None:
 # Merged from test_cancelled_cleanup_review.py (suffix: cr)
 # ---------------------------------------------------------------------------
 
-from agentpool.orchestrator.session_pool_messaging import SessionPoolMessagingMixin
-from agentpool.orchestrator.session_pool_runs import SessionPoolRunsMixin
 
 class _FakeGen:
     """Fake async generator that raises CancelledError on aclose()."""
 
-    def __init__(self, events: list[Any] | None=None) -> None:
+    def __init__(self, events: list[Any] | None = None) -> None:
         self._events = events or []
 
     def __aiter__(self) -> _FakeGen:
@@ -597,14 +604,18 @@ class _FakeGen:
         raise StopAsyncIteration
 
     async def aclose(self) -> None:
-        raise asyncio.CancelledError('simulated cancellation')
+        raise asyncio.CancelledError("simulated cancellation")
+
 
 async def _drain_async_gen(gen: Any) -> None:
     """Drain an async generator to completion."""
     async for _ in gen:
         pass
 
-@pytest.mark.skip(reason="L2 migration: requires mock mixin/session internals — remains L1 unit test")
+
+@pytest.mark.skip(
+    reason="L2 migration: requires mock mixin/session internals — remains L1 unit test"
+)
 @pytest.mark.unit
 @pytest.mark.anyio
 async def test_cancelled_error_cleanup_in_process_prompt() -> None:
@@ -628,19 +639,31 @@ async def test_cancelled_error_cleanup_in_process_prompt() -> None:
     mixin.sessions = controller
     mixin.pool = MagicMock()
     mock_run_handle = MagicMock(spec=RunHandle)
-    mock_run_handle.run_id = 'run-123'
+    mock_run_handle.run_id = "run-123"
     mock_run_handle.start = MagicMock(return_value=_FakeGen())
 
     def fake_create(*args: Any, **kwargs: Any) -> Any:
-        session.current_run_id = 'run-123'
-        controller._runs['run-123'] = mock_run_handle
+        session.current_run_id = "run-123"
+        controller._runs["run-123"] = mock_run_handle
         return mock_run_handle
-    with patch.object(type(mixin), 'event_bus', new_callable=lambda: property(lambda self: event_bus)), patch.object(SessionPoolMessagingMixin, '_create_run_handle', side_effect=fake_create, create=True), pytest.raises(asyncio.CancelledError):
-        await mixin._process_prompt_run_turn('sess-1', 'hello')
-    assert session.current_run_id is None, 'current_run_id was not cleared'
-    assert 'run-123' not in controller._runs, '_runs.pop was not called'
 
-@pytest.mark.skip(reason="L2 migration: requires mock mixin/session internals — remains L1 unit test")
+    with (
+        patch.object(
+            type(mixin), "event_bus", new_callable=lambda: property(lambda self: event_bus)
+        ),
+        patch.object(
+            SessionPoolMessagingMixin, "_create_run_handle", side_effect=fake_create, create=True
+        ),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await mixin._process_prompt_run_turn("sess-1", "hello")
+    assert session.current_run_id is None, "current_run_id was not cleared"
+    assert "run-123" not in controller._runs, "_runs.pop was not called"
+
+
+@pytest.mark.skip(
+    reason="L2 migration: requires mock mixin/session internals — remains L1 unit test"
+)
 @pytest.mark.unit
 @pytest.mark.anyio
 async def test_cancelled_error_cleanup_in_run_stream() -> None:
@@ -668,46 +691,52 @@ async def test_cancelled_error_cleanup_in_run_stream() -> None:
     mock_pool.manifest.agents = {}
     mixin.pool = mock_pool
     mock_run_handle = MagicMock(spec=RunHandle)
-    mock_run_handle.run_id = 'run-stream-1'
+    mock_run_handle.run_id = "run-stream-1"
     mock_run_handle.start = MagicMock(return_value=_FakeGen())
 
     def fake_create(*args: Any, **kwargs: Any) -> Any:
-        session.current_run_id = 'run-stream-1'
-        controller._runs['run-stream-1'] = mock_run_handle
+        session.current_run_id = "run-stream-1"
+        controller._runs["run-stream-1"] = mock_run_handle
         return mock_run_handle
-    with patch.object(type(mixin), 'event_bus', new_callable=lambda: property(lambda self: event_bus)), patch.object(SessionPoolRunsMixin, '_create_run_handle', side_effect=fake_create, create=True), pytest.raises(asyncio.CancelledError):
-        await _drain_async_gen(mixin._run_stream_run_turn('sess-1', 'hello'))
-    assert session.current_run_id is None, 'current_run_id was not cleared'
-    assert 'run-stream-1' not in controller._runs, '_runs.pop was not called'
+
+    with (
+        patch.object(
+            type(mixin), "event_bus", new_callable=lambda: property(lambda self: event_bus)
+        ),
+        patch.object(
+            SessionPoolRunsMixin, "_create_run_handle", side_effect=fake_create, create=True
+        ),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await _drain_async_gen(mixin._run_stream_run_turn("sess-1", "hello"))
+    assert session.current_run_id is None, "current_run_id was not cleared"
+    assert "run-stream-1" not in controller._runs, "_runs.pop was not called"
 
 
 # ---------------------------------------------------------------------------
 # Merged from test_cancel_e2e.py (suffix: e2e)
 # ---------------------------------------------------------------------------
 
-import contextlib
-from agentpool.agents.events import RunFailedEvent, RunStartedEvent, StreamCompleteEvent, ToolCallStartEvent
-from agentpool.lifecycle import RunState
-from agentpool.orchestrator.core import EventEnvelope, SessionPool
-
-if TYPE_CHECKING:
-    from agentpool.agents.context import AgentRunContext
 
 def _unwrap_event(event: Any) -> Any:
     """Unwrap EventEnvelope if present, otherwise return the event as-is."""
     return event.event if isinstance(event, EventEnvelope) else event
 
-async def _receive_and_get_handle(session_pool: SessionPool, session_id: str, content: str, **kwargs: Any) -> Any:
+
+async def _receive_and_get_handle(
+    session_pool: SessionPool, session_id: str, content: str, **kwargs: Any
+) -> Any:
     """Call receive_request and return the RunHandle for the active run.
 
     receive_request() now returns str | None (message_id), but many tests
     need the RunHandle to inspect state. This helper bridges the gap.
     """
     message_id = await session_pool.send_message(session_id, content, **kwargs)
-    assert message_id is not None, 'receive_request should return a message_id for idle session'
+    assert message_id is not None, "receive_request should return a message_id for idle session"
     handle = session_pool._get_active_run_handle(session_id)
-    assert handle is not None, 'Expected an active RunHandle after receive_request'
+    assert handle is not None, "Expected an active RunHandle after receive_request"
     return handle
+
 
 class _BlockingTurn(Turn):
     """Turn that blocks until run_ctx.cancelled, then returns without StreamCompleteEvent."""
@@ -717,24 +746,28 @@ class _BlockingTurn(Turn):
 
     async def execute(self):
         self._message_history = []
-        self._final_message = ChatMessage(content='blocked', role='assistant')
+        self._final_message = ChatMessage(content="blocked", role="assistant")
         while not self._run_ctx.cancelled:
             await asyncio.sleep(0.01)
         return
         yield
 
-class _StubTurn_e2e(Turn):
+
+class _StubTurn_e2e(Turn):  # noqa: N801
     """Minimal Turn that yields events from a list and sets message history."""
 
-    def __init__(self, *, events: list[Any] | None=None, message_history: list[Any] | None=None) -> None:
+    def __init__(
+        self, *, events: list[Any] | None = None, message_history: list[Any] | None = None
+    ) -> None:
         self._events = events or []
         self._history = message_history or []
 
     async def execute(self):
         self._message_history = self._history
-        self._final_message = ChatMessage(content='done', role='assistant')
+        self._final_message = ChatMessage(content="done", role="assistant")
         for event in self._events:
             yield event
+
 
 class _ToolBlockingTurn(Turn):
     """Turn that yields ToolCallStartEvent then blocks until run_ctx.cancelled."""
@@ -744,10 +777,13 @@ class _ToolBlockingTurn(Turn):
 
     async def execute(self):
         self._message_history = []
-        self._final_message = ChatMessage(content='tool-blocked', role='assistant')
-        yield ToolCallStartEvent(tool_call_id='test-tool-1', tool_name='bash', title='Running bash command')
+        self._final_message = ChatMessage(content="tool-blocked", role="assistant")
+        yield ToolCallStartEvent(
+            tool_call_id="test-tool-1", tool_name="bash", title="Running bash command"
+        )
         while not self._run_ctx.cancelled:
             await asyncio.sleep(0.01)
+
 
 async def _patch_agent_create_turn(
     session_pool: SessionPool,
@@ -762,6 +798,7 @@ async def _patch_agent_create_turn(
     agent.create_turn = create_turn_fn  # type: ignore[method-assign]
     return agent
 
+
 def _make_cancel_aware_create_turn() -> Any:
     """Return a create_turn function whose first call returns _BlockingTurn.
 
@@ -769,13 +806,23 @@ def _make_cancel_aware_create_turn() -> Any:
     """
     call_count = 0
 
-    def _create_turn(prompts: Any, run_ctx: AgentRunContext, message_history: Any, **kwargs: Any) -> Turn:
+    def _create_turn(
+        prompts: Any, run_ctx: AgentRunContext, message_history: Any, **kwargs: Any
+    ) -> Turn:
         nonlocal call_count
         call_count += 1
         if call_count == 1:
             return _BlockingTurn(run_ctx)
-        return _StubTurn_e2e(events=[RunStartedEvent(run_id='test-run'), StreamCompleteEvent(message=ChatMessage(content='response', role='assistant'))], message_history=['msg'])
+        return _StubTurn_e2e(
+            events=[
+                RunStartedEvent(run_id="test-run"),
+                StreamCompleteEvent(message=ChatMessage(content="response", role="assistant")),
+            ],
+            message_history=["msg"],
+        )
+
     return _create_turn
+
 
 async def _drain_queue(queue: asyncio.Queue) -> list[Any]:
     """Drain all currently-available events from a queue without blocking."""
@@ -786,6 +833,7 @@ async def _drain_queue(queue: asyncio.Queue) -> list[Any]:
             continue
         break
     return events
+
 
 @pytest.mark.integration
 @pytest.mark.anyio
@@ -803,18 +851,22 @@ async def test_cancel_then_new_prompt_full_flow(minimal_pool: AgentPool) -> None
     """
     session_pool = minimal_pool.session_pool
     assert session_pool is not None
-    session_id = 'sess-cancel-e2e'
-    await session_pool.create_session(session_id, agent_name='test_agent')
+    session_id = "sess-cancel-e2e"
+    await session_pool.create_session(session_id, agent_name="test_agent")
     await _patch_agent_create_turn(session_pool, session_id, _make_cancel_aware_create_turn())
     queue = await session_pool.event_bus.subscribe(session_id)
-    first_handle = await _receive_and_get_handle(session_pool, session_id, 'first prompt')
+    first_handle = await _receive_and_get_handle(session_pool, session_id, "first prompt")
     await asyncio.sleep(0.1)
     session_pool.sessions.cancel_run_for_session(session_id)
     await asyncio.sleep(0.2)
     pre_events = await _drain_queue(queue)
     pre_event_types = [type(_unwrap_event(e)) for e in pre_events]
-    assert RunFailedEvent in pre_event_types, f'Expected RunFailedEvent from cancelled turn, got: {pre_event_types}'
-    second_msg_id = await asyncio.wait_for(session_pool.send_message(session_id, 'second prompt'), timeout=30.0)
+    assert RunFailedEvent in pre_event_types, (
+        f"Expected RunFailedEvent from cancelled turn, got: {pre_event_types}"
+    )
+    second_msg_id = await asyncio.wait_for(
+        session_pool.send_message(session_id, "second prompt"), timeout=30.0
+    )
     post_events: list[Any] = []
     try:
         async with asyncio.timeout(30.0):
@@ -828,17 +880,24 @@ async def test_cancel_then_new_prompt_full_flow(minimal_pool: AgentPool) -> None
                 except TimeoutError:
                     break
     except TimeoutError:
-        pytest.fail('Timed out waiting for events after cancel-then-prompt')
+        pytest.fail("Timed out waiting for events after cancel-then-prompt")
     post_event_types = [type(_unwrap_event(e)) for e in post_events]
-    assert RunStartedEvent in post_event_types, f'Expected RunStartedEvent for new prompt, got: {post_event_types}'
-    assert StreamCompleteEvent in post_event_types, f'Expected StreamCompleteEvent for new prompt, got: {post_event_types}'
+    assert RunStartedEvent in post_event_types, (
+        f"Expected RunStartedEvent for new prompt, got: {post_event_types}"
+    )
+    assert StreamCompleteEvent in post_event_types, (
+        f"Expected StreamCompleteEvent for new prompt, got: {post_event_types}"
+    )
     if second_msg_id is not None:
         second_handle = session_pool._get_active_run_handle(session_id)
         if second_handle is not None and second_handle is not first_handle:
             pass
-    assert first_handle._run_state in (RunState.IDLE, RunState.DONE), f'First RunHandle should be idle or done, got: {first_handle._run_state}'
+    assert first_handle._run_state in (RunState.IDLE, RunState.DONE), (
+        f"First RunHandle should be idle or done, got: {first_handle._run_state}"
+    )
     first_handle.close()
     await asyncio.sleep(0.1)
+
 
 def _make_tool_blocking_create_turn() -> Any:
     """Return a create_turn function whose first call returns _ToolBlockingTurn.
@@ -847,28 +906,50 @@ def _make_tool_blocking_create_turn() -> Any:
     """
     call_count = 0
 
-    def _create_turn(prompts: Any, run_ctx: AgentRunContext, message_history: Any, **kwargs: Any) -> Turn:
+    def _create_turn(
+        prompts: Any, run_ctx: AgentRunContext, message_history: Any, **kwargs: Any
+    ) -> Turn:
         nonlocal call_count
         call_count += 1
         if call_count == 1:
             return _ToolBlockingTurn(run_ctx)
-        return _StubTurn_e2e(events=[RunStartedEvent(run_id='test-run'), StreamCompleteEvent(message=ChatMessage(content='response', role='assistant'))], message_history=['msg'])
+        return _StubTurn_e2e(
+            events=[
+                RunStartedEvent(run_id="test-run"),
+                StreamCompleteEvent(message=ChatMessage(content="response", role="assistant")),
+            ],
+            message_history=["msg"],
+        )
+
     return _create_turn
+
 
 def _make_stub_then_die_create_turn() -> Any:
     """Return a create_turn function: first returns _StubTurn, second raises, rest _StubTurn."""
     call_count = 0
 
-    def _create_turn(prompts: Any, run_ctx: AgentRunContext, message_history: Any, **kwargs: Any) -> Turn:
+    def _create_turn(
+        prompts: Any, run_ctx: AgentRunContext, message_history: Any, **kwargs: Any
+    ) -> Turn:
         nonlocal call_count
         call_count += 1
         if call_count == 2:
-            msg = 'Simulated unrecoverable error in create_turn'
+            msg = "Simulated unrecoverable error in create_turn"
             raise RuntimeError(msg)
-        return _StubTurn_e2e(events=[RunStartedEvent(run_id='test-run'), StreamCompleteEvent(message=ChatMessage(content='response', role='assistant'))], message_history=['msg'])
+        return _StubTurn_e2e(
+            events=[
+                RunStartedEvent(run_id="test-run"),
+                StreamCompleteEvent(message=ChatMessage(content="response", role="assistant")),
+            ],
+            message_history=["msg"],
+        )
+
     return _create_turn
 
-async def _collect_events_until(queue: asyncio.Queue, target_type: type, *, timeout: float=30.0) -> list[Any]:
+
+async def _collect_events_until(
+    queue: asyncio.Queue, target_type: type, *, timeout: float = 30.0
+) -> list[Any]:
     """Collect events from a queue until a target event type is seen."""
     events: list[Any] = []
     try:
@@ -882,8 +963,9 @@ async def _collect_events_until(queue: asyncio.Queue, target_type: type, *, time
                 except TimeoutError:
                     break
     except TimeoutError:
-        pytest.fail(f'Timed out waiting for {target_type.__name__}')
+        pytest.fail(f"Timed out waiting for {target_type.__name__}")
     return events
+
 
 @pytest.mark.integration
 @pytest.mark.anyio
@@ -896,11 +978,11 @@ async def test_double_cancel(minimal_pool: AgentPool) -> None:
     """
     session_pool = minimal_pool.session_pool
     assert session_pool is not None
-    session_id = 'sess-double-cancel'
-    await session_pool.create_session(session_id, agent_name='test_agent')
+    session_id = "sess-double-cancel"
+    await session_pool.create_session(session_id, agent_name="test_agent")
     await _patch_agent_create_turn(session_pool, session_id, _make_cancel_aware_create_turn())
     queue = await session_pool.event_bus.subscribe(session_id)
-    first_handle = await _receive_and_get_handle(session_pool, session_id, 'first prompt')
+    first_handle = await _receive_and_get_handle(session_pool, session_id, "first prompt")
     assert first_handle is not None
     await asyncio.sleep(0.1)
     session_pool.sessions.cancel_run_for_session(session_id)
@@ -908,14 +990,17 @@ async def test_double_cancel(minimal_pool: AgentPool) -> None:
     await asyncio.sleep(0.2)
     pre_events = await _drain_queue(queue)
     pre_types = [type(_unwrap_event(e)) for e in pre_events]
-    assert RunFailedEvent in pre_types, f'Expected RunFailedEvent, got: {pre_types}'
-    assert first_handle._run_state in (RunState.IDLE, RunState.DONE), f'RunHandle should be idle/done after double cancel, got: {first_handle._run_state}'
-    await asyncio.wait_for(session_pool.send_message(session_id, 'second prompt'), timeout=30.0)
+    assert RunFailedEvent in pre_types, f"Expected RunFailedEvent, got: {pre_types}"
+    assert first_handle._run_state in (RunState.IDLE, RunState.DONE), (
+        f"RunHandle should be idle/done after double cancel, got: {first_handle._run_state}"
+    )
+    await asyncio.wait_for(session_pool.send_message(session_id, "second prompt"), timeout=30.0)
     post_events = await _collect_events_until(queue, StreamCompleteEvent)
     post_types = [type(_unwrap_event(e)) for e in post_events]
-    assert StreamCompleteEvent in post_types, f'Expected StreamCompleteEvent, got: {post_types}'
+    assert StreamCompleteEvent in post_types, f"Expected StreamCompleteEvent, got: {post_types}"
     first_handle.close()
     await asyncio.sleep(0.1)
+
 
 @pytest.mark.integration
 @pytest.mark.anyio
@@ -928,26 +1013,42 @@ async def test_cancel_during_idle_then_new_prompt(minimal_pool: AgentPool) -> No
     """
     session_pool = minimal_pool.session_pool
     assert session_pool is not None
-    session_id = 'sess-cancel-idle'
-    await session_pool.create_session(session_id, agent_name='test_agent')
-    agent = await _patch_agent_create_turn(session_pool, session_id, _make_cancel_aware_create_turn())
+    session_id = "sess-cancel-idle"
+    await session_pool.create_session(session_id, agent_name="test_agent")
+    agent = await _patch_agent_create_turn(
+        session_pool, session_id, _make_cancel_aware_create_turn()
+    )
     queue = await session_pool.event_bus.subscribe(session_id)
     # Re-patch with a stub-only create_turn for immediate completion
-    agent.create_turn = lambda prompts, run_ctx, message_history, **kwargs: _StubTurn_e2e(events=[RunStartedEvent(run_id='test-run'), StreamCompleteEvent(message=ChatMessage(content='response', role='assistant'))], message_history=['msg'])  # type: ignore[method-assign]
-    first_handle = await _receive_and_get_handle(session_pool, session_id, 'first prompt')
+    agent.create_turn = lambda prompts, run_ctx, message_history, **kwargs: _StubTurn_e2e(
+        events=[
+            RunStartedEvent(run_id="test-run"),
+            StreamCompleteEvent(message=ChatMessage(content="response", role="assistant")),
+        ],
+        message_history=["msg"],
+    )  # type: ignore[method-assign]
+    first_handle = await _receive_and_get_handle(session_pool, session_id, "first prompt")
     assert first_handle is not None
     await _collect_events_until(queue, StreamCompleteEvent)
     await asyncio.sleep(0.1)
     session_pool.sessions.cancel_run_for_session(session_id)
     await asyncio.sleep(0.05)
-    assert first_handle.run_ctx.cancelled is False, 'cancelled flag should remain False when cancel is called while idle (no active run to cancel)'
-    await asyncio.wait_for(session_pool.send_message(session_id, 'second prompt'), timeout=30.0)
+    assert first_handle.run_ctx.cancelled is False, (
+        "cancelled flag should remain False when cancel is called while idle"
+        " (no active run to cancel)"
+    )
+    await asyncio.wait_for(session_pool.send_message(session_id, "second prompt"), timeout=30.0)
     post_events = await _collect_events_until(queue, StreamCompleteEvent)
     post_types = [type(_unwrap_event(e)) for e in post_events]
-    assert StreamCompleteEvent in post_types, f'Expected StreamCompleteEvent from new turn, got: {post_types}'
-    assert first_handle.run_ctx.cancelled is False, 'cancelled flag should remain False — new turn ran without cancel'
+    assert StreamCompleteEvent in post_types, (
+        f"Expected StreamCompleteEvent from new turn, got: {post_types}"
+    )
+    assert first_handle.run_ctx.cancelled is False, (
+        "cancelled flag should remain False — new turn ran without cancel"
+    )
     first_handle.close()
     await asyncio.sleep(0.1)
+
 
 @pytest.mark.integration
 @pytest.mark.anyio
@@ -961,22 +1062,27 @@ async def test_cancel_then_steer_continues_turn(minimal_pool: AgentPool) -> None
     """
     session_pool = minimal_pool.session_pool
     assert session_pool is not None
-    session_id = 'sess-cancel-steer'
-    await session_pool.create_session(session_id, agent_name='test_agent')
+    session_id = "sess-cancel-steer"
+    await session_pool.create_session(session_id, agent_name="test_agent")
     await _patch_agent_create_turn(session_pool, session_id, _make_cancel_aware_create_turn())
     queue = await session_pool.event_bus.subscribe(session_id)
-    first_handle = await _receive_and_get_handle(session_pool, session_id, 'first prompt')
+    first_handle = await _receive_and_get_handle(session_pool, session_id, "first prompt")
     assert first_handle is not None
     await asyncio.sleep(0.1)
     session_pool.sessions.cancel_run_for_session(session_id)
-    steer_result = first_handle.steer('steer message')
-    assert steer_result is not None, 'steer() should return message_id (message delivered/queued)'
+    steer_result = first_handle.steer("steer message")
+    assert steer_result is not None, "steer() should return message_id (message delivered/queued)"
     post_events = await _collect_events_until(queue, StreamCompleteEvent, timeout=30.0)
     post_types = [type(_unwrap_event(e)) for e in post_events]
-    assert RunFailedEvent in post_types, f'Expected RunFailedEvent from cancelled turn, got: {post_types}'
-    assert StreamCompleteEvent in post_types, f'Expected StreamCompleteEvent from subsequent turn, got: {post_types}'
+    assert RunFailedEvent in post_types, (
+        f"Expected RunFailedEvent from cancelled turn, got: {post_types}"
+    )
+    assert StreamCompleteEvent in post_types, (
+        f"Expected StreamCompleteEvent from subsequent turn, got: {post_types}"
+    )
     first_handle.close()
     await asyncio.sleep(0.1)
+
 
 @pytest.mark.integration
 @pytest.mark.anyio
@@ -989,22 +1095,29 @@ async def test_cancel_during_tool_execution(minimal_pool: AgentPool) -> None:
     """
     session_pool = minimal_pool.session_pool
     assert session_pool is not None
-    session_id = 'sess-cancel-tool'
-    await session_pool.create_session(session_id, agent_name='test_agent')
+    session_id = "sess-cancel-tool"
+    await session_pool.create_session(session_id, agent_name="test_agent")
     await _patch_agent_create_turn(session_pool, session_id, _make_tool_blocking_create_turn())
     queue = await session_pool.event_bus.subscribe(session_id)
-    first_handle = await _receive_and_get_handle(session_pool, session_id, 'first prompt')
+    first_handle = await _receive_and_get_handle(session_pool, session_id, "first prompt")
     assert first_handle is not None
     await asyncio.sleep(0.1)
     session_pool.sessions.cancel_run_for_session(session_id)
     await asyncio.sleep(0.2)
     events = await _drain_queue(queue)
     event_types = [type(_unwrap_event(e)) for e in events]
-    assert ToolCallStartEvent in event_types, f'Expected ToolCallStartEvent before cancel, got: {event_types}'
-    assert RunFailedEvent in event_types, f'Expected RunFailedEvent after cancel, got: {event_types}'
-    assert first_handle._run_state in (RunState.IDLE, RunState.DONE), f'RunHandle should be idle/done after cancel, got: {first_handle._run_state}'
+    assert ToolCallStartEvent in event_types, (
+        f"Expected ToolCallStartEvent before cancel, got: {event_types}"
+    )
+    assert RunFailedEvent in event_types, (
+        f"Expected RunFailedEvent after cancel, got: {event_types}"
+    )
+    assert first_handle._run_state in (RunState.IDLE, RunState.DONE), (
+        f"RunHandle should be idle/done after cancel, got: {first_handle._run_state}"
+    )
     first_handle.close()
     await asyncio.sleep(0.1)
+
 
 @pytest.mark.integration
 @pytest.mark.anyio
@@ -1017,26 +1130,33 @@ async def test_cancel_then_followup_next_turn(minimal_pool: AgentPool) -> None:
     """
     session_pool = minimal_pool.session_pool
     assert session_pool is not None
-    session_id = 'sess-cancel-followup'
-    await session_pool.create_session(session_id, agent_name='test_agent')
+    session_id = "sess-cancel-followup"
+    await session_pool.create_session(session_id, agent_name="test_agent")
     await _patch_agent_create_turn(session_pool, session_id, _make_cancel_aware_create_turn())
     queue = await session_pool.event_bus.subscribe(session_id)
-    first_handle = await _receive_and_get_handle(session_pool, session_id, 'first prompt')
+    first_handle = await _receive_and_get_handle(session_pool, session_id, "first prompt")
     assert first_handle is not None
     await asyncio.sleep(0.1)
     session_pool.sessions.cancel_run_for_session(session_id)
     await asyncio.sleep(0.3)
     pre_events = await _drain_queue(queue)
     pre_types = [type(_unwrap_event(e)) for e in pre_events]
-    assert RunFailedEvent in pre_types, f'Expected RunFailedEvent from cancelled turn, got: {pre_types}'
-    followup_result = first_handle.followup('followup message')
-    assert followup_result is not None, 'followup() should return message_id (message queued)'
+    assert RunFailedEvent in pre_types, (
+        f"Expected RunFailedEvent from cancelled turn, got: {pre_types}"
+    )
+    followup_result = first_handle.followup("followup message")
+    assert followup_result is not None, "followup() should return message_id (message queued)"
     post_events = await _collect_events_until(queue, StreamCompleteEvent, timeout=30.0)
     post_types = [type(_unwrap_event(e)) for e in post_events]
-    assert RunStartedEvent in post_types, f'Expected RunStartedEvent for followup turn, got: {post_types}'
-    assert StreamCompleteEvent in post_types, f'Expected StreamCompleteEvent for followup turn, got: {post_types}'
+    assert RunStartedEvent in post_types, (
+        f"Expected RunStartedEvent for followup turn, got: {post_types}"
+    )
+    assert StreamCompleteEvent in post_types, (
+        f"Expected StreamCompleteEvent for followup turn, got: {post_types}"
+    )
     first_handle.close()
     await asyncio.sleep(0.1)
+
 
 @pytest.mark.integration
 @pytest.mark.anyio
@@ -1049,11 +1169,11 @@ async def test_double_cancel_then_new_prompt(minimal_pool: AgentPool) -> None:
     """
     session_pool = minimal_pool.session_pool
     assert session_pool is not None
-    session_id = 'sess-double-cancel-prompt'
-    await session_pool.create_session(session_id, agent_name='test_agent')
+    session_id = "sess-double-cancel-prompt"
+    await session_pool.create_session(session_id, agent_name="test_agent")
     await _patch_agent_create_turn(session_pool, session_id, _make_cancel_aware_create_turn())
     queue = await session_pool.event_bus.subscribe(session_id)
-    first_handle = await _receive_and_get_handle(session_pool, session_id, 'first prompt')
+    first_handle = await _receive_and_get_handle(session_pool, session_id, "first prompt")
     assert first_handle is not None
     await asyncio.sleep(0.1)
     session_pool.sessions.cancel_run_for_session(session_id)
@@ -1061,13 +1181,18 @@ async def test_double_cancel_then_new_prompt(minimal_pool: AgentPool) -> None:
     await asyncio.sleep(0.2)
     pre_events = await _drain_queue(queue)
     pre_types = [type(_unwrap_event(e)) for e in pre_events]
-    assert RunFailedEvent in pre_types, f'Expected RunFailedEvent from cancelled turn, got: {pre_types}'
-    await asyncio.wait_for(session_pool.send_message(session_id, 'second prompt'), timeout=30.0)
+    assert RunFailedEvent in pre_types, (
+        f"Expected RunFailedEvent from cancelled turn, got: {pre_types}"
+    )
+    await asyncio.wait_for(session_pool.send_message(session_id, "second prompt"), timeout=30.0)
     post_events = await _collect_events_until(queue, StreamCompleteEvent, timeout=30.0)
     post_types = [type(_unwrap_event(e)) for e in post_events]
-    assert StreamCompleteEvent in post_types, f'Expected StreamCompleteEvent from new prompt, got: {post_types}'
+    assert StreamCompleteEvent in post_types, (
+        f"Expected StreamCompleteEvent from new prompt, got: {post_types}"
+    )
     first_handle.close()
     await asyncio.sleep(0.1)
+
 
 @pytest.mark.integration
 @pytest.mark.anyio
@@ -1083,26 +1208,32 @@ async def test_runhandle_dies_in_idle_loop(minimal_pool: AgentPool) -> None:
     """
     session_pool = minimal_pool.session_pool
     assert session_pool is not None
-    session_id = 'sess-dies-in-idle'
-    await session_pool.create_session(session_id, agent_name='test_agent')
+    session_id = "sess-dies-in-idle"
+    await session_pool.create_session(session_id, agent_name="test_agent")
     await _patch_agent_create_turn(session_pool, session_id, _make_stub_then_die_create_turn())
     queue = await session_pool.event_bus.subscribe(session_id)
-    first_handle = await _receive_and_get_handle(session_pool, session_id, 'first prompt')
+    first_handle = await _receive_and_get_handle(session_pool, session_id, "first prompt")
     assert first_handle is not None
     await _collect_events_until(queue, StreamCompleteEvent)
     await asyncio.sleep(0.1)
-    await asyncio.wait_for(session_pool.send_message(session_id, 'trigger error'), timeout=30.0)
+    await asyncio.wait_for(session_pool.send_message(session_id, "trigger error"), timeout=30.0)
     await asyncio.sleep(0.5)
     crash_session = session_pool.sessions.get_session(session_id)
     assert crash_session is not None
-    assert crash_session.current_run_id is None, 'current_run_id should be cleared by _cleanup_run after error'
-    second_msg_id = await asyncio.wait_for(session_pool.send_message(session_id, 'new prompt after crash'), timeout=30.0)
-    assert second_msg_id is not None, 'receive_request should return a new message_id after cleanup'
+    assert crash_session.current_run_id is None, (
+        "current_run_id should be cleared by _cleanup_run after error"
+    )
+    second_msg_id = await asyncio.wait_for(
+        session_pool.send_message(session_id, "new prompt after crash"), timeout=30.0
+    )
+    assert second_msg_id is not None, "receive_request should return a new message_id after cleanup"
     second_handle = session_pool._get_active_run_handle(session_id)
     assert second_handle is not None
-    assert second_handle is not first_handle, 'New RunHandle should be a different instance'
+    assert second_handle is not first_handle, "New RunHandle should be a different instance"
     post_events = await _collect_events_until(queue, StreamCompleteEvent, timeout=30.0)
     post_types = [type(_unwrap_event(e)) for e in post_events]
-    assert StreamCompleteEvent in post_types, f'Expected StreamCompleteEvent from new RunHandle, got: {post_types}'
+    assert StreamCompleteEvent in post_types, (
+        f"Expected StreamCompleteEvent from new RunHandle, got: {post_types}"
+    )
     second_handle.close()
     await asyncio.sleep(0.1)

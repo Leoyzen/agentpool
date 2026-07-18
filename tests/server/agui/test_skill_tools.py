@@ -16,6 +16,7 @@ from agentpool_server.agui_server.skill_tools import (
     AGUISkillToolAdapter,
 )
 
+
 pytestmark = pytest.mark.integration
 
 

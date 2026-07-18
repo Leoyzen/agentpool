@@ -6,6 +6,7 @@ import yaml
 from agentpool import AgentsManifest
 from agentpool.prompts.manager import PromptManager
 
+
 pytestmark = pytest.mark.unit
 
 

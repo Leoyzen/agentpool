@@ -19,6 +19,7 @@ from agentpool_storage.protocols import (
     StatsAggregator,
 )
 
+
 pytestmark = pytest.mark.unit
 
 

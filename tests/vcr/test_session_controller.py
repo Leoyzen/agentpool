@@ -13,13 +13,12 @@ Cassettes ([HUMAN-REQUIRED]):
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from dirty_equals import IsStr
 import pytest
 
-from agentpool.lifecycle.types import RunState
 from tests.vcr.conftest import cassette_exists
+
 
 if TYPE_CHECKING:
     from agentpool import AgentPool

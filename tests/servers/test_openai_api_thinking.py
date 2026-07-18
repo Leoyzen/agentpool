@@ -29,6 +29,7 @@ from agentpool_server.openai_api_server.responses.models import (
     ResponseRequest,
 )
 
+
 pytestmark = pytest.mark.integration
 
 

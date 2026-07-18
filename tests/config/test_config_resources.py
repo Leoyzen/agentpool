@@ -9,6 +9,7 @@ import pytest
 from agentpool import config_resources
 from agentpool.models.manifest import AgentsManifest
 
+
 pytestmark = pytest.mark.unit
 
 

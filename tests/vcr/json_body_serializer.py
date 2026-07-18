@@ -16,7 +16,6 @@ hook in ``tests/conftest.py``.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 import gzip
 import json
 import re
@@ -56,6 +55,8 @@ _CREDENTIAL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from yaml import Dumper, SafeLoader
 else:
     try:

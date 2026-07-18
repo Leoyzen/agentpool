@@ -49,6 +49,7 @@ from agentpool.agents.events import (
 )
 from agentpool.messaging import ChatMessage
 
+
 pytestmark = pytest.mark.integration
 
 

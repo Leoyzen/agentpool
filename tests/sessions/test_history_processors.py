@@ -10,6 +10,7 @@ from agentpool.models.agents import NativeAgentConfig
 from agentpool.utils.inspection import get_fn_name
 from agentpool_config.session import MemoryConfig
 
+
 pytestmark = pytest.mark.unit
 
 

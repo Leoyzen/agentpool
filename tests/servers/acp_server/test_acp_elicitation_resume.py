@@ -20,14 +20,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.agents.events.events import ElicitationDeferredEvent
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.handler import ACPProtocolHandler
 from agentpool_server.acp_server.session_manager import ACPSessionManager
 
+
 if TYPE_CHECKING:
-    pass
+    from agentpool import AgentPool
+
 
 pytestmark = pytest.mark.integration
 

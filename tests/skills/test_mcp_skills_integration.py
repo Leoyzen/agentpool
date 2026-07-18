@@ -21,6 +21,7 @@ from agentpool.capabilities.resource_protocols import SkillEntry
 from agentpool.skills.skill import Skill
 from agentpool_toolsets.builtin.skills import list_skills, load_skill
 
+
 pytestmark = pytest.mark.integration
 
 

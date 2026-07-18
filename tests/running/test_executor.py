@@ -15,6 +15,7 @@ from agentpool.running.executor import (
     execute_functions,
 )
 
+
 pytestmark = pytest.mark.unit
 
 

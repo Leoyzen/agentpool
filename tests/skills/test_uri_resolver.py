@@ -22,6 +22,7 @@ from agentpool.skills.uri_resolver import (
     _validate_skill_name,
 )
 
+
 pytestmark = pytest.mark.unit
 
 

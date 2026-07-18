@@ -11,6 +11,7 @@ from agentpool import AgentPool, AgentsManifest
 from agentpool.messaging.context import NodeContext
 from agentpool_commands.prompts import ShowPromptCommand
 
+
 pytestmark = pytest.mark.integration
 
 

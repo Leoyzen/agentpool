@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Check that every test file has at least one layer marker (unit, integration, vcr, or e2e).
 
 Usage:
@@ -12,8 +11,9 @@ Exit codes:
 from __future__ import annotations
 
 import ast
-import sys
 from pathlib import Path
+import sys
+
 
 LAYER_MARKERS = {"unit", "integration", "vcr", "e2e"}
 
@@ -21,7 +21,7 @@ LAYER_MARKERS = {"unit", "integration", "vcr", "e2e"}
 PYTESTMARK_ATTRS = {"pytestmark", "pytest"}
 
 
-def has_layer_marker(filepath: Path) -> bool:
+def has_layer_marker(filepath: Path) -> bool:  # noqa: PLR0911
     """Check if a test file has at least one layer marker.
 
     Looks for:
@@ -48,19 +48,18 @@ def has_layer_marker(filepath: Path) -> bool:
                         for elt in node.value.elts:
                             if isinstance(elt, ast.Attribute) and _is_layer_mark(elt):
                                 return True
-        elif isinstance(node, ast.AnnAssign):
-            if (
-                isinstance(node.target, ast.Name)
-                and node.target.id == "pytestmark"
-                and node.value is not None
-            ):
-                if isinstance(node.value, ast.Attribute):
-                    if _is_layer_mark(node.value):
+        elif isinstance(node, ast.AnnAssign) and (
+            isinstance(node.target, ast.Name)
+            and node.target.id == "pytestmark"
+            and node.value is not None
+        ):
+            if isinstance(node.value, ast.Attribute):
+                if _is_layer_mark(node.value):
+                    return True
+            elif isinstance(node.value, ast.List):
+                for elt in node.value.elts:
+                    if isinstance(elt, ast.Attribute) and _is_layer_mark(elt):
                         return True
-                elif isinstance(node.value, ast.List):
-                    for elt in node.value.elts:
-                        if isinstance(elt, ast.Attribute) and _is_layer_mark(elt):
-                            return True
 
     # Check @pytest.mark.<layer> decorators on functions
     for node in ast.walk(tree):
@@ -84,10 +83,12 @@ def _is_layer_mark(node: ast.Attribute) -> bool:
     if node.attr not in LAYER_MARKERS:
         return False
     # Check that the value is pytest.mark
-    if isinstance(node.value, ast.Attribute) and node.value.attr == "mark":
-        if isinstance(node.value.value, ast.Name) and node.value.value.id == "pytest":
-            return True
-    return False
+    return (
+        isinstance(node.value, ast.Attribute)
+        and node.value.attr == "mark"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "pytest"
+    )
 
 
 def main() -> int:
@@ -106,9 +107,12 @@ def main() -> int:
         for f in missing:
             rel = f.relative_to(tests_dir.parent)
             print(f"  {rel}")
-        print(f"\nAdd @pytest.mark.unit, @pytest.mark.integration, @pytest.mark.vcr, or @pytest.mark.e2e to each file.")
+        print(
+            "\nAdd @pytest.mark.unit, @pytest.mark.integration,"
+            " @pytest.mark.vcr, or @pytest.mark.e2e to each file."
+        )
         return 1
-    print(f"✅ All test files have at least one layer marker.")
+    print("✅ All test files have at least one layer marker.")
     return 0
 
 

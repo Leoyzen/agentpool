@@ -20,6 +20,7 @@ import pytest
 
 from agentpool.sessions.models import SessionData
 
+
 pytestmark = pytest.mark.integration
 
 

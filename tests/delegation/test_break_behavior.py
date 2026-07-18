@@ -54,6 +54,7 @@ from agentpool import Agent, AgentPool
 from agentpool.agents.events import StreamCompleteEvent, ToolCallStartEvent
 from agentpool.orchestrator.core import SessionPool
 
+
 pytestmark = pytest.mark.integration
 
 
@@ -84,7 +85,9 @@ def tool_call_agent() -> Agent[None]:
     )
 
 
-async def _setup_session_pool(agent: Agent[Any], minimal_pool: AgentPool) -> tuple[SessionPool, str]:
+async def _setup_session_pool(
+    agent: Agent[Any], minimal_pool: AgentPool
+) -> tuple[SessionPool, str]:
     """Create a SessionPool with the given agent attached using the real pool."""
     # Create a new SessionPool with auto_resume disabled for break testing
     session_pool = SessionPool(minimal_pool, enable_auto_resume=False)
@@ -142,7 +145,9 @@ async def test_simple_break_after_n_events(break_test_agent: Agent[None], minima
         await session_pool.shutdown()
 
 
-async def test_break_with_exception_handling(break_test_agent: Agent[None], minimal_pool: AgentPool):
+async def test_break_with_exception_handling(
+    break_test_agent: Agent[None], minimal_pool: AgentPool
+):
     """Test 2: Verify exception handling around break.
 
     !!! warning "Known Issue"
@@ -166,7 +171,9 @@ async def test_break_with_exception_handling(break_test_agent: Agent[None], mini
         await session_pool.shutdown()
 
 
-async def test_conversation_history_after_break(break_test_agent: Agent[None], minimal_pool: AgentPool):
+async def test_conversation_history_after_break(
+    break_test_agent: Agent[None], minimal_pool: AgentPool
+):
     """Test 3: Conversation history after break.
 
     !!! warning "Known Issue"
@@ -261,7 +268,9 @@ async def test_interrupt_vs_break(break_test_agent: Agent[None], minimal_pool: A
         await session_pool.shutdown()
 
 
-async def test_safe_pattern_complete_consumption(break_test_agent: Agent[None], minimal_pool: AgentPool):
+async def test_safe_pattern_complete_consumption(
+    break_test_agent: Agent[None], minimal_pool: AgentPool
+):
     """Test 6: Safe pattern - consume until StreamCompleteEvent.
 
     !!! tip "Recommended Pattern"
@@ -287,7 +296,9 @@ async def test_safe_pattern_complete_consumption(break_test_agent: Agent[None], 
         await session_pool.shutdown()
 
 
-async def test_tool_call_detection_without_break(tool_call_agent: Agent[None], minimal_pool: AgentPool):
+async def test_tool_call_detection_without_break(
+    tool_call_agent: Agent[None], minimal_pool: AgentPool
+):
     """Test 7: Tool call detection simulation without breaking.
 
     !!! tip "Recommended Pattern"

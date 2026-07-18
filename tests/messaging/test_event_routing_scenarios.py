@@ -10,6 +10,7 @@ import pytest
 from agentpool.agents.events import RunStartedEvent, SubAgentEvent
 from agentpool.messaging.event_manager import EventManager
 
+
 pytestmark = pytest.mark.unit
 
 

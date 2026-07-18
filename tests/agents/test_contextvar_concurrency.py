@@ -3,11 +3,12 @@
 Tests that _current_run_ctx uses ContextVar for thread-safe per-run context.
 """
 
-import pytest
-
 import asyncio
 from pathlib import Path
 import sys
+
+import pytest
+
 
 pytestmark = pytest.mark.unit
 

@@ -6,13 +6,14 @@
 
 from __future__ import annotations
 
-import pytest
-
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from agentpool.agents.modes import ModeCategory, ModeInfo
 from agentpool_server.acp_server.acp_agent import get_agent_role_config_option
 from agentpool_server.opencode_server.routes.config_routes import list_modes
+
 
 pytestmark = pytest.mark.integration
 

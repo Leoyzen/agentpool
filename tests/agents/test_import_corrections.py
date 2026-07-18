@@ -3,10 +3,11 @@
 Tests that all imports use the canonical pydantic_ai.usage module location.
 """
 
-import pytest
-
 import ast
 from pathlib import Path
+
+import pytest
+
 
 pytestmark = pytest.mark.unit
 

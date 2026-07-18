@@ -15,12 +15,11 @@ Priority order for resolution:
 
 from __future__ import annotations
 
-import pytest
-
 import os
 from pathlib import Path
 
 from pydantic import BaseModel
+import pytest
 from upathtools import UPath
 
 from agentpool_config.context import CONFIG_DIR, ConfigContextManager
@@ -30,6 +29,7 @@ from agentpool_config.paths import (
     ConfigPath,
     resolve_config_path,
 )
+
 
 pytestmark = pytest.mark.unit
 

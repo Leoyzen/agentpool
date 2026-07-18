@@ -16,14 +16,14 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from dirty_equals import IsStr
 import pytest
 
-from agentpool.orchestrator.event_bus import EventBus
 from tests.vcr.conftest import cassette_exists
+
 
 if TYPE_CHECKING:
     from agentpool import AgentPool
+    from agentpool.orchestrator.event_bus import EventBus
 
 pytestmark = [pytest.mark.vcr, pytest.mark.integration]
 
@@ -43,9 +43,7 @@ async def test_real_event_sequence_publish(vcr_pool: AgentPool) -> None:
     """
     event_bus: EventBus = vcr_pool.session_pool.event_bus
     session_id = "test-eventbus-vcr"
-    await vcr_pool.session_pool.sessions.get_or_create_session(
-        session_id, agent_name="test_agent"
-    )
+    await vcr_pool.session_pool.sessions.get_or_create_session(session_id, agent_name="test_agent")
     queue = await event_bus.subscribe(session_id, scope="session")
     await vcr_pool.session_pool.send_message(
         session_id=session_id,
@@ -62,7 +60,7 @@ async def test_real_event_sequence_publish(vcr_pool: AgentPool) -> None:
             type_name = type(event).__name__
             if "Complete" in type_name or "Error" in type_name:
                 break
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pass
 
     assert events, "Expected at least one EventBus event"
@@ -82,12 +80,8 @@ async def test_scoped_subscription_session(vcr_pool: AgentPool) -> None:
     event_bus: EventBus = vcr_pool.session_pool.event_bus
     session_a = "test-scope-session-a"
     session_b = "test-scope-session-b"
-    await vcr_pool.session_pool.sessions.get_or_create_session(
-        session_a, agent_name="test_agent"
-    )
-    await vcr_pool.session_pool.sessions.get_or_create_session(
-        session_b, agent_name="test_agent"
-    )
+    await vcr_pool.session_pool.sessions.get_or_create_session(session_a, agent_name="test_agent")
+    await vcr_pool.session_pool.sessions.get_or_create_session(session_b, agent_name="test_agent")
     queue = await event_bus.subscribe(session_a, scope="session")
     await vcr_pool.session_pool.send_message(
         session_id=session_a,
@@ -102,7 +96,7 @@ async def test_scoped_subscription_session(vcr_pool: AgentPool) -> None:
             events.append(event)
             if "Complete" in type(event).__name__:
                 break
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pass
 
     assert events, "Expected events for session_a"
@@ -121,9 +115,7 @@ async def test_scoped_subtree(vcr_pool: AgentPool) -> None:
     """
     event_bus: EventBus = vcr_pool.session_pool.event_bus
     session_id = "test-subtree-vcr"
-    await vcr_pool.session_pool.sessions.get_or_create_session(
-        session_id, agent_name="test_agent"
-    )
+    await vcr_pool.session_pool.sessions.get_or_create_session(session_id, agent_name="test_agent")
     queue = await event_bus.subscribe(session_id, scope="subtree")
     await vcr_pool.session_pool.send_message(
         session_id=session_id,
@@ -138,7 +130,7 @@ async def test_scoped_subtree(vcr_pool: AgentPool) -> None:
             events.append(event)
             if "Complete" in type(event).__name__:
                 break
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pass
 
     assert events, "Expected events with subtree scope"
@@ -157,9 +149,7 @@ async def test_replay_buffer(vcr_pool: AgentPool) -> None:
     """
     event_bus: EventBus = vcr_pool.session_pool.event_bus
     session_id = "test-replay-vcr"
-    await vcr_pool.session_pool.sessions.get_or_create_session(
-        session_id, agent_name="test_agent"
-    )
+    await vcr_pool.session_pool.sessions.get_or_create_session(session_id, agent_name="test_agent")
     await vcr_pool.session_pool.send_message(
         session_id=session_id,
         content="Say hello.",
@@ -174,7 +164,7 @@ async def test_replay_buffer(vcr_pool: AgentPool) -> None:
         while True:
             event = await asyncio.wait_for(queue.get(), timeout=2.0)
             events.append(event)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pass
 
     # The replay buffer may or may not be enabled. If it is, we should see

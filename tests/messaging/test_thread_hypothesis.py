@@ -1,10 +1,10 @@
 """Minimal test to isolate the piping hang."""
 
+from pydantic_ai._utils import disable_threads
 import pytest
 
-from pydantic_ai._utils import disable_threads
-
 from agentpool import Agent
+
 
 pytestmark = pytest.mark.unit
 

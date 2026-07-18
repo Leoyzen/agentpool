@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.host.factory import AgentFactory
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
 
 
 pytestmark = pytest.mark.unit
@@ -100,7 +103,9 @@ def test_compile_returns_empty_registry(minimal_pool: AgentPool) -> None:
 
 @pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 @pytest.mark.asyncio
-async def test_create_session_agent_native_main_calls_get_agent_with_pool(minimal_pool: AgentPool) -> None:
+async def test_create_session_agent_native_main_calls_get_agent_with_pool(
+    minimal_pool: AgentPool,
+) -> None:
     """When cfg is NativeAgentConfig and no parent, get_agent is called with pool."""
     agent = _make_agent_mock()
     cfg = _make_native_cfg(agent=agent)
@@ -181,7 +186,9 @@ async def test_create_session_agent_native_main_no_pool_providers(minimal_pool: 
 
 @pytest.mark.skip(reason="L2 migration: requires mock internals — remains L1 unit test")
 @pytest.mark.asyncio
-async def test_create_session_agent_non_native_builds_snapshot_manually(minimal_pool: AgentPool) -> None:
+async def test_create_session_agent_non_native_builds_snapshot_manually(
+    minimal_pool: AgentPool,
+) -> None:
     """When cfg is NOT NativeAgentConfig, MCP snapshot is built from pool."""
     agent = _make_agent_mock()
     # Non-native cfg: not an instance of NativeAgentConfig

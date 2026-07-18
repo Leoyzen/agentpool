@@ -16,6 +16,7 @@ from upathtools import UPath
 from agentpool.skills.manager import SkillsManager
 from agentpool_config.skills import SkillsConfig
 
+
 pytestmark = pytest.mark.integration
 
 
@@ -129,12 +130,11 @@ class TestSkillsIncludeDefault:
         When AgentPoolACPAgent.load_skills is None and manifest has include_default=False,
         init_client_skills should not be called.
         """
-        from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
-
         # Create a real AgentPool with include_default=False
         import yamling
 
         from agentpool import AgentPool, AgentsManifest
+        from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 
         config = """\
 agents:

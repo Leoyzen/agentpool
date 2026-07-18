@@ -9,6 +9,7 @@ import pytest
 from agentpool import Agent
 from agentpool.hooks import AgentHooks, CallableHook
 
+
 pytestmark = pytest.mark.unit
 
 

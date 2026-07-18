@@ -6,6 +6,7 @@ import pytest
 from agentpool import Agent
 from agentpool.talk.talk import Talk, TeamTalk
 
+
 pytestmark = pytest.mark.unit
 
 

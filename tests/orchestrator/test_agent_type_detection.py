@@ -6,10 +6,14 @@ rather than ``session.metadata["agent_type"]`` which may be missing or stale.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
-from agentpool import AgentPool
-from agentpool.orchestrator.core import SessionController
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
+    from agentpool.orchestrator.core import SessionController
 
 
 pytestmark = pytest.mark.unit

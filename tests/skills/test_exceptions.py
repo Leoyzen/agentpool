@@ -21,6 +21,7 @@ from agentpool.skills.exceptions import (
 )
 from agentpool.utils.baseregistry import AgentPoolError
 
+
 pytestmark = pytest.mark.unit
 
 

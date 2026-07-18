@@ -19,12 +19,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
-import anyenv
 import anyio
 from anyio.abc import ByteReceiveStream, ByteSendStream
-from dirty_equals import IsPartialDict, IsStr
+from dirty_equals import IsStr
 import pytest
 
 from acp import (
@@ -39,6 +38,7 @@ from acp import (
 )
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 from tests.vcr.conftest import cassette_exists
+
 
 if TYPE_CHECKING:
     from agentpool import AgentPool
@@ -95,7 +95,7 @@ class _PairedPipe:
         self.client_reader: asyncio.StreamReader | None = None
         self.client_writer: asyncio.StreamWriter | None = None
 
-    async def __aenter__(self) -> _PairedPipe:
+    async def __aenter__(self) -> Self:
         async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
             self.server_reader = reader
             self.server_writer = writer
@@ -178,9 +178,7 @@ async def test_session_init(vcr_pool: AgentPool) -> None:
         assert isinstance(init_resp, InitializeResponse)
         assert init_resp.protocol_version == 1
 
-        new_sess = await client_conn.new_session(
-            NewSessionRequest(mcp_servers=[], cwd="/test")
-        )
+        new_sess = await client_conn.new_session(NewSessionRequest(mcp_servers=[], cwd="/test"))
         assert isinstance(new_sess, NewSessionResponse)
         assert new_sess.session_id == IsStr(min_length=1)
 
@@ -215,9 +213,7 @@ async def test_basic_completion(vcr_pool: AgentPool) -> None:
         )
 
         await client_conn.initialize(InitializeRequest(protocol_version=1))
-        new_sess = await client_conn.new_session(
-            NewSessionRequest(mcp_servers=[], cwd="/test")
-        )
+        new_sess = await client_conn.new_session(NewSessionRequest(mcp_servers=[], cwd="/test"))
 
         # Collect session notifications for a few seconds after prompting.
         notifications: list[SessionNotification] = []
@@ -239,7 +235,7 @@ async def test_basic_completion(vcr_pool: AgentPool) -> None:
         )
         try:
             await _asyncio.wait_for(collector, timeout=10.0)
-        except _asyncio.TimeoutError:
+        except TimeoutError:
             pass
         finally:
             collector.cancel()
@@ -285,9 +281,7 @@ async def test_streaming_events(vcr_pool: AgentPool) -> None:
         )
 
         await client_conn.initialize(InitializeRequest(protocol_version=1))
-        new_sess = await client_conn.new_session(
-            NewSessionRequest(mcp_servers=[], cwd="/test")
-        )
+        new_sess = await client_conn.new_session(NewSessionRequest(mcp_servers=[], cwd="/test"))
 
         notifications: list[SessionNotification] = []
 
@@ -308,7 +302,7 @@ async def test_streaming_events(vcr_pool: AgentPool) -> None:
         )
         try:
             await _asyncio.wait_for(collector, timeout=15.0)
-        except _asyncio.TimeoutError:
+        except TimeoutError:
             pass
         finally:
             collector.cancel()
@@ -335,14 +329,12 @@ async def test_model_api_rate_limit(acp_pipe: _PairedPipe) -> None:
         _AsyncioWriterAdapter(acp_pipe.client_writer),
         _AsyncioReaderAdapter(acp_pipe.client_reader),
     )
-    agent_conn = AgentSideConnection(
+    AgentSideConnection(
         _AsyncioWriterAdapter(acp_pipe.server_writer),
         _AsyncioReaderAdapter(acp_pipe.server_reader),
     )
     await client_conn.initialize(InitializeRequest(protocol_version=1))
-    new_sess = await client_conn.new_session(
-        NewSessionRequest(mcp_servers=[], cwd="/test")
-    )
+    new_sess = await client_conn.new_session(NewSessionRequest(mcp_servers=[], cwd="/test"))
 
     notifications: list[SessionNotification] = []
 
@@ -365,7 +357,7 @@ async def test_model_api_rate_limit(acp_pipe: _PairedPipe) -> None:
     )
     try:
         await asyncio.wait_for(collector, timeout=15.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pass
     finally:
         collector.cancel()
@@ -393,24 +385,19 @@ async def test_model_api_server_error(acp_pipe: _PairedPipe) -> None:
         _AsyncioWriterAdapter(acp_pipe.client_writer),
         _AsyncioReaderAdapter(acp_pipe.client_reader),
     )
-    agent_conn = AgentSideConnection(
+    AgentSideConnection(
         _AsyncioWriterAdapter(acp_pipe.server_writer),
         _AsyncioReaderAdapter(acp_pipe.server_reader),
     )
     await client_conn.initialize(InitializeRequest(protocol_version=1))
-    new_sess = await client_conn.new_session(
-        NewSessionRequest(mcp_servers=[], cwd="/test")
-    )
+    new_sess = await client_conn.new_session(NewSessionRequest(mcp_servers=[], cwd="/test"))
 
     notifications: list[SessionNotification] = []
 
     async def _collect() -> None:
         async for notification in acp_pipe.agent.client.notifications:
             notifications.append(notification)
-            if any(
-                "error" in str(getattr(n.update, "type", "")).lower()
-                for n in notifications
-            ):
+            if any("error" in str(getattr(n.update, "type", "")).lower() for n in notifications):
                 break
 
     collector = asyncio.create_task(_collect())
@@ -422,7 +409,7 @@ async def test_model_api_server_error(acp_pipe: _PairedPipe) -> None:
     )
     try:
         await asyncio.wait_for(collector, timeout=15.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pass
     finally:
         collector.cancel()
@@ -430,9 +417,7 @@ async def test_model_api_server_error(acp_pipe: _PairedPipe) -> None:
             await collector
 
     error_events = [
-        n
-        for n in notifications
-        if "error" in str(getattr(n.update, "type", "")).lower()
+        n for n in notifications if "error" in str(getattr(n.update, "type", "")).lower()
     ]
     assert len(error_events) >= 1, "Expected at least one error event from 500 server error"
 
@@ -452,24 +437,19 @@ async def test_model_api_malformed_stream(acp_pipe: _PairedPipe) -> None:
         _AsyncioWriterAdapter(acp_pipe.client_writer),
         _AsyncioReaderAdapter(acp_pipe.client_reader),
     )
-    agent_conn = AgentSideConnection(
+    AgentSideConnection(
         _AsyncioWriterAdapter(acp_pipe.server_writer),
         _AsyncioReaderAdapter(acp_pipe.server_reader),
     )
     await client_conn.initialize(InitializeRequest(protocol_version=1))
-    new_sess = await client_conn.new_session(
-        NewSessionRequest(mcp_servers=[], cwd="/test")
-    )
+    new_sess = await client_conn.new_session(NewSessionRequest(mcp_servers=[], cwd="/test"))
 
     notifications: list[SessionNotification] = []
 
     async def _collect() -> None:
         async for notification in acp_pipe.agent.client.notifications:
             notifications.append(notification)
-            if any(
-                "error" in str(getattr(n.update, "type", "")).lower()
-                for n in notifications
-            ):
+            if any("error" in str(getattr(n.update, "type", "")).lower() for n in notifications):
                 break
 
     collector = asyncio.create_task(_collect())
@@ -481,7 +461,7 @@ async def test_model_api_malformed_stream(acp_pipe: _PairedPipe) -> None:
     )
     try:
         await asyncio.wait_for(collector, timeout=15.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pass
     finally:
         collector.cancel()
@@ -490,8 +470,6 @@ async def test_model_api_malformed_stream(acp_pipe: _PairedPipe) -> None:
 
     # Malformed stream should result in an error event, not a crash.
     error_events = [
-        n
-        for n in notifications
-        if "error" in str(getattr(n.update, "type", "")).lower()
+        n for n in notifications if "error" in str(getattr(n.update, "type", "")).lower()
     ]
     assert len(error_events) >= 1, "Expected at least one error event from malformed stream"

@@ -9,13 +9,13 @@ Consolidated from:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.agents.events import RunStartedEvent
 from agentpool.orchestrator.core import (
     EventBus,
@@ -24,11 +24,14 @@ from agentpool.orchestrator.core import (
     SessionPool,
     SessionState,
 )
+from agentpool.orchestrator.run import RunHandle
+from agentpool.sessions.models import PendingDeferredCall, SessionData
 
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from agentpool import AgentPool
     from agentpool.agents.context import AgentRunContext
 
 
@@ -168,7 +171,9 @@ class TestSessionControllerParentChild:
         assert ctrl.get_session("child1") is None
 
     @pytest.mark.anyio
-    async def test_close_session_independent_preserves_children(self, minimal_pool: AgentPool) -> None:
+    async def test_close_session_independent_preserves_children(
+        self, minimal_pool: AgentPool
+    ) -> None:
         ctrl = SessionController(pool=minimal_pool)
         await ctrl.get_or_create_session("parent1")
         await ctrl.get_or_create_session(
@@ -179,7 +184,9 @@ class TestSessionControllerParentChild:
         assert ctrl.get_session("child1") is not None
 
     @pytest.mark.anyio
-    async def test_lifecycle_policy_bound_closes_child_immediately(self, minimal_pool: AgentPool) -> None:
+    async def test_lifecycle_policy_bound_closes_child_immediately(
+        self, minimal_pool: AgentPool
+    ) -> None:
         ctrl = SessionController(pool=minimal_pool)
         await ctrl.get_or_create_session("parent1")
         await ctrl.get_or_create_session(
@@ -290,16 +297,14 @@ async def test_close_session_acquires_request_lock(
 # close_session background task unblock
 # ============================================================================
 
-
 # ---------------------------------------------------------------------------
 # Merged from test_close_session.py (suffix: cs)
 # ---------------------------------------------------------------------------
 
-import contextlib
-from agentpool.orchestrator.run import RunHandle
 
 if TYPE_CHECKING:
     from agentpool.agents.context import AgentRunContext
+
 
 @pytest.fixture
 def controller_cs(minimal_pool: AgentPool) -> SessionController:
@@ -307,11 +312,13 @@ def controller_cs(minimal_pool: AgentPool) -> SessionController:
     assert minimal_pool.session_pool is not None
     return minimal_pool.session_pool.sessions
 
+
 def _make_session(session_id: str) -> SessionState:
     """Return a minimal SessionState for testing."""
-    return SessionState(session_id=session_id, agent_name='test-agent')
+    return SessionState(session_id=session_id, agent_name="test-agent")
 
-def _make_mock_run_handle(run_id: str='run-1') -> MagicMock:
+
+def _make_mock_run_handle(run_id: str = "run-1") -> MagicMock:
     """Return a MagicMock simulating a RunHandle with close/cancel/complete_event."""
     rh = MagicMock(spec=RunHandle)
     rh.run_id = run_id
@@ -321,41 +328,51 @@ def _make_mock_run_handle(run_id: str='run-1') -> MagicMock:
     rh.complete_event = asyncio.Event()
     return rh
 
+
 @pytest.mark.anyio
-async def test_flag_on_timeout_triggers_cancel(controller_cs: SessionController, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_flag_on_timeout_triggers_cancel(
+    controller_cs: SessionController, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """When turn_lock acquisition times out, RunHandle.cancel() is called."""
-    monkeypatch.setenv('AGENTPOOL_USE_RUN_TURN', 'true')
-    session = _make_session('sess-2')
-    session.current_run_id = 'run-2'
-    controller_cs._sessions['sess-2'] = session
-    run_handle = _make_mock_run_handle('run-2')
-    controller_cs._runs['run-2'] = run_handle
+    monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
+    session = _make_session("sess-2")
+    session.current_run_id = "run-2"
+    controller_cs._sessions["sess-2"] = session
+    run_handle = _make_mock_run_handle("run-2")
+    controller_cs._runs["run-2"] = run_handle
     held_lock = session.turn_lock
     await held_lock.acquire()
     original_timeout = asyncio.timeout
 
     def fast_timeout(delay: float) -> asyncio.Timeout:
         return original_timeout(0.05)
-    monkeypatch.setattr(asyncio, 'timeout', fast_timeout)
-    await controller_cs.close_session('sess-2')
+
+    monkeypatch.setattr(asyncio, "timeout", fast_timeout)
+    await controller_cs.close_session("sess-2")
     run_handle.close.assert_called_once()
     run_handle.cancel.assert_called_once()
     assert session.is_closing is True
-    assert 'sess-2' not in controller_cs._sessions
+    assert "sess-2" not in controller_cs._sessions
     held_lock.release()
 
-@pytest.mark.anyio
-async def test_flag_on_no_active_run(controller_cs: SessionController, monkeypatch: pytest.MonkeyPatch) -> None:
-    """When flag is ON and no active run exists, session closes cleanly."""
-    monkeypatch.setenv('AGENTPOOL_USE_RUN_TURN', 'true')
-    session = _make_session('sess-4')
-    session.current_run_id = None
-    controller_cs._sessions['sess-4'] = session
-    await controller_cs.close_session('sess-4')
-    assert session.is_closing is True
-    assert 'sess-4' not in controller_cs._sessions
 
-@pytest.mark.skip(reason="L2 migration: requires mock session/run_handle internals — remains L1 unit test")
+@pytest.mark.anyio
+async def test_flag_on_no_active_run(
+    controller_cs: SessionController, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When flag is ON and no active run exists, session closes cleanly."""
+    monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
+    session = _make_session("sess-4")
+    session.current_run_id = None
+    controller_cs._sessions["sess-4"] = session
+    await controller_cs.close_session("sess-4")
+    assert session.is_closing is True
+    assert "sess-4" not in controller_cs._sessions
+
+
+@pytest.mark.skip(
+    reason="L2 migration: requires mock session/run_handle internals — remains L1 unit test"
+)
 @pytest.mark.unit
 async def test_close_session_releases_lock_on_cancelled(minimal_pool: AgentPool) -> None:
     """close_session must release turn_lock even if cancelled mid-wait.
@@ -364,12 +381,13 @@ async def test_close_session_releases_lock_on_cancelled(minimal_pool: AgentPool)
     skips the lock release, leaving the session permanently locked.
     """
     from agentpool.orchestrator.core import SessionController
+
     controller_cs = SessionController(pool=minimal_pool)
     controller_cs._event_bus = EventBus()
-    session_id = 'sess-close-cancel'
+    session_id = "sess-close-cancel"
     controller_cs._sessions[session_id] = MagicMock()
     controller_cs._sessions[session_id].session_id = session_id
-    controller_cs._sessions[session_id].current_run_id = 'fake-run-id'
+    controller_cs._sessions[session_id].current_run_id = "fake-run-id"
     controller_cs._sessions[session_id].closing = False
     controller_cs._sessions[session_id].is_closing = False
     controller_cs._sessions[session_id]._request_lock = asyncio.Lock()
@@ -381,11 +399,12 @@ async def test_close_session_releases_lock_on_cancelled(minimal_pool: AgentPool)
     fake_run.close = MagicMock()
     fake_run.cancel = MagicMock()
     fake_run.complete_event = asyncio.Event()
-    controller_cs._runs['fake-run-id'] = fake_run
+    controller_cs._runs["fake-run-id"] = fake_run
     lock = controller_cs._sessions[session_id].turn_lock
 
     async def _close() -> None:
         await controller_cs._close_session_run_turn(session_id)
+
     task = asyncio.create_task(_close())
     await asyncio.sleep(0.1)
     task.cancel()
@@ -395,10 +414,11 @@ async def test_close_session_releases_lock_on_cancelled(minimal_pool: AgentPool)
         async with asyncio.timeout(1):
             await lock.acquire()
     except TimeoutError:
-        pytest.fail('turn_lock was not released after CancelledError in close_session')
+        pytest.fail("turn_lock was not released after CancelledError in close_session")
     finally:
         if lock.locked():
             lock.release()
+
 
 @pytest.mark.integration
 @pytest.mark.anyio
@@ -415,7 +435,6 @@ async def test_close_session_after_cancel(minimal_pool: AgentPool) -> None:
     _turn_complete_event, and the turn completes — releasing turn_lock.
     close_session() should acquire turn_lock quickly and return.
     """
-    from typing import Any
     from agentpool.agents.events import StreamCompleteEvent
     from agentpool.messaging import ChatMessage
     from agentpool.orchestrator.turn import Turn
@@ -428,7 +447,7 @@ async def test_close_session_after_cancel(minimal_pool: AgentPool) -> None:
 
         async def execute(self):
             self._message_history = []
-            self._final_message = ChatMessage(content='blocked', role='assistant')
+            self._final_message = ChatMessage(content="blocked", role="assistant")
             while not self._run_ctx.cancelled:
                 await asyncio.sleep(0.01)
             return
@@ -439,25 +458,28 @@ async def test_close_session_after_cancel(minimal_pool: AgentPool) -> None:
 
         async def execute(self):
             self._message_history = []
-            self._final_message = ChatMessage(content='done', role='assistant')
-            yield StreamCompleteEvent(message=ChatMessage(content='response', role='assistant'))
+            self._final_message = ChatMessage(content="done", role="assistant")
+            yield StreamCompleteEvent(message=ChatMessage(content="response", role="assistant"))
 
     session_pool = minimal_pool.session_pool
     assert session_pool is not None
-    session_id = 'sess-close-after-cancel'
-    await session_pool.create_session(session_id, agent_name='test_agent')
+    session_id = "sess-close-after-cancel"
+    await session_pool.create_session(session_id, agent_name="test_agent")
     # Get real agent from pool and patch create_turn to control execution
     agent = await session_pool.sessions.get_or_create_session_agent(session_id)
     call_count = 0
 
-    def _create_turn(prompts: Any, run_ctx: AgentRunContext, message_history: Any, **kwargs: Any) -> Turn:
+    def _create_turn(
+        prompts: Any, run_ctx: AgentRunContext, message_history: Any, **kwargs: Any
+    ) -> Turn:
         nonlocal call_count
         call_count += 1
         if call_count == 1:
             return _BlockingTurn(run_ctx)
         return _StubTurn()
+
     agent.create_turn = _create_turn  # type: ignore[method-assign]
-    msg_id = await session_pool.send_message(session_id, 'blocking prompt')
+    msg_id = await session_pool.send_message(session_id, "blocking prompt")
     assert msg_id is not None
     run_handle = session_pool._get_active_run_handle(session_id)
     assert run_handle is not None
@@ -469,7 +491,7 @@ async def test_close_session_after_cancel(minimal_pool: AgentPool) -> None:
     try:
         await asyncio.wait_for(session_pool.close_session(session_id), timeout=30.0)
     except TimeoutError:
-        pytest.fail('close_session hung after cancel — turn_lock was not released')
+        pytest.fail("close_session hung after cancel — turn_lock was not released")
     assert session_id not in session_pool.sessions._sessions
     # session_pool lifecycle managed by minimal_pool fixture
 
@@ -478,21 +500,37 @@ async def test_close_session_after_cancel(minimal_pool: AgentPool) -> None:
 # Merged from test_close_checkpoint.py (suffix: cc)
 # ---------------------------------------------------------------------------
 
-from unittest.mock import AsyncMock, MagicMock
-from agentpool.sessions.models import PendingDeferredCall, SessionData
 
-def make_pending_call(tool_call_id: str='call-1', tool_name: str='bash') -> PendingDeferredCall:
+def make_pending_call(tool_call_id: str = "call-1", tool_name: str = "bash") -> PendingDeferredCall:
     """Create a PendingDeferredCall for testing."""
-    return PendingDeferredCall(tool_call_id=tool_call_id, tool_name=tool_name, deferred_kind='external', deferred_strategy='block')
+    return PendingDeferredCall(
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+        deferred_kind="external",
+        deferred_strategy="block",
+    )
 
-def make_session_data(session_id: str='sess-1', agent_name: str='test-agent', pending: list[PendingDeferredCall] | None=None, status: str='active') -> SessionData:
+
+def make_session_data(
+    session_id: str = "sess-1",
+    agent_name: str = "test-agent",
+    pending: list[PendingDeferredCall] | None = None,
+    status: str = "active",
+) -> SessionData:
     """Create a SessionData with optional pending deferred calls."""
-    return SessionData(session_id=session_id, agent_name=agent_name, pending_deferred_calls=pending or [], status=status)
+    return SessionData(
+        session_id=session_id,
+        agent_name=agent_name,
+        pending_deferred_calls=pending or [],
+        status=status,
+    )
+
 
 @pytest.fixture
 def controller_cc(minimal_pool: AgentPool, mock_store: MagicMock) -> SessionController:
     """Return a SessionController backed by the real pool with a mock store."""
     return SessionController(pool=minimal_pool, store=mock_store)
+
 
 @pytest.fixture
 def mock_store() -> MagicMock:
@@ -502,6 +540,7 @@ def mock_store() -> MagicMock:
     store.save_session = AsyncMock(return_value=None)
     store.delete_session = AsyncMock(return_value=None)
     return store
+
 
 class TestShouldCheckpointOnClose:
     """Test the _should_checkpoint_on_close predicate."""
@@ -520,102 +559,132 @@ class TestShouldCheckpointOnClose:
         """None data → no checkpoint needed."""
         assert controller_cc._should_checkpoint_on_close(None) is False
 
+
 class TestCloseSessionWithoutPendingCalls:
     """close_session() without pending deferred calls behaves as before."""
 
     @pytest.mark.anyio
     async def test_removes_session(self, controller_cc: SessionController) -> None:
         """Session is removed from tracking."""
-        await controller_cc.get_or_create_session('sess-1')
-        await controller_cc.close_session('sess-1')
-        assert controller_cc.get_session('sess-1') is None
+        await controller_cc.get_or_create_session("sess-1")
+        await controller_cc.close_session("sess-1")
+        assert controller_cc.get_session("sess-1") is None
 
     @pytest.mark.anyio
     async def test_is_idempotent(self, controller_cc: SessionController) -> None:
         """Double close does not raise."""
-        await controller_cc.get_or_create_session('sess-1')
-        await controller_cc.close_session('sess-1')
-        await controller_cc.close_session('sess-1')
+        await controller_cc.get_or_create_session("sess-1")
+        await controller_cc.close_session("sess-1")
+        await controller_cc.close_session("sess-1")
 
     @pytest.mark.anyio
-    async def test_marks_closed_in_store(self, minimal_pool: AgentPool, mock_store: MagicMock) -> None:
+    async def test_marks_closed_in_store(
+        self, minimal_pool: AgentPool, mock_store: MagicMock
+    ) -> None:
         """When a store exists, the session is marked as closed (not deleted)."""
         mock_store.load_session = AsyncMock(return_value=make_session_data())
         mock_store.save_session = AsyncMock(return_value=None)
         ctrl = SessionController(pool=minimal_pool, store=mock_store)
-        await ctrl.get_or_create_session('sess-1')
-        await ctrl.close_session('sess-1')
+        await ctrl.get_or_create_session("sess-1")
+        await ctrl.close_session("sess-1")
         mock_store.delete_session.assert_not_awaited()
-        closed_saves = [call for call in mock_store.save_session.await_args_list if call[0][0].status == 'closed']
+        closed_saves = [
+            call
+            for call in mock_store.save_session.await_args_list
+            if call[0][0].status == "closed"
+        ]
         assert len(closed_saves) >= 1, "Expected save() with status='closed'"
 
     @pytest.mark.anyio
-    async def test_does_not_save_checkpoint(self, minimal_pool: AgentPool, mock_store: MagicMock) -> None:
+    async def test_does_not_save_checkpoint(
+        self, minimal_pool: AgentPool, mock_store: MagicMock
+    ) -> None:
         """Without pending calls, save is NOT called for checkpoint status."""
         mock_store.load_session = AsyncMock(return_value=make_session_data())
         ctrl = SessionController(pool=minimal_pool, store=mock_store)
-        await ctrl.get_or_create_session('sess-1')
-        await ctrl.close_session('sess-1')
-        for call in mock_store.save_session.await_args_list if hasattr(mock_store.save_session, 'await_args_list') else []:
+        await ctrl.get_or_create_session("sess-1")
+        await ctrl.close_session("sess-1")
+        for call in (
+            mock_store.save_session.await_args_list
+            if hasattr(mock_store.save_session, "await_args_list")
+            else []
+        ):
             args, _ = call
-            if hasattr(args[0], 'status') and args[0].status == 'checkpointed':
-                pytest.fail('save() was called with checkpointed status unexpectedly')
+            if hasattr(args[0], "status") and args[0].status == "checkpointed":
+                pytest.fail("save() was called with checkpointed status unexpectedly")
+
 
 class TestCloseSessionWithPendingCalls:
     """close_session() with pending deferred calls triggers checkpoint."""
 
     @pytest.mark.anyio
-    async def test_saves_checkpoint_before_release(self, minimal_pool: AgentPool, mock_store: MagicMock) -> None:
+    async def test_saves_checkpoint_before_release(
+        self, minimal_pool: AgentPool, mock_store: MagicMock
+    ) -> None:
         """When pending deferred calls exist, session data is saved as checkpointed."""
         data = make_session_data(pending=[make_pending_call()])
         mock_store.load_session = AsyncMock(return_value=data)
         mock_store.save_session = AsyncMock(return_value=None)
         ctrl = SessionController(pool=minimal_pool, store=mock_store)
-        await ctrl.get_or_create_session('sess-1')
-        await ctrl.close_session('sess-1')
-        saved_calls = [call for call in mock_store.save_session.await_args_list if call[0][0].session_id == 'sess-1' and call[0][0].status == 'checkpointed']
-        assert len(saved_calls) >= 1, 'Expected save() with checkpointed status'
+        await ctrl.get_or_create_session("sess-1")
+        await ctrl.close_session("sess-1")
+        saved_calls = [
+            call
+            for call in mock_store.save_session.await_args_list
+            if call[0][0].session_id == "sess-1" and call[0][0].status == "checkpointed"
+        ]
+        assert len(saved_calls) >= 1, "Expected save() with checkpointed status"
         saved_data: SessionData = saved_calls[0][0][0]
-        assert saved_data.pending_deferred_calls[0].tool_call_id == 'call-1'
-        assert saved_data.pending_deferred_calls[0].tool_name == 'bash'
+        assert saved_data.pending_deferred_calls[0].tool_call_id == "call-1"
+        assert saved_data.pending_deferred_calls[0].tool_name == "bash"
 
     @pytest.mark.anyio
-    async def test_does_not_delete_from_store(self, minimal_pool: AgentPool, mock_store: MagicMock) -> None:
+    async def test_does_not_delete_from_store(
+        self, minimal_pool: AgentPool, mock_store: MagicMock
+    ) -> None:
         """When checkpointed, store.delete is NOT called."""
         data = make_session_data(pending=[make_pending_call()])
         mock_store.load_session = AsyncMock(return_value=data)
         ctrl = SessionController(pool=minimal_pool, store=mock_store)
-        await ctrl.get_or_create_session('sess-1')
-        await ctrl.close_session('sess-1')
+        await ctrl.get_or_create_session("sess-1")
+        await ctrl.close_session("sess-1")
         mock_store.delete_session.assert_not_awaited()
 
     @pytest.mark.anyio
-    async def test_releases_inmemory_resources(self, minimal_pool: AgentPool, mock_store: MagicMock) -> None:
+    async def test_releases_inmemory_resources(
+        self, minimal_pool: AgentPool, mock_store: MagicMock
+    ) -> None:
         """Even when checkpointed, in-memory session state is cleaned up."""
         data = make_session_data(pending=[make_pending_call()])
         mock_store.load_session = AsyncMock(return_value=data)
         ctrl = SessionController(pool=minimal_pool, store=mock_store)
-        await ctrl.get_or_create_session('sess-1')
-        await ctrl.close_session('sess-1')
-        assert ctrl.get_session('sess-1') is None
+        await ctrl.get_or_create_session("sess-1")
+        await ctrl.close_session("sess-1")
+        assert ctrl.get_session("sess-1") is None
 
     @pytest.mark.anyio
-    async def test_checkpoint_failure_prevents_resource_release(self, minimal_pool: AgentPool, mock_store: MagicMock) -> None:
+    async def test_checkpoint_failure_prevents_resource_release(
+        self, minimal_pool: AgentPool, mock_store: MagicMock
+    ) -> None:
         """If checkpoint save fails, session resources are NOT released."""
         data = make_session_data(pending=[make_pending_call()])
         mock_store.load_session = AsyncMock(return_value=data)
         orig_save = AsyncMock(return_value=None)
 
         async def failing_save(obj: Any) -> None:
-            if isinstance(obj, SessionData) and obj.status == 'checkpointed':
-                raise RuntimeError('Storage unavailable')
+            if isinstance(obj, SessionData) and obj.status == "checkpointed":
+                raise RuntimeError("Storage unavailable")
             await orig_save(obj)
+
         mock_store.save_session = AsyncMock(side_effect=failing_save)
         ctrl = SessionController(pool=minimal_pool, store=mock_store)
-        await ctrl.get_or_create_session('sess-1')
-        await ctrl.close_session('sess-1')
-        assert ctrl.get_session('sess-1') is not None, 'Session should survive when checkpoint save fails'
+        await ctrl.get_or_create_session("sess-1")
+        await ctrl.close_session("sess-1")
+        assert ctrl.get_session("sess-1") is not None, (
+            "Session should survive when checkpoint save fails"
+        )
         mock_store.delete_session.assert_not_awaited()
+
 
 class TestCloseSessionWithoutStore:
     """close_session() when no store is configured."""
@@ -623,36 +692,42 @@ class TestCloseSessionWithoutStore:
     @pytest.mark.anyio
     async def test_no_store_no_checkpoint(self, controller_cc: SessionController) -> None:
         """Without a store, close_session just removes the session."""
-        await controller_cc.get_or_create_session('sess-1')
-        await controller_cc.close_session('sess-1')
-        assert controller_cc.get_session('sess-1') is None
+        await controller_cc.get_or_create_session("sess-1")
+        await controller_cc.close_session("sess-1")
+        assert controller_cc.get_session("sess-1") is None
+
 
 class TestSessionPoolCloseCheckpoint:
     """SessionPool.close_session delegates to SessionController which handles checkpoint."""
+
 
 class TestSaveCloseCheckpoint:
     """Test the _save_close_checkpoint helper."""
 
     @pytest.mark.anyio
-    async def test_saves_with_checkpoint_status(self, minimal_pool: AgentPool, mock_store: MagicMock) -> None:
+    async def test_saves_with_checkpoint_status(
+        self, minimal_pool: AgentPool, mock_store: MagicMock
+    ) -> None:
         """_save_close_checkpoint saves session data as checkpointed."""
         data = make_session_data(pending=[make_pending_call()])
         mock_store.load_session = AsyncMock(return_value=data)
         ctrl = SessionController(pool=minimal_pool, store=mock_store)
-        result = await ctrl._save_close_checkpoint('sess-1', data)
+        result = await ctrl._save_close_checkpoint("sess-1", data)
         assert result is True
         mock_store.save_session.assert_awaited_once()
         saved_data = mock_store.save_session.await_args[0][0]
-        assert saved_data.status == 'checkpointed'
+        assert saved_data.status == "checkpointed"
         assert len(saved_data.pending_deferred_calls) == 1
 
     @pytest.mark.anyio
-    async def test_returns_false_on_failure(self, minimal_pool: AgentPool, mock_store: MagicMock) -> None:
+    async def test_returns_false_on_failure(
+        self, minimal_pool: AgentPool, mock_store: MagicMock
+    ) -> None:
         """_save_close_checkpoint returns False when save fails."""
         data = make_session_data(pending=[make_pending_call()])
-        mock_store.save_session = AsyncMock(side_effect=RuntimeError('Storage error'))
+        mock_store.save_session = AsyncMock(side_effect=RuntimeError("Storage error"))
         ctrl = SessionController(pool=minimal_pool, store=mock_store)
-        result = await ctrl._save_close_checkpoint('sess-1', data)
+        result = await ctrl._save_close_checkpoint("sess-1", data)
         assert result is False
 
 
@@ -660,28 +735,11 @@ class TestSaveCloseCheckpoint:
 # Merged from test_checkpoint_close_review.py (suffix: cr)
 # ---------------------------------------------------------------------------
 
-from unittest.mock import AsyncMock, MagicMock
-from agentpool.sessions.models import PendingDeferredCall, SessionData
-
-def make_pending_call(tool_call_id: str='call-1', tool_name: str='bash') -> PendingDeferredCall:
-    """Create a PendingDeferredCall for testing."""
-    return PendingDeferredCall(tool_call_id=tool_call_id, tool_name=tool_name, deferred_kind='external', deferred_strategy='block')
-
-def make_session_data(session_id: str='sess-1', agent_name: str='test-agent', pending: list[PendingDeferredCall] | None=None, status: str='active') -> SessionData:
-    """Create a SessionData with optional pending deferred calls."""
-    return SessionData(session_id=session_id, agent_name=agent_name, pending_deferred_calls=pending or [], status=status)
-
-@pytest.fixture
-def mock_store() -> MagicMock:
-    """Return a mocked SessionStore."""
-    store = MagicMock()
-    store.load_session = AsyncMock(return_value=None)
-    store.save_session = AsyncMock(return_value=None)
-    store.delete_session = AsyncMock(return_value=None)
-    return store
 
 @pytest.mark.anyio
-async def test_checkpointed_status_not_overwritten_on_close(minimal_pool: AgentPool, mock_store: MagicMock) -> None:
+async def test_checkpointed_status_not_overwritten_on_close(
+    minimal_pool: AgentPool, mock_store: MagicMock
+) -> None:
     """Checkpointed status must not be overwritten with 'closed' on close.
 
     When a session is checkpointed before close (due to pending deferred
@@ -689,20 +747,26 @@ async def test_checkpointed_status_not_overwritten_on_close(minimal_pool: AgentP
     which would overwrite the "checkpointed" status with "closed".
     """
     data = make_session_data(pending=[make_pending_call()])
-    checkpointed_data = data.model_copy(update={'status': 'checkpointed'})
+    checkpointed_data = data.model_copy(update={"status": "checkpointed"})
     mock_store.load_session = AsyncMock(return_value=checkpointed_data)
     mock_store.save_session = AsyncMock(return_value=None)
     ctrl = SessionController(pool=minimal_pool, store=mock_store)
-    await ctrl.get_or_create_session('sess-1')
-    await ctrl.close_session('sess-1')
+    await ctrl.get_or_create_session("sess-1")
+    await ctrl.close_session("sess-1")
     all_saves = mock_store.save_session.await_args_list
-    closed_saves = [call for call in all_saves if call[0][0].status == 'closed']
-    checkpointed_saves = [call for call in all_saves if call[0][0].status == 'checkpointed']
-    assert len(closed_saves) == 0, f"Expected no save with status='closed', but found {len(closed_saves)}. The checkpointed status was overwritten!"
+    closed_saves = [call for call in all_saves if call[0][0].status == "closed"]
+    checkpointed_saves = [call for call in all_saves if call[0][0].status == "checkpointed"]
+    assert len(closed_saves) == 0, (
+        f"Expected no save with status='closed', but found {len(closed_saves)}."
+        " The checkpointed status was overwritten!"
+    )
     assert len(checkpointed_saves) >= 1, "Expected at least one save with status='checkpointed'"
 
+
 @pytest.mark.anyio
-async def test_non_checkpointed_still_marked_closed(minimal_pool: AgentPool, mock_store: MagicMock) -> None:
+async def test_non_checkpointed_still_marked_closed(
+    minimal_pool: AgentPool, mock_store: MagicMock
+) -> None:
     """Normal close (no pending calls) should still mark as 'closed'.
 
     When a session has NO pending deferred calls, close_session should
@@ -712,8 +776,8 @@ async def test_non_checkpointed_still_marked_closed(minimal_pool: AgentPool, moc
     mock_store.load_session = AsyncMock(return_value=data)
     mock_store.save_session = AsyncMock(return_value=None)
     ctrl = SessionController(pool=minimal_pool, store=mock_store)
-    await ctrl.get_or_create_session('sess-1')
-    await ctrl.close_session('sess-1')
+    await ctrl.get_or_create_session("sess-1")
+    await ctrl.close_session("sess-1")
     all_saves = mock_store.save_session.await_args_list
-    closed_saves = [call for call in all_saves if call[0][0].status == 'closed']
+    closed_saves = [call for call in all_saves if call[0][0].status == "closed"]
     assert len(closed_saves) >= 1, "Expected save with status='closed' for normal close"

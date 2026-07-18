@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from pathlib import Path
 import sys
 from typing import TYPE_CHECKING, Any
@@ -14,6 +12,7 @@ from pydantic_graph.id_types import NodeID
 from pydantic_graph.node import EndNode, Fork
 from pydantic_graph.paths import BroadcastMarker, DestinationMarker, TransformMarker
 from pydantic_graph.step import Step
+import pytest
 
 
 # Add src to path for imports
@@ -23,6 +22,7 @@ from agentpool.messaging import ChatMessage, MessageNode
 from agentpool.talk import Talk
 from agentpool.talk.graph_edges import TalkEdgeTranslator
 from agentpool.utils.time_utils import get_now
+
 
 pytestmark = pytest.mark.unit
 

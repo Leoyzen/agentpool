@@ -6,6 +6,7 @@ import pytest
 from agentpool import Agent
 from agentpool.messaging.message_utils import build_message_index, get_message_chain
 
+
 pytestmark = pytest.mark.unit
 
 

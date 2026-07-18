@@ -15,16 +15,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from dirty_equals import IsStr
 import pytest
 
-from agentpool.agents.events import (
-    PartDeltaEvent,
-    PartStartEvent,
-    RunStartedEvent,
-    StreamCompleteEvent,
-)
 from tests.vcr.conftest import cassette_exists
+
 
 if TYPE_CHECKING:
     from agentpool import AgentPool
@@ -46,9 +40,9 @@ async def test_real_streaming_event_sequence(vcr_pool: AgentPool) -> None:
         StreamCompleteEvent
     """
     agent = vcr_pool.get_agent("test_agent")
-    events: list[Any] = []
-    async for event in agent.run_stream("Say hello in one short sentence."):
-        events.append(event)
+    events: list[Any] = [
+        event async for event in agent.run_stream("Say hello in one short sentence.")
+    ]
 
     assert events, "run_stream produced no events"
     type_names = [type(e).__name__ for e in events]

@@ -39,6 +39,7 @@ from agentpool_server.opencode_server.models.message import (
 from agentpool_server.opencode_server.routes.message_routes import _process_message_locked
 from agentpool_server.opencode_server.state import ServerState
 
+
 pytestmark = pytest.mark.integration
 
 

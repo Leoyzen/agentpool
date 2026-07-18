@@ -30,6 +30,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 from opentelemetry.sdk.trace.sampling import ALWAYS_ON as ALWAYS_ON_SAMPLER
 import pytest
 
+
 pytestmark = pytest.mark.unit
 
 

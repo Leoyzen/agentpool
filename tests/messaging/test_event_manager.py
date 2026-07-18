@@ -9,6 +9,7 @@ import pytest
 from agentpool.messaging import EventManager
 from agentpool.utils.time_utils import get_now
 
+
 pytestmark = pytest.mark.unit
 
 

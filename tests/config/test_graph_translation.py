@@ -22,6 +22,7 @@ from agentpool_config.forward_targets import (
 )
 from agentpool_config.nodes import NodeConfig
 
+
 pytestmark = pytest.mark.unit
 
 

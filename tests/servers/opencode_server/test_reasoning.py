@@ -25,6 +25,7 @@ from agentpool_server.opencode_server.models.parts import (
     TextPart as OpenCodeTextPart,
 )
 
+
 pytestmark = pytest.mark.integration
 
 

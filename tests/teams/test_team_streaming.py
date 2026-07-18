@@ -27,6 +27,7 @@ from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthErr
 from agentpool.delegation.base_team import BaseTeam
 from agentpool.messaging import ChatMessage
 
+
 pytestmark = pytest.mark.integration
 
 

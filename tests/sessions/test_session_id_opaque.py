@@ -14,13 +14,18 @@ case in text_sharing which is format-agnostic via `[-8:]`).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.sessions import SessionData
 from agentpool_storage.memory_provider.provider import MemoryStorageProvider
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
+
 
 pytestmark = pytest.mark.integration
 

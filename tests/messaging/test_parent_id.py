@@ -7,6 +7,7 @@ import pytest
 
 from agentpool import Agent, ChatMessage
 
+
 pytestmark = pytest.mark.unit
 
 

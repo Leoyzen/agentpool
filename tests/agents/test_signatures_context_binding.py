@@ -10,6 +10,7 @@ from agentpool.agents.context import AgentContext
 from agentpool.utils.inspection import get_fn_name
 from agentpool.utils.signatures import create_bound_callable
 
+
 pytestmark = pytest.mark.unit
 
 

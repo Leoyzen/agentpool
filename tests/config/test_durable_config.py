@@ -7,13 +7,13 @@ and timeout field validation.
 
 from __future__ import annotations
 
-import pytest
-
 from datetime import timedelta
 
+import pytest
 import yaml
 
 from agentpool_config.durable import CheckpointConfig, DeferredToolConfig
+
 
 pytestmark = pytest.mark.unit
 

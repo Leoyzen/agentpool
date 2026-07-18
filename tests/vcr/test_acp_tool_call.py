@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 import anyio
 from anyio.abc import ByteReceiveStream, ByteSendStream
@@ -30,6 +30,7 @@ from acp import (
 )
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 from tests.vcr.conftest import cassette_exists
+
 
 if TYPE_CHECKING:
     from agentpool import AgentPool
@@ -79,7 +80,7 @@ class _PairedPipe:
         self.client_reader: asyncio.StreamReader | None = None
         self.client_writer: asyncio.StreamWriter | None = None
 
-    async def __aenter__(self) -> _PairedPipe:
+    async def __aenter__(self) -> Self:
         async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
             self.server_reader = reader
             self.server_writer = writer
@@ -158,9 +159,7 @@ async def test_tool_call_through_acp(vcr_pool: AgentPool) -> None:
         )
 
         await client_conn.initialize(InitializeRequest(protocol_version=1))
-        new_sess = await client_conn.new_session(
-            NewSessionRequest(mcp_servers=[], cwd="/test")
-        )
+        new_sess = await client_conn.new_session(NewSessionRequest(mcp_servers=[], cwd="/test"))
 
         notifications: list[SessionNotification] = []
 
@@ -179,7 +178,7 @@ async def test_tool_call_through_acp(vcr_pool: AgentPool) -> None:
         )
         try:
             await asyncio.wait_for(collector, timeout=15.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
         finally:
             collector.cancel()

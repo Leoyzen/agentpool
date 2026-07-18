@@ -9,6 +9,7 @@ from agentpool.models.agents import NativeAgentConfig
 from agentpool.models.manifest import AgentsManifest
 from agentpool_server import A2AServer, AggregatingServer, AGUIServer
 
+
 pytestmark = pytest.mark.integration
 
 

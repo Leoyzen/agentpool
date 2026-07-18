@@ -6,6 +6,7 @@ import pytest
 
 from agentpool import AgentPool, AgentsManifest
 
+
 pytestmark = pytest.mark.integration
 
 

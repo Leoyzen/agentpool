@@ -18,14 +18,18 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.orchestrator.core import EventBus, SessionController, SessionState
 from agentpool.orchestrator.session_pool import SessionPool
 from agentpool.orchestrator.session_pool_config import SessionPoolConfig
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
 
 
 pytestmark = [pytest.mark.unit]
@@ -239,7 +243,9 @@ async def test_concurrent_resume_and_close_no_deadlock(minimal_pool: AgentPool) 
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="L2 migration: requires mock agent assertions for MCP cleanup — remains L1 unit test")
+@pytest.mark.skip(
+    reason="L2 migration: requires mock agent assertions for MCP cleanup — remains L1 unit test"
+)
 @pytest.mark.unit
 async def test_checkpoint_on_close_failure_preserves_session(minimal_pool: AgentPool) -> None:
     """When checkpoint save fails, session is preserved and MCP cleanup still runs.

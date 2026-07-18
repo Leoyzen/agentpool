@@ -20,6 +20,7 @@ from agentpool_server.opencode_server.routes.routing import (
     tui_event_filter,
 )
 
+
 pytestmark = pytest.mark.integration
 
 

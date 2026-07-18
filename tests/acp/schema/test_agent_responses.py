@@ -11,6 +11,7 @@ from acp.schema.agent_responses import (
 )
 from acp.schema.providers import ProviderCurrentConfig, ProviderInfo
 
+
 pytestmark = pytest.mark.unit
 
 

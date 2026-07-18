@@ -11,16 +11,19 @@ Covers five scenarios:
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.lifecycle.types import DeliveryMode
 from agentpool.orchestrator.core import EventBus, SessionController
 from agentpool.orchestrator.run import RunHandle
 from tests._controller_helpers import send_via_controller
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
 
 
 pytestmark = pytest.mark.unit

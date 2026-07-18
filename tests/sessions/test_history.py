@@ -13,6 +13,7 @@ from agentpool_config.storage import SQLStorageConfig
 from agentpool_storage.models import QueryFilters, StatsFilters
 from agentpool_storage.sql_provider import SQLModelProvider
 
+
 pytestmark = pytest.mark.unit
 
 

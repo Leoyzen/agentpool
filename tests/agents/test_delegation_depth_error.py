@@ -6,6 +6,7 @@ import pytest
 
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 
+
 pytestmark = pytest.mark.unit
 
 

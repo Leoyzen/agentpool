@@ -23,6 +23,7 @@ from agentpool.agents.events import (
 )
 from tests.vcr.conftest import cassette_exists
 
+
 if TYPE_CHECKING:
     from agentpool import AgentPool
 
@@ -59,9 +60,9 @@ async def test_tool_call_roundtrip(vcr_pool: AgentPool) -> None:
     # Attach the echo tool programmatically (the YAML tool config is a stub).
     agent.add_tool(echo)
 
-    events: list[object] = []
-    async for event in agent.run_stream("Use the echo tool to say hi."):
-        events.append(event)
+    events: list[object] = [
+        event async for event in agent.run_stream("Use the echo tool to say hi.")
+    ]
 
     tool_starts = [e for e in events if isinstance(e, ToolCallStartEvent)]
     tool_completes = [e for e in events if isinstance(e, ToolCallCompleteEvent)]
@@ -93,9 +94,9 @@ async def test_tool_call_event_structure(vcr_pool: AgentPool) -> None:
     agent = vcr_pool.get_agent("test_agent")
     agent.add_tool(echo)
 
-    events: list[object] = []
-    async for event in agent.run_stream("Call echo with the text 'hello'."):
-        events.append(event)
+    events: list[object] = [
+        event async for event in agent.run_stream("Call echo with the text 'hello'.")
+    ]
 
     tool_starts = [e for e in events if isinstance(e, ToolCallStartEvent)]
     assert tool_starts, "Expected at least one ToolCallStartEvent"
@@ -119,11 +120,11 @@ async def test_tool_result_in_response(vcr_pool: AgentPool) -> None:
     agent = vcr_pool.get_agent("test_agent")
     agent.add_tool(echo)
 
-    result = await agent.run("Use the echo tool with the text 'hello' and tell me what it returned.")
+    result = await agent.run(
+        "Use the echo tool with the text 'hello' and tell me what it returned."
+    )
     assert result is not None
     assert result.content is not None
     # The model should reference the echoed text somewhere in its response.
-    content_str = (
-        result.content if isinstance(result.content, str) else str(result.content)
-    )
+    content_str = result.content if isinstance(result.content, str) else str(result.content)
     assert content_str == IsPartialDict() or len(content_str) > 0

@@ -13,11 +13,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from dirty_equals import IsPartialDict, IsStr
+from dirty_equals import IsStr
 import pytest
 
 from agentpool.agents.events import StreamCompleteEvent
 from tests.vcr.conftest import cassette_exists
+
 
 if TYPE_CHECKING:
     from agentpool import AgentPool
@@ -64,9 +65,9 @@ async def test_basic_completion_streaming(vcr_pool: AgentPool) -> None:
     final event payload.
     """
     agent = vcr_pool.get_agent("test_agent")
-    events: list[object] = []
-    async for event in agent.run_stream("Say hello in one short sentence."):
-        events.append(event)
+    events: list[object] = [
+        event async for event in agent.run_stream("Say hello in one short sentence.")
+    ]
 
     assert events, "run_stream produced no events"
     last_event = events[-1]

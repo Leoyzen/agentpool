@@ -9,6 +9,7 @@ import pytest
 from agentpool import Agent, ChatMessage
 from agentpool.delegation.base_team import BaseTeam
 
+
 pytestmark = pytest.mark.unit
 
 

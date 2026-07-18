@@ -16,12 +16,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from dirty_equals import IsPartialDict
 from httpx import ASGITransport, AsyncClient
-from dirty_equals import IsPartialDict, IsStr
 import pytest
 
 from agentpool_server.agui_server import AGUIServer
 from tests.vcr.conftest import cassette_exists
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -47,13 +48,12 @@ async def agui_app(agui_server: AGUIServer) -> Any:
     # AGUIServer uses Starlette — build a minimal Starlette app from routes.
     from starlette.applications import Starlette
 
-    app = Starlette(routes=routes)
-    return app
+    return Starlette(routes=routes)
 
 
 @pytest.fixture
 async def agui_client(agui_app: Any) -> AsyncIterator[AsyncClient]:
-    """httpx async client against the in-process AG-UI ASGI app."""
+    """Httpx async client against the in-process AG-UI ASGI app."""
     transport = ASGITransport(app=agui_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

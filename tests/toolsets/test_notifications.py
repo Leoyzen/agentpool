@@ -10,6 +10,7 @@ import pytest
 from agentpool_config.toolsets import NotificationsToolsetConfig
 from agentpool_toolsets.notifications import NotificationsTools
 
+
 pytestmark = pytest.mark.unit
 
 

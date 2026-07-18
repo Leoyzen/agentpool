@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import MagicMock
 
 from pydantic_ai.models.test import TestModel
 import pytest

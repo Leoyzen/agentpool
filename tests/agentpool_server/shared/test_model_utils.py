@@ -16,6 +16,7 @@ from agentpool_server.shared.model_utils import (
     _extract_provider_from_identifier,
 )
 
+
 pytestmark = pytest.mark.integration
 
 

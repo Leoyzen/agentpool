@@ -19,6 +19,7 @@ import pytest
 from agentpool import Agent
 from agentpool.agents.events import StreamCompleteEvent
 
+
 pytestmark = pytest.mark.unit
 
 

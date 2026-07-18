@@ -8,16 +8,16 @@ This module tests:
 
 from __future__ import annotations
 
-import pytest
-
 import re
 
 import jsonschema
+import pytest
 import yamling
 
 from agentpool import AgentsManifest
 from agentpool.models.agents import NativeAgentConfig
 from agentpool.models.model_configs import StringModelConfig
+
 
 pytestmark = pytest.mark.unit
 

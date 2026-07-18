@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
-
 from mcp import types
+import pytest
 
 from acp import RequestPermissionResponse
 from agentpool_server.acp_server.input_provider import (
@@ -17,6 +16,7 @@ from agentpool_server.acp_server.input_provider import (
     _is_enum_schema,
     _is_oneof_schema,
 )
+
 
 pytestmark = pytest.mark.integration
 

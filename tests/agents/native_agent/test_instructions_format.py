@@ -22,6 +22,7 @@ from agentpool.prompts.instructions import (
 )
 from agentpool.utils.context_wrapping import wrap_instruction
 
+
 pytestmark = pytest.mark.unit
 
 

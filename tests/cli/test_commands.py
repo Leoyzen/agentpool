@@ -15,6 +15,7 @@ from agentpool_config.commands import (
     StaticCommandConfig,
 )
 
+
 pytestmark = pytest.mark.unit
 
 

@@ -36,6 +36,7 @@ from agentpool.skills.skill import Skill
 from agentpool.skills.uri_resolver import SkillURIResolver
 from agentpool_toolsets.builtin.skills import load_skill
 
+
 pytestmark = pytest.mark.integration
 
 

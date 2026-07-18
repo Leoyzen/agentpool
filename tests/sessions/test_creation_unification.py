@@ -15,12 +15,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.utils.identifiers import generate_session_id
 from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
 
 if TYPE_CHECKING:
+    from agentpool import AgentPool
     from agentpool.sessions.models import SessionData
 
 

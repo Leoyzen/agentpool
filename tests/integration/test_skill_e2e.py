@@ -13,12 +13,11 @@ Covers tasks:
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.capabilities.extension_registry import (
     ExtensionRegistry,
     Scope,
@@ -33,6 +32,11 @@ from agentpool.skills.skill import Skill
 from agentpool.skills.skill_tool_manager import SkillToolManager
 from agentpool.skills.uri_resolver import SkillURIResolver
 from agentpool_config.skills import SkillToolConfig
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
+
 
 pytestmark = pytest.mark.integration
 

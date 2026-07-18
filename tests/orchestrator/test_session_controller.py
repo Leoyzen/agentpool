@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.lifecycle.types import DeliveryMode
 from agentpool.orchestrator.core import (
     DEFAULT_SESSION_TTL_SECONDS,
@@ -22,6 +22,10 @@ from agentpool.orchestrator.core import (
 )
 from agentpool.orchestrator.run import RunHandle
 from tests._controller_helpers import send_via_controller
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
 
 
 pytestmark = pytest.mark.unit
@@ -362,6 +366,7 @@ def test_default_ttl_is_one_hour() -> None:
 # Either idle (run completed quickly) or exactly one active run
 # Because run_loop is mocked, it returns immediately, so the run
 # may already be cleaned up.
+
 
 # ---------------------------------------------------------------------------
 # cancel_run_for_session

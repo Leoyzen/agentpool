@@ -7,11 +7,15 @@ This is a standalone test that uses a real AgentPool to avoid circular imports.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool import AgentPool
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
+
 
 pytestmark = pytest.mark.integration
 
@@ -89,7 +93,7 @@ class TestGetSessionRedFlag:
 
     def test_returns_session_when_in_both(self, minimal_pool: AgentPool):
         """get_session() should work when session is in both places."""
-        manager, controller = _make_manager_with_controller(minimal_pool)
+        manager, _controller = _make_manager_with_controller(minimal_pool)
         session_id = "sess-in-both-001"
 
         mock_session: MagicMock = MagicMock()

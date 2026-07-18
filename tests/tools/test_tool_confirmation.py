@@ -6,6 +6,7 @@ import pytest
 from agentpool import Agent, Tool
 from agentpool.ui.mock_provider import MockInputProvider
 
+
 pytestmark = pytest.mark.unit
 
 

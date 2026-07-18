@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 from agentpool_cli.__main__ import cli
 from agentpool_cli.agent import agent_cli
 
+
 pytestmark = pytest.mark.unit
 
 

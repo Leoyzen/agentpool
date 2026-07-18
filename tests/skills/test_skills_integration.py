@@ -14,6 +14,7 @@ import yaml
 
 from agentpool.delegation.pool import AgentPool
 
+
 pytestmark = pytest.mark.integration
 
 

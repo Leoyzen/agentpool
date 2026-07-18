@@ -17,6 +17,7 @@ from agentpool.prompts.instructions import (
     SimpleInstruction,
 )
 
+
 pytestmark = pytest.mark.unit
 
 

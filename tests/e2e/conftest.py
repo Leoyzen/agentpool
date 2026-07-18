@@ -21,12 +21,13 @@ L4b full tests: pytest -m e2e
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from dataclasses import dataclass, field
 import os
 import shutil
 import signal
 import socket
 import sys
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -184,9 +185,7 @@ async def _health_check_http(
     return False
 
 
-async def _health_check_stdio(
-    process: asyncio.subprocess.Process, timeout: float = 5.0
-) -> bool:
+async def _health_check_stdio(process: asyncio.subprocess.Process, timeout: float = 5.0) -> bool:
     """For stdio servers, verify the process is alive and has not exited early.
 
     A stdio ACP server doesn't have a health endpoint. We consider it healthy
@@ -220,11 +219,9 @@ async def _terminate_process(process: asyncio.subprocess.Process) -> str:
     if process.returncode is not None:
         # Already exited; drain stderr.
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(), timeout=2.0
-            )
+            _stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=2.0)
             stderr_text = stderr_bytes.decode("utf-8", errors="replace")
-        except (asyncio.TimeoutError, Exception):
+        except (TimeoutError, ProcessLookupError, OSError):
             pass
         return stderr_text
 
@@ -240,12 +237,12 @@ async def _terminate_process(process: asyncio.subprocess.Process) -> str:
 
     try:
         await asyncio.wait_for(process.wait(), timeout=5.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         # SIGKILL fallback.
         try:
             process.kill()
             await asyncio.wait_for(process.wait(), timeout=2.0)
-        except (asyncio.TimeoutError, ProcessLookupError):
+        except (TimeoutError, ProcessLookupError):
             pass
 
     # Drain stderr.
@@ -253,7 +250,7 @@ async def _terminate_process(process: asyncio.subprocess.Process) -> str:
         if process.stderr:
             stderr_data = await process.stderr.read()
             stderr_text = stderr_data.decode("utf-8", errors="replace")
-    except Exception:
+    except (OSError, RuntimeError):
         pass
 
     return stderr_text
@@ -447,6 +444,7 @@ async def _spawn_server(
         host: Bind host.
         is_stdio: Whether this is a stdio server.
         health_timeout: Health check timeout.
+        health_path: Health check endpoint path (default ``/``).
         extra_args: Additional CLI arguments.
 
     Yields:
@@ -548,7 +546,7 @@ def process_registry() -> ProcessRegistry:
 def _register_process_cleanup(process_registry: ProcessRegistry) -> Any:
     """Autouse fixture that ensures process registry is available."""
     # The actual cleanup verification is in the session-scoped finalizer below.
-    yield
+    return
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -567,15 +565,12 @@ def verify_no_orphaned_processes(
         p for p in process_registry.processes if p.returncode is None
     ]
     for proc in orphans:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             proc.kill()
-        except ProcessLookupError:
-            pass
     if orphans:
         import warnings
 
         warnings.warn(
-            f"{len(orphans)} orphaned agentpool subprocess(es) found and killed "
-            "at session end.",
+            f"{len(orphans)} orphaned agentpool subprocess(es) found and killed at session end.",
             stacklevel=2,
         )

@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.orchestrator import SessionPool
 from agentpool.sessions import SessionData
 from agentpool.utils.identifiers import generate_session_id
@@ -14,11 +13,14 @@ from agentpool_config.storage import SQLStorageConfig
 from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 from agentpool_storage.sql_provider import SQLModelProvider
 
+
 pytestmark = pytest.mark.integration
 
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from agentpool import AgentPool
 
 
 @pytest.fixture

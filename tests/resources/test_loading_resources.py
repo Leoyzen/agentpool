@@ -7,6 +7,7 @@ import yamling
 from agentpool import AgentPool
 from agentpool.models import AgentsManifest
 
+
 pytestmark = pytest.mark.integration
 
 

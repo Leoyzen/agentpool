@@ -7,46 +7,20 @@ Combines tests from:
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
-
 from typing import Any
-
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from agentpool.agents.base_agent import BaseAgent
-
 from agentpool.agents.native_agent.checkpoint import CheckpointData
-
 from agentpool.lifecycle.types import DeliveryMode
-
 from agentpool.sessions.models import PendingDeferredCall, SessionData
-
+from agentpool_server.opencode_server.converters import session_data_to_opencode
 from agentpool_server.opencode_server.models import (
     MessageWithParts,
-    SessionStatusEvent,
-)
-
-from agentpool_server.opencode_server.models.parts import (
-    ToolPart,
-    ToolStateRunning,
-)
-
-from agentpool_server.opencode_server.session_pool_integration import (
-    OpenCodeSessionPoolIntegration,
-    ensure_session,
-)
-
-from agentpool_server.opencode_server.state import ServerState
-
-import asyncio
-
-from agentpool.sessions.models import SessionData
-
-from agentpool_server.opencode_server.converters import session_data_to_opencode
-
-from agentpool_server.opencode_server.models import (
     Session,
     SessionCreatedEvent,
     SessionIdleEvent,
@@ -54,8 +28,16 @@ from agentpool_server.opencode_server.models import (
     SessionUpdatedEvent,
     TimeCreatedUpdated,
 )
+from agentpool_server.opencode_server.models.parts import (
+    ToolPart,
+    ToolStateRunning,
+)
+from agentpool_server.opencode_server.session_pool_integration import (
+    OpenCodeSessionPoolIntegration,
+    ensure_session,
+)
+from agentpool_server.opencode_server.state import ServerState
 
-from agentpool_server.opencode_server.session_pool_integration import ensure_session
 
 pytestmark = pytest.mark.integration
 
@@ -63,6 +45,7 @@ pytestmark = pytest.mark.integration
 # =============================================================================
 # --- Merged from test_ensure_session_durable.py ---
 # =============================================================================
+
 
 def create_mock_agent() -> MagicMock:
     """Create a properly configured mock agent."""
@@ -527,6 +510,7 @@ async def test_ensure_session_checkpointed_without_store(
 # =============================================================================
 # --- Merged from test_ensure_session_store_first.py ---
 # =============================================================================
+
 
 def create_mock_agent_store_first() -> MagicMock:
     """Create a properly configured mock agent."""
@@ -1014,4 +998,3 @@ async def test_store_first_top_level_session_does_not_bind_agent(
     assert session_id in mock_state_store_first.sessions
     # Agent should NOT be bound to this session
     assert mock_state_store_first.agent.session_id == original_session_id
-

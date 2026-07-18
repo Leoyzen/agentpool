@@ -21,6 +21,7 @@ import pytest
 
 from agentpool import Agent, AgentPool
 
+
 pytestmark = pytest.mark.integration
 
 

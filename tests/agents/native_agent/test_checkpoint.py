@@ -28,6 +28,7 @@ from agentpool.agents.native_agent.checkpoint import (
 from agentpool.sessions.models import PendingDeferredCall
 from agentpool.storage.manager import StorageManager
 
+
 pytestmark = pytest.mark.unit
 
 

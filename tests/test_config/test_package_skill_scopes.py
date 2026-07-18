@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import pytest
-
 import yaml
 
 from agentpool_config import resolution
+
 
 pytestmark = pytest.mark.unit
 

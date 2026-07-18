@@ -20,6 +20,7 @@ from agentpool.capabilities.agent_context import AgentContext
 from agentpool.capabilities.delegation import AgentNotFoundError, DelegationService
 from agentpool.host.context import HostContext, RunScope
 
+
 pytestmark = pytest.mark.unit
 
 

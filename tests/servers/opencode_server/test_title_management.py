@@ -15,13 +15,13 @@ These tests should FAIL before the fix and PASS afterwards.
 
 from __future__ import annotations
 
-import pytest
-
 import asyncio
 import os
 import time
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 
 from agentpool.storage.manager import SessionMetadata, SessionMetadataGeneratedEvent, StorageManager
 from agentpool.utils.time_utils import now_ms
@@ -39,6 +39,7 @@ from agentpool_server.opencode_server.routes.message_routes import (
 )
 from agentpool_server.opencode_server.session_pool_integration import get_messages_for_session
 from agentpool_server.opencode_server.state import ServerState
+
 
 pytestmark = pytest.mark.integration
 

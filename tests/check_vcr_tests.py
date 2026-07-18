@@ -70,18 +70,17 @@ def _module_has_vcr_pytestmark(tree: ast.Module) -> bool:
                         for elt in node.value.elts:
                             if isinstance(elt, ast.Attribute) and _is_vcr_mark(elt):
                                 return True
-        elif isinstance(node, ast.AnnAssign):
-            if (
-                isinstance(node.target, ast.Name)
-                and node.target.id == "pytestmark"
-                and node.value is not None
-            ):
-                if _is_vcr_mark(node.value):
-                    return True
-                if isinstance(node.value, ast.List):
-                    for elt in node.value.elts:
-                        if isinstance(elt, ast.Attribute) and _is_vcr_mark(elt):
-                            return True
+        elif isinstance(node, ast.AnnAssign) and (
+            isinstance(node.target, ast.Name)
+            and node.target.id == "pytestmark"
+            and node.value is not None
+        ):
+            if _is_vcr_mark(node.value):
+                return True
+            if isinstance(node.value, ast.List):
+                for elt in node.value.elts:
+                    if isinstance(elt, ast.Attribute) and _is_vcr_mark(elt):
+                        return True
     return False
 
 
@@ -143,9 +142,9 @@ def main() -> int:
             "(expected — record with --record-mode=once):",
         )
         for test_module, func_name in missing:
-            rel_cassette = (
-                CASSETTES_DIR / test_module / f"{func_name}.yaml"
-            ).relative_to(REPO_ROOT)
+            rel_cassette = (CASSETTES_DIR / test_module / f"{func_name}.yaml").relative_to(
+                REPO_ROOT
+            )
             print(f"  {test_module}.py::{func_name} → {rel_cassette}")
         print(
             "\nTo record: export OPENAI_API_KEY=sk-... && "

@@ -11,6 +11,7 @@ from agentpool.models.agents import NativeAgentConfig
 from agentpool.models.manifest import AgentsManifest
 from agentpool_server.a2a_server import A2AServer
 
+
 pytestmark = pytest.mark.integration
 
 

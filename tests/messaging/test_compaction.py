@@ -37,6 +37,7 @@ from agentpool_config.compaction import (
     WhenMessageCountExceedsConfig,
 )
 
+
 pytestmark = pytest.mark.unit
 
 

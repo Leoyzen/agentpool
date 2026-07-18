@@ -14,7 +14,7 @@ import yamling
 from agentpool import Agent, AgentPool, AgentsManifest, NativeAgentConfig
 
 # Import minimal_pool fixture so it's available to all tests without explicit import.
-from tests.fixtures.minimal_pool import minimal_pool  # noqa: E402, F401
+from tests.fixtures.minimal_pool import minimal_pool  # noqa: F401
 
 
 if TYPE_CHECKING:
@@ -629,9 +629,7 @@ def _check_vcr_cassette_usage(vcr: Cassette, strict_usage: bool) -> None:
 
 
 @pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_makereport(
-    item: pytest.Item, call: pytest.CallInfo[None]
-) -> Iterator[Any]:
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> Iterator[Any]:
     """Attach setup/call/teardown reports to the item for fail_partially_used_vcr_cassettes."""
     outcome = yield
     report = outcome.get_result()

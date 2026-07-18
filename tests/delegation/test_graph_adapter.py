@@ -11,6 +11,7 @@ from agentpool.messaging import ChatMessage
 from agentpool.messaging.graph_adapter import AgentPoolState, MessageNodeStep
 from agentpool.messaging.messagenode import MessageNode
 
+
 pytestmark = pytest.mark.unit
 
 

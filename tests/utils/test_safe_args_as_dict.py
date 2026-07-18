@@ -12,6 +12,7 @@ import pytest
 
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 
+
 pytestmark = pytest.mark.unit
 
 

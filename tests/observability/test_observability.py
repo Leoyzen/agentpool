@@ -14,6 +14,7 @@ from agentpool_config.observability import (
     ObservabilityConfig,
 )
 
+
 pytestmark = pytest.mark.unit
 
 

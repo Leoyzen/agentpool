@@ -17,7 +17,7 @@ import pytest
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
 from agentpool.agents.events import StreamCompleteEvent
 from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionController, SessionPool
+from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionController
 
 
 # ============================================================================
@@ -105,7 +105,9 @@ class TestEventBusSessionTree:
             "but _session_tree is empty so it returns False"
         )
 
-    async def test_publish_delivers_descendant_events_to_parent(self, minimal_pool: AgentPool) -> None:
+    async def test_publish_delivers_descendant_events_to_parent(
+        self, minimal_pool: AgentPool
+    ) -> None:
         """FIXED: Child session events ARE delivered to parent subscribers via controller."""
         controller = SessionController(minimal_pool)
         await controller.get_or_create_session("parent-sid")
@@ -189,7 +191,9 @@ class TestSessionControllerChildrenVsEventBus:
             "even though _session_tree is empty"
         )
 
-    async def test_should_receive_descendants_with_controller_wired(self, minimal_pool: AgentPool) -> None:
+    async def test_should_receive_descendants_with_controller_wired(
+        self, minimal_pool: AgentPool
+    ) -> None:
         """With controller wired, descendants scope works despite empty _session_tree."""
         controller = SessionController(minimal_pool)
         bus = EventBus(session_controller=controller)
@@ -274,7 +278,9 @@ class TestSessionControllerChildrenVsEventBus:
 class TestSessionPoolIntegration:
     """Red flag: SessionPool-level integration tests."""
 
-    async def test_subagent_streaming_events_routed_to_parent(self, minimal_pool: AgentPool) -> None:
+    async def test_subagent_streaming_events_routed_to_parent(
+        self, minimal_pool: AgentPool
+    ) -> None:
         """FIXED: When SessionPool runs subagent, events reach parent."""
         pool = minimal_pool.session_pool
         assert pool is not None

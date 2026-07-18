@@ -25,6 +25,7 @@ from agentpool_server.opencode_server.routes.config_routes import router as conf
 from agentpool_server.opencode_server.routes.global_routes import router as global_router
 from agentpool_server.opencode_server.state import ServerState
 
+
 pytestmark = pytest.mark.integration
 
 

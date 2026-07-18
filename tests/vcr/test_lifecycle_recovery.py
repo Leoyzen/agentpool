@@ -15,15 +15,15 @@ Cassettes ([HUMAN-REQUIRED]):
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from dirty_equals import IsStr
 import pytest
 
 from agentpool.lifecycle.journal import MemoryJournal
 from agentpool.lifecycle.snapshot_store import MemorySnapshotStore
-from agentpool.lifecycle.types import ResumeResult, RunState
+from agentpool.lifecycle.types import ResumeResult
 from tests.vcr.conftest import cassette_exists
+
 
 if TYPE_CHECKING:
     from agentpool import AgentPool
@@ -94,7 +94,7 @@ async def test_tool_execution_log_idempotency(vcr_pool: AgentPool) -> None:
     tool execution to the Journal via ``_log_tool_execution()``. Asserts
     the Journal can retrieve tool execution records by turn ID.
     """
-    journal = MemoryJournal()
+    MemoryJournal()
 
     def echo(text: str) -> str:
         """Echo text."""

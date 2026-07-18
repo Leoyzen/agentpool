@@ -9,74 +9,44 @@ Combines tests from:
 from __future__ import annotations
 
 import asyncio
-
 from typing import Any
-
 from unittest.mock import AsyncMock, Mock
 
+from mcp import types
 import pytest
 
+from agentpool.orchestrator.core import SessionController, SessionState
 from agentpool.tasks.exceptions import RunAbortedError
-
 from agentpool.utils import identifiers as identifier
-
 from agentpool.utils.time_utils import now_ms
-
+from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider, PendingPermission
 from agentpool_server.opencode_server.models import (
     AssistantMessage,
     MessageRequest,
+    PermissionRequestEvent,
+    PermissionResolvedEvent,
+    QuestionReply,
     TextPartInput,
     TimeCreated,
     UserMessage,
 )
-
 from agentpool_server.opencode_server.models.message import (
     MessageAbortedError,
     MessageWithParts,
 )
-
 from agentpool_server.opencode_server.routes.message_routes import _process_message_locked
-
-from agentpool_server.opencode_server.session_pool_integration import (
-    append_message_to_session,
-    get_messages_for_session,
-    get_session_status,
-)
-
-from agentpool_server.opencode_server.state import PendingQuestion, ServerState
-
-from unittest.mock import Mock
-
-from mcp import types
-
-from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider, PendingPermission
-
-from agentpool_server.opencode_server.models import (
-    PermissionRequestEvent,
-    PermissionResolvedEvent,
-    QuestionReply,
-)
-
-from agentpool_server.opencode_server.routes.question_routes import (
-    reject_question,
-    reply_to_question,
-)
-
-from agentpool_server.opencode_server.state import ServerState
-
-from agentpool.orchestrator.core import SessionController, SessionState
-
-from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
-
-from agentpool_server.opencode_server.models import (
-    QuestionReply,
-)
-
 from agentpool_server.opencode_server.routes.question_routes import (
     list_questions,
     reject_question,
     reply_to_question,
 )
+from agentpool_server.opencode_server.session_pool_integration import (
+    append_message_to_session,
+    get_messages_for_session,
+    get_session_status,
+)
+from agentpool_server.opencode_server.state import PendingQuestion, ServerState
+
 
 pytestmark = pytest.mark.integration
 
@@ -1213,12 +1183,14 @@ class TestUnboundLocalErrorInExceptHandler:
 
 import contextlib  # noqa: E402
 
+
 pytestmark = pytest.mark.integration
 
 
 # =============================================================================
 # --- Merged from test_question_integration.py ---
 # =============================================================================
+
 
 def _make_mock_session_controller(session_id: str) -> Mock:
     """Create a mock SessionController with a SessionState for the given session."""
@@ -1818,6 +1790,7 @@ if __name__ == "__main__":
 # --- Merged from test_question_session_controller.py ---
 # =============================================================================
 
+
 @pytest.fixture
 def mock_pool():
     """Create a mock AgentPool."""
@@ -2203,4 +2176,3 @@ class TestSSEDisconnectViaSessionController:
 
         assert cancelled == ["q1"]
         assert future.cancelled()
-

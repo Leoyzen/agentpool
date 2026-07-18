@@ -7,6 +7,7 @@ from agentpool import Agent, AgentPool
 from agentpool.models.agents import NativeAgentConfig
 from agentpool.models.manifest import AgentsManifest
 
+
 pytestmark = pytest.mark.integration
 
 

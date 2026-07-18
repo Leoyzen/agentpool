@@ -7,15 +7,18 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.agents.events.events import SessionResumeEvent
-from agentpool.orchestrator.core import SessionPool
+from agentpool.orchestrator.core import SessionBusyError, SessionPool
 from agentpool.sessions.models import PendingDeferredCall, SessionData
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
 
 
 def _stream_empty(queue: asyncio.Queue[Any]) -> bool:
@@ -698,63 +701,88 @@ async def test_resume_session_with_empty_pending_calls(
 # Merged from test_resume_concurrency.py (suffix: rc)
 # ---------------------------------------------------------------------------
 
-from agentpool.orchestrator.core import SessionBusyError, SessionPool
 
 async def _ok_gen_rc(*args: Any, **kwargs: Any) -> Any:
     """Async generator that yields nothing and completes silently."""
     return
     yield
 
+
 async def _fail_gen_rc(*args: Any, **kwargs: Any) -> Any:
     """Async generator that raises RuntimeError during iteration."""
-    raise RuntimeError('Boom')
+    raise RuntimeError("Boom")
     yield
+
 
 @pytest.fixture
 async def session_pool_rc(minimal_pool: AgentPool) -> SessionPool:
     """Return a SessionPool backed by a real AgentPool with MemoryStorageProvider."""
     from agentpool_storage.memory_provider.provider import MemoryStorageProvider
+
     store = MemoryStorageProvider()
     return SessionPool(pool=minimal_pool, store=store)
+
 
 @pytest.mark.anyio
 async def test_with_resume_lock_acquires_lock(session_pool_rc: SessionPool) -> None:
     """_with_resume_lock acquires the per-session resume lock."""
-    lock = await session_pool_rc._get_resume_lock('sess-1')
+    lock = await session_pool_rc._get_resume_lock("sess-1")
     assert lock is not None
     assert not lock.locked()
-    async with session_pool_rc._with_resume_lock('sess-1') as session:
+    async with session_pool_rc._with_resume_lock("sess-1") as session:
         assert lock.locked()
         assert session is None
     assert not lock.locked()
 
+
 @pytest.mark.anyio
 async def test_with_resume_lock_raises_busy_for_active_run(session_pool_rc: SessionPool) -> None:
     """_with_resume_lock raises SessionBusyError when session has active run."""
-    state, _ = await session_pool_rc.sessions.get_or_create_session('sess-1', agent_name='test-agent')
-    state.current_run_id = 'run-active'
-    with pytest.raises(SessionBusyError, match='already has an active run'):
-        async with session_pool_rc._with_resume_lock('sess-1'):
+    state, _ = await session_pool_rc.sessions.get_or_create_session(
+        "sess-1", agent_name="test-agent"
+    )
+    state.current_run_id = "run-active"
+    with pytest.raises(SessionBusyError, match="already has an active run"):
+        async with session_pool_rc._with_resume_lock("sess-1"):
             pass
 
+
 @pytest.mark.anyio
-async def test_with_resume_lock_raises_busy_for_resumed_session(session_pool_rc: SessionPool) -> None:
+async def test_with_resume_lock_raises_busy_for_resumed_session(
+    session_pool_rc: SessionPool,
+) -> None:
     """_with_resume_lock raises SessionBusyError when session status is not 'checkpointed'."""
     store = session_pool_rc.sessions.store
     assert store is not None
-    await store.save_session(make_session_data(session_id='sess-1', agent_name='test-agent', status='active', metadata={'agent_type': 'native'}))
-    with pytest.raises(SessionBusyError, match='already has an active run'):
-        async with session_pool_rc._with_resume_lock('sess-1'):
+    await store.save_session(
+        make_session_data(
+            session_id="sess-1",
+            agent_name="test-agent",
+            status="active",
+            metadata={"agent_type": "native"},
+        )
+    )
+    with pytest.raises(SessionBusyError, match="already has an active run"):
+        async with session_pool_rc._with_resume_lock("sess-1"):
             pass
+
 
 @pytest.mark.anyio
 async def test_with_resume_lock_allows_checkpointed_session(session_pool_rc: SessionPool) -> None:
     """_with_resume_lock allows sessions with status 'checkpointed'."""
     store = session_pool_rc.sessions.store
     assert store is not None
-    await store.save_session(make_session_data(session_id='sess-1', agent_name='test-agent', status='checkpointed', metadata={'agent_type': 'native'}))
-    async with session_pool_rc._with_resume_lock('sess-1') as session:
+    await store.save_session(
+        make_session_data(
+            session_id="sess-1",
+            agent_name="test-agent",
+            status="checkpointed",
+            metadata={"agent_type": "native"},
+        )
+    )
+    async with session_pool_rc._with_resume_lock("sess-1") as session:
         assert session is None
+
 
 @pytest.mark.anyio
 async def test_resume_session_concurrent_calls_serialize(session_pool_rc: SessionPool) -> None:
@@ -764,30 +792,51 @@ async def test_resume_session_concurrent_calls_serialize(session_pool_rc: Sessio
     """
     store = session_pool_rc.sessions.store
     assert store is not None
-    await store.save_session(make_session_data(session_id='sess-1', agent_type='native', pending=[make_pending_call('call-1')], status='checkpointed', metadata={'agent_type': 'native'}))
+    await store.save_session(
+        make_session_data(
+            session_id="sess-1",
+            agent_type="native",
+            pending=[make_pending_call("call-1")],
+            status="checkpointed",
+            metadata={"agent_type": "native"},
+        )
+    )
     from agentpool.agents.native_agent.checkpoint import CheckpointData
-    checkpoint_data = CheckpointData(message_history=[], pending_calls=[make_pending_call('call-1')])
+
+    checkpoint_data = CheckpointData(
+        message_history=[], pending_calls=[make_pending_call("call-1")]
+    )
     block_event = asyncio.Event()
 
     async def slow_run_stream(session_id: str, *prompts: Any, **kwargs: Any) -> Any:
         await block_event.wait()
         return
         yield
+
     mock_native = MagicMock()
-    mock_native.name = 'test-agent'
+    mock_native.name = "test-agent"
     mock_native._model = None
     mock_native.model_settings = None
-    with patch.object(session_pool_rc, '_load_checkpoint_data', AsyncMock(return_value=checkpoint_data)), patch.object(session_pool_rc, '_reconstruct_native_agent', AsyncMock(return_value=mock_native)), patch.object(session_pool_rc, 'run_stream', slow_run_stream):
-        results = make_deferred_tool_results(['call-1'])
-        task1 = asyncio.create_task(session_pool_rc.resume_session('sess-1', results))
-        task2 = asyncio.create_task(session_pool_rc.resume_session('sess-1', results))
+    with (
+        patch.object(
+            session_pool_rc, "_load_checkpoint_data", AsyncMock(return_value=checkpoint_data)
+        ),
+        patch.object(
+            session_pool_rc, "_reconstruct_native_agent", AsyncMock(return_value=mock_native)
+        ),
+        patch.object(session_pool_rc, "run_stream", slow_run_stream),
+    ):
+        results = make_deferred_tool_results(["call-1"])
+        task1 = asyncio.create_task(session_pool_rc.resume_session("sess-1", results))
+        task2 = asyncio.create_task(session_pool_rc.resume_session("sess-1", results))
         await asyncio.sleep(0.05)
-        assert not task1.done(), 'First resume should be blocked on slow_run_stream'
-        assert not task2.done(), 'Second resume should be waiting for lock'
+        assert not task1.done(), "First resume should be blocked on slow_run_stream"
+        assert not task2.done(), "Second resume should be waiting for lock"
         block_event.set()
         await task1
         with pytest.raises(SessionBusyError):
             await task2
+
 
 @pytest.mark.anyio
 async def test_resume_session_rejects_second_after_success(session_pool_rc: SessionPool) -> None:
@@ -797,43 +846,85 @@ async def test_resume_session_rejects_second_after_success(session_pool_rc: Sess
     """
     store = session_pool_rc.sessions.store
     assert store is not None
-    await store.save_session(make_session_data(session_id='sess-1', agent_type='native', pending=[make_pending_call('call-1')], status='checkpointed', metadata={'agent_type': 'native'}))
+    await store.save_session(
+        make_session_data(
+            session_id="sess-1",
+            agent_type="native",
+            pending=[make_pending_call("call-1")],
+            status="checkpointed",
+            metadata={"agent_type": "native"},
+        )
+    )
     from agentpool.agents.native_agent.checkpoint import CheckpointData
-    checkpoint_data = CheckpointData(message_history=[], pending_calls=[make_pending_call('call-1')])
+
+    checkpoint_data = CheckpointData(
+        message_history=[], pending_calls=[make_pending_call("call-1")]
+    )
     mock_native = MagicMock()
-    mock_native.name = 'test-agent'
+    mock_native.name = "test-agent"
     mock_native._model = None
     mock_native.model_settings = None
-    with patch.object(session_pool_rc, '_load_checkpoint_data', AsyncMock(return_value=checkpoint_data)), patch.object(session_pool_rc, '_reconstruct_native_agent', AsyncMock(return_value=mock_native)), patch.object(session_pool_rc, 'run_stream', _ok_gen_rc):
-        results = make_deferred_tool_results(['call-1'])
-        await session_pool_rc.resume_session('sess-1', results)
+    with (
+        patch.object(
+            session_pool_rc, "_load_checkpoint_data", AsyncMock(return_value=checkpoint_data)
+        ),
+        patch.object(
+            session_pool_rc, "_reconstruct_native_agent", AsyncMock(return_value=mock_native)
+        ),
+        patch.object(session_pool_rc, "run_stream", _ok_gen_rc),
+    ):
+        results = make_deferred_tool_results(["call-1"])
+        await session_pool_rc.resume_session("sess-1", results)
         with pytest.raises(SessionBusyError):
-            await session_pool_rc.resume_session('sess-1', make_deferred_tool_results([]))
+            await session_pool_rc.resume_session("sess-1", make_deferred_tool_results([]))
+
 
 @pytest.mark.anyio
-async def test_resume_session_does_not_clear_pending_on_failure(session_pool_rc: SessionPool) -> None:
+async def test_resume_session_does_not_clear_pending_on_failure(
+    session_pool_rc: SessionPool,
+) -> None:
     """pending_deferred_calls are NOT cleared if agent.run() fails.
 
     Status reverts to 'checkpointed' so the session can be retried.
     """
     store = session_pool_rc.sessions.store
     assert store is not None
-    await store.save_session(make_session_data(session_id='sess-1', agent_type='native', pending=[make_pending_call('call-1')], status='checkpointed', metadata={'agent_type': 'native'}))
+    await store.save_session(
+        make_session_data(
+            session_id="sess-1",
+            agent_type="native",
+            pending=[make_pending_call("call-1")],
+            status="checkpointed",
+            metadata={"agent_type": "native"},
+        )
+    )
     from agentpool.agents.native_agent.checkpoint import CheckpointData
-    checkpoint_data = CheckpointData(message_history=[], pending_calls=[make_pending_call('call-1')])
+
+    checkpoint_data = CheckpointData(
+        message_history=[], pending_calls=[make_pending_call("call-1")]
+    )
     mock_native = MagicMock()
-    mock_native.name = 'test-agent'
+    mock_native.name = "test-agent"
     mock_native._model = None
     mock_native.model_settings = None
-    with patch.object(session_pool_rc, '_load_checkpoint_data', AsyncMock(return_value=checkpoint_data)), patch.object(session_pool_rc, '_reconstruct_native_agent', AsyncMock(return_value=mock_native)), patch.object(session_pool_rc, 'run_stream', _fail_gen_rc):
-        results = make_deferred_tool_results(['call-1'])
-        with pytest.raises(RuntimeError, match='Boom'):
-            await session_pool_rc.resume_session('sess-1', results)
-    session_data = await store.load_session('sess-1')
+    with (
+        patch.object(
+            session_pool_rc, "_load_checkpoint_data", AsyncMock(return_value=checkpoint_data)
+        ),
+        patch.object(
+            session_pool_rc, "_reconstruct_native_agent", AsyncMock(return_value=mock_native)
+        ),
+        patch.object(session_pool_rc, "run_stream", _fail_gen_rc),
+    ):
+        results = make_deferred_tool_results(["call-1"])
+        with pytest.raises(RuntimeError, match="Boom"):
+            await session_pool_rc.resume_session("sess-1", results)
+    session_data = await store.load_session("sess-1")
     assert session_data is not None
     assert len(session_data.pending_deferred_calls) == 1
-    assert session_data.pending_deferred_calls[0].tool_call_id == 'call-1'
-    assert session_data.status == 'checkpointed'
+    assert session_data.pending_deferred_calls[0].tool_call_id == "call-1"
+    assert session_data.status == "checkpointed"
+
 
 @pytest.mark.anyio
 async def test_resume_session_allows_retry_after_failure(session_pool_rc: SessionPool) -> None:
@@ -844,12 +935,23 @@ async def test_resume_session_allows_retry_after_failure(session_pool_rc: Sessio
     """
     store = session_pool_rc.sessions.store
     assert store is not None
-    await store.save_session(make_session_data(session_id='sess-1', agent_type='native', pending=[make_pending_call('call-1')], status='checkpointed', metadata={'agent_type': 'native'}))
+    await store.save_session(
+        make_session_data(
+            session_id="sess-1",
+            agent_type="native",
+            pending=[make_pending_call("call-1")],
+            status="checkpointed",
+            metadata={"agent_type": "native"},
+        )
+    )
     from agentpool.agents.native_agent.checkpoint import CheckpointData
-    checkpoint_data = CheckpointData(message_history=[], pending_calls=[make_pending_call('call-1')])
+
+    checkpoint_data = CheckpointData(
+        message_history=[], pending_calls=[make_pending_call("call-1")]
+    )
     fail_run = True
     mock_native = MagicMock()
-    mock_native.name = 'test-agent'
+    mock_native.name = "test-agent"
     mock_native._model = None
     mock_native.model_settings = None
 
@@ -857,71 +959,126 @@ async def test_resume_session_allows_retry_after_failure(session_pool_rc: Sessio
         nonlocal fail_run
         if fail_run:
             fail_run = False
-            raise RuntimeError('First attempt fails')
+            raise RuntimeError("First attempt fails")
         return
         yield
-    with patch.object(session_pool_rc, '_load_checkpoint_data', AsyncMock(return_value=checkpoint_data)), patch.object(session_pool_rc, '_reconstruct_native_agent', AsyncMock(return_value=mock_native)), patch.object(session_pool_rc, 'run_stream', run_fail_then_succeed_stream):
-        results = make_deferred_tool_results(['call-1'])
-        with pytest.raises(RuntimeError, match='First attempt fails'):
-            await session_pool_rc.resume_session('sess-1', results)
-        session_data = await store.load_session('sess-1')
+
+    with (
+        patch.object(
+            session_pool_rc, "_load_checkpoint_data", AsyncMock(return_value=checkpoint_data)
+        ),
+        patch.object(
+            session_pool_rc, "_reconstruct_native_agent", AsyncMock(return_value=mock_native)
+        ),
+        patch.object(session_pool_rc, "run_stream", run_fail_then_succeed_stream),
+    ):
+        results = make_deferred_tool_results(["call-1"])
+        with pytest.raises(RuntimeError, match="First attempt fails"):
+            await session_pool_rc.resume_session("sess-1", results)
+        session_data = await store.load_session("sess-1")
         assert session_data is not None
-        assert session_data.status == 'checkpointed'
+        assert session_data.status == "checkpointed"
         assert len(session_data.pending_deferred_calls) == 1
-        await session_pool_rc.resume_session('sess-1', results)
-        session_data = await store.load_session('sess-1')
+        await session_pool_rc.resume_session("sess-1", results)
+        session_data = await store.load_session("sess-1")
         assert session_data is not None
-        assert session_data.status == 'active'
+        assert session_data.status == "active"
         assert session_data.pending_deferred_calls == []
 
+
 @pytest.mark.anyio
-async def test_resume_session_status_transitions_checkpointed_to_resuming_to_active(session_pool_rc: SessionPool) -> None:
+async def test_resume_session_status_transitions_checkpointed_to_resuming_to_active(
+    session_pool_rc: SessionPool,
+) -> None:
     """Status transitions: checkpointed -> resuming -> active on success."""
     store = session_pool_rc.sessions.store
     assert store is not None
-    await store.save_session(make_session_data(session_id='sess-1', agent_type='native', pending=[make_pending_call('call-1')], status='checkpointed', metadata={'agent_type': 'native'}))
+    await store.save_session(
+        make_session_data(
+            session_id="sess-1",
+            agent_type="native",
+            pending=[make_pending_call("call-1")],
+            status="checkpointed",
+            metadata={"agent_type": "native"},
+        )
+    )
     from agentpool.agents.native_agent.checkpoint import CheckpointData
-    checkpoint_data = CheckpointData(message_history=[], pending_calls=[make_pending_call('call-1')])
+
+    checkpoint_data = CheckpointData(
+        message_history=[], pending_calls=[make_pending_call("call-1")]
+    )
     observed_statuses: list[str] = []
     original_save = store.save_session
 
     async def tracking_save(data: Any) -> None:
         observed_statuses.append(data.status)
         await original_save(data)
+
     store.save_session = tracking_save
     mock_native = MagicMock()
-    mock_native.name = 'test-agent'
+    mock_native.name = "test-agent"
     mock_native._model = None
     mock_native.model_settings = None
-    with patch.object(session_pool_rc, '_load_checkpoint_data', AsyncMock(return_value=checkpoint_data)), patch.object(session_pool_rc, '_reconstruct_native_agent', AsyncMock(return_value=mock_native)), patch.object(session_pool_rc, 'run_stream', _ok_gen_rc):
-        results = make_deferred_tool_results(['call-1'])
-        await session_pool_rc.resume_session('sess-1', results)
-    assert 'resuming' in observed_statuses
-    assert 'active' in observed_statuses
-    assert observed_statuses[-1] == 'active'
+    with (
+        patch.object(
+            session_pool_rc, "_load_checkpoint_data", AsyncMock(return_value=checkpoint_data)
+        ),
+        patch.object(
+            session_pool_rc, "_reconstruct_native_agent", AsyncMock(return_value=mock_native)
+        ),
+        patch.object(session_pool_rc, "run_stream", _ok_gen_rc),
+    ):
+        results = make_deferred_tool_results(["call-1"])
+        await session_pool_rc.resume_session("sess-1", results)
+    assert "resuming" in observed_statuses
+    assert "active" in observed_statuses
+    assert observed_statuses[-1] == "active"
+
 
 @pytest.mark.anyio
-async def test_resume_session_status_reverts_to_checkpointed_on_failure(session_pool_rc: SessionPool) -> None:
+async def test_resume_session_status_reverts_to_checkpointed_on_failure(
+    session_pool_rc: SessionPool,
+) -> None:
     """Status reverts from resuming to checkpointed on agent.run() failure."""
     store = session_pool_rc.sessions.store
     assert store is not None
-    await store.save_session(make_session_data(session_id='sess-1', agent_type='native', pending=[make_pending_call('call-1')], status='checkpointed', metadata={'agent_type': 'native'}))
+    await store.save_session(
+        make_session_data(
+            session_id="sess-1",
+            agent_type="native",
+            pending=[make_pending_call("call-1")],
+            status="checkpointed",
+            metadata={"agent_type": "native"},
+        )
+    )
     from agentpool.agents.native_agent.checkpoint import CheckpointData
-    checkpoint_data = CheckpointData(message_history=[], pending_calls=[make_pending_call('call-1')])
+
+    checkpoint_data = CheckpointData(
+        message_history=[], pending_calls=[make_pending_call("call-1")]
+    )
     observed_statuses: list[str] = []
     original_save = store.save_session
 
     async def tracking_save(data: Any) -> None:
         observed_statuses.append(data.status)
         await original_save(data)
+
     store.save_session = tracking_save
     mock_native = MagicMock()
-    mock_native.name = 'test-agent'
+    mock_native.name = "test-agent"
     mock_native._model = None
     mock_native.model_settings = None
-    with patch.object(session_pool_rc, '_load_checkpoint_data', AsyncMock(return_value=checkpoint_data)), patch.object(session_pool_rc, '_reconstruct_native_agent', AsyncMock(return_value=mock_native)), patch.object(session_pool_rc, 'run_stream', _fail_gen_rc):
-        results = make_deferred_tool_results(['call-1'])
-        with pytest.raises(RuntimeError, match='Boom'):
-            await session_pool_rc.resume_session('sess-1', results)
-    assert 'resuming' in observed_statuses
-    assert observed_statuses[-1] == 'checkpointed'
+    with (
+        patch.object(
+            session_pool_rc, "_load_checkpoint_data", AsyncMock(return_value=checkpoint_data)
+        ),
+        patch.object(
+            session_pool_rc, "_reconstruct_native_agent", AsyncMock(return_value=mock_native)
+        ),
+        patch.object(session_pool_rc, "run_stream", _fail_gen_rc),
+    ):
+        results = make_deferred_tool_results(["call-1"])
+        with pytest.raises(RuntimeError, match="Boom"):
+            await session_pool_rc.resume_session("sess-1", results)
+    assert "resuming" in observed_statuses
+    assert observed_statuses[-1] == "checkpointed"

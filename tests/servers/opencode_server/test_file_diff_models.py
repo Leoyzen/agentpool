@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
-
 from dataclasses import dataclass
 
+import pytest
+
 from agentpool_server.opencode_server.models.common import FileDiff
+
 
 pytestmark = pytest.mark.integration
 

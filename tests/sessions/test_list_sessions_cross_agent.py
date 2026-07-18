@@ -18,6 +18,7 @@ from agentpool.sessions.models import SessionData
 from agentpool_config.storage import SQLStorageConfig
 from agentpool_storage.sql_provider import SQLModelProvider
 
+
 pytestmark = pytest.mark.unit
 
 

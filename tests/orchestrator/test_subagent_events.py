@@ -581,8 +581,11 @@ async def test_nested_subagents_create_recursive_toolparts() -> None:
 
         # Wait for grandparent's ToolPart to be created before publishing depth=2
         await _wait_for(
-            lambda: _get_last_assistant_message(server_state, grandparent_id) is not None
-            and _count_tool_parts(_get_last_assistant_message(server_state, grandparent_id)) >= 1,
+            lambda: (
+                _get_last_assistant_message(server_state, grandparent_id) is not None
+                and _count_tool_parts(_get_last_assistant_message(server_state, grandparent_id))
+                >= 1
+            ),
             description="grandparent ToolPart for parent",
         )
 
@@ -597,8 +600,10 @@ async def test_nested_subagents_create_recursive_toolparts() -> None:
 
         # Wait for parent's ToolPart to be created before asserting
         await _wait_for(
-            lambda: _get_last_assistant_message(server_state, parent_id) is not None
-            and _count_tool_parts(_get_last_assistant_message(server_state, parent_id)) >= 1,
+            lambda: (
+                _get_last_assistant_message(server_state, parent_id) is not None
+                and _count_tool_parts(_get_last_assistant_message(server_state, parent_id)) >= 1
+            ),
             description="parent ToolPart for child",
         )
 
@@ -630,15 +635,18 @@ async def test_nested_subagents_create_recursive_toolparts() -> None:
 
         # Wait for parent's ToolPart to transition to Completed before asserting
         await _wait_for(
-            lambda: _get_last_assistant_message(server_state, parent_id) is not None
-            and _get_tool_part_for_child(
-                _get_last_assistant_message(server_state, parent_id), child_id
-            ) is not None
-            and isinstance(
-                _get_tool_part_for_child(
+            lambda: (
+                _get_last_assistant_message(server_state, parent_id) is not None
+                and _get_tool_part_for_child(
                     _get_last_assistant_message(server_state, parent_id), child_id
-                ).state,
-                ToolStateCompleted,
+                )
+                is not None
+                and isinstance(
+                    _get_tool_part_for_child(
+                        _get_last_assistant_message(server_state, parent_id), child_id
+                    ).state,
+                    ToolStateCompleted,
+                )
             ),
             description="parent ToolPart for child to be Completed",
         )

@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Check that @pytest.mark.integration test files don't use MagicMock or Mock.
 
 Integration tests should avoid mocking in favor of real component wiring.
@@ -15,9 +14,10 @@ Exit codes:
 from __future__ import annotations
 
 import ast
+from pathlib import Path
 import re
 import sys
-from pathlib import Path
+
 
 # Markers that constitute "integration test" designation
 INTEGRATION_MARKER = "integration"
@@ -29,7 +29,7 @@ MOCK_PATTERNS: list[re.Pattern[str]] = [
 ]
 
 
-def is_integration_test(filepath: Path) -> bool:
+def is_integration_test(filepath: Path) -> bool:  # noqa: PLR0911
     """Check if a test file is marked as integration.
 
     Recognises:
@@ -88,10 +88,12 @@ def _is_integration_attr(node: ast.expr) -> bool:
         return False
     if node.attr != INTEGRATION_MARKER:
         return False
-    if isinstance(node.value, ast.Attribute) and node.value.attr == "mark":
-        if isinstance(node.value.value, ast.Name) and node.value.value.id == "pytest":
-            return True
-    return False
+    return (
+        isinstance(node.value, ast.Attribute)
+        and node.value.attr == "mark"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "pytest"
+    )
 
 
 def find_mock_lines(filepath: Path) -> list[tuple[int, str]]:
@@ -135,7 +137,10 @@ def main() -> int:
 
     if violations:
         total = sum(len(lines) for _, lines in violations)
-        print(f"❌ {len(violations)} integration test file(s) use MagicMock/Mock ({total} occurrence(s)):")
+        print(
+            f"❌ {len(violations)} integration test file(s)"
+            f" use MagicMock/Mock ({total} occurrence(s)):"
+        )
         print()
         for filepath, lines in violations:
             rel = filepath.relative_to(tests_dir.parent)

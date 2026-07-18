@@ -20,6 +20,7 @@ import pytest
 from agentpool.mcp_server import MCPClient
 from agentpool_config.mcp_server import StdioMCPServerConfig
 
+
 pytestmark = pytest.mark.unit
 
 

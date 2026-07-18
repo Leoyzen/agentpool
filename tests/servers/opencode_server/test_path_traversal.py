@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+
 pytestmark = pytest.mark.integration
 
 

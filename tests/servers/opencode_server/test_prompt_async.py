@@ -8,6 +8,7 @@ import pytest
 
 from agentpool_server.opencode_server.models import MessageRequest, TextPartInput
 
+
 pytestmark = pytest.mark.integration
 
 

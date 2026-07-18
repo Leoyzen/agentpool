@@ -25,6 +25,7 @@ import pytest
 from agentpool.models.manifest import AgentsManifest
 from agentpool_config.context import CONFIG_DIR, ConfigContextManager
 
+
 pytestmark = pytest.mark.unit
 
 

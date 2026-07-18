@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.orchestrator.core import SessionController
 from agentpool.sessions.models import PendingDeferredCall, SessionData
 from agentpool.storage.manager import StorageManager
@@ -26,6 +25,8 @@ from agentpool_storage.sql_provider import SQLModelProvider
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from agentpool import AgentPool
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING, Any
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import pytest
 
@@ -21,7 +21,11 @@ from agentpool_server.opencode_server.models import (
     SessionStatusEvent,
 )
 from agentpool_server.opencode_server.models.events import ServerConnectedEvent
+from agentpool_server.opencode_server.opencode_event_bridge import (
+    OpenCodeEventBridgeMixin,
+)
 from agentpool_server.opencode_server.state import ServerState
+
 
 pytestmark = pytest.mark.integration
 
@@ -30,7 +34,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentpool_server.opencode_server.models.events import Event
-
 
 
 # =============================================================================
@@ -279,6 +282,7 @@ async def test_bridge_isolation_between_sessions(
     with pytest.raises(asyncio.QueueEmpty):
         sub_b.get_nowait()
 
+
 # =============================================================================
 # --- Merged from test_event_bridge_review.py ---
 # =============================================================================
@@ -288,16 +292,6 @@ async def test_bridge_isolation_between_sessions(
 Verifies that when one child's stop_event_consumer raises an exception,
 the remaining children are still stopped (the loop doesn't break).
 """
-
-from typing import Any
-from unittest.mock import MagicMock
-
-import pytest
-
-from agentpool_server.opencode_server.opencode_event_bridge import (
-    OpenCodeEventBridgeMixin,
-)
-
 
 pytestmark = pytest.mark.unit
 

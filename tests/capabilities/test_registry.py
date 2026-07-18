@@ -15,18 +15,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.capabilities.registry import (
     CapabilityNotFoundError,
     discover_entry_point_capabilities,
     resolve_capability_type,
 )
 
+
 pytestmark = pytest.mark.integration
 
 
 if TYPE_CHECKING:
     from pydantic_ai.capabilities import AbstractCapability
+
+    from agentpool import AgentPool
 
 
 # ---- Helpers ----

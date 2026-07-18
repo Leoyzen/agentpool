@@ -22,6 +22,7 @@ import pytest
 from agentpool.agents.native_agent.checkpoint import CheckpointManager
 from agentpool.storage.serialization import messages_adapter
 
+
 pytestmark = pytest.mark.unit
 
 

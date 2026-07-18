@@ -12,11 +12,12 @@ Run with: uv run python tests/verification/test_acp_display_config.py
 
 from __future__ import annotations
 
-import pytest
-
 import subprocess
 import sys
 import warnings
+
+import pytest
+
 
 pytestmark = pytest.mark.integration
 

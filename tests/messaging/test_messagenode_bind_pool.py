@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from agentpool import AgentPool
 from agentpool.messaging import ChatMessage
 from agentpool.messaging.messagenode import MessageNode
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
 
 
 class ConcreteMessageNode(MessageNode[Any, Any]):

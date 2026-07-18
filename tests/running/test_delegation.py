@@ -10,6 +10,7 @@ from agentpool.agents import Agent
 from agentpool.agents.base_agent import BaseAgent  # noqa: TC001
 from agentpool.running import NodeInjectionError, with_nodes
 
+
 pytestmark = pytest.mark.unit
 
 

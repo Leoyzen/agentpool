@@ -13,6 +13,7 @@ from agentpool.agents.base_agent import BaseAgent, _current_run_ctx_var
 from agentpool.agents.context import AgentRunContext
 from agentpool.orchestrator.core import SessionState
 
+
 pytestmark = pytest.mark.integration
 
 

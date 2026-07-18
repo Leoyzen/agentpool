@@ -14,6 +14,7 @@ from acp.client.implementations import HeadlessACPClient
 from acp.filesystem import ACPFileSystem
 from acp.schema import ClientCapabilities
 
+
 pytestmark = pytest.mark.integration
 
 

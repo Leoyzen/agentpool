@@ -16,6 +16,7 @@ import pytest
 from agentpool_server.opencode_server.models import ShellRequest
 from agentpool_server.opencode_server.routes.session_routes import run_shell_command
 
+
 pytestmark = pytest.mark.integration
 
 

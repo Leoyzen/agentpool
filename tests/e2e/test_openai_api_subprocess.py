@@ -16,7 +16,7 @@ L4b full tests: pytest -m e2e
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
@@ -49,13 +49,9 @@ AUTH_HEADERS = {"Authorization": "Bearer test-key"}
     [{"serve_command": "serve-api", "is_stdio": False}],
     indirect=True,
 )
-async def test_server_startup(
-    subprocess_server: SubprocessServer, e2e_config: Path
-) -> None:
+async def test_server_startup(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
     """L4a: Start serve-api, verify HTTP server is responding."""
-    assert subprocess_server.process.returncode is None, (
-        "OpenAI API server process exited early"
-    )
+    assert subprocess_server.process.returncode is None, "OpenAI API server process exited early"
     assert subprocess_server.port > 0
 
     # The server may not have a root endpoint; we check via the completions
@@ -79,9 +75,7 @@ async def test_server_startup(
     [{"serve_command": "serve-api", "is_stdio": False}],
     indirect=True,
 )
-async def test_chat_completion(
-    subprocess_server: SubprocessServer, e2e_config: Path
-) -> None:
+async def test_chat_completion(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
     """L4a: POST /v1/chat/completions, verify chat completion response.
 
     Note: The serve-api CLI command may not initialize SessionPool in all
@@ -113,9 +107,7 @@ async def test_chat_completion(
             assert "choices" in data, f"Expected 'choices' in response: {data}"
             assert len(data["choices"]) > 0, f"Expected at least 1 choice: {data}"
             content = data["choices"][0].get("message", {}).get("content")
-            assert content is not None, (
-                f"Expected content in message: {data['choices'][0]}"
-            )
+            assert content is not None, f"Expected content in message: {data['choices'][0]}"
 
 
 @pytest.mark.parametrize(
@@ -123,9 +115,7 @@ async def test_chat_completion(
     [{"serve_command": "serve-api", "is_stdio": False}],
     indirect=True,
 )
-async def test_server_shutdown(
-    subprocess_server: SubprocessServer, e2e_config: Path
-) -> None:
+async def test_server_shutdown(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
     """L4a: Verify server is responsive then shuts down cleanly."""
     base_url = subprocess_server.base_url
 
@@ -151,14 +141,13 @@ async def test_server_shutdown(
     [{"serve_command": "serve-api", "is_stdio": False}],
     indirect=True,
 )
-async def test_streaming_completion(
-    subprocess_server: SubprocessServer, e2e_config: Path
-) -> None:
+async def test_streaming_completion(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
     """L4b: Streaming chat completion via SSE."""
     base_url = subprocess_server.base_url
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        async with client.stream(
+    async with (
+        httpx.AsyncClient(timeout=30.0) as client,
+        client.stream(
             "POST",
             f"{base_url}/v1/chat/completions",
             headers=AUTH_HEADERS,
@@ -167,20 +156,19 @@ async def test_streaming_completion(
                 "messages": [{"role": "user", "content": "Stream a response"}],
                 "stream": True,
             },
-        ) as resp:
-            assert resp.status_code == 200, (
-                f"Streaming completion failed: {resp.status_code}"
-            )
-            # Read the SSE stream and verify we get chunks.
-            chunks: list[str] = []
-            async for line in resp.aiter_lines():
-                if line.startswith("data: "):
-                    chunks.append(line)
-                # Stop at SSE done marker.
-                stripped = line.strip()
-                if stripped.endswith("DONE]"):
-                    break
-            assert len(chunks) > 0, "Expected at least one SSE chunk"
+        ) as resp,
+    ):
+        assert resp.status_code == 200, f"Streaming completion failed: {resp.status_code}"
+        # Read the SSE stream and verify we get chunks.
+        chunks: list[str] = []
+        async for line in resp.aiter_lines():
+            if line.startswith("data: "):
+                chunks.append(line)
+            # Stop at SSE done marker.
+            stripped = line.strip()
+            if stripped.endswith("DONE]"):
+                break
+        assert len(chunks) > 0, "Expected at least one SSE chunk"
 
 
 @pytest.mark.slow
@@ -189,9 +177,7 @@ async def test_streaming_completion(
     [{"serve_command": "serve-api", "is_stdio": False}],
     indirect=True,
 )
-async def test_multi_turn(
-    subprocess_server: SubprocessServer, e2e_config: Path
-) -> None:
+async def test_multi_turn(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
     """L4b: Multi-turn conversation via chat completions."""
     base_url = subprocess_server.base_url
 
