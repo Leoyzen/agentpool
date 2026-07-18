@@ -92,3 +92,7 @@ class OpenCodeSessionPoolIntegration(
         # Pending canonical message IDs from REST handlers (D14).
         # Populated by route_message(), consumed by _before_consumer_loop.
         self._pending_message_ids: dict[str, str] = {}
+        # Pending message metadata from REST handlers (agent/model propagation).
+        # Populated by route_message(), consumed by _before_consumer_loop.
+        # Each entry: {message_id, model_id, provider_id} (all optional).
+        self._pending_message_metadata: dict[str, dict[str, str | None]] = {}

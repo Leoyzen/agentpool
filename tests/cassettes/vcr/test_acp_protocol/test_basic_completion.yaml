@@ -8,7 +8,7 @@ interactions:
       connection:
       - keep-alive
       content-length:
-      - '4702'
+      - '4750'
       content-type:
       - application/json
       host:
@@ -20,6 +20,7 @@ interactions:
           You are test_agent.
 
           You are a helpful test assistant for VCR cassette replay.
+          Working directory: /test
           <available-skills>
           <skill name="example-skill" description="A simple example skill that demonstrates the basic structure and functionality. Use when you need to show how skills work or test skill loading." />
           <skill name="openspec-apply-change" description="Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks." />
@@ -35,7 +36,7 @@ interactions:
           </available-skills>
         role: system
       - content:
-        - text: Say hello.
+        - text: Say hello in one short sentence.
           type: text
         role: user
       model: svc/deepseek-v4-flash
@@ -93,29 +94,19 @@ interactions:
   response:
     body:
       string: |+
-        data: {"id":"chatcmpl-94a6f7c7dc4f58b3","object":"chat.completion.chunk","created":1784396474,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+        data: {"id":"chatcmpl-90a4366da812cc9b","object":"chat.completion.chunk","created":1784394804,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
 
-        data: {"id":"chatcmpl-94a6f7c7dc4f58b3","created":1784396474,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"The"}}]}
+        data: {"id":"chatcmpl-90a4366da812cc9b","created":1784394804,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"The"}}]}
 
-        data: {"id":"chatcmpl-94a6f7c7dc4f58b3","created":1784396474,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" user wants me"}}]}
+        data: {"id":"chatcmpl-90a4366da812cc9b","created":1784394804,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" user wants me to say"}}]}
 
-        data: {"id":"chatcmpl-94a6f7c7dc4f58b3","created":1784396474,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" to say hello. Let me do"}}]}
+        data: {"id":"chatcmpl-90a4366da812cc9b","created":1784394804,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" hello in one short sentence"}}]}
 
-        data: {"id":"chatcmpl-94a6f7c7dc4f58b3","created":1784396474,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" that directly"}}]}
+        data: {"id":"chatcmpl-90a4366da812cc9b","created":1784394804,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".","content":"Hello!"}}]}
 
-        data: {"id":"chatcmpl-94a6f7c7dc4f58b3","created":1784396474,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" without"}}]}
+        data: {"id":"chatcmpl-90a4366da812cc9b","object":"chat.completion.chunk","created":1784394804,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
 
-        data: {"id":"chatcmpl-94a6f7c7dc4f58b3","created":1784396474,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" needing"}}]}
-
-        data: {"id":"chatcmpl-94a6f7c7dc4f58b3","created":1784396474,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" any special"}}]}
-
-        data: {"id":"chatcmpl-94a6f7c7dc4f58b3","created":1784396474,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" tools.","content":"Hello! How"}}]}
-
-        data: {"id":"chatcmpl-94a6f7c7dc4f58b3","object":"chat.completion.chunk","created":1784396474,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" can I help you today?"}}]}
-
-        data: {"id":"chatcmpl-94a6f7c7dc4f58b3","object":"chat.completion.chunk","created":1784396474,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
-
-        data: {"id":"chatcmpl-94a6f7c7dc4f58b3","created":1784396474,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":30,"prompt_tokens":1135,"total_tokens":1165,"completion_tokens_details":{"reasoning_tokens":19}}}
+        data: {"id":"chatcmpl-90a4366da812cc9b","created":1784394804,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":16,"prompt_tokens":1145,"total_tokens":1161,"completion_tokens_details":{"reasoning_tokens":12}}}
 
         data: [DONE]
 
@@ -129,11 +120,11 @@ interactions:
       content-type:
       - text/event-stream; charset=utf-8
       req-arrive-time:
-      - '1784396474398'
+      - '1784394804549'
       req-cost-time:
-      - '163'
+      - '169'
       resp-start-time:
-      - '1784396474562'
+      - '1784394804718'
       transfer-encoding:
       - chunked
     status:

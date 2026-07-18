@@ -294,6 +294,10 @@ class _DummyCommChannel:
     def publishes_to_event_bus(self) -> bool:
         return False
 
+    @property
+    def journal(self):  # type: ignore[no-untyped-def]
+        return None
+
     def attach(self, run_loop: Any) -> None: ...
 
     def on_state_change(self, state: RunState) -> None: ...

@@ -819,6 +819,8 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
                 input_provider=input_provider,
                 agent_name=agent_name,
                 message_id=async_assistant_msg_id,
+                model_id=request.model.model_id if request.model else None,
+                provider_id=request.model.provider_id if request.model else None,
             )
         else:
             sp_state, _was_created = await session_pool.sessions.get_or_create_session(

@@ -15,11 +15,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from dirty_equals import IsStr
+from pydantic_ai.messages import TextPart, ThinkingPart
 import pytest
 
 from agentpool.agents.events import (
     PartDeltaEvent,
     PartStartEvent,
+    RunStartedEvent,
     StreamCompleteEvent,
 )
 from tests.vcr.conftest import cassette_exists
@@ -37,23 +39,24 @@ _MODULE_STEM = "test_native_streaming"
     not cassette_exists(_MODULE_STEM, "test_streaming_event_sequence"),
     reason="Cassette not recorded yet — run with --record-mode=once",
 )
-@pytest.mark.xfail(
-    reason="Streaming event sequence assertion doesn't match actual model output "
-    "events (RunStartedEvent may not be emitted in all cases)",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 async def test_streaming_event_sequence(vcr_pool: AgentPool) -> None:
-    """The streaming event sequence matches the expected order.
+    """The streaming event sequence follows the expected structural order.
 
-    Expected order (design D8, P6):
-        RunStartedEvent → PartStartEvent → PartDeltaEvent* →
-        StreamCompleteEvent
+    Expected structure (design D8, P6):
+        RunStartedEvent → (PartStartEvent → PartDeltaEvent* → PartEndEvent)*
+        → FinalResultEvent* → StreamCompleteEvent
 
-    ``PartDeltaEvent`` may repeat an arbitrary number of times (one per
-    streamed chunk). The test asserts the relative order of the other event
-    types and that at least one ``PartDeltaEvent`` is present.
+    PydanticAI emits multiple parts (text, thinking, tool calls), each with
+    its own PartStart/PartDelta/PartEnd cycle. The test asserts structural
+    invariants rather than an exact sequence to remain resilient across
+    pydantic-ai versions and model response patterns.
+
+    Assertions:
+    1. First event is ``RunStartedEvent``
+    2. Last event is ``StreamCompleteEvent``
+    3. At least one ``PartStartEvent`` and ``PartDeltaEvent`` exist
+    4. First ``PartStartEvent`` precedes first ``PartDeltaEvent``
+    5. First ``PartDeltaEvent`` precedes ``StreamCompleteEvent``
     """
     agent = vcr_pool.get_agent("test_agent")
     events: list[object] = [
@@ -62,26 +65,34 @@ async def test_streaming_event_sequence(vcr_pool: AgentPool) -> None:
 
     assert events, "run_stream produced no events"
 
-    # Collect event type names in order, collapsing repeated PartDeltaEvent.
-    type_sequence: list[str] = []
-    for evt in events:
-        type_name = type(evt).__name__
-        if (
-            type_name == "PartDeltaEvent"
-            and type_sequence
-            and type_sequence[-1] == "PartDeltaEvent"
-        ):
-            continue  # collapse consecutive deltas
-        type_sequence.append(type_name)
+    # 1. First event must be RunStartedEvent.
+    assert isinstance(events[0], RunStartedEvent), (
+        f"First event should be RunStartedEvent, got {type(events[0]).__name__}"
+    )
 
-    # Assert the expected skeleton order.
-    expected_skeleton = [
-        "RunStartedEvent",
-        "PartStartEvent",
-        "PartDeltaEvent",
-        "StreamCompleteEvent",
-    ]
-    assert type_sequence == expected_skeleton, f"Event sequence mismatch. Got: {type_sequence}"
+    # 2. Last event must be StreamCompleteEvent.
+    assert isinstance(events[-1], StreamCompleteEvent), (
+        f"Last event should be StreamCompleteEvent, got {type(events[-1]).__name__}"
+    )
+
+    # 3. Must have at least one PartStartEvent and PartDeltaEvent.
+    part_start_indices = [i for i, e in enumerate(events) if isinstance(e, PartStartEvent)]
+    part_delta_indices = [i for i, e in enumerate(events) if isinstance(e, PartDeltaEvent)]
+    assert part_start_indices, "Expected at least one PartStartEvent"
+    assert part_delta_indices, "Expected at least one PartDeltaEvent"
+
+    # 4. First PartStartEvent must precede first PartDeltaEvent.
+    assert part_start_indices[0] < part_delta_indices[0], (
+        "First PartStartEvent must come before first PartDeltaEvent"
+    )
+
+    # 5. First PartDeltaEvent must precede StreamCompleteEvent.
+    stream_complete_index = next(
+        i for i, e in enumerate(events) if isinstance(e, StreamCompleteEvent)
+    )
+    assert part_delta_indices[0] < stream_complete_index, (
+        "First PartDeltaEvent must come before StreamCompleteEvent"
+    )
 
 
 @pytest.mark.skipif(
@@ -122,15 +133,13 @@ async def test_streaming_delta_aggregation(vcr_pool: AgentPool) -> None:
     not cassette_exists(_MODULE_STEM, "test_streaming_part_start_structure"),
     reason="Cassette not recorded yet — run with --record-mode=once",
 )
-@pytest.mark.xfail(
-    reason="PartStartEvent structure assertion doesn't match actual event fields "
-    "(part_type attribute may not exist on current PartStartEvent)",
-    strict=False,
-    raises=(AssertionError, AttributeError),
-)
-@pytest.mark.known_bug
 async def test_streaming_part_start_structure(vcr_pool: AgentPool) -> None:
-    """``PartStartEvent`` and ``StreamCompleteEvent`` carry the expected fields."""
+    """``PartStartEvent`` and ``StreamCompleteEvent`` carry the expected fields.
+
+    ``PartStartEvent`` inherits from pydantic-ai's ``PyAIPartStartEvent`` and
+    exposes a ``part`` field containing the content part (``TextPart``,
+    ``ThinkingPart``, etc.) — not a ``part_type`` field.
+    """
     agent = vcr_pool.get_agent("test_agent")
     events: list[object] = [event async for event in agent.run_stream("Say hello.")]
 
@@ -139,11 +148,11 @@ async def test_streaming_part_start_structure(vcr_pool: AgentPool) -> None:
     assert starts, "Expected at least one PartStartEvent"
     assert completes, "Expected at least one StreamCompleteEvent"
 
-    # Structural assertions using dirty_equals for fuzzy matching.
+    # PartStartEvent.part contains the content part (TextPart, ThinkingPart, etc.).
     first_start = starts[0]
-    assert first_start is not None
-    # PartStartEvent inherits from pydantic-ai's PyAIPartStartEvent.
-    assert first_start.part_type is not None or first_start is not None
+    assert isinstance(first_start.part, TextPart | ThinkingPart), (
+        f"Expected TextPart or ThinkingPart, got {type(first_start.part).__name__}"
+    )
 
     first_complete = completes[0]
-    assert first_complete is not None
+    assert first_complete.message.content is not None

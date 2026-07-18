@@ -8,7 +8,7 @@ interactions:
       connection:
       - keep-alive
       content-length:
-      - '4751'
+      - '5491'
       content-type:
       - application/json
       host:
@@ -16,67 +16,23 @@ interactions:
     method: POST
     parsed_body:
       messages:
-      - content: 'You are test_agent.
-
+      - content: |-
+          You are test_agent.
 
           You are a helpful test assistant for VCR cassette replay.
-
           <available-skills>
-
-          <skill name="example-skill" description="A simple example skill that demonstrates
-          the basic structure and functionality. Use when you need to show how skills
-          work or test skill loading." />
-
-          <skill name="openspec-apply-change" description="Implement tasks from an
-          OpenSpec change. Use when the user wants to start implementing, continue
-          implementation, or work through tasks." />
-
-          <skill name="openspec-explore" description="Enter explore mode - a thinking
-          partner for exploring ideas, investigating problems, and clarifying requirements.
-          Use when the user wants to think through something before or during a change."
-          />
-
-          <skill name="openspec-archive-change" description="Archive a completed change
-          in the experimental workflow. Use when the user wants to finalize and archive
-          a change after implementation is complete." />
-
-          <skill name="openspec-propose" description="Propose a new change with all
-          artifacts generated in one step. Use when the user wants to quickly describe
-          what they want to build and get a complete proposal with design, specs,
-          and tasks ready for implementation." />
-
-          <skill name="systematic-debugging" description="Use when encountering any
-          bug, test failure, or unexpected behavior, before proposing fixes" />
-
-          <skill name="metaskill" description="The meta-skill: create AI agent teams,
-          individual agents, or custom skills for any project. Use when the user wants
-          to generate a complete .claude/ agent team, create a single agent, or create
-          a single skill." />
-
-          <skill name="uv-package-manager" description="Master the uv package manager
-          for fast Python dependency management, virtual environments, and modern
-          Python project workflows. Use when setting up Python projects, managing
-          dependencies, or optimizing Python development workflows with uv." />
-
-          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous
-          skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md
-          files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing
-          with git version control, validates improvements through test prompts, and
-          generates visual result cards. Use when user mentions &quot;优化skill&quot;,
-          &quot;skill评分&quot;, &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;,
-          &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;,
-          &quot;提升skill质量&quot;, &quot;skill review&quot;, &quot;skill打分&quot;." />
-
-          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned
-          with company objectives -- qualitative objectives with measurable key results.
-          Use when setting quarterly OKRs, aligning team goals with company strategy,
-          drafting objectives, or learning how to write effective OKRs." />
-
-          <skill name="code-review-expert" description="Expert code review of current
-          git changes with a senior engineer lens. Detects SOLID violations, security
-          risks, and proposes actionable improvements." />
-
-          </available-skills>'
+          <skill name="example-skill" description="A simple example skill that demonstrates the basic structure and functionality. Use when you need to show how skills work or test skill loading." />
+          <skill name="openspec-apply-change" description="Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks." />
+          <skill name="openspec-explore" description="Enter explore mode - a thinking partner for exploring ideas, investigating problems, and clarifying requirements. Use when the user wants to think through something before or during a change." />
+          <skill name="openspec-archive-change" description="Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete." />
+          <skill name="openspec-propose" description="Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and tasks ready for implementation." />
+          <skill name="systematic-debugging" description="Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes" />
+          <skill name="metaskill" description="The meta-skill: create AI agent teams, individual agents, or custom skills for any project. Use when the user wants to generate a complete .claude/ agent team, create a single agent, or create a single skill." />
+          <skill name="uv-package-manager" description="Master the uv package manager for fast Python dependency management, virtual environments, and modern Python project workflows. Use when setting up Python projects, managing dependencies, or optimizing Python development workflows with uv." />
+          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing with git version control, validates improvements through test prompts, and generates visual result cards. Use when user mentions &quot;优化skill&quot;, &quot;skill评分&quot;, &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;, &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;, &quot;提升skill质量&quot;, &quot;skill review&quot;, &quot;skill打分&quot;." />
+          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned with company objectives -- qualitative objectives with measurable key results. Use when setting quarterly OKRs, aligning team goals with company strategy, drafting objectives, or learning how to write effective OKRs." />
+          <skill name="code-review-expert" description="Expert code review of current git changes with a senior engineer lens. Detects SOLID violations, security risks, and proposes actionable improvements." />
+          </available-skills>
         role: system
       - content:
         - text: First use echo with 'hello', then use reverse with 'world'.
@@ -89,12 +45,18 @@ interactions:
       tool_choice: auto
       tools:
       - function:
-          description: "Load a Claude Code Skill and return its instructions.\n\n\
-            Args:\n    ctx: Agent context providing access to pool and skills\n  \
-            \  skill_name: Name of the skill to load, or a skill:// URI.\n       \
-            \ Use skill:// URI to load a specific reference file:\n        skill://skill-name/references/file.md\n\
-            \    arguments: Optional space-separated arguments for substitution\n\n\
-            Returns:\n    The full skill instructions for execution"
+          description: |-
+            Load a Claude Code Skill and return its instructions.
+
+            Args:
+                ctx: Agent context providing access to pool and skills
+                skill_name: Name of the skill to load, or a skill:// URI.
+                    Use skill:// URI to load a specific reference file:
+                    skill://skill-name/references/file.md
+                arguments: Optional space-separated arguments for substitution
+
+            Returns:
+                The full skill instructions for execution
           name: load_skill
           parameters:
             additionalProperties: false
@@ -106,498 +68,99 @@ interactions:
                 default: null
                 description: Optional space-separated arguments for substitution
               skill_name:
-                description: 'Name of the skill to load, or a skill:// URI.
-
+                description: |-
+                  Name of the skill to load, or a skill:// URI.
                   Use skill:// URI to load a specific reference file:
-
-                  skill://skill-name/references/file.md'
+                  skill://skill-name/references/file.md
                 type: string
             required:
             - skill_name
             type: object
         type: function
       - function:
-          description: "List all available skills.\n\nReturns:\n    Formatted list\
-            \ of available skills with descriptions and URI information"
+          description: |-
+            List all available skills.
+
+            Returns:
+                Formatted list of available skills with descriptions and URI information
           name: list_skills
           parameters:
             additionalProperties: false
             properties: {}
             type: object
         type: function
+      - function:
+          description: |-
+            Echo the provided text back to the caller.
+
+            Args:
+                text: The text to echo.
+
+            Returns:
+                The same text, unchanged.
+          name: echo
+          parameters:
+            additionalProperties: false
+            properties:
+              text:
+                description: The text to echo.
+                type: string
+            required:
+            - text
+            type: object
+          strict: true
+        type: function
+      - function:
+          description: |-
+            Reverse the provided text.
+
+            Args:
+                text: The text to reverse.
+
+            Returns:
+                The reversed text.
+          name: reverse
+          parameters:
+            additionalProperties: false
+            properties:
+              text:
+                description: The text to reverse.
+                type: string
+            required:
+            - text
+            type: object
+          strict: true
+        type: function
     uri: http://api.ai.rootcloud.info/v1/chat/completions
   response:
     body:
-      string: 'data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+      string: |+
+        data: {"id":"chatcmpl-a4c9b6c15d138342","object":"chat.completion.chunk","created":1784396470,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
 
+        data: {"id":"chatcmpl-a4c9b6c15d138342","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"I"}}]}
 
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"The"}}]}
+        data: {"id":"chatcmpl-a4c9b6c15d138342","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"'ll"}}]}
 
+        data: {"id":"chatcmpl-a4c9b6c15d138342","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" first"}}]}
 
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        user wants me to first"}}]}
+        data: {"id":"chatcmpl-a4c9b6c15d138342","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" echo '"}}]}
 
+        data: {"id":"chatcmpl-a4c9b6c15d138342","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"hello', then reverse '"}}]}
 
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        use an"}}]}
+        data: {"id":"chatcmpl-a4c9b6c15d138342","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"world'."}}]}
 
+        data: {"id":"chatcmpl-a4c9b6c15d138342","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-b78b0dc6a68e0f18","function":{"arguments":"","name":"echo"},"type":"function","index":0}]}}]}
 
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        echo command with ''hello'',"}}]}
+        data: {"id":"chatcmpl-a4c9b6c15d138342","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"{\"text\": \""},"type":"function","index":0}]}}]}
 
+        data: {"id":"chatcmpl-a4c9b6c15d138342","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"hello\"}"},"type":"function","index":0}]}}]}
 
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        then use a reverse command with ''world"}}]}
+        data: {"id":"chatcmpl-a4c9b6c15d138342","object":"chat.completion.chunk","created":1784396470,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
 
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"''.
-        However"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":",
-        I don''t have an"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        \"echo\" or \"reverse\" tool available"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        in my toolset. Let me look"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        at my"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        available tools again.\n\nI have:\n1"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".
-        load_skill -"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        Load a Claude"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        Code Skill\n2. list_"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"skills
-        - List all available skills\n\nNeither"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        of these can"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        do echo or reverse operations"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"."}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"\n\nLet"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        me check"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        if there are"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        any skills that might provide"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        such"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        functionality."}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        Let"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        me list"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        skills"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        first to"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        see what''s available,"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        but based"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        on the skill"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        names, none"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        seem"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        related"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        to echo or reverse.\n\nWait"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":",
-        this"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        seems"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        like a test scenario"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        where"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        I don"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"''t
-        actually"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        have those"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        tools. Let me just explain"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        that I don"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"''t
-        have echo"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        or reverse tools available, and"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        offer"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        alternatives"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".\n\nActually,
-        let me re-read"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        the instructions. It"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        says I"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"''m
-        a"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        \"help"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"ful
-        test assistant for VCR cassette replay"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".\"
-        This seems"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        like a testing"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        scenario where"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        certain"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        commands/t"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"ools
-        might be expected. But"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        I genuinely"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        don''t have echo or"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        reverse tools.\n\nLet me proceed"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        and"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        inform"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        the user that I cannot"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        perform"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
-        these operations with my available tools."}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"I''d"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        love"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        to help with that"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":",
-        but unfortunately"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        I don''t have `"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"echo`
-        or `reverse` tools available"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        in my current toolset.\n\n"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"Here
-        are"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        the tools I *"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"do*
-        have access to"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":":\n\n1"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":".
-        **`list"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"_skills`**
-        –"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        Lists"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        all available skills\n2. **`"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"load_skill`**
-        – Loads"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        a Claude"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        Code Skill by name\n\nNone"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        of these support"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        the"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        echo"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        or reverse operations you''re asking"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        about"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":".\n\nCould"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        you clarify what you''re"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        trying to accomplish"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"?
-        For example:\n- Are"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        you looking to"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        run shell"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        commands (like"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        `echo hello"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"`)"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        in a terminal?"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        If"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        so, I may"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        need different"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        permissions"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        or"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        tools"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":".\n-
-        Is"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        this"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        part of testing"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        a specific skill or system"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"?
-        Maybe"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        I"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        can help via"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        a different"}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
-        approach."}}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","object":"chat.completion.chunk","created":1784381126,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
-
-
-        data: {"id":"chatcmpl-bddfb22fb3ea358c","created":1784381126,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":388,"prompt_tokens":1146,"total_tokens":1534,"completion_tokens_details":{"reasoning_tokens":231}}}
-
+        data: {"id":"chatcmpl-a4c9b6c15d138342","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":56,"prompt_tokens":1305,"total_tokens":1361,"completion_tokens_details":{"reasoning_tokens":12}}}
 
         data: [DONE]
 
-
-        '
     headers:
       cache-control:
       - no-cache
@@ -608,14 +171,419 @@ interactions:
       content-type:
       - text/event-stream; charset=utf-8
       req-arrive-time:
-      - '1784381125884'
+      - '1784396470358'
       req-cost-time:
-      - '133'
+      - '165'
       resp-start-time:
-      - '1784381126017'
+      - '1784396470524'
+      transfer-encoding:
+      - chunked
+    status:
+      code: 200
+      message: OK
+- request:
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, br
+      connection:
+      - keep-alive
+      content-length:
+      - '5836'
+      content-type:
+      - application/json
+      host:
+      - api.ai.rootcloud.info
+    method: POST
+    parsed_body:
+      messages:
+      - content: |-
+          You are test_agent.
+
+          You are a helpful test assistant for VCR cassette replay.
+          <available-skills>
+          <skill name="example-skill" description="A simple example skill that demonstrates the basic structure and functionality. Use when you need to show how skills work or test skill loading." />
+          <skill name="openspec-apply-change" description="Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks." />
+          <skill name="openspec-explore" description="Enter explore mode - a thinking partner for exploring ideas, investigating problems, and clarifying requirements. Use when the user wants to think through something before or during a change." />
+          <skill name="openspec-archive-change" description="Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete." />
+          <skill name="openspec-propose" description="Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and tasks ready for implementation." />
+          <skill name="systematic-debugging" description="Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes" />
+          <skill name="metaskill" description="The meta-skill: create AI agent teams, individual agents, or custom skills for any project. Use when the user wants to generate a complete .claude/ agent team, create a single agent, or create a single skill." />
+          <skill name="uv-package-manager" description="Master the uv package manager for fast Python dependency management, virtual environments, and modern Python project workflows. Use when setting up Python projects, managing dependencies, or optimizing Python development workflows with uv." />
+          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing with git version control, validates improvements through test prompts, and generates visual result cards. Use when user mentions &quot;优化skill&quot;, &quot;skill评分&quot;, &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;, &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;, &quot;提升skill质量&quot;, &quot;skill review&quot;, &quot;skill打分&quot;." />
+          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned with company objectives -- qualitative objectives with measurable key results. Use when setting quarterly OKRs, aligning team goals with company strategy, drafting objectives, or learning how to write effective OKRs." />
+          <skill name="code-review-expert" description="Expert code review of current git changes with a senior engineer lens. Detects SOLID violations, security risks, and proposes actionable improvements." />
+          </available-skills>
+        role: system
+      - content:
+        - text: First use echo with 'hello', then use reverse with 'world'.
+          type: text
+        role: user
+      - content: null
+        reasoning_content: I'll first echo 'hello', then reverse 'world'.
+        role: assistant
+        tool_calls:
+        - function:
+            arguments: '{"text": "hello"}'
+            name: echo
+          id: chatcmpl-tool-b78b0dc6a68e0f18
+          type: function
+      - content: hello
+        role: tool
+        tool_call_id: chatcmpl-tool-b78b0dc6a68e0f18
+      model: svc/deepseek-v4-flash
+      stream: true
+      stream_options:
+        include_usage: true
+      tool_choice: auto
+      tools:
+      - function:
+          description: |-
+            Load a Claude Code Skill and return its instructions.
+
+            Args:
+                ctx: Agent context providing access to pool and skills
+                skill_name: Name of the skill to load, or a skill:// URI.
+                    Use skill:// URI to load a specific reference file:
+                    skill://skill-name/references/file.md
+                arguments: Optional space-separated arguments for substitution
+
+            Returns:
+                The full skill instructions for execution
+          name: load_skill
+          parameters:
+            additionalProperties: false
+            properties:
+              arguments:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+                description: Optional space-separated arguments for substitution
+              skill_name:
+                description: |-
+                  Name of the skill to load, or a skill:// URI.
+                  Use skill:// URI to load a specific reference file:
+                  skill://skill-name/references/file.md
+                type: string
+            required:
+            - skill_name
+            type: object
+        type: function
+      - function:
+          description: |-
+            List all available skills.
+
+            Returns:
+                Formatted list of available skills with descriptions and URI information
+          name: list_skills
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+      - function:
+          description: |-
+            Echo the provided text back to the caller.
+
+            Args:
+                text: The text to echo.
+
+            Returns:
+                The same text, unchanged.
+          name: echo
+          parameters:
+            additionalProperties: false
+            properties:
+              text:
+                description: The text to echo.
+                type: string
+            required:
+            - text
+            type: object
+          strict: true
+        type: function
+      - function:
+          description: |-
+            Reverse the provided text.
+
+            Args:
+                text: The text to reverse.
+
+            Returns:
+                The reversed text.
+          name: reverse
+          parameters:
+            additionalProperties: false
+            properties:
+              text:
+                description: The text to reverse.
+                type: string
+            required:
+            - text
+            type: object
+          strict: true
+        type: function
+    uri: http://api.ai.rootcloud.info/v1/chat/completions
+  response:
+    body:
+      string: |+
+        data: {"id":"chatcmpl-b547cdd2f1d10631","object":"chat.completion.chunk","created":1784396470,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+
+        data: {"id":"chatcmpl-b547cdd2f1d10631","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"The"}}]}
+
+        data: {"id":"chatcmpl-b547cdd2f1d10631","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" echo returned"}}]}
+
+        data: {"id":"chatcmpl-b547cdd2f1d10631","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" \"hello\". Now I'll"}}]}
+
+        data: {"id":"chatcmpl-b547cdd2f1d10631","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" reverse \"world\"."}}]}
+
+        data: {"id":"chatcmpl-b547cdd2f1d10631","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-bc3b1d5f00edce24","function":{"arguments":"","name":"reverse"},"type":"function","index":0}]}}]}
+
+        data: {"id":"chatcmpl-b547cdd2f1d10631","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"{\"text\": \""},"type":"function","index":0}]}}]}
+
+        data: {"id":"chatcmpl-b547cdd2f1d10631","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"world"},"type":"function","index":0}]}}]}
+
+        data: {"id":"chatcmpl-b547cdd2f1d10631","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"\"}"},"type":"function","index":0}]}}]}
+
+        data: {"id":"chatcmpl-b547cdd2f1d10631","object":"chat.completion.chunk","created":1784396470,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+        data: {"id":"chatcmpl-b547cdd2f1d10631","created":1784396470,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":57,"prompt_tokens":1373,"total_tokens":1430,"completion_tokens_details":{"reasoning_tokens":13}}}
+
+        data: [DONE]
+
+    headers:
+      cache-control:
+      - no-cache
+      connection:
+      - close
+      content-security-policy:
+      - frame-ancestors 'none'
+      content-type:
+      - text/event-stream; charset=utf-8
+      req-arrive-time:
+      - '1784396470866'
+      req-cost-time:
+      - '81'
+      resp-start-time:
+      - '1784396470948'
+      transfer-encoding:
+      - chunked
+    status:
+      code: 200
+      message: OK
+- request:
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, br
+      connection:
+      - keep-alive
+      content-length:
+      - '6194'
+      content-type:
+      - application/json
+      host:
+      - api.ai.rootcloud.info
+    method: POST
+    parsed_body:
+      messages:
+      - content: |-
+          You are test_agent.
+
+          You are a helpful test assistant for VCR cassette replay.
+          <available-skills>
+          <skill name="example-skill" description="A simple example skill that demonstrates the basic structure and functionality. Use when you need to show how skills work or test skill loading." />
+          <skill name="openspec-apply-change" description="Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks." />
+          <skill name="openspec-explore" description="Enter explore mode - a thinking partner for exploring ideas, investigating problems, and clarifying requirements. Use when the user wants to think through something before or during a change." />
+          <skill name="openspec-archive-change" description="Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete." />
+          <skill name="openspec-propose" description="Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and tasks ready for implementation." />
+          <skill name="systematic-debugging" description="Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes" />
+          <skill name="metaskill" description="The meta-skill: create AI agent teams, individual agents, or custom skills for any project. Use when the user wants to generate a complete .claude/ agent team, create a single agent, or create a single skill." />
+          <skill name="uv-package-manager" description="Master the uv package manager for fast Python dependency management, virtual environments, and modern Python project workflows. Use when setting up Python projects, managing dependencies, or optimizing Python development workflows with uv." />
+          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing with git version control, validates improvements through test prompts, and generates visual result cards. Use when user mentions &quot;优化skill&quot;, &quot;skill评分&quot;, &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;, &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;, &quot;提升skill质量&quot;, &quot;skill review&quot;, &quot;skill打分&quot;." />
+          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned with company objectives -- qualitative objectives with measurable key results. Use when setting quarterly OKRs, aligning team goals with company strategy, drafting objectives, or learning how to write effective OKRs." />
+          <skill name="code-review-expert" description="Expert code review of current git changes with a senior engineer lens. Detects SOLID violations, security risks, and proposes actionable improvements." />
+          </available-skills>
+        role: system
+      - content:
+        - text: First use echo with 'hello', then use reverse with 'world'.
+          type: text
+        role: user
+      - content: null
+        reasoning_content: I'll first echo 'hello', then reverse 'world'.
+        role: assistant
+        tool_calls:
+        - function:
+            arguments: '{"text": "hello"}'
+            name: echo
+          id: chatcmpl-tool-b78b0dc6a68e0f18
+          type: function
+      - content: hello
+        role: tool
+        tool_call_id: chatcmpl-tool-b78b0dc6a68e0f18
+      - content: null
+        reasoning_content: The echo returned "hello". Now I'll reverse "world".
+        role: assistant
+        tool_calls:
+        - function:
+            arguments: '{"text": "world"}'
+            name: reverse
+          id: chatcmpl-tool-bc3b1d5f00edce24
+          type: function
+      - content: dlrow
+        role: tool
+        tool_call_id: chatcmpl-tool-bc3b1d5f00edce24
+      model: svc/deepseek-v4-flash
+      stream: true
+      stream_options:
+        include_usage: true
+      tool_choice: auto
+      tools:
+      - function:
+          description: |-
+            Load a Claude Code Skill and return its instructions.
+
+            Args:
+                ctx: Agent context providing access to pool and skills
+                skill_name: Name of the skill to load, or a skill:// URI.
+                    Use skill:// URI to load a specific reference file:
+                    skill://skill-name/references/file.md
+                arguments: Optional space-separated arguments for substitution
+
+            Returns:
+                The full skill instructions for execution
+          name: load_skill
+          parameters:
+            additionalProperties: false
+            properties:
+              arguments:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+                description: Optional space-separated arguments for substitution
+              skill_name:
+                description: |-
+                  Name of the skill to load, or a skill:// URI.
+                  Use skill:// URI to load a specific reference file:
+                  skill://skill-name/references/file.md
+                type: string
+            required:
+            - skill_name
+            type: object
+        type: function
+      - function:
+          description: |-
+            List all available skills.
+
+            Returns:
+                Formatted list of available skills with descriptions and URI information
+          name: list_skills
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+      - function:
+          description: |-
+            Echo the provided text back to the caller.
+
+            Args:
+                text: The text to echo.
+
+            Returns:
+                The same text, unchanged.
+          name: echo
+          parameters:
+            additionalProperties: false
+            properties:
+              text:
+                description: The text to echo.
+                type: string
+            required:
+            - text
+            type: object
+          strict: true
+        type: function
+      - function:
+          description: |-
+            Reverse the provided text.
+
+            Args:
+                text: The text to reverse.
+
+            Returns:
+                The reversed text.
+          name: reverse
+          parameters:
+            additionalProperties: false
+            properties:
+              text:
+                description: The text to reverse.
+                type: string
+            required:
+            - text
+            type: object
+          strict: true
+        type: function
+    uri: http://api.ai.rootcloud.info/v1/chat/completions
+  response:
+    body:
+      string: |+
+        data: {"id":"chatcmpl-b47156d8b2c43bf5","object":"chat.completion.chunk","created":1784396471,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+
+        data: {"id":"chatcmpl-b47156d8b2c43bf5","created":1784396471,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"Both"}}]}
+
+        data: {"id":"chatcmpl-b47156d8b2c43bf5","created":1784396471,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" tools"}}]}
+
+        data: {"id":"chatcmpl-b47156d8b2c43bf5","created":1784396471,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" executed"}}]}
+
+        data: {"id":"chatcmpl-b47156d8b2c43bf5","created":1784396471,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" successfully. Let me summarize the"}}]}
+
+        data: {"id":"chatcmpl-b47156d8b2c43bf5","created":1784396471,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" results.","content":"Done"}}]}
+
+        data: {"id":"chatcmpl-b47156d8b2c43bf5","object":"chat.completion.chunk","created":1784396471,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"! Here are"}}]}
+
+        data: {"id":"chatcmpl-b47156d8b2c43bf5","object":"chat.completion.chunk","created":1784396471,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" the results:\n\n1. **`echo"}}]}
+
+        data: {"id":"chatcmpl-b47156d8b2c43bf5","object":"chat.completion.chunk","created":1784396471,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"("}}]}
+
+        data: {"id":"chatcmpl-b47156d8b2c43bf5","object":"chat.completion.chunk","created":1784396471,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"\"hello\")`** → `"}}]}
+
+        data: {"id":"chatcmpl-b47156d8b2c43bf5","object":"chat.completion.chunk","created":1784396471,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"\"hello\"`\n2. **`reverse"}}]}
+
+        data: {"id":"chatcmpl-b47156d8b2c43bf5","object":"chat.completion.chunk","created":1784396471,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"(\"world\")`** → `"}}]}
+
+        data: {"id":"chatcmpl-b47156d8b2c43bf5","object":"chat.completion.chunk","created":1784396471,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"\"dlrow\"`"}}]}
+
+        data: {"id":"chatcmpl-b47156d8b2c43bf5","object":"chat.completion.chunk","created":1784396471,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+        data: {"id":"chatcmpl-b47156d8b2c43bf5","created":1784396471,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":52,"prompt_tokens":1443,"total_tokens":1495,"completion_tokens_details":{"reasoning_tokens":11}}}
+
+        data: [DONE]
+
+    headers:
+      cache-control:
+      - no-cache
+      connection:
+      - close
+      content-security-policy:
+      - frame-ancestors 'none'
+      content-type:
+      - text/event-stream; charset=utf-8
+      req-arrive-time:
+      - '1784396471271'
+      req-cost-time:
+      - '81'
+      resp-start-time:
+      - '1784396471352'
       transfer-encoding:
       - chunked
     status:
       code: 200
       message: OK
 version: 1
+...

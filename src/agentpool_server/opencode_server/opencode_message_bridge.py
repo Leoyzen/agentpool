@@ -219,11 +219,26 @@ def _reconstruct_tool_parts_from_checkpoint(
 
     # Create an assistant message to hold the ToolParts
     assistant_msg_id = identifier.ascending("message")
+
+    # Agent/model propagation: look up the real agent_name from the
+    # session state instead of hardcoding "agentpool". Falls back to
+    # "agentpool" when the session state is unavailable.
+    agent_name = "agentpool"
+    try:
+        pool = state.pool
+        session_pool = pool.session_pool
+    except RuntimeError:
+        session_pool = None
+    if session_pool is not None:
+        session_state = session_pool.sessions.get_session(session_id)
+        if session_state is not None:
+            agent_name = session_state.agent_name
+
     assistant_msg = MessageWithParts.assistant(
         message_id=assistant_msg_id,
         session_id=session_id,
         time=MessageTime(created=now_ms()),
-        agent_name="agentpool",
+        agent_name=agent_name,
         model_id="default",
         parent_id=session_id,
         provider_id="agentpool",

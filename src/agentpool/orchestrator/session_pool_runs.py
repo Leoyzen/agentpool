@@ -132,6 +132,7 @@ class SessionPoolRunsMixin:
 
         trigger = ProtocolTrigger()
         comm_channel: ProtocolChannel | None = None
+        journal: MemoryJournal | None = None
         if event_bus is not None:
             journal = MemoryJournal()
             comm_channel = ProtocolChannel(
@@ -159,6 +160,7 @@ class SessionPoolRunsMixin:
             run_ctx=run_ctx,
             _trigger_source=trigger,
             _comm_channel=comm_channel,
+            _journal=journal,
             _host_context=host_ctx,
             _agent_registry=agent_registry,
         )

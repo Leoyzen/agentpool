@@ -254,7 +254,20 @@ class RunHandle:
         in-process implementation. Both ``DirectChannel`` and
         ``ProtocolChannel`` receive the journal via their constructor,
         so no post-hoc journal injection is needed.
+
+        If ``_comm_channel`` is provided but ``_journal`` is ``None``,
+        the CommChannel's journal is reused. This ensures
+        ``journal.resume()`` reads the same events that ``publish()``
+        writes — without it, crash recovery silently fails because
+        ``resume()`` reads from a fresh empty journal while events
+        are written to the CommChannel's journal instance.
         """
+        # If CommChannel is provided but _journal is not, reuse the
+        # CommChannel's journal to ensure resume() reads the same events
+        # that publish() writes. Without this, crash recovery silently
+        # fails because resume() reads an empty journal.
+        if self._journal is None and self._comm_channel is not None:
+            self._journal = self._comm_channel.journal
         if self._journal is None:
             self._journal = MemoryJournal()
         if self._snapshot_store is None:
@@ -449,45 +462,58 @@ class RunHandle:
                         # and executes a spurious empty-prompt turn.
                         current_prompts = [initial_prompt] if initial_prompt else []
                     while not self._closing:
-                        if not current_prompts:
-                            current_prompts = await self._idle_loop()
+                        try:
                             if not current_prompts:
+                                current_prompts = await self._idle_loop()
+                                if not current_prompts:
+                                    continue
+
+                            try:
+                                async with contextlib.aclosing(
+                                    self._execute_turn(
+                                        agent,
+                                        event_bus,
+                                        session,
+                                        current_prompts,
+                                    ),
+                                ) as turn_gen:
+                                    async for event in turn_gen:
+                                        yield event
+
+                                action = await self._handle_turn_result(event_bus)
+                            except asyncio.CancelledError:
+                                # Force-cancel was triggered by cancel() to
+                                # break through __aexit__ hangs. Only catch
+                                # if _force_cancelling is set; external
+                                # task.cancel() (e.g. test cleanup) must
+                                # propagate so start() exits.
+                                if not self._force_cancelling:
+                                    raise
+                                self._force_cancelling = False
+                                with contextlib.suppress(Exception):
+                                    await self._handle_turn_result(event_bus)
+                                current_prompts = []
                                 continue
 
-                        try:
-                            async with contextlib.aclosing(
-                                self._execute_turn(
-                                    agent,
-                                    event_bus,
-                                    session,
-                                    current_prompts,
-                                ),
-                            ) as turn_gen:
-                                async for event in turn_gen:
-                                    yield event
+                            if action == "continue":
+                                current_prompts = []  # Prevent re-execution of cancelled prompt
+                                continue
+                            if action == "break":
+                                break
 
-                            action = await self._handle_turn_result(event_bus)
+                            current_prompts = await self._drain_events()
                         except asyncio.CancelledError:
-                            # Force-cancel was triggered by cancel() to
-                            # break through __aexit__ hangs. Only catch
-                            # if _force_cancelling is set; external
-                            # task.cancel() (e.g. test cleanup) must
-                            # propagate so start() exits.
+                            # Catch CancelledError from _idle_loop() too
+                            # (e.g. double cancel() throws at
+                            # _idle_event.wait()). Without this, the
+                            # generator dies and all subsequent messages
+                            # get stuck. Re-check _force_cancelling: if
+                            # set, swallow and continue to idle.
                             if not self._force_cancelling:
                                 raise
                             self._force_cancelling = False
-                            with contextlib.suppress(Exception):
-                                await self._handle_turn_result(event_bus)
                             current_prompts = []
                             continue
-
-                        if action == "continue":
-                            current_prompts = []  # Prevent re-execution of cancelled prompt
-                            continue
-                        if action == "break":
-                            break
-
-                        current_prompts = await self._drain_events()
 
             finally:
                 self._closed = True
@@ -1127,9 +1153,9 @@ class RunHandle:
 
         Returns:
             The ``message_id`` string on success, ``None`` if the handle
-            is closing.
+            is closing or closed.
         """
-        if self._closing:
+        if self._closing or self._closed:
             return None
 
         # Construct Feedback BEFORE deliver_feedback to preserve
@@ -1343,6 +1369,16 @@ class RunHandle:
         # handler which checks run_ctx.cancelled and exits gracefully. The
         # start() finally block will still run, setting complete_event and
         # releasing turn_lock.
+        #
+        # Idempotency guard: if _force_cancelling is already True, a
+        # previous cancel() already called task.cancel(). Calling
+        # task.cancel() again would throw a second CancelledError at
+        # _idle_event.wait() in _idle_loop() — outside the inner except
+        # handler — killing the start() generator. Just set the idle
+        # event (done above) and return.
+        if self._force_cancelling:
+            return
+
         task = self.run_ctx.current_task
         if task is not None and not task.done():
             self._force_cancelling = True

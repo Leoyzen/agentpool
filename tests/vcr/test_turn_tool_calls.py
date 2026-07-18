@@ -62,13 +62,6 @@ def reverse(text: str) -> str:
     not cassette_exists(_MODULE_STEM, "test_real_tool_call_roundtrip"),
     reason="Cassette not recorded yet — run with --record-mode=once",
 )
-@pytest.mark.xfail(
-    reason="_temporary_tools registers tool on _builtin_provider but it is not "
-    "passed to the model API (bug in get_agentlet capability iteration)",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 async def test_real_tool_call_roundtrip(vcr_pool: AgentPool) -> None:
     """A real tool-call round trip through the Turn lifecycle.
 
@@ -98,21 +91,11 @@ async def test_real_tool_call_roundtrip(vcr_pool: AgentPool) -> None:
     not cassette_exists(_MODULE_STEM, "test_pre_post_hooks_fire"),
     reason="Cassette not recorded yet — run with --record-mode=once",
 )
-@pytest.mark.xfail(
-    reason="_temporary_tools registers tool on _builtin_provider but it is not "
-    "passed to the model API (bug in get_agentlet capability iteration); "
-    "also HookDecision import path is incorrect",
-    strict=False,
-    raises=(AssertionError, ImportError, AttributeError),
-)
-@pytest.mark.known_bug
 async def test_pre_post_hooks_fire(vcr_pool: AgentPool) -> None:
     """Tool-call stream completes when _temporary_tools is active.
 
-    NOTE: This test is xfail because _temporary_tools doesn't pass tools
-    to the model API (bug #204). The test only asserts the event stream
-    completes, not that hooks fire — hook registration requires the
-    agent's hooks config API which is separate from _temporary_tools.
+    Asserts the event stream completes with a StreamCompleteEvent when
+    the echo tool is registered via _temporary_tools.
     """
     agent = vcr_pool.get_agent("test_agent")
     async with agent._temporary_tools(echo):
@@ -128,13 +111,6 @@ async def test_pre_post_hooks_fire(vcr_pool: AgentPool) -> None:
     not cassette_exists(_MODULE_STEM, "test_tool_result_injection"),
     reason="Cassette not recorded yet — run with --record-mode=once",
 )
-@pytest.mark.xfail(
-    reason="_temporary_tools registers tool on _builtin_provider but it is not "
-    "passed to the model API (bug in get_agentlet capability iteration)",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 async def test_tool_result_injection(vcr_pool: AgentPool) -> None:
     """Tool results are injected into the conversation for the next model call.
 
@@ -155,13 +131,6 @@ async def test_tool_result_injection(vcr_pool: AgentPool) -> None:
     not cassette_exists(_MODULE_STEM, "test_multiple_tools_sequential"),
     reason="Cassette not recorded yet — run with --record-mode=once",
 )
-@pytest.mark.xfail(
-    reason="_temporary_tools registers tool on _builtin_provider but it is not "
-    "passed to the model API (bug in get_agentlet capability iteration)",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 async def test_multiple_tools_sequential(vcr_pool: AgentPool) -> None:
     """The model calls multiple tools in sequence within one turn.
 

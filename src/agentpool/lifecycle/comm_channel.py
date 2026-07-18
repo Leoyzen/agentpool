@@ -97,6 +97,18 @@ class DirectChannel:
         return self._queue
 
     @property
+    def journal(self) -> Journal:
+        """The Journal instance owned by this channel.
+
+        Exposed so callers (notably ``RunHandle.__post_init__``) can
+        reuse the same Journal instance instead of constructing a new
+        one, which would break crash recovery (``journal.resume()``
+        reads from an empty journal while events are written to a
+        different instance).
+        """
+        return self._journal
+
+    @property
     def publishes_to_event_bus(self) -> bool:
         """DirectChannel does not publish to the EventBus.
 
@@ -293,6 +305,18 @@ class ProtocolChannel:
             Always ``True``.
         """
         return True
+
+    @property
+    def journal(self) -> Journal:
+        """The Journal instance owned by this channel.
+
+        Exposed so callers (notably ``RunHandle.__post_init__``) can
+        reuse the same Journal instance instead of constructing a new
+        one, which would break crash recovery (``journal.resume()``
+        reads from an empty journal while events are written to a
+        different instance).
+        """
+        return self._journal
 
     def attach(self, run_loop: Any) -> None:
         """Store a reference to the RunLoop for feedback routing.
