@@ -209,6 +209,15 @@ class SessionControllerRunsMixin:
         agent_registry = AgentRegistry(
             dict.fromkeys(self.pool.manifest.agents),  # type: ignore[arg-type]
         )
+
+        # Reset the agent's _cancelled flag from any prior run.
+        # BaseAgent.interrupt() sets _cancelled = True, but it's only
+        # reset in run_in_background() and _prepare_standalone_context().
+        # Without this, a stale _cancelled = True from a previous
+        # aborted run would persist and cause is_cancelled() to return
+        # True for ACP sessions.
+        agent._cancelled = False
+
         run_handle = RunHandle(
             run_id=uuid.uuid4().hex,
             session_id=session_id,

@@ -207,8 +207,11 @@ class NativeTurn(HookAwareTurn, Turn):
                 for p in self._prompts:
                     if isinstance(p, str):
                         flattened.append(p)
-                    else:
+                    elif isinstance(p, list):
                         flattened.extend(p)
+                    else:
+                        # Single content item (ImageUrl, TextContent, etc.)
+                        flattened.append(p)
                 if staged_text is not None:
                     if flattened and isinstance(flattened[0], str):
                         first = f"{staged_text}\n\n{flattened[0]}"

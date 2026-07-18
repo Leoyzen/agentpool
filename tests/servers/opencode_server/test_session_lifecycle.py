@@ -413,12 +413,17 @@ class TestSessionStatus:
         response = await async_client.post("/session/nonexistent-id/abort")
         assert response.status_code == 404
 
-    async def test_abort_native_agent_calls_interrupt_and_cancel_run(
+    async def test_abort_native_agent_calls_interrupt_not_cancel_run(
         self,
         async_client: AsyncClient,
         server_state: ServerState,
     ):
-        """Aborting a native (per-session) agent should call interrupt() and cancel_run()."""
+        """Aborting a native (per-session) agent should call interrupt() only.
+
+        interrupt() internally calls cancel_run_for_session(), so the
+        abort handler must NOT call session_pool.cancel_run() again.
+        A double cancel() kills the start() generator (issue #182).
+        """
         from agentpool.orchestrator.core import SessionState
 
         response = await async_client.post("/session", json={"title": "Native Agent Session"})
@@ -449,9 +454,11 @@ class TestSessionStatus:
         per_session_agent.interrupt.assert_awaited_once()
         # Shared agent should NOT be interrupted
         server_state.agent.interrupt.assert_not_awaited()
-        # cancel_run should be called with the run_id
+        # cancel_run should NOT be called separately — interrupt() handles
+        # it internally via cancel_run_for_session(). Calling cancel_run()
+        # again would double-cancel and kill the start() generator.
         session_pool = server_state.agent.host_context.session_pool
-        session_pool.cancel_run.assert_called_once_with("run-native-123")
+        session_pool.cancel_run.assert_not_called()
 
     async def test_abort_non_native_shared_agent_skips_interrupt(
         self,
