@@ -64,7 +64,7 @@ def reverse(text: str) -> str:
 )
 @pytest.mark.xfail(
     reason="_temporary_tools registers tool on _builtin_provider but it is not "
-           "passed to the model API (bug in get_agentlet capability iteration)",
+    "passed to the model API (bug in get_agentlet capability iteration)",
     strict=False,
     raises=AssertionError,
 )
@@ -100,8 +100,8 @@ async def test_real_tool_call_roundtrip(vcr_pool: AgentPool) -> None:
 )
 @pytest.mark.xfail(
     reason="_temporary_tools registers tool on _builtin_provider but it is not "
-           "passed to the model API (bug in get_agentlet capability iteration); "
-           "also HookDecision import path is incorrect",
+    "passed to the model API (bug in get_agentlet capability iteration); "
+    "also HookDecision import path is incorrect",
     strict=False,
     raises=(AssertionError, ImportError, AttributeError),
 )
@@ -147,7 +147,7 @@ async def test_pre_post_hooks_fire(vcr_pool: AgentPool) -> None:
 )
 @pytest.mark.xfail(
     reason="_temporary_tools registers tool on _builtin_provider but it is not "
-           "passed to the model API (bug in get_agentlet capability iteration)",
+    "passed to the model API (bug in get_agentlet capability iteration)",
     strict=False,
     raises=AssertionError,
 )
@@ -174,7 +174,7 @@ async def test_tool_result_injection(vcr_pool: AgentPool) -> None:
 )
 @pytest.mark.xfail(
     reason="_temporary_tools registers tool on _builtin_provider but it is not "
-           "passed to the model API (bug in get_agentlet capability iteration)",
+    "passed to the model API (bug in get_agentlet capability iteration)",
     strict=False,
     raises=AssertionError,
 )

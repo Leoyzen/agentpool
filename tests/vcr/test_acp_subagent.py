@@ -117,7 +117,7 @@ def _build_acp_agent(pool: AgentPool, agent_name: str = "coordinator") -> AgentP
 )
 @pytest.mark.xfail(
     reason="acp.Client is a Protocol and cannot be instantiated directly; "
-           "_build_acp_agent needs to use a concrete Client implementation",
+    "_build_acp_agent needs to use a concrete Client implementation",
     strict=False,
     raises=TypeError,
 )

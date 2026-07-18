@@ -50,7 +50,7 @@ def echo(text: str) -> str:
 )
 @pytest.mark.xfail(
     reason="_temporary_tools registers tool on _builtin_provider but it is not "
-           "passed to the model API (bug in get_agentlet capability iteration)",
+    "passed to the model API (bug in get_agentlet capability iteration)",
     strict=False,
     raises=AssertionError,
 )
@@ -93,7 +93,7 @@ async def test_tool_call_roundtrip(vcr_pool: AgentPool) -> None:
 )
 @pytest.mark.xfail(
     reason="_temporary_tools registers tool on _builtin_provider but it is not "
-           "passed to the model API (bug in get_agentlet capability iteration)",
+    "passed to the model API (bug in get_agentlet capability iteration)",
     strict=False,
     raises=AssertionError,
 )
@@ -124,7 +124,7 @@ async def test_tool_call_event_structure(vcr_pool: AgentPool) -> None:
 )
 @pytest.mark.xfail(
     reason="_temporary_tools registers tool on _builtin_provider but it is not "
-           "passed to the model API (bug in get_agentlet capability iteration)",
+    "passed to the model API (bug in get_agentlet capability iteration)",
     strict=False,
     raises=AssertionError,
 )

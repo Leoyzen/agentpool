@@ -39,7 +39,7 @@ _MODULE_STEM = "test_lifecycle_recovery"
 )
 @pytest.mark.xfail(
     reason="MemoryJournal.resume() returns None instead of ResumeResult; "
-           "journal is not wired to the agent's RunHandle in this fixture",
+    "journal is not wired to the agent's RunHandle in this fixture",
     strict=False,
     raises=(AssertionError, TypeError),
 )
@@ -74,7 +74,7 @@ async def test_crash_recovery_mark_interrupted(vcr_pool: AgentPool) -> None:
 )
 @pytest.mark.xfail(
     reason="MemoryJournal.resume() returns None instead of ResumeResult; "
-           "journal is not wired to the agent's RunHandle in this fixture",
+    "journal is not wired to the agent's RunHandle in this fixture",
     strict=False,
     raises=(AssertionError, TypeError),
 )
@@ -103,7 +103,7 @@ async def test_crash_recovery_retry(vcr_pool: AgentPool) -> None:
 )
 @pytest.mark.xfail(
     reason="_temporary_tools registers tool on _builtin_provider but it is not "
-           "passed to the model API (bug in get_agentlet capability iteration)",
+    "passed to the model API (bug in get_agentlet capability iteration)",
     strict=False,
     raises=(AssertionError, AttributeError),
 )
@@ -138,7 +138,7 @@ async def test_tool_execution_log_idempotency(vcr_pool: AgentPool) -> None:
 )
 @pytest.mark.xfail(
     reason="MemoryJournal.resume() returns None instead of ResumeResult; "
-           "journal is not wired to the agent's RunHandle in this fixture",
+    "journal is not wired to the agent's RunHandle in this fixture",
     strict=False,
     raises=(AssertionError, TypeError),
 )

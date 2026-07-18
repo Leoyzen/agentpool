@@ -150,7 +150,7 @@ def _build_acp_agent(pool: AgentPool) -> AgentPoolACPAgent:
 )
 @pytest.mark.xfail(
     reason="acp.Client is a Protocol and cannot be instantiated directly; "
-           "_build_acp_agent needs to use a concrete Client implementation",
+    "_build_acp_agent needs to use a concrete Client implementation",
     strict=False,
     raises=TypeError,
 )
@@ -196,7 +196,7 @@ async def test_session_init(vcr_pool: AgentPool) -> None:
 )
 @pytest.mark.xfail(
     reason="acp.Client is a Protocol and cannot be instantiated directly; "
-           "_build_acp_agent needs to use a concrete Client implementation",
+    "_build_acp_agent needs to use a concrete Client implementation",
     strict=False,
     raises=TypeError,
 )
@@ -267,7 +267,7 @@ async def test_basic_completion(vcr_pool: AgentPool) -> None:
 )
 @pytest.mark.xfail(
     reason="acp.Client is a Protocol and cannot be instantiated directly; "
-           "_build_acp_agent needs to use a concrete Client implementation",
+    "_build_acp_agent needs to use a concrete Client implementation",
     strict=False,
     raises=TypeError,
 )
@@ -341,7 +341,7 @@ async def test_streaming_events(vcr_pool: AgentPool) -> None:
 )
 @pytest.mark.xfail(
     reason="acp.Client is a Protocol and cannot be instantiated directly; "
-           "_build_acp_agent needs to use a concrete Client implementation",
+    "_build_acp_agent needs to use a concrete Client implementation",
     strict=False,
     raises=TypeError,
 )
@@ -409,7 +409,7 @@ async def test_model_api_rate_limit(acp_pipe: _PairedPipe) -> None:
 )
 @pytest.mark.xfail(
     reason="acp.Client is a Protocol and cannot be instantiated directly; "
-           "_build_acp_agent needs to use a concrete Client implementation",
+    "_build_acp_agent needs to use a concrete Client implementation",
     strict=False,
     raises=TypeError,
 )
@@ -463,7 +463,7 @@ async def test_model_api_server_error(acp_pipe: _PairedPipe) -> None:
 )
 @pytest.mark.xfail(
     reason="acp.Client is a Protocol and cannot be instantiated directly; "
-           "_build_acp_agent needs to use a concrete Client implementation",
+    "_build_acp_agent needs to use a concrete Client implementation",
     strict=False,
     raises=TypeError,
 )

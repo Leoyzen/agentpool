@@ -39,7 +39,7 @@ _MODULE_STEM = "test_native_streaming"
 )
 @pytest.mark.xfail(
     reason="Streaming event sequence assertion doesn't match actual model output "
-           "events (RunStartedEvent may not be emitted in all cases)",
+    "events (RunStartedEvent may not be emitted in all cases)",
     strict=False,
     raises=AssertionError,
 )
@@ -124,7 +124,7 @@ async def test_streaming_delta_aggregation(vcr_pool: AgentPool) -> None:
 )
 @pytest.mark.xfail(
     reason="PartStartEvent structure assertion doesn't match actual event fields "
-           "(part_type attribute may not exist on current PartStartEvent)",
+    "(part_type attribute may not exist on current PartStartEvent)",
     strict=False,
     raises=(AssertionError, AttributeError),
 )

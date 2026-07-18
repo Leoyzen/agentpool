@@ -77,7 +77,7 @@ async def test_session_init(agui_client: AsyncClient) -> None:
 )
 @pytest.mark.xfail(
     reason="AG-UI server endpoint path mismatch: GET /test_agent returns 405 "
-           "instead of 200 (server route structure differs from test expectations)",
+    "instead of 200 (server route structure differs from test expectations)",
     strict=False,
     raises=AssertionError,
 )

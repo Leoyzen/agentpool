@@ -133,7 +133,7 @@ def _build_acp_agent(pool: AgentPool) -> AgentPoolACPAgent:
 )
 @pytest.mark.xfail(
     reason="acp.Client is a Protocol and cannot be instantiated directly; "
-           "_build_acp_agent needs to use a concrete Client implementation",
+    "_build_acp_agent needs to use a concrete Client implementation",
     strict=False,
     raises=TypeError,
 )
@@ -148,53 +148,52 @@ async def test_tool_call_through_acp(vcr_pool: AgentPool) -> None:
     """
     acp_agent = _build_acp_agent(vcr_pool)
     # Attach the echo tool for the duration of the ACP session.
-    async with acp_agent.default_agent._temporary_tools(echo):
-        async with _PairedPipe() as pipe:
-            assert pipe.client_writer is not None
-            assert pipe.client_reader is not None
-            assert pipe.server_writer is not None
-            assert pipe.server_reader is not None
+    async with acp_agent.default_agent._temporary_tools(echo), _PairedPipe() as pipe:
+        assert pipe.client_writer is not None
+        assert pipe.client_reader is not None
+        assert pipe.server_writer is not None
+        assert pipe.server_reader is not None
 
-            client_conn = ClientSideConnection(
-                lambda _conn: acp_agent.client,
-                _AsyncioWriterAdapter(pipe.client_writer),
-                _AsyncioReaderAdapter(pipe.client_reader),
+        client_conn = ClientSideConnection(
+            lambda _conn: acp_agent.client,
+            _AsyncioWriterAdapter(pipe.client_writer),
+            _AsyncioReaderAdapter(pipe.client_reader),
+        )
+        _agent_conn = AgentSideConnection(
+            lambda _conn: acp_agent,
+            _AsyncioWriterAdapter(pipe.server_writer),
+            _AsyncioReaderAdapter(pipe.server_reader),
+        )
+
+        await client_conn.initialize(InitializeRequest(protocol_version=1))
+        new_sess = await client_conn.new_session(NewSessionRequest(mcp_servers=[], cwd="/test"))
+
+        notifications: list[SessionNotification] = []
+
+        async def _collect() -> None:
+            async for notification in acp_agent.client.notifications:
+                notifications.append(notification)
+                if len(notifications) >= 3:
+                    break
+
+        collector = asyncio.create_task(_collect())
+        await client_conn.session_update(
+            SessionNotification(
+                session_id=new_sess.session_id,
+                update=UserMessageChunk.text("Use the echo tool to say hi."),
             )
-            _agent_conn = AgentSideConnection(
-                lambda _conn: acp_agent,
-                _AsyncioWriterAdapter(pipe.server_writer),
-                _AsyncioReaderAdapter(pipe.server_reader),
-            )
+        )
+        try:
+            await asyncio.wait_for(collector, timeout=15.0)
+        except TimeoutError:
+            pass
+        finally:
+            collector.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await collector
 
-            await client_conn.initialize(InitializeRequest(protocol_version=1))
-            new_sess = await client_conn.new_session(NewSessionRequest(mcp_servers=[], cwd="/test"))
-
-            notifications: list[SessionNotification] = []
-
-            async def _collect() -> None:
-                async for notification in acp_agent.client.notifications:
-                    notifications.append(notification)
-                    if len(notifications) >= 3:
-                        break
-
-            collector = asyncio.create_task(_collect())
-            await client_conn.session_update(
-                SessionNotification(
-                    session_id=new_sess.session_id,
-                    update=UserMessageChunk.text("Use the echo tool to say hi."),
-                )
-            )
-            try:
-                await asyncio.wait_for(collector, timeout=15.0)
-            except TimeoutError:
-                pass
-            finally:
-                collector.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await collector
-
-            assert notifications, "Expected at least one session notification"
-            # All notifications should reference the same session.
-            session_ids = {n.session_id for n in notifications}
-            assert session_ids == {new_sess.session_id}
-            assert new_sess.session_id == IsStr(min_length=1)
+        assert notifications, "Expected at least one session notification"
+        # All notifications should reference the same session.
+        session_ids = {n.session_id for n in notifications}
+        assert session_ids == {new_sess.session_id}
+        assert new_sess.session_id == IsStr(min_length=1)

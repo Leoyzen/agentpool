@@ -106,12 +106,10 @@ def _attach_get_agent_compat(pool: AgentPool, agents_cache: dict[str, Any]) -> N
 
     def get_agent(name: str) -> Any:
         if name not in agents_cache:
-            raise KeyError(
-                f"Agent {name!r} not found. Available: {list(agents_cache.keys())}"
-            )
+            raise KeyError(f"Agent {name!r} not found. Available: {list(agents_cache.keys())}")
         return agents_cache[name]
 
-    setattr(pool, "get_agent", get_agent)
+    pool.get_agent = get_agent  # type: ignore[method-assignment]
 
 
 @pytest.fixture
@@ -198,7 +196,7 @@ def cassette_exists(test_module_stem: str, test_name: str) -> bool:
 @pytest.fixture(autouse=True)
 def _enable_model_requests_for_vcr_recording(
     request: pytest.FixtureRequest,
-) -> "Iterator[None]":
+) -> Iterator[None]:
     """Enable real model API requests for VCR tests.
 
     The global ``ALLOW_MODEL_REQUESTS=False`` gate blocks model calls at the
