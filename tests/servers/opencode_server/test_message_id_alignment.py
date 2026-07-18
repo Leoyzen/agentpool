@@ -136,6 +136,7 @@ class TestRouteMessagePassesMessageId:
 
         server_state = Mock()
         server_state.working_dir = "/tmp"
+        server_state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
         server_state.broadcast_event = AsyncMock()
 
         integration = OpenCodeSessionPoolIntegration(session_pool, server_state)
@@ -170,6 +171,7 @@ class TestRouteMessagePassesMessageId:
 
         server_state = Mock()
         server_state.working_dir = "/tmp"
+        server_state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
 
         integration = OpenCodeSessionPoolIntegration(session_pool, server_state)
         integration._start_event_consumer = AsyncMock()
@@ -200,6 +202,7 @@ class TestRouteMessagePassesMessageId:
 
         server_state = Mock()
         server_state.working_dir = "/tmp"
+        server_state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
 
         integration = OpenCodeSessionPoolIntegration(session_pool, server_state)
         integration._start_event_consumer = AsyncMock()
@@ -234,6 +237,7 @@ class TestBeforeConsumerLoopPendingMessageId:
         session_pool.sessions.get_session = Mock(return_value=None)
         server_state = Mock()
         server_state.working_dir = "/tmp"
+        server_state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
 
         integration = OpenCodeSessionPoolIntegration(session_pool, server_state)
         # Set a pending message_id
@@ -260,6 +264,7 @@ class TestBeforeConsumerLoopPendingMessageId:
         session_pool.sessions.get_session = Mock(return_value=None)
         server_state = Mock()
         server_state.working_dir = "/tmp"
+        server_state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
 
         integration = OpenCodeSessionPoolIntegration(session_pool, server_state)
 
@@ -300,6 +305,7 @@ class TestHandleEventUpdatesMessageId:
         session_pool = Mock()
         server_state = Mock()
         server_state.working_dir = "/tmp"
+        server_state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
         server_state.broadcast_event = AsyncMock()
 
         integration = OpenCodeSessionPoolIntegration(session_pool, server_state)
@@ -365,6 +371,7 @@ class TestHandleEventUpdatesMessageId:
         session_pool = Mock()
         server_state = Mock()
         server_state.working_dir = "/tmp"
+        server_state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
         server_state.broadcast_event = AsyncMock()
 
         integration = OpenCodeSessionPoolIntegration(session_pool, server_state)

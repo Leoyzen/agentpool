@@ -77,6 +77,7 @@ async def session_pool(mock_agent_pool: Mock, mock_session_store: Mock) -> Sessi
 def server_state(tmp_path: Any) -> ServerState:
     """Create a minimal ServerState for testing."""
     agent = Mock()
+    agent.model_name = None  # resolve_default_model_info() fallback
     agent.name = "test-agent"
     agent.storage = Mock()
     return ServerState(working_dir=str(tmp_path), agent=agent)
