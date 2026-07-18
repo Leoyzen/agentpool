@@ -22,7 +22,7 @@ from agentpool.capabilities.registry import (
 )
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:

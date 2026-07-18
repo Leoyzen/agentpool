@@ -109,11 +109,6 @@ async def test_post_mcp(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="DELETE /mcp/{id} not implemented in agentpool OpenCode server yet. See issue #188.",
-    strict=False,
-    raises=AssertionError,
-)
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
@@ -134,11 +129,6 @@ async def test_delete_mcp_by_id(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="PUT /mcp/{id} not implemented in agentpool OpenCode server yet. See issue #188.",
-    strict=False,
-    raises=AssertionError,
-)
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
@@ -160,11 +150,6 @@ async def test_put_mcp_by_id(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="GET /mcp/tool not implemented in agentpool OpenCode server yet. See issue #188.",
-    strict=False,
-    raises=AssertionError,
-)
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
@@ -185,11 +170,6 @@ async def test_get_mcp_tool(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="POST /mcp/tool not implemented in agentpool OpenCode server yet. See issue #188.",
-    strict=False,
-    raises=AssertionError,
-)
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
@@ -211,11 +191,6 @@ async def test_post_mcp_tool(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="GET /mcp/server not implemented in agentpool OpenCode server yet. See issue #188.",
-    strict=False,
-    raises=AssertionError,
-)
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
@@ -235,11 +210,6 @@ async def test_get_mcp_server(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="POST /mcp/server not implemented in agentpool OpenCode server yet. See issue #188.",
-    strict=False,
-    raises=AssertionError,
-)
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],

@@ -13,6 +13,7 @@ from opentelemetry.context import attach, detach
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from acp import Agent as ACPAgent
+from acp.exceptions import RequestError
 from acp.schema import (
     CloseSessionResponse,
     DisableProvidersRequest,
@@ -41,7 +42,7 @@ from acp.schema import (
     SetSessionModeResponse,
 )
 from agentpool.log import get_logger
-from agentpool.utils.tasks import TaskManager
+from agentpool.utils.task_group import ManagedTaskGroup
 from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnectionManager
 from agentpool_server.acp_server.converters import to_session_config_option, to_session_info
 from agentpool_server.acp_server.provider_router import ProviderRouter
@@ -260,7 +261,7 @@ class AgentPoolACPAgent(ACPAgent):
             raise RuntimeError(msg)
         if self.session_manager is None:
             self.session_manager = ACPSessionManager(pool=pool)
-        self.tasks = TaskManager()
+        self._task_group = ManagedTaskGroup()
         self._initialized = False
         self._sessions_cache: ListSessionsResponse | None = None
         self._sessions_cache_time: float = 0.0
@@ -358,6 +359,7 @@ class AgentPoolACPAgent(ACPAgent):
 
     async def initialize(self, params: InitializeRequest) -> InitializeResponse:
         """Initialize the agent and negotiate capabilities."""
+        await self._task_group.__aenter__()
         version = min(params.protocol_version, self.PROTOCOL_VERSION)
         self.client_capabilities = params.client_capabilities
         self.client_info = params.client_info
@@ -441,9 +443,9 @@ class AgentPoolACPAgent(ACPAgent):
             # Schedule available commands update after session response is returned
             if session := self.session_manager.get_session(session_id):
                 # Schedule task to run after response is sent
-                self.tasks.create_task(session.send_available_commands_update())
-                self.tasks.create_task(session.agent.load_rules(session.cwd))
-                self.tasks.create_task(session._register_prompt_hub_commands())
+                self._task_group.start_soon(session.send_available_commands_update)
+                self._task_group.start_soon(session.agent.load_rules, session.cwd)
+                self._task_group.start_soon(session._register_prompt_hub_commands)
                 # Determine whether to load client skills
                 # None means "use manifest's include_default setting"
                 should_load_skills = self.load_skills
@@ -458,8 +460,7 @@ class AgentPoolACPAgent(ACPAgent):
                     should_load_skills = True  # Fallback default
 
                 if should_load_skills:
-                    coro_4 = session.init_client_skills()
-                    self.tasks.create_task(coro_4, name=f"init_client_skills_{session_id}")
+                    self._task_group.start_soon(session.init_client_skills)
             logger.info("Created session", session_id=session_id)
 
             return NewSessionResponse(
@@ -484,6 +485,21 @@ class AgentPoolACPAgent(ACPAgent):
             # Get or resume session from storage
             session = self.session_manager.get_session(params.session_id)
             if not session:
+                # Check if the session is closed in storage before attempting
+                # to resume. A closed session should not be loadable via
+                # session/load — clients must use session/resume instead.
+                store = self.session_manager.session_store
+                stored_data = None
+                if store is not None:
+                    try:
+                        stored_data = await store.load_session(params.session_id)
+                    except Exception:
+                        logger.exception(
+                            "Failed to check session status in store",
+                            session_id=params.session_id,
+                        )
+                if stored_data is not None and stored_data.status == "closed":
+                    raise RequestError.resource_not_found(params.session_id) from None  # noqa: TRY301
                 session = await self.session_manager.resume_session(
                     session_id=params.session_id,
                     client=self.client,
@@ -518,10 +534,12 @@ class AgentPoolACPAgent(ACPAgent):
                 models = session.agent._state.models
             config_opts = await get_session_config_options(session.agent)
             # Schedule post-load tasks
-            self.tasks.create_task(session.send_available_commands_update())
-            self.tasks.create_task(session.agent.load_rules(session.cwd))
+            self._task_group.start_soon(session.send_available_commands_update)
+            self._task_group.start_soon(session.agent.load_rules, session.cwd)
             logger.info("Session loaded", session_id=params.session_id)
             return LoadSessionResponse(models=models, modes=mode_state, config_options=config_opts)
+        except RequestError:
+            raise
         except Exception:
             logger.exception("Failed to load session", session_id=params.session_id)
             return LoadSessionResponse()
@@ -654,8 +672,8 @@ class AgentPoolACPAgent(ACPAgent):
                 mode_state = await get_session_mode_state(session.agent)
                 config_options = await get_session_config_options(session.agent)
 
-            self.tasks.create_task(session.send_available_commands_update())
-            self.tasks.create_task(session.agent.load_rules(session.cwd))
+            self._task_group.start_soon(session.send_available_commands_update)
+            self._task_group.start_soon(session.agent.load_rules, session.cwd)
             logger.info("Session resumed", session_id=params.session_id)
             return ResumeSessionResponse(
                 models=models, modes=mode_state, config_options=config_options
@@ -775,7 +793,7 @@ class AgentPoolACPAgent(ACPAgent):
                     # Pass the full flattened ACP params to handle_client_message.
                     # handle_client_message will reconstruct the inner JSON-RPC
                     # message from the flattened format (per MCP-over-ACP RFD).
-                    self.tasks.create_task(conn.handle_client_message(params))
+                    self._task_group.start_soon(conn.handle_client_message, params)
                 else:
                     logger.warning(
                         "Received MCP message for unknown connection",
@@ -876,6 +894,7 @@ class AgentPoolACPAgent(ACPAgent):
             await self._mcp_manager.close_all()
         except Exception:
             logger.exception("Failed to close MCP connections during agent shutdown")
+        await self._task_group.close()
 
     async def set_session_mode(
         self, params: SetSessionModeRequest

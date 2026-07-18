@@ -592,12 +592,22 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
         await get_messages_for_session(state, session_id) if is_subagent_session else []
     )
     if session_pool is not None:
+        # Avoid auto-creating a session for nonexistent session IDs.
+        # If the session is not in memory (state.sessions or SessionController)
+        # and not in the persistent store (checked above), it doesn't exist.
+        # Return early instead of calling get_or_create_session_agent which
+        # would auto-create the session as a side effect (and may raise).
+        if cached_session is None and (
+            state.session_controller is None
+            or state.session_controller.get_session(session_id) is None
+        ):
+            return None
         agent = await session_pool.sessions.get_or_create_session_agent(session_id)
     else:
         agent = state.agent
     data = await agent.load_session(session_id)
     if data is None:
-        return None
+        return cached_session
 
     session = session_data_to_opencode(data)
     state.sessions[session_id] = session
@@ -1502,12 +1512,15 @@ async def summarize_session(  # noqa: PLR0915
     session_id: str,
     state: StateDep,
     request: SummarizeRequest | None = None,
-) -> MessageWithParts:
+) -> bool:
     """Summarize the session conversation.
 
     First runs the compaction pipeline to condense older messages,
     then streams an LLM-generated summary/continuation prompt to the user.
     The summary message is marked with summary=true for UI display.
+
+    Returns:
+        True if summarization completed successfully.
     """
     from pydantic_ai.messages import (
         PartDeltaEvent as PydanticPartDeltaEvent,
@@ -1699,7 +1712,7 @@ async def summarize_session(  # noqa: PLR0915
         finally:
             await state.mark_session_idle(session_id)
 
-        return assistant_msg_with_parts
+        return True
 
 
 @router.post("/{session_id}/share")

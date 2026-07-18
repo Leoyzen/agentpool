@@ -11,7 +11,6 @@ from slashed import Command, CommandContext
 
 from agentpool.log import get_logger
 from agentpool.prompts.builtin_provider import BuiltinPromptProvider
-from agentpool.utils.tasks import TaskManager
 
 
 if TYPE_CHECKING:
@@ -71,7 +70,6 @@ class PromptManager:
         """Initialize prompt manager."""
         super().__init__()
         self.config = config
-        self.task_manager = TaskManager()
         self.providers: dict[str, BasePromptProvider] = {}
         # Always register builtin provider
         self.providers["builtin"] = BuiltinPromptProvider(config.system_prompts)

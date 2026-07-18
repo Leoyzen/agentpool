@@ -19,7 +19,7 @@ from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.session import ACPSession
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:
@@ -48,7 +48,7 @@ def agent_pool() -> AgentPool:
 def mock_acp_agent() -> MagicMock:
     """Create a mock ACP agent with tasks support."""
     mock = MagicMock()
-    mock.tasks.create_task = lambda coro, *, name=None: coro  # type: ignore[assignment,method-assign]
+    mock._task_group.start_soon = lambda fn, *args: None  # type: ignore[assignment,method-assign]
     return mock
 
 

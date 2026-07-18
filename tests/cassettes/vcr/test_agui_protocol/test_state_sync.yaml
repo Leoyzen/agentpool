@@ -1,0 +1,54 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      accept:
+      - '*/*'
+      accept-encoding:
+      - gzip, deflate, br
+      connection:
+      - keep-alive
+      host:
+      - test
+    method: GET
+    uri: http://test/test_agent
+  response:
+    body:
+      string: Method Not Allowed
+    headers:
+      allow:
+      - POST
+      content-length:
+      - '18'
+      content-type:
+      - text/plain; charset=utf-8
+    status:
+      code: 405
+      message: Method Not Allowed
+- request:
+    body: ''
+    headers:
+      accept:
+      - '*/*'
+      accept-encoding:
+      - gzip, deflate, br
+      connection:
+      - keep-alive
+      host:
+      - test
+    method: GET
+    uri: http://test/test_agent
+  response:
+    body:
+      string: Method Not Allowed
+    headers:
+      allow:
+      - POST
+      content-length:
+      - '18'
+      content-type:
+      - text/plain; charset=utf-8
+    status:
+      code: 405
+      message: Method Not Allowed
+version: 1

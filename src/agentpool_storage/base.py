@@ -6,8 +6,6 @@ from collections import defaultdict
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, Self
 
-from agentpool.utils.tasks import TaskManager
-
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -59,7 +57,6 @@ class StorageProvider:
     def __init__(self, config: BaseStorageProviderConfig) -> None:
         super().__init__()
         self.config = config
-        self.task_manager = TaskManager()
         self.log_messages = config.log_messages
         self.log_sessions = config.log_sessions
         self.log_commands = config.log_commands

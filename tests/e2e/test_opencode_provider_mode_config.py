@@ -66,11 +66,6 @@ async def test_get_provider(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="POST /provider not implemented in agentpool OpenCode server yet. See issue #188.",
-    strict=False,
-    raises=AssertionError,
-)
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
@@ -117,11 +112,6 @@ async def test_get_mode(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="POST /mode endpoint not implemented in agentpool OpenCode server yet. See issue #188.",
-    strict=False,
-    raises=AssertionError,
-)
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],

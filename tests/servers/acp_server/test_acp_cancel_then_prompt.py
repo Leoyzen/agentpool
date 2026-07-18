@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from agentpool.agents.context import AgentRunContext
 
 
-pytestmark = [pytest.mark.integration, pytest.mark.anyio]
+pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
 
 def _unwrap_event(event: Any) -> Any:

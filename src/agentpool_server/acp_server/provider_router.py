@@ -140,18 +140,42 @@ class ProviderRouter:
     ) -> None:
         """Set override values for a provider.
 
+        If the provider is not already registered but is a well-known
+        provider (present in the default base URL table), it is registered
+        on-the-fly. This allows ``providers/set`` to accept well-known
+        provider IDs (e.g. ``"openai"``, ``"anthropic"``) even when no
+        ``model_variants`` are configured in the manifest.
+
         Args:
             provider_id: Provider to override.
             base_url: Optional custom base URL.
             api_key_id: Optional API key identifier.
 
         Raises:
-            ValueError: If provider_id is unknown.
+            ValueError: If provider_id is unknown (not registered and not
+                a well-known provider).
         """
         async with self._lock:
             if provider_id not in self._providers:
-                msg = f"Unknown provider: {provider_id}"
-                raise ValueError(msg)
+                # Register well-known providers on-the-fly.
+                default_base_url = self._get_default_base_url(provider_id)
+                if not default_base_url:
+                    msg = f"Unknown provider: {provider_id}"
+                    raise ValueError(msg)
+                self._providers[provider_id] = ProviderInfo(
+                    id=provider_id,
+                    supported=[provider_id],
+                    required=False,
+                    current=ProviderCurrentConfig(
+                        api_type=provider_id,
+                        base_url=default_base_url,
+                    ),
+                )
+                logger.info(
+                    "Registered provider on-the-fly",
+                    provider_id=provider_id,
+                    base_url=default_base_url,
+                )
             if provider_id not in self._overrides:
                 self._overrides[provider_id] = {}
             if base_url is not None:

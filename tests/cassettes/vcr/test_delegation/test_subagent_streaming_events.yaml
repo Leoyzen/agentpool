@@ -1,0 +1,1089 @@
+interactions:
+- request:
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, br
+      connection:
+      - keep-alive
+      content-length:
+      - '6827'
+      content-type:
+      - application/json
+      host:
+      - api.ai.rootcloud.info
+    method: POST
+    parsed_body:
+      messages:
+      - content: 'You are coordinator.
+
+
+          You coordinate tasks. Delegate to the worker when helpful.
+
+          <available-skills>
+
+          <skill name="example-skill" description="A simple example skill that demonstrates
+          the basic structure and functionality. Use when you need to show how skills
+          work or test skill loading." />
+
+          <skill name="openspec-apply-change" description="Implement tasks from an
+          OpenSpec change. Use when the user wants to start implementing, continue
+          implementation, or work through tasks." />
+
+          <skill name="openspec-explore" description="Enter explore mode - a thinking
+          partner for exploring ideas, investigating problems, and clarifying requirements.
+          Use when the user wants to think through something before or during a change."
+          />
+
+          <skill name="openspec-archive-change" description="Archive a completed change
+          in the experimental workflow. Use when the user wants to finalize and archive
+          a change after implementation is complete." />
+
+          <skill name="openspec-propose" description="Propose a new change with all
+          artifacts generated in one step. Use when the user wants to quickly describe
+          what they want to build and get a complete proposal with design, specs,
+          and tasks ready for implementation." />
+
+          <skill name="systematic-debugging" description="Use when encountering any
+          bug, test failure, or unexpected behavior, before proposing fixes" />
+
+          <skill name="metaskill" description="The meta-skill: create AI agent teams,
+          individual agents, or custom skills for any project. Use when the user wants
+          to generate a complete .claude/ agent team, create a single agent, or create
+          a single skill." />
+
+          <skill name="uv-package-manager" description="Master the uv package manager
+          for fast Python dependency management, virtual environments, and modern
+          Python project workflows. Use when setting up Python projects, managing
+          dependencies, or optimizing Python development workflows with uv." />
+
+          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous
+          skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md
+          files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing
+          with git version control, validates improvements through test prompts, and
+          generates visual result cards. Use when user mentions &quot;优化skill&quot;,
+          &quot;skill评分&quot;, &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;,
+          &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;,
+          &quot;提升skill质量&quot;, &quot;skill review&quot;, &quot;skill打分&quot;." />
+
+          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned
+          with company objectives -- qualitative objectives with measurable key results.
+          Use when setting quarterly OKRs, aligning team goals with company strategy,
+          drafting objectives, or learning how to write effective OKRs." />
+
+          <skill name="code-review-expert" description="Expert code review of current
+          git changes with a senior engineer lens. Detects SOLID violations, security
+          risks, and proposes actionable improvements." />
+
+          </available-skills>'
+        role: system
+      - content:
+        - text: 'Delegate to the worker: ask it to count to 3.'
+          type: text
+        role: user
+      model: svc/deepseek-v4-flash
+      stream: true
+      stream_options:
+        include_usage: true
+      tool_choice: auto
+      tools:
+      - function:
+          description: "List available agents and/or teams in the current pool.\n\n\
+            Args:\n    node_type: Filter by node type - \"all\", \"agent\", or \"\
+            team\"\n    only_idle: If True, only returns nodes that aren't currently\
+            \ busy\n\nReturns:\n    List of node names that can be used with the task\
+            \ tool"
+          name: list_available_nodes
+          parameters:
+            additionalProperties: false
+            properties:
+              node_type:
+                default: all
+                description: Filter by node type - "all", "agent", or "team"
+                enum:
+                - all
+                - agent
+                - team
+                type: string
+              only_idle:
+                default: false
+                description: If True, only returns nodes that aren't currently busy
+                type: boolean
+            type: object
+        type: function
+      - function:
+          description: "Execute a task on an agent or team.\n\nLaunch a task to be\
+            \ executed by a specialized agent or team.\n\nIn synchronous mode (default),\
+            \ the task runs with streaming progress events\nand returns the result\
+            \ when complete.\n\nIn async mode, the task starts in the background and\
+            \ returns immediately\nwith a task ID. The output is written to /tasks/{task_id}/output.md\
+            \ in\nthe internal filesystem after the run completes.\n\nArgs:\n    agent_or_team:\
+            \ The agent or team to execute the task\n    prompt: The task instructions\
+            \ for the agent or team\n    description: A short (3-5 words) description\
+            \ of the task\n    async_mode: If True, run in background and return task\
+            \ ID immediately\n\nReturns:\n    Structured output containing result\
+            \ and metadata"
+          name: task
+          parameters:
+            additionalProperties: false
+            properties:
+              agent_or_team:
+                description: The agent or team to execute the task
+                type: string
+              async_mode:
+                default: false
+                description: If True, run in background and return task ID immediately
+                type: boolean
+              description:
+                description: A short (3-5 words) description of the task
+                type: string
+              prompt:
+                description: The task instructions for the agent or team
+                type: string
+            required:
+            - agent_or_team
+            - prompt
+            - description
+            type: object
+        type: function
+      - function:
+          description: "Load a Claude Code Skill and return its instructions.\n\n\
+            Args:\n    ctx: Agent context providing access to pool and skills\n  \
+            \  skill_name: Name of the skill to load, or a skill:// URI.\n       \
+            \ Use skill:// URI to load a specific reference file:\n        skill://skill-name/references/file.md\n\
+            \    arguments: Optional space-separated arguments for substitution\n\n\
+            Returns:\n    The full skill instructions for execution"
+          name: load_skill
+          parameters:
+            additionalProperties: false
+            properties:
+              arguments:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+                description: Optional space-separated arguments for substitution
+              skill_name:
+                description: 'Name of the skill to load, or a skill:// URI.
+
+                  Use skill:// URI to load a specific reference file:
+
+                  skill://skill-name/references/file.md'
+                type: string
+            required:
+            - skill_name
+            type: object
+        type: function
+      - function:
+          description: "List all available skills.\n\nReturns:\n    Formatted list\
+            \ of available skills with descriptions and URI information"
+          name: list_skills
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+    uri: http://api.ai.rootcloud.info/v1/chat/completions
+  response:
+    body:
+      string: 'data: {"id":"chatcmpl-ad77eaac0b609382","object":"chat.completion.chunk","created":1784377589,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+
+
+        data: {"id":"chatcmpl-ad77eaac0b609382","created":1784377589,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"The"}}]}
+
+
+        data: {"id":"chatcmpl-ad77eaac0b609382","created":1784377589,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
+        user wants me to delegate a"}}]}
+
+
+        data: {"id":"chatcmpl-ad77eaac0b609382","created":1784377589,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
+        task to a"}}]}
+
+
+        data: {"id":"chatcmpl-ad77eaac0b609382","created":1784377589,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
+        worker agent to count to"}}]}
+
+
+        data: {"id":"chatcmpl-ad77eaac0b609382","created":1784377589,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
+        3. Let me check"}}]}
+
+
+        data: {"id":"chatcmpl-ad77eaac0b609382","created":1784377589,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
+        what"}}]}
+
+
+        data: {"id":"chatcmpl-ad77eaac0b609382","created":1784377589,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
+        agents/"}}]}
+
+
+        data: {"id":"chatcmpl-ad77eaac0b609382","created":1784377589,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"teams
+        are available first"}}]}
+
+
+        data: {"id":"chatcmpl-ad77eaac0b609382","created":1784377589,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"."}}]}
+
+
+        data: {"id":"chatcmpl-ad77eaac0b609382","created":1784377589,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-80d44123a8b6a2e9","function":{"arguments":"","name":"list_available_nodes"},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-ad77eaac0b609382","created":1784377589,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"{\"node_type\":
+        \""},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-ad77eaac0b609382","created":1784377589,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"all"},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-ad77eaac0b609382","created":1784377589,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"\",
+        \"only_idle\": "},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-ad77eaac0b609382","created":1784377589,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"false}"},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-ad77eaac0b609382","object":"chat.completion.chunk","created":1784377589,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+
+        data: {"id":"chatcmpl-ad77eaac0b609382","created":1784377589,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":96,"prompt_tokens":1636,"total_tokens":1732,"completion_tokens_details":{"reasoning_tokens":29}}}
+
+
+        data: [DONE]
+
+
+        '
+    headers:
+      cache-control:
+      - no-cache
+      connection:
+      - close
+      content-security-policy:
+      - frame-ancestors 'none'
+      content-type:
+      - text/event-stream; charset=utf-8
+      req-arrive-time:
+      - '1784377589451'
+      req-cost-time:
+      - '117'
+      resp-start-time:
+      - '1784377589569'
+      transfer-encoding:
+      - chunked
+    status:
+      code: 200
+      message: OK
+- request:
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, br
+      connection:
+      - keep-alive
+      content-length:
+      - '7408'
+      content-type:
+      - application/json
+      host:
+      - api.ai.rootcloud.info
+    method: POST
+    parsed_body:
+      messages:
+      - content: 'You are coordinator.
+
+
+          You coordinate tasks. Delegate to the worker when helpful.
+
+          <available-skills>
+
+          <skill name="example-skill" description="A simple example skill that demonstrates
+          the basic structure and functionality. Use when you need to show how skills
+          work or test skill loading." />
+
+          <skill name="openspec-apply-change" description="Implement tasks from an
+          OpenSpec change. Use when the user wants to start implementing, continue
+          implementation, or work through tasks." />
+
+          <skill name="openspec-explore" description="Enter explore mode - a thinking
+          partner for exploring ideas, investigating problems, and clarifying requirements.
+          Use when the user wants to think through something before or during a change."
+          />
+
+          <skill name="openspec-archive-change" description="Archive a completed change
+          in the experimental workflow. Use when the user wants to finalize and archive
+          a change after implementation is complete." />
+
+          <skill name="openspec-propose" description="Propose a new change with all
+          artifacts generated in one step. Use when the user wants to quickly describe
+          what they want to build and get a complete proposal with design, specs,
+          and tasks ready for implementation." />
+
+          <skill name="systematic-debugging" description="Use when encountering any
+          bug, test failure, or unexpected behavior, before proposing fixes" />
+
+          <skill name="metaskill" description="The meta-skill: create AI agent teams,
+          individual agents, or custom skills for any project. Use when the user wants
+          to generate a complete .claude/ agent team, create a single agent, or create
+          a single skill." />
+
+          <skill name="uv-package-manager" description="Master the uv package manager
+          for fast Python dependency management, virtual environments, and modern
+          Python project workflows. Use when setting up Python projects, managing
+          dependencies, or optimizing Python development workflows with uv." />
+
+          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous
+          skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md
+          files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing
+          with git version control, validates improvements through test prompts, and
+          generates visual result cards. Use when user mentions &quot;优化skill&quot;,
+          &quot;skill评分&quot;, &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;,
+          &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;,
+          &quot;提升skill质量&quot;, &quot;skill review&quot;, &quot;skill打分&quot;." />
+
+          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned
+          with company objectives -- qualitative objectives with measurable key results.
+          Use when setting quarterly OKRs, aligning team goals with company strategy,
+          drafting objectives, or learning how to write effective OKRs." />
+
+          <skill name="code-review-expert" description="Expert code review of current
+          git changes with a senior engineer lens. Detects SOLID violations, security
+          risks, and proposes actionable improvements." />
+
+          </available-skills>'
+        role: system
+      - content:
+        - text: 'Delegate to the worker: ask it to count to 3.'
+          type: text
+        role: user
+      - content: null
+        reasoning_content: The user wants me to delegate a task to a worker agent
+          to count to 3. Let me check what agents/teams are available first.
+        role: assistant
+        tool_calls:
+        - function:
+            arguments: '{"node_type": "all", "only_idle": false}'
+            name: list_available_nodes
+          id: chatcmpl-tool-80d44123a8b6a2e9
+          type: function
+      - content: 'name: coordinator
+
+          type: agent
+
+          description: No description
+
+          ---
+
+          name: worker
+
+          type: agent
+
+          description: No description
+
+          ---'
+        role: tool
+        tool_call_id: chatcmpl-tool-80d44123a8b6a2e9
+      model: svc/deepseek-v4-flash
+      stream: true
+      stream_options:
+        include_usage: true
+      tool_choice: auto
+      tools:
+      - function:
+          description: "List available agents and/or teams in the current pool.\n\n\
+            Args:\n    node_type: Filter by node type - \"all\", \"agent\", or \"\
+            team\"\n    only_idle: If True, only returns nodes that aren't currently\
+            \ busy\n\nReturns:\n    List of node names that can be used with the task\
+            \ tool"
+          name: list_available_nodes
+          parameters:
+            additionalProperties: false
+            properties:
+              node_type:
+                default: all
+                description: Filter by node type - "all", "agent", or "team"
+                enum:
+                - all
+                - agent
+                - team
+                type: string
+              only_idle:
+                default: false
+                description: If True, only returns nodes that aren't currently busy
+                type: boolean
+            type: object
+        type: function
+      - function:
+          description: "Execute a task on an agent or team.\n\nLaunch a task to be\
+            \ executed by a specialized agent or team.\n\nIn synchronous mode (default),\
+            \ the task runs with streaming progress events\nand returns the result\
+            \ when complete.\n\nIn async mode, the task starts in the background and\
+            \ returns immediately\nwith a task ID. The output is written to /tasks/{task_id}/output.md\
+            \ in\nthe internal filesystem after the run completes.\n\nArgs:\n    agent_or_team:\
+            \ The agent or team to execute the task\n    prompt: The task instructions\
+            \ for the agent or team\n    description: A short (3-5 words) description\
+            \ of the task\n    async_mode: If True, run in background and return task\
+            \ ID immediately\n\nReturns:\n    Structured output containing result\
+            \ and metadata"
+          name: task
+          parameters:
+            additionalProperties: false
+            properties:
+              agent_or_team:
+                description: The agent or team to execute the task
+                type: string
+              async_mode:
+                default: false
+                description: If True, run in background and return task ID immediately
+                type: boolean
+              description:
+                description: A short (3-5 words) description of the task
+                type: string
+              prompt:
+                description: The task instructions for the agent or team
+                type: string
+            required:
+            - agent_or_team
+            - prompt
+            - description
+            type: object
+        type: function
+      - function:
+          description: "Load a Claude Code Skill and return its instructions.\n\n\
+            Args:\n    ctx: Agent context providing access to pool and skills\n  \
+            \  skill_name: Name of the skill to load, or a skill:// URI.\n       \
+            \ Use skill:// URI to load a specific reference file:\n        skill://skill-name/references/file.md\n\
+            \    arguments: Optional space-separated arguments for substitution\n\n\
+            Returns:\n    The full skill instructions for execution"
+          name: load_skill
+          parameters:
+            additionalProperties: false
+            properties:
+              arguments:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+                description: Optional space-separated arguments for substitution
+              skill_name:
+                description: 'Name of the skill to load, or a skill:// URI.
+
+                  Use skill:// URI to load a specific reference file:
+
+                  skill://skill-name/references/file.md'
+                type: string
+            required:
+            - skill_name
+            type: object
+        type: function
+      - function:
+          description: "List all available skills.\n\nReturns:\n    Formatted list\
+            \ of available skills with descriptions and URI information"
+          name: list_skills
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+    uri: http://api.ai.rootcloud.info/v1/chat/completions
+  response:
+    body:
+      string: 'data: {"id":"chatcmpl-8aba091f0df9fd32","object":"chat.completion.chunk","created":1784377590,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+
+
+        data: {"id":"chatcmpl-8aba091f0df9fd32","created":1784377590,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"There"}}]}
+
+
+        data: {"id":"chatcmpl-8aba091f0df9fd32","created":1784377590,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"''s
+        a \"worker\" agent"}}]}
+
+
+        data: {"id":"chatcmpl-8aba091f0df9fd32","created":1784377590,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
+        available. Let me delegate the counting"}}]}
+
+
+        data: {"id":"chatcmpl-8aba091f0df9fd32","created":1784377590,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
+        task to it."}}]}
+
+
+        data: {"id":"chatcmpl-8aba091f0df9fd32","created":1784377590,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-81abc774529dbcb7","function":{"arguments":"","name":"task"},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-8aba091f0df9fd32","created":1784377590,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"{\"agent_or_team\":
+        \""},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-8aba091f0df9fd32","created":1784377590,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"worker"},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-8aba091f0df9fd32","created":1784377590,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"\",
+        \"prompt\": \""},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-8aba091f0df9fd32","created":1784377590,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"Count
+        from 1 to 3, step by step. Output each number as you go."},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-8aba091f0df9fd32","created":1784377590,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"\",
+        \"description\": \""},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-8aba091f0df9fd32","created":1784377590,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"Count
+        to 3"},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-8aba091f0df9fd32","created":1784377590,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"\"}"},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-8aba091f0df9fd32","object":"chat.completion.chunk","created":1784377590,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+
+        data: {"id":"chatcmpl-8aba091f0df9fd32","created":1784377590,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":118,"prompt_tokens":1771,"total_tokens":1889,"completion_tokens_details":{"reasoning_tokens":18}}}
+
+
+        data: [DONE]
+
+
+        '
+    headers:
+      cache-control:
+      - no-cache
+      connection:
+      - close
+      content-security-policy:
+      - frame-ancestors 'none'
+      content-type:
+      - text/event-stream; charset=utf-8
+      req-arrive-time:
+      - '1784377590204'
+      req-cost-time:
+      - '538'
+      resp-start-time:
+      - '1784377590743'
+      transfer-encoding:
+      - chunked
+    status:
+      code: 200
+      message: OK
+- request:
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, br
+      connection:
+      - keep-alive
+      content-length:
+      - '4742'
+      content-type:
+      - application/json
+      host:
+      - api.ai.rootcloud.info
+    method: POST
+    parsed_body:
+      messages:
+      - content: 'You are worker.
+
+
+          You are a worker agent. Complete tasks concisely.
+
+          <available-skills>
+
+          <skill name="example-skill" description="A simple example skill that demonstrates
+          the basic structure and functionality. Use when you need to show how skills
+          work or test skill loading." />
+
+          <skill name="openspec-apply-change" description="Implement tasks from an
+          OpenSpec change. Use when the user wants to start implementing, continue
+          implementation, or work through tasks." />
+
+          <skill name="openspec-explore" description="Enter explore mode - a thinking
+          partner for exploring ideas, investigating problems, and clarifying requirements.
+          Use when the user wants to think through something before or during a change."
+          />
+
+          <skill name="openspec-archive-change" description="Archive a completed change
+          in the experimental workflow. Use when the user wants to finalize and archive
+          a change after implementation is complete." />
+
+          <skill name="openspec-propose" description="Propose a new change with all
+          artifacts generated in one step. Use when the user wants to quickly describe
+          what they want to build and get a complete proposal with design, specs,
+          and tasks ready for implementation." />
+
+          <skill name="systematic-debugging" description="Use when encountering any
+          bug, test failure, or unexpected behavior, before proposing fixes" />
+
+          <skill name="metaskill" description="The meta-skill: create AI agent teams,
+          individual agents, or custom skills for any project. Use when the user wants
+          to generate a complete .claude/ agent team, create a single agent, or create
+          a single skill." />
+
+          <skill name="uv-package-manager" description="Master the uv package manager
+          for fast Python dependency management, virtual environments, and modern
+          Python project workflows. Use when setting up Python projects, managing
+          dependencies, or optimizing Python development workflows with uv." />
+
+          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous
+          skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md
+          files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing
+          with git version control, validates improvements through test prompts, and
+          generates visual result cards. Use when user mentions &quot;优化skill&quot;,
+          &quot;skill评分&quot;, &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;,
+          &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;,
+          &quot;提升skill质量&quot;, &quot;skill review&quot;, &quot;skill打分&quot;." />
+
+          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned
+          with company objectives -- qualitative objectives with measurable key results.
+          Use when setting quarterly OKRs, aligning team goals with company strategy,
+          drafting objectives, or learning how to write effective OKRs." />
+
+          <skill name="code-review-expert" description="Expert code review of current
+          git changes with a senior engineer lens. Detects SOLID violations, security
+          risks, and proposes actionable improvements." />
+
+          </available-skills>'
+        role: system
+      - content:
+        - text: Count from 1 to 3, step by step. Output each number as you go.
+          type: text
+        role: user
+      model: svc/deepseek-v4-flash
+      stream: true
+      stream_options:
+        include_usage: true
+      tool_choice: auto
+      tools:
+      - function:
+          description: "Load a Claude Code Skill and return its instructions.\n\n\
+            Args:\n    ctx: Agent context providing access to pool and skills\n  \
+            \  skill_name: Name of the skill to load, or a skill:// URI.\n       \
+            \ Use skill:// URI to load a specific reference file:\n        skill://skill-name/references/file.md\n\
+            \    arguments: Optional space-separated arguments for substitution\n\n\
+            Returns:\n    The full skill instructions for execution"
+          name: load_skill
+          parameters:
+            additionalProperties: false
+            properties:
+              arguments:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+                description: Optional space-separated arguments for substitution
+              skill_name:
+                description: 'Name of the skill to load, or a skill:// URI.
+
+                  Use skill:// URI to load a specific reference file:
+
+                  skill://skill-name/references/file.md'
+                type: string
+            required:
+            - skill_name
+            type: object
+        type: function
+      - function:
+          description: "List all available skills.\n\nReturns:\n    Formatted list\
+            \ of available skills with descriptions and URI information"
+          name: list_skills
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+    uri: http://api.ai.rootcloud.info/v1/chat/completions
+  response:
+    body:
+      string: 'data: {"id":"chatcmpl-a1a271f6d15731b8","object":"chat.completion.chunk","created":1784377593,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+
+
+        data: {"id":"chatcmpl-a1a271f6d15731b8","created":1784377593,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"The"}}]}
+
+
+        data: {"id":"chatcmpl-a1a271f6d15731b8","created":1784377593,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
+        user wants me to count from"}}]}
+
+
+        data: {"id":"chatcmpl-a1a271f6d15731b8","created":1784377593,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
+        1 to 3, step by step"}}]}
+
+
+        data: {"id":"chatcmpl-a1a271f6d15731b8","created":1784377593,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":",
+        outputting each number as"}}]}
+
+
+        data: {"id":"chatcmpl-a1a271f6d15731b8","created":1784377593,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
+        I go. This is straightforward"}}]}
+
+
+        data: {"id":"chatcmpl-a1a271f6d15731b8","created":1784377593,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"."}}]}
+
+
+        data: {"id":"chatcmpl-a1a271f6d15731b8","object":"chat.completion.chunk","created":1784377593,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"Let"}}]}
+
+
+        data: {"id":"chatcmpl-a1a271f6d15731b8","object":"chat.completion.chunk","created":1784377593,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
+        me count from"}}]}
+
+
+        data: {"id":"chatcmpl-a1a271f6d15731b8","object":"chat.completion.chunk","created":1784377593,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
+        1 to 3:\n\n"}}]}
+
+
+        data: {"id":"chatcmpl-a1a271f6d15731b8","object":"chat.completion.chunk","created":1784377593,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"1\n\n"}}]}
+
+
+        data: {"id":"chatcmpl-a1a271f6d15731b8","object":"chat.completion.chunk","created":1784377593,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"2\n\n3"}}]}
+
+
+        data: {"id":"chatcmpl-a1a271f6d15731b8","object":"chat.completion.chunk","created":1784377593,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+
+        data: {"id":"chatcmpl-a1a271f6d15731b8","created":1784377593,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":46,"prompt_tokens":1149,"total_tokens":1195,"completion_tokens_details":{"reasoning_tokens":29}}}
+
+
+        data: [DONE]
+
+
+        '
+    headers:
+      cache-control:
+      - no-cache
+      connection:
+      - close
+      content-security-policy:
+      - frame-ancestors 'none'
+      content-type:
+      - text/event-stream; charset=utf-8
+      req-arrive-time:
+      - '1784377593027'
+      req-cost-time:
+      - '106'
+      resp-start-time:
+      - '1784377593134'
+      transfer-encoding:
+      - chunked
+    status:
+      code: 200
+      message: OK
+- request:
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, br
+      connection:
+      - keep-alive
+      content-length:
+      - '8140'
+      content-type:
+      - application/json
+      host:
+      - api.ai.rootcloud.info
+    method: POST
+    parsed_body:
+      messages:
+      - content: 'You are coordinator.
+
+
+          You coordinate tasks. Delegate to the worker when helpful.
+
+          <available-skills>
+
+          <skill name="example-skill" description="A simple example skill that demonstrates
+          the basic structure and functionality. Use when you need to show how skills
+          work or test skill loading." />
+
+          <skill name="openspec-apply-change" description="Implement tasks from an
+          OpenSpec change. Use when the user wants to start implementing, continue
+          implementation, or work through tasks." />
+
+          <skill name="openspec-explore" description="Enter explore mode - a thinking
+          partner for exploring ideas, investigating problems, and clarifying requirements.
+          Use when the user wants to think through something before or during a change."
+          />
+
+          <skill name="openspec-archive-change" description="Archive a completed change
+          in the experimental workflow. Use when the user wants to finalize and archive
+          a change after implementation is complete." />
+
+          <skill name="openspec-propose" description="Propose a new change with all
+          artifacts generated in one step. Use when the user wants to quickly describe
+          what they want to build and get a complete proposal with design, specs,
+          and tasks ready for implementation." />
+
+          <skill name="systematic-debugging" description="Use when encountering any
+          bug, test failure, or unexpected behavior, before proposing fixes" />
+
+          <skill name="metaskill" description="The meta-skill: create AI agent teams,
+          individual agents, or custom skills for any project. Use when the user wants
+          to generate a complete .claude/ agent team, create a single agent, or create
+          a single skill." />
+
+          <skill name="uv-package-manager" description="Master the uv package manager
+          for fast Python dependency management, virtual environments, and modern
+          Python project workflows. Use when setting up Python projects, managing
+          dependencies, or optimizing Python development workflows with uv." />
+
+          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous
+          skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md
+          files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing
+          with git version control, validates improvements through test prompts, and
+          generates visual result cards. Use when user mentions &quot;优化skill&quot;,
+          &quot;skill评分&quot;, &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;,
+          &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;,
+          &quot;提升skill质量&quot;, &quot;skill review&quot;, &quot;skill打分&quot;." />
+
+          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned
+          with company objectives -- qualitative objectives with measurable key results.
+          Use when setting quarterly OKRs, aligning team goals with company strategy,
+          drafting objectives, or learning how to write effective OKRs." />
+
+          <skill name="code-review-expert" description="Expert code review of current
+          git changes with a senior engineer lens. Detects SOLID violations, security
+          risks, and proposes actionable improvements." />
+
+          </available-skills>'
+        role: system
+      - content:
+        - text: 'Delegate to the worker: ask it to count to 3.'
+          type: text
+        role: user
+      - content: null
+        reasoning_content: The user wants me to delegate a task to a worker agent
+          to count to 3. Let me check what agents/teams are available first.
+        role: assistant
+        tool_calls:
+        - function:
+            arguments: '{"node_type": "all", "only_idle": false}'
+            name: list_available_nodes
+          id: chatcmpl-tool-80d44123a8b6a2e9
+          type: function
+      - content: 'name: coordinator
+
+          type: agent
+
+          description: No description
+
+          ---
+
+          name: worker
+
+          type: agent
+
+          description: No description
+
+          ---'
+        role: tool
+        tool_call_id: chatcmpl-tool-80d44123a8b6a2e9
+      - content: null
+        reasoning_content: There's a "worker" agent available. Let me delegate the
+          counting task to it.
+        role: assistant
+        tool_calls:
+        - function:
+            arguments: '{"agent_or_team": "worker", "prompt": "Count from 1 to 3,
+              step by step. Output each number as you go.", "description": "Count
+              to 3"}'
+            name: task
+          id: chatcmpl-tool-81abc774529dbcb7
+          type: function
+      - content: '{"output":"The user wants me to count from 1 to 3, step by step,
+          outputting each number as I go. This is straightforward.Let me count from
+          1 to 3:\n\n1\n\n2\n\n3","metadata":{"sessionId":"ses_f75314be3001p0hlc2SpBF3frd"}}'
+        role: tool
+        tool_call_id: chatcmpl-tool-81abc774529dbcb7
+      model: svc/deepseek-v4-flash
+      stream: true
+      stream_options:
+        include_usage: true
+      tool_choice: auto
+      tools:
+      - function:
+          description: "List available agents and/or teams in the current pool.\n\n\
+            Args:\n    node_type: Filter by node type - \"all\", \"agent\", or \"\
+            team\"\n    only_idle: If True, only returns nodes that aren't currently\
+            \ busy\n\nReturns:\n    List of node names that can be used with the task\
+            \ tool"
+          name: list_available_nodes
+          parameters:
+            additionalProperties: false
+            properties:
+              node_type:
+                default: all
+                description: Filter by node type - "all", "agent", or "team"
+                enum:
+                - all
+                - agent
+                - team
+                type: string
+              only_idle:
+                default: false
+                description: If True, only returns nodes that aren't currently busy
+                type: boolean
+            type: object
+        type: function
+      - function:
+          description: "Execute a task on an agent or team.\n\nLaunch a task to be\
+            \ executed by a specialized agent or team.\n\nIn synchronous mode (default),\
+            \ the task runs with streaming progress events\nand returns the result\
+            \ when complete.\n\nIn async mode, the task starts in the background and\
+            \ returns immediately\nwith a task ID. The output is written to /tasks/{task_id}/output.md\
+            \ in\nthe internal filesystem after the run completes.\n\nArgs:\n    agent_or_team:\
+            \ The agent or team to execute the task\n    prompt: The task instructions\
+            \ for the agent or team\n    description: A short (3-5 words) description\
+            \ of the task\n    async_mode: If True, run in background and return task\
+            \ ID immediately\n\nReturns:\n    Structured output containing result\
+            \ and metadata"
+          name: task
+          parameters:
+            additionalProperties: false
+            properties:
+              agent_or_team:
+                description: The agent or team to execute the task
+                type: string
+              async_mode:
+                default: false
+                description: If True, run in background and return task ID immediately
+                type: boolean
+              description:
+                description: A short (3-5 words) description of the task
+                type: string
+              prompt:
+                description: The task instructions for the agent or team
+                type: string
+            required:
+            - agent_or_team
+            - prompt
+            - description
+            type: object
+        type: function
+      - function:
+          description: "Load a Claude Code Skill and return its instructions.\n\n\
+            Args:\n    ctx: Agent context providing access to pool and skills\n  \
+            \  skill_name: Name of the skill to load, or a skill:// URI.\n       \
+            \ Use skill:// URI to load a specific reference file:\n        skill://skill-name/references/file.md\n\
+            \    arguments: Optional space-separated arguments for substitution\n\n\
+            Returns:\n    The full skill instructions for execution"
+          name: load_skill
+          parameters:
+            additionalProperties: false
+            properties:
+              arguments:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+                description: Optional space-separated arguments for substitution
+              skill_name:
+                description: 'Name of the skill to load, or a skill:// URI.
+
+                  Use skill:// URI to load a specific reference file:
+
+                  skill://skill-name/references/file.md'
+                type: string
+            required:
+            - skill_name
+            type: object
+        type: function
+      - function:
+          description: "List all available skills.\n\nReturns:\n    Formatted list\
+            \ of available skills with descriptions and URI information"
+          name: list_skills
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+    uri: http://api.ai.rootcloud.info/v1/chat/completions
+  response:
+    body:
+      string: 'data: {"id":"chatcmpl-8b5585f81c8e65f0","object":"chat.completion.chunk","created":1784377595,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","created":1784377595,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"The"}}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","created":1784377595,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
+        worker successfully counted to"}}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","created":1784377595,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
+        3. Let me relay"}}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","created":1784377595,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"
+        the result."}}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","object":"chat.completion.chunk","created":1784377595,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"Done"}}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","object":"chat.completion.chunk","created":1784377595,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"!
+        Here"}}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","object":"chat.completion.chunk","created":1784377595,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"''s
+        what the"}}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","object":"chat.completion.chunk","created":1784377595,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
+        worker did:\n\n1"}}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","object":"chat.completion.chunk","created":1784377595,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"️⃣"}}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","object":"chat.completion.chunk","created":1784377595,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"  \n"}}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","object":"chat.completion.chunk","created":1784377595,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"2️⃣  \n3️⃣  \n\nAll"}}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","object":"chat.completion.chunk","created":1784377595,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
+        done"}}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","object":"chat.completion.chunk","created":1784377595,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":","}}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","object":"chat.completion.chunk","created":1784377595,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
+        boss"}}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","object":"chat.completion.chunk","created":1784377595,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"!"}}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","object":"chat.completion.chunk","created":1784377595,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"
+        🎉"}}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","object":"chat.completion.chunk","created":1784377595,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+
+        data: {"id":"chatcmpl-8b5585f81c8e65f0","created":1784377595,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":42,"prompt_tokens":1975,"total_tokens":2017,"completion_tokens_details":{"reasoning_tokens":14}}}
+
+
+        data: [DONE]
+
+
+        '
+    headers:
+      cache-control:
+      - no-cache
+      connection:
+      - close
+      content-security-policy:
+      - frame-ancestors 'none'
+      content-type:
+      - text/event-stream; charset=utf-8
+      req-arrive-time:
+      - '1784377594895'
+      req-cost-time:
+      - '123'
+      resp-start-time:
+      - '1784377595018'
+      transfer-encoding:
+      - chunked
+    status:
+      code: 200
+      message: OK
+version: 1

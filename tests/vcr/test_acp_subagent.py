@@ -115,6 +115,13 @@ def _build_acp_agent(pool: AgentPool, agent_name: str = "coordinator") -> AgentP
     not cassette_exists(_MODULE_STEM, "test_subagent_delegation"),
     reason="Cassette not recorded yet — run with --record-mode=once",
 )
+@pytest.mark.xfail(
+    reason="acp.Client is a Protocol and cannot be instantiated directly; "
+    "_build_acp_agent needs to use a concrete Client implementation",
+    strict=False,
+    raises=TypeError,
+)
+@pytest.mark.known_bug
 async def test_subagent_delegation(vcr_pool_with_subagent: AgentPool) -> None:
     """Coordinator delegates to worker; spawn/complete events propagate.
 

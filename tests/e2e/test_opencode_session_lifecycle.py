@@ -240,7 +240,7 @@ async def test_session_not_found(
 
 
 @pytest.mark.xfail(
-    reason="Fork accesses message routes triggering OTel _IncludedRouter bug (#190)",
+    reason="Fork endpoint returns 500 — deeper issue beyond OTel fix",
     strict=False,
     raises=AssertionError,
 )
@@ -254,12 +254,7 @@ async def test_fork_session(
     subprocess_server: SubprocessServer,
     e2e_config: Path,
 ) -> None:
-    """C2.7: POST /session/{id}/fork, verify new session created.
-
-    XFAIL: The fork endpoint internally accesses message routes which trigger
-    the OpenTelemetry _IncludedRouter.path AttributeError (pre-existing server
-    bug, same as POST /session/{id}/message returning 500).
-    """
+    """C2.7: POST /session/{id}/fork, verify new session created."""
     base_url = subprocess_server.base_url
 
     async with httpx.AsyncClient(timeout=10.0) as client:

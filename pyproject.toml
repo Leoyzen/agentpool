@@ -355,6 +355,7 @@ markers = [
   "flaky: marks tests as flaky (auto-rerun on failure)",
   "incompatible_with_thinking: marks tests that use structured output (tool_choice: required) which is incompatible with thinking-mode models (DeepSeek, Kimi) — see issue #84",
   "integration: marks tests as integration tests",
+  "isolated: test requires fresh server (bypasses subprocess cache)",
   "real_mcp: marks tests that use real MCPToolset connections (skips __aenter__/__aexit__ mock fixture)",
   "real_model: marks tests that make real model API calls (auto-skipped without OPENAI_API_KEY, replaces requires_openai_key)",
   "security: security-related tests",

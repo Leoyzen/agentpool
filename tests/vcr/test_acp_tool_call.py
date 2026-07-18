@@ -123,7 +123,6 @@ def _build_acp_agent(pool: AgentPool) -> AgentPoolACPAgent:
     from acp import Client
 
     default_agent = pool.get_agent("test_agent")
-    default_agent.add_tool(echo)
     client = Client(allow_file_operations=False, use_real_files=False)
     return AgentPoolACPAgent(client=client, default_agent=default_agent)
 
@@ -132,6 +131,13 @@ def _build_acp_agent(pool: AgentPool) -> AgentPoolACPAgent:
     not cassette_exists(_MODULE_STEM, "test_tool_call_through_acp"),
     reason="Cassette not recorded yet — run with --record-mode=once",
 )
+@pytest.mark.xfail(
+    reason="acp.Client is a Protocol and cannot be instantiated directly; "
+    "_build_acp_agent needs to use a concrete Client implementation",
+    strict=False,
+    raises=TypeError,
+)
+@pytest.mark.known_bug
 async def test_tool_call_through_acp(vcr_pool: AgentPool) -> None:
     """Tool-call events propagate through ACP as session notifications.
 
@@ -141,7 +147,8 @@ async def test_tool_call_through_acp(vcr_pool: AgentPool) -> None:
     updates. Asserts at least one tool-call notification is observed.
     """
     acp_agent = _build_acp_agent(vcr_pool)
-    async with _PairedPipe() as pipe:
+    # Attach the echo tool for the duration of the ACP session.
+    async with acp_agent.default_agent._temporary_tools(echo), _PairedPipe() as pipe:
         assert pipe.client_writer is not None
         assert pipe.client_reader is not None
         assert pipe.server_writer is not None

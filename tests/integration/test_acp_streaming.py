@@ -50,7 +50,7 @@ from agentpool.agents.events import (
 from agentpool.messaging import ChatMessage
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:
