@@ -143,7 +143,7 @@ async def test_immediate_send_error_handling(caplog: pytest.LogCaptureFixture):
         return task
 
     mock_acp_agent = AsyncMock()
-    mock_acp_agent.tasks.create_task = mock_create_task
+    mock_acp_agent._task_group.start_soon = mock_create_task
 
     session = ACPSession(
         session_id="test_session",

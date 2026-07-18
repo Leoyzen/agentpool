@@ -74,8 +74,8 @@ def _mock_skills_on_pool(pool: AgentPool, skills: list[Skill]) -> None:
 def _make_mock_acp_agent() -> MagicMock:
     """Create a mock ACP agent suitable for ACPSession construction."""
     mock_acp_agent = MagicMock()
-    mock_acp_agent.tasks = MagicMock()
-    mock_acp_agent.tasks.create_task = MagicMock(return_value=MagicMock())
+    mock_acp_agent._task_group = MagicMock()
+    mock_acp_agent._task_group.start_soon = MagicMock()
     mock_acp_agent._mcp_manager = MagicMock()
     return mock_acp_agent
 

@@ -25,7 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import tempfile
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from exxec import MockExecutionEnvironment
 
@@ -36,7 +36,6 @@ from agentpool import AgentsManifest
 from agentpool.delegation import AgentPool
 from agentpool.models.agents import NativeAgentConfig
 from agentpool.models.model_configs import TestModelConfig
-from agentpool.utils.tasks import TaskManager
 from agentpool_server.acp_server.session import ACPSession
 
 
@@ -105,7 +104,7 @@ class ToolCallTestHarness:
 
     def __post_init__(self) -> None:
         self._mock_acp_agent = AsyncMock()
-        self._mock_acp_agent.tasks = TaskManager()
+        self._mock_acp_agent._task_group = MagicMock()
 
     async def execute_tool(
         self,

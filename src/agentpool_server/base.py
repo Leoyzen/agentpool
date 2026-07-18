@@ -6,10 +6,8 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Self
 
-import anyio
-
 from agentpool.log import get_logger
-from agentpool.utils.tasks import TaskManager
+from agentpool.utils.task_group import ManagedTaskGroup
 
 
 if TYPE_CHECKING:
@@ -31,7 +29,7 @@ class BaseServer:
     - async with run_context() - automatic server start/stop management
 
     Features:
-    - Centralized task management via TaskManager
+    - Centralized task management via ManagedTaskGroup
     - Configurable exception handling via raise_exceptions parameter
     - Automatic pool lifecycle management
     - Background task lifecycle management
@@ -56,10 +54,9 @@ class BaseServer:
         self.pool = pool
         self.name = name or f"{self.__class__.__name__}-{id(self):x}"
         self.raise_exceptions = raise_exceptions
-        self.task_manager = TaskManager()
+        self._task_group = ManagedTaskGroup()
         self._server_task: asyncio.Task[None] | None = None
         self._shutdown_event = asyncio.Event()
-        self._task_group: anyio.abc.TaskGroup | None = None
         self.log = logger.bind(server_name=self.name)
 
     async def __aenter__(self) -> Self:
@@ -74,8 +71,8 @@ class BaseServer:
         exc_tb: TracebackType | None,
     ) -> None:
         """Exit async context and cleanup server resources."""
-        # Cleanup any pending tasks
-        await self.task_manager.cleanup_tasks()
+        # Close task group (idempotent — safe if already closed by start())
+        await self._task_group.close()
         # Cleanup pool
         await self.pool.__aexit__(exc_type, exc_val, exc_tb)
 
@@ -96,32 +93,47 @@ class BaseServer:
         This is the public interface that handles exception management
         based on the raise_exceptions setting. Subclasses should implement
         _start_async() instead of overriding this method.
+
+        The task group is opened and closed within this method to ensure
+        self-contained lifecycle — start_background() callers do not need
+        to wrap in ``async with server:``.
         """
-        async with anyio.create_task_group() as tg:
-            self._task_group = tg
-            try:
-                self.log.info("Starting server")
-                await self._start_async()
-            except Exception as e:
-                if self.raise_exceptions:
-                    raise
-                self.log.exception("Server error", exc_info=e)
-            finally:
-                await self.shutdown()
+        await self._task_group.__aenter__()
+        try:
+            self.log.info("Starting server")
+            await self._start_async()
+        except Exception as e:
+            if self.raise_exceptions:
+                raise
+            self.log.exception("Server error", exc_info=e)
+        finally:
+            await self._safe_close_task_group()
+            await self.shutdown()
+
+    async def _safe_close_task_group(self) -> None:
+        """Close the task group, suppressing and logging any errors.
+
+        This prevents cleanup errors from masking the original exception
+        that triggered the finally block.
+        """
+        try:
+            await self._task_group.close()
+        except BaseExceptionGroup as eg:
+            # Filter out CancelledError (expected during shutdown)
+            _, real_errors = eg.split(lambda e: isinstance(e, asyncio.CancelledError))
+            if real_errors is not None:
+                self.log.warning("Errors during task group shutdown", exc_info=real_errors)
+        except Exception as e:  # noqa: BLE001
+            self.log.warning("Unexpected error closing task group", exc_info=e)
 
     async def shutdown(self) -> None:
         """Shutdown server resources.
 
         This method can be overridden by subclasses to add specific
-        cleanup logic. The base implementation handles task cleanup.
+        cleanup logic. The base implementation signals shutdown.
         """
-        try:
-            await self.task_manager.cleanup_tasks()
-        except Exception:
-            self.log.exception("Error during server shutdown")
-        finally:
-            self._shutdown_event.set()
-            self.log.info("Server shutdown complete")
+        self._shutdown_event.set()
+        self.log.info("Server shutdown complete")
 
     def start_background(self) -> None:
         """Start server in background task (non-blocking).

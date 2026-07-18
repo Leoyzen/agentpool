@@ -13,11 +13,10 @@ from anyenv.signals import Signal
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
 from agentpool.talk import AggregatedTalkStats
-from agentpool.utils.tasks import TaskManager
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable, Coroutine
     from datetime import timedelta
     from types import TracebackType
 
@@ -108,7 +107,7 @@ class MessageNode[TDeps, TResult](ABC):
             if prompt := event.to_prompt():
                 await self.run(prompt)
 
-        self.task_manager = TaskManager()
+        self._pending_tasks: set[asyncio.Task[Any]] = set()
         self._name = name or self.__class__.__name__
         self._display_name = display_name
         self.log = logger.bind(agent_name=self._name)
@@ -236,7 +235,77 @@ class MessageNode[TDeps, TResult](ABC):
         await self._events.__aexit__(exc_type, exc_val, exc_tb)
         if not self._mcp_shared:
             await self.mcp.__aexit__(exc_type, exc_val, exc_tb)
-        await self.task_manager.cleanup_tasks()
+        # Cancel and wait for all pending background tasks, then clear.
+        if self._pending_tasks:
+            for task in self._pending_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*self._pending_tasks, return_exceptions=True)
+        self._pending_tasks.clear()
+
+    def spawn_task(
+        self,
+        coro_fn: Callable[..., Coroutine[Any, Any, Any]],
+        *args: Any,
+    ) -> asyncio.Task[Any]:
+        """Schedule a coroutine for background execution on this node.
+
+        The created task is tracked in ``_pending_tasks`` and automatically
+        removed when it completes. All pending tasks are awaited in
+        ``__aexit__``.
+
+        Args:
+            coro_fn: Coroutine function to call.
+            *args: Positional arguments passed to ``coro_fn``.
+
+        Returns:
+            The created :class:`asyncio.Task`.
+        """
+        task = asyncio.create_task(coro_fn(*args))
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._pending_tasks.discard)
+        return task
+
+    def fire_and_forget(self, coro: Coroutine[Any, Any, Any]) -> None:
+        """Run a coroutine in the background without waiting for result.
+
+        The coroutine is wrapped in a try/except that logs and swallows
+        exceptions, preventing one non-critical task failure from
+        propagating.
+
+        Args:
+            coro: Coroutine to run in the background.
+        """
+
+        async def _safe_run() -> None:
+            try:
+                await coro
+            except Exception:
+                self.log.exception("fire_and_forget task failed")
+
+        task = asyncio.create_task(_safe_run())
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._pending_tasks.discard)
+
+    @property
+    def task_manager(self) -> _TaskManagerShim:
+        """Deprecated: backward-compat shim for the old TaskManager API.
+
+        .. deprecated::
+            Use :meth:`spawn_task` or :attr:`_pending_tasks` directly.
+
+        Returns:
+            A shim object that provides the old TaskManager method surface
+            (``complete_tasks``, ``cleanup_tasks``, ``fire_and_forget``,
+            ``create_task``, ``_pending_tasks``) backed by this node's
+            ``_pending_tasks`` set.
+        """
+        warnings.warn(
+            "task_manager is deprecated. Use spawn_task() or _pending_tasks instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return _TaskManagerShim(self)
 
     @property
     def connection_stats(self) -> AggregatedTalkStats:
@@ -671,3 +740,67 @@ class MessageNode[TDeps, TResult](ABC):
     @abstractmethod
     def run_iter(self, *prompts: Any, **kwargs: Any) -> AsyncIterator[ChatMessage[Any]]:
         """Yield messages during execution."""
+
+
+class _TaskManagerShim:
+    """Backward-compat shim providing the old ``TaskManager`` API surface.
+
+    Wraps a :class:`MessageNode`'s ``_pending_tasks`` set and delegates
+    the deprecated TaskManager methods to the new asyncio-based patterns.
+    """
+
+    def __init__(self, node: MessageNode[Any, Any]) -> None:
+        self._node = node
+
+    @property
+    def _pending_tasks(self) -> set[asyncio.Task[Any]]:
+        """Direct access to the node's pending task set."""
+        return self._node._pending_tasks
+
+    def fire_and_forget(self, coro: Coroutine[Any, Any, Any]) -> None:
+        """Run coroutine without waiting for result."""
+        self._node.fire_and_forget(coro)
+
+    def create_task(
+        self,
+        coro: Coroutine[Any, Any, Any],
+        *,
+        name: str | None = None,
+        priority: int = 0,
+        delay: timedelta | None = None,
+    ) -> asyncio.Task[Any]:
+        """Create and track a new task.
+
+        Args:
+            coro: Coroutine to run.
+            name: Optional name for the task.
+            priority: Ignored (kept for API compat).
+            delay: Ignored (kept for API compat).
+        """
+        del priority, delay  # unused, accepted for API compat
+
+        async def _runner() -> Any:
+            return await coro
+
+        task = asyncio.create_task(_runner(), name=name) if name else asyncio.create_task(_runner())
+        self._node._pending_tasks.add(task)
+        task.add_done_callback(self._node._pending_tasks.discard)
+        return task
+
+    async def cleanup_tasks(self) -> None:
+        """Wait for all pending tasks to complete."""
+        if self._node._pending_tasks:
+            await asyncio.gather(*self._node._pending_tasks, return_exceptions=True)
+        self._node._pending_tasks.clear()
+
+    async def complete_tasks(self, cancel: bool = False) -> None:
+        """Wait for all pending tasks to complete."""
+        if cancel:
+            for task in self._node._pending_tasks:
+                task.cancel()
+        if self._node._pending_tasks:
+            await asyncio.wait(self._node._pending_tasks)
+
+    def is_busy(self) -> bool:
+        """Check if there are any tasks pending."""
+        return bool(self._node._pending_tasks)
