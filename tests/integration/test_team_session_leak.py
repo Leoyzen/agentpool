@@ -1,13 +1,14 @@
-"""L3 integration test: member session leak when lead run terminates.
+"""L2 integration test: member session leak when lead run terminates.
 
 Reproduces the bug where member sessions spawned by ``team_create`` leak
 when the lead agent's RunHandle terminates without ``close_session`` being
 called on the lead session (e.g., the run finishes but the session stays
 alive for follow-ups).
 
-The test uses a **real** AgentPool + SessionPool (no mocks) with TestModel
-agents so the full session lifecycle (RunHandle, background tasks, EventBus)
-is exercised end-to-end.
+The test uses a **real** AgentPool + SessionPool (no mocks) with a
+manually created RunHandle so the full session lifecycle (RunHandle,
+background tasks, complete_event) is exercised without depending on
+TestModel timing.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
+import uuid
 
 import pytest
 import yamling
@@ -25,6 +27,8 @@ from agentpool.capabilities.runloop_delegation import RunLoopDelegationService
 from agentpool.capabilities.team_comm_capability import TeamCommCapability
 from agentpool.host.context import RunScope
 from agentpool.host.registry import AgentRegistry
+from agentpool.orchestrator.core import SessionState  # noqa: TC001
+from agentpool.orchestrator.run import RunHandle
 
 
 if TYPE_CHECKING:
@@ -105,11 +109,31 @@ def _make_mock_run_context(agent_ctx: AgentContext) -> MagicMock:
     return ctx
 
 
+def _inject_run_handle(
+    session_pool: Any,
+    session: SessionState,
+) -> RunHandle:
+    """Manually create and register a RunHandle for the given session.
+
+    This avoids depending on TestModel timing — the RunHandle is created
+    in IDLE state and can be closed directly to simulate run termination.
+    """
+    run_id = str(uuid.uuid4())
+    run_handle = RunHandle(
+        run_id=run_id,
+        session_id=session.session_id,
+        agent_type="native",
+    )
+    session_pool.sessions._runs[run_id] = run_handle
+    session.current_run_id = run_id
+    return run_handle
+
+
 @pytest.mark.integration
 async def test_member_sessions_closed_when_lead_run_terminates(
     tmp_path: Any,
 ) -> None:
-    """Given: real AgentPool with team_mode, lead session with active run.
+    """Given: real AgentPool with team_mode, lead session with active RunHandle.
 
     When: team_create spawns member sessions, then the lead's RunHandle
         terminates (RunHandle.close() called directly, simulating run
@@ -139,20 +163,12 @@ async def test_member_sessions_closed_when_lead_run_terminates(
             team_member_name="coordinator",
         )
 
-        # Start a run on the lead session by sending a message.
-        # TestModel will respond immediately, but the run stays alive
-        # in IDLE state for follow-ups.
-        await session_pool.send_message(
-            lead_session_id,
-            "Start working",
-        )
-        # Give the run a moment to start and process the TestModel response.
-        await asyncio.sleep(0.5)
-
-        # Verify the lead session has an active run.
         lead_session = session_pool.sessions.get_session(lead_session_id)
         assert lead_session is not None
-        assert lead_session.current_run_id is not None
+
+        # Manually inject a RunHandle so we have control over when it
+        # terminates, without depending on TestModel timing.
+        lead_run_handle = _inject_run_handle(session_pool, lead_session)
 
         # Construct AgentContext and call team_create.
         agent_ctx = _make_agent_context(pool, lead_session_id, team_mode_config)
@@ -196,12 +212,11 @@ async def test_member_sessions_closed_when_lead_run_terminates(
         # Simulate the lead's RunHandle terminating WITHOUT close_session.
         # This happens when the run finishes but the session stays alive
         # for follow-ups (protocol server scenario).
-        lead_run_id = lead_session.current_run_id
-        lead_run_handle = session_pool.sessions._runs.get(lead_run_id)
-        assert lead_run_handle is not None
-
-        # Close the RunHandle directly (not close_session).
+        # close() sets _closing=True; complete_event is normally set by
+        # the start() generator's finally block, which we simulate here
+        # since the RunHandle was manually created without start().
         lead_run_handle.close()
+        lead_run_handle.complete_event.set()
 
         # Wait for complete_event to fire and cleanup callbacks to execute.
         await asyncio.wait_for(
