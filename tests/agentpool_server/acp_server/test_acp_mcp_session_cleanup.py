@@ -193,7 +193,7 @@ async def test_has_active_sessions_false_when_empty(
 # --- Integration test (1) ---
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_connect_acp_mcp_server_registers_session(
     acp_agent: AgentPoolACPAgent,

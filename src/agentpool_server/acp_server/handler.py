@@ -594,6 +594,11 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         )
         input_provider = ACPInputProvider(session=session_proxy)  # type: ignore[arg-type]
 
+        # Emit user_message_chunk notifications for the user's input before
+        # processing the prompt. Per the ACP spec, the server should notify
+        # the client of the user's message chunks.
+        await self._emit_user_message_chunks(session_id, prompt)
+
         stop_reason: StopReason = "end_turn"
         try:
             message_id = await session_pool.send_message(
@@ -766,6 +771,45 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         from acp.schema import PromptResponse
 
         return PromptResponse(stop_reason=stop_reason)
+
+    async def _emit_user_message_chunks(
+        self,
+        session_id: str,
+        prompt: Sequence[ContentBlock],
+    ) -> None:
+        """Emit ``user_message_chunk`` SessionUpdate notifications for user input.
+
+        Per the ACP spec, the server should emit ``user_message_chunk``
+        notifications when a user message is processed. This method
+        converts the user's content blocks to ``UserMessageChunk``
+        session updates and sends them to the client before the agent
+        begins processing.
+
+        Args:
+            session_id: The ACP session identifier.
+            prompt: ACP content blocks from the prompt request.
+        """
+        from acp.schema import SessionNotification, TextContentBlock
+
+        for block in prompt:
+            if not isinstance(block, TextContentBlock):
+                continue
+            text = block.text
+            if not text:
+                continue
+            chunks = ACPEventConverter.build_user_message_chunks(text)
+            for chunk in chunks:
+                notification = SessionNotification(
+                    session_id=session_id,
+                    update=chunk,
+                )
+                try:
+                    await self.client.session_update(notification)
+                except (ConnectionResetError, BrokenPipeError, anyio.ClosedResourceError):
+                    logger.debug(
+                        "Failed to send user_message_chunk",
+                        session_id=session_id,
+                    )
 
 
 class _ACPSessionProxy:

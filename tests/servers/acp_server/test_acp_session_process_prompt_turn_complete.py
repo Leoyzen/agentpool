@@ -19,7 +19,7 @@ from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.session import ACPSession
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Annotated, Any
 
 import anyenv
@@ -130,7 +131,11 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
         import logfire
 
         self.app = FastAPI()
-        logfire.instrument_fastapi(self.app)
+        if os.environ.get("LOGFIRE_DISABLE", "").lower() != "true":
+            try:
+                logfire.instrument_fastapi(self.app)
+            except Exception:  # noqa: BLE001
+                logger.warning("Failed to instrument FastAPI app with Logfire", exc_info=True)
 
         if cors:
             from fastapi.middleware.cors import CORSMiddleware
@@ -189,6 +194,9 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
         session_pool = self.pool.session_pool
         if session_pool is None:
             raise HTTPException(500, "SessionPool not available")
+
+        if not request.messages:
+            raise HTTPException(400, "Messages list must not be empty")
 
         content = request.messages[-1].content or ""
 

@@ -3,7 +3,7 @@
 Covers Phase C group C3 (9 tasks):
     - C3.1 test_post_message — POST /session/{id}/message
     - C3.2 test_abort_active_execution — POST /session/{id}/abort
-    - C3.3 test_summarize_session [xfail #189] — POST /session/{id}/summarize
+    - C3.3 test_summarize_session — POST /session/{id}/summarize
     - C3.4 test_list_messages — GET /session/{id}/message
     - C3.5 test_delete_message_part — DELETE .../message/{mid}/part/{pid}
     - C3.6 test_share_session [skip] — POST /session/{id}/share
@@ -74,12 +74,6 @@ async def _send_message(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="POST /session/{id}/message returns 500 due to OTel _IncludedRouter.path bug (see #190)",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
@@ -138,16 +132,10 @@ async def test_abort_active_execution(
 
 
 # ---------------------------------------------------------------------------
-# C3.3 — POST /session/{id}/summarize [xfail #189]
+# C3.3 — POST /session/{id}/summarize [fixed #189]
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="Server returns MessageWithParts instead of boolean (see #189)",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
@@ -157,16 +145,13 @@ async def test_summarize_session(
     subprocess_server: SubprocessServer,
     e2e_config: Path,
 ) -> None:
-    """C3.3: POST /session/{id}/summarize, verify 200 with boolean body.
-
-    The opencode client expects the response body to be a boolean indicating
-    whether the summarize succeeded. Currently the server returns a
-    MessageWithParts object instead (known bug #189).
-    """
+    """C3.3: POST /session/{id}/summarize, verify 200 with boolean body."""
     base_url = subprocess_server.base_url
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         session_id = await _create_session(base_url, client)
+        # Send a message first so the session has content to summarize.
+        await _send_message(base_url, client, session_id)
         resp = await client.post(
             f"{base_url}/session/{session_id}/summarize",
             json={},
@@ -175,7 +160,6 @@ async def test_summarize_session(
             f"Expected 200 for summarize, got {resp.status_code}: {resp.text}"
         )
         body = resp.json()
-        # This assertion fails because server returns MessageWithParts (dict).
         assert isinstance(body, bool), (
             f"Expected boolean body for summarize, got {type(body)}: {body}"
         )

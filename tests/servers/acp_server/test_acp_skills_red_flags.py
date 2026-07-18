@@ -17,7 +17,7 @@ from agentpool.skills.manager import SkillsManager
 from agentpool_config.skills import SkillsConfig
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 class TestSkillsIncludeDefault:

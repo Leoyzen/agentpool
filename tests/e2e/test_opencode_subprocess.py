@@ -67,10 +67,6 @@ async def test_server_startup(subprocess_server: SubprocessServer, e2e_config: P
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
     indirect=True,
 )
-@pytest.mark.xfail(
-    reason="serve-opencode returns 500 for message POST (#185)", strict=False, raises=AssertionError
-)
-@pytest.mark.known_bug
 async def test_basic_prompt(subprocess_server: SubprocessServer, e2e_config: Path) -> None:
     """L4a: Create session, send message, verify response via HTTP SSE."""
     base_url = subprocess_server.base_url

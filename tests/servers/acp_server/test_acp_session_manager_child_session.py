@@ -15,7 +15,7 @@ from agentpool_server.acp_server.session_manager import ACPSessionManager
 from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 def _make_pool_with_sessions() -> tuple[AgentPool, Agent, SessionPool, MemoryStorageProvider]:

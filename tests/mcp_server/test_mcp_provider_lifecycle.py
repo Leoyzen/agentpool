@@ -34,7 +34,7 @@ from agentpool_config.mcp_server import (
 )
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------

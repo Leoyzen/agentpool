@@ -23,7 +23,7 @@ from agentpool.capabilities.skill_manager_cap import SkillManagerCap
 from agentpool.skills.skill import Skill
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 # ---- Mock MCP server capability ----

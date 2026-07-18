@@ -182,7 +182,7 @@ def _build_test_fixture(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_initialize_mcp_servers_registers_transport_and_syncs_snapshot() -> None:
     """initialize_mcp_servers() registers ACP transport and updates snapshot.
 
@@ -232,7 +232,7 @@ async def test_initialize_mcp_servers_registers_transport_and_syncs_snapshot() -
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_get_capabilities_finds_acp_configs_after_initialize() -> None:
     """get_capabilities(session_id) returns non-empty list after initialize.
 
@@ -268,7 +268,7 @@ async def test_get_capabilities_finds_acp_configs_after_initialize() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_child_session_inherits_acp_configs_and_transports() -> None:
     """Child session inherits parent's ACP configs and transports.
 
@@ -363,7 +363,7 @@ async def test_child_session_inherits_acp_configs_and_transports() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_child_get_capabilities_finds_inherited_acp_configs() -> None:
     """get_capabilities on child session returns non-empty list.
 
@@ -435,7 +435,7 @@ async def test_child_get_capabilities_finds_inherited_acp_configs() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 @pytest.mark.real_mcp
 async def test_function_model_discovers_mcp_tools_through_acp_transport() -> None:
     """FunctionModel discovers MCP tools through the real ACP transport.

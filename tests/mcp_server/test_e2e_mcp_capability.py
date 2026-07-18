@@ -178,7 +178,7 @@ def _make_responsive_send_request(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_get_capabilities_with_acp_config_creates_real_toolset() -> None:
     """get_capabilities(session_id) with ACP config creates a real toolset.
 
@@ -226,7 +226,7 @@ async def test_get_capabilities_with_acp_config_creates_real_toolset() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_initialize_mcp_servers_full_chain() -> None:
     """connect_acp_mcp_server + add_acp_transport leaves correct state.
 
@@ -328,7 +328,7 @@ async def test_initialize_mcp_servers_full_chain() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_tool_execution_through_get_capabilities_and_acp_transport() -> None:  # noqa: PLR0915
     """get_capabilities + AcpMcpTransport.connect_session + ClientSession.initialize.
 
@@ -450,7 +450,7 @@ async def test_tool_execution_through_get_capabilities_and_acp_transport() -> No
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_acp_transport_failure_during_tool_execution_cleanup() -> None:
     """cleanup_session() removes all resources when ACP transport fails.
 
@@ -538,7 +538,7 @@ async def test_acp_transport_failure_during_tool_execution_cleanup() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_child_session_inherits_parent_acp_transports() -> None:
     """copy_pre_created_transports() inherits parent ACP transports.
 

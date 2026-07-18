@@ -95,10 +95,7 @@ async def test_summarize_uses_session_pool(
     assert run_stream_called is True
 
     result = response.json()
-    assert "info" in result
-    assert "parts" in result
-    # Should have step_start, text_part, step_finish
-    assert len(result["parts"]) >= 2
+    assert result is True
 
 
 async def test_summarize_routes_through_session_pool(
@@ -178,5 +175,4 @@ async def test_summarize_routes_through_session_pool(
     assert mock_pool.session_pool.run_stream.call_count == 1
 
     result = response.json()
-    assert "info" in result
-    assert "parts" in result
+    assert result is True

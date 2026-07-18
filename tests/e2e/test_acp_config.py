@@ -135,15 +135,6 @@ async def test_session_set_model(acp_server: ACPConfigHandle) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="SetSessionConfigOptionRequest.value uses serialization_alias='valueId' "
-    "(output-only) but client sends 'valueId' via by_alias=True; server expects 'value' "
-    "on input → Invalid params (-32602). Schema bug: should use alias= not "
-    "serialization_alias=.",
-    strict=False,
-    raises=RequestError,
-)
-@pytest.mark.known_bug
 async def test_session_set_config_option(acp_server: ACPConfigHandle) -> None:
     """B3.3: Create session, set config option (e.g., agent_role), verify change."""
     new_sess = await acp_server.new_session()
