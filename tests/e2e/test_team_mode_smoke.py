@@ -234,8 +234,7 @@ async def test_team_mode_session_creation(
 )
 @pytest.mark.xfail(
     reason=(
-        "POST /session/{id}/message returns 500 due to OTel"
-        " _IncludedRouter.path bug (#185, #190)"
+        "POST /session/{id}/message returns 500 due to OTel _IncludedRouter.path bug (#185, #190)"
     ),
     strict=False,
     raises=AssertionError,

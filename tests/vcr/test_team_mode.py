@@ -10,17 +10,17 @@ agents, capabilities, EventBus, SessionController, and team-mode
 toolset all run for real in-process. Cassettes replay the recorded
 model responses deterministically in CI.
 
-Cassettes ([HUMAN-REQUIRED]):
-- ``tests/cassettes/vcr/test_team_mode/test_team_mode_via_vcr.yaml``
+Cassettes:
+- ``tests/cassettes/vcr/test_team_mode/test_team_mode_via_vcr[create_team].yaml``
+- ``tests/cassettes/vcr/test_team_mode/test_team_mode_via_vcr[full_lifecycle].yaml``
+- ``tests/cassettes/vcr/test_team_mode/test_team_mode_via_vcr[send_message].yaml``
 
 Record with::
 
     OPENAI_API_KEY=sk-... uv run pytest tests/vcr/test_team_mode.py \\
         --record-mode=once
 
-See ``tests/AGENTS.md`` for the VCR recording workflow and
-``openspec/changes/layered-testing-infrastructure/design.md`` for
-design D6 (VCR scope) and D15 (``vcr_team_pool`` fixture).
+See ``tests/AGENTS.md`` for the VCR recording workflow.
 """
 
 from __future__ import annotations
@@ -36,7 +36,6 @@ from agentpool.agents.events import (
     ToolCallCompleteEvent,
     ToolCallStartEvent,
 )
-from tests.vcr.conftest import cassette_exists  # noqa: F401
 
 
 if TYPE_CHECKING:
@@ -48,32 +47,6 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.vcr
 
 _MODULE_STEM = "test_team_mode"
-
-
-# ---------------------------------------------------------------------------
-# VCR config override — lenient matching for team-mode tests.
-#
-# Cassettes may be recorded with a different model/endpoint than the
-# ``vcr_team_pool`` fixture uses (e.g. recorded with ``svc/deepseek-v4-flash``
-# at a custom gateway, but fixture uses ``openai:gpt-4o-mini``). Matching
-# on method+path only ensures VCR replays correctly regardless of model
-# name or host differences.
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-def vcr_config() -> dict[str, Any]:
-    """Module-scoped VCR configuration for team-mode tests.
-
-    Overrides the root ``vcr_config`` to use lenient matching
-    (method + path only), so cassettes recorded with different models
-    or endpoints replay correctly.
-    """
-    return {
-        "filter_headers": ["authorization", "x-api-key", "cookie", "set-cookie"],
-        "decode_compressed_response": True,
-        "match_on": ["method", "path"],
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +139,7 @@ async def _drain_events(stream: AsyncIterator[Any]) -> list[Any]:
 
 
 # ---------------------------------------------------------------------------
-# Parameterized VCR test
+# Skip guard — only skip when no cassette exists and not recording
 # ---------------------------------------------------------------------------
 
 
@@ -174,40 +147,28 @@ async def _drain_events(stream: AsyncIterator[Any]) -> list[Any]:
 def _skip_if_no_cassette(request: pytest.FixtureRequest) -> None:
     """Skip test if cassette doesn't exist and we're not recording.
 
-    When ``--record-mode`` is not ``none`` (e.g. ``once``), the test runs
-    even without an existing cassette so it can record.
-    In replay mode (default), the test is skipped if no cassette exists.
-
-    Checks both the legacy ``tests/cassettes/vcr/`` path and the
-    pytest-recording default ``tests/vcr/cassettes/`` path.
+    Uses the ``VCR_RECORDING`` env var and ``--record-mode`` CLI option
+    to determine if we're in recording mode. In replay mode (default),
+    the test is skipped if no cassette exists at the standard path.
     """
+    import os
     from pathlib import Path
 
     record_mode = request.config.getoption("--record-mode", default="none") or "none"
-    if record_mode != "none":
+    if record_mode != "none" or os.getenv("VCR_RECORDING"):
         return  # Allow recording
 
-    # Check both possible cassette locations.
-    cassettes_dir = Path(__file__).parent / "cassettes" / _MODULE_STEM
-    legacy_dir = Path(__file__).parent.parent / "cassettes" / "vcr" / _MODULE_STEM
-    has_cassette = any(cassettes_dir.glob("*.yaml")) or any(legacy_dir.glob("*.yaml"))
-    if not has_cassette:
+    cassettes_dir = Path(__file__).parent.parent / "cassettes" / "vcr" / _MODULE_STEM
+    if not any(cassettes_dir.glob("*.yaml")):
         pytest.skip(
             "Cassette not recorded yet — run with "
             "`OPENAI_API_KEY=... uv run pytest tests/vcr/test_team_mode.py --record-mode=once`",
         )
 
 
-@pytest.fixture(autouse=True)
-def fail_partially_used_vcr_cassettes(request: pytest.FixtureRequest, vcr: Any) -> Any:
-    """Override: disable strict cassette usage for team-mode VCR tests.
-
-    Team-mode cassettes naturally contain extra interactions from member
-    sessions (spawned via ``team_create``) that may not all be replayed.
-    The root conftest's ``fail_partially_used_vcr_cassettes`` would flag
-    these as unplayed, causing false failures.
-    """
-    yield  # No-op  # noqa: PT022
+# ---------------------------------------------------------------------------
+# Parameterized VCR test
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -216,7 +177,6 @@ def fail_partially_used_vcr_cassettes(request: pytest.FixtureRequest, vcr: Any) 
 )
 @pytest.mark.usefixtures("_skip_if_no_cassette")
 async def test_team_mode_via_vcr(
-    allow_model_requests: None,
     vcr_team_pool: AgentPool,
     case: TeamCase,
 ) -> None:
