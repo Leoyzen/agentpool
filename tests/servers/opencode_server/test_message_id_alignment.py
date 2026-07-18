@@ -230,6 +230,8 @@ class TestBeforeConsumerLoopPendingMessageId:
         )
 
         session_pool = Mock()
+        session_pool.sessions = Mock()
+        session_pool.sessions.get_session = Mock(return_value=None)
         server_state = Mock()
         server_state.working_dir = "/tmp"
 
@@ -254,6 +256,8 @@ class TestBeforeConsumerLoopPendingMessageId:
         )
 
         session_pool = Mock()
+        session_pool.sessions = Mock()
+        session_pool.sessions.get_session = Mock(return_value=None)
         server_state = Mock()
         server_state.working_dir = "/tmp"
 
