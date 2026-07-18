@@ -1160,7 +1160,15 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             and not _in_turn_context.get()
         ):
             session_pool = self.host_context.session_pool
-            effective_session_id = session_id or generate_session_id()
+            # Fall back to the agent's home session (set via set_session_context
+            # during AgentFactory.create_session_agent) before generating a new
+            # session_id. This ensures that instance-level state mutations
+            # (_temporary_tools, /register-tool, override(tools=...)) are
+            # preserved when run_stream() is called without an explicit
+            # session_id — see issue #204.
+            effective_session_id = (
+                session_id or getattr(self._events, "session_id", None) or generate_session_id()
+            )
             existing_session = session_pool.sessions.get_session(effective_session_id)
             if existing_session is None or existing_session.agent_name == self.name:
                 return self._pool_stream_iter(
