@@ -210,6 +210,20 @@ class CommChannel(Protocol):
     (append for deltas, upsert for entity-state events).
     """
 
+    @property
+    def journal(self) -> Journal:
+        """The Journal instance owned by this channel.
+
+        Every CommChannel owns a Journal. Callers (notably
+        ``RunHandle.__post_init__``) can access this to reuse the same
+        Journal instance, ensuring ``resume()`` reads the same events
+        that ``publish()`` writes.
+
+        Returns:
+            The Journal instance owned by this channel.
+        """
+        ...
+
     def set_replaying(self, flag: bool) -> None:
         """Set the replaying flag.
 

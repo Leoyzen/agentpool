@@ -1,5 +1,7 @@
-"""Regression test: RunHandle._journal must be the same instance as
-CommChannel._journal to ensure crash recovery sees all events.
+"""Regression test for journal instance consistency.
+
+RunHandle._journal must be the same instance as CommChannel._journal
+to ensure crash recovery sees all events.
 
 When ``RunHandle`` is constructed via the ``SessionPool`` or
 ``SessionController`` paths, a ``ProtocolChannel`` is created with a
@@ -59,7 +61,7 @@ def _make_minimal_run_handle(**overrides: Any) -> RunHandle:
 
 
 def test_direct_channel_journal_shared_with_run_handle() -> None:
-    """When _comm_channel is None, RunHandle creates DirectChannel(self._journal) — same instance."""
+    """DirectChannel default path: same instance via DirectChannel(self._journal)."""
     handle = _make_minimal_run_handle()
     assert handle._journal is not None
     assert handle._comm_channel is not None
@@ -68,7 +70,7 @@ def test_direct_channel_journal_shared_with_run_handle() -> None:
 
 
 def test_protocol_channel_journal_shared_with_run_handle() -> None:
-    """When _comm_channel is provided with a journal, RunHandle._journal must be the same instance."""
+    """ProtocolChannel explicit path: both _comm_channel and _journal passed."""
     journal = MemoryJournal()
     event_bus = EventBus()
     comm_channel = ProtocolChannel(
@@ -87,7 +89,7 @@ def test_protocol_channel_journal_shared_with_run_handle() -> None:
 
 
 def test_protocol_channel_journal_reused_when_journal_not_passed() -> None:
-    """When _comm_channel is provided but _journal is None, __post_init__ reuses CommChannel's journal.
+    """ProtocolChannel reuse path: __post_init__ reuses CommChannel's journal.
 
     This is the defensive guard that prevents future construction sites
     from reintroducing the bug: even if a caller forgets to pass

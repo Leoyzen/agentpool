@@ -32,7 +32,6 @@ from agentpool.lifecycle import (
     SnapshotStore,
     TriggerSource,
 )
-from agentpool.lifecycle.comm_channel import ProtocolChannel
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
 from agentpool.observability.spans import safe_span
@@ -267,11 +266,7 @@ class RunHandle:
         # CommChannel's journal to ensure resume() reads the same events
         # that publish() writes. Without this, crash recovery silently
         # fails because resume() reads an empty journal.
-        if (
-            self._journal is None
-            and self._comm_channel is not None
-            and isinstance(self._comm_channel, DirectChannel | ProtocolChannel)
-        ):
+        if self._journal is None and self._comm_channel is not None:
             self._journal = self._comm_channel.journal
         if self._journal is None:
             self._journal = MemoryJournal()

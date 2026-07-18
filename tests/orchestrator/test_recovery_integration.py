@@ -175,7 +175,9 @@ def test_resume_includes_upsert_events():
     # Subsequent events (jseq >= 2) are "since" snapshot.
     journal.append(_MockEvent(turn_id="turn_001", payload="filler"))  # jseq=1
     journal.append(_MockEvent(turn_id="turn_001", payload="delta"))  # jseq=2
-    journal.upsert("tool_call:abc", _MockEvent(turn_id="turn_001", payload="state_update"))  # jseq=3
+    journal.upsert(
+        "tool_call:abc", _MockEvent(turn_id="turn_001", payload="state_update")
+    )  # jseq=3
 
     result = journal.resume(snapshot_store)
 
