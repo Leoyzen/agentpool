@@ -55,7 +55,7 @@ from agentpool.agents.events import StreamCompleteEvent, ToolCallStartEvent
 from agentpool.orchestrator.core import SessionPool
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 TEST_RESPONSE = "I am a test response"

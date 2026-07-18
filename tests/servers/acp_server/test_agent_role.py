@@ -16,7 +16,7 @@ from agentpool_server.acp_server.acp_agent import (
 )
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 MULTI_AGENT_CONFIG = """\

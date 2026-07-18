@@ -9,7 +9,7 @@ import pytest
 from agentpool.agents.events import ToastInfo
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 @pytest.mark.unit

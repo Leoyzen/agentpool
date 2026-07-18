@@ -16,7 +16,7 @@ import pytest
 from agentpool.mcp_server.global_pool import GlobalConnectionPool
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 class _FakeTransport:

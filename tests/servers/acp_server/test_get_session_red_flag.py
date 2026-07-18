@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from agentpool import AgentPool
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 def _make_manager_with_controller(pool: AgentPool) -> tuple[object, object]:

@@ -171,7 +171,7 @@ def pending_deferred_calls() -> list[PendingDeferredCall]:
 # ── Tests: Message History Replay ────────────────────────────────────────
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_load_session_replays_message_history(
     mock_acp_agent: AgentPoolACPAgent,
     mock_connection: AsyncMock,
@@ -225,7 +225,7 @@ async def test_load_session_replays_message_history(
     assert "I'll run that for you." in replay_args[1].parts[0].content
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_load_session_includes_pending_toolcallpart_without_toolreturnpart(
     mock_acp_agent: AgentPoolACPAgent,
     mock_connection: AsyncMock,
@@ -284,7 +284,7 @@ async def test_load_session_includes_pending_toolcallpart_without_toolreturnpart
     )
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_load_session_message_ordering_is_correct(
     mock_acp_agent: AgentPoolACPAgent,
 ) -> None:
@@ -345,7 +345,7 @@ async def test_load_session_message_ordering_is_correct(
     assert len(replay_args) == len(ordered_messages)
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_load_session_empty_conversation_no_replay(
     mock_acp_agent: AgentPoolACPAgent,
 ) -> None:
@@ -374,7 +374,7 @@ async def test_load_session_empty_conversation_no_replay(
     mock_session.notifications.replay.assert_not_awaited()
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_load_session_returns_response_with_config(
     mock_acp_agent: AgentPoolACPAgent,
 ) -> None:
@@ -409,7 +409,7 @@ async def test_load_session_returns_response_with_config(
 # ── Tests: Checkpoint-Aware Loading ──────────────────────────────────────
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_load_checkpoint_messages_used_for_replay(
     mock_acp_agent: AgentPoolACPAgent,
     storage_manager: StorageManager,
@@ -454,7 +454,7 @@ async def test_load_checkpoint_messages_used_for_replay(
                     assert part.tool_call_id != "pending_call_1"
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_load_session_with_checkpointed_data(
     mock_acp_agent: AgentPoolACPAgent,
     storage_manager: StorageManager,
@@ -503,7 +503,7 @@ async def test_load_session_with_checkpointed_data(
     assert len(replay_args) == len(pending_messages)
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_load_session_no_toolcalldeferredevent_during_replay(
     mock_acp_agent: AgentPoolACPAgent,
     pending_messages: list[ModelMessage],
@@ -543,7 +543,7 @@ async def test_load_session_no_toolcalldeferredevent_during_replay(
     # (verified by mocking notifications.replay, not any event bus method)
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_load_session_replay_preserves_chatmessage_model_messages(
     mock_acp_agent: AgentPoolACPAgent,
 ) -> None:
