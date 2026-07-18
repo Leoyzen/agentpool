@@ -8,7 +8,7 @@ coexistence scenarios.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -22,6 +22,11 @@ from agentpool_config.team_mode import (
     TeamDefaultsConfig,
     TeamModeConfig,
 )
+from tests.team_mode.conftest import build_agent_context, make_mock_run_context
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
 
 
 # ---------------------------------------------------------------------------
@@ -158,44 +163,42 @@ def _make_defaults_config(base_dir: str) -> TeamModeConfig:
 
 @pytest.mark.integration
 async def test_e2e_lifecycle_create_message_task_blackboard_delete(
-    tmp_path: Any,
+    team_mode_pool: AgentPool[Any],
 ) -> None:
-    """Given: lead agent with enabled team mode and mock SessionPool.
+    """Given: real AgentPool with team_mode enabled and a lead session.
 
     When: full lifecycle is exercised — create team, send message, create
         task, complete task, write/read blackboard, delete team.
 
-    Then: each step returns the expected result and FileTeamState on disk
-        reflects the changes.
+    Then: each step returns the expected result, real child sessions are
+        created in SessionPool, and FileTeamState on disk reflects the
+        changes.
     """
-    config = _make_enabled_config(
-        member_eligible=["worker", "reviewer"],
-        base_dir=str(tmp_path),
+    manifest = team_mode_pool.manifest
+    team_mode_config: TeamModeConfig | None = manifest.team_mode
+    assert team_mode_config is not None
+
+    session_pool = team_mode_pool.session_pool
+    assert session_pool is not None
+
+    # --- Setup: create lead session ---
+    session_id = "lead-session-001"
+    await session_pool.create_session(
+        session_id,
+        agent_name="coordinator",
+        team_role="lead",
+        team_member_name="coordinator",
     )
 
-    mock_registry = MagicMock()
-    mock_registry.exists = MagicMock(return_value=True)
-    mock_pool = MagicMock()
-    mock_pool.send_message = AsyncMock(return_value="msg_id_001")
-    mock_pool.close_session = AsyncMock()
-    mock_delegation = MagicMock()
-    mock_delegation.create_child_session = AsyncMock(return_value="child_session_001")
-
-    # --- Step 1: Create team ---
-    lead_meta: dict[str, Any] = {
+    agent_ctx = build_agent_context(team_mode_pool, session_id, team_mode_config)
+    lead_metadata: dict[str, Any] = {
         "team_role": "lead",
         "team_member_name": "coordinator",
     }
-    ctx = _make_run_context(
-        metadata=lead_meta,
-        session_pool=mock_pool,
-        config=config,
-        base_dir=str(tmp_path),
-        agent_registry=mock_registry,
-        delegation=mock_delegation,
-    )
-    cap = TeamCommCapability(config, "coordinator", lead_meta)
+    cap = TeamCommCapability(team_mode_config, "coordinator", lead_metadata)
+    ctx = make_mock_run_context(agent_ctx)
 
+    # --- Step 1: Create team ---
     create_result = await cap.team_create(
         ctx,
         "alpha_team",
@@ -208,91 +211,61 @@ async def test_e2e_lifecycle_create_message_task_blackboard_delete(
     assert "Team 'alpha_team' created with 2 members" in create_result
     assert "team_id=" in create_result
     team_id = create_result.split("team_id=")[1].strip()
-    # team_create does not write team_id back to session metadata;
-    # we set it manually to simulate the per-session replacement that
-    # create_session_agent() would perform in production.
-    lead_meta["team_id"] = team_id
-    lead_meta["team_name"] = "alpha_team"
-    assert mock_delegation.create_child_session.await_count == 2
+    # team_create writes team_id back to agent_ctx.session.metadata;
+    # update cap._session_metadata for consistency.
+    cap._session_metadata["team_id"] = team_id
+    cap._session_metadata["team_name"] = "alpha_team"
 
-    # Verify team exists on disk
-    team_state = FileTeamState(str(tmp_path))
+    # Verify real child sessions exist in SessionPool.
+    base_dir = team_mode_config.effective_base_dir
+    team_state = FileTeamState(base_dir)
     state_path = team_state._state_path(team_id)
     assert state_path.exists()
+    state = team_state._read_json(state_path)
+    members: dict[str, dict[str, str]] = state.get("members", {})
+    for member_info in members.values():
+        member_sid = member_info.get("session_id", "")
+        assert member_sid != ""
+        assert session_pool.sessions.get_session(member_sid) is not None
 
     # --- Step 2: Send a message ---
-    # Now use the updated metadata (with team_id) for subsequent calls.
-    ctx_msg = _make_run_context(
-        metadata=lead_meta,
-        session_pool=mock_pool,
-        config=config,
-        base_dir=str(tmp_path),
-        agent_registry=mock_registry,
-    )
-    msg_result = await cap.send_message(ctx_msg, "translator_agent", "Start translating")
+    msg_result = await cap.send_message(ctx, "translator_agent", "Start translating")
     assert msg_result == "Message sent to translator_agent"
 
     # --- Step 3: Create a task ---
-    ctx_task = _make_run_context(
-        metadata=lead_meta,
-        session_pool=mock_pool,
-        config=config,
-        base_dir=str(tmp_path),
-        agent_registry=mock_registry,
-    )
-    task_result = await cap.task_create(ctx_task, "Translate docs", "Translate API docs")
+    task_result = await cap.task_create(ctx, "Translate docs", "Translate API docs")
     assert task_result.startswith("Task created: ")
     task_id = task_result.replace("Task created: ", "")
 
     # --- Step 4: Complete the task ---
-    ctx_update = _make_run_context(
-        metadata=lead_meta,
-        session_pool=mock_pool,
-        config=config,
-        base_dir=str(tmp_path),
-        agent_registry=mock_registry,
-    )
-    update_result = await cap.task_update(ctx_update, task_id, status="completed")
+    update_result = await cap.task_update(ctx, task_id, status="completed")
     updated = json.loads(update_result)
     assert updated["status"] == "completed"
 
     # --- Step 5: Write blackboard ---
-    ctx_wb = _make_run_context(
-        metadata=lead_meta,
-        session_pool=mock_pool,
-        config=config,
-        base_dir=str(tmp_path),
-        agent_registry=mock_registry,
-    )
-    wb_write_result = await cap.write_blackboard(ctx_wb, "glossary", "v1 content")
+    wb_write_result = await cap.write_blackboard(ctx, "glossary", "v1 content")
     assert wb_write_result == "Written, version=1"
 
     # --- Step 6: Read blackboard ---
-    ctx_rb = _make_run_context(
-        metadata=lead_meta,
-        session_pool=mock_pool,
-        config=config,
-        base_dir=str(tmp_path),
-        agent_registry=mock_registry,
-    )
-    rb_result = await cap.read_blackboard(ctx_rb, "glossary")
+    rb_result = await cap.read_blackboard(ctx, "glossary")
     rb_data = json.loads(rb_result)
     assert rb_data["value"]["text"] == "v1 content"
     assert rb_data["version"] == 1
 
     # --- Step 7: Delete team ---
-    ctx_del = _make_run_context(
-        metadata=lead_meta,
-        session_pool=mock_pool,
-        config=config,
-        base_dir=str(tmp_path),
-        agent_registry=mock_registry,
-    )
-    del_result = await cap.team_delete(ctx_del)
+    del_result = await cap.team_delete(ctx)
     assert del_result == "Team deleted"
-    assert mock_pool.close_session.await_count == 2
-    # Team state should be cleaned up
+
+    # Verify real member sessions are closed.
+    for member_info in members.values():
+        member_sid = member_info.get("session_id", "")
+        assert session_pool.sessions.get_session(member_sid) is None
+
+    # Team state should be cleaned up.
     assert not state_path.exists()
+
+    # Cleanup.
+    await session_pool.close_session(session_id)
 
 
 # ---------------------------------------------------------------------------
@@ -529,58 +502,70 @@ async def test_team_status_with_existing_team_id_no_session_creation(
 
 
 @pytest.mark.integration
-async def test_team_create_uses_config_default_members_when_empty(tmp_path: Any) -> None:
+async def test_team_create_uses_config_default_members_when_empty(
+    team_mode_pool_with_defaults: AgentPool[Any],
+) -> None:
     """Given: defaults config is set, lead calls team_create with empty members.
 
     When: team_create is called with members=[].
 
-    Then: uses defaults.members from config, creates child sessions, and
+    Then: uses defaults.members from config, creates real child sessions, and
         team_status shows the created team.
     """
-    config = _make_defaults_config(str(tmp_path))
+    manifest = team_mode_pool_with_defaults.manifest
+    team_mode_config: TeamModeConfig | None = manifest.team_mode
+    assert team_mode_config is not None
+    assert team_mode_config.defaults is not None
 
-    mock_pool = MagicMock()
-    mock_pool.send_message = AsyncMock(return_value="msg_id")
-    mock_pool.close_session = AsyncMock()
+    session_pool = team_mode_pool_with_defaults.session_pool
+    assert session_pool is not None
 
-    mock_registry = MagicMock()
-    mock_registry.exists = MagicMock(return_value=True)
-
-    child_ids = iter(["child_translator", "child_reviewer"])
-    mock_delegation = MagicMock()
-    mock_delegation.create_child_session = AsyncMock(
-        side_effect=lambda *a, **kw: next(child_ids),
+    # Setup: create lead session.
+    session_id = "lead-defaults-001"
+    await session_pool.create_session(
+        session_id,
+        agent_name="coordinator",
+        team_role="lead",
+        team_member_name="coordinator",
     )
 
-    # Lead metadata WITHOUT team_id.
+    agent_ctx = build_agent_context(
+        team_mode_pool_with_defaults,
+        session_id,
+        team_mode_config,
+    )
     lead_metadata: dict[str, Any] = {
         "team_role": "lead",
         "team_member_name": "coordinator",
     }
-    ctx = _make_run_context(
-        metadata=lead_metadata,
-        session_pool=mock_pool,
-        config=config,
-        base_dir=str(tmp_path),
-        agent_registry=mock_registry,
-        delegation=mock_delegation,
-    )
-    cap = TeamCommCapability(config, "coordinator", lead_metadata)
+    cap = TeamCommCapability(team_mode_config, "coordinator", lead_metadata)
+    ctx = make_mock_run_context(agent_ctx)
 
     # team_create with empty members should use defaults config defaults.
     create_result = await cap.team_create(ctx, "my_team", [])
     assert "Team 'my_team' created with 2 members" in create_result
-    assert mock_delegation.create_child_session.await_count == 2
-    assert mock_pool.send_message.await_count == 2
-
-    # Set team_id in metadata for subsequent team_status call.
     team_id = create_result.split("team_id=")[1].strip()
-    lead_metadata["team_id"] = team_id
-    lead_metadata["team_name"] = "my_team"
+    cap._session_metadata["team_id"] = team_id
+    cap._session_metadata["team_name"] = "my_team"
+
+    # Verify real child sessions were created (2 from defaults).
+    base_dir = team_mode_config.effective_base_dir
+    team_state = FileTeamState(base_dir)
+    state = team_state._read_json(team_state._state_path(team_id))
+    members: dict[str, dict[str, str]] = state.get("members", {})
+    assert len(members) == 2
+    for member_info in members.values():
+        member_sid = member_info.get("session_id", "")
+        assert member_sid != ""
+        assert session_pool.sessions.get_session(member_sid) is not None
 
     # team_status should show the created team.
     status_result = await cap.team_status(ctx)
     assert "my_team" in status_result
+
+    # Cleanup.
+    await cap.team_delete(ctx)
+    await session_pool.close_session(session_id)
 
 
 # ---------------------------------------------------------------------------
@@ -653,34 +638,63 @@ async def test_e2e_task_and_blackboard_lifecycle(tmp_path: Any) -> None:
 
 
 @pytest.mark.integration
-async def test_e2e_broadcast_and_status(tmp_path: Any) -> None:
-    """Given: lead agent with initialized team and mock SessionPool.
+async def test_e2e_broadcast_and_status(
+    team_mode_pool: AgentPool[Any],
+) -> None:
+    """Given: real AgentPool with a team created via team_create.
 
     When: broadcast message is sent, then team_status is checked.
 
     Then: broadcast reaches all members, team_status shows team info.
     """
-    _init_team(str(tmp_path))
-    config = _make_enabled_config(base_dir=str(tmp_path))
-    metadata = _make_lead_metadata()
-    mock_pool = MagicMock()
-    mock_pool.send_message = AsyncMock(return_value="msg_id")
-    ctx = _make_run_context(
-        metadata=metadata,
-        session_pool=mock_pool,
-        config=config,
-        base_dir=str(tmp_path),
-    )
-    cap = TeamCommCapability(config, "coordinator", metadata)
+    manifest = team_mode_pool.manifest
+    team_mode_config: TeamModeConfig | None = manifest.team_mode
+    assert team_mode_config is not None
 
-    # Broadcast
+    session_pool = team_mode_pool.session_pool
+    assert session_pool is not None
+
+    # Setup: create lead session and team.
+    session_id = "lead-broadcast-001"
+    await session_pool.create_session(
+        session_id,
+        agent_name="coordinator",
+        team_role="lead",
+        team_member_name="coordinator",
+    )
+
+    agent_ctx = build_agent_context(team_mode_pool, session_id, team_mode_config)
+    lead_metadata: dict[str, Any] = {
+        "team_role": "lead",
+        "team_member_name": "coordinator",
+    }
+    cap = TeamCommCapability(team_mode_config, "coordinator", lead_metadata)
+    ctx = make_mock_run_context(agent_ctx)
+
+    create_result = await cap.team_create(
+        ctx,
+        "alpha_team",
+        [
+            {"agent": "worker", "name": "translator_agent"},
+            {"agent": "reviewer", "name": "reviewer_agent"},
+        ],
+    )
+    assert "team_id=" in create_result
+    team_id = create_result.split("team_id=")[1].strip()
+    cap._session_metadata["team_id"] = team_id
+    cap._session_metadata["team_name"] = "alpha_team"
+
+    # Broadcast.
     broadcast_result = await cap.send_message(ctx, "*", "Team meeting at 3pm")
     assert "Broadcast sent to 2 members" in broadcast_result
-    assert mock_pool.send_message.await_count == 2
 
-    # Team status
+    # Team status.
     status_result = await cap.team_status(ctx)
     assert "alpha_team" in status_result
     assert "active" in status_result
     assert "translator_agent" in status_result
     assert "reviewer_agent" in status_result
+
+    # Cleanup.
+    await cap.team_delete(ctx)
+    await session_pool.close_session(session_id)
