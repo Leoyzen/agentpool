@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Self
@@ -64,7 +65,8 @@ class ConnectionManager:
         """Wait for this agent and all connected agents to complete their tasks."""
         seen: set[AgentName] = _seen or {self.owner.name}
         # Wait for our own tasks
-        await self.owner.task_manager.complete_tasks()
+        if self.owner._pending_tasks:
+            await asyncio.gather(*self.owner._pending_tasks, return_exceptions=True)
         # Wait for connected agents
         for agent in self.get_targets():
             if agent.name not in seen:

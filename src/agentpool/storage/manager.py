@@ -17,7 +17,6 @@ from agentpool.messaging import ChatMessage
 from agentpool.sessions.models import PendingDeferredCall
 from agentpool.storage.serialization import deserialize_messages
 from agentpool.utils.identifiers import generate_session_id
-from agentpool.utils.tasks import TaskManager
 from agentpool_config.session import SessionQuery
 from agentpool_config.storage import StorageConfig
 
@@ -91,7 +90,6 @@ class StorageManager:
             config: Storage configuration including providers and filters
         """
         self.config = config or StorageConfig()
-        self.task_manager = TaskManager()
         self.providers = [self._create_provider(cfg) for cfg in self.config.effective_providers]
         self._session_logged: set[str] = set()  # Track logged conversations for idempotency
         self._model_variants: dict[str, Any] = {}  # Set by AgentPool after init
@@ -136,8 +134,6 @@ class StorageManager:
                 chained_error = RuntimeError(error_msg)
                 chained_error.__cause__ = e
                 errors.append(chained_error)
-
-        await self.task_manager.cleanup_tasks()
 
         if errors:
             raise ExceptionGroup("Provider cleanup errors", errors)
