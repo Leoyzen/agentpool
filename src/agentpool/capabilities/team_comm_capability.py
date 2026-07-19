@@ -92,6 +92,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         _session_metadata: Per-session metadata (team_name, team_role, etc.).
     """
 
+    # Auto-cleanup tuning (override in tests).
+    _idle_timeout: float = 300.0
+    _poll_interval: float = 30.0
+
     def __init__(
         self,
         config: TeamModeConfig,
@@ -267,10 +271,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
             mode = DeliveryMode.STEER if urgent else DeliveryMode.QUEUE
             delivered = 0
+            lead_sid = agent_ctx.session.session_id
             for member_name in members:
                 target_sid = team_state.get_member_session_id(team_id, member_name)
-                if target_sid is None:
-                    continue
+                if target_sid is None or target_sid == lead_sid:
+                    continue  # Skip self (lead broadcasting to itself).
                 result = await session_pool.send_message(target_sid, body, mode=mode)
                 if result is not None:
                     delivered += 1
@@ -639,6 +644,15 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             [{"name": m["name"], "agent": m["agent"]} for m in members],
         )
 
+        # Register the lead as a member so other members can send_message
+        # to the lead by name.  The lead's member name comes from session
+        # metadata (set by the factory), falling back to the agent name.
+        lead_member_name = agent_ctx.session.metadata.get(
+            "team_member_name",
+            self._agent_name,
+        )
+        team_state.register_member(team_id, lead_member_name, lead_session_id)
+
         # Record started_at timestamp for wall-clock enforcement.
         state = team_state._read_json(team_state._state_path(team_id))
         state["started_at"] = datetime.datetime.now(datetime.UTC).isoformat()
@@ -716,70 +730,79 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         lead_session_id: str,
         member_session_ids: list[str],
     ) -> None:
-        """Schedule a background task to close member sessions when the lead run ends.
+        """Schedule a background task to close member sessions when the lead goes idle.
 
-        Awaits ``RunHandle.complete_event`` for the lead's current run.
-        When the event fires, closes every member session whose ID is
-        still recorded in ``session.metadata["team_member_sessions"]``
-        (``team_delete`` clears this list to signal manual cleanup was
-        already performed).
+        Polls ``session.last_active_at`` every 30 seconds.  When the lead
+        has been inactive for longer than ``idle_timeout`` (default 300s),
+        closes every member session whose ID is still recorded in
+        ``session.metadata["team_member_sessions"]`` (``team_delete``
+        clears this list to signal manual cleanup was already performed).
+
+        This approach correctly handles protocol-server sessions (e.g.
+        OpenCode) where the lead's RunLoop stays alive between turns —
+        the cleanup fires based on wall-clock inactivity, not on
+        ``complete_event`` which may never fire.
 
         Args:
             agent_ctx: The lead agent's per-turn context.
             lead_session_id: The lead session ID.
-            member_session_ids: Member session IDs to close on run termination.
+            member_session_ids: Member session IDs to close on idle.
         """
         session_pool = agent_ctx.host.session_pool
         if session_pool is None:
             return
 
-        session = session_pool.sessions.get_session(lead_session_id)
-        if session is None or session.current_run_id is None:
-            return
+        import time
 
-        run_handle = session_pool.sessions._runs.get(session.current_run_id)
-        if run_handle is None:
-            return
+        # Configurable via class attributes so tests can override.
+        idle_timeout = TeamCommCapability._idle_timeout
+        poll_interval = TeamCommCapability._poll_interval
 
-        complete_event = run_handle.complete_event
-
-        async def _cleanup_when_run_ends() -> None:
-            """Await lead run completion, then close member sessions."""
+        async def _cleanup_when_idle() -> None:
+            """Poll lead activity; close members after idle timeout."""
             try:
-                await asyncio.wait_for(complete_event.wait(), timeout=300.0)
-            except TimeoutError:
-                logger.warning(
-                    "Timed out waiting for lead run completion; "
-                    "skipping member session auto-cleanup",
-                    lead_session_id=lead_session_id,
-                )
-                return
+                while True:
+                    await asyncio.sleep(poll_interval)
+                    # Check if team_delete already cleaned up.
+                    current_session = session_pool.sessions.get_session(
+                        lead_session_id,
+                    )
+                    if current_session is None:
+                        return  # Lead session closed — cascade handled it.
+                    remaining = current_session.metadata.get(
+                        "team_member_sessions",
+                    )
+                    if not remaining:
+                        return  # team_delete already closed members.
 
-            # Check if team_delete already cleaned up (it clears the list).
-            current_session = session_pool.sessions.get_session(lead_session_id)
-            if current_session is None:
-                return  # Lead session already closed — children cascade-closed.
-            remaining = current_session.metadata.get("team_member_sessions")
-            if not remaining:
-                return  # team_delete already closed member sessions.
+                    # Check idle time via last_active_at.
+                    now = time.monotonic()
+                    idle_seconds = now - current_session.last_active_at
+                    if idle_seconds < idle_timeout:
+                        continue  # Lead still active, keep waiting.
 
-            # Close each member session.  ``close_session`` is idempotent
-            # for already-closed sessions, so racing with cascade close
-            # in ``_close_session_unlocked`` is safe.
-            for msid in member_session_ids:
-                try:
-                    await session_pool.close_session(msid)
-                except Exception:
-                    logger.exception(
-                        "Failed to auto-close member session",
-                        member_session_id=msid,
+                    # Lead has been idle beyond threshold — close members.
+                    logger.info(
+                        "Lead idle for %.0fs, auto-closing member sessions",
+                        idle_seconds,
                         lead_session_id=lead_session_id,
                     )
+                    for msid in member_session_ids:
+                        try:
+                            await session_pool.close_session(msid)
+                        except Exception:
+                            logger.exception(
+                                "Failed to auto-close member session",
+                                member_session_id=msid,
+                                lead_session_id=lead_session_id,
+                            )
+                    # Clear list so cascade close is a no-op.
+                    current_session.metadata["team_member_sessions"] = []
+                    return  # Cleanup done, exit loop.
+            except asyncio.CancelledError:
+                pass  # Pool shutdown — exit gracefully.
 
-            # Clear the list so a second cleanup (e.g. cascade close) is a no-op.
-            current_session.metadata["team_member_sessions"] = []
-
-        task = asyncio.create_task(_cleanup_when_run_ends())
+        task = asyncio.create_task(_cleanup_when_idle())
         _cleanup_tasks.add(task)
 
         def _on_done(t: asyncio.Task[Any]) -> None:
@@ -824,10 +847,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         members: dict[str, dict[str, str]] = state.get("members", {})
 
         session_pool = agent_ctx.host.session_pool
+        lead_session_id = agent_ctx.session.session_id
         if session_pool is not None:
             for member_info in members.values():
                 sid: str = member_info.get("session_id", "")
-                if sid:
+                if sid and sid != lead_session_id:
                     await session_pool.close_session(sid)
 
         # Clear member session IDs from metadata so the auto-cleanup

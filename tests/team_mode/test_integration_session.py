@@ -135,16 +135,16 @@ async def test_member_sessions_closed_when_lead_run_terminates(
 ) -> None:
     """Given: real AgentPool with team_mode, lead session with active RunHandle.
 
-    When: team_create spawns member sessions, then the lead's RunHandle
-        terminates (RunHandle.close() called directly, simulating run
-        completion without close_session on the lead).
+    When: team_create spawns member sessions, then the lead goes idle
+        (last_active_at set far in the past to trigger auto-cleanup).
 
     Then: member sessions are automatically closed (not leaked).
-        Without the fix, member sessions stay active because
-        ``_close_session_unlocked`` cascade close only runs when
-        ``close_session(lead)`` is called — not when the RunHandle
-        terminates independently.
+        The cleanup polls last_active_at every _poll_interval seconds
+        and closes members after _idle_timeout seconds of inactivity.
     """
+    # Use short intervals for testing.
+    TeamCommCapability._idle_timeout = 0.5
+    TeamCommCapability._poll_interval = 0.1
     manifest = _make_manifest(tmp_path)
     team_mode_config: TeamModeConfig | None = manifest.team_mode
     assert team_mode_config is not None
@@ -166,9 +166,9 @@ async def test_member_sessions_closed_when_lead_run_terminates(
         lead_session = session_pool.sessions.get_session(lead_session_id)
         assert lead_session is not None
 
-        # Manually inject a RunHandle so we have control over when it
-        # terminates, without depending on TestModel timing.
-        lead_run_handle = _inject_run_handle(session_pool, lead_session)
+        # Manually inject a RunHandle so the session has an active run
+        # (needed for team_create's cleanup scheduling).
+        _inject_run_handle(session_pool, lead_session)
 
         # Construct AgentContext and call team_create.
         agent_ctx = _make_agent_context(pool, lead_session_id, team_mode_config)
@@ -193,14 +193,18 @@ async def test_member_sessions_closed_when_lead_run_terminates(
         )
         assert "Team 'test_team' created with 2 members" in create_result
 
-        # Extract member session IDs from team state.
+        # Extract member session IDs from team state (exclude lead).
         from agentpool.capabilities.file_team_state import FileTeamState
 
         team_id = create_result.split("team_id=")[1].strip()
         team_state = FileTeamState(str(tmp_path))
         state = team_state._read_json(team_state._state_path(team_id))
+        lead_sid = session_pool.sessions.get_session("lead-session-001")
+        lead_session_id = lead_sid.session_id if lead_sid else "lead-session-001"
         member_session_ids: list[str] = [
-            m["session_id"] for m in state.get("members", {}).values() if m.get("session_id")
+            m["session_id"]
+            for m in state.get("members", {}).values()
+            if m.get("session_id") and m["session_id"] != lead_session_id
         ]
         assert len(member_session_ids) == 2
 
@@ -209,24 +213,15 @@ async def test_member_sessions_closed_when_lead_run_terminates(
             ms = session_pool.sessions.get_session(msid)
             assert ms is not None, f"Member session {msid} should exist after team_create"
 
-        # Simulate the lead's RunHandle terminating WITHOUT close_session.
-        # This happens when the run finishes but the session stays alive
-        # for follow-ups (protocol server scenario).
-        # close() sets _closing=True; complete_event is normally set by
-        # the start() generator's finally block, which we simulate here
-        # since the RunHandle was manually created without start().
-        lead_run_handle.close()
-        lead_run_handle.complete_event.set()
+        # Simulate the lead going idle: set last_active_at far in the past
+        # so the polling cleanup triggers after _idle_timeout seconds.
+        import time
 
-        # Wait for complete_event to fire and cleanup callbacks to execute.
-        await asyncio.wait_for(
-            lead_run_handle.complete_event.wait(),
-            timeout=10.0,
-        )
-        # Give the fix's cleanup callback time to run after complete_event.
-        # Member sessions have active runs that need to be cancelled and
-        # cleaned up, which involves RunHandle cancellation with timeouts.
-        await asyncio.sleep(3.0)
+        lead_session.last_active_at = time.monotonic() - 100.0
+
+        # Wait for the polling cleanup to detect idle and close members.
+        # _poll_interval=0.1, _idle_timeout=0.5 → cleanup fires within ~1s.
+        await asyncio.sleep(2.0)
 
         # Assert member sessions are closed (not leaked).
         # Without the fix: member sessions stay active (BUG).

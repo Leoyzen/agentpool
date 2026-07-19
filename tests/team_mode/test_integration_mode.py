@@ -256,9 +256,11 @@ async def test_e2e_lifecycle_create_message_task_blackboard_delete(
     del_result = await cap.team_delete(ctx)
     assert del_result == "Team deleted"
 
-    # Verify real member sessions are closed.
+    # Verify real member sessions are closed (exclude lead — lead session stays alive).
     for member_info in members.values():
         member_sid = member_info.get("session_id", "")
+        if member_sid == session_id:
+            continue  # Lead's own session should still be alive.
         assert session_pool.sessions.get_session(member_sid) is None
 
     # Team state should be cleaned up.
@@ -548,12 +550,13 @@ async def test_team_create_uses_config_default_members_when_empty(
     cap._session_metadata["team_id"] = team_id
     cap._session_metadata["team_name"] = "my_team"
 
-    # Verify real child sessions were created (2 from defaults).
+    # Verify real child sessions were created (2 from defaults + lead registered).
     base_dir = team_mode_config.effective_base_dir
     team_state = FileTeamState(base_dir)
     state = team_state._read_json(team_state._state_path(team_id))
     members: dict[str, dict[str, str]] = state.get("members", {})
-    assert len(members) == 2
+    # Lead is also registered as a member, so 3 total (lead + 2 defaults).
+    assert len(members) == 3
     for member_info in members.values():
         member_sid = member_info.get("session_id", "")
         assert member_sid != ""
@@ -684,7 +687,7 @@ async def test_e2e_broadcast_and_status(
     cap._session_metadata["team_id"] = team_id
     cap._session_metadata["team_name"] = "alpha_team"
 
-    # Broadcast.
+    # Broadcast (excludes lead, so 2 members receive).
     broadcast_result = await cap.send_message(ctx, "*", "Team meeting at 3pm")
     assert "Broadcast sent to 2 members" in broadcast_result
 
