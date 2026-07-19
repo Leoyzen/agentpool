@@ -318,6 +318,10 @@ class TestSessionControllerPersistence:
         assert loaded is not None
         assert loaded.session_id == "test_session"
         assert loaded.agent_name == "test_agent"
+        # Regression: created_at must be a wall-clock datetime, not 1970
+        # from datetime.fromtimestamp(time.monotonic()).
+        assert loaded.created_at.year >= 2024
+        assert loaded.last_active.year >= 2024
 
     async def test_close_session_marks_closed_in_store(
         self, minimal_pool: AgentPool, store: MemoryStorageProvider
@@ -411,6 +415,15 @@ class TestSessionControllerPersistence:
         assert child.project_id == "abc123def456"
         assert child.cwd == "/path/to/project"
         assert child.parent_id == "parent_1"
+        # Regression: child sessions go through _state_to_data() which
+        # previously used datetime.fromtimestamp(time.monotonic()),
+        # producing a 1970 datetime.  Verify the full pipeline produces
+        # a sane time.created in the OpenCode session model.
+        from agentpool_server.opencode_server.converters import session_data_to_opencode
+
+        opencode_session = session_data_to_opencode(child)
+        assert opencode_session.time.created > 1_000_000_000_000
+        assert opencode_session.time.updated > 1_000_000_000_000
 
     async def test_create_without_store(self, minimal_pool: AgentPool) -> None:
         """SessionController works without a store."""
