@@ -58,6 +58,7 @@ class MockServerState:
         self.working_dir = "/tmp"
         self.agent = MagicMock()
         self.agent.name = "test-agent"
+        self.agent.model_name = None
         self.pool: Any = None
         self.session_status: dict[str, Any] = {}
         self.config = MagicMock()
@@ -79,6 +80,9 @@ class MockServerState:
 
     async def broadcast_event(self, event: Any) -> None:
         self.events.append(event)
+
+    def resolve_default_model_info(self) -> tuple[str, str]:
+        return "default", "agentpool"
 
 
 def _get_last_assistant_message(state: MockServerState, session_id: str) -> Any | None:

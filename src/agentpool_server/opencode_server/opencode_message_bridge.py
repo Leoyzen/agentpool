@@ -82,14 +82,15 @@ async def get_messages_for_session(
             existing_agent = session_pool.sessions.get_session_agent(session_id)
             if existing_agent is not None:
                 agent = existing_agent
+            default_model_id, default_provider_id = state.resolve_default_model_info()
             return [
                 chat_message_to_opencode(
                     chat_msg,
                     session_id=session_id,
                     working_dir=state.working_dir,
                     agent_name=agent.name,
-                    model_id=getattr(chat_msg, "model_name", None) or "sonnet",
-                    provider_id=getattr(chat_msg, "provider_name", None) or "claude-code",
+                    model_id=getattr(chat_msg, "model_name", None) or default_model_id,
+                    provider_id=getattr(chat_msg, "provider_name", None) or default_provider_id,
                 )
                 for chat_msg in sp_messages
             ]
@@ -234,14 +235,16 @@ def _reconstruct_tool_parts_from_checkpoint(
         if session_state is not None:
             agent_name = session_state.agent_name
 
+    default_model_id, default_provider_id = state.resolve_default_model_info()
+
     assistant_msg = MessageWithParts.assistant(
         message_id=assistant_msg_id,
         session_id=session_id,
         time=MessageTime(created=now_ms()),
         agent_name=agent_name,
-        model_id="default",
+        model_id=default_model_id,
         parent_id=session_id,
-        provider_id="agentpool",
+        provider_id=default_provider_id,
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
     )
 

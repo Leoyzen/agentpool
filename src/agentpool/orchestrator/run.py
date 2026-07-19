@@ -743,7 +743,7 @@ class RunHandle:
         run_started = RunStartedEvent(
             run_id=self.run_id,
             session_id=self.session_id,
-            agent_name=self.agent_type,
+            agent_name=self.agent.name if self.agent is not None else self.agent_type,
             parent_session_id=session.parent_session_id if session is not None else None,
         )
         if not self._comm_channel.publishes_to_event_bus:
@@ -836,7 +836,7 @@ class RunHandle:
                 error_event = RunErrorEvent(
                     message=str(e),
                     run_id=self.run_id,
-                    agent_name=self.agent_type,
+                    agent_name=self.agent.name if self.agent is not None else self.agent_type,
                 )
                 if not self._comm_channel.publishes_to_event_bus:
                     await event_bus.publish(self.session_id, error_event)

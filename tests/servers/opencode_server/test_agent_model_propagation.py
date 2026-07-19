@@ -58,6 +58,7 @@ def _make_integration(
     if server_state is None:
         server_state = Mock()
         server_state.working_dir = "/tmp"
+        server_state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
     return OpenCodeSessionPoolIntegration(session_pool, server_state)
 
 
@@ -265,6 +266,7 @@ class TestReconstructToolPartsAgentName:
 
         server_state = Mock()
         server_state.working_dir = "/tmp"
+        server_state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
         server_state.pool = pool
         server_state.messages = {}
 
@@ -302,6 +304,7 @@ class TestReconstructToolPartsAgentName:
 
         server_state = Mock()
         server_state.working_dir = "/tmp"
+        server_state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
         server_state.pool = pool
         server_state.messages = {}
 

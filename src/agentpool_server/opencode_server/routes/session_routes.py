@@ -573,6 +573,7 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
             # See issue #192.
             existing_msgs = state.messages.get(session_id, [])
             if not existing_msgs:
+                default_model_id, default_provider_id = state.resolve_default_model_info()
                 await set_messages_for_session(
                     state,
                     session_id,
@@ -582,8 +583,8 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
                             session_id=session_id,
                             working_dir=state.working_dir,
                             agent_name=agent.name,
-                            model_id=chat_msg.model_name or "sonnet",
-                            provider_id=chat_msg.provider_name or "claude-code",
+                            model_id=chat_msg.model_name or default_model_id,
+                            provider_id=chat_msg.provider_name or default_provider_id,
                         )
                         for chat_msg in agent.conversation.chat_messages
                     ],
@@ -626,6 +627,7 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
         # See issue #192.
         all_existing_msgs = state.messages.get(session_id, [])
         if not all_existing_msgs:
+            default_model_id, default_provider_id = state.resolve_default_model_info()
             await set_messages_for_session(
                 state,
                 session_id,
@@ -635,8 +637,8 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
                         session_id=session_id,
                         working_dir=state.working_dir,
                         agent_name=agent.name,
-                        model_id=chat_msg.model_name or "sonnet",
-                        provider_id=chat_msg.provider_name or "claude-code",
+                        model_id=chat_msg.model_name or default_model_id,
+                        provider_id=chat_msg.provider_name or default_provider_id,
                     )
                     for chat_msg in agent.conversation.chat_messages
                 ],
@@ -1564,8 +1566,11 @@ async def summarize_session(  # noqa: PLR0915
     # Lock ordering: route-level lock first, then turn_lock.
     async with state.get_session_lock(session_id):
         # Determine model to use
-        model_id = request.model_id if request and request.model_id else "default"
-        provider_id = request.provider_id if request and request.provider_id else "agentpool"
+        default_model_id, default_provider_id = state.resolve_default_model_info()
+        model_id = request.model_id if request and request.model_id else default_model_id
+        provider_id = (
+            request.provider_id if request and request.provider_id else default_provider_id
+        )
 
         now = now_ms()
         # Create assistant message for the summary (marked with summary=true)

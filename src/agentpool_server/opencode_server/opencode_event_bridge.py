@@ -27,6 +27,7 @@ from agentpool_server.opencode_server.event_processor_context import (
     EventProcessorContext,
 )
 from agentpool_server.opencode_server.models import (
+    AssistantMessage,
     MessagePath,
     MessageTime,
     MessageUpdatedEvent,
@@ -187,8 +188,7 @@ class OpenCodeEventBridgeMixin:
         # "agentpool"/"default"/"agentpool" when unavailable (graceful
         # degradation for sessions created outside the REST handler path).
         agent_name = "agentpool"
-        model_id = "default"
-        provider_id = "agentpool"
+        model_id, provider_id = self.server_state.resolve_default_model_info()
         session_state = self.session_pool.sessions.get_session(session_id)
         if session_state is not None:
             agent_name = session_state.agent_name
@@ -210,6 +210,7 @@ class OpenCodeEventBridgeMixin:
             parent_id=session_id,
             provider_id=provider_id,
             path=MessagePath(cwd=self.server_state.working_dir, root=self.server_state.working_dir),
+            mode=agent_name,
         )
         ctx = EventProcessorContext(
             session_id=session_id,
@@ -422,6 +423,17 @@ class OpenCodeEventBridgeMixin:
             ctx = self._contexts.get(session_id)
             if ctx is None:
                 return
+
+            # Update assistant message with real agent info from RunStartedEvent.
+            # RunStartedEvent is the first event in a run and carries the real
+            # agent_name from the RunLoop. This is more reliable than the session
+            # state lookup in _before_consumer_loop (which may not have the
+            # agent name for sessions created outside the REST handler).
+            if isinstance(event, RunStartedEvent) and event.agent_name:
+                info = ctx.assistant_msg.info
+                if isinstance(info, AssistantMessage):
+                    info.agent = event.agent_name
+                    info.mode = event.agent_name
 
             # NOTE: Do NOT overwrite ctx.assistant_msg_id from event.message_id.
             # NativeTurn generates its own UUID for _message_id (uuid4().hex)

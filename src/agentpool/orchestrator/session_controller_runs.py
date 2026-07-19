@@ -102,7 +102,11 @@ class SessionControllerRunsMixin:
                 error_event = RunErrorEvent(
                     message=f"{type(exc).__name__}: {exc}",
                     run_id=run_handle.run_id,
-                    agent_name=run_handle.agent_type,
+                    agent_name=(
+                        run_handle.agent.name
+                        if run_handle.agent is not None
+                        else run_handle.agent_type
+                    ),
                 )
                 if self._event_bus is not None:
                     await self._event_bus.publish(run_handle.session_id, error_event)
