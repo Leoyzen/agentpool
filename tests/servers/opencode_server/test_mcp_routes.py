@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
 
-async def test_mcp_status_includes_display_name(
+async def test_mcp_route_status_includes_display_name(
     async_client: AsyncClient,
     server_state: ServerState,
     mock_agent: Mock,
@@ -55,7 +55,7 @@ async def test_mcp_status_includes_display_name(
     assert "displayName" in server_data
 
 
-async def test_mcp_status_display_name_matches_configured_name(
+async def test_mcp_route_status_display_name_matches_configured_name(
     async_client: AsyncClient,
     server_state: ServerState,
     mock_agent: Mock,
@@ -83,7 +83,7 @@ async def test_mcp_status_display_name_matches_configured_name(
     assert server_data["displayName"] == configured_name
 
 
-async def test_mcp_status_display_name_fallback(
+async def test_mcp_route_status_display_name_fallback(
     async_client: AsyncClient,
     server_state: ServerState,
     mock_agent: Mock,
@@ -111,7 +111,7 @@ async def test_mcp_status_display_name_fallback(
     assert server_data["displayName"] == client_id
 
 
-async def test_mcp_status_multiple_servers(
+async def test_mcp_route_status_multiple_servers(
     async_client: AsyncClient,
     server_state: ServerState,
     mock_agent: Mock,
@@ -158,7 +158,7 @@ async def test_mcp_status_multiple_servers(
         assert "status" in server_data
 
 
-async def test_mcp_status_empty_response(
+async def test_mcp_route_status_empty_response(
     async_client: AsyncClient,
     server_state: ServerState,
     mock_agent: Mock,
@@ -176,15 +176,18 @@ async def test_mcp_status_empty_response(
     assert data == {}
 
 
-async def test_mcp_status_includes_tools(
+async def test_mcp_route_status_includes_tools(
     async_client: AsyncClient,
     server_state: ServerState,
     mock_agent: Mock,
 ):
     """Test that MCP status includes tools list in response.
 
-    Verifies the API response format includes the tools field
-    as part of the MCP status information.
+    Shape-only contract test: verifies the ``tools`` field exists and is a
+    list. The mock ``MCPServerStatus`` does not populate ``tools``, so this
+    test asserts ``tools == []``. Real tools verification (tools populated
+    from a connected MCP server) lives in
+    ``test_mcp_status_behavior.py::test_mcp_status_connected_server_via_mock_client``.
     """
     mock_status = MCPServerStatus(
         name="tools-server",
@@ -203,7 +206,7 @@ async def test_mcp_status_includes_tools(
     assert isinstance(server_data["tools"], list)
 
 
-async def test_mcp_status_includes_error_field(
+async def test_mcp_route_status_includes_error_field(
     async_client: AsyncClient,
     server_state: ServerState,
     mock_agent: Mock,

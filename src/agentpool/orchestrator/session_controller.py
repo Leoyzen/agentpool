@@ -16,10 +16,12 @@ import anyio
 
 from agentpool.log import get_logger
 from agentpool.orchestrator.runtime_registry import RuntimeAgentRegistry
+from agentpool.utils.time_utils import get_now
 
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
+    from datetime import datetime
 
     from agentpool.delegation import AgentPool
     from agentpool.models.pending_interaction import PendingPermission
@@ -151,6 +153,16 @@ class SessionState:
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.monotonic)
     last_active_at: float = field(default_factory=time.monotonic)
+    created_at_wall: datetime = field(default_factory=get_now)
+    """Wall-clock creation timestamp (UTC datetime) for persistence.
+
+    ``created_at`` and ``last_active_at`` use ``time.monotonic()`` for
+    elapsed-time calculations (idle detection, session age).  They must
+    NOT be passed to ``datetime.fromtimestamp()`` — that function treats
+    its argument as a Unix epoch timestamp, producing a 1970 datetime.
+    This field stores the real wall-clock creation time so that
+    ``_state_to_data()`` can persist a correct ``created_at``.
+    """
     closed_at: float | None = None
     is_per_session_agent: bool = False
     turn_lock: asyncio.Lock = field(default_factory=asyncio.Lock)

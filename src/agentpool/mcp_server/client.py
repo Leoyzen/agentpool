@@ -111,6 +111,31 @@ class MCPClient:
         """Check if client is connected by examining session state."""
         return self._client.is_connected()
 
+    @property
+    def server_info(self) -> dict[str, str] | None:
+        """Get server info (name and version) from the connected client.
+
+        Returns a dict with ``name`` and ``version`` keys from the MCP
+        ``initialize`` result's ``serverInfo`` field, or ``None`` if the
+        initialize result is not yet available (e.g. before ``__aenter__``
+        has completed).
+
+        Does NOT trigger a connection — reads from the already-connected
+        client's cached initialize result.
+        """
+        try:
+            init_result = self._client.initialize_result
+        except RuntimeError:
+            # Session not active yet (FastMCP raises if session state is
+            # accessed before __aenter__ completes).
+            return None
+        if init_result is None:
+            return None
+        info = init_result.serverInfo
+        if info is None:
+            return None
+        return {"name": info.name, "version": info.version}
+
     def _ensure_connected(self) -> None:
         """Ensure client is connected, raise RuntimeError if not."""
         if not self.connected:

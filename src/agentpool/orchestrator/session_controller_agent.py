@@ -99,9 +99,8 @@ class SessionControllerAgentMixin:
         Returns:
             Persistable session data.
         """
-        from datetime import datetime
-
         from agentpool.sessions.models import SessionData
+        from agentpool.utils.time_utils import get_now
 
         return SessionData(
             session_id=state.session_id,
@@ -110,8 +109,8 @@ class SessionControllerAgentMixin:
             project_id=state.metadata.get("project_id"),
             cwd=state.metadata.get("cwd"),
             agent_type=state.metadata.get("agent_type"),
-            created_at=datetime.fromtimestamp(state.created_at),
-            last_active=datetime.fromtimestamp(state.last_active_at),
+            created_at=state.created_at_wall,
+            last_active=get_now(),
             metadata=state.metadata,
         )
 
