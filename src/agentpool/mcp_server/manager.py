@@ -15,6 +15,7 @@ from pydantic_ai.capabilities import AbstractCapability
 
 from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
 from agentpool.capabilities.mcp_server_cap import McpServerCap
+from agentpool.common_types import MCPServerStatus
 from agentpool.log import get_logger
 from agentpool.mcp_server.global_pool import GlobalConnectionPool
 from agentpool_config.mcp_server import AcpMCPServerConfig, BaseMCPServerConfig
@@ -122,6 +123,30 @@ def _make_timeout_logger(
     return _process_tool_call
 
 
+async def _fetch_connected_status(
+    cap: McpServerCap,
+) -> tuple[list[str], str | None, str | None]:
+    """Fetch tools list and server info for a connected McpServerCap.
+
+    Returns a tuple of ``(tool_names, server_name, server_version)``.
+    Tool names come from ``cap.list_tools()``; server name/version come
+    from ``cap.client.server_info`` (the new MCPClient property). Both
+    are read-only and do NOT trigger lazy connections — the caller must
+    ensure ``cap.client is not None`` before invoking this helper.
+    """
+    tool_entries = await cap.list_tools()
+    tools = [t.name for t in tool_entries]
+    server_name: str | None = None
+    server_version: str | None = None
+    client = cap.client
+    if client is not None:
+        info = client.server_info
+        if info is not None:
+            server_name = info.get("name")
+            server_version = info.get("version")
+    return tools, server_name, server_version
+
+
 @dataclass
 class McpSessionContext:
     """Per-session MCP state container for the :class:`MCPManager`.
@@ -185,6 +210,11 @@ class MCPManager:
         self._toolset_cache: dict[str, Any] = {}
         self._session_contexts: dict[str, McpSessionContext] = {}
         self._acp_mcp_manager: AcpMcpConnectionManager | None = None
+        # Per-client_id setup error messages, populated by setup_server()
+        # when a connection attempt fails. Cleared on successful retry.
+        # Used by get_server_status() to report status="error" for failed
+        # servers instead of silently dropping them.
+        self._setup_errors: dict[str, str] = {}
 
     def add_server_config(self, cfg: MCPServerConfig | str) -> None:
         """Add a new MCP server to the manager."""
@@ -267,19 +297,26 @@ class MCPManager:
         return f"MCPManager(name={self.name!r}, servers={len(self.servers)})"
 
     async def __aenter__(self) -> Self:
-        try:
-            if tasks := [self.setup_server(server) for server in self.servers]:
-                await asyncio.gather(*tasks)
-        except Exception as e:
-            server_names = [s.display_name for s in self.servers]
-            logger.warning(
-                "MCP manager initialization failed (servers: %s): %s",
-                server_names,
-                e,
-            )
-            await self.__aexit__(type(e), e, e.__traceback__)
-            raise RuntimeError(f"Failed to initialize MCP manager (servers: {server_names})") from e
-
+        # Use return_exceptions=True so a single server's setup failure does
+        # NOT prevent the remaining servers from initializing. Failed servers
+        # are recorded in self._setup_errors by setup_server() before
+        # re-raising; successful servers proceed to self.providers. The
+        # manager enters its context even if some servers fail, making
+        # get_server_status() reachable to report both connected and failed
+        # servers.
+        if tasks := [self.setup_server(server) for server in self.servers]:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for server, result in zip(self.servers, results, strict=True):
+                if isinstance(result, asyncio.CancelledError):
+                    raise result
+                if isinstance(result, BaseException):
+                    logger.warning(
+                        "MCP server %s failed to initialize: %s",
+                        server.display_name,
+                        result,
+                    )
+                    # setup_server already recorded the error in
+                    # self._setup_errors before re-raising.
         return self
 
     async def __aexit__(
@@ -353,23 +390,166 @@ class MCPManager:
 
         from agentpool.mcp_server.client import MCPClient
 
-        client = MCPClient(
-            config=config,
-            sampling_callback=self._sampling_callback,
-            accessible_roots=self._accessible_roots,
-        )
-        provider = McpServerCap(
-            config=config,
-            name=f"{self.name}_{config.display_name}",
-            client=client,
-        )
-        provider = await self.exit_stack.enter_async_context(provider)
-        self.providers.append(provider)
+        try:
+            client = MCPClient(
+                config=config,
+                sampling_callback=self._sampling_callback,
+                accessible_roots=self._accessible_roots,
+            )
+            provider = McpServerCap(
+                config=config,
+                name=f"{self.name}_{config.display_name}",
+                client=client,
+            )
+            provider = await self.exit_stack.enter_async_context(provider)
+            self.providers.append(provider)
+        except Exception as e:
+            # Record the failure so get_server_status() can report it
+            # as status="error" instead of silently dropping the server.
+            # Re-raise so __aenter__ (with return_exceptions=True) and
+            # direct callers both see the failure.
+            self._setup_errors[config.client_id] = str(e)
+            raise
+        # Success — clear any prior error for this client_id (retry succeeded).
+        self._setup_errors.pop(config.client_id, None)
         return provider
 
     def get_mcp_providers(self) -> list[McpServerCap]:
         """Get all MCP resource providers managed by this manager."""
         return list(self.providers)
+
+    async def get_server_status(self) -> dict[str, MCPServerStatus]:
+        """Get status of all configured MCP servers.
+
+        Joins ``self.servers`` (configured), ``self.providers`` (connected),
+        and ``self._setup_errors`` (failed setup attempts) into a single
+        dict keyed by ``display_name`` (the human-readable server name
+        configured by the user, falling back to ``client_id`` when no
+        name is set).
+
+        Precedence on multi-category membership:
+            - ``disabled`` wins over all (config has ``enabled=False``)
+            - ``providers`` (connected) wins over ``_setup_errors`` (error)
+            - otherwise ``_setup_errors`` → ``status="error"``
+            - otherwise ``status="disconnected"``
+
+        This method SHALL NOT trigger lazy connections: it only reads
+        ``cap.client`` (the cached property) and calls ``list_tools()``
+        when ``cap.client is not None``. Disconnected/pending servers
+        return ``tools=[]`` without calling ``_ensure_client()``.
+
+        Returns:
+            Dict mapping ``display_name`` to ``MCPServerStatus``.
+        """
+        # Index providers by client_id for O(1) lookup.
+        providers_by_id: dict[str, McpServerCap] = {p.config.client_id: p for p in self.providers}
+        # Index server configs by client_id.
+        configs_by_id: dict[str, MCPServerConfig] = {s.client_id: s for s in self.servers}
+        # Union of all known client_ids.
+        all_ids: set[str] = set(configs_by_id) | set(providers_by_id) | set(self._setup_errors)
+
+        # Build base status entries (without tools) synchronously.
+        # Keyed by display_name (readable), not client_id (internal).
+        entries: dict[str, MCPServerStatus] = {}
+        connected_caps: list[McpServerCap] = []
+        for client_id in all_ids:
+            config = configs_by_id.get(client_id)
+            cap = providers_by_id.get(client_id)
+            # Resolve display_name from config or cap (falls back to client_id).
+            display_name: str = (
+                config.display_name
+                if config is not None
+                else cap.config.display_name
+                if cap is not None
+                else client_id
+            )
+            server_type = (
+                config.type
+                if config is not None
+                else cap.config.type
+                if cap is not None
+                else "unknown"
+            )
+            # Disabled wins over all other states.
+            if config is not None and not config.enabled:
+                entries[display_name] = MCPServerStatus(
+                    name=display_name,
+                    status="disabled",
+                    display_name=display_name,
+                    server_type=server_type,
+                )
+                continue
+            # Connected (providers wins over errors).
+            if cap is not None:
+                # Only query tools if the client is already cached (no lazy
+                # connection). cap.client returns self._client without
+                # calling _ensure_client().
+                if cap.client is not None:
+                    connected_caps.append(cap)
+                entries[display_name] = MCPServerStatus(
+                    name=display_name,
+                    status="connected",
+                    display_name=display_name,
+                    server_type=server_type,
+                )
+                continue
+            # Error (failed setup).
+            if client_id in self._setup_errors:
+                error_msg = self._setup_errors[client_id]
+                entries[display_name] = MCPServerStatus(
+                    name=display_name,
+                    status="error",
+                    display_name=display_name,
+                    server_type=server_type,
+                    error=error_msg,
+                )
+                continue
+            # Configured but not yet connected and no error recorded.
+            entries[display_name] = MCPServerStatus(
+                name=display_name,
+                status="disconnected",
+                display_name=display_name,
+                server_type=server_type,
+            )
+
+        # Concurrently fetch tools + server_info for connected servers only.
+        if connected_caps:
+            results = await asyncio.gather(
+                *(_fetch_connected_status(cap) for cap in connected_caps),
+                return_exceptions=True,
+            )
+            for cap, result in zip(connected_caps, results, strict=True):
+                # Resolve the entry key using the same logic as entry creation:
+                # config.display_name takes precedence over cap.config.display_name.
+                cid = cap.config.client_id
+                cfg = configs_by_id.get(cid)
+                key = cfg.display_name if cfg is not None else cap.config.display_name
+                entry = entries.get(key)
+                if entry is None:
+                    continue
+                if isinstance(result, asyncio.CancelledError):
+                    raise result
+                if isinstance(result, BaseException):
+                    # Tool fetch failed — keep connected status, empty tools.
+                    logger.warning(
+                        "Failed to fetch MCP server status for %s: %s",
+                        cap.config.client_id,
+                        result,
+                    )
+                    continue
+                tools, server_name, server_version = result
+                entries[key] = MCPServerStatus(
+                    name=entry.name,
+                    status=entry.status,
+                    display_name=entry.display_name,
+                    server_type=entry.server_type,
+                    error=entry.error,
+                    server_name=server_name,
+                    server_version=server_version,
+                    tools=tools,
+                )
+
+        return entries
 
     def remove_provider(self, client_id: str) -> bool:
         """Remove a provider by its server config's client_id.

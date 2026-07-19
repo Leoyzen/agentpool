@@ -89,11 +89,15 @@ def to_mcp_status(status: MCPServerStatus) -> MCPStatus:
         name=status.name,
         display_name=status.display_name or status.name,
         status=to_opencode_mcp_status(status.status),
+        tools=status.tools,
         error=status.error,
     )
 
 
 def to_opencode_mcp_status(status: MCPConnectionStatus) -> OpenCodeMCPConnectionStatus:
+    # Note: 'disabled' is an internal status (server configured but
+    # enabled=False). The OpenCode API has no 'disabled' state, so it
+    # maps to 'disconnected'.
     mapping: dict[MCPConnectionStatus, OpenCodeMCPConnectionStatus] = {
         "connected": "connected",
         "disconnected": "disconnected",

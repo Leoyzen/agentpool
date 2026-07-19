@@ -24,6 +24,7 @@ import asyncio
 import contextlib
 from dataclasses import dataclass, field
 import os
+from pathlib import Path
 import shutil
 import signal
 import socket
@@ -37,7 +38,6 @@ import yaml
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-    from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +397,52 @@ def session_e2e_config_with_tool(tmp_path_factory: pytest.TempPathFactory) -> Pa
                 "tools": [{"name": "bash", "enabled": True}],
             }
         },
+        "storage": {"providers": [{"type": "memory"}]},
+    }
+    config_path.write_text(yaml.dump(config, default_flow_style=False))
+    return config_path
+
+
+@pytest.fixture(scope="session")
+def session_e2e_config_with_mcp(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Session-scoped e2e config with a fake stdio MCP server.
+
+    Defines a single native agent (``test_agent`` using TestModel) and one
+    pool-level stdio MCP server (``fake_kb``) backed by
+    ``tests/fixtures/fake_mcp_server.py``. The fake server is built with
+    ``fastmcp`` and exposes a single ``search_kb`` tool; it reports
+    ``serverInfo.name = "fake-kb-server"`` and ``version = "0.1.0"`` via
+    the MCP initialize handshake.
+
+    Uses ``sys.executable`` as the command so the subprocess inherits the
+    active venv (where ``fastmcp`` is installed). The fixture path is
+    resolved relative to this conftest file to work regardless of the
+    pytest rootdir.
+
+    Includes ``storage: {providers: [{type: memory}]}`` to eliminate
+    cross-run SQLite leakage.
+    """
+    config_dir = tmp_path_factory.mktemp("e2e_mcp")
+    config_path = config_dir / "e2e_config_mcp.yml"
+    fixtures_dir = Path(__file__).resolve().parent.parent / "fixtures"
+    fake_server_path = fixtures_dir / "fake_mcp_server.py"
+    config = {
+        "agents": {
+            "test_agent": {
+                "type": "native",
+                "model": "test",
+                "system_prompt": "You are a test assistant.",
+            }
+        },
+        "mcp_servers": [
+            {
+                "name": "fake_kb",
+                "type": "stdio",
+                "command": sys.executable,
+                "args": [str(fake_server_path)],
+                "enabled": True,
+            }
+        ],
         "storage": {"providers": [{"type": "memory"}]},
     }
     config_path.write_text(yaml.dump(config, default_flow_style=False))
@@ -893,6 +939,45 @@ async def subprocess_server_with_tool(
     )
     yield server
     # Do NOT terminate cached servers
+
+
+@pytest.fixture
+async def subprocess_server_with_mcp(
+    request: pytest.FixtureRequest,
+    process_registry: ProcessRegistry,
+    session_e2e_config_with_mcp: Path,
+    allow_model_requests: Any,
+) -> AsyncIterator[SubprocessServer]:
+    """Spawn an ``agentpool serve-*`` subprocess with the fake MCP server config.
+
+    Uses ``_spawn_server`` (non-cached) because the MCP-config variant is
+    unique to MCP status tests and not worth caching. The fake MCP server
+    adds startup time (subprocess spawn + MCP handshake), so the default
+    health timeout is 20s.
+
+    Parametrize via ``indirect=True`` with the same dict shape as
+    ``subprocess_server`` (minus ``config_path``, which is fixed to
+    ``session_e2e_config_with_mcp``).
+    """
+    params = getattr(request, "param", {"serve_command": "serve-opencode"})
+    serve_command: str = params.get("serve_command", "serve-opencode")
+    host: str = params.get("host", "127.0.0.1")
+    is_stdio: bool = params.get("is_stdio", False)
+    health_timeout: float = params.get("health_timeout", 20.0)
+    health_path: str = params.get("health_path", "/session")
+    extra_args: list[str] | None = params.get("extra_args")
+
+    async for server in _spawn_server(
+        serve_command,
+        session_e2e_config_with_mcp,
+        process_registry=process_registry,
+        host=host,
+        is_stdio=is_stdio,
+        health_timeout=health_timeout,
+        health_path=health_path,
+        extra_args=extra_args,
+    ):
+        yield server
 
 
 # ---------------------------------------------------------------------------

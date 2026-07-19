@@ -47,7 +47,13 @@ pytestmark = [
     indirect=True,
 )
 async def test_get_mcp(subprocess_server: SubprocessServer) -> None:
-    """C7.1: GET /mcp, verify 200 with MCP server list."""
+    """C7.1: GET /mcp, verify 200 with MCP server list.
+
+    Minimal-config variant (no MCP servers configured): the response dict
+    is empty (``{}``) but must still be a dict. The companion test
+    ``test_get_mcp_with_connected_server`` exercises the non-empty case
+    with a real stdio MCP server.
+    """
     base_url = subprocess_server.base_url
 
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -58,6 +64,62 @@ async def test_get_mcp(subprocess_server: SubprocessServer) -> None:
         mcp_servers = resp.json()
         # GET /mcp returns a dict mapping server names to MCPStatus objects.
         assert isinstance(mcp_servers, dict), f"Expected dict, got {type(mcp_servers)}"
+
+
+@pytest.mark.parametrize(
+    "subprocess_server_with_mcp",
+    [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
+    indirect=True,
+)
+async def test_get_mcp_with_connected_server(
+    subprocess_server_with_mcp: SubprocessServer,
+) -> None:
+    """C7.1+: GET /mcp with a real stdio MCP server, verify connected status.
+
+    L4 e2e test for MCP status reporting (fix-mcp-status-reporting tasks
+    8.1-8.3). Uses ``tests/fixtures/fake_mcp_server.py`` (a ``fastmcp``
+    stdio server exposing the ``search_kb`` tool) spawned as a real
+    subprocess by the ``MCPManager`` during pool startup.
+
+    Asserts:
+        - Response is a non-empty dict (the bug was that it returned ``{}``).
+        - The ``fake_kb`` server appears (identified by ``display_name``
+          because the dict key is ``client_id``, not the configured name).
+        - ``status == "connected"`` (the server successfully handshaked).
+        - ``tools`` contains ``"search_kb"`` (tools are populated from
+          ``McpServerCap.list_tools()``).
+    """
+    base_url = subprocess_server_with_mcp.base_url
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(f"{base_url}/mcp")
+        assert resp.status_code == 200, (
+            f"Expected 200 for GET /mcp, got {resp.status_code}: {resp.text}"
+        )
+        mcp_servers = resp.json()
+        assert isinstance(mcp_servers, dict), f"Expected dict, got {type(mcp_servers)}"
+        assert len(mcp_servers) > 0, (
+            f"Expected non-empty MCP servers with fake_kb configured, got {mcp_servers}"
+        )
+
+        # The dict key is client_id (e.g. "<python>_<fixture_path>"), not
+        # the configured name. Find the fake_kb entry by displayName (the
+        # OpenCode API uses camelCase aliases via OpenCodeBaseModel).
+        fake_kb_entry: dict[str, Any] | None = None
+        for entry in mcp_servers.values():
+            assert isinstance(entry, dict), f"Expected dict entry, got {type(entry)}"
+            if entry.get("displayName") == "fake_kb":
+                fake_kb_entry = entry
+                break
+        assert fake_kb_entry is not None, (
+            f"fake_kb server not found in response (displayName lookup), got {mcp_servers}"
+        )
+        assert fake_kb_entry["status"] == "connected", (
+            f"Expected status='connected', got '{fake_kb_entry['status']}': {fake_kb_entry}"
+        )
+        assert "search_kb" in fake_kb_entry["tools"], (
+            f"Expected 'search_kb' in tools, got {fake_kb_entry['tools']}"
+        )
 
 
 # ---------------------------------------------------------------------------

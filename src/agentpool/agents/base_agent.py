@@ -533,13 +533,29 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         for tool in await self._get_all_tools():
             tool.enabled = True
 
-    async def _get_mcp_server_info(self) -> dict[str, Any]:
-        """Get information about configured MCP servers.
+    async def _get_mcp_server_info(self) -> dict[str, MCPServerStatus]:
+        """Get MCP server status by merging agent-scoped and pool-level managers.
 
-        MCP server status is not directly available from capabilities.
-        Subclasses can override to provide agent-specific MCP server info.
+        ``self.mcp`` is always set on ``MessageNode`` (either shared with
+        the pool or a dedicated agent-scoped ``MCPManager``). When
+        ``self.host_context`` is available AND ``self.mcp is not
+        self.host_context.mcp`` (identity check — agent has its own
+        servers), pool-level servers from ``host_context.mcp`` are merged
+        in, with agent-scoped keys taking precedence on collision.
+
+        Returns:
+            Dict mapping ``client_id`` to ``MCPServerStatus``.
         """
-        return {}
+        result = await self.mcp.get_server_status()
+        # Merge pool-level servers when the agent has its own MCPManager
+        # (not shared with the pool). Agent-scoped takes precedence on
+        # key collision.
+        host_ctx = self.host_context
+        if host_ctx is not None and self.mcp is not host_ctx.mcp:
+            pool_status = await host_ctx.mcp.get_server_status()
+            pool_status.update(result)
+            result = pool_status
+        return result
 
     async def get_resource(self, name: str) -> Any:
         """Get a specific MCP resource by name or URI.
