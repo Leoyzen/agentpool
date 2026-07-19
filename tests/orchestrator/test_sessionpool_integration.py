@@ -93,6 +93,9 @@ class MockServerState:
     async def broadcast_event(self, event: Any) -> None:
         self.events.append(event)
 
+    def resolve_default_model_info(self) -> tuple[str, str]:
+        return "default", "agentpool"
+
 
 class MockMCPCapability(FunctionToolsetCapability):
     """Mock MCP provider for testing inheritance."""

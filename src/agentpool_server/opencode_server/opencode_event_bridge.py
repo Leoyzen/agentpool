@@ -188,9 +188,7 @@ class OpenCodeEventBridgeMixin:
         # "agentpool"/"default"/"agentpool" when unavailable (graceful
         # degradation for sessions created outside the REST handler path).
         agent_name = "agentpool"
-        default_model_id, default_provider_id = self.server_state.resolve_default_model_info()
-        model_id = default_model_id
-        provider_id = default_provider_id
+        model_id, provider_id = self.server_state.resolve_default_model_info()
         session_state = self.session_pool.sessions.get_session(session_id)
         if session_state is not None:
             agent_name = session_state.agent_name
