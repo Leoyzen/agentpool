@@ -9,7 +9,7 @@ agents:
     model: test:test-model
     system_prompt: "Collision test agent"
     mcp_servers:
-      - name: agent_kb
+      - name: kb
         type: stdio
         command: echo
         args: [kb]
@@ -22,7 +22,7 @@ mcp_servers:
     args: [fake]
     enabled: false
 
-  - name: pool_kb
+  - name: kb
     type: stdio
     command: echo
     args: [kb]

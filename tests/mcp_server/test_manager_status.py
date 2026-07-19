@@ -128,8 +128,8 @@ async def test_get_server_status_connected() -> None:
 
     status = await manager.get_server_status()
 
-    assert cap.config.client_id in status
-    entry = status[cap.config.client_id]
+    assert cap.config.display_name in status
+    entry = status[cap.config.display_name]
     assert entry.status == "connected"
     assert entry.display_name == "Connected"
     assert entry.server_name == "fake"
@@ -148,7 +148,7 @@ async def test_get_server_status_error() -> None:
 
     status = await manager.get_server_status()
 
-    entry = status[config.client_id]
+    entry = status[config.display_name]
     assert entry.status == "error"
     assert entry.error == "connection refused"
     assert entry.display_name == "Errored"
@@ -162,7 +162,7 @@ async def test_get_server_status_disabled() -> None:
 
     status = await manager.get_server_status()
 
-    entry = status[config.client_id]
+    entry = status[config.display_name]
     assert entry.status == "disabled"
 
 
@@ -174,7 +174,7 @@ async def test_get_server_status_disconnected() -> None:
 
     status = await manager.get_server_status()
 
-    entry = status[config.client_id]
+    entry = status[config.display_name]
     assert entry.status == "disconnected"
     assert entry.tools == []
 
@@ -190,7 +190,7 @@ async def test_get_server_status_tools_populated() -> None:
 
     status = await manager.get_server_status()
 
-    entry = status[cap.config.client_id]
+    entry = status[cap.config.display_name]
     assert entry.status == "connected"
     assert entry.tools == ["search_kb", "fetch_doc"]
 
@@ -208,14 +208,16 @@ async def test_get_server_status_no_lazy_connection() -> None:
 
     status = await manager.get_server_status()
 
-    entry = status[config.client_id]
+    entry = status[config.display_name]
     assert entry.status == "disconnected"
     assert entry.tools == []
 
 
 async def test_get_server_status_connected_cap_without_client_skips_tools() -> None:
-    """A cap in ``providers`` whose ``client`` is None stays ``connected`` but
-    ``list_tools()`` is NOT called (no lazy connection)."""
+    """A cap in ``providers`` whose ``client`` is None stays ``connected`` but.
+
+    ``list_tools()`` is NOT called (no lazy connection).
+    """
     config = _make_config(client_id="srv_no_client")
     cap = McpServerCap(config=config, name="mgr_srv_no_client", client=None)
     cap.list_tools = AsyncMock(return_value=[])  # type: ignore[method-assign]
@@ -224,7 +226,7 @@ async def test_get_server_status_connected_cap_without_client_skips_tools() -> N
 
     status = await manager.get_server_status()
 
-    entry = status[cap.config.client_id]
+    entry = status[cap.config.display_name]
     assert entry.status == "connected"
     assert entry.tools == []
     cap.list_tools.assert_not_awaited()  # type: ignore[attr-defined]
@@ -236,8 +238,10 @@ async def test_get_server_status_connected_cap_without_client_skips_tools() -> N
 
 
 async def test_setup_server_records_failure() -> None:
-    """When ``setup_server()`` raises, ``_setup_errors[client_id]`` is set
-    and the exception is re-raised."""
+    """When ``setup_server()`` raises, ``_setup_errors[client_id]`` is set.
+
+    and the exception is re-raised.
+    """
     config = _make_config(client_id="srv_fail")
     manager = MCPManager()
     # Force MCPClient construction to raise by patching the import target.
@@ -312,8 +316,10 @@ def test_mcp_server_cap_config_property() -> None:
 
 
 def test_mcp_server_cap_client_property_no_connection() -> None:
-    """``client`` property returns ``self._client`` (or None) without calling
-    ``_ensure_client()`` — no connection triggered on access."""
+    """``client`` property returns ``self._client`` (or None) without calling.
+
+    ``_ensure_client()`` — no connection triggered on access.
+    """
     # Case 1: no client set → returns None, no connection.
     cap_no_client = McpServerCap(
         config=_make_config(client_id="cap_no_client"),
@@ -362,9 +368,7 @@ async def _mock_server_status(status_map: dict[str, MCPServerStatus]) -> Any:
 
 async def test_agent_mcp_info_same_manager() -> None:
     """When ``self.mcp is host_context.mcp`` (same object), no merge happens."""
-    shared_mcp = await _mock_server_status(
-        {"a": MCPServerStatus(name="a", status="connected")}
-    )
+    shared_mcp = await _mock_server_status({"a": MCPServerStatus(name="a", status="connected")})
     host_ctx = MagicMock()
     host_ctx.mcp = shared_mcp
     agent = _FakeAgent(mcp=shared_mcp, host_context=host_ctx)
@@ -378,12 +382,12 @@ async def test_agent_mcp_info_same_manager() -> None:
 
 async def test_agent_mcp_info_different_managers() -> None:
     """When ``self.mcp`` differs from ``host_context.mcp``, results are merged."""
-    agent_mcp = await _mock_server_status(
-        {"agent_srv": MCPServerStatus(name="agent_srv", status="connected")}
-    )
-    pool_mcp = await _mock_server_status(
-        {"pool_srv": MCPServerStatus(name="pool_srv", status="disconnected")}
-    )
+    agent_mcp = await _mock_server_status({
+        "agent_srv": MCPServerStatus(name="agent_srv", status="connected")
+    })
+    pool_mcp = await _mock_server_status({
+        "pool_srv": MCPServerStatus(name="pool_srv", status="disconnected")
+    })
     host_ctx = MagicMock()
     host_ctx.mcp = pool_mcp
     agent = _FakeAgent(mcp=agent_mcp, host_context=host_ctx)
@@ -397,9 +401,7 @@ async def test_agent_mcp_info_different_managers() -> None:
 
 async def test_agent_mcp_info_no_host_context() -> None:
     """When ``host_context`` is None, only ``self.mcp`` results are returned."""
-    mcp = await _mock_server_status(
-        {"only": MCPServerStatus(name="only", status="connected")}
-    )
+    mcp = await _mock_server_status({"only": MCPServerStatus(name="only", status="connected")})
     agent = _FakeAgent(mcp=mcp, host_context=None)
 
     result = await BaseAgent._get_mcp_server_info(agent)  # type: ignore[arg-type]
@@ -409,12 +411,12 @@ async def test_agent_mcp_info_no_host_context() -> None:
 
 async def test_agent_mcp_info_key_collision() -> None:
     """On key collision, agent-scoped status wins over pool-level."""
-    agent_mcp = await _mock_server_status(
-        {"shared": MCPServerStatus(name="shared", status="connected")}
-    )
-    pool_mcp = await _mock_server_status(
-        {"shared": MCPServerStatus(name="shared", status="error", error="pool fail")}
-    )
+    agent_mcp = await _mock_server_status({
+        "shared": MCPServerStatus(name="shared", status="connected")
+    })
+    pool_mcp = await _mock_server_status({
+        "shared": MCPServerStatus(name="shared", status="error", error="pool fail")
+    })
     host_ctx = MagicMock()
     host_ctx.mcp = pool_mcp
     agent = _FakeAgent(mcp=agent_mcp, host_context=host_ctx)
@@ -432,9 +434,11 @@ async def test_agent_mcp_info_key_collision() -> None:
 
 
 async def test_aenter_tolerates_individual_failure() -> None:
-    """3 servers configured, 1 fails → manager enters, failed in
+    """3 servers configured, 1 fails → manager enters, failed in.
+
     ``_setup_errors``, other 2 in ``self.providers``, ``get_server_status()``
-    returns all 3."""
+    returns all 3.
+    """
     cfg_ok1 = _make_config(client_id="ok1")
     cfg_ok2 = _make_config(client_id="ok2")
     cfg_fail = _make_config(client_id="fail")
@@ -452,9 +456,7 @@ async def test_aenter_tolerates_individual_failure() -> None:
         # matches) with a mocked connected client.
         mock_client = MagicMock(spec=MCPClient)
         mock_client.server_info = None
-        cap = McpServerCap(
-            config=config, name=f"mgr_{config.client_id}", client=mock_client
-        )
+        cap = McpServerCap(config=config, name=f"mgr_{config.client_id}", client=mock_client)
         cap.list_tools = AsyncMock(return_value=[])  # type: ignore[method-assign]
         self.providers.append(cap)
         return cap
@@ -478,14 +480,14 @@ async def test_aenter_tolerates_individual_failure() -> None:
 
     status = await manager.get_server_status()
     assert set(status.keys()) == {
-        cfg_ok1.client_id,
-        cfg_ok2.client_id,
-        cfg_fail.client_id,
+        cfg_ok1.display_name,
+        cfg_ok2.display_name,
+        cfg_fail.display_name,
     }
-    assert status[cfg_ok1.client_id].status == "connected"
-    assert status[cfg_ok2.client_id].status == "connected"
-    assert status[cfg_fail.client_id].status == "error"
-    assert status[cfg_fail.client_id].error == "setup failed"
+    assert status[cfg_ok1.display_name].status == "connected"
+    assert status[cfg_ok2.display_name].status == "connected"
+    assert status[cfg_fail.display_name].status == "error"
+    assert status[cfg_fail.display_name].error == "setup failed"
 
     # Cleanup so exit_stack doesn't try to close mock caps.
     manager.providers.clear()
@@ -493,8 +495,10 @@ async def test_aenter_tolerates_individual_failure() -> None:
 
 
 async def test_aenter_all_fail() -> None:
-    """All servers fail → manager still enters, ``providers`` empty, all in
-    ``_setup_errors``, every status is ``error``."""
+    """All servers fail → manager still enters, ``providers`` empty, all in.
+
+    ``_setup_errors``, every status is ``error``.
+    """
     cfg_a = _make_config(client_id="a")
     cfg_b = _make_config(client_id="b")
     manager = MCPManager(servers=[cfg_a, cfg_b])
@@ -519,7 +523,7 @@ async def test_aenter_all_fail() -> None:
     assert set(manager._setup_errors.keys()) == {cfg_a.client_id, cfg_b.client_id}
 
     status = await manager.get_server_status()
-    assert set(status.keys()) == {cfg_a.client_id, cfg_b.client_id}
+    assert set(status.keys()) == {cfg_a.display_name, cfg_b.display_name}
     assert all(s.status == "error" for s in status.values())
 
     await manager.__aexit__(None, None, None)
@@ -531,8 +535,10 @@ async def test_aenter_all_fail() -> None:
 
 
 def test_server_info_after_connection() -> None:
-    """After connection, ``server_info`` returns name/version from
-    ``initialize_result.serverInfo``."""
+    """After connection, ``server_info`` returns name/version from.
+
+    ``initialize_result.serverInfo``.
+    """
     config = _make_config(client_id="srv_info")
     client = MCPClient(config=config)
 
@@ -553,8 +559,10 @@ def test_server_info_after_connection() -> None:
 
 
 def test_server_info_before_connection() -> None:
-    """Before ``__aenter__`` completes, accessing ``initialize_result`` raises
-    RuntimeError → ``server_info`` returns ``None``."""
+    """Before ``__aenter__`` completes, accessing ``initialize_result`` raises.
+
+    RuntimeError → ``server_info`` returns ``None``.
+    """
     config = _make_config(client_id="srv_pre")
     client = MCPClient(config=config)
 
@@ -589,9 +597,11 @@ def test_server_info_no_connection_trigger() -> None:
 
 
 async def test_multi_category_precedence() -> None:
-    """A server in both ``self.providers`` and ``self._setup_errors`` reports
-    ``connected`` (providers wins) with ``error=None``."""
-    cap = _make_connected_cap(client_id="srv_both", tool_names=["t"])
+    """A server in both ``self.providers`` and ``self._setup_errors`` reports.
+
+    ``connected`` (providers wins) with ``error=None``.
+    """
+    cap = _make_connected_cap(client_id="srv_both", display_name="srv_both", tool_names=["t"])
     config = _make_config(client_id="srv_both")
     manager = MCPManager()
     _populate_manager(
@@ -603,7 +613,7 @@ async def test_multi_category_precedence() -> None:
 
     status = await manager.get_server_status()
 
-    entry = status[config.client_id]
+    entry = status[config.display_name]
     assert entry.status == "connected"
     assert entry.error is None
     assert entry.tools == ["t"]

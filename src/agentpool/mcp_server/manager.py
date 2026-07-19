@@ -421,7 +421,9 @@ class MCPManager:
 
         Joins ``self.servers`` (configured), ``self.providers`` (connected),
         and ``self._setup_errors`` (failed setup attempts) into a single
-        dict keyed by ``client_id``.
+        dict keyed by ``display_name`` (the human-readable server name
+        configured by the user, falling back to ``client_id`` when no
+        name is set).
 
         Precedence on multi-category membership:
             - ``disabled`` wins over all (config has ``enabled=False``)
@@ -435,7 +437,7 @@ class MCPManager:
         return ``tools=[]`` without calling ``_ensure_client()``.
 
         Returns:
-            Dict mapping ``client_id`` to ``MCPServerStatus``.
+            Dict mapping ``display_name`` to ``MCPServerStatus``.
         """
         # Index providers by client_id for O(1) lookup.
         providers_by_id: dict[str, McpServerCap] = {p.config.client_id: p for p in self.providers}
@@ -445,18 +447,34 @@ class MCPManager:
         all_ids: set[str] = set(configs_by_id) | set(providers_by_id) | set(self._setup_errors)
 
         # Build base status entries (without tools) synchronously.
+        # Keyed by display_name (readable), not client_id (internal).
         entries: dict[str, MCPServerStatus] = {}
         connected_caps: list[McpServerCap] = []
         for client_id in all_ids:
             config = configs_by_id.get(client_id)
             cap = providers_by_id.get(client_id)
+            # Resolve display_name from config or cap (falls back to client_id).
+            display_name: str = (
+                config.display_name
+                if config is not None
+                else cap.config.display_name
+                if cap is not None
+                else client_id
+            )
+            server_type = (
+                config.type
+                if config is not None
+                else cap.config.type
+                if cap is not None
+                else "unknown"
+            )
             # Disabled wins over all other states.
             if config is not None and not config.enabled:
-                entries[client_id] = MCPServerStatus(
-                    name=client_id,
+                entries[display_name] = MCPServerStatus(
+                    name=display_name,
                     status="disabled",
-                    display_name=config.display_name if config is not None else None,
-                    server_type=config.type if config is not None else "unknown",
+                    display_name=display_name,
+                    server_type=server_type,
                 )
                 continue
             # Connected (providers wins over errors).
@@ -466,10 +484,8 @@ class MCPManager:
                 # calling _ensure_client().
                 if cap.client is not None:
                     connected_caps.append(cap)
-                display_name = cap.config.display_name
-                server_type = cap.config.type
-                entries[client_id] = MCPServerStatus(
-                    name=client_id,
+                entries[display_name] = MCPServerStatus(
+                    name=display_name,
                     status="connected",
                     display_name=display_name,
                     server_type=server_type,
@@ -478,20 +494,20 @@ class MCPManager:
             # Error (failed setup).
             if client_id in self._setup_errors:
                 error_msg = self._setup_errors[client_id]
-                entries[client_id] = MCPServerStatus(
-                    name=client_id,
+                entries[display_name] = MCPServerStatus(
+                    name=display_name,
                     status="error",
-                    display_name=config.display_name if config is not None else None,
-                    server_type=config.type if config is not None else "unknown",
+                    display_name=display_name,
+                    server_type=server_type,
                     error=error_msg,
                 )
                 continue
             # Configured but not yet connected and no error recorded.
-            entries[client_id] = MCPServerStatus(
-                name=client_id,
+            entries[display_name] = MCPServerStatus(
+                name=display_name,
                 status="disconnected",
-                display_name=config.display_name if config is not None else None,
-                server_type=config.type if config is not None else "unknown",
+                display_name=display_name,
+                server_type=server_type,
             )
 
         # Concurrently fetch tools + server_info for connected servers only.
@@ -501,7 +517,14 @@ class MCPManager:
                 return_exceptions=True,
             )
             for cap, result in zip(connected_caps, results, strict=True):
-                entry = entries[cap.config.client_id]
+                # Resolve the entry key using the same logic as entry creation:
+                # config.display_name takes precedence over cap.config.display_name.
+                cid = cap.config.client_id
+                cfg = configs_by_id.get(cid)
+                key = cfg.display_name if cfg is not None else cap.config.display_name
+                entry = entries.get(key)
+                if entry is None:
+                    continue
                 if isinstance(result, BaseException):
                     # Tool fetch failed — keep connected status, empty tools.
                     logger.warning(
@@ -511,7 +534,7 @@ class MCPManager:
                     )
                     continue
                 tools, server_name, server_version = result
-                entries[cap.config.client_id] = MCPServerStatus(
+                entries[key] = MCPServerStatus(
                     name=entry.name,
                     status=entry.status,
                     display_name=entry.display_name,

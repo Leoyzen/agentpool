@@ -18,11 +18,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, Mock
 
-import pytest
-import yamling
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from mcp.types import Tool
+import pytest
+import yamling
 
 from agentpool import AgentPool, AgentsManifest
 from agentpool.capabilities.mcp_server_cap import McpServerCap
@@ -32,8 +32,6 @@ from agentpool_server.opencode_server.state import ServerState
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-
     from agentpool_config.mcp_server import MCPServerConfig
 
 
@@ -162,8 +160,8 @@ async def test_mcp_status_connected_server_via_mock_client(
 
         assert response.status_code == 200
         data = response.json()
-        assert "echo_fake" in data
-        server = data["echo_fake"]
+        assert "fake_kb" in data
+        server = data["fake_kb"]
         assert server["status"] == "connected"
         assert server["tools"] == ["search_kb"]
         assert server["displayName"] == "fake_kb"
@@ -171,25 +169,25 @@ async def test_mcp_status_connected_server_via_mock_client(
         # Verify internal MCPServerStatus carries server_name/server_version
         # (not exposed via the OpenCode MCPStatus API but part of the spec).
         internal = await state.agent.get_mcp_server_info()
-        status = internal["echo_fake"]
+        status = internal["fake_kb"]
         assert status.server_name == "fake"
         assert status.server_version == "1.0"
 
 
 async def test_mcp_status_agent_scoped_wins_on_key_collision(tmp_path: Path) -> None:
-    """Agent-scoped MCP server takes precedence on ``client_id`` collision.
+    """Agent-scoped MCP server takes precedence on ``display_name`` collision.
 
-    Given: pool-level server ``pool_kb`` and agent-scoped server ``agent_kb``
-        share the same ``client_id`` (``echo_kb``) but have different configs.
+    Given: pool-level server ``kb`` and agent-scoped server ``kb``
+        share the same ``display_name`` (``kb``) and ``client_id`` (``echo_kb``).
     When: ``GET /mcp`` is called on the agent with its own ``MCPManager``.
     Then: ``BaseAgent._get_mcp_server_info`` merges pool-level and agent-scoped
         statuses, with agent-scoped keys overwriting pool-level on collision.
-        The response reports the agent-scoped server's display name and tools.
+        The response reports the agent-scoped server's tools.
     """
     manifest = _load_manifest()
     pool = AgentPool(manifest)
 
-    # Pool-level "pool_kb" server (client_id = "echo_kb").
+    # Pool-level "kb" server (client_id = "echo_kb").
     pool_cfg = pool.mcp.servers[1]
     assert pool_cfg.client_id == "echo_kb"
     pool_enabled = _enable_config(pool_cfg)
@@ -200,7 +198,7 @@ async def test_mcp_status_agent_scoped_wins_on_key_collision(tmp_path: Path) -> 
         server_version="1.0",
         tool_name="pool_tool",
     )
-    _inject_mock_cap(pool.mcp, pool_enabled, pool_client, name="pool_kb")
+    _inject_mock_cap(pool.mcp, pool_enabled, pool_client, name="kb")
 
     async with pool:
         state, app = await _make_server_state(pool, "collision_agent", str(tmp_path))
@@ -210,7 +208,7 @@ async def test_mcp_status_agent_scoped_wins_on_key_collision(tmp_path: Path) -> 
         agent = state.agent
         assert agent.mcp is not pool.mcp
 
-        # Agent-scoped "agent_kb" server (same client_id "echo_kb").
+        # Agent-scoped "kb" server (same client_id "echo_kb", same display_name "kb").
         agent_cfg = agent.mcp.servers[0]
         assert agent_cfg.client_id == "echo_kb"
         agent_enabled = _enable_config(agent_cfg)
@@ -221,7 +219,7 @@ async def test_mcp_status_agent_scoped_wins_on_key_collision(tmp_path: Path) -> 
             server_version="2.0",
             tool_name="agent_tool",
         )
-        _inject_mock_cap(agent.mcp, agent_enabled, agent_client, name="agent_kb")
+        _inject_mock_cap(agent.mcp, agent_enabled, agent_client, name="kb")
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -229,17 +227,16 @@ async def test_mcp_status_agent_scoped_wins_on_key_collision(tmp_path: Path) -> 
 
         assert response.status_code == 200
         data = response.json()
-        # The collision key "echo_kb" must be present with the agent-scoped
+        # The collision key "kb" must be present with the agent-scoped
         # server's values (agent-scoped overwrites pool-level on collision).
-        assert "echo_kb" in data
-        server = data["echo_kb"]
-        # Agent-scoped wins: its display name and tools are surfaced.
-        assert server["displayName"] == "agent_kb"
+        assert "kb" in data
+        server = data["kb"]
+        # Agent-scoped wins: its tools are surfaced.
         assert server["tools"] == ["agent_tool"]
         assert server["status"] == "connected"
 
         # Verify the internal status came from the agent-scoped manager.
         internal = await agent.get_mcp_server_info()
-        status = internal["echo_kb"]
+        status = internal["kb"]
         assert status.server_name == "agent_server"
         assert status.server_version == "2.0"
