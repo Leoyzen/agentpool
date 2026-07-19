@@ -295,6 +295,13 @@ async def list_commands(state: StateDep) -> list[Command]:
 @router.get("/mcp")
 async def get_mcp_status(state: StateDep) -> dict[str, MCPStatus]:
     """Get MCP server status."""
+    # NOTE: GET /mcp uses state.agent.get_mcp_server_info() (which delegates
+    # to self.mcp / host_context.mcp directly) instead of _find_mcp_manager
+    # because _find_mcp_manager searches agent._all_capabilities for
+    # MCPManager instances, but the MCPManager lives on self.mcp (MessageNode
+    # property), not in capabilities. _find_mcp_manager is kept for sibling
+    # /mcp/* routes (POST, connect, disconnect) that need the manager for
+    # mutations.
     server_info = await state.agent.get_mcp_server_info()
     return {name: to_mcp_status(status) for name, status in server_info.items()}
 
