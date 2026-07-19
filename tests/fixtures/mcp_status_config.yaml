@@ -1,0 +1,29 @@
+agents:
+  test_agent:
+    type: native
+    model: test:test-model
+    system_prompt: "Test agent"
+
+  collision_agent:
+    type: native
+    model: test:test-model
+    system_prompt: "Collision test agent"
+    mcp_servers:
+      - name: agent_kb
+        type: stdio
+        command: echo
+        args: [kb]
+        enabled: false
+
+mcp_servers:
+  - name: fake_kb
+    type: stdio
+    command: echo
+    args: [fake]
+    enabled: false
+
+  - name: pool_kb
+    type: stdio
+    command: echo
+    args: [kb]
+    enabled: false
