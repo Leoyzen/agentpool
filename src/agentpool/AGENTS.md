@@ -101,3 +101,98 @@
 - **mcp.json format follows Claude Desktop**: The companion file uses `{"mcpServers": {"name": {"command": "...", "args": [...], ...}}}` JSON format. The `_load_mcp_json()` function handles env var expansion and converts entries to `SkillMcpServerConfig` objects. Only filesystem skills (UPath paths) can have companion files — virtual skills (PurePosixPath) cannot.
 - **Tool prefixing prevents name collisions**: Python tools get the prefix `{skill_name}__tool__` and MCP tools get `{skill_name}__mcp__`. This ensures tool names from different skills never collide in the agent's tool namespace.
 - **Config model lives in separate package**: `agentpool_config/` exists solely to prevent import cycles with protocol servers.
+
+## Event Types
+
+The `RichAgentStreamEvent` union (`agents/events/events.py`) covers all events that flow through the EventBus and `run_stream()`. The taxonomy:
+
+| Name | Kind | Purpose |
+|---|---|---|
+| `AgentStreamEvent` | Stream | PydanticAI-native streaming delta |
+| `StreamCompleteEvent` | Lifecycle | Run finished with final `ChatMessage` |
+| `RunStartedEvent` | Lifecycle | Run began |
+| `RunErrorEvent` | Lifecycle | Run errored (recoverable) |
+| `RunFailedEvent` | Lifecycle | Run failed (unrecoverable) |
+| `ToolCallStartEvent` | Tool | Tool invocation started |
+| `ToolCallProgressEvent` | Tool | Tool invocation progress |
+| `ToolCallCompleteEvent` | Tool | Tool invocation finished |
+| `ToolCallDeferredEvent` | Tool | Tool invocation deferred (elicitation/approval) |
+| `ElicitationDeferredEvent` | Tool | Elicitation request deferred |
+| `SessionResumeEvent` | Lifecycle | Session resumed from checkpoint |
+| `PlanUpdateEvent` | Plan | Todo/plan entries updated |
+| `CompactionEvent` | Lifecycle | Context window compacted |
+| `SubAgentEvent` | Subagent | Wraps events from a child agent |
+| `SpawnSessionStart` | Subagent | Child session spawned |
+| `ToolResultMetadataEvent` | Tool | Tool result metadata attached |
+| `CustomEvent` | Custom | User-defined event |
+| `StateUpdate` | Lifecycle | Internal loop state transition (journaled, NOT published to EventBus) |
+| `ToolCallUpdateEvent` | Tool | Tool call updated (incremental) |
+| `MessageReplacementEvent` | Message | Replace a prior message (upsert semantics) |
+| `SystemNotificationEvent` | System | System-level notification visible in the TUI (background task completion, lifecycle events, steer/followup injection, team activity) |
+
+### SystemNotificationEvent
+
+`SystemNotificationEvent` (`agents/events/events.py`) carries a system-generated message that should be displayed inline in the conversation transcript without an agent turn. It is distinct from `ToastInfo` (chrome-level OS toast/sound notifications).
+
+**Fields:**
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `session_id` | `str` | `""` | Session this notification belongs to |
+| `level` | `Literal["info","warning","error","success"]` | `"info"` | Severity level |
+| `source` | `Literal[...]` | `"system"` | What produced the notification (see below) |
+| `title` | `str` | `""` | Short human-readable title (optional) |
+| `text` | `str` | (required) | Notification body text |
+| `ref_session_id` | `str \| None` | `None` | Optional reference to a related session (e.g. child session of a background task) |
+| `ref_label` | `str \| None` | `None` | Optional human-readable label for `ref_session_id` (e.g. `"subagent: researcher"`) |
+| `timestamp` | `float` | `time.time()` | Epoch seconds when the notification was emitted |
+
+**`source` enum values:**
+
+| Value | Produced by |
+|---|---|
+| `background_task` | `AgentRunContext.complete_background_task()` — a background subagent finished |
+| `system` | Generic system source (default) |
+| `lifecycle` | Lifecycle-event fallback mapping in `EventProcessor` (compaction, plan update, session resume) |
+| `steer` | `RunHandle.steer(emit_notification=True)` — mid-turn message injection |
+| `followup` | `RunHandle.followup(emit_notification=True)` — queued prompt for next turn |
+| `team` | Team mode `send_message` — one member notified another |
+| `custom` | User code calling `emit_system_notification(source="custom", ...)` |
+
+**`level` enum values:** `info` (default), `warning`, `error`, `success`.
+
+**`ref_session_id` / `ref_label`:** When set, the OpenCode `EventProcessor` appends `(ref_label)` — or `(session: ref_session_id)` if only `ref_session_id` is set — to the rendered output so the TUI can link the notification to a related session.
+
+## System Notifications
+
+### AgentRunContext.emit_system_notification()
+
+`AgentRunContext.emit_system_notification()` (`agents/context.py`) is the public API for capabilities and tools to emit custom system notifications. It publishes a `SystemNotificationEvent` directly to `self.event_bus` (the same pattern as `report_progress()` and `StreamEventEmitter._emit()`). It does NOT go through `CommChannel` — notifications are point-in-time and never journaled.
+
+Best-effort semantics: empty `text` logs a warning and returns without emitting; `event_bus` failures are logged but never raised. Decorated with `@logfire.instrument("agent.emit_system_notification {session_id}")`.
+
+```python
+# From a tool or capability with access to RunContext.deps
+await ctx.deps.run_ctx.emit_system_notification(
+    level="info",
+    source="custom",
+    text="Analysis complete",
+    ref_session_id="child-123",
+    ref_label="subagent: researcher",
+)
+```
+
+`AgentRunContext.complete_background_task()` calls this internally with `source="background_task"` and `ref_session_id=child_session_id` after the `steer_callback` try/except block, so the TUI surfaces background task completion even if the model doesn't echo the result.
+
+### RunHandle.steer() / followup() Notification Parameters
+
+`RunHandle.steer()` and `RunHandle.followup()` (`orchestrator/run.py`) accept an `emit_notification: bool` parameter that controls whether a `SystemNotificationEvent` is scheduled for the injection.
+
+| Method | Default | `source` | Rationale |
+|---|---|---|---|
+| `steer(emit_notification=True)` | `True` | `"steer"` | Mid-turn injections are noteworthy — the user should see that a steer message arrived |
+| `followup(emit_notification=False)` | `False` | `"followup"` | Queued messages are less urgent and will be visible when the next turn processes them |
+
+**Fire-and-forget mechanism:** When `emit_notification` is `True`, the notification is scheduled via `asyncio.get_running_loop().create_task(self._emit_steer_notification(message))` (or `_emit_followup_notification`). This is viable because `steer()` and `followup()` are always called from an async context (protocol handlers, `SessionController`). The `create_task` call is wrapped in `try/except RuntimeError` — if there is no running event loop, the notification is silently skipped and `steer()` / `followup()` still return normally. The private `_emit_*_notification` coroutines truncate the message to 80 chars (with `"..."` suffix) and wrap the `emit_system_notification` call in `try/except` so failures never propagate.
+
+**Team mode suppression:** Team mode `send_message` passes `emit_notification=False` to `steer()` to suppress the generic `"System injected: ..."` notification, then emits its own `source="team"` notification with a `ref_session_id` / `ref_label` pointing at the recipient member. This avoids duplicate notifications and gives the TUI more specific context.

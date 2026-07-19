@@ -74,6 +74,10 @@ async def stream_response(
                         "choices": [choice],
                     }
                     yield f"data: {anyenv.dump_json(chunk_data)}\n\n"
+                case _:
+                    # Non-text events (tool calls, system notifications, etc.)
+                    # are intentionally ignored in OpenAI streaming format.
+                    pass
         final_chunk = {
             "id": response_id,
             "object": "chat.completion.chunk",

@@ -1029,6 +1029,7 @@ class RunHandle:
         message: str | list[Any],
         *,
         message_id: str | None = None,
+        emit_notification: bool = True,
     ) -> str | None:
         """Inject a steer message into the active turn or wake idle handle.
 
@@ -1044,6 +1045,13 @@ class RunHandle:
         are unpacked via ``agent_run.enqueue(*content_blocks,
         priority="asap")``.
 
+        When ``emit_notification`` is ``True`` (default), a
+        ``SystemNotificationEvent(source="steer")`` is scheduled via
+        ``asyncio.create_task()`` (fire-and-forget). Set to ``False``
+        when the caller emits its own specific notification (e.g. team
+        mode ``send_message`` emits ``source="team"`` with
+        ``ref_session_id``).
+
         Design note: Once feedback is dequeued by ``recv()`` and
         delivered to the agent runtime (via ``_idle_loop`` →
         ``_execute_turn`` → ``agent_run``), it cannot be revoked.
@@ -1057,6 +1065,9 @@ class RunHandle:
                 blocks).
             message_id: Optional message ID. Auto-generated as UUID4 if
                 not provided.
+            emit_notification: If ``True``, schedule a
+                ``SystemNotificationEvent(source="steer")`` via
+                ``asyncio.create_task()``.
 
         Returns:
             The ``message_id`` string on success, ``None`` if the handle
@@ -1101,6 +1112,7 @@ class RunHandle:
             # event prevents blocking on _idle_event.wait() when the
             # feedback is already in the CommChannel queue.
             self._idle_event.set()
+            self._try_schedule_steer_notification(message, emit_notification)
             return fb.message_id
 
         # Fallback: DirectChannel path (existing logic).
@@ -1110,6 +1122,7 @@ class RunHandle:
             else:
                 self._message_queue.append(fb.content)
             self._idle_event.set()
+            self._try_schedule_steer_notification(message, emit_notification)
             return fb.message_id
 
         if self._run_state == RunState.RUNNING:
@@ -1119,12 +1132,14 @@ class RunHandle:
                     agent_run.enqueue(*fb.content_blocks, priority="asap")
                 else:
                     agent_run.enqueue(fb.content, priority="asap")
+                self._try_schedule_steer_notification(message, emit_notification)
                 return fb.message_id
             # No active agent_run — queue for next turn.
             if fb.content_blocks is not None:
                 self.run_ctx.queued_steer_messages.append(fb.content_blocks)
             else:
                 self.run_ctx.queued_steer_messages.append(fb.content)
+            self._try_schedule_steer_notification(message, emit_notification)
             return fb.message_id
 
         return None
@@ -1135,6 +1150,7 @@ class RunHandle:
         message: str | list[Any],
         *,
         message_id: str | None = None,
+        emit_notification: bool = False,
     ) -> str | None:
         """Queue a follow-up prompt for the next turn.
 
@@ -1145,11 +1161,18 @@ class RunHandle:
         When ``message`` is a ``list``, it is stored as
         ``Feedback.content_blocks`` (structured/multimodal content).
 
+        When ``emit_notification`` is ``True`` (default ``False``), a
+        ``SystemNotificationEvent(source="followup")`` is scheduled via
+        ``asyncio.create_task()`` (fire-and-forget). Default is ``False``
+        because queued messages are less urgent than mid-turn steers.
+
         Args:
             message: The follow-up message (plain text or structured
                 content blocks).
             message_id: Optional message ID. Auto-generated as UUID4 if
                 not provided.
+            emit_notification: If ``True``, schedule a
+                ``SystemNotificationEvent(source="followup")``.
 
         Returns:
             The ``message_id`` string on success, ``None`` if the handle
@@ -1184,6 +1207,7 @@ class RunHandle:
         if self._comm_channel is not None and self._comm_channel.deliver_feedback(fb):
             # Always set _idle_event (see steer() for rationale).
             self._idle_event.set()
+            self._try_schedule_followup_notification(message, emit_notification)
             return fb.message_id
 
         # Fallback: DirectChannel path (existing logic).
@@ -1193,7 +1217,60 @@ class RunHandle:
             self._message_queue.append(fb.content)
         if self._run_state == RunState.IDLE:
             self._idle_event.set()
+        self._try_schedule_followup_notification(message, emit_notification)
         return fb.message_id
+
+    def _try_schedule_steer_notification(
+        self,
+        message: str | list[Any],
+        emit: bool,
+    ) -> None:
+        """Best-effort schedule of a steer notification via asyncio.create_task."""
+        if not emit:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._emit_steer_notification(message))  # noqa: RUF006  # fire-and-forget
+        except RuntimeError:
+            pass  # No running event loop — skip notification silently.
+
+    async def _emit_steer_notification(self, message: str | list[Any]) -> None:
+        """Emit a SystemNotificationEvent for a steer injection (best-effort)."""
+        try:
+            text = message if isinstance(message, str) else str(message)
+            truncated = text[:80] + ("..." if len(text) > 80 else "")  # noqa: PLR2004
+            await self.run_ctx.emit_system_notification(
+                source="steer",
+                text=f"System injected: {truncated}",
+            )
+        except Exception:  # noqa: BLE001  # best-effort
+            logger.warning("Failed to emit steer notification", exc_info=True)
+
+    def _try_schedule_followup_notification(
+        self,
+        message: str | list[Any],
+        emit: bool,
+    ) -> None:
+        """Best-effort schedule of a followup notification via asyncio.create_task."""
+        if not emit:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._emit_followup_notification(message))  # noqa: RUF006  # fire-and-forget
+        except RuntimeError:
+            pass  # No running event loop — skip notification silently.
+
+    async def _emit_followup_notification(self, message: str | list[Any]) -> None:
+        """Emit a SystemNotificationEvent for a followup queue (best-effort)."""
+        try:
+            text = message if isinstance(message, str) else str(message)
+            truncated = text[:80] + ("..." if len(text) > 80 else "")  # noqa: PLR2004
+            await self.run_ctx.emit_system_notification(
+                source="followup",
+                text=f"System queued: {truncated}",
+            )
+        except Exception:  # noqa: BLE001  # best-effort
+            logger.warning("Failed to emit followup notification", exc_info=True)
 
     def revoke(self, message_id: str) -> bool:
         """Revoke a pending steer or followup message by ID.

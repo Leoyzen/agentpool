@@ -21,6 +21,7 @@ from pydantic_ai import (
 from agentpool.agents.events import (
     RunErrorEvent,
     StreamCompleteEvent,
+    SystemNotificationEvent,
     ToolCallProgressEvent,
     ToolCallStartEvent,
 )
@@ -60,6 +61,10 @@ async def simple_print_handler(ctx: AgentContext[Any], event: RichAgentStreamEve
 
         case RunErrorEvent(message=message):
             print(f"\n❌ Error: {message}", flush=True, file=sys.stderr)
+
+        case SystemNotificationEvent(level=lvl, title=ttl, text=txt):
+            label = f"{ttl}: " if ttl else ""
+            print(f"\n🔔 [{lvl}] {label}{txt}", flush=True, file=sys.stderr)
 
         case StreamCompleteEvent():
             print(file=sys.stderr)  # Final newline
@@ -114,6 +119,10 @@ async def detailed_print_handler(ctx: AgentContext[Any], event: RichAgentStreamE
         case RunErrorEvent(message=message, code=code):
             error_info = f" [{code}]" if code else ""
             print(f"\n❌ Error{error_info}: {message}", flush=True, file=sys.stderr)
+
+        case SystemNotificationEvent(level=lvl, source=src, title=ttl, text=txt):
+            label = f"{ttl}: " if ttl else ""
+            print(f"\n🔔 [{lvl}] ({src}) {label}{txt}", flush=True, file=sys.stderr)
 
         case StreamCompleteEvent():
             print(file=sys.stderr)  # Final newline
@@ -175,6 +184,11 @@ def create_file_stream_handler(
 
             case RunErrorEvent(message=message):
                 file_handle.write(f"\n[error] {message}\n")
+                file_handle.flush()
+
+            case SystemNotificationEvent(level=lvl, title=ttl, text=txt):
+                label = f"{ttl}: " if ttl else ""
+                file_handle.write(f"\n[system/{lvl}] {label}{txt}\n")
                 file_handle.flush()
 
             case StreamCompleteEvent():

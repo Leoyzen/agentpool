@@ -69,3 +69,9 @@
 - **MCP server** does NOT extend `ProtocolEventConsumerMixin`. It uses FastMCP decorators and exposes agents as tools/prompts/resources — no session-level event streaming.
 - **A2A server** does NOT extend `ProtocolEventConsumerMixin` either. It's a request-response HTTP server with no event subscription.
 - **OpenAI API server** extends both `BaseServer` and `ProtocolEventConsumerMixin`. It uses the mixin only for child consumer lifecycle (subagent sessions). The main chat completions endpoint does not use EventBus directly.
+- **OpenCode lifecycle-event fallback mapping**: `EventProcessor.process()` (`opencode_server/event_processor.py`) maps `SystemNotificationEvent` to a synthetic `ToolPart(tool="system", state="completed", metadata={"system_notification": True})` via the `_render_system_notification()` helper. As a fallback, lifecycle events that would otherwise be dropped are also routed through `_render_system_notification()` so they surface in the TUI:
+  - `CompactionEvent` → `SystemNotificationEvent(source="lifecycle", text="Context compacted ({trigger}, {phase})")`
+  - `PlanUpdateEvent` → `SystemNotificationEvent(source="lifecycle", text="Plan updated ({len(entries)} entries)")`
+  - `SessionResumeEvent` → `SystemNotificationEvent(source="lifecycle", text="Session resumed ({resolved_call_count} calls resolved, source={source})")`
+  
+  This fallback mapping lives in `EventProcessor.process()` (the OpenCode server side), NOT at the emission source in core. Core code emits the original lifecycle events; the OpenCode server rewrites them into system notifications so the TUI has a uniform rendering path.

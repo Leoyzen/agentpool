@@ -8,6 +8,7 @@ state, enabling stateless recursive processing.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+import uuid
 
 from pydantic_ai import FunctionToolCallEvent
 from pydantic_ai.messages import (
@@ -21,11 +22,15 @@ from pydantic_ai.messages import (
 )
 
 from agentpool.agents.events import (
+    CompactionEvent,
     ElicitationDeferredEvent,
     FileContentItem,
     LocationContentItem,
+    PlanUpdateEvent,
     RunErrorEvent,
+    SessionResumeEvent,
     StreamCompleteEvent,
+    SystemNotificationEvent,
     TextContentItem,
     ToolCallCompleteEvent,
     ToolCallDeferredEvent,
@@ -225,6 +230,81 @@ class EventProcessor:
                     error_name=run_error_event.code or "RunError",
                     error_message=run_error_event.message,
                 )
+
+            case SystemNotificationEvent(
+                level=lvl,
+                source=src,
+                title=ttl,
+                text=txt,
+                ref_session_id=rid,
+                ref_label=rlbl,
+            ):
+                for e in self._render_system_notification(ctx, lvl, src, ttl, txt, rid, rlbl):
+                    yield e
+
+            case CompactionEvent(trigger=trig, phase=ph):
+                for e in self._render_system_notification(
+                    ctx, "info", "lifecycle", "", f"Context compacted ({trig}, {ph})", None, None
+                ):
+                    yield e
+
+            case PlanUpdateEvent(entries=entries):
+                text = f"Plan updated ({len(entries)} entries)"
+                for e in self._render_system_notification(
+                    ctx, "info", "lifecycle", "", text, None, None
+                ):
+                    yield e
+
+            case SessionResumeEvent(resolved_call_count=count, source=src):
+                text = f"Session resumed ({count} calls resolved, source={src})"
+                for e in self._render_system_notification(
+                    ctx, "info", "lifecycle", "", text, None, None
+                ):
+                    yield e
+
+    def _render_system_notification(
+        self,
+        ctx: EventProcessorContext,
+        level: str,
+        source: str,
+        title: str,
+        text: str,
+        ref_session_id: str | None,
+        ref_label: str | None,
+    ) -> Iterator[Event]:
+        """Render a system notification as a completed ToolPart.
+
+        Follows the ``tool="elicitation"`` precedent (line ~567) which uses
+        a synthetic tool name with metadata flag for TUI recognition.
+        Falls back to ``TextPart`` if TUI rendering of ``tool="system"`` is
+        broken (task 5.7 empirical verification).
+        """
+        output = f"[{level}] {title}: {text}" if title else f"[{level}] {text}"
+        if ref_label is not None:
+            output += f" ({ref_label})"
+        elif ref_session_id is not None:
+            output += f" (session: {ref_session_id})"
+
+        call_id = f"system-{uuid.uuid4().hex}"
+        ts = TimeStartEndCompacted(start=now_ms(), end=now_ms())
+        tool_state = ToolStateCompleted(
+            title=title or f"System notification ({source})",
+            input={},
+            output=output,
+            metadata={"system_notification": True},
+            time=ts,
+        )
+        tool_part = ToolPart(
+            id=identifier.ascending("part"),
+            message_id=ctx.assistant_msg_id,
+            session_id=ctx.session_id,
+            tool="system",
+            call_id=call_id,
+            state=tool_state,
+            metadata={"system_notification": True},
+        )
+        ctx.assistant_msg.parts.append(tool_part)
+        yield PartUpdatedEvent.create(tool_part)
 
     def _process_text_start(
         self,

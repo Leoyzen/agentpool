@@ -18,6 +18,7 @@ If no content is emitted, the return value is automatically converted for UI (fa
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import time
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic_ai import (
@@ -901,6 +902,49 @@ class MessageReplacementEvent:
     """Event type identifier."""
 
 
+@dataclass(kw_only=True)
+class SystemNotificationEvent:
+    """System-level notification visible in the TUI without an agent turn.
+
+    Carries a system-generated message (background task completion, lifecycle
+    event, steer/followup injection, team activity) that should be displayed
+    inline in the conversation transcript. Distinct from ``ToastInfo`` which
+    represents chrome-level OS toast/sound notifications.
+    """
+
+    session_id: str = ""
+    """ID of the session this notification belongs to."""
+
+    level: Literal["info", "warning", "error", "success"] = "info"
+    """Severity level of the notification."""
+
+    source: Literal[
+        "background_task",
+        "system",
+        "lifecycle",
+        "steer",
+        "followup",
+        "team",
+        "custom",
+    ] = "system"
+    """What produced the notification."""
+
+    title: str = ""
+    """Short human-readable title (optional)."""
+
+    text: str
+    """Notification body text (required)."""
+
+    ref_session_id: str | None = None
+    """Optional reference to a related session (e.g. child session of a background task)."""
+
+    ref_label: str | None = None
+    """Optional human-readable label for ``ref_session_id`` (e.g. 'member: researcher')."""
+
+    timestamp: float = field(default_factory=time.time)
+    """Epoch seconds when the notification was emitted."""
+
+
 type RichAgentStreamEvent[OutputDataT] = (
     AgentStreamEvent
     | StreamCompleteEvent[OutputDataT]
@@ -922,6 +966,7 @@ type RichAgentStreamEvent[OutputDataT] = (
     | StateUpdate
     | ToolCallUpdateEvent
     | MessageReplacementEvent
+    | SystemNotificationEvent
 )
 
 

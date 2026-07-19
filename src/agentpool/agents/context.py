@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import uuid
 
 import anyio
+import logfire
 from mcp.types import (
     ElicitRequestFormParams,
     ElicitRequestParams,
@@ -17,6 +18,7 @@ from mcp.types import (
     ErrorData,
 )
 
+from agentpool.agents.events.events import SystemNotificationEvent
 from agentpool.agents.prompt_injection import PromptInjectionManager
 from agentpool.log import get_logger
 from agentpool.messaging.context import NodeContext
@@ -185,17 +187,79 @@ class AgentRunContext:
     share the same ``turn_id`` for idempotent crash recovery.
     """
 
+    @logfire.instrument("agent.emit_system_notification {session_id}")
+    async def emit_system_notification(
+        self,
+        *,
+        level: Literal["info", "warning", "error", "success"] = "info",
+        source: Literal[
+            "background_task",
+            "system",
+            "lifecycle",
+            "steer",
+            "followup",
+            "team",
+            "custom",
+        ] = "system",
+        text: str,
+        title: str = "",
+        ref_session_id: str | None = None,
+        ref_label: str | None = None,
+    ) -> None:
+        """Emit a system notification visible in the TUI.
+
+        Publishes a ``SystemNotificationEvent`` directly to ``self.event_bus``
+        — the same pattern as ``report_progress()`` and
+        ``StreamEventEmitter._emit()``. Does NOT go through ``CommChannel``
+        (notifications are point-in-time, never journaled).
+
+        Best-effort: empty ``text`` logs a warning and returns without
+        emitting. ``event_bus`` failures are logged but never raised.
+        """
+        if not text:
+            logger.warning(
+                "emit_system_notification called with empty text, skipping",
+                session_id=self.session_id,
+            )
+            return
+        if self.event_bus is None:
+            logger.warning(
+                "emit_system_notification called with no event_bus, dropping",
+                session_id=self.session_id,
+                text=text[:80],
+            )
+            return
+        event = SystemNotificationEvent(
+            session_id=self.session_id,
+            level=level,
+            source=source,
+            title=title,
+            text=text,
+            ref_session_id=ref_session_id,
+            ref_label=ref_label,
+        )
+        try:
+            await self.event_bus.publish(self.session_id, event)
+        except Exception:  # noqa: BLE001  # best-effort
+            logger.warning(
+                "Failed to publish SystemNotificationEvent",
+                exc_info=True,
+                session_id=self.session_id,
+                source=source,
+            )
+
     async def complete_background_task(self, child_session_id: str, message: str) -> None:
         """Signal that a background child task has completed.
 
-        Calls steer_callback first (if set), then pops and sets the done_event.
-        Ordering is critical: steer BEFORE signal to prevent NativeTurn
-        from waking before the steer message is queued.
+        Calls steer_callback first (if set), emits a SystemNotificationEvent,
+        then pops and sets the done_event. Ordering is critical: steer BEFORE
+        notification BEFORE signal to prevent NativeTurn from waking before
+        the steer message is queued.
         """
         if self.steer_callback is not None:
             try:
                 await self.steer_callback(self.session_id, message)
-            except Exception:
+            except Exception:  # best-effort
                 logger.exception(
                     "steer_callback raised in complete_background_task",
                     child_session_id=child_session_id,
@@ -205,6 +269,14 @@ class AgentRunContext:
                 "complete_background_task called without steer_callback",
                 child_session_id=child_session_id,
             )
+        # Emit system notification so the TUI can see the task completed,
+        # even if the model doesn't echo the result.
+        await self.emit_system_notification(
+            level="info",
+            source="background_task",
+            text=message,
+            ref_session_id=child_session_id,
+        )
         event = self.child_done_events.pop(child_session_id, None)
         if event is not None:
             event.set()
@@ -409,13 +481,13 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                                 )
                                 data.touch()
                                 await store.save_session(data)
-                        except Exception:  # noqa: BLE001
+                        except Exception:  # noqa: BLE001  # best-effort  # noqa: BLE001
                             logger.debug(
                                 "Failed to update session status to checkpointed",
                                 session_id=run_ctx.session_id,
                                 exc_info=True,
                             )
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001  # best-effort  # noqa: BLE001
                 # Checkpoint failed — the in-process future await still
                 # works, but crash recovery won't be available for this
                 # elicitation. Log prominently so operators know durability
@@ -436,7 +508,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         # question and the future times out.
         try:
             await provider.broadcast_elicitation_question(handle, params, shared_future=future)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  # best-effort  # noqa: BLE001
             logger.warning(
                 "Failed to broadcast elicitation question",
                 session_id=run_ctx.session_id,
@@ -466,11 +538,11 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         finally:
             try:
                 registry.remove(handle)
-            except Exception:
+            except Exception:  # best-effort
                 logger.exception("Failed to remove elicitation handle from registry")
             try:
                 provider.cleanup_elicitation_question(handle)
-            except Exception:
+            except Exception:  # best-effort
                 logger.exception("Failed to cleanup elicitation question")
 
         # Convert payload to ElicitResult.

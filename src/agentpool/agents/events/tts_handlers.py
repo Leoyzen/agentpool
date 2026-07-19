@@ -87,6 +87,11 @@ class BaseTTSEventHandler:
             case StreamCompleteEvent():
                 await self._close_stream()
 
+            case _:
+                # Non-text events (tool calls, system notifications, etc.)
+                # are intentionally ignored for TTS synthesis.
+                pass
+
 
 class OpenAITTSEventHandler(BaseTTSEventHandler):
     """TTS event handler using OpenAI's Text-to-Speech API.
