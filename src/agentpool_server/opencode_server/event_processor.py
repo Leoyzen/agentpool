@@ -50,6 +50,7 @@ from agentpool_server.opencode_server.models import (
 # Cross-layer import: McpToolsChangedEvent is an OpenCode SSE event that
 # EventProcessor creates from core-layer ChangeEvent(kind="tools_changed").
 from agentpool_server.opencode_server.models.events import McpToolsChangedEvent
+from agentpool_server.opencode_server.models.message import AssistantMessage
 from agentpool_server.opencode_server.models.parts import (
     ReasoningPart,
     StepFinishPart,
@@ -823,6 +824,13 @@ class EventProcessor:
             )
         if msg.cost_info and msg.cost_info.total_cost:
             ctx.update_cost(float(msg.cost_info.total_cost))
+
+        # Update model info from the real inference result
+        if isinstance(ctx.assistant_msg.info, AssistantMessage):
+            if msg.model_name is not None:
+                ctx.assistant_msg.info.model_id = msg.model_name
+            if msg.provider_name is not None:
+                ctx.assistant_msg.info.provider_id = msg.provider_name
 
         response_time = now_ms()
         start = ctx.stream_start_ms

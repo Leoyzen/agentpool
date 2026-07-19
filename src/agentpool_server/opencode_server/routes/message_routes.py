@@ -253,57 +253,62 @@ async def _process_message(
     Per-session locking ensures messages to the same session are processed
     sequentially, preventing race conditions and event interleaving.
 
-    User message is created BEFORE acquiring the lock so that the UI can
-    immediately show the message with "QUEUED" status while waiting.
+    The entire flow—session loading, user message creation, and agent
+    processing—runs inside the per-session lock. This eliminates the race
+    condition where concurrent ``get_or_load_session`` calls could replace
+    ``state.messages[session_id]`` (via ``set_messages_for_session``) while
+    another coroutine has already appended a user message (see issue #192).
     """
-    # --- Create user message BEFORE lock (so UI shows queued status) ---
-    session = await get_or_load_session(state, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    agent_name = _resolve_message_agent_name(state, session_id, request.agent)
-    user_msg_id = identifier.ascending("message", request.message_id)
-    user_message = UserMessage(
-        id=user_msg_id,
-        session_id=session_id,
-        time=TimeCreated.now(),
-        agent=agent_name,
-        model=request.model,
-    )
-
-    user_msg_with_parts = MessageWithParts(info=user_message)
-    for part in request.parts:
-        match part:
-            case TextPartInput(text=text):
-                created: Part = user_msg_with_parts.add_text_part(text)
-            case FilePartInput(mime=mime, url=url, filename=filename, source=source):
-                created = user_msg_with_parts.add_file_part(
-                    mime,
-                    url,
-                    filename=filename,
-                    source=source,
-                )
-            case AgentPartInput(name=name, source=source):
-                created = user_msg_with_parts.add_agent_part(name, source=source)
-            case SubtaskPartInput(
-                prompt=subtask_prompt, description=desc, agent=subtask_agent, model=subtask_model
-            ):
-                created = user_msg_with_parts.add_subtask_part(
-                    subtask_prompt,
-                    desc,
-                    subtask_agent,
-                    model=subtask_model,
-                )
-            case _ as unreachable:
-                assert_never(unreachable)
-        await state.broadcast_event(PartUpdatedEvent.create(created))
-    await append_message_to_session(state, session_id, user_msg_with_parts)
-    await persist_message_to_storage(state, user_msg_with_parts, session_id)
-    await state.broadcast_event(MessageUpdatedEvent.create(user_message))
-
-    # Acquire per-session lock to ensure sequential processing
     lock = state.get_session_lock(session_id)
     async with lock:
+        # --- Load session and create user message (inside lock) ---
+        session = await get_or_load_session(state, session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        agent_name = _resolve_message_agent_name(state, session_id, request.agent)
+        user_msg_id = identifier.ascending("message", request.message_id)
+        user_message = UserMessage(
+            id=user_msg_id,
+            session_id=session_id,
+            time=TimeCreated.now(),
+            agent=agent_name,
+            model=request.model,
+        )
+
+        user_msg_with_parts = MessageWithParts(info=user_message)
+        for part in request.parts:
+            match part:
+                case TextPartInput(text=text):
+                    created: Part = user_msg_with_parts.add_text_part(text)
+                case FilePartInput(mime=mime, url=url, filename=filename, source=source):
+                    created = user_msg_with_parts.add_file_part(
+                        mime,
+                        url,
+                        filename=filename,
+                        source=source,
+                    )
+                case AgentPartInput(name=name, source=source):
+                    created = user_msg_with_parts.add_agent_part(name, source=source)
+                case SubtaskPartInput(
+                    prompt=subtask_prompt,
+                    description=desc,
+                    agent=subtask_agent,
+                    model=subtask_model,
+                ):
+                    created = user_msg_with_parts.add_subtask_part(
+                        subtask_prompt,
+                        desc,
+                        subtask_agent,
+                        model=subtask_model,
+                    )
+                case _ as unreachable:
+                    assert_never(unreachable)
+            await state.broadcast_event(PartUpdatedEvent.create(created))
+        await append_message_to_session(state, session_id, user_msg_with_parts)
+        await persist_message_to_storage(state, user_msg_with_parts, session_id)
+        await state.broadcast_event(MessageUpdatedEvent.create(user_message))
+
         return await _process_message_locked(
             session_id, request, state, user_msg_id, user_msg_with_parts
         )
@@ -553,6 +558,8 @@ async def _process_message_locked(  # noqa: PLR0915
                 input_provider=input_provider,
                 agent_name=agent_name,
                 message_id=assistant_msg_id,
+                model_id=request.model.model_id if request.model else None,
+                provider_id=request.model.provider_id if request.model else None,
             )
         else:
             from agentpool.lifecycle.types import DeliveryMode
@@ -747,100 +754,110 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
     Client should listen to SSE events to get updates.
 
     Returns 204 No Content immediately.
+
+    The entire flow—session loading, user message creation, and routing—
+    runs inside the per-session lock to prevent the race condition described
+    in issue #192 where concurrent ``get_or_load_session`` calls could
+    destroy messages already appended by another coroutine.
     """
-    # 1. Create user message immediately (UI shows QUEUED status)
-    session = await get_or_load_session(state, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+    lock = state.get_session_lock(session_id)
+    async with lock:
+        # 1. Create user message (inside lock to prevent race with get_or_load_session)
+        session = await get_or_load_session(state, session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
 
-    agent_name = _resolve_message_agent_name(state, session_id, request.agent)
-    user_msg_id = identifier.ascending("message", request.message_id)
-    user_message = UserMessage(
-        id=user_msg_id,
-        session_id=session_id,
-        time=TimeCreated.now(),
-        agent=agent_name,
-        model=request.model,
-    )
-
-    user_msg_with_parts = MessageWithParts(info=user_message)
-    for part in request.parts:
-        match part:
-            case TextPartInput(text=text):
-                created: Part = user_msg_with_parts.add_text_part(text)
-            case FilePartInput(mime=mime, url=url, filename=filename, source=source):
-                created = user_msg_with_parts.add_file_part(
-                    mime,
-                    url,
-                    filename=filename,
-                    source=source,
-                )
-            case AgentPartInput(name=name, source=source):
-                created = user_msg_with_parts.add_agent_part(name, source=source)
-            case SubtaskPartInput(
-                prompt=subtask_prompt, description=desc, agent=subtask_agent, model=subtask_model
-            ):
-                created = user_msg_with_parts.add_subtask_part(
-                    subtask_prompt,
-                    desc,
-                    subtask_agent,
-                    model=subtask_model,
-                )
-            case _ as unreachable:
-                assert_never(unreachable)
-        await state.broadcast_event(PartUpdatedEvent.create(created))
-    await append_message_to_session(state, session_id, user_msg_with_parts)
-    await persist_message_to_storage(state, user_msg_with_parts, session_id)
-    await state.broadcast_event(MessageUpdatedEvent.create(user_message))
-
-    # 2. Route through SessionPool instead of server-owned queue
-    session_pool = state.pool.session_pool
-    if session_pool is not None:
-        input_provider = state.ensure_input_provider(session_id)
-
-        user_prompt = await extract_user_prompt_from_parts(
-            request.parts,
-            fs=state.fs,
-            agent=state.agent,
+        agent_name = _resolve_message_agent_name(state, session_id, request.agent)
+        user_msg_id = identifier.ascending("message", request.message_id)
+        user_message = UserMessage(
+            id=user_msg_id,
+            session_id=session_id,
+            time=TimeCreated.now(),
+            agent=agent_name,
+            model=request.model,
         )
 
-        # D13: Map delivery mode from request to priority.
-        delivery_priority = "asap" if request.delivery == "steer" else "when_idle"
-        # D14: Generate assistant_msg_id and pass to receive_request so the
-        # consumer loop reuses it instead of generating an independent one.
-        async_assistant_msg_id = identifier.ascending("message")
-        # Use integration layer to ensure session creation and event consumer startup
-        integration = state.session_pool_integration
-        if integration is not None:
-            await integration.route_message(
-                session_id=session_id,
-                content=user_prompt if isinstance(user_prompt, str) else list(user_prompt),
-                priority=delivery_priority,
-                input_provider=input_provider,
-                agent_name=agent_name,
-                message_id=async_assistant_msg_id,
-                model_id=request.model.model_id if request.model else None,
-                provider_id=request.model.provider_id if request.model else None,
-            )
-        else:
-            sp_state, _was_created = await session_pool.sessions.get_or_create_session(
-                session_id,
-                agent_name=agent_name,
-            )
-            sp_state.input_provider = input_provider
+        user_msg_with_parts = MessageWithParts(info=user_message)
+        for part in request.parts:
+            match part:
+                case TextPartInput(text=text):
+                    created: Part = user_msg_with_parts.add_text_part(text)
+                case FilePartInput(mime=mime, url=url, filename=filename, source=source):
+                    created = user_msg_with_parts.add_file_part(
+                        mime,
+                        url,
+                        filename=filename,
+                        source=source,
+                    )
+                case AgentPartInput(name=name, source=source):
+                    created = user_msg_with_parts.add_agent_part(name, source=source)
+                case SubtaskPartInput(
+                    prompt=subtask_prompt,
+                    description=desc,
+                    agent=subtask_agent,
+                    model=subtask_model,
+                ):
+                    created = user_msg_with_parts.add_subtask_part(
+                        subtask_prompt,
+                        desc,
+                        subtask_agent,
+                        model=subtask_model,
+                    )
+                case _ as unreachable:
+                    assert_never(unreachable)
+            await state.broadcast_event(PartUpdatedEvent.create(created))
+        await append_message_to_session(state, session_id, user_msg_with_parts)
+        await persist_message_to_storage(state, user_msg_with_parts, session_id)
+        await state.broadcast_event(MessageUpdatedEvent.create(user_message))
 
-            from agentpool.lifecycle.types import DeliveryMode
+        # 2. Route through SessionPool instead of server-owned queue
+        session_pool = state.pool.session_pool
+        if session_pool is not None:
+            input_provider = state.ensure_input_provider(session_id)
 
-            delivery_mode = (
-                DeliveryMode.STEER if delivery_priority == "asap" else DeliveryMode.QUEUE
+            user_prompt = await extract_user_prompt_from_parts(
+                request.parts,
+                fs=state.fs,
+                agent=state.agent,
             )
-            await session_pool.send_message(
-                session_id=session_id,
-                content=user_prompt if isinstance(user_prompt, str) else list(user_prompt),
-                mode=delivery_mode,
-                input_provider=input_provider,
-                message_id=async_assistant_msg_id,
-            )
+
+            # D13: Map delivery mode from request to priority.
+            delivery_priority = "asap" if request.delivery == "steer" else "when_idle"
+            # D14: Generate assistant_msg_id and pass to receive_request so the
+            # consumer loop reuses it instead of generating an independent one.
+            async_assistant_msg_id = identifier.ascending("message")
+            # Use integration layer to ensure session creation and event consumer startup
+            integration = state.session_pool_integration
+            if integration is not None:
+                await integration.route_message(
+                    session_id=session_id,
+                    content=user_prompt if isinstance(user_prompt, str) else list(user_prompt),
+                    priority=delivery_priority,
+                    input_provider=input_provider,
+                    agent_name=agent_name,
+                    message_id=async_assistant_msg_id,
+                    model_id=request.model.model_id if request.model else None,
+                    provider_id=request.model.provider_id if request.model else None,
+                )
+            else:
+                sp_state, _was_created = await session_pool.sessions.get_or_create_session(
+                    session_id,
+                    agent_name=agent_name,
+                )
+                sp_state.input_provider = input_provider
+
+                from agentpool.lifecycle.types import DeliveryMode
+
+                delivery_mode = (
+                    DeliveryMode.STEER if delivery_priority == "asap" else DeliveryMode.QUEUE
+                )
+                await session_pool.send_message(
+                    session_id=session_id,
+                    content=user_prompt if isinstance(user_prompt, str) else list(user_prompt),
+                    mode=delivery_mode,
+                    input_provider=input_provider,
+                    message_id=async_assistant_msg_id,
+                )
 
 
 @router.get("/message/{message_id}")

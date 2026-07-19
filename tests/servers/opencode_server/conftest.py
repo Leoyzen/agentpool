@@ -306,6 +306,7 @@ def mock_agent(mock_env: Mock, mock_pool: Mock, storage_manager: StorageManager)
     """
     agent = Mock()
     agent.name = "test-agent"
+    agent.model_name = None  # resolve_default_model_info() falls back to ("default", "agentpool")
     agent.env = mock_env
     agent._input_provider = None
     agent.run = AsyncMock(return_value=Mock(data="test response"))

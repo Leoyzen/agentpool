@@ -278,6 +278,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
             tokens=tokens,
             cost=float(msg.cost_info.total_cost) if msg.cost_info else 0.0,
             finish=msg.finish_reason,
+            mode=msg.name or agent_name,
         )
 
         result.add_step_start_part()

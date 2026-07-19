@@ -100,6 +100,7 @@ async def _async_wait(seconds: float = 0.1) -> None:
 def server_state(tmp_path: Any) -> ServerState:
     """Create a minimal ServerState with a mock agent for testing."""
     agent = Mock()
+    agent.model_name = None  # resolve_default_model_info() fallback
     agent.name = "test-agent"
     agent.storage = Mock()
     agent.host_context = Mock()
