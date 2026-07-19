@@ -307,6 +307,8 @@ class MCPManager:
         if tasks := [self.setup_server(server) for server in self.servers]:
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for server, result in zip(self.servers, results, strict=True):
+                if isinstance(result, asyncio.CancelledError):
+                    raise result
                 if isinstance(result, BaseException):
                     logger.warning(
                         "MCP server %s failed to initialize: %s",
@@ -525,6 +527,8 @@ class MCPManager:
                 entry = entries.get(key)
                 if entry is None:
                     continue
+                if isinstance(result, asyncio.CancelledError):
+                    raise result
                 if isinstance(result, BaseException):
                     # Tool fetch failed — keep connected status, empty tools.
                     logger.warning(
