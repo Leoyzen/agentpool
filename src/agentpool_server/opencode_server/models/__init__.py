@@ -203,6 +203,7 @@ from agentpool_server.opencode_server.models.events import (
     SessionStatusProperties,
     SessionUpdatedEvent,
     TuiSessionSelectEvent,
+    TuiToastShowEvent,
 )
 from agentpool_server.opencode_server.models.mcp import (
     LogRequest,
@@ -402,6 +403,7 @@ __all__ = [
     "ToolStatePending",
     "ToolStateRunning",
     "TuiSessionSelectEvent",
+    "TuiToastShowEvent",
     "UnknownError",
     "UnknownErrorData",
     "UpgradeResponse",

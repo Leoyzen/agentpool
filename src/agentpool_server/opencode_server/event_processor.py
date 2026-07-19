@@ -50,6 +50,7 @@ from agentpool_server.opencode_server.models import (
     SessionStatusEvent,
     TokenCache,
     Tokens,
+    TuiToastShowEvent,
 )
 
 # Cross-layer import: McpToolsChangedEvent is an OpenCode SSE event that
@@ -272,12 +273,13 @@ class EventProcessor:
         ref_session_id: str | None,
         ref_label: str | None,
     ) -> Iterator[Event]:
-        """Render a system notification as a completed ToolPart.
+        """Render a system notification as a TUI toast + TextPart.
 
-        Follows the ``tool="elicitation"`` precedent (line ~567) which uses
-        a synthetic tool name with metadata flag for TUI recognition.
-        Falls back to ``TextPart`` if TUI rendering of ``tool="system"`` is
-        broken (task 5.7 empirical verification).
+        Yields two events:
+        1. ``TuiToastShowEvent`` — non-intrusive toast notification (the
+           primary visible signal in the TUI)
+        2. ``PartUpdatedEvent`` with ``TextPart`` — inline text in the
+           assistant message (persistent record in the conversation)
         """
         output = f"[{level}] {title}: {text}" if title else f"[{level}] {text}"
         if ref_label is not None:
@@ -285,26 +287,34 @@ class EventProcessor:
         elif ref_session_id is not None:
             output += f" (session: {ref_session_id})"
 
-        call_id = f"system-{uuid.uuid4().hex}"
-        ts = TimeStartEndCompacted(start=now_ms(), end=now_ms())
-        tool_state = ToolStateCompleted(
-            title=title or f"System notification ({source})",
-            input={},
-            output=output,
-            metadata={"system_notification": True},
-            time=ts,
+        # Map level to toast variant
+        variant_map: dict[str, str] = {
+            "info": "info",
+            "warning": "warning",
+            "error": "error",
+            "success": "success",
+        }
+        variant = variant_map.get(level, "info")
+
+        # 1. Toast notification (non-intrusive, auto-dismisses)
+        yield TuiToastShowEvent.create(
+            message=output,
+            variant=variant,  # type: ignore[arg-type]
+            title=title or f"System ({source})",
+            duration=5000,
         )
-        tool_part = ToolPart(
+
+        # 2. Inline TextPart (persistent record in conversation)
+        text_part = TextPart(
             id=identifier.ascending("part"),
             message_id=ctx.assistant_msg_id,
             session_id=ctx.session_id,
-            tool="system",
-            call_id=call_id,
-            state=tool_state,
-            metadata={"system_notification": True},
+            text=output,
+            synthetic=True,
+            metadata={"system_notification": True, "source": source},
         )
-        ctx.assistant_msg.parts.append(tool_part)
-        yield PartUpdatedEvent.create(tool_part)
+        ctx.assistant_msg.parts.append(text_part)
+        yield PartUpdatedEvent.create(text_part)
 
     def _process_text_start(
         self,
