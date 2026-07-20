@@ -148,10 +148,8 @@ async def append_message_to_session(
     messages = getattr(state, "messages", None)
     if messages is not None:
         messages.setdefault(session_id, [])
-        msg_id = getattr(msg.info, "id", None)
-        already_in_memory = msg_id is not None and any(
-            getattr(m.info, "id", None) == msg_id for m in messages[session_id]
-        )
+        msg_id = msg.info.id
+        already_in_memory = any(m.info.id == msg_id for m in messages[session_id])
         if not already_in_memory:
             messages[session_id].append(msg)
 

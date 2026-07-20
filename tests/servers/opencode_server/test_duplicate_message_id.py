@@ -14,7 +14,7 @@ See: https://github.com/Leoyzen/agentpool/issues/229
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pytest
@@ -27,6 +27,7 @@ from agentpool_server.opencode_server.models.message import (
 from agentpool_server.opencode_server.opencode_message_bridge import (
     append_message_to_session,
 )
+
 
 if TYPE_CHECKING:
     from agentpool_server.opencode_server.state import ServerState
@@ -104,9 +105,7 @@ class TestAppendMessageToSessionIdempotent:
 
         # Verify the message is in the in-memory dict exactly once
         messages = server_state.messages.get(session_id, [])
-        assistant_messages = [
-            m for m in messages if getattr(m.info, "id", None) == msg_id
-        ]
+        assistant_messages = [m for m in messages if m.info.id == msg_id]
         assert len(assistant_messages) == 1, (
             f"Expected exactly 1 assistant message in memory, got {len(assistant_messages)}"
         )
@@ -170,7 +169,6 @@ class TestRouteMessagePassesMessageId:
     ) -> None:
         """route_message must set _pending_message_ids on the event bridge."""
         integration = server_state.session_pool_integration
-        event_bridge = server_state.event_bridge
 
         # Call route_message with a message_id
         await integration.route_message(
