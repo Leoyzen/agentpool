@@ -36,14 +36,20 @@ repos:
         require_serial: true
       - id: tombi-format
         name: tombi-format
-        entry: uv run tombi format pyproject.toml
+        entry: uv run tombi format pyproject.toml ty.toml ruff.toml
         language: system
-        files: ^pyproject\.toml$
+        files: ^(pyproject|ty|ruff)\.toml$
         require_serial: true
 
-  # Phase 3: Linting (ruff + config schema check, only staged files, ~2-3s)
+  # Phase 3: Linting (ty + ruff + config schema check, only staged files, ~2-3s)
   - repo: local
     hooks:
+      - id: ty
+        name: ty
+        entry: uv run ty check
+        language: system
+        types: [python]
+        require_serial: true
       - id: ruff
         name: ruff
         entry: uv run ruff check
