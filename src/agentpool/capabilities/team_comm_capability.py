@@ -300,6 +300,12 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if session_pool is None:
             return "SessionPool not available"
 
+        # Check member exists BEFORE bounds check to avoid creating
+        # phantom entries in team state for non-existent members.
+        target_sid = team_state.get_member_session_id(team_id, to)
+        if target_sid is None:
+            return f"Member '{to}' not found or no session registered"
+
         # Bounds: max_member_turns and inbox_max_bytes checks.
         from agentpool.capabilities.file_team_state import FileTeamState
 
@@ -328,10 +334,6 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             members_state[to] = member_info
             current_state["members"] = members_state
             FileTeamState._atomic_write(state_path, current_state)
-
-        target_sid = team_state.get_member_session_id(team_id, to)
-        if target_sid is None:
-            return f"Member '{to}' not found or no session registered"
 
         from agentpool.lifecycle.types import DeliveryMode
 
@@ -927,6 +929,21 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             return "SessionPool not available"
 
         await session_pool.close_session(member_sid)
+
+        # Mark member as shutdown in team state (clear session_id so
+        # team_status shows them as offline, not with a stale session).
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        state_path = team_state._state_path(team_id)
+        if state_path.exists():
+            state: dict[str, Any] = FileTeamState._read_json(state_path)
+            members: dict[str, dict[str, Any]] = state.get("members", {})
+            if member_name in members:
+                members[member_name]["session_id"] = ""
+                members[member_name]["status"] = "shutdown"
+                state["members"] = members
+                FileTeamState._atomic_write(state_path, state)
+
         return f"Shutdown completed for {member_name}"
 
     async def team_add_member(  # noqa: PLR0911, PLR0915

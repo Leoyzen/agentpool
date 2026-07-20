@@ -2139,3 +2139,66 @@ async def test_team_add_member_notify_excludes_lead_and_new_member(tmp_path: Any
     # Existing members (translator_agent, reviewer_agent) SHOULD be in notify targets.
     assert "sess_translator" in notify_targets
     assert "sess_reviewer" in notify_targets
+
+
+@pytest.mark.unit
+async def test_send_message_to_nonexistent_member_no_phantom(tmp_path: Any) -> None:
+    """Given: lead in a team.
+
+    When: send_message to a non-existent member.
+    Then: returns error AND does NOT create a phantom entry in team state.
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.send_message(ctx, "ghost_member", "hello")
+
+    assert "not found" in result
+    # Verify NO phantom entry was created in team state.
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    team_state = FileTeamState(str(tmp_path))
+    state = team_state._read_json(team_state._state_path("team_123"))
+    assert "ghost_member" not in state.get("members", {})
+
+
+@pytest.mark.unit
+async def test_shutdown_request_marks_member_offline(tmp_path: Any) -> None:
+    """Given: lead with an initialized team.
+
+    When: shutdown_request is called for a member.
+    Then: member's session_id is cleared and status set to 'shutdown'
+        in team state, so team_status shows them as offline.
+    """
+    _init_team(str(tmp_path))
+    mock_pool = MagicMock()
+    mock_pool.close_session = AsyncMock()
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.shutdown_request(ctx, "translator_agent")
+
+    assert result == "Shutdown completed for translator_agent"
+    mock_pool.close_session.assert_awaited_once_with("sess_translator")
+    # Verify member marked as shutdown in team state.
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    team_state = FileTeamState(str(tmp_path))
+    state = team_state._read_json(team_state._state_path("team_123"))
+    member = state["members"]["translator_agent"]
+    assert member["session_id"] == ""
+    assert member["status"] == "shutdown"
