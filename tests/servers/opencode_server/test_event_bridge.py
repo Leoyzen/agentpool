@@ -15,6 +15,7 @@ import pytest
 
 from agentpool.agents.events.events import (
     CustomEvent,
+    RunFailedEvent,
     RunStartedEvent,
     StreamCompleteEvent,
 )
@@ -700,9 +701,7 @@ async def test_d1_reset_skips_finalize_if_already_completed() -> None:
 
 @pytest.mark.anyio
 @pytest.mark.unit
-async def test_d2_warning_logged_on_incomplete_turn(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+async def test_d2_warning_logged_on_incomplete_turn() -> None:
     """D2: Warning should be logged when finalizing an incomplete turn.
 
     If the D1 reset finds time.completed is None, it means StreamCompleteEvent
@@ -710,6 +709,8 @@ async def test_d2_warning_logged_on_incomplete_turn(
     red flag (running turn killed by new turn) is visible.
     """
     from unittest.mock import AsyncMock, patch
+
+    import agentpool_server.opencode_server.opencode_event_bridge as bridge_module
 
     session_id = "sess-d2"
     bridge, _ctx, _broadcast_calls = _setup_bridge_for_handle(
@@ -732,12 +733,141 @@ async def test_d2_warning_logged_on_incomplete_turn(
             "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
             new_callable=AsyncMock,
         ),
-        caplog.at_level("WARNING"),
+        patch.object(bridge_module.logger, "warning") as mock_warning,
     ):
         await bridge._handle_event(session_id, envelope)
 
     # Assert a warning was logged about finalizing an incomplete turn
-    warning_messages = [r.message for r in caplog.records if r.levelname == "WARNING"]
-    assert any(
-        "incomplete turn" in msg.lower() or "StreamCompleteEvent" in msg for msg in warning_messages
-    ), f"Should log a warning about finalizing incomplete turn, got: {warning_messages}"
+    mock_warning.assert_called_once()
+    call_args = mock_warning.call_args
+    assert (
+        "incomplete turn" in call_args.args[0].lower() or "StreamCompleteEvent" in call_args.args[0]
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.unit
+async def test_run_failed_sets_time_completed() -> None:
+    """D3: RunFailedEvent must also finalize time.completed.
+
+    If a run fails, StreamCompleteEvent is not emitted. Without this
+    finalization, the next turn's D1 reset would log a false-positive
+    warning about a missed StreamCompleteEvent.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    session_id = "sess-rf"
+    bridge, ctx, broadcast_calls = _setup_bridge_for_handle(
+        session_id, completed=None, message_registered=True
+    )
+
+    event = RunFailedEvent(
+        run_id="run-fail-1",
+        exception=RuntimeError("test failure"),
+        session_id=session_id,
+    )
+    envelope = EventEnvelope(source_session_id=session_id, event=event)
+
+    with (
+        patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.set_session_status",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
+            new_callable=AsyncMock,
+        ) as mock_append,
+    ):
+        await bridge._handle_event(session_id, envelope)
+
+    # Assert time.completed was set despite run failure
+    info = ctx.assistant_msg.info
+    assert isinstance(info, AssistantMessage)
+    assert info.time.completed is not None, "time.completed should be set after RunFailedEvent"
+
+    # Assert MessageUpdatedEvent was broadcast
+    updated_events = [e for e in broadcast_calls if isinstance(e, MessageUpdatedEvent)]
+    assert len(updated_events) >= 1, "MessageUpdatedEvent should be broadcast"
+
+    # Assert append_message_to_session was called
+    assert mock_append.called, "append_message_to_session should be called"
+
+
+@pytest.mark.anyio
+@pytest.mark.unit
+async def test_stream_complete_cancelled_sets_time_completed() -> None:
+    """D3: StreamCompleteEvent with cancelled=True should still set time.completed.
+
+    A cancelled run still completed (just was cancelled). The UI needs
+    time.completed to show the message as finished.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    session_id = "sess-cancel"
+    bridge, ctx, broadcast_calls = _setup_bridge_for_handle(
+        session_id, completed=None, message_registered=True
+    )
+
+    event = StreamCompleteEvent(
+        message=ChatMessage(content="partial", role="assistant"),
+        cancelled=True,
+        session_id=session_id,
+    )
+    envelope = EventEnvelope(source_session_id=session_id, event=event)
+
+    with (
+        patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.set_session_status",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
+            new_callable=AsyncMock,
+        ),
+    ):
+        await bridge._handle_event(session_id, envelope)
+
+    # Assert time.completed was set even for cancelled runs
+    info = ctx.assistant_msg.info
+    assert isinstance(info, AssistantMessage)
+    assert info.time.completed is not None, "time.completed should be set for cancelled runs"
+
+    updated_events = [e for e in broadcast_calls if isinstance(e, MessageUpdatedEvent)]
+    assert len(updated_events) >= 1
+
+
+@pytest.mark.anyio
+@pytest.mark.unit
+async def test_finalize_skips_when_no_context() -> None:
+    """_finalize_assistant_time should be a no-op when ctx is None."""
+    from unittest.mock import AsyncMock, patch
+
+    session_id = "sess-no-ctx"
+    bridge = _FakeBridge()
+    # Deliberately do NOT set bridge._contexts[session_id]
+    bridge._message_registered[session_id] = True
+
+    event = StreamCompleteEvent(
+        message=ChatMessage(content="done", role="assistant"),
+        session_id=session_id,
+    )
+    envelope = EventEnvelope(source_session_id=session_id, event=event)
+
+    with (
+        patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.set_session_status",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
+            new_callable=AsyncMock,
+        ) as mock_append,
+    ):
+        # Should not raise even though ctx is None
+        await bridge._handle_event(session_id, envelope)
+
+    # append_message_to_session should NOT be called (no ctx to finalize)
+    # But it might be called for message registration if _message_registered
+    # is True and the code reaches that block. Since ctx is None, the code
+    # returns early at "if ctx is None: return" (line ~465).
+    assert not mock_append.called, "append_message_to_session should not be called when ctx is None"

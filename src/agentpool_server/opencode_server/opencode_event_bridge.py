@@ -185,6 +185,38 @@ class OpenCodeEventBridgeMixin:
         )
         return assistant_msg_id, assistant_msg
 
+    async def _finalize_assistant_time(
+        self,
+        session_id: str,
+        *,
+        warn: bool = False,
+    ) -> None:
+        """Finalize time.completed on the assistant message if not already set.
+
+        Used by StreamCompleteEvent, RunFailedEvent, and D1 reset to ensure
+        the assistant message's time.completed is set before the turn ends
+        or a new turn begins.
+
+        Args:
+            session_id: The session whose assistant message to finalize.
+            warn: If True, log a warning when finalizing an incomplete turn
+                (indicates StreamCompleteEvent was missed — D2 red flag).
+        """
+        ctx = self._contexts.get(session_id)
+        if ctx is None:
+            return
+        info = ctx.assistant_msg.info
+        if isinstance(info, AssistantMessage) and info.time.completed is None:
+            if warn:
+                logger.warning(
+                    "Finalizing incomplete turn — StreamCompleteEvent missed",
+                    session_id=session_id,
+                    previous_message_id=ctx.assistant_msg_id,
+                )
+            info.time.completed = now_ms()
+            await self.server_state.broadcast_event(MessageUpdatedEvent.create(info))
+            await append_message_to_session(self.server_state, session_id, ctx.assistant_msg)
+
     async def _before_consumer_loop(self, session_id: str) -> None:
         """Set up per-session context before the consumer loop starts.
 
@@ -433,21 +465,16 @@ class OpenCodeEventBridgeMixin:
                     # immediately and never sets time.completed on the
                     # assistant message, so the event bridge must do it here
                     # when StreamCompleteEvent arrives.
-                    sc_ctx = self._contexts.get(session_id)
-                    if sc_ctx is not None:
-                        sc_info = sc_ctx.assistant_msg.info
-                        if isinstance(sc_info, AssistantMessage) and sc_info.time.completed is None:
-                            sc_info.time.completed = now_ms()
-                            await self.server_state.broadcast_event(
-                                MessageUpdatedEvent.create(sc_info)
-                            )
-                            await append_message_to_session(
-                                self.server_state, session_id, sc_ctx.assistant_msg
-                            )
+                    await self._finalize_assistant_time(session_id)
                 case RunFailedEvent(exception=exc):
                     await set_session_status(
                         self.server_state, session_id, SessionStatus(type="idle")
                     )
+                    # D3: Finalize time.completed for failed runs too,
+                    # so the next turn's D1 reset doesn't log a
+                    # false-positive warning about a missed
+                    # StreamCompleteEvent.
+                    await self._finalize_assistant_time(session_id)
                     if isinstance(exc, Exception) and not isinstance(exc, asyncio.CancelledError):
                         await self.server_state.broadcast_event(
                             SessionErrorEvent.from_exception(exc, session_id=session_id)
@@ -482,18 +509,7 @@ class OpenCodeEventBridgeMixin:
                 # prevents the previous turn's time.completed from being lost
                 # when the D1 reset creates a new message. The warning makes
                 # the D2 red flag (running turn killed by new turn) visible.
-                prev_info = ctx.assistant_msg.info
-                if isinstance(prev_info, AssistantMessage) and prev_info.time.completed is None:
-                    logger.warning(
-                        "Finalizing incomplete turn — StreamCompleteEvent missed",
-                        session_id=session_id,
-                        previous_message_id=ctx.assistant_msg_id,
-                    )
-                    prev_info.time.completed = now_ms()
-                    await self.server_state.broadcast_event(MessageUpdatedEvent.create(prev_info))
-                    await append_message_to_session(
-                        self.server_state, session_id, ctx.assistant_msg
-                    )
+                await self._finalize_assistant_time(session_id, warn=True)
 
                 assistant_msg_id, assistant_msg = self._create_assistant_message(session_id)
                 ctx.assistant_msg_id = assistant_msg_id

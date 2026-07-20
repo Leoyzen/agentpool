@@ -178,17 +178,32 @@ async def _wait_for_assistant_completion(
     *,
     timeout: float = 15.0,
     interval: float = 0.3,
+    min_count: int = 1,
 ) -> list[dict[str, Any]]:
-    """Poll until the last assistant message has time.completed set."""
+    """Poll until at least min_count assistant messages have time.completed set.
+
+    Args:
+        base_url: Server base URL.
+        client: HTTP client.
+        session_id: Session to poll.
+        timeout: Maximum wait time in seconds.
+        interval: Polling interval in seconds.
+        min_count: Minimum number of completed assistant messages to wait for.
+
+    Returns:
+        List of all messages for the session.
+    """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         messages = await _get_messages(base_url, client, session_id)
         assistant_msgs = [m for m in messages if m.get("info", {}).get("role") == "assistant"]
-        if assistant_msgs:
-            last_assistant = assistant_msgs[-1]
-            time_obj = last_assistant.get("info", {}).get("time", {})
-            if time_obj.get("completed") is not None:
-                return messages
+        completed = [
+            m
+            for m in assistant_msgs
+            if m.get("info", {}).get("time", {}).get("completed") is not None
+        ]
+        if len(completed) >= min_count:
+            return messages
         await asyncio.sleep(interval)
     return await _get_messages(base_url, client, session_id)
 
@@ -404,6 +419,7 @@ class TestMultiTurnLifecycle:
                 client,
                 session_id,
                 timeout=15.0,
+                min_count=2,
             )
             assistant_msgs = [m for m in messages if m.get("info", {}).get("role") == "assistant"]
             # Need at least 2 assistant messages
