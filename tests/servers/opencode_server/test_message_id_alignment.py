@@ -6,6 +6,7 @@ Tests that:
 - _before_consumer_loop uses pending message_id when available (D14)
 - _handle_event updates ctx.assistant_msg_id from events (D14)
 - Delivery mode mapping: "steer" -> "asap", "queue" -> "when_idle" (D13)
+- Message ID timestamp is consistent with time.created (C1)
 """
 
 from __future__ import annotations
@@ -416,3 +417,68 @@ class TestHandleEventUpdatesMessageId:
 
         # The ctx.assistant_msg_id should NOT have been updated
         assert ctx.assistant_msg_id == "msg_original"
+
+
+# =============================================================================
+# C1: Message ID timestamp consistency
+# =============================================================================
+
+
+class TestMessageIdTimestampConsistency:
+    """Tests for message ID timestamp vs time.created consistency (C1).
+
+    Issue C1: identifiers.py uses int(time.time()*1000) (float truncation)
+    while time_utils.now_ms() uses time.time_ns()//1_000_000 (integer division).
+    Same-ms messages can have a 1ms mismatch. Additionally, the 48-bit
+    encoding (timestamp_ms * 0x1000 + counter) overflows for 2026+ timestamps.
+    """
+
+    @pytest.mark.unit
+    @pytest.mark.xfail(
+        reason="C1: identifiers.py uses int(time.time()*1000) (float truncation) "
+        "vs time_utils.now_ms() uses time.time_ns()//1_000_000. "
+        "Also 48-bit encoding overflows for current timestamps.",
+        strict=False,
+        raises=AssertionError,
+    )
+    @pytest.mark.known_bug
+    def test_id_timestamp_matches_now_ms(self) -> None:
+        """C1: Timestamp decoded from ascending ID should match now_ms() window."""
+        from agentpool.utils import identifiers
+        from agentpool.utils.time_utils import now_ms
+
+        ts_before = now_ms()
+        msg_id = identifiers.ascending("message")
+        ts_after = now_ms()
+
+        # Decode timestamp from ID: first 12 hex chars = 6 bytes (48 bits)
+        # now = timestamp_ms * 0x1000 + counter → timestamp_ms = now >> 12
+        id_part = msg_id.split("_", 1)[1]
+        id_ts = int(id_part[:12], 16) >> 12
+
+        assert ts_before <= id_ts <= ts_after, (
+            f"ID timestamp ({id_ts}) outside now_ms() window [{ts_before}, {ts_after}] — issue C1"
+        )
+
+    @pytest.mark.unit
+    @pytest.mark.xfail(
+        reason="C1: Same-ms IDs should have timestamps within 1ms of each other, "
+        "but float truncation can cause 1ms drift.",
+        strict=False,
+        raises=AssertionError,
+    )
+    @pytest.mark.known_bug
+    def test_same_ms_ids_have_consistent_timestamps(self) -> None:
+        """C1: Two IDs generated in rapid succession should have close timestamps."""
+        from agentpool.utils import identifiers
+
+        id1 = identifiers.ascending("message")
+        id2 = identifiers.ascending("message")
+
+        ts1 = int(id1.split("_", 1)[1][:12], 16) >> 12
+        ts2 = int(id2.split("_", 1)[1][:12], 16) >> 12
+
+        assert abs(ts1 - ts2) <= 1, (
+            f"Same-ms IDs have {abs(ts1 - ts2)}ms difference — "
+            f"should be <=1ms (issue C1: float truncation)"
+        )
