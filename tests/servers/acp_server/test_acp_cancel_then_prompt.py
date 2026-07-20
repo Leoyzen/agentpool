@@ -20,7 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentpool.agents.events import RunFailedEvent, RunStartedEvent, StreamCompleteEvent
-from agentpool.lifecycle import RunState
+from agentpool.lifecycle import DirectChannel, MemoryJournal, RunState
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventEnvelope
 from agentpool.orchestrator.turn import Turn
@@ -92,6 +92,10 @@ async def _attach_agent(
     """Attach a mock agent to an existing session."""
     state, _ = await pool.sessions.get_or_create_session(session_id)  # type: ignore[union-attr]
     state.agent = agent
+    # Initialize comm_channel on session (normally done by
+    # _initialize_lifecycle_and_recovery, but we pre-cache the agent
+    # so that path is skipped).
+    state._comm_channel = DirectChannel(MemoryJournal())
     pool.sessions._session_agents[session_id] = agent  # type: ignore[union-attr]
     real_pool.get_agent = MagicMock(return_value=agent)  # type: ignore[assignment]
 
@@ -238,8 +242,9 @@ async def test_acp_cancel_then_prompt_no_hang(
     # --- Step 5: Verify RunHandle state ---
     # After cancel + followup, the RunHandle may be the same instance (reused)
     # or a new one. Either is valid — what matters is the state.
-    assert first_handle._run_state in (RunState.IDLE, RunState.DONE), (
-        f"First RunHandle should be idle or done, got: {first_handle._run_state}"
+    # In the per-prompt model, RunHandle has no _run_state. Use complete_event.
+    assert first_handle.complete_event.is_set(), (
+        "First RunHandle should be complete (complete_event set) after cancel"
     )
 
     # Cleanup: close the RunHandle first so the start() loop exits and
@@ -340,9 +345,9 @@ async def test_cancel_does_not_start_spontaneous_turn(
         f"re-executed — current_prompts was not cleared in the cancel path."
     )
 
-    # RunHandle should be idle, waiting for the next prompt
-    assert first_handle._run_state == RunState.IDLE, (
-        f"Expected RunHandle status idle after cancel, got {first_handle._run_state}"
+    # RunHandle should be complete (complete_event set) after cancel
+    assert first_handle.complete_event.is_set(), (
+        "Expected RunHandle complete_event set after cancel"
     )
 
     # No new events should have been published between cancel and idle

@@ -52,6 +52,7 @@ from agentpool.agents.events.events import (
     StreamCompleteEvent,
 )
 from agentpool.agents.native_agent.turn import NativeTurn
+from agentpool.lifecycle import MemoryJournal, ProtocolChannel
 from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionState
 from agentpool.orchestrator.run import RunHandle
 from agentpool.sessions.models import ElicitationResumePayload
@@ -278,6 +279,12 @@ async def test_stream_complete_via_run_handle_event_bus() -> None:
         session = SessionState(
             session_id=session_id,
             agent_name="test-elicit-agent",
+        )
+        # Initialize comm_channel so RunHandle._execute_turn can publish events.
+        session._comm_channel = ProtocolChannel(
+            journal=MemoryJournal(),
+            event_bus=event_bus,
+            session_id=session_id,
         )
 
         run_ctx = AgentRunContext(

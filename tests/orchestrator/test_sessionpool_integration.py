@@ -1108,8 +1108,12 @@ def _make_recorder(event: str) -> CallableHook:
 
 def _make_run_handle(agent: Agent[Any, Any], run_ctx: AgentRunContext) -> RunHandle:
     """Create a RunHandle wired for the SessionPool path."""
+    from agentpool.lifecycle import DirectChannel, MemoryJournal
+
     event_bus = EventBus()
     session = SessionState(session_id="test-session", agent_name="test-agent")
+    # Set up lifecycle dimensions required by RunHandle._execute_turn()
+    session._comm_channel = DirectChannel(MemoryJournal())
     return RunHandle(
         run_id="test-run",
         session_id="test-session",

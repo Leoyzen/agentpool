@@ -626,7 +626,9 @@ class TestSessionAbort:
 
         # Give the background task time to start and transition to running
         await asyncio.sleep(0.05)
-        assert actual_handle._run_state == RunState.RUNNING
+        # In the per-prompt model, RunHandle has no _run_state.
+        # is_running returns True when complete_event is not set.
+        assert actual_handle.is_running is True
 
         await integration.abort_session("test-session-011")
 

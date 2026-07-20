@@ -22,6 +22,7 @@ from agentpool.agents.events import (
     ToolCallCompleteEvent,
     ToolCallStartEvent,
 )
+from agentpool.lifecycle import DirectChannel, MemoryJournal
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionPool
 
@@ -57,6 +58,9 @@ async def _attach_agent(
     state.agent = agent
     pool.sessions._session_agents[session_id] = agent
     real_pool.get_agent = MagicMock(return_value=agent)  # type: ignore[assignment]
+    # Set up lifecycle dimensions for RunHandle._execute_turn()
+    # session._comm_channel must be set before start() accesses it.
+    state._comm_channel = DirectChannel(MemoryJournal())
 
 
 @pytest.fixture

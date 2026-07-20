@@ -55,6 +55,7 @@ class SessionControllerAgentMixin:
     _lock: asyncio.Lock
     _todo_lock: asyncio.Lock
     _runtime_registry: RuntimeAgentRegistry
+    _event_bus: Any
 
     def _increment_mcp_count(self, _agent: Any) -> None: ...
 
@@ -292,8 +293,125 @@ class SessionControllerAgentMixin:
                 session.is_per_session_agent = True
                 self._increment_mcp_count(agent)
 
+            # Initialize lifecycle dimensions and run crash recovery once
+            # per session (per-prompt RunHandle migration, task 1.2).
+            await self._initialize_lifecycle_and_recovery(session, agent)
+
             logger.info("Created session agent", session_id=session_id, agent_name=agent_name)
             return agent
+
+    async def _initialize_lifecycle_and_recovery(
+        self,
+        session: SessionState,
+        agent: BaseAgent[Any, Any],
+    ) -> None:
+        """Initialize lifecycle dimensions and run crash recovery for a session.
+
+        Creates the 6 lifecycle dimensions (Journal, SnapshotStore,
+        CommChannel, EventTransport, TriggerSource) and stores them on
+        ``SessionState``. Then runs the full crash recovery logic
+        (``journal.resume()``, event replay, recovery strategy
+        application, dimension subscription, initial snapshot).
+
+        This runs ONCE per session at agent creation time, NOT per
+        RunHandle. In the per-prompt model, dimensions persist across
+        RunHandles and recovery is a session-level concern.
+
+        Args:
+            session: The session state to initialize dimensions on.
+            agent: The agent instance for this session.
+        """
+        from agentpool.lifecycle import (
+            DirectChannel,
+            InProcessTransport,
+            MemoryJournal,
+            MemorySnapshotStore,
+            ProtocolChannel,
+            ProtocolTrigger,
+            RunState,
+        )
+
+        event_bus = self._event_bus
+
+        # Create ProtocolChannel when EventBus is available (protocol
+        # server sessions). Otherwise use DirectChannel (standalone).
+        journal: MemoryJournal | None = None
+        comm_channel: ProtocolChannel | DirectChannel | None = None
+        if event_bus is not None:
+            journal = MemoryJournal()
+            comm_channel = ProtocolChannel(
+                journal=journal,
+                event_bus=event_bus,
+                session_id=session.session_id,
+            )
+
+        # Create SnapshotStore (in-memory for now; durable via
+        # agent._lifecycle_config is handled separately).
+        snapshot_store = MemorySnapshotStore()
+
+        # EventTransport is always in-process for M2.
+        event_transport = InProcessTransport()
+
+        # TriggerSource: ProtocolTrigger for protocol sessions,
+        # ImmediateTrigger for standalone.
+        trigger_source: ProtocolTrigger | None = ProtocolTrigger()
+
+        # Store dimensions on SessionState.
+        session._journal = journal
+        session._snapshot_store = snapshot_store
+        session._comm_channel = comm_channel
+        session._event_transport = event_transport
+        session._trigger_source = trigger_source
+        session._lifecycle_session_id = session.session_id
+
+        # Wire HostContext and AgentRegistry on SessionState (task 1.6).
+        from agentpool.host.registry import AgentRegistry
+
+        host_ctx = self.pool.get_context()
+        agent_registry = AgentRegistry(
+            dict.fromkeys(self.pool.manifest.agents),  # type: ignore[arg-type]
+        )
+        session._host_context = host_ctx
+        session._agent_registry = agent_registry
+
+        # Run crash recovery (full _handle_recovery logic, task 1.2).
+        if journal is not None and comm_channel is not None and snapshot_store is not None:
+            resume_result = journal.resume(snapshot_store)
+            if resume_result is not None:
+                if resume_result.is_inflight:
+                    # Replay journaled events through CommChannel.
+                    comm_channel.set_replaying(True)
+                    try:
+                        for event in resume_result.events:
+                            await comm_channel.publish(event)
+                    finally:
+                        comm_channel.set_replaying(False)
+                    session._recovered_inflight_turn_id = resume_result.inflight_turn_id
+                    # Apply recovery strategy.
+                    if (
+                        session._recover_strategy == "mark_interrupted"
+                        and resume_result.inflight_turn_id is not None
+                    ):
+                        snapshot_store.save_turn_result(
+                            resume_result.inflight_turn_id,
+                            {"status": "interrupted"},
+                        )
+                    # "retry" strategy: the recovered prompt is stored
+                    # on SessionState._resume_result for the first
+                    # RunHandle to pick up.
+                    session._resume_result = resume_result
+                # Non-inflight: no special action needed.
+            else:
+                # Fresh start: save initial snapshot.
+                snapshot_store.save(
+                    {"state": RunState.IDLE.value, "run_id": None},
+                )
+
+            # Subscribe dimensions to the session (not to a RunHandle,
+            # since RunHandle is now ephemeral).
+            if trigger_source is not None:
+                trigger_source.subscribe(session)
+            comm_channel.attach(session)
 
     def list_sessions(self) -> list[SessionInfo]:
         """List all active sessions.

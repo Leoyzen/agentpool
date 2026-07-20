@@ -64,6 +64,8 @@ class SessionControllerCloseMixin:
         2. Await RunHandle completion
         3. MCP cleanup (``agent.mcp.cleanup_session``)
         4. Agent ``__aexit__``
+        4b. Close lifecycle dimensions (Journal, CommChannel, EventTransport,
+            TriggerSource) — per-prompt migration, task 3.11
         5. Session persistence (save final state as ``"closed"``)
            — skipped when ``checkpointed=True`` (status already saved
            as ``"checkpointed"`` by ``_save_close_checkpoint``)
@@ -141,6 +143,21 @@ class SessionControllerCloseMixin:
                 logger.exception("Failed to exit agent context", session_id=session_id)
             finally:
                 self._decrement_mcp_count(agent)
+
+        # Step 4b: Close lifecycle dimensions (per-prompt migration, task 3.11).
+        # These were previously closed in RunHandle.close() but are now
+        # session-owned and must be closed here.
+        import contextlib as ctxlib
+
+        with ctxlib.suppress(Exception):
+            if session._trigger_source is not None:
+                session._trigger_source.close()
+        with ctxlib.suppress(Exception):
+            if session._comm_channel is not None:
+                session._comm_channel.close()
+        with ctxlib.suppress(Exception):
+            if session._event_transport is not None:
+                session._event_transport.close()
 
         # Step 5: Session persistence (save final state)
         # Skip when checkpointed=True — _save_close_checkpoint already

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 import anyio
 
+from agentpool.lifecycle.types import Feedback, ResumeResult
 from agentpool.log import get_logger
 from agentpool.orchestrator.runtime_registry import RuntimeAgentRegistry
 from agentpool.utils.time_utils import get_now
@@ -24,6 +25,15 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from agentpool.delegation import AgentPool
+    from agentpool.host.context import HostContext
+    from agentpool.host.registry import AgentRegistry
+    from agentpool.lifecycle.protocols import (
+        CommChannel,
+        EventTransport,
+        Journal,
+        SnapshotStore,
+        TriggerSource,
+    )
     from agentpool.models.pending_interaction import PendingPermission
     from agentpool.orchestrator.event_bus import EventBus
     from agentpool_storage.protocols import SessionPersistence
@@ -179,6 +189,73 @@ class SessionState:
     checkpoint_enabled: bool = False
     """Whether durable elicitation/checkpointing is enabled for this session."""
 
+    # ------------------------------------------------------------------
+    # Lifecycle dimensions (per-prompt RunHandle migration)
+    # ------------------------------------------------------------------
+    # SessionState owns the 6 lifecycle dimensions previously held by
+    # RunHandle. These persist across RunHandles for the session's
+    # lifetime and are only closed during session close.
+    _journal: Journal | None = None
+    _snapshot_store: SnapshotStore | None = None
+    _comm_channel: CommChannel | None = None
+    _event_transport: EventTransport | None = None
+    _trigger_source: TriggerSource | None = None
+    _lifecycle_session_id: str = "default"
+    _recover_strategy: str = "mark_interrupted"
+    """Crash recovery strategy: ``"mark_interrupted"`` or ``"retry"``.
+
+    Only active when both ``lifecycle.journal`` and ``lifecycle.snapshot``
+    are durable.
+    """
+    _resume_result: ResumeResult | None = None
+    """Result of crash recovery (``journal.resume()``), stored at session init.
+
+    Set once in ``get_or_create_session_agent()`` when recovery runs.
+    ``None`` for fresh starts or when no durable journal is configured.
+    """
+    _recovered_inflight_turn_id: str | None = None
+    """Turn ID of the in-flight Turn detected during crash recovery.
+
+    Set on SessionState during recovery in ``get_or_create_session_agent()``.
+    Used by the ``"retry"`` strategy to check
+    ``journal.get_tool_executions(turn_id)`` before re-executing.
+    """
+
+    # ------------------------------------------------------------------
+    # HostContext injection (moved from RunHandle)
+    # ------------------------------------------------------------------
+    _host_context: HostContext | None = None
+    """HostContext for constructing per-turn AgentContext.
+
+    When set, RunHandle constructs an ``AgentContext`` per turn and
+    injects it into ``run_ctx.deps`` so capabilities like
+    ``SubagentCapability`` can access the delegation service.
+    """
+    _agent_registry: AgentRegistry | None = None
+    """Read-only registry of compiled agents for delegation."""
+    _resume_deferred_tool_results: Any = None
+    """Deferred tool results from checkpoint, forwarded to ``agent.create_turn()``
+    via ``**pydantic_ai_kwargs`` during resume. Only set by
+    ``_create_run_handle()`` when resuming from a checkpoint."""
+
+    # ------------------------------------------------------------------
+    # Queues for per-prompt message routing
+    # ------------------------------------------------------------------
+    prompt_queue: asyncio.Queue[str | list[Any]] = field(default_factory=asyncio.Queue)
+    """Queue of followup prompts for the next RunHandle.
+
+    When a RunHandle is active, followup messages are enqueued here.
+    After the RunHandle terminates, ``_consume_run()`` drains this
+    queue (holding ``_request_lock``) and creates a new RunHandle for
+    each prompt in FIFO order.
+    """
+    feedback_queue: asyncio.Queue[Feedback] = field(default_factory=asyncio.Queue)
+    """Queue of steer messages for delivery to the next RunHandle.
+
+    When no RunHandle is active, steer messages are enqueued here.
+    The next RunHandle drains this queue at turn start.
+    """
+
     @property
     def closing(self) -> bool:
         """Alias for is_closing."""
@@ -187,6 +264,113 @@ class SessionState:
     @closing.setter
     def closing(self, value: bool) -> None:
         self.is_closing = value
+
+    # ------------------------------------------------------------------
+    # Per-prompt RunHandle: message routing helpers
+    # ------------------------------------------------------------------
+
+    def set_current_run_id(self, run_id: str | None) -> None:
+        """Set ``current_run_id`` and publish a ``StateUpdate`` on transition.
+
+        In the per-prompt model, ``RunState`` is eliminated. The state
+        machine is expressed by ``current_run_id`` (None = idle,
+        non-None = running). This helper publishes ``StateUpdate``
+        events when ``current_run_id`` transitions, replacing the old
+        ``RunHandle._transition()`` mechanism.
+
+        Args:
+            run_id: The new run ID, or ``None`` to mark idle.
+        """
+        old = self.current_run_id
+        self.current_run_id = run_id
+        if old == run_id:
+            return
+        # Publish StateUpdate via CommChannel when available.
+        from agentpool.agents.events import StateUpdate
+        from agentpool.lifecycle.types import RunState
+
+        comm = self._comm_channel
+        if comm is None:
+            return
+        new_state = RunState.RUNNING if run_id is not None else RunState.IDLE
+        comm.on_state_change(new_state)
+        state_event = StateUpdate(
+            session_id=self._lifecycle_session_id,
+            state=new_state,
+            stop_reason=None,
+        )
+        with contextlib.suppress(Exception):
+            asyncio.get_running_loop().create_task(comm.publish(state_event))
+
+    def steer_from_background_task(self, message: str) -> str | None:
+        """Route a steer message from a background subagent completion.
+
+        Called by ``AgentRunContext.complete_background_task()`` (via
+        ``steer_callback``) when a background subagent completes. If a
+        RunHandle is active, the message is injected into it directly.
+        If no RunHandle is active (between turns), the message is
+        enqueued to ``feedback_queue`` for delivery to the next
+        RunHandle.
+
+        Args:
+            message: The steer message content.
+
+        Returns:
+            A placeholder message ID (always ``None`` since this path
+            does not generate message IDs).
+        """
+        if self.current_run_id is not None:
+            # Active RunHandle — inject directly via run_handle.steer().
+            # The RunHandle is looked up by _consume_run() which stores
+            # a back-reference. We use a lightweight callback registered
+            # by RunHandle.start().
+            steer_cb = self._active_steer_callback
+            if steer_cb is not None:
+                return steer_cb(message)
+        # No active RunHandle — enqueue for next RunHandle.
+        fb = Feedback(content=message, is_steer=True)
+        self.feedback_queue.put_nowait(fb)
+        return fb.message_id
+
+    _active_steer_callback: Callable[[str], str | None] | None = None
+    """Callback set by RunHandle.start() to enable direct steer injection.
+
+    When a RunHandle is active, it registers a callback here so
+    ``steer_from_background_task()`` can inject messages without
+    needing a direct RunHandle reference. Cleared in RunHandle.close().
+    """
+
+    def revoke(self, message_id: str) -> bool:
+        """Revoke a queued steer message in ``feedback_queue`` by ID.
+
+        In the per-prompt model, CommChannel's feedback queue is unused.
+        Steer messages pending between turns live in
+        ``SessionState.feedback_queue``. This method cancels any
+        pending steer with the given ``message_id``.
+
+        Args:
+            message_id: The ID of the message to revoke.
+
+        Returns:
+            ``True`` if revoked or already gone (idempotent), ``False``
+            if the message was not found in the queue.
+        """
+        # Drain and re-enqueue, skipping the target message_id.
+        found = False
+        remaining: list[Feedback] = []
+        while not self.feedback_queue.empty():
+            try:
+                fb = self.feedback_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if fb.message_id == message_id:
+                found = True
+                # Do not re-enqueue — revoked.
+            else:
+                remaining.append(fb)
+        for fb in remaining:
+            self.feedback_queue.put_nowait(fb)
+        return found
 
 
 # Mixin imports placed after SessionState/exception definitions to avoid

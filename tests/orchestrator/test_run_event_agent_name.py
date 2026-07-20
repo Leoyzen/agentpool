@@ -21,6 +21,8 @@ from agentpool.agents.events import (
     RunStartedEvent,
     StreamCompleteEvent,
 )
+from agentpool.lifecycle.comm_channel import DirectChannel
+from agentpool.lifecycle.journal import MemoryJournal
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
@@ -69,6 +71,8 @@ def _make_handle(
 
     Returns (handle, event_bus) so the caller can inspect published events.
     """
+    from agentpool.orchestrator.core import SessionState
+
     agent = MagicMock()
     agent.name = agent_name
     agent.AGENT_TYPE = agent_type
@@ -79,8 +83,8 @@ def _make_handle(
         ),
     )
     event_bus = AsyncMock()
-    session = MagicMock()
-    session.turn_lock = asyncio.Lock()
+    session = SessionState(session_id="test-session", agent_name=agent_name)
+    session._comm_channel = DirectChannel(MemoryJournal())
     handle = RunHandle(
         run_id="test-run",
         session_id="test-session",

@@ -52,6 +52,7 @@ import pytest
 
 from agentpool import Agent, AgentPool
 from agentpool.agents.events import StreamCompleteEvent, ToolCallStartEvent
+from agentpool.lifecycle import DirectChannel, MemoryJournal
 from agentpool.orchestrator.core import SessionPool
 
 
@@ -99,6 +100,10 @@ async def _setup_session_pool(
     # Attach agent to session
     state, _ = await session_pool.sessions.get_or_create_session(session_id)
     state.agent = agent
+    # Initialize comm_channel on session (normally done by
+    # _initialize_lifecycle_and_recovery, but we pre-cache the agent
+    # so that path is skipped).
+    state._comm_channel = DirectChannel(MemoryJournal())
     session_pool.sessions._session_agents[session_id] = agent
     minimal_pool.get_agent = MagicMock(return_value=agent)  # type: ignore[assignment]
 

@@ -21,6 +21,8 @@ import pytest
 
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import StreamCompleteEvent
+from agentpool.lifecycle.comm_channel import DirectChannel
+from agentpool.lifecycle.journal import MemoryJournal
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
@@ -62,6 +64,7 @@ def _make_run_handle(
     if session is None:
         session = MagicMock()
         session.turn_lock = asyncio.Lock()
+        session._comm_channel = DirectChannel(MemoryJournal())
         session.input_provider = None
         session.parent_session_id = None
     return RunHandle(

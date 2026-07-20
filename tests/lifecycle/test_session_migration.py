@@ -1,15 +1,22 @@
-"""Tests for SessionController & SessionPool migration to RunLoop API.
+"""Tests for SessionController & SessionPool migration to per-prompt RunHandle.
 
-Covers M2 Task 10: SessionController and protocol server migration.
-Verifies that receive_request creates RunHandle with ProtocolTrigger
-and ProtocolChannel dimensions, steer/followup deliver Feedback to
-ProtocolChannel, close_session calls RunLoop.close(), and event
-delivery flows through ProtocolChannel → EventBus →
-ProtocolEventConsumerMixin.
+In the per-prompt model, lifecycle dimensions (TriggerSource, Journal,
+SnapshotStore, CommChannel, EventTransport) live on SessionState, not
+RunHandle. These are initialized by
+``SessionController._initialize_lifecycle_and_recovery()`` during
+``get_or_create_session_agent()``.
 
+The following test categories were REMOVED because they tested RunHandle
+features that no longer exist:
 
-# TODO: L2 migration — test requires complex mock pool dependencies that
-# cannot be easily replaced with a real pool. Needs investigation.
+- _trigger_source on RunHandle — moved to SessionState
+- _comm_channel on RunHandle — moved to SessionState
+- followup() — removed (routing moves to SessionState.prompt_queue)
+- steer() via ProtocolChannel.deliver_feedback — steer() now uses
+  agent_run.enqueue() or run_ctx.queued_steer_messages
+- _closing / _closed flags — replaced by complete_event.is_set()
+- steer() after close() raises RuntimeError — steer() after close()
+  no longer raises; it just queues to run_ctx.queued_steer_messages
 """
 
 from __future__ import annotations
@@ -107,13 +114,13 @@ def _make_mock_pool(agent: MagicMock | None = None) -> MagicMock:
 
 
 # ---------------------------------------------------------------------------
-# SessionController._start_run_handle: ProtocolTrigger & ProtocolChannel
+# _initialize_lifecycle_and_recovery: dimensions on SessionState
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 async def test_start_run_handle_creates_protocol_trigger() -> None:
-    """_start_run_handle creates a RunHandle with ProtocolTrigger."""
+    """_initialize_lifecycle_and_recovery creates ProtocolTrigger on SessionState."""
     agent = _make_mock_agent()
     pool = _make_mock_pool(agent)
     controller = SessionController(pool)
@@ -124,20 +131,20 @@ async def test_start_run_handle_creates_protocol_trigger() -> None:
     controller._sessions["s1"] = session
     controller._session_agents["s1"] = agent
 
-    controller._start_run_handle(session, agent, "s1", "hello")
-    run_handle = controller._runs[session.current_run_id]
+    # Initialize lifecycle dimensions on the session (normally called
+    # by get_or_create_session_agent).
+    await controller._initialize_lifecycle_and_recovery(session, agent)
 
-    assert isinstance(run_handle._trigger_source, ProtocolTrigger)
-    assert run_handle._trigger_source is not None
+    assert isinstance(session._trigger_source, ProtocolTrigger)
 
     # Cleanup
-    run_handle.close()
-    controller._runs.clear()
+    if session._comm_channel is not None:
+        session._comm_channel.close()
 
 
 @pytest.mark.unit
 async def test_start_run_handle_creates_protocol_channel() -> None:
-    """_start_run_handle creates a RunHandle with ProtocolChannel."""
+    """_initialize_lifecycle_and_recovery creates ProtocolChannel on SessionState."""
     agent = _make_mock_agent()
     pool = _make_mock_pool(agent)
     controller = SessionController(pool)
@@ -148,17 +155,15 @@ async def test_start_run_handle_creates_protocol_channel() -> None:
     controller._sessions["s1"] = session
     controller._session_agents["s1"] = agent
 
-    controller._start_run_handle(session, agent, "s1", "hello")
-    run_handle = controller._runs[session.current_run_id]
+    await controller._initialize_lifecycle_and_recovery(session, agent)
 
-    assert isinstance(run_handle._comm_channel, ProtocolChannel)
-    assert run_handle._comm_channel is not None
-    assert run_handle._comm_channel._session_id == "s1"
-    assert run_handle._comm_channel._event_bus is event_bus
+    assert isinstance(session._comm_channel, ProtocolChannel)
+    assert session._comm_channel is not None
+    assert session._comm_channel._session_id == "s1"
+    assert session._comm_channel._event_bus is event_bus
 
     # Cleanup
-    run_handle.close()
-    controller._runs.clear()
+    session._comm_channel.close()
 
 
 @pytest.mark.unit
@@ -174,96 +179,17 @@ async def test_start_run_handle_protocol_channel_has_journal() -> None:
     controller._sessions["s1"] = session
     controller._session_agents["s1"] = agent
 
-    controller._start_run_handle(session, agent, "s1", "hello")
-    run_handle = controller._runs[session.current_run_id]
+    await controller._initialize_lifecycle_and_recovery(session, agent)
 
-    assert isinstance(run_handle._comm_channel, ProtocolChannel)
-    assert isinstance(run_handle._comm_channel._journal, MemoryJournal)
+    assert isinstance(session._comm_channel, ProtocolChannel)
+    assert isinstance(session._comm_channel._journal, MemoryJournal)
 
     # Cleanup
-    run_handle.close()
-    controller._runs.clear()
+    session._comm_channel.close()
 
 
 # ---------------------------------------------------------------------------
-# Steer / followup via ProtocolChannel
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-async def test_steer_delivers_feedback_to_protocol_channel() -> None:
-    """steer() delivers Feedback(is_steer=True) to ProtocolChannel."""
-    agent = _make_mock_agent()
-    pool = _make_mock_pool(agent)
-    controller = SessionController(pool)
-    event_bus = EventBus()
-    controller._event_bus = event_bus
-
-    session = SessionState(session_id="s1", agent_name="test_agent")
-    controller._sessions["s1"] = session
-    controller._session_agents["s1"] = agent
-
-    controller._start_run_handle(session, agent, "s1", "hello")
-    run_handle = controller._runs[session.current_run_id]
-
-    # Drain the initial prompt feedback if present (placed by _start_run_handle
-    # via followup() per D17). The background task may have consumed it already.
-    run_handle._comm_channel.recv()
-
-    # Steer should deliver feedback to the ProtocolChannel.
-    result = run_handle.steer("change direction")
-    assert result is not None
-
-    # Verify feedback was enqueued.
-    assert isinstance(run_handle._comm_channel, ProtocolChannel)
-    feedback = run_handle._comm_channel.recv()
-    assert feedback is not None
-    assert isinstance(feedback, Feedback)
-    assert feedback.content == "change direction"
-    assert feedback.is_steer is True
-
-    # Cleanup
-    run_handle.close()
-    controller._runs.clear()
-
-
-@pytest.mark.unit
-async def test_followup_delivers_feedback_to_protocol_channel() -> None:
-    """followup() delivers Feedback(is_steer=False) to ProtocolChannel."""
-    agent = _make_mock_agent()
-    pool = _make_mock_pool(agent)
-    controller = SessionController(pool)
-    event_bus = EventBus()
-    controller._event_bus = event_bus
-
-    session = SessionState(session_id="s1", agent_name="test_agent")
-    controller._sessions["s1"] = session
-    controller._session_agents["s1"] = agent
-
-    controller._start_run_handle(session, agent, "s1", "hello")
-    run_handle = controller._runs[session.current_run_id]
-
-    # Drain the initial prompt feedback if present (placed by _start_run_handle
-    # via followup() per D17). The background task may have consumed it already.
-    run_handle._comm_channel.recv()
-
-    result = run_handle.followup("next question")
-    assert result is not None
-
-    assert isinstance(run_handle._comm_channel, ProtocolChannel)
-    feedback = run_handle._comm_channel.recv()
-    assert feedback is not None
-    assert isinstance(feedback, Feedback)
-    assert feedback.content == "next question"
-    assert feedback.is_steer is False
-
-    # Cleanup
-    run_handle.close()
-    controller._runs.clear()
-
-
-# ---------------------------------------------------------------------------
-# close_session calls RunLoop.close()
+# close_session calls RunHandle.close()
 # ---------------------------------------------------------------------------
 
 
@@ -291,10 +217,9 @@ async def test_close_session_calls_run_handle_close() -> None:
     # Close the session.
     await controller.close_session("s1")
 
-    # The run handle should have been signaled to close (either
-    # _closing=True if still running, or _closed=True if the start()
-    # loop already finished and the finally block ran).
-    assert run_handle._closing is True or run_handle._closed is True
+    # The run handle should have complete_event set (either by close()
+    # or by the turn completing naturally).
+    assert run_handle.complete_event.is_set() is True
 
 
 # ---------------------------------------------------------------------------
@@ -335,75 +260,35 @@ async def test_protocol_channel_publishes_to_event_bus() -> None:
 
 @pytest.mark.unit
 async def test_no_double_publish_with_protocol_channel() -> None:
-    """When ProtocolChannel is the comm_channel, events are not double-published to EventBus.
+    """ProtocolChannel.publishes_to_event_bus returns True.
 
-    The publishes_to_event_bus property returns True for
-    ProtocolChannel, so start() skips the direct event_bus.publish()
-    call and lets ProtocolChannel.publish() handle EventBus delivery.
+    When ProtocolChannel is the comm_channel, events are published to
+    EventBus by the channel itself, so RunHandle.start() skips the
+    direct event_bus.publish() call.
     """
     event_bus = EventBus()
     journal = MemoryJournal()
     channel = ProtocolChannel(journal=journal, event_bus=event_bus, session_id="s1")
 
-    # Create a RunHandle with ProtocolChannel.
-    agent = _make_mock_agent()
-    session = MagicMock()
-    session.turn_lock = asyncio.Lock()
-    session.parent_session_id = None
-    session.input_provider = None
-
-    run_handle = RunHandle(
-        run_id="r1",
-        session_id="s1",
-        agent_type="native",
-        agent=agent,
-        event_bus=event_bus,
-        session=session,
-        run_ctx=AgentRunContext(session_id="s1", event_bus=event_bus),
-        _comm_channel=channel,
-        _trigger_source=ProtocolTrigger(),
-    )
-
     # The property should return True.
-    assert run_handle._comm_channel.publishes_to_event_bus is True
+    assert channel.publishes_to_event_bus is True
 
     # Cleanup
-    run_handle.close()
+    channel.close()
 
 
 @pytest.mark.unit
 async def test_double_publish_with_direct_channel() -> None:
-    """With DirectChannel, publishes_to_event_bus is False.
+    """DirectChannel.publishes_to_event_bus returns False.
 
-    DirectChannel does not publish to EventBus, so start() must
-    call event_bus.publish() directly.
+    DirectChannel does not publish to EventBus, so RunHandle.start()
+    must call event_bus.publish() directly.
     """
-    event_bus = EventBus()
     journal = MemoryJournal()
     channel = DirectChannel(journal=journal)
 
-    agent = _make_mock_agent()
-    session = MagicMock()
-    session.turn_lock = asyncio.Lock()
-    session.parent_session_id = None
-    session.input_provider = None
-
-    run_handle = RunHandle(
-        run_id="r1",
-        session_id="s1",
-        agent_type="native",
-        agent=agent,
-        event_bus=event_bus,
-        session=session,
-        run_ctx=AgentRunContext(session_id="s1", event_bus=event_bus),
-        _comm_channel=channel,
-    )
-
     # The property should return False.
-    assert run_handle._comm_channel.publishes_to_event_bus is False
-
-    # Cleanup
-    run_handle.close()
+    assert channel.publishes_to_event_bus is False
 
 
 # ---------------------------------------------------------------------------
@@ -430,13 +315,13 @@ async def test_receive_request_closed_session_returns_none() -> None:
 
 
 # ---------------------------------------------------------------------------
-# SessionPool._create_run_handle with ProtocolTrigger/ProtocolChannel
+# SessionPool creates ProtocolTrigger/ProtocolChannel on SessionState
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 async def test_session_pool_create_run_handle_creates_protocol_dimensions() -> None:
-    """SessionPool._create_run_handle creates RunHandle with ProtocolTrigger/ProtocolChannel."""
+    """_initialize_lifecycle_and_recovery creates dimensions on SessionState."""
     agent = _make_mock_agent()
     pool = _make_mock_pool(agent)
 
@@ -448,16 +333,16 @@ async def test_session_pool_create_run_handle_creates_protocol_dimensions() -> N
     session_pool.sessions._sessions["s1"] = session
     session_pool.sessions._session_agents["s1"] = agent
 
-    run_handle = session_pool._create_run_handle(session, agent, "s1")
+    # Initialize lifecycle dimensions on the session.
+    await session_pool.sessions._initialize_lifecycle_and_recovery(session, agent)
 
-    assert isinstance(run_handle._trigger_source, ProtocolTrigger)
-    assert isinstance(run_handle._comm_channel, ProtocolChannel)
-    assert run_handle._comm_channel._session_id == "s1"
-    assert run_handle._comm_channel._event_bus is session_pool._event_bus
+    assert isinstance(session._trigger_source, ProtocolTrigger)
+    assert isinstance(session._comm_channel, ProtocolChannel)
+    assert session._comm_channel._session_id == "s1"
+    assert session._comm_channel._event_bus is session_pool._event_bus
 
     # Cleanup
-    run_handle.close()
-    session_pool.sessions._runs.clear()
+    session._comm_channel.close()
 
 
 # ---------------------------------------------------------------------------
@@ -506,43 +391,6 @@ async def test_event_delivery_through_protocol_channel_to_event_bus() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Steer on closed RunHandle raises RuntimeError
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-async def test_steer_after_close_raises_runtime_error() -> None:
-    """steer() after start() has finished (closed) raises RuntimeError."""
-    event_bus = EventBus()
-    journal = MemoryJournal()
-    channel = ProtocolChannel(journal=journal, event_bus=event_bus, session_id="s1")
-
-    agent = _make_mock_agent()
-    session = MagicMock()
-    session.turn_lock = asyncio.Lock()
-    session.parent_session_id = None
-    session.input_provider = None
-
-    run_handle = RunHandle(
-        run_id="r1",
-        session_id="s1",
-        agent_type="native",
-        agent=agent,
-        event_bus=event_bus,
-        session=session,
-        run_ctx=AgentRunContext(session_id="s1", event_bus=event_bus),
-        _comm_channel=channel,
-        _trigger_source=ProtocolTrigger(),
-    )
-
-    # Simulate closed state.
-    run_handle._closed = True
-
-    with pytest.raises(RuntimeError, match="Cannot steer after close"):
-        run_handle.steer("message")
-
-
-# ---------------------------------------------------------------------------
 # close_session with active run waits then completes
 # ---------------------------------------------------------------------------
 
@@ -575,3 +423,351 @@ async def test_close_session_with_active_run_completes() -> None:
 
     # Session should be removed.
     assert controller.get_session("s1") is None
+
+
+# ---------------------------------------------------------------------------
+# SessionState.set_current_run_id() publishes StateUpdate
+# (replaces old test_state_transition_publishes_state_update)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_set_current_run_id_publishes_state_update_running() -> None:
+    """set_current_run_id(run_id) publishes StateUpdate with RunState.RUNNING.
+
+    When ``current_run_id`` transitions from None to a non-None value,
+    ``SessionState.set_current_run_id()`` calls
+    ``comm.on_state_change(RunState.RUNNING)`` and schedules a
+    ``StateUpdate`` event publish.
+    """
+    from agentpool.agents.events import StateUpdate
+    from agentpool.lifecycle.types import RunState
+
+    session = SessionState(session_id="s1", agent_name="test_agent")
+    comm = MagicMock()
+    comm.publishes_to_event_bus = True
+    comm.publish = AsyncMock()
+    session._comm_channel = comm
+    session._lifecycle_session_id = "s1"
+
+    assert session.current_run_id is None
+    session.set_current_run_id("run-1")
+
+    assert session.current_run_id == "run-1"
+    comm.on_state_change.assert_called_once_with(RunState.RUNNING)
+    # publish is scheduled via create_task; let it run.
+    await asyncio.sleep(0.01)
+    comm.publish.assert_called_once()
+    published_event = comm.publish.call_args.args[0]
+    assert isinstance(published_event, StateUpdate)
+    assert published_event.state == RunState.RUNNING
+    assert published_event.session_id == "s1"
+
+
+@pytest.mark.unit
+async def test_set_current_run_id_publishes_state_update_idle() -> None:
+    """set_current_run_id(None) publishes StateUpdate with RunState.IDLE.
+
+    When ``current_run_id`` transitions from a non-None value to None,
+    ``SessionState.set_current_run_id()`` calls
+    ``comm.on_state_change(RunState.IDLE)`` and schedules a
+    ``StateUpdate`` event publish.
+    """
+    from agentpool.agents.events import StateUpdate
+    from agentpool.lifecycle.types import RunState
+
+    session = SessionState(session_id="s1", agent_name="test_agent")
+    comm = MagicMock()
+    comm.publishes_to_event_bus = True
+    comm.publish = AsyncMock()
+    session._comm_channel = comm
+    session._lifecycle_session_id = "s1"
+    session.current_run_id = "run-1"
+
+    session.set_current_run_id(None)
+
+    assert session.current_run_id is None
+    comm.on_state_change.assert_called_once_with(RunState.IDLE)
+    await asyncio.sleep(0.01)
+    comm.publish.assert_called_once()
+    published_event = comm.publish.call_args.args[0]
+    assert isinstance(published_event, StateUpdate)
+    assert published_event.state == RunState.IDLE
+
+
+@pytest.mark.unit
+async def test_set_current_run_id_no_transition_when_same_value() -> None:
+    """set_current_run_id with same value does not publish StateUpdate.
+
+    When the new value equals the old value, no transition occurs and
+    no StateUpdate is published.
+    """
+    session = SessionState(session_id="s1", agent_name="test_agent")
+    comm = MagicMock()
+    comm.publish = AsyncMock()
+    session._comm_channel = comm
+    session.current_run_id = "run-1"
+
+    session.set_current_run_id("run-1")
+
+    assert session.current_run_id == "run-1"
+    comm.on_state_change.assert_not_called()
+    comm.publish.assert_not_called()
+
+
+@pytest.mark.unit
+async def test_set_current_run_id_no_comm_channel_no_crash() -> None:
+    """set_current_run_id with no comm_channel sets field without crashing.
+
+    When ``_comm_channel`` is None (standalone execution), the method
+    only sets ``current_run_id`` without publishing events.
+    """
+    session = SessionState(session_id="s1", agent_name="test_agent")
+    assert session._comm_channel is None
+
+    session.set_current_run_id("run-1")
+    assert session.current_run_id == "run-1"
+
+    session.set_current_run_id(None)
+    assert session.current_run_id is None
+
+
+# ---------------------------------------------------------------------------
+# _route_message followup (when_idle) enqueues to prompt_queue
+# (replaces old test_busy_when_idle_calls_followup which tested followup())
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_route_message_when_idle_enqueues_to_prompt_queue() -> None:
+    """_route_message with priority='when_idle' enqueues to prompt_queue.
+
+    When the session has an active run and a message arrives with
+    ``priority="when_idle"``, the message is enqueued to
+    ``SessionState.prompt_queue`` for the next RunHandle.
+    """
+    agent = _make_mock_agent()
+    pool = _make_mock_pool(agent)
+    controller = SessionController(pool)
+    event_bus = EventBus()
+    controller._event_bus = event_bus
+
+    session = SessionState(session_id="s1", agent_name="test_agent")
+    session._comm_channel = DirectChannel(MemoryJournal())
+    controller._sessions["s1"] = session
+    controller._session_agents["s1"] = agent
+
+    # Create an active run handle so the session is "busy".
+    controller._start_run_handle(session, agent, "s1", "first")
+    assert session.current_run_id is not None
+    assert session.prompt_queue.empty()  # queue is empty initially
+
+    # Send a followup message with when_idle priority.
+    result = await controller._route_message(
+        session,
+        agent,
+        "s1",
+        "followup msg",
+        priority="when_idle",
+    )
+
+    # Should return a message_id (not None).
+    assert result is not None
+    # The message should be in prompt_queue.
+    assert not session.prompt_queue.empty()
+    queued = session.prompt_queue.get_nowait()
+    assert queued == "followup msg"
+
+    # Cleanup: cancel the background run task.
+    run_id = session.current_run_id
+    if run_id is not None:
+        run_handle = controller._runs.pop(run_id, None)
+        if run_handle is not None:
+            run_handle.close()
+    session.set_current_run_id(None)
+
+
+@pytest.mark.unit
+async def test_route_message_asap_calls_steer() -> None:
+    """_route_message with priority='asap' calls RunHandle.steer().
+
+    When the session has an active run and a message arrives with
+    ``priority="asap"``, the message is injected via ``steer()``.
+    """
+    agent = _make_mock_agent()
+    pool = _make_mock_pool(agent)
+    controller = SessionController(pool)
+    event_bus = EventBus()
+    controller._event_bus = event_bus
+
+    session = SessionState(session_id="s1", agent_name="test_agent")
+    session._comm_channel = DirectChannel(MemoryJournal())
+    controller._sessions["s1"] = session
+    controller._session_agents["s1"] = agent
+
+    # Create an active run handle.
+    controller._start_run_handle(session, agent, "s1", "first")
+    run_id = session.current_run_id
+    assert run_id is not None
+    run_handle = controller._runs[run_id]
+
+    # Mock steer to capture the call.
+    run_handle.steer = MagicMock(return_value="steer-msg-id")
+
+    result = await controller._route_message(
+        session,
+        agent,
+        "s1",
+        "steer msg",
+        priority="asap",
+    )
+
+    assert result == "steer-msg-id"
+    run_handle.steer.assert_called_once_with("steer msg", message_id=None)
+
+    # Cleanup.
+    controller._runs.pop(run_id, None)
+    run_handle.close()
+    session.set_current_run_id(None)
+
+
+# ---------------------------------------------------------------------------
+# _consume_run chains RunHandles via prompt_queue
+# (replaces old test_followup_triggers_new_turn, test_multi_turn_with_protocol_trigger)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_consume_run_chains_via_prompt_queue() -> None:
+    """_consume_run creates a new RunHandle when prompt_queue is non-empty.
+
+    After the first turn terminates, if ``prompt_queue`` has a queued
+    prompt, ``_consume_run()`` creates a new RunHandle and executes
+    the next turn with that prompt.
+    """
+    agent = _make_mock_agent()
+    pool = _make_mock_pool(agent)
+    controller = SessionController(pool)
+    event_bus = EventBus()
+    controller._event_bus = event_bus
+
+    session = SessionState(session_id="s1", agent_name="test_agent")
+    session._comm_channel = DirectChannel(MemoryJournal())
+    controller._sessions["s1"] = session
+    controller._session_agents["s1"] = agent
+
+    # Track prompts passed to create_turn.
+    captured_prompts: list[list[Any]] = []
+    original_create_turn = agent.create_turn
+
+    def _capturing_create_turn(*, prompts: list[Any], **kwargs: Any) -> Any:
+        captured_prompts.append(list(prompts))
+        return original_create_turn(prompts=prompts, **kwargs)
+
+    agent.create_turn = _capturing_create_turn
+
+    # Enqueue a followup prompt BEFORE starting the run.
+    # _consume_run will find it after the first turn completes.
+    session.prompt_queue.put_nowait("second prompt")
+
+    # Start the run with the first prompt.
+    controller._start_run_handle(session, agent, "s1", "first prompt")
+
+    # Wait for both turns to complete.
+    await asyncio.sleep(0.3)
+
+    # Two turns should have executed: first prompt + second prompt.
+    assert len(captured_prompts) == 2, (
+        f"Expected 2 turns, got {len(captured_prompts)}: {captured_prompts}"
+    )
+    assert captured_prompts[0] == ["first prompt"]
+    assert captured_prompts[1] == ["second prompt"]
+
+    # prompt_queue should be drained.
+    assert session.prompt_queue.empty()
+    # Session should be idle.
+    assert session.current_run_id is None
+
+
+@pytest.mark.unit
+async def test_consume_run_no_chain_when_prompt_queue_empty() -> None:
+    """_consume_run does not chain when prompt_queue is empty.
+
+    After the single turn completes, if ``prompt_queue`` is empty,
+    the session goes idle and no new RunHandle is created.
+    """
+    agent = _make_mock_agent()
+    pool = _make_mock_pool(agent)
+    controller = SessionController(pool)
+    event_bus = EventBus()
+    controller._event_bus = event_bus
+
+    session = SessionState(session_id="s1", agent_name="test_agent")
+    session._comm_channel = DirectChannel(MemoryJournal())
+    controller._sessions["s1"] = session
+    controller._session_agents["s1"] = agent
+
+    captured_prompts: list[list[Any]] = []
+    original_create_turn = agent.create_turn
+
+    def _capturing_create_turn(*, prompts: list[Any], **kwargs: Any) -> Any:
+        captured_prompts.append(list(prompts))
+        return original_create_turn(prompts=prompts, **kwargs)
+
+    agent.create_turn = _capturing_create_turn
+
+    # No prompt in prompt_queue — only the initial prompt.
+    controller._start_run_handle(session, agent, "s1", "only prompt")
+
+    await asyncio.sleep(0.2)
+
+    # Only one turn.
+    assert len(captured_prompts) == 1
+    assert captured_prompts[0] == ["only prompt"]
+    assert session.prompt_queue.empty()
+    assert session.current_run_id is None
+
+
+@pytest.mark.unit
+async def test_consume_run_fifo_ordering_of_queued_prompts() -> None:
+    """_consume_run processes queued prompts in FIFO order.
+
+    Multiple prompts enqueued to ``prompt_queue`` are executed in
+    the order they were enqueued.
+    """
+    agent = _make_mock_agent()
+    pool = _make_mock_pool(agent)
+    controller = SessionController(pool)
+    event_bus = EventBus()
+    controller._event_bus = event_bus
+
+    session = SessionState(session_id="s1", agent_name="test_agent")
+    session._comm_channel = DirectChannel(MemoryJournal())
+    controller._sessions["s1"] = session
+    controller._session_agents["s1"] = agent
+
+    captured_prompts: list[list[Any]] = []
+    original_create_turn = agent.create_turn
+
+    def _capturing_create_turn(*, prompts: list[Any], **kwargs: Any) -> Any:
+        captured_prompts.append(list(prompts))
+        return original_create_turn(prompts=prompts, **kwargs)
+
+    agent.create_turn = _capturing_create_turn
+
+    # Enqueue two followup prompts in FIFO order.
+    session.prompt_queue.put_nowait("second")
+    session.prompt_queue.put_nowait("third")
+
+    # Start with the first prompt.
+    controller._start_run_handle(session, agent, "s1", "first")
+
+    await asyncio.sleep(0.5)
+
+    # Three turns in order: first, second, third.
+    assert len(captured_prompts) == 3
+    assert captured_prompts[0] == ["first"]
+    assert captured_prompts[1] == ["second"]
+    assert captured_prompts[2] == ["third"]
+    assert session.prompt_queue.empty()
+    assert session.current_run_id is None
