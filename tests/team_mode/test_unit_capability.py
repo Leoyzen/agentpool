@@ -487,6 +487,41 @@ def _init_team(base_dir: str, team_id: str = "team_123") -> None:
     state.register_member(team_id, "reviewer_agent", "sess_reviewer")
 
 
+def _make_add_member_setup(
+    tmp_path: Any,
+    *,
+    member_eligible: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[TeamCommCapability, Any, MagicMock, MagicMock, MagicMock]:
+    """Create a standard setup for team_add_member tests.
+
+    Returns:
+        (capability, ctx, mock_pool, mock_delegation, mock_registry)
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(
+        member_eligible=member_eligible or ["worker", "reviewer", "editor"],
+        base_dir=str(tmp_path),
+    )
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=True)
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    mock_pool.close_session = AsyncMock()
+    mock_delegation = MagicMock()
+    mock_delegation.create_child_session = AsyncMock(return_value="child_session_new")
+    ctx = _make_run_context(
+        metadata=metadata or _make_lead_metadata(),
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+        delegation=mock_delegation,
+    )
+    cap = TeamCommCapability(config, "coordinator", metadata or _make_lead_metadata())
+    return cap, ctx, mock_pool, mock_delegation, mock_registry
+
+
 @pytest.mark.unit
 async def test_send_message_happy_path(tmp_path: Any) -> None:
     """Given: team session with registered members + mock session_pool.
@@ -1740,32 +1775,25 @@ async def test_team_add_member_success(tmp_path: Any) -> None:
     When: team_add_member is called with a valid agent name.
     Then: returns success message and creates child session.
     """
-    _init_team(str(tmp_path))
-    config = _make_enabled_config(
-        member_eligible=["worker", "reviewer", "editor"],
-        base_dir=str(tmp_path),
-    )
-    mock_registry = MagicMock()
-    mock_registry.exists = MagicMock(return_value=True)
-    mock_pool = MagicMock()
-    mock_pool.send_message = AsyncMock(return_value="msg_id")
-    mock_delegation = MagicMock()
-    mock_delegation.create_child_session = AsyncMock(return_value="child_session_new")
-    ctx = _make_run_context(
-        metadata=_make_lead_metadata(),
-        session_pool=mock_pool,
-        config=config,
-        base_dir=str(tmp_path),
-        agent_registry=mock_registry,
-        delegation=mock_delegation,
-    )
-    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+    cap, ctx, mock_pool, mock_delegation, _mock_registry = _make_add_member_setup(tmp_path)
 
     result = await cap.team_add_member(ctx, "new_member", "editor")
 
     assert result == "Member 'new_member' added to team (lifecycle=persistent)"
     mock_delegation.create_child_session.assert_awaited_once()
     mock_pool.send_message.assert_awaited_once()
+
+    # Verify agent field in team state is the actual agent type, not the member name.
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    team_state = FileTeamState(str(tmp_path))
+    state = team_state._read_json(team_state._state_path("team_123"))
+    assert state["members"]["new_member"]["agent"] == "editor"
+    assert state["members"]["new_member"]["session_id"] == "child_session_new"
+
+    # Verify team_member_sessions metadata was updated.
+    agent_ctx = cap._resolve_agent_context(ctx)
+    assert "child_session_new" in agent_ctx.session.metadata.get("team_member_sessions", [])
 
 
 @pytest.mark.unit
@@ -1790,20 +1818,10 @@ async def test_team_add_member_agent_not_eligible(tmp_path: Any) -> None:
     When: team_add_member is called.
     Then: returns "Agent '{agent}' is not eligible".
     """
-    _init_team(str(tmp_path))
-    config = _make_enabled_config(
+    cap, ctx, _mock_pool, _mock_delegation, _mock_registry = _make_add_member_setup(
+        tmp_path,
         member_eligible=["worker", "reviewer"],
-        base_dir=str(tmp_path),
     )
-    mock_registry = MagicMock()
-    mock_registry.exists = MagicMock(return_value=True)
-    ctx = _make_run_context(
-        metadata=_make_lead_metadata(),
-        config=config,
-        base_dir=str(tmp_path),
-        agent_registry=mock_registry,
-    )
-    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
     result = await cap.team_add_member(ctx, "new_member", "non_eligible")
 
@@ -1817,20 +1835,10 @@ async def test_team_add_member_duplicate_name(tmp_path: Any) -> None:
     When: team_add_member is called with existing name.
     Then: returns "Member '{name}' already exists".
     """
-    _init_team(str(tmp_path))
-    config = _make_enabled_config(
+    cap, ctx, _mock_pool, _mock_delegation, _mock_registry = _make_add_member_setup(
+        tmp_path,
         member_eligible=["worker", "reviewer"],
-        base_dir=str(tmp_path),
     )
-    mock_registry = MagicMock()
-    mock_registry.exists = MagicMock(return_value=True)
-    ctx = _make_run_context(
-        metadata=_make_lead_metadata(),
-        config=config,
-        base_dir=str(tmp_path),
-        agent_registry=mock_registry,
-    )
-    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
     result = await cap.team_add_member(ctx, "translator_agent", "worker")
 
@@ -1844,26 +1852,7 @@ async def test_team_add_member_with_notify(tmp_path: Any) -> None:
     When: team_add_member is called with notify="New member joining".
     Then: notify message is sent to existing members (excluding lead and new member).
     """
-    _init_team(str(tmp_path))
-    config = _make_enabled_config(
-        member_eligible=["worker", "reviewer", "editor"],
-        base_dir=str(tmp_path),
-    )
-    mock_registry = MagicMock()
-    mock_registry.exists = MagicMock(return_value=True)
-    mock_pool = MagicMock()
-    mock_pool.send_message = AsyncMock(return_value="msg_id")
-    mock_delegation = MagicMock()
-    mock_delegation.create_child_session = AsyncMock(return_value="child_session_new")
-    ctx = _make_run_context(
-        metadata=_make_lead_metadata(),
-        session_pool=mock_pool,
-        config=config,
-        base_dir=str(tmp_path),
-        agent_registry=mock_registry,
-        delegation=mock_delegation,
-    )
-    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+    cap, ctx, mock_pool, _mock_delegation, _mock_registry = _make_add_member_setup(tmp_path)
 
     result = await cap.team_add_member(
         ctx,
@@ -1876,6 +1865,17 @@ async def test_team_add_member_with_notify(tmp_path: Any) -> None:
     # send_message called: 1 for initial prompt + 2 for notify (translator + reviewer)
     assert mock_pool.send_message.await_count == 3
 
+    # Verify notify was sent to existing members but NOT to lead or new member.
+    notify_calls = [
+        c
+        for c in mock_pool.send_message.await_args_list
+        if len(c.args) > 1 and c.args[1] == "New member joining"
+    ]
+    notify_targets = {c.args[0] for c in notify_calls}
+    assert "sess_translator" in notify_targets  # existing member received
+    assert "sess_reviewer" in notify_targets  # existing member received
+    assert "child_session_new" not in notify_targets  # new member excluded
+
 
 @pytest.mark.unit
 async def test_team_add_member_ephemeral(tmp_path: Any) -> None:
@@ -1884,26 +1884,7 @@ async def test_team_add_member_ephemeral(tmp_path: Any) -> None:
     When: team_add_member is called with lifecycle="ephemeral".
     Then: returns success with lifecycle=ephemeral and cleanup task scheduled.
     """
-    _init_team(str(tmp_path))
-    config = _make_enabled_config(
-        member_eligible=["worker", "reviewer", "editor"],
-        base_dir=str(tmp_path),
-    )
-    mock_registry = MagicMock()
-    mock_registry.exists = MagicMock(return_value=True)
-    mock_pool = MagicMock()
-    mock_pool.send_message = AsyncMock(return_value="msg_id")
-    mock_delegation = MagicMock()
-    mock_delegation.create_child_session = AsyncMock(return_value="child_session_new")
-    ctx = _make_run_context(
-        metadata=_make_lead_metadata(),
-        session_pool=mock_pool,
-        config=config,
-        base_dir=str(tmp_path),
-        agent_registry=mock_registry,
-        delegation=mock_delegation,
-    )
-    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+    cap, ctx, _mock_pool, _mock_delegation, _mock_registry = _make_add_member_setup(tmp_path)
 
     result = await cap.team_add_member(
         ctx,
@@ -1949,6 +1930,11 @@ async def test_team_remove_member_success(tmp_path: Any) -> None:
     team_state = FileTeamState(str(tmp_path))
     sid = team_state.get_member_session_id("team_123", "translator_agent")
     assert sid is None
+
+    # Verify blackboard was written with sanitized key.
+    bb_result = team_state.read_blackboard("team_123", "member_update/translator_agent")
+    assert bb_result is not None
+    assert bb_result["value"]["action"] == "removed"
 
 
 @pytest.mark.unit
@@ -1997,3 +1983,159 @@ async def test_team_remove_member_is_self(tmp_path: Any) -> None:
 
     assert result == "Cannot remove yourself"
     mock_pool.close_session.assert_not_awaited()
+
+
+# ---- Additional team_add_member / team_remove_member coverage ----
+
+
+@pytest.mark.unit
+async def test_team_add_member_non_ascii_name(tmp_path: Any) -> None:
+    """Member name with Chinese characters should succeed (blackboard key sanitized)."""
+    import re
+
+    cap, ctx, _mock_pool, _mock_delegation, _mock_registry = _make_add_member_setup(tmp_path)
+    result = await cap.team_add_member(ctx, "推理员B", "editor")
+    assert "added to team" in result
+
+    # Verify blackboard key was sanitized (non-ASCII chars replaced with _).
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", "推理员B")
+    team_state = FileTeamState(str(tmp_path))
+    bb = team_state.read_blackboard("team_123", f"member_update/{safe_name}")
+    assert bb is not None
+    assert bb["value"]["name"] == "推理员B"
+
+
+@pytest.mark.unit
+async def test_team_add_member_hyphen_in_name(tmp_path: Any) -> None:
+    """Member name with hyphens should succeed."""
+    import re
+
+    cap, ctx, _mock_pool, _mock_delegation, _mock_registry = _make_add_member_setup(tmp_path)
+    result = await cap.team_add_member(ctx, "logician-B", "editor")
+    assert "added to team" in result
+
+    # Verify blackboard key was sanitized (hyphen replaced with _).
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", "logician-B")
+    team_state = FileTeamState(str(tmp_path))
+    bb = team_state.read_blackboard("team_123", f"member_update/{safe_name}")
+    assert bb is not None
+
+
+@pytest.mark.unit
+async def test_team_add_member_agent_field_correct(tmp_path: Any) -> None:
+    """The agent field in team state should be the agent type, not the member name."""
+    cap, ctx, _mock_pool, _mock_delegation, _mock_registry = _make_add_member_setup(tmp_path)
+    await cap.team_add_member(ctx, "my_member", "editor")
+
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    team_state = FileTeamState(str(tmp_path))
+    state = team_state._read_json(team_state._state_path("team_123"))
+    assert state["members"]["my_member"]["agent"] == "editor"
+    assert state["members"]["my_member"]["agent"] != "my_member"  # NOT the member name
+
+
+@pytest.mark.unit
+async def test_team_add_member_max_members_exceeded(tmp_path: Any) -> None:
+    """Should fail when adding a member would exceed max_members.
+
+    The team from _init_team has 2 non-lead members (translator_agent,
+    reviewer_agent).  max_members counts non-lead members only, so with
+    max_members=2 the team is already full.
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(
+        member_eligible=["worker", "reviewer", "editor"],
+        base_dir=str(tmp_path),
+    )
+    config = config.model_copy(update={"bounds": TeamBounds(max_members=2)})
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=True)
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    mock_delegation = MagicMock()
+    mock_delegation.create_child_session = AsyncMock(return_value="child_session_new")
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+        delegation=mock_delegation,
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.team_add_member(ctx, "extra", "editor")
+
+    assert "max_members" in result
+
+
+@pytest.mark.unit
+async def test_team_add_member_agent_not_in_registry(tmp_path: Any) -> None:
+    """Should fail when agent doesn't exist in the registry."""
+    cap, ctx, _mock_pool, _mock_delegation, mock_registry = _make_add_member_setup(tmp_path)
+    mock_registry.exists = MagicMock(return_value=False)  # Agent not in registry
+
+    result = await cap.team_add_member(ctx, "new_member", "nonexistent_agent")
+
+    assert "not found in registry" in result
+
+
+@pytest.mark.unit
+async def test_team_add_member_team_member_sessions_updated(tmp_path: Any) -> None:
+    """session.metadata['team_member_sessions'] should include the new session_id."""
+    cap, ctx, _mock_pool, _mock_delegation, _mock_registry = _make_add_member_setup(tmp_path)
+    await cap.team_add_member(ctx, "new_member", "editor")
+
+    agent_ctx = cap._resolve_agent_context(ctx)
+    sessions = agent_ctx.session.metadata.get("team_member_sessions", [])
+    assert "child_session_new" in sessions
+
+
+@pytest.mark.unit
+async def test_team_remove_member_non_ascii_name(tmp_path: Any) -> None:
+    """Removing a member with non-ASCII name should succeed (blackboard key sanitized)."""
+    import re
+
+    # First add a member with Chinese name.
+    cap, ctx, _mock_pool, _mock_delegation, _mock_registry = _make_add_member_setup(tmp_path)
+    await cap.team_add_member(ctx, "推理员", "editor")
+
+    # Then remove it.
+    result = await cap.team_remove_member(ctx, "推理员")
+    assert "removed from team" in result
+
+    # Verify blackboard was written with sanitized key.
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", "推理员")
+    team_state = FileTeamState(str(tmp_path))
+    bb = team_state.read_blackboard("team_123", f"member_update/{safe_name}")
+    assert bb is not None
+    assert bb["value"]["action"] == "removed"
+    assert bb["value"]["name"] == "推理员"
+
+
+@pytest.mark.unit
+async def test_team_add_member_notify_excludes_lead_and_new_member(tmp_path: Any) -> None:
+    """Notify should be sent to existing members but NOT to lead or the new member."""
+    cap, ctx, mock_pool, _mock_delegation, _mock_registry = _make_add_member_setup(tmp_path)
+    await cap.team_add_member(ctx, "new_member", "editor", notify="Heads up")
+
+    # Get all send_message calls where content == "Heads up"
+    notify_calls = [
+        c
+        for c in mock_pool.send_message.await_args_list
+        if len(c.args) > 1 and c.args[1] == "Heads up"
+    ]
+    notify_targets = {c.args[0] for c in notify_calls}
+    # Lead's session should NOT be in notify targets.
+    # New member's session ("child_session_new") should NOT be in notify targets.
+    assert "child_session_new" not in notify_targets
+    # Existing members (translator_agent, reviewer_agent) SHOULD be in notify targets.
+    assert "sess_translator" in notify_targets
+    assert "sess_reviewer" in notify_targets
