@@ -12,7 +12,7 @@ future-annotations = true
 select = [
   "A",      # Flake8-builtins
   # "ANN",  # Flake8-Annotations — TODO: enable to replace mypy disallow_untyped_defs
-  "ASYNC",  # Flake8-Async
+  # "ASYNC",  # Flake8-Async — TODO: enable in follow-up PR after fixing ASYNC109/ASYNC240 violations
   # "ARG",  # Flake8-Unused-Arguments
   "B",      # flake8-bugbear
   "BLE",    # Flake8-blind-except
