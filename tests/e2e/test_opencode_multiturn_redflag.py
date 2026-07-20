@@ -204,8 +204,8 @@ def _extract_text_part_text(msg: dict[str, Any]) -> str:
 def _id_timestamp_ms(msg_id: str) -> int | None:
     """Extract millisecond timestamp from an agentpool ascending ID.
 
-    AgentPool ID format: ``{prefix}_{12 hex chars}{14 base62 chars}``
-    where the 12 hex chars encode 6 bytes (48 bits) of
+    AgentPool ID format: ``{prefix}_{16 hex chars}{14 base62 chars}``
+    where the 16 hex chars encode 8 bytes (64 bits) of
     ``timestamp_ms * 0x1000 + counter`` (big-endian).
 
     Returns None if the ID format is not recognized.
@@ -215,11 +215,11 @@ def _id_timestamp_ms(msg_id: str) -> int | None:
     if "_" in id_part:
         id_part = id_part.split("_", 1)[1]
 
-    if len(id_part) < 12:
+    if len(id_part) < 16:
         return None
 
-    # First 12 chars are hex encoding of 6 bytes (48 bits)
-    hex_part = id_part[:12]
+    # First 16 chars are hex encoding of 8 bytes (64 bits)
+    hex_part = id_part[:16]
     try:
         now = int(hex_part, 16)
     except ValueError:

@@ -434,14 +434,6 @@ class TestMessageIdTimestampConsistency:
     """
 
     @pytest.mark.unit
-    @pytest.mark.xfail(
-        reason="C1: identifiers.py uses int(time.time()*1000) (float truncation) "
-        "vs time_utils.now_ms() uses time.time_ns()//1_000_000. "
-        "Also 48-bit encoding overflows for current timestamps.",
-        strict=False,
-        raises=AssertionError,
-    )
-    @pytest.mark.known_bug
     def test_id_timestamp_matches_now_ms(self) -> None:
         """C1: Timestamp decoded from ascending ID should match now_ms() window."""
         from agentpool.utils import identifiers
@@ -451,23 +443,16 @@ class TestMessageIdTimestampConsistency:
         msg_id = identifiers.ascending("message")
         ts_after = now_ms()
 
-        # Decode timestamp from ID: first 12 hex chars = 6 bytes (48 bits)
+        # Decode timestamp from ID: first 16 hex chars = 8 bytes (64 bits)
         # now = timestamp_ms * 0x1000 + counter → timestamp_ms = now >> 12
         id_part = msg_id.split("_", 1)[1]
-        id_ts = int(id_part[:12], 16) >> 12
+        id_ts = int(id_part[:16], 16) >> 12
 
         assert ts_before <= id_ts <= ts_after, (
             f"ID timestamp ({id_ts}) outside now_ms() window [{ts_before}, {ts_after}] — issue C1"
         )
 
     @pytest.mark.unit
-    @pytest.mark.xfail(
-        reason="C1: Same-ms IDs should have timestamps within 1ms of each other, "
-        "but float truncation can cause 1ms drift.",
-        strict=False,
-        raises=AssertionError,
-    )
-    @pytest.mark.known_bug
     def test_same_ms_ids_have_consistent_timestamps(self) -> None:
         """C1: Two IDs generated in rapid succession should have close timestamps."""
         from agentpool.utils import identifiers
@@ -475,8 +460,8 @@ class TestMessageIdTimestampConsistency:
         id1 = identifiers.ascending("message")
         id2 = identifiers.ascending("message")
 
-        ts1 = int(id1.split("_", 1)[1][:12], 16) >> 12
-        ts2 = int(id2.split("_", 1)[1][:12], 16) >> 12
+        ts1 = int(id1.split("_", 1)[1][:16], 16) >> 12
+        ts2 = int(id2.split("_", 1)[1][:16], 16) >> 12
 
         assert abs(ts1 - ts2) <= 1, (
             f"Same-ms IDs have {abs(ts1 - ts2)}ms difference — "
