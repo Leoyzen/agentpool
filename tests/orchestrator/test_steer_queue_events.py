@@ -11,7 +11,7 @@ tests/orchestrator/test_run_handle.py.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import anyio
@@ -20,9 +20,14 @@ import pytest
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunErrorEvent, RunStartedEvent, StreamCompleteEvent
 from agentpool.lifecycle import RunState
+from agentpool.lifecycle.journal import MemoryJournal
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, SessionState
 from agentpool.orchestrator.run import RunHandle
+
+
+if TYPE_CHECKING:
+    from agentpool.lifecycle.comm_channel import ProtocolChannel
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
@@ -668,3 +673,352 @@ async def test_inflight_followup_queued_for_next_turn() -> None:
     # Turn 2's prompts include the followup message.
     assert len(captured) >= 2
     assert any("queued msg" in str(p) for p in captured[1])
+
+
+# ---------------------------------------------------------------------------
+# ProtocolChannel delivery: steer/followup via CommChannel feedback loop
+# ---------------------------------------------------------------------------
+
+
+def _make_handle_with_protocol_channel(
+    *,
+    agent: Any | None = None,
+) -> tuple[RunHandle, EventBus, list[list[Any]], ProtocolChannel]:
+    """Create a RunHandle wired with a ProtocolChannel (instead of DirectChannel).
+
+    Returns (handle, event_bus, captured_prompts, protocol_channel).
+    """
+    from agentpool.lifecycle.comm_channel import ProtocolChannel
+
+    bus = EventBus()
+    captured_prompts: list[list[Any]] = []
+
+    mock_agent = agent or MagicMock()
+    original_create_turn = mock_agent.create_turn
+
+    def _capturing_create_turn(*, prompts: list[Any], **kwargs: Any) -> Any:
+        captured_prompts.append(list(prompts))
+        return original_create_turn(prompts=prompts, **kwargs)
+
+    mock_agent.create_turn = _capturing_create_turn
+
+    session = SessionState(session_id="test-sess", agent_name="test-agent")
+    run_ctx = AgentRunContext(session_id="test-sess", event_bus=bus)
+    channel = ProtocolChannel(
+        journal=MemoryJournal(),
+        event_bus=bus,
+        session_id="test-sess",
+    )
+    handle = RunHandle(
+        run_id="test-run",
+        session_id="test-sess",
+        agent_type="native",
+        agent=mock_agent,
+        event_bus=bus,
+        session=session,
+        run_ctx=run_ctx,
+        _comm_channel=channel,
+    )
+    return handle, bus, captured_prompts, channel
+
+
+async def test_steer_via_protocol_channel_delivered_to_next_turn() -> None:
+    """Steer via ProtocolChannel is delivered to the next turn's prompts.
+
+    Given: A RunHandle wired with a ProtocolChannel (not DirectChannel).
+    When: handle.steer("steered via protocol") is called while idle.
+    Then: The second turn's prompts include "steered via protocol".
+    """
+    call_count = 0
+
+    def create_turn(**kwargs: Any) -> Any:
+        nonlocal call_count
+        call_count += 1
+        return _stub_turn()
+
+    mock_agent = MagicMock()
+    mock_agent.create_turn = create_turn
+
+    handle, _bus, captured, _channel = _make_handle_with_protocol_channel(
+        agent=mock_agent,
+    )
+
+    gen = handle.start("initial")
+
+    async with anyio.create_task_group() as tg:
+
+        async def _consume() -> None:
+            async for _event in gen:
+                pass
+
+        tg.start_soon(_consume)
+        await anyio.sleep(0.05)
+
+        handle.steer("steered via protocol")
+        await anyio.sleep(0.05)
+
+        handle.close()
+        await anyio.sleep(0.05)
+
+    assert call_count == 2
+    assert len(captured) >= 2
+    assert any("steered via protocol" in str(p) for p in captured[1])
+
+
+async def test_followup_via_protocol_channel_delivered_to_next_turn() -> None:
+    """Followup via ProtocolChannel is delivered to the next turn's prompts.
+
+    Given: A RunHandle wired with a ProtocolChannel (not DirectChannel).
+    When: handle.followup("followup via protocol") is called while idle.
+    Then: The second turn's prompts include "followup via protocol".
+    """
+    call_count = 0
+
+    def create_turn(**kwargs: Any) -> Any:
+        nonlocal call_count
+        call_count += 1
+        return _stub_turn()
+
+    mock_agent = MagicMock()
+    mock_agent.create_turn = create_turn
+
+    handle, _bus, captured, _channel = _make_handle_with_protocol_channel(
+        agent=mock_agent,
+    )
+
+    gen = handle.start("initial")
+
+    async with anyio.create_task_group() as tg:
+
+        async def _consume() -> None:
+            async for _event in gen:
+                pass
+
+        tg.start_soon(_consume)
+        await anyio.sleep(0.05)
+
+        handle.followup("followup via protocol")
+        await anyio.sleep(0.05)
+
+        handle.close()
+        await anyio.sleep(0.05)
+
+    assert call_count == 2
+    assert len(captured) >= 2
+    assert any("followup via protocol" in str(p) for p in captured[1])
+
+
+async def test_steer_prioritized_over_followup_via_protocol_channel() -> None:
+    """Steer feedback is prioritized over followup in _drain_events.
+
+    Given: A RunHandle wired with a ProtocolChannel, with a turn
+        actively running (blocked).
+    When: followup("followup msg") then steer("steer msg") are called
+        during the running turn (both routed via ProtocolChannel
+        feedback queue).
+    Then: After the turn completes, _drain_events drains the feedback
+        queue with steer prioritized — "steer msg" appears BEFORE
+        "followup msg" in the second turn's prompts.
+    """
+    block_event = anyio.Event()
+    turn_count = 0
+
+    def create_turn(**kwargs: Any) -> Any:
+        nonlocal turn_count
+        turn_count += 1
+        if turn_count == 1:
+            return _blocking_stub_turn(block_event=block_event)
+        return _stub_turn()
+
+    mock_agent = MagicMock()
+    mock_agent.create_turn = create_turn
+
+    handle, _bus, captured, _channel = _make_handle_with_protocol_channel(
+        agent=mock_agent,
+    )
+
+    gen = handle.start("initial")
+
+    async with anyio.create_task_group() as tg:
+
+        async def _consume() -> None:
+            async for _event in gen:
+                pass
+
+        tg.start_soon(_consume)
+        await anyio.sleep(0.05)
+
+        # Turn 1 is running and blocked.
+        assert handle._run_state == RunState.RUNNING
+
+        # Deliver followup first, then steer — both via ProtocolChannel
+        # feedback queue. _drain_events will prioritize steer.
+        handle.followup("followup msg")
+        handle.steer("steer msg")
+        await anyio.sleep(0.02)
+
+        # Release turn 1 to complete — _drain_events drains feedback.
+        block_event.set()
+        await anyio.sleep(0.05)
+
+        handle.close()
+        await anyio.sleep(0.05)
+
+    assert turn_count == 2
+    assert len(captured) >= 2
+    second_turn_prompts = [str(p) for p in captured[1]]
+    steer_idx = next(
+        (i for i, p in enumerate(second_turn_prompts) if "steer msg" in p),
+        None,
+    )
+    followup_idx = next(
+        (i for i, p in enumerate(second_turn_prompts) if "followup msg" in p),
+        None,
+    )
+    assert steer_idx is not None, "steer msg not found in second turn prompts"
+    assert followup_idx is not None, "followup msg not found in second turn prompts"
+    assert steer_idx < followup_idx, (
+        f"steer msg (idx={steer_idx}) should come before followup msg "
+        f"(idx={followup_idx}) in second turn prompts"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Queued steer: steer during RUNNING with no active_agent_run
+# ---------------------------------------------------------------------------
+
+
+async def test_queued_steer_delivered_to_next_turn() -> None:
+    """Steer during a running turn with no active_agent_run is queued.
+
+    Given: A RunHandle with a turn actively running (RunState.RUNNING)
+        but active_agent_run set to None (no agent_run available).
+    When: handle.steer("queued steer") is called.
+    Then: The message lands in run_ctx.queued_steer_messages and appears
+        in the second turn's prompts after the blocking turn completes.
+    """
+    block_event = anyio.Event()
+    turn_count = 0
+
+    def create_turn(**kwargs: Any) -> Any:
+        nonlocal turn_count
+        turn_count += 1
+        if turn_count == 1:
+            return _blocking_stub_turn(block_event=block_event)
+        return _stub_turn()
+
+    mock_agent = MagicMock()
+    mock_agent.create_turn = create_turn
+
+    handle, _bus, captured = _make_handle(agent=mock_agent)
+
+    gen = handle.start("initial")
+
+    async with anyio.create_task_group() as tg:
+
+        async def _consume() -> None:
+            async for _event in gen:
+                pass
+
+        tg.start_soon(_consume)
+        await anyio.sleep(0.05)
+
+        # Turn 1 is running and blocked.
+        assert handle._run_state == RunState.RUNNING
+        # Simulate no active agent_run available for enqueue.
+        handle.active_agent_run = None
+
+        handle.steer("queued steer")
+        await anyio.sleep(0.02)
+
+        # The steer message should be in queued_steer_messages.
+        assert any("queued steer" in str(m) for m in handle.run_ctx.queued_steer_messages), (
+            "steer message should be queued in run_ctx.queued_steer_messages"
+        )
+
+        # Release turn 1 to complete.
+        block_event.set()
+        await anyio.sleep(0.05)
+
+        handle.close()
+        await anyio.sleep(0.05)
+
+    # Two turns: initial + queued steer.
+    assert turn_count == 2
+    assert len(captured) >= 2
+    assert any("queued steer" in str(p) for p in captured[1])
+
+
+# ---------------------------------------------------------------------------
+# History accumulation across three turns
+# ---------------------------------------------------------------------------
+
+
+async def test_message_history_accumulates_across_three_turns() -> None:
+    """Message history accumulates across three turns via steer.
+
+    Given: A RunHandle with a history-capturing create_turn that
+        returns increasing message_history: ["m1"], ["m1","m2"],
+        ["m1","m2","m3"].
+    When: Start with "turn1", steer "turn2", steer "turn3".
+    Then: create_turn is called 3 times, and the third call's
+        message_history contains all prior messages.
+    """
+    call_count = [0]
+    captured_history: list[list[Any]] = []
+
+    def create_turn(**kwargs: Any) -> Any:
+        call_count[0] += 1
+        msg_history = kwargs.get("message_history", [])
+        captured_history.append(list(msg_history))
+
+        # Simulate NativeTurn accumulating message_history after execution.
+        # Each turn adds a user message and assistant response to history.
+        turn = _stub_turn()
+        turn.message_history = [
+            *msg_history,
+            ChatMessage(content=f"m{call_count[0]}", role="user"),
+            ChatMessage(content=f"resp{call_count[0]}", role="assistant"),
+        ]
+        return turn
+
+    mock_agent = MagicMock()
+    mock_agent.create_turn = create_turn
+
+    handle, _bus, _captured = _make_handle(agent=mock_agent)
+
+    gen = handle.start("turn1")
+
+    async with anyio.create_task_group() as tg:
+
+        async def _consume() -> None:
+            async for _event in gen:
+                pass
+
+        tg.start_soon(_consume)
+        await anyio.sleep(0.05)
+
+        handle.steer("turn2")
+        await anyio.sleep(0.05)
+
+        handle.steer("turn3")
+        await anyio.sleep(0.05)
+
+        handle.close()
+        await anyio.sleep(0.05)
+
+    # Three turns total.
+    assert call_count[0] == 3, f"Expected 3 turns, got {call_count[0]}"
+    # Turn 1 starts with empty history.
+    assert len(captured_history[0]) == 0
+    # Turn 2 starts with turn 1's accumulated history (2 messages).
+    assert len(captured_history[1]) == 2
+    # Turn 3 starts with turns 1+2 accumulated history (4 messages).
+    assert len(captured_history[2]) == 4
+    # The third call's message_history contains all prior messages.
+    history_contents = [getattr(msg, "content", str(msg)) for msg in captured_history[2]]
+    all_history_text = " ".join(str(c) for c in history_contents)
+    assert "m1" in all_history_text
+    assert "m2" in all_history_text
+    assert "resp1" in all_history_text
+    assert "resp2" in all_history_text

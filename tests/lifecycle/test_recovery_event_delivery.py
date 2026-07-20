@@ -31,6 +31,7 @@ import pytest
 from agentpool.agents.events import (
     PartDeltaEvent,
     RunStartedEvent,
+    StateUpdate,
     StreamCompleteEvent,
 )
 from agentpool.lifecycle import (
@@ -41,7 +42,7 @@ from agentpool.lifecycle import (
     RunState,
     ToolExecutionRecord,
 )
-from agentpool.lifecycle.comm_channel import ProtocolChannel
+from agentpool.lifecycle.comm_channel import DirectChannel, ProtocolChannel
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.event_bus import EventBus
 
@@ -444,3 +445,213 @@ async def test_replayed_events_maintain_publish_order() -> None:
     assert received[2].event.delta.content_delta == "second"
 
     assert isinstance(received[3].event, StreamCompleteEvent)
+
+
+# ---------------------------------------------------------------------------
+# Test 8: ProtocolChannel replay delivers events to EventBus
+# ---------------------------------------------------------------------------
+
+
+async def test_protocol_channel_replay_delivers_events_to_event_bus() -> None:
+    """Replayed events through ProtocolChannel reach the EventBus subscriber.
+
+    Given:
+        A MemoryJournal with pre-crash events and a snapshot at seq=0.
+    When:
+        journal.resume() returns events, then they are replayed through
+        ProtocolChannel with set_replaying(True).
+    Then:
+        The EventBus subscriber receives all replayed events.
+    """
+    journal = MemoryJournal()
+    snapshot_store = MemorySnapshotStore()
+    bus = EventBus()
+
+    journal.append(_run_started(run_id="replay-1"))
+    journal.append(_part_delta("replay-a"))
+    journal.append(_part_delta("replay-b"))
+    _set_snapshot(snapshot_store, last_journal_seq=0)
+
+    channel = ProtocolChannel(journal=journal, event_bus=bus, session_id="test")
+    queue = await bus.subscribe("test")
+
+    resume_result = journal.resume(snapshot_store)
+    assert resume_result is not None
+    assert len(resume_result.events) == 3
+
+    channel.set_replaying(True)
+    for event in resume_result.events:
+        await channel.publish(event)
+    channel.set_replaying(False)
+
+    received = await _drain_queue(queue, expected_count=3)
+    assert len(received) == 3
+    assert isinstance(received[0].event, RunStartedEvent)
+    assert isinstance(received[1].event, PartDeltaEvent)
+    assert isinstance(received[2].event, PartDeltaEvent)
+
+
+# ---------------------------------------------------------------------------
+# Test 9: ProtocolChannel replay filters StateUpdate from EventBus
+# ---------------------------------------------------------------------------
+
+
+async def test_protocol_channel_replay_filters_state_update_from_event_bus() -> None:
+    """StateUpdate events are journaled but NOT published to EventBus during replay.
+
+    Given:
+        A journal with a RunStartedEvent and a StateUpdate event, snapshot at seq=0.
+    When:
+        Events are replayed through ProtocolChannel with set_replaying(True).
+    Then:
+        The EventBus subscriber receives the RunStartedEvent but NOT the
+        StateUpdate (filtered via isinstance check at comm_channel.py line 370).
+    """
+    journal = MemoryJournal()
+    snapshot_store = MemorySnapshotStore()
+    bus = EventBus()
+
+    run_event = _run_started(run_id="su-run")
+    state_event = StateUpdate(session_id="test", state=RunState.RUNNING)
+    journal.append(run_event)
+    journal.append(state_event)
+    _set_snapshot(snapshot_store, last_journal_seq=0)
+
+    channel = ProtocolChannel(journal=journal, event_bus=bus, session_id="test")
+    queue = await bus.subscribe("test")
+
+    resume_result = journal.resume(snapshot_store)
+    assert resume_result is not None
+    assert len(resume_result.events) == 2
+
+    channel.set_replaying(True)
+    for event in resume_result.events:
+        await channel.publish(event)
+    channel.set_replaying(False)
+
+    # Only the RunStartedEvent should arrive; StateUpdate is filtered.
+    received = await _drain_queue(queue, expected_count=1)
+    assert len(received) == 1
+    assert isinstance(received[0].event, RunStartedEvent)
+    assert not isinstance(received[0].event, StateUpdate)
+
+
+# ---------------------------------------------------------------------------
+# Test 10: Replay does not duplicate journal entries
+# ---------------------------------------------------------------------------
+
+
+async def test_replay_does_not_duplicate_journal_entries() -> None:
+    """set_replaying(True) prevents duplicate journal entries on replay.
+
+    Given:
+        A journal with one pre-existing event.
+    When:
+        The same event is published through ProtocolChannel with
+        set_replaying(True).
+    Then:
+        The journal entry count is unchanged (no duplicate written).
+    """
+    journal = MemoryJournal()
+    bus = EventBus()
+    channel = ProtocolChannel(journal=journal, event_bus=bus, session_id="test")
+
+    pre_event = _run_started(run_id="dup-check")
+    journal.append(pre_event)
+    initial_count = len(journal._entries)
+
+    channel.set_replaying(True)
+    await channel.publish(pre_event)
+    channel.set_replaying(False)
+
+    assert len(journal._entries) == initial_count
+
+
+# ---------------------------------------------------------------------------
+# Test 11: DirectChannel replay enqueues StateUpdate
+# ---------------------------------------------------------------------------
+
+
+async def test_direct_channel_replay_enqueues_state_update() -> None:
+    """DirectChannel does NOT filter StateUpdate (unlike ProtocolChannel).
+
+    Given:
+        A DirectChannel with replaying mode enabled.
+    When:
+        A StateUpdate event is published during replay.
+    Then:
+        The StateUpdate IS enqueued in the channel's internal queue
+        (DirectChannel has no EventBus filtering).
+    """
+    journal = MemoryJournal()
+    channel = DirectChannel(journal=journal)
+
+    state_event = StateUpdate(session_id="test", state=RunState.IDLE)
+
+    channel.set_replaying(True)
+    await channel.publish(state_event)
+    channel.set_replaying(False)
+
+    # DirectChannel does not filter StateUpdate — it should be in the queue.
+    assert not channel.queue.empty()
+    queued = channel.queue.get_nowait()
+    assert isinstance(queued, StateUpdate)
+
+
+# ---------------------------------------------------------------------------
+# Test 12: Replay preserves ordering with mixed append/upsert
+# ---------------------------------------------------------------------------
+
+
+async def test_replay_preserves_ordering_mixed_append_upsert() -> None:
+    """Journal resume returns events in seq order with upsert replacement.
+
+    Given:
+        A journal with: append A (seq=1), upsert "tool:1" B (seq=2),
+        append C (seq=3), upsert "tool:1" D (seq=4, replaces B).
+    When:
+        journal.resume(snapshot_store) is called with snapshot at seq=0.
+    Then:
+        resume_result.events is [A, C, D] in order (B replaced by D).
+        Replay through ProtocolChannel delivers the same order to subscriber.
+    """
+    journal = MemoryJournal()
+    snapshot_store = MemorySnapshotStore()
+    bus = EventBus()
+
+    event_a = _run_started(run_id="A")
+    event_b = _part_delta("B")
+    event_c = _part_delta("C")
+    event_d = _part_delta("D")
+
+    journal.append(event_a)  # seq=1
+    journal.upsert("tool:1", event_b)  # seq=2
+    journal.append(event_c)  # seq=3
+    journal.upsert("tool:1", event_d)  # seq=4, replaces B
+
+    _set_snapshot(snapshot_store, last_journal_seq=0)
+
+    channel = ProtocolChannel(journal=journal, event_bus=bus, session_id="test")
+    queue = await bus.subscribe("test")
+
+    resume_result = journal.resume(snapshot_store)
+    assert resume_result is not None
+    # B (seq=2) is replaced by D (seq=4) in the upserts dict, so events are [A, C, D].
+    assert len(resume_result.events) == 3
+    assert resume_result.events[0] is event_a
+    assert resume_result.events[1] is event_c
+    assert resume_result.events[2] is event_d
+
+    channel.set_replaying(True)
+    for event in resume_result.events:
+        await channel.publish(event)
+    channel.set_replaying(False)
+
+    received = await _drain_queue(queue, expected_count=3)
+    assert len(received) == 3
+    assert isinstance(received[0].event, RunStartedEvent)
+    assert received[0].event.run_id == "A"
+    assert isinstance(received[1].event, PartDeltaEvent)
+    assert received[1].event.delta.content_delta == "C"
+    assert isinstance(received[2].event, PartDeltaEvent)
+    assert received[2].event.delta.content_delta == "D"

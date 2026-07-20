@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from asyncio import Queue as AsyncQueue, QueueEmpty, QueueShutDown
 from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -294,3 +295,226 @@ async def test_stateupdate_filtered_from_eventbus() -> None:
     # (b) Verify the EventBus subscriber did NOT receive the StateUpdate.
     bus_events = _drain_queue(queue)
     assert len(bus_events) == 0
+
+
+# ---------------------------------------------------------------------------
+# Test 10: ProtocolChannel publishes non-StateUpdate to EventBus
+# ---------------------------------------------------------------------------
+
+
+async def test_protocol_channel_publishes_non_stateupdate_to_eventbus() -> None:
+    """ProtocolChannel publishes non-StateUpdate events to EventBus and journals them.
+
+    Given: A ProtocolChannel with a MemoryJournal and EventBus, and a
+        subscriber on the EventBus.
+    When: channel.publish(RunStartedEvent(...)) is called.
+    Then:
+        (a) The event IS received by the EventBus subscriber.
+        (b) The event IS recorded in the journal (appended).
+    """
+    journal = MemoryJournal()
+    bus = EventBus(max_queue_size=10)
+    channel = ProtocolChannel(journal=journal, event_bus=bus, session_id="test-sess")
+
+    # Subscribe BEFORE publishing to capture live events.
+    queue = await bus.subscribe("test-sess")
+
+    event = RunStartedEvent(session_id="test-sess", run_id="run-positive")
+    await channel.publish(event)
+
+    # (a) Verify the EventBus subscriber received the event.
+    bus_events = _drain_queue(queue)
+    assert len(bus_events) == 1
+    assert cast(RunStartedEvent, bus_events[0].event).run_id == "run-positive"
+
+    # (b) Verify the event was journaled.
+    journal_events: list[object] = []
+    async for evt in journal.replay():
+        journal_events.append(evt)  # noqa: PERF401
+
+    run_started_in_journal: list[RunStartedEvent] = [
+        evt for evt in journal_events if isinstance(evt, RunStartedEvent)
+    ]
+    assert len(run_started_in_journal) == 1
+    assert run_started_in_journal[0].run_id == "run-positive"
+
+
+# ---------------------------------------------------------------------------
+# Test 11: Scoped subscription — subtree
+# ---------------------------------------------------------------------------
+
+
+async def test_scoped_subscription_subtree() -> None:
+    """Subtree scope receives events from self, parent, and siblings.
+
+    Given: EventBus with a session tree: root → [child_a, child_b].
+    When: A subscriber on "child_a" with scope="subtree" is created, and
+        events are published to "child_a", "root", and "child_b".
+    Then: All 3 events are received (self, parent, sibling).
+    """
+    bus = EventBus(max_queue_size=10)
+    bus._session_tree = {"root": ["child_a", "child_b"]}
+
+    queue = await bus.subscribe("child_a", scope="subtree")
+
+    await bus.publish("child_a", _make_event("run-self"))
+    await bus.publish("root", _make_event("run-parent"))
+    await bus.publish("child_b", _make_event("run-sibling"))
+
+    events = _drain_queue(queue)
+    assert len(events) == 3
+    assert _run_ids(events) == ["run-self", "run-parent", "run-sibling"]
+
+
+# ---------------------------------------------------------------------------
+# Test 12: Descendants scope with SessionController
+# ---------------------------------------------------------------------------
+
+
+async def test_descendants_scope_with_session_controller() -> None:
+    """Descendants scope uses SessionController.get_children for hierarchy queries.
+
+    Given: EventBus with a mock SessionController where
+        get_children("parent") -> ["child"] and
+        get_parent("child") -> SessionState(session_id="parent").
+    When: A subscriber on "parent" with scope="descendants" is created,
+        and an event is published to "child".
+    Then: The event is received by the subscriber, and
+        controller.get_children was called.
+    """
+    controller = MagicMock()
+    parent_state = MagicMock()
+    parent_state.session_id = "parent"
+    controller.get_parent.return_value = parent_state
+    controller.get_children.return_value = ["child"]
+
+    bus = EventBus(max_queue_size=10, session_controller=controller)
+
+    parent_queue = await bus.subscribe("parent", scope="descendants")
+
+    await bus.publish("child", _make_event("run-child"))
+
+    events = _drain_queue(parent_queue)
+    assert len(events) == 1
+    assert cast(RunStartedEvent, events[0].event).run_id == "run-child"
+
+    # Verify the controller was consulted for hierarchy.
+    controller.get_children.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# Test 13: Close session removes replay buffer (no orphaned replay)
+# ---------------------------------------------------------------------------
+
+
+async def test_close_session_no_orphaned_replay_buffer() -> None:
+    """close_session removes the replay buffer so new subscribers see no stale events.
+
+    Given: A subscriber on "sess-1" with a published and drained event.
+    When: The session is closed via close_session().
+    Then:
+        (a) "sess-1" is no longer in bus._replay_buffers.
+        (b) A new subscriber to "sess-1" receives zero historical events.
+    """
+    bus = EventBus(max_queue_size=10)
+    queue = await bus.subscribe("sess-1")
+
+    await bus.publish("sess-1", _make_event("run-1"))
+    _drain_queue(queue)
+
+    await bus.close_session("sess-1")
+
+    # (a) Replay buffer for "sess-1" should be gone.
+    assert "sess-1" not in bus._replay_buffers
+
+    # (b) New subscriber should receive zero historical events.
+    new_queue = await bus.subscribe("sess-1")
+    events = _drain_queue(new_queue)
+    assert len(events) == 0
+
+
+# ---------------------------------------------------------------------------
+# Test 14: Drop subscriber overflow policy
+# ---------------------------------------------------------------------------
+
+
+async def test_drop_subscriber_verifies_queue_shutdown() -> None:
+    """drop_subscriber policy removes the subscriber and shuts down its queue on overflow.
+
+    Given: EventBus with max_queue_size=3 and overflow_policy="drop_subscriber".
+    When: 4 events are published without draining.
+    Then:
+        (a) The subscriber is removed from get_subscriber_counts().
+        (b) The dead queue raises QueueShutDown on get_nowait() after draining
+            remaining items.
+    """
+    bus = EventBus(max_queue_size=3, overflow_policy="drop_subscriber")
+    queue = await bus.subscribe("sess-1")
+
+    for i in range(4):
+        await bus.publish("sess-1", _make_event(f"run-{i}"))
+
+    # (a) Subscriber should be removed from subscriber counts.
+    counts = await bus.get_subscriber_counts()
+    assert "sess-1" not in counts
+
+    # (b) The queue was shut down. Drain remaining items (3 from before
+    # overflow), then verify QueueShutDown is raised on the empty shut-down queue.
+    remaining = _drain_queue(queue)
+    assert len(remaining) == 3
+
+    with pytest.raises(QueueShutDown):
+        queue.get_nowait()
+
+
+# ---------------------------------------------------------------------------
+# Test 15: Clear replay buffer prevents stale replay
+# ---------------------------------------------------------------------------
+
+
+async def test_clear_replay_buffer_prevents_stale_replay() -> None:
+    """clear_replay_buffer removes historical events so new subscribers see none.
+
+    Given: A subscriber on "sess-1" with a published and drained event.
+    When: bus.clear_replay_buffer("sess-1") is called.
+    Then: A new subscriber to "sess-1" receives zero historical events.
+    """
+    bus = EventBus(max_queue_size=10)
+    queue = await bus.subscribe("sess-1")
+
+    await bus.publish("sess-1", _make_event("run-1"))
+    _drain_queue(queue)
+
+    bus.clear_replay_buffer("sess-1")
+
+    new_queue = await bus.subscribe("sess-1")
+    events = _drain_queue(new_queue)
+    assert len(events) == 0
+
+
+# ---------------------------------------------------------------------------
+# Test 16: Scope "all" replays from multiple sessions
+# ---------------------------------------------------------------------------
+
+
+async def test_scope_all_replay_from_multiple_sessions() -> None:
+    """Scope "all" replays historical events from all session replay buffers.
+
+    Given: Events published to sessions "A" and "B" (populating both
+        replay buffers).
+    When: A subscriber with scope="all" is created.
+    Then: The subscriber receives replayed events from BOTH sessions.
+    """
+    bus = EventBus(max_queue_size=10)
+
+    await bus.publish("A", _make_event("run-a"))
+    await bus.publish("B", _make_event("run-b"))
+
+    queue = await bus.subscribe("global", scope="all")
+
+    events = _drain_queue(queue)
+    assert len(events) == 2
+
+    run_ids = _run_ids(events)
+    assert "run-a" in run_ids
+    assert "run-b" in run_ids
