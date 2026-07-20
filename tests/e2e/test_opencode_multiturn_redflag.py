@@ -430,8 +430,7 @@ class TestMultiTurnLifecycle:
     @pytest.mark.xfail(
         reason="TestModel does not produce text parts in OpenCode message format — "
         "assistant messages only have step-start/step-finish parts. "
-        "E2 fix (wait_for_completion uses _turn_complete_event) is verified "
-        "by test_redflag_e1_consecutive_turns_both_complete getting 4 messages.",
+        "E2 is verified by test_redflag_e1_consecutive_turns_both_complete getting 4 messages.",
         strict=False,
         raises=AssertionError,
     )

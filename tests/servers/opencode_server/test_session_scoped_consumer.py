@@ -266,7 +266,9 @@ async def test_multiple_requests_share_one_consumer(
     reason="D1: start_event_consumer() is idempotent — _before_consumer_loop() "
     "only runs once. _message_registered stays True after turn 1, so "
     "turn 2 reuses turn 1's assistant_msg_id instead of generating a new one. "
-    "Fix: reset _message_registered on RunStartedEvent.",
+    "This is a protocol-server-side issue independent of the per-prompt RunHandle "
+    "migration. Fix: reset _message_registered on RunStartedEvent in the "
+    "OpenCode event bridge.",
     strict=False,
     raises=AssertionError,
 )
