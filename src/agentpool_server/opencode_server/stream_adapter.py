@@ -177,7 +177,7 @@ class OpenCodeStreamAdapter:
         except RunAbortedError:
             # Agent aborted the run (e.g. question_for_user raised RunAbortedError
             # when user cancelled the questionnaire). Re-raise so
-            # _process_message_locked can finalize the assistant message with
+            # _wait_and_finalize can finalize the assistant message with
             # aborted state and update the agent's conversation history.
             logger.debug("Run aborted by agent", session_id=self.session_id)
             raise
