@@ -34,7 +34,6 @@ from agentpool_server.opencode_server.models.message import (
     MessageAbortedError,
     MessageWithParts,
 )
-from agentpool_server.opencode_server.routes.message_routes import _process_message_locked
 from agentpool_server.opencode_server.routes.question_routes import (
     list_questions,
     reject_question,
@@ -46,6 +45,7 @@ from agentpool_server.opencode_server.session_pool_integration import (
     get_session_status,
 )
 from agentpool_server.opencode_server.state import PendingQuestion, ServerState
+from tests.servers.opencode_server.conftest import run_message_phases
 
 
 pytestmark = pytest.mark.integration
@@ -256,6 +256,7 @@ def _make_pool_mock(agent: Any) -> Mock:  # noqa: PLR0915
     session_pool.sessions.store = None
     sp_session = Mock()
     sp_session.agent = agent
+    sp_session.current_run_id = None
     session_pool.sessions.get_session = Mock(return_value=sp_session)
     # Use a functional event bus that routes publish→subscribe
     from tests.servers.opencode_server.conftest import _make_functional_event_bus
@@ -504,7 +505,7 @@ def _create_user_message(
 class TestRunAbortedErrorCorruptsConversation:
     """BUG: RunAbortedError is not caught by the CancelledError handler.
 
-    When question_for_user raises RunAbortedError, _process_message_locked
+    When question_for_user raises RunAbortedError, _run_message_locked
     does NOT add the aborted assistant message to the agent's conversation.
     This corrupts the LLM's context for subsequent messages.
 
@@ -533,7 +534,7 @@ class TestRunAbortedErrorCorruptsConversation:
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
         await append_message_to_session(state, session_id, user_msg_with_parts)
 
-        await _process_message_locked(
+        await run_message_phases(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
 
@@ -566,7 +567,7 @@ class TestRunAbortedErrorCorruptsConversation:
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
         await append_message_to_session(state, session_id, user_msg_with_parts)
 
-        await _process_message_locked(
+        await run_message_phases(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
 
@@ -613,7 +614,7 @@ class TestRunAbortedErrorCorruptsConversation:
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
         await append_message_to_session(state, session_id, user_msg_with_parts)
 
-        await _process_message_locked(
+        await run_message_phases(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
 
@@ -686,9 +687,15 @@ class TestRunAbortedErrorCorruptsConversation:
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
         await append_message_to_session(state, session_id, user_msg_with_parts)
 
-        await _process_message_locked(
+        ctx = await run_message_phases(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
+        # Phase 3: mark session idle (not included in run_message_phases)
+        from agentpool_server.opencode_server.routes.message_routes import (
+            _mark_session_idle_safe,
+        )
+
+        await _mark_session_idle_safe(state, session_id, ctx)
 
         status = await get_session_status(state, session_id)
         assert status is not None
@@ -714,7 +721,7 @@ class TestRunAbortedErrorCorruptsConversation:
         # First message: RunAbortedError
         user_msg_id_1, user_msg_1 = _create_user_message(session_id, sample_message_request)
         await append_message_to_session(state, session_id, user_msg_1)
-        await _process_message_locked(
+        await run_message_phases(
             session_id, sample_message_request, state, user_msg_id_1, user_msg_1
         )
 
@@ -726,7 +733,7 @@ class TestRunAbortedErrorCorruptsConversation:
         )
         user_msg_id_2, user_msg_2 = _create_user_message(session_id, second_request)
         await append_message_to_session(state, session_id, user_msg_2)
-        await _process_message_locked(session_id, second_request, state, user_msg_id_2, user_msg_2)
+        await run_message_phases(session_id, second_request, state, user_msg_id_2, user_msg_2)
 
         # Simulate the TUI's pending memo logic
         all_messages = await get_messages_for_session(state, session_id)
@@ -782,7 +789,7 @@ class TestAgentLockDeadlockOnUnresolvedQuestion:
 
         # Start message processing in background (it will block on the question)
         process_task = asyncio.create_task(
-            _process_message_locked(
+            run_message_phases(
                 session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
             )
         )
@@ -828,7 +835,7 @@ class TestAgentLockDeadlockOnUnresolvedQuestion:
 
         # Start message processing in background (blocks on question)
         process_task = asyncio.create_task(
-            _process_message_locked(
+            run_message_phases(
                 session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
             )
         )
@@ -884,7 +891,7 @@ class TestAgentLockDeadlockOnUnresolvedQuestion:
 
         # Start message processing in background
         process_task = asyncio.create_task(
-            _process_message_locked(
+            run_message_phases(
                 session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
             )
         )
@@ -942,7 +949,7 @@ class TestSSEDisconnectReleasesAgentLock:
 
         # Start message processing in background (will create PendingQuestion)
         process_task = asyncio.create_task(
-            _process_message_locked(
+            run_message_phases(
                 session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
             )
         )
@@ -1009,7 +1016,7 @@ class TestSSEDisconnectReleasesAgentLock:
 
         # Start message processing in background (will block on question)
         process_task = asyncio.create_task(
-            _process_message_locked(
+            run_message_phases(
                 session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
             )
         )
@@ -1160,7 +1167,7 @@ class TestUnboundLocalErrorInExceptHandler:
 
         # This should NOT raise UnboundLocalError — it should handle CancelledError gracefully
         try:
-            await _process_message_locked(
+            await run_message_phases(
                 session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
             )
         except asyncio.CancelledError:

@@ -21,6 +21,7 @@ from agentpool_server.opencode_server.models import (
     UserMessage,
 )
 from agentpool_server.opencode_server.models.config import Config
+from tests.servers.opencode_server.conftest import run_message_phases
 
 
 if TYPE_CHECKING:
@@ -462,6 +463,7 @@ def _make_mock_state_with_session_agent(
         side_effect=_get_or_create_session_agent
     )
     session_pool.sessions.get_or_create_session = AsyncMock(return_value=(Mock(), True))
+    session_pool.sessions.get_session = Mock(return_value=None)
 
     # RunHandle that completes immediately
     run_handle = Mock()
@@ -493,7 +495,7 @@ def _make_mock_state_with_session_agent(
     state.messages = {}  # type: ignore[attr-defined]
     state.todos = {}  # type: ignore[attr-defined]
     state.input_providers = {}  # type: ignore[attr-defined]
-    # No session_pool_integration — _process_message_locked will use the
+    # No session_pool_integration — run_message_phases will use the
     # fallback path via session_pool.sessions.get_or_create_session.
 
     # Pre-populate sessions in state
@@ -521,14 +523,11 @@ async def test_model_switch_targets_per_session_agent(tmp_project_dir: Path) -> 
     """Model switching must call set_model on the per-session agent, not the shared agent.
 
     The shared ``state.agent`` is no longer used for model switching.
-    ``_process_message_locked`` uses
+    ``run_message_phases`` uses
     ``session_pool.sessions.get_or_create_session_agent()`` so each session
     gets its own isolated model configuration.
     """
     from agentpool.utils import identifiers as identifier
-    from agentpool_server.opencode_server.routes.message_routes import (
-        _process_message_locked,
-    )
 
     session_id = "test-session-a"
     session_agents: dict[str, PerSessionAgentMock] = {
@@ -558,7 +557,7 @@ async def test_model_switch_targets_per_session_agent(tmp_project_dir: Path) -> 
     user_msg_with_parts.add_text_part("Hello!")
     state.messages[session_id].append(user_msg_with_parts)
 
-    await _process_message_locked(session_id, request, state, user_msg_id, user_msg_with_parts)
+    await run_message_phases(session_id, request, state, user_msg_id, user_msg_with_parts)
 
     # Per-session agent should have been created and had set_model called on it
     per_session_agent = session_agents[session_id]
@@ -574,9 +573,6 @@ async def test_model_switch_targets_per_session_agent(tmp_project_dir: Path) -> 
 async def test_model_switch_affects_only_target_session(tmp_project_dir: Path) -> None:
     """Switching model in session A must not affect session B's agent."""
     from agentpool.utils import identifiers as identifier
-    from agentpool_server.opencode_server.routes.message_routes import (
-        _process_message_locked,
-    )
 
     session_a = "session-a"
     session_b = "session-b"
@@ -605,7 +601,7 @@ async def test_model_switch_affects_only_target_session(tmp_project_dir: Path) -
     user_msg_with_parts_a.add_text_part("Hello A!")
     state.messages[session_a].append(user_msg_with_parts_a)
 
-    await _process_message_locked(session_a, request_a, state, user_msg_id_a, user_msg_with_parts_a)
+    await run_message_phases(session_a, request_a, state, user_msg_id_a, user_msg_with_parts_a)
 
     # Process message for session B WITHOUT model override
     request_b = MessageRequest(
@@ -623,7 +619,7 @@ async def test_model_switch_affects_only_target_session(tmp_project_dir: Path) -
     user_msg_with_parts_b.add_text_part("Hello B!")
     state.messages[session_b].append(user_msg_with_parts_b)
 
-    await _process_message_locked(session_b, request_b, state, user_msg_id_b, user_msg_with_parts_b)
+    await run_message_phases(session_b, request_b, state, user_msg_id_b, user_msg_with_parts_b)
 
     # Session A's agent should have switched
     assert session_agents[session_a].set_model_calls == ["gpt-4o"]
@@ -637,9 +633,6 @@ async def test_model_switch_affects_only_target_session(tmp_project_dir: Path) -
 async def test_other_sessions_retain_original_model(tmp_project_dir: Path) -> None:
     """After switching model in one session, other sessions keep their original model."""
     from agentpool.utils import identifiers as identifier
-    from agentpool_server.opencode_server.routes.message_routes import (
-        _process_message_locked,
-    )
 
     session_a = "session-a"
     session_b = "session-b"
@@ -668,7 +661,7 @@ async def test_other_sessions_retain_original_model(tmp_project_dir: Path) -> No
     user_msg_with_parts.add_text_part("Switch model!")
     state.messages[session_a].append(user_msg_with_parts)
 
-    await _process_message_locked(session_a, request, state, user_msg_id, user_msg_with_parts)
+    await run_message_phases(session_a, request, state, user_msg_id, user_msg_with_parts)
 
     # Session A switched
     assert session_agents[session_a].model_name == "new-model"

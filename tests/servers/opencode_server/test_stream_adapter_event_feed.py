@@ -1,7 +1,7 @@
 """Tests for OpenCodeStreamAdapter receiving events via EventBus.
 
 Verifies the fix for the orphaned adapter bug: the adapter created in
-_process_message_locked must receive stream events so that finalize()
+run_message_phases must receive stream events so that finalize()
 produces correct tokens and response text.
 """
 
@@ -33,10 +33,10 @@ from agentpool_server.opencode_server.models import (
 )
 from agentpool_server.opencode_server.models.message import MessageWithParts
 from agentpool_server.opencode_server.models.parts import StepFinishPart
-from agentpool_server.opencode_server.routes.message_routes import _process_message_locked
 from agentpool_server.opencode_server.session_pool_integration import get_messages_for_session
 from agentpool_server.opencode_server.state import ServerState
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
+from tests.servers.opencode_server.conftest import run_message_phases
 
 
 pytestmark = pytest.mark.integration
@@ -149,7 +149,7 @@ def event_bus_test_state(tmp_project_dir, mock_agent_with_event_bus):
     state = ServerState(working_dir=str(tmp_project_dir), agent=agent)
     # Initialize backward-compat dicts removed from ServerState dataclass
     state.messages = {}
-    # No session_pool_integration — _process_message_locked will use the
+    # No session_pool_integration — run_message_phases will use the
     # fallback path via session_pool.sessions.get_or_create_session.
     return state
 
@@ -183,9 +183,9 @@ async def test_adapter_receives_events_before_finalize(
     user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
     state.messages[session_id].append(user_msg_with_parts)
 
-    # Start _process_message_locked in background
+    # Start run_message_phases in background
     process_task = asyncio.create_task(
-        _process_message_locked(
+        run_message_phases(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
     )
@@ -201,7 +201,7 @@ async def test_adapter_receives_events_before_finalize(
     )
     await event_bus.publish(session_id, StreamCompleteEvent(message=chat_msg))
 
-    # Signal run completion so _process_message_locked continues
+    # Signal run completion so run_message_phases continues
     run_handle.complete_event.set()
 
     # Wait for processing to finish
@@ -237,7 +237,7 @@ async def test_message_cleanup_tolerates_deleted_session(
     state.messages[session_id].append(user_msg_with_parts)
 
     process_task = asyncio.create_task(
-        _process_message_locked(
+        run_message_phases(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
     )
@@ -277,7 +277,7 @@ async def test_adapter_response_text_populated_after_finalize(
     state.messages[session_id].append(user_msg_with_parts)
 
     process_task = asyncio.create_task(
-        _process_message_locked(
+        run_message_phases(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
     )
