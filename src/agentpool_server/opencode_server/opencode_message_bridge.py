@@ -126,34 +126,12 @@ async def append_message_to_session(
                 session_id=session_id,
                 exc_info=True,
             )
-        except ValueError as exc:
-            # The storage provider (e.g. MemoryProvider) raises ValueError
-            # for duplicate message IDs. In the sync path (POST /message),
-            # the REST handler pre-stores the assistant message before the
-            # event bridge tries to store it with the same canonical ID
-            # (via _pending_message_ids). This is expected — the message
-            # is already in storage, so we skip the duplicate write
-            # gracefully instead of propagating the error.
-            if "Duplicate message ID" in str(exc):
-                logger.debug(
-                    "Message already in storage, skipping duplicate write",
-                    session_id=session_id,
-                )
-            else:
-                raise
 
-    # Always mirror to the in-memory dict when present for backward compatibility.
-    # For duplicate writes (pre-stored by REST handler), skip the in-memory
-    # append too — the message was already added by the REST handler's call.
+    # Always mirror to the in-memory dict when present for backward compatibility
     messages = getattr(state, "messages", None)
     if messages is not None:
         messages.setdefault(session_id, [])
-        msg_id = getattr(msg.info, "id", None)
-        already_in_memory = msg_id is not None and any(
-            getattr(m.info, "id", None) == msg_id for m in messages[session_id]
-        )
-        if not already_in_memory:
-            messages[session_id].append(msg)
+        messages[session_id].append(msg)
 
 
 async def set_messages_for_session(

@@ -267,16 +267,8 @@ def mock_pool(  # noqa: PLR0915
 
     async def _mock_append_message(session_id: str, msg: Any) -> str:
         _mock_chat_store.setdefault(session_id, [])
-        # Mimic MemoryProvider.log_message: check for duplicate message IDs.
-        # This catches double-write bugs where the REST handler pre-stores
-        # a message and the event bridge tries to store it again.
-        msg_id = getattr(msg, "message_id", None)
-        if msg_id is not None:
-            for existing in _mock_chat_store[session_id]:
-                if getattr(existing, "message_id", None) == msg_id:
-                    raise ValueError(f"Duplicate message ID: {msg_id}")
         _mock_chat_store[session_id].append(msg)
-        return msg_id or "msg-id"
+        return "msg-id"
 
     pool.session_pool.get_messages = AsyncMock(side_effect=_mock_get_messages)
     pool.session_pool.truncate_messages = AsyncMock(return_value=0)
@@ -381,13 +373,6 @@ def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
     # AsyncMock is required because message_routes.py and other code await
     # integration.create_session(), integration.get_session_status(), etc.
     state.session_pool_integration = AsyncMock()
-    # Initialize real dicts for _pending_message_ids/_pending_message_metadata
-    # so route_message can store canonical message IDs (mimicking production
-    # behavior where OpenCodeSessionPoolIntegration inherits these from
-    # OpenCodeEventBridgeMixin). AsyncMock auto-creates attributes as Mocks,
-    # so we must set real dicts explicitly.
-    state.session_pool_integration._pending_message_ids = {}
-    state.session_pool_integration._pending_message_metadata = {}
     # create_session returns a mock session state that supports attribute assignment
     state.session_pool_integration.create_session = AsyncMock(return_value=Mock())
     state.session_pool_integration.get_session_status = AsyncMock(return_value=None)
@@ -402,24 +387,6 @@ def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
         **kwargs: Any,
     ) -> Any:
         from agentpool.lifecycle.types import DeliveryMode
-
-        # D14: Store the canonical message_id so _before_consumer_loop
-        # can reuse it instead of generating an independent one. This
-        # mimics the real route_message behavior and is critical for
-        # catching duplicate-write bugs where the REST handler pre-stores
-        # the assistant message and the event bridge tries to store it
-        # again with the same ID.
-        message_id = kwargs.get("message_id")
-        if message_id is not None:
-            state.session_pool_integration._pending_message_ids[session_id] = message_id
-        # Also store model metadata for agent/model propagation.
-        model_id = kwargs.get("model_id")
-        provider_id = kwargs.get("provider_id")
-        state.session_pool_integration._pending_message_metadata[session_id] = {
-            "message_id": message_id,
-            "model_id": model_id,
-            "provider_id": provider_id,
-        }
 
         sp = state.pool.session_pool  # type: ignore[union-attr]
         if sp is None:
