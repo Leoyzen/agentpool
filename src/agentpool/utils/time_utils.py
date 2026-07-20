@@ -37,18 +37,22 @@ def datetime_to_ms(dt: datetime) -> int:
 
 
 def parse_iso_timestamp(value: str, *, fallback: datetime | None = None) -> datetime:
-    """Parse an ISO 8601 timestamp string, handling 'Z' suffix.
+    """Parse an ISO 8601 timestamp string, always returning a timezone-aware datetime.
 
-    Falls back to the provided fallback or current UTC time on parse failure.
+    Handles 'Z' suffix and assumes UTC for timezone-naive strings. Falls back
+    to the provided fallback or current UTC time on parse failure.
 
     Args:
-        value: ISO timestamp string (may use 'Z' instead of '+00:00')
+        value: ISO timestamp string (may use 'Z' instead of '+00:00', may be naive)
         fallback: Datetime to return on parse failure (defaults to current UTC time)
 
     Returns:
-        Parsed timezone-aware datetime, or fallback on failure.
+        Parsed timezone-aware datetime in UTC, or fallback on failure.
     """
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except (ValueError, AttributeError):
         return fallback if fallback is not None else get_now()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt

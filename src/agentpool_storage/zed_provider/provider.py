@@ -163,7 +163,7 @@ class ZedStorageProvider(StorageProvider):
                 if query.since and cutoff and msg.timestamp and msg.timestamp < cutoff:
                     continue
                 if query.until and msg.timestamp:
-                    until_dt = datetime.fromisoformat(query.until)
+                    until_dt = parse_iso_timestamp(query.until)
                     if msg.timestamp > until_dt:
                         continue
                 if query.contains and query.contains not in msg.content:

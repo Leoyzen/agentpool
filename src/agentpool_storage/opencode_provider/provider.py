@@ -36,7 +36,7 @@ from agentpool.log import get_logger
 from agentpool.sessions.models import ProjectData, SessionData
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 from agentpool.utils.thread_helpers import run_in_thread
-from agentpool.utils.time_utils import datetime_to_ms, get_now, ms_to_datetime
+from agentpool.utils.time_utils import datetime_to_ms, get_now, ms_to_datetime, parse_iso_timestamp
 from agentpool_config.storage import OpenCodeStorageConfig
 from agentpool_server.opencode_server.models import (
     AssistantMessage,
@@ -512,7 +512,7 @@ class OpenCodeStorageProvider(StorageProvider):
                 if query.since and cutoff and chat_msg.timestamp < cutoff:
                     continue
                 if query.until:
-                    until_dt = datetime.fromisoformat(query.until)
+                    until_dt = parse_iso_timestamp(query.until)
                     if chat_msg.timestamp > until_dt:
                         continue
                 if query.contains and query.contains not in chat_msg.content:

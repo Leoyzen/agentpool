@@ -276,3 +276,95 @@ async def test_sql_provider_timestamp_priority_with_different_times(
     assert len(result) == 2
     assert result[0].message_id == "msg_zzz"
     assert result[1].message_id == "msg_aaa"
+
+
+# ---------------------------------------------------------------------------
+# L1 Unit Tests — Timezone-aware datetime parsing (parse_iso_timestamp)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_parse_iso_timestamp_naive_string_returns_aware() -> None:
+    """parse_iso_timestamp returns UTC-aware datetime for naive ISO strings.
+
+    Given: an ISO string without timezone info (e.g. "2025-01-01T12:00:00")
+    When: parsed via parse_iso_timestamp
+    Then: the result has tzinfo=UTC (not None)
+    """
+    from agentpool.utils.time_utils import parse_iso_timestamp
+
+    result = parse_iso_timestamp("2025-01-01T12:00:00")
+    assert result.tzinfo is not None
+    assert result.utcoffset() == UTC.utcoffset(None)
+
+
+@pytest.mark.unit
+def test_parse_iso_timestamp_aware_string_preserves_timezone() -> None:
+    """parse_iso_timestamp preserves timezone for already-aware ISO strings.
+
+    Given: an ISO string with explicit timezone (e.g. "...+05:00")
+    When: parsed via parse_iso_timestamp
+    Then: the result preserves the original timezone offset
+    """
+    from datetime import timedelta
+
+    from agentpool.utils.time_utils import parse_iso_timestamp
+
+    result = parse_iso_timestamp("2025-01-01T12:00:00+05:00")
+    assert result.tzinfo is not None
+    assert result.utcoffset() == timedelta(hours=5)
+
+
+@pytest.mark.unit
+def test_parse_iso_timestamp_z_suffix_returns_utc() -> None:
+    """parse_iso_timestamp handles 'Z' suffix and returns UTC-aware datetime.
+
+    Given: an ISO string with 'Z' suffix (e.g. "2025-01-01T12:00:00Z")
+    When: parsed via parse_iso_timestamp
+    Then: the result has tzinfo=UTC
+    """
+    from agentpool.utils.time_utils import parse_iso_timestamp
+
+    result = parse_iso_timestamp("2025-01-01T12:00:00Z")
+    assert result.tzinfo is not None
+    assert result.utcoffset() == UTC.utcoffset(None)
+
+
+@pytest.mark.unit
+async def test_memory_provider_sort_does_not_crash_with_mixed_timestamps() -> None:
+    """Sorting messages with different timezone awareness does not crash.
+
+    Given: messages with timezone-aware timestamps (from get_now)
+    When: sorted in memory provider
+    Then: no TypeError from comparing naive and aware datetimes
+
+    This is a regression test for the timezone-naive/aware comparison bug
+    that could occur when timestamps come from external sources without
+    timezone info.
+    """
+    ts = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+    provider = MemoryStorageProvider()
+    await provider.log_session(session_id="s1", node_name="agent")
+
+    await provider.log_message(
+        message=ChatMessage(
+            content="msg_a",
+            role="user",
+            session_id="s1",
+            message_id="msg_aaa",
+            timestamp=ts,
+        ),
+    )
+    await provider.log_message(
+        message=ChatMessage(
+            content="msg_b",
+            role="assistant",
+            session_id="s1",
+            message_id="msg_bbb",
+            timestamp=ts,
+        ),
+    )
+
+    # Should not raise TypeError
+    result = await provider.get_session_messages("s1")
+    assert len(result) == 2

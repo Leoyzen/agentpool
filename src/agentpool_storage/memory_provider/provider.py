@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from agentpool.utils.time_utils import get_now
+from agentpool.utils.time_utils import get_now, parse_iso_timestamp
 from agentpool_config.storage import MemoryStorageConfig
 from agentpool_storage.base import StorageProvider
 from agentpool_storage.models import ConversationData
@@ -13,6 +12,7 @@ from agentpool_storage.models import ConversationData
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from datetime import datetime
 
     from agentpool.common_types import JsonValue
     from agentpool.messaging import ChatMessage
@@ -63,11 +63,7 @@ class MemoryStorageProvider(StorageProvider):
                     continue
 
             # Skip if after until time
-            if (
-                query.until
-                and msg.timestamp
-                and msg.timestamp > datetime.fromisoformat(query.until)
-            ):
+            if query.until and msg.timestamp and msg.timestamp > parse_iso_timestamp(query.until):
                 continue
 
             # Skip if content doesn't match search

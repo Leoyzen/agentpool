@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
@@ -14,13 +13,15 @@ from agentpool.common_types import JsonValue, MessageRole
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, TokenCost
 from agentpool.storage import deserialize_messages
-from agentpool.utils.time_utils import get_now
+from agentpool.utils.time_utils import get_now, parse_iso_timestamp
 from agentpool_config.storage import FileStorageConfig
 from agentpool_storage.base import StorageProvider
 from agentpool_storage.models import TokenUsage
 
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from yamling import FormatType
 
     from agentpool.sessions.models import ProjectData
@@ -149,10 +150,10 @@ class FileProvider(StorageProvider):
             if query.agents and msg["name"] not in query.agents:
                 continue
             cutoff = query.get_time_cutoff()
-            timestamp = datetime.fromisoformat(msg["timestamp"])
+            timestamp = parse_iso_timestamp(msg["timestamp"])
             if query.since and cutoff and (timestamp < cutoff):
                 continue
-            if query.until and datetime.fromisoformat(msg["timestamp"]) > datetime.fromisoformat(
+            if query.until and parse_iso_timestamp(msg["timestamp"]) > parse_iso_timestamp(
                 query.until
             ):
                 continue
@@ -180,7 +181,7 @@ class FileProvider(StorageProvider):
                 model_name=msg["model"],
                 cost_info=cost_info,
                 response_time=msg["response_time"],
-                timestamp=datetime.fromisoformat(msg["timestamp"]),
+                timestamp=parse_iso_timestamp(msg["timestamp"]),
                 provider_name=msg["provider_name"],
                 provider_response_id=msg["provider_response_id"],
                 messages=deserialize_messages(msg["messages"]),
@@ -306,7 +307,7 @@ class FileProvider(StorageProvider):
             "finish_reason": msg.get("finish_reason"),
         }
         if msg.get("timestamp"):
-            kwargs["timestamp"] = datetime.fromisoformat(msg["timestamp"])
+            kwargs["timestamp"] = parse_iso_timestamp(msg["timestamp"])
         if msg.get("message_id"):
             kwargs["message_id"] = msg["message_id"]
         return ChatMessage[str](**kwargs)
@@ -388,7 +389,7 @@ class FileProvider(StorageProvider):
             if conv_messages:
                 conv_messages.sort(
                     key=lambda m: (
-                        datetime.fromisoformat(m["timestamp"]) if m.get("timestamp") else get_now()
+                        parse_iso_timestamp(m["timestamp"]) if m.get("timestamp") else get_now()
                     )
                 )
                 fork_point_id = conv_messages[-1].get("message_id")
@@ -533,8 +534,8 @@ class FileProvider(StorageProvider):
             name=data["name"],
             vcs=data["vcs"],
             config_path=data["config_path"],
-            created_at=datetime.fromisoformat(data["created_at"]),
-            last_active=datetime.fromisoformat(data["last_active"]),
+            created_at=parse_iso_timestamp(data["created_at"]),
+            last_active=parse_iso_timestamp(data["last_active"]),
             settings=data["settings"],
         )
 
