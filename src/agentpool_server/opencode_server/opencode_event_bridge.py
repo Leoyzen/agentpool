@@ -136,6 +136,53 @@ class OpenCodeEventBridgeMixin:
         """
         return "session"
 
+    def _create_assistant_message(self, session_id: str) -> tuple[str, MessageWithParts]:
+        """Create a fresh assistant message for a new turn.
+
+        Resolves the canonical message_id from pending IDs (set by the REST
+        handler), agent/model info from session state and pending metadata,
+        and constructs a ``MessageWithParts.assistant`` instance.
+
+        Args:
+            session_id: The session to create the message for.
+
+        Returns:
+            A tuple of (assistant_msg_id, assistant_msg).
+        """
+        assistant_msg_id = self._pending_message_ids.pop(session_id, None)
+        if assistant_msg_id is None:
+            assistant_msg_id = identifier.ascending("message")
+
+        agent_name = "agentpool"
+        model_id, provider_id = self.server_state.resolve_default_model_info()
+        session_state = self.session_pool.sessions.get_session(session_id)
+        if session_state is not None:
+            agent_name = session_state.agent_name
+        pending_meta = self._pending_message_metadata.pop(session_id, None)
+        if pending_meta is not None:
+            pending_model_id = pending_meta.get("model_id")
+            if pending_model_id is not None:
+                model_id = pending_model_id
+            pending_provider_id = pending_meta.get("provider_id")
+            if pending_provider_id is not None:
+                provider_id = pending_provider_id
+
+        assistant_msg = MessageWithParts.assistant(
+            message_id=assistant_msg_id,
+            session_id=session_id,
+            time=MessageTime(created=now_ms()),
+            agent_name=agent_name,
+            model_id=model_id,
+            parent_id=session_id,
+            provider_id=provider_id,
+            path=MessagePath(
+                cwd=self.server_state.working_dir,
+                root=self.server_state.working_dir,
+            ),
+            mode=agent_name,
+        )
+        return assistant_msg_id, assistant_msg
+
     async def _before_consumer_loop(self, session_id: str) -> None:
         """Set up per-session context before the consumer loop starts.
 
@@ -178,40 +225,8 @@ class OpenCodeEventBridgeMixin:
         # D14: Use the canonical message_id from the REST handler if available
         # instead of generating an independent one. This resolves the dual
         # assistant_msg_id split-message issue.
-        assistant_msg_id = self._pending_message_ids.pop(session_id, None)
-        if assistant_msg_id is None:
-            assistant_msg_id = identifier.ascending("message")
+        assistant_msg_id, assistant_msg = self._create_assistant_message(session_id)
 
-        # Agent/model propagation: look up the real agent_name from the
-        # session state and the model info from pending metadata (provided
-        # by the REST handler via route_message). Falls back to
-        # "agentpool"/"default"/"agentpool" when unavailable (graceful
-        # degradation for sessions created outside the REST handler path).
-        agent_name = "agentpool"
-        model_id, provider_id = self.server_state.resolve_default_model_info()
-        session_state = self.session_pool.sessions.get_session(session_id)
-        if session_state is not None:
-            agent_name = session_state.agent_name
-        pending_meta = self._pending_message_metadata.pop(session_id, None)
-        if pending_meta is not None:
-            pending_model_id = pending_meta.get("model_id")
-            if pending_model_id is not None:
-                model_id = pending_model_id
-            pending_provider_id = pending_meta.get("provider_id")
-            if pending_provider_id is not None:
-                provider_id = pending_provider_id
-
-        assistant_msg = MessageWithParts.assistant(
-            message_id=assistant_msg_id,
-            session_id=session_id,
-            time=MessageTime(created=now_ms()),
-            agent_name=agent_name,
-            model_id=model_id,
-            parent_id=session_id,
-            provider_id=provider_id,
-            path=MessagePath(cwd=self.server_state.working_dir, root=self.server_state.working_dir),
-            mode=agent_name,
-        )
         ctx = EventProcessorContext(
             session_id=session_id,
             assistant_msg_id=assistant_msg_id,
@@ -434,39 +449,9 @@ class OpenCodeEventBridgeMixin:
             if isinstance(event, RunStartedEvent) and self._message_registered.get(
                 session_id, False
             ):
-                assistant_msg_id = self._pending_message_ids.pop(session_id, None)
-                if assistant_msg_id is None:
-                    assistant_msg_id = identifier.ascending("message")
-
-                agent_name = "agentpool"
-                model_id, provider_id = self.server_state.resolve_default_model_info()
-                session_state = self.session_pool.sessions.get_session(session_id)
-                if session_state is not None:
-                    agent_name = session_state.agent_name
-                pending_meta = self._pending_message_metadata.pop(session_id, None)
-                if pending_meta is not None:
-                    pending_model_id = pending_meta.get("model_id")
-                    if pending_model_id is not None:
-                        model_id = pending_model_id
-                    pending_provider_id = pending_meta.get("provider_id")
-                    if pending_provider_id is not None:
-                        provider_id = pending_provider_id
-
+                assistant_msg_id, assistant_msg = self._create_assistant_message(session_id)
                 ctx.assistant_msg_id = assistant_msg_id
-                ctx.assistant_msg = MessageWithParts.assistant(
-                    message_id=assistant_msg_id,
-                    session_id=session_id,
-                    time=MessageTime(created=now_ms()),
-                    agent_name=agent_name,
-                    model_id=model_id,
-                    parent_id=session_id,
-                    provider_id=provider_id,
-                    path=MessagePath(
-                        cwd=self.server_state.working_dir,
-                        root=self.server_state.working_dir,
-                    ),
-                    mode=agent_name,
-                )
+                ctx.assistant_msg = assistant_msg
                 # Reset per-turn mutable tracking state
                 ctx.response_text = ""
                 ctx.text_part = None

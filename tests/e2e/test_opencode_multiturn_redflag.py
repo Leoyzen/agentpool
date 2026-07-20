@@ -310,8 +310,7 @@ class TestMultiTurnLifecycle:
             for i, msg in enumerate(assistant_msgs[:2]):
                 parts = msg.get("parts", [])
                 assert len(parts) > 0, (
-                    f"Assistant message {i + 1} has no parts — "
-                    f"turn may not have executed properly"
+                    f"Assistant message {i + 1} has no parts — turn may not have executed properly"
                 )
 
     @pytest.mark.parametrize(

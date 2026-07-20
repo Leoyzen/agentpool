@@ -437,15 +437,17 @@ class SessionControllerRunsMixin:
         # is set in start()'s finally block when the RunHandle exits.
         turn_done = asyncio.ensure_future(run_handle._turn_complete_event.wait())
         run_done = asyncio.ensure_future(run_handle.complete_event.wait())
-        done, pending = await asyncio.wait(
-            {turn_done, run_done},
-            timeout=timeout,
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for p in pending:
-            p.cancel()
-        if not done:
-            raise TimeoutError
+        try:
+            done, _pending = await asyncio.wait(
+                {turn_done, run_done},
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if not done:
+                raise TimeoutError
+        finally:
+            turn_done.cancel()
+            run_done.cancel()
         return session_id
 
     def _cleanup_run(self, run_id: str) -> None:
