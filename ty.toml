@@ -1,0 +1,75 @@
+# ty — Astral's Python type checker
+# https://docs.astral.sh/ty/reference/configuration/
+
+[environment]
+python-version = "3.13"
+python-platform = "all"
+
+[analysis]
+# Replace mypy's ignore_missing_imports with ty's replace-imports-with-any.
+# These modules are treated as `typing.Any`, suppressing both import errors
+# and type errors from untyped third-party libraries.
+replace-imports-with-any = [
+  "fsspec.**",
+  "grep_ast.**",
+  "tree_sitter.**",
+  "tree_sitter_language_pack.**",
+  "rustworkx.**",
+  "zstandard.**",
+  "telegram.**",
+  "slack_sdk.**",
+  "slackify_markdown.**",
+  "copykitten.**",
+  "promptlayer.**",
+  "langfuse.**",
+  "braintrust.**",
+  "composio.**",
+  "ast_grep_py.**",
+  "fasta2a.**",
+  "mcp_run.**",
+  "pyarrow.**",
+  "anyvoice.**",
+  "clawd_code_sdk.**",
+  "fastmcp.prompts.**",
+  "fastmcp.tools.**",
+  "apprise.**",
+]
+# Respect existing `# type: ignore` comments for mypy compatibility.
+respect-type-ignore-comments = true
+
+[rules]
+# --- Suppressed rules (known false positives or migration period) ---
+unused-type-ignore-comment = "ignore" # Migration: don't warn about stale ignores
+invalid-type-form = "ignore"          # Known FP in complex generics
+not-subscriptable = "ignore"          # Known FP with dynamic types
+
+# --- Warn-level rules ---
+division-by-zero = "warn"             # Default is ignore; enable as warning
+possibly-missing-import = "warn"      # Imports that might be missing
+possibly-unresolved-reference = "warn" # Approximates mypy warn_return_any
+unresolved-import = "warn"            # Import resolution failures
+
+# --- Error-level rules (approximate mypy strict) ---
+missing-type-argument = "error"       # Approximates mypy disallow_any_generics
+
+[terminal]
+# Migration period: warnings don't cause non-zero exit code.
+# Change to `true` once ty output is stable and clean.
+error-on-warning = false
+
+[src]
+# Explicitly include both src and tests directories.
+include = ["src", "tests"]
+
+# --- Per-file overrides ---
+
+# Test files: relax type checking to reduce noise.
+# Tests use dynamic fixtures, mocks, and untyped assertions that
+# would generate excessive false positives under strict checking.
+[[overrides]]
+include = ["tests/**", "**/test_*.py", "**/conftest.py"]
+
+[overrides.rules]
+unresolved-attribute = "ignore"
+missing-type-argument = "warn"
+possibly-unresolved-reference = "ignore"
