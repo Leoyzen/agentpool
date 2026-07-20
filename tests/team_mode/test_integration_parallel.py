@@ -387,13 +387,11 @@ async def test_parallel_task_assignment(
 
     # Verify both tasks appear in task_list.
     list_result = await cap.task_list(ctx)
-    tasks = json.loads(list_result)
-    assert len(tasks) == 2
-    subjects = {t["subject"] for t in tasks}
-    assert subjects == {"Analyze dataset", "Review findings"}
-    task_ids = {t["task_id"] for t in tasks}
-    assert task_id_1 in task_ids
-    assert task_id_2 in task_ids
+    assert "<task_list>" in list_result
+    assert "Analyze dataset" in list_result
+    assert "Review findings" in list_result
+    assert task_id_1 in list_result
+    assert task_id_2 in list_result
 
     # Cleanup.
     session_pool = team_mode_pool.session_pool

@@ -406,18 +406,17 @@ async def test_flow_full_lifecycle(tmp_path: Any) -> None:
     task_id = results[2].replace("Task created: ", "")
 
     # Turn 4: task_list
-    tasks = json.loads(results[3])
-    assert len(tasks) == 1
-    assert tasks[0]["subject"] == "Review PR"
-    assert tasks[0]["task_id"] == task_id
+    assert "<task_list>" in results[3]
+    assert "Review PR" in results[3]
+    assert task_id in results[3]
 
     # Turn 5: write_blackboard
     assert results[4] == "Written, version=1"
 
     # Turn 6: read_blackboard
-    bb_data = json.loads(results[5])
-    assert bb_data["value"]["text"] == "in_progress"
-    assert bb_data["version"] == 1
+    assert "<blackboard" in results[5]
+    assert "in_progress" in results[5]
+    assert 'version="1"' in results[5]
 
     # Turn 7: team_delete
     assert results[6] == "Team deleted"
@@ -566,8 +565,9 @@ async def test_flow_send_message_and_task_update(tmp_path: Any) -> None:
     )
     all_results.append(r4)
     messages.append(resp)
-    updated = json.loads(r4)
-    assert updated["status"] == "completed"
+    updated = r4
+    assert 'status="completed"' in updated
+    assert "<task" in updated
 
     # Turn 5: team_delete
     resp = await model_fn(messages, agent_info)
@@ -845,10 +845,9 @@ async def test_flow_error_recovery(tmp_path: Any) -> None:
     # Verify the task was actually created (before team_delete cleans up)
     ctx_verify = ctx_factory()
     list_result = await cap.task_list(ctx_verify)
-    tasks = json.loads(list_result)
-    assert len(tasks) == 1
-    assert tasks[0]["subject"] == "Recovered task"
-    assert tasks[0]["task_id"] == task_id
+    assert "<task_list>" in list_result
+    assert "Recovered task" in list_result
+    assert task_id in list_result
 
     # Turn 4: team_delete (run separately to preserve verification above)
     delete_result = await cap.team_delete(ctx_factory())

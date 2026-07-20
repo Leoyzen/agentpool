@@ -7,7 +7,6 @@ coexistence scenarios.
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -239,8 +238,8 @@ async def test_e2e_lifecycle_create_message_task_blackboard_delete(
 
     # --- Step 4: Complete the task ---
     update_result = await cap.task_update(ctx, task_id, status="completed")
-    updated = json.loads(update_result)
-    assert updated["status"] == "completed"
+    assert 'status="completed"' in update_result
+    assert "<task" in update_result
 
     # --- Step 5: Write blackboard ---
     wb_write_result = await cap.write_blackboard(ctx, "glossary", "v1 content")
@@ -248,9 +247,9 @@ async def test_e2e_lifecycle_create_message_task_blackboard_delete(
 
     # --- Step 6: Read blackboard ---
     rb_result = await cap.read_blackboard(ctx, "glossary")
-    rb_data = json.loads(rb_result)
-    assert rb_data["value"]["text"] == "v1 content"
-    assert rb_data["version"] == 1
+    assert "<blackboard" in rb_result
+    assert "v1 content" in rb_result
+    assert 'version="1"' in rb_result
 
     # --- Step 7: Delete team ---
     del_result = await cap.team_delete(ctx)
@@ -602,14 +601,13 @@ async def test_e2e_task_and_blackboard_lifecycle(tmp_path: Any) -> None:
 
     # List tasks
     list_result = await cap.task_list(ctx)
-    tasks = json.loads(list_result)
-    assert len(tasks) == 1
-    assert tasks[0]["subject"] == "Review PR"
+    assert "<task_list>" in list_result
+    assert "Review PR" in list_result
 
     # Update task status
     update_result = await cap.task_update(ctx, task_id, status="in_progress")
-    updated = json.loads(update_result)
-    assert updated["status"] == "in_progress"
+    assert 'status="in_progress"' in update_result
+    assert "<task" in update_result
 
     # Write blackboard
     wb_result = await cap.write_blackboard(ctx, "review_notes", "LGTM")
@@ -617,14 +615,14 @@ async def test_e2e_task_and_blackboard_lifecycle(tmp_path: Any) -> None:
 
     # Read blackboard
     rb_result = await cap.read_blackboard(ctx, "review_notes")
-    rb_data = json.loads(rb_result)
-    assert rb_data["value"]["text"] == "LGTM"
-    assert rb_data["version"] == 1
+    assert "<blackboard" in rb_result
+    assert "LGTM" in rb_result
+    assert 'version="1"' in rb_result
 
     # List blackboard keys
     lb_result = await cap.list_blackboard(ctx)
-    keys = json.loads(lb_result)
-    assert "review_notes" in keys
+    assert "<blackboard_keys>" in lb_result
+    assert "review_notes" in lb_result
 
     # Delete blackboard key (lead-only)
     db_result = await cap.delete_blackboard(ctx, "review_notes")

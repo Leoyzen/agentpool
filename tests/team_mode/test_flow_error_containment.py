@@ -11,7 +11,6 @@ The tests use the real ``team_mode_pool`` fixture and exercise
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -283,9 +282,9 @@ async def test_blackboard_write_failure_is_soft_error(
 
     # Verify the blackboard value was NOT overwritten.
     read_result = await cap.read_blackboard(ctx, "status")
-    bb_data = json.loads(read_result)
-    assert bb_data["value"]["text"] == "in_progress"
-    assert bb_data["version"] == 1
+    assert "<blackboard" in read_result
+    assert "in_progress" in read_result
+    assert 'version="1"' in read_result
 
     # Cleanup.
     session_pool = team_mode_pool.session_pool

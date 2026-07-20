@@ -414,7 +414,26 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             return "Not in a team session"
 
         tasks = team_state.list_tasks(team_id)
-        return json.dumps(tasks, indent=2, default=str)
+        if not tasks:
+            return "<task_list>(empty)</task_list>"
+        lines = ["<task_list>"]
+        for t in tasks:
+            tid = t.get("task_id", "?")
+            status = t.get("status", "?")
+            owner = t.get("owner", "")
+            subject = t.get("subject", "")
+            description = t.get("description", "")
+            blocked = t.get("is_unblocked", True)
+            blocked_attr = "" if blocked else ' blocked="true"'
+            owner_attr = f' owner="{owner}"' if owner else ""
+            lines.append(f'  <task id="{tid}" status="{status}"{owner_attr}{blocked_attr}>')
+            if description:
+                lines.append(f"    {subject}: {description}")
+            else:
+                lines.append(f"    {subject}")
+            lines.append("  </task>")
+        lines.append("</task_list>")
+        return "\n".join(lines)
 
     async def task_update(
         self,
@@ -455,7 +474,14 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             updated = team_state.update_task(team_id, task_id, updates)
         except (FileNotFoundError, OSError):
             return f"Task not found: {task_id}"
-        return json.dumps(updated, indent=2, default=str)
+        tid = updated.get("task_id", "?")
+        status = updated.get("status", "?")
+        owner = updated.get("owner", "")
+        subject = updated.get("subject", "")
+        description = updated.get("description", "")
+        owner_attr = f' owner="{owner}"' if owner else ""
+        content = f"{subject}: {description}" if description else subject
+        return f'<task id="{tid}" status="{status}"{owner_attr}>\n{content}\n</task>'
 
     async def read_blackboard(self, ctx: RunContext[Any], key: str) -> str:
         """Read a key from the shared blackboard.
@@ -479,7 +505,14 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         result = team_state.read_blackboard(team_id, key)
         if result is None:
             return "Key not found"
-        return json.dumps(result, indent=2, default=str)
+        value_text = result.get("value", {}).get("text", "")
+        version = result.get("version", 0)
+        written_by = result.get("written_by", "unknown")
+        written_at = result.get("written_at", "")
+        return (
+            f'<blackboard version="{version}" written_by="{written_by}" '
+            f'written_at="{written_at}">\n{value_text}\n</blackboard>'
+        )
 
     async def write_blackboard(
         self,
@@ -550,7 +583,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             return "Not in a team session"
 
         keys = team_state.list_blackboard(team_id)
-        return json.dumps(keys, indent=2)
+        if not keys:
+            return "<blackboard_keys>(empty)</blackboard_keys>"
+        return "<blackboard_keys>\n" + "\n".join(keys) + "\n</blackboard_keys>"
 
     async def team_status(self, ctx: RunContext[Any]) -> str:
         """Get the current status of the team.

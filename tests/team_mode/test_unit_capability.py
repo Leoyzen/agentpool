@@ -898,12 +898,10 @@ async def test_task_list_returns_tasks(tmp_path: Any) -> None:
     await cap.task_create(ctx, "Task B")
 
     result = await cap.task_list(ctx)
-    import json
 
-    tasks = json.loads(result)
-    assert len(tasks) == 2
-    subjects = {t["subject"] for t in tasks}
-    assert subjects == {"Task A", "Task B"}
+    assert "<task_list>" in result
+    assert "Task A" in result
+    assert "Task B" in result
 
 
 @pytest.mark.unit
@@ -922,10 +920,9 @@ async def test_task_update_changes_status(tmp_path: Any) -> None:
     task_id = create_result.replace("Task created: ", "")
 
     update_result = await cap.task_update(ctx, task_id, status="completed")
-    import json
 
-    updated = json.loads(update_result)
-    assert updated["status"] == "completed"
+    assert 'status="completed"' in update_result
+    assert "<task" in update_result
 
 
 @pytest.mark.unit
@@ -959,11 +956,10 @@ async def test_read_blackboard_returns_value(tmp_path: Any) -> None:
 
     await cap.write_blackboard(ctx, "config", "value1")
     result = await cap.read_blackboard(ctx, "config")
-    import json
 
-    data = json.loads(result)
-    assert data["value"]["text"] == "value1"
-    assert data["version"] == 1
+    assert "<blackboard" in result
+    assert "value1" in result
+    assert 'version="1"' in result
 
 
 @pytest.mark.unit
@@ -1034,10 +1030,10 @@ async def test_list_blackboard_returns_keys(tmp_path: Any) -> None:
     await cap.write_blackboard(ctx, "alpha", "a")
 
     result = await cap.list_blackboard(ctx)
-    import json
 
-    keys = json.loads(result)
-    assert keys == ["alpha", "zebra"]
+    assert "<blackboard_keys>" in result
+    assert "alpha" in result
+    assert "zebra" in result
 
 
 @pytest.mark.unit
