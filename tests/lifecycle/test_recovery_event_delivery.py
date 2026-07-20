@@ -93,7 +93,7 @@ async def _drain_queue(
     items: list[Any] = []
     with anyio.move_on_after(timeout):
         for _ in range(expected_count):
-            items.append(await queue.get())
+            items.append(await queue.get())  # noqa: PERF401
     return items
 
 

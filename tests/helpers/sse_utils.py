@@ -12,12 +12,13 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 
 def parse_sse_events(response_body: str) -> list[dict[str, object]]:
-    """Parse SSE-formatted text into a list of event dicts.
+    r"""Parse SSE-formatted text into a list of event dicts.
 
     Each event dict has ``event`` (str) and ``data`` (dict) keys.
     Events are returned in the order they appear in the response body.
@@ -34,9 +35,9 @@ def parse_sse_events(response_body: str) -> list[dict[str, object]]:
 
     for line in response_body.split("\n"):
         if line.startswith("event: "):
-            current_event = line[len("event: "):]
+            current_event = line[len("event: ") :]
         elif line.startswith("data: "):
-            current_data_lines.append(line[len("data: "):])
+            current_data_lines.append(line[len("data: ") :])
         elif line == "" and current_event is not None:
             data_str = "\n".join(current_data_lines)
             try:
@@ -65,9 +66,9 @@ async def drain_sse_stream(response: object) -> list[dict[str, object]]:
 
     async for line in _iter_response_lines(response):
         if line.startswith("event: "):
-            current_event = line[len("event: "):]
+            current_event = line[len("event: ") :]
         elif line.startswith("data: "):
-            current_data_lines.append(line[len("data: "):])
+            current_data_lines.append(line[len("data: ") :])
         elif line == "" and current_event is not None:
             data_str = "\n".join(current_data_lines)
             try:

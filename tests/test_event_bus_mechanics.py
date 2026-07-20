@@ -15,14 +15,14 @@ from __future__ import annotations
 from asyncio import Queue as AsyncQueue, QueueEmpty, QueueShutDown
 from typing import cast
 
-import anyio
 import pytest
 
 from agentpool.agents.events import RunStartedEvent, StateUpdate
 from agentpool.lifecycle.comm_channel import ProtocolChannel
 from agentpool.lifecycle.journal import MemoryJournal
 from agentpool.lifecycle.types import RunState
-from agentpool.orchestrator.event_bus import EventEnvelope, EventBus, OverflowPolicy
+from agentpool.orchestrator.event_bus import EventBus, EventEnvelope, OverflowPolicy
+
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
@@ -190,7 +190,7 @@ async def test_observer_defect_isolation() -> None:
     # Consumer A raises on the first event — simulate a buggy consumer.
     try:
         queue_a.get_nowait()
-        raise RuntimeError("consumer A defect")
+        raise RuntimeError("consumer A defect")  # noqa: TRY301
     except RuntimeError:
         pass  # Consumer A crashed; its queue may still have remaining events.
 
@@ -206,7 +206,7 @@ async def test_observer_defect_isolation() -> None:
 
 
 async def test_scoped_subscription_descendants() -> None:
-    """descendants scope receives events from child sessions.
+    """Descendants scope receives events from child sessions.
 
     Given: EventBus with a parent-child session hierarchy established
         via the internal session tree.
@@ -282,7 +282,7 @@ async def test_stateupdate_filtered_from_eventbus() -> None:
     # (a) Verify the StateUpdate was journaled.
     journal_events: list[object] = []
     async for evt in journal.replay():
-        journal_events.append(evt)
+        journal_events.append(evt)  # noqa: PERF401
 
     state_updates_in_journal: list[StateUpdate] = [
         evt for evt in journal_events if isinstance(evt, StateUpdate)

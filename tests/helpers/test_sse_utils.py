@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 
-import anyio
 import pytest
 
 from tests.helpers.sse_utils import parse_sse_events
@@ -15,7 +14,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
 def test_parse_sse_events_basic() -> None:
     """Parse a simple SSE response with one event."""
-    body = "event: session.status\ndata: {\"status\": \"busy\"}\n\n"
+    body = 'event: session.status\ndata: {"status": "busy"}\n\n'
     events = parse_sse_events(body)
     assert len(events) == 1
     assert events[0]["event"] == "session.status"
@@ -79,12 +78,12 @@ async def test_drain_sse_stream_chunked() -> None:
                 yield line
 
     lines = [
-        'event: server.connected',
+        "event: server.connected",
         'data: {"id": "1"}',
-        '',
-        'event: session.status',
+        "",
+        "event: session.status",
         'data: {"status": "busy"}',
-        '',
+        "",
     ]
     from tests.helpers.sse_utils import drain_sse_stream
 
