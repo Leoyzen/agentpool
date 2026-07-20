@@ -451,7 +451,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if not updates:
             return "No updates specified"
 
-        updated = team_state.update_task(team_id, task_id, updates)
+        try:
+            updated = team_state.update_task(team_id, task_id, updates)
+        except (FileNotFoundError, OSError):
+            return f"Task not found: {task_id}"
         return json.dumps(updated, indent=2, default=str)
 
     async def read_blackboard(self, ctx: RunContext[Any], key: str) -> str:

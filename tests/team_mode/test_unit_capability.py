@@ -2268,3 +2268,26 @@ async def test_delete_blackboard_nonexistent_key_returns_not_found(
 
     result = await cap.delete_blackboard(ctx, "nonexistent_key")
     assert "not found" in result, f"Should return 'not found' for missing key, got: {result}"
+
+
+@pytest.mark.unit
+async def test_task_update_invalid_task_id_returns_friendly_error(
+    tmp_path: Any,
+) -> None:
+    """BUG-01: task_update with invalid task_id returns friendly error,
+    not raw FileNotFoundError.
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        config=config,
+        base_dir=str(tmp_path),
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.task_update(ctx, "nonexistent_task_id", status="completed")
+    assert "Task not found" in result
+    assert "nonexistent_task_id" in result
+    assert "Errno" not in result
+    assert "No such file" not in result
