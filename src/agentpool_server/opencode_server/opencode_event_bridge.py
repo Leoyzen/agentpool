@@ -13,6 +13,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any, cast
 
 from agentpool.agents.events.events import (
+    CustomEvent,
     RunErrorEvent,
     RunFailedEvent,
     RunStartedEvent,
@@ -35,6 +36,7 @@ from agentpool_server.opencode_server.models import (
     PartUpdatedEvent,
     SessionErrorEvent,
     SessionStatus,
+    StepStartPart,
     TimeCreated,
     UserMessage,
 )
@@ -437,6 +439,13 @@ class OpenCodeEventBridgeMixin:
                 case _:
                     pass
 
+            # C4: CustomEvent wraps SSE broadcast events (e.g.
+            # SessionCreatedEvent) republished from the OpenCodeEventBridge.
+            # These are not real agent events and must NOT trigger assistant
+            # message registration. Skip them entirely.
+            if isinstance(event, CustomEvent):
+                return
+
             ctx = self._contexts.get(session_id)
             if ctx is None:
                 return
@@ -488,12 +497,24 @@ class OpenCodeEventBridgeMixin:
             # handler's ID, so the UI cannot associate parts with the message.
             # The canonical assistant_msg_id from the REST handler is correct.
 
-            # Register assistant message on first non-spawn event
+            # Register assistant message on first non-spawn, non-custom event.
+            # C3: The event bridge is the sole broadcast point for the assistant
+            # message. This ensures the message is visible only when the agent
+            # actually starts producing events, not before.
             if not self._message_registered.get(session_id, False):
                 await append_message_to_session(self.server_state, session_id, ctx.assistant_msg)
                 await self.server_state.broadcast_event(
                     MessageUpdatedEvent.create(ctx.assistant_msg.info)
                 )
+                # C3: Also broadcast a StepStartPart so the frontend sees the
+                # step-start indicator when the agent actually begins work.
+                step_start_part = StepStartPart(
+                    id=identifier.ascending("part"),
+                    message_id=ctx.assistant_msg_id,
+                    session_id=session_id,
+                )
+                ctx.assistant_msg.parts.append(step_start_part)
+                await self.server_state.broadcast_event(PartUpdatedEvent.create(step_start_part))
                 self._message_registered[session_id] = True
 
             adapter = self._adapters.get(session_id)

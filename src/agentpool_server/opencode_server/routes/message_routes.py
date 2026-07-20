@@ -389,13 +389,18 @@ async def _process_message_locked(  # noqa: PLR0915
         time=MessageTime(created=now),
     )
     assistant_msg_with_parts = MessageWithParts(info=assistant_msg, parts=[])
-    await append_message_to_session(state, session_id, assistant_msg_with_parts)
-    await state.broadcast_event(MessageUpdatedEvent.create(assistant_msg))
-    # Step-start part
+    # C3: Do NOT broadcast the assistant message here. The event bridge
+    # (_handle_event) is the sole broadcast point — it creates and broadcasts
+    # the assistant message when the first real agent event arrives
+    # (RunStartedEvent), ensuring the message ID is ordered after system
+    # notifications. Broadcasting here would cause the TUI to see the
+    # assistant message before the agent runs, leading to notification
+    # queuing issues.
+    # Step-start part: keep in parts for API response, but do not broadcast.
+    # The event bridge will broadcast it alongside the assistant message.
     part_id = identifier.ascending("part")
     step_start = StepStartPart(id=part_id, message_id=assistant_msg_id, session_id=session_id)
     assistant_msg_with_parts.parts.append(step_start)
-    await state.broadcast_event(PartUpdatedEvent.create(step_start))
     # --- Resolve agent and variant ---
     # --- Stream via adapter ---
     adapter = OpenCodeStreamAdapter(

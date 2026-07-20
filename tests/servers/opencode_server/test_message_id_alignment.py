@@ -467,3 +467,396 @@ class TestMessageIdTimestampConsistency:
             f"Same-ms IDs have {abs(ts1 - ts2)}ms difference — "
             f"should be <=1ms (issue C1: float truncation)"
         )
+
+
+# =============================================================================
+# C4: CustomEvent bypasses assistant registration
+# =============================================================================
+
+
+class TestCustomEventBypassesRegistration:
+    """Tests that CustomEvent does not trigger assistant message registration (C4).
+
+    Issue C4: CustomEvent wraps SSE broadcast events (e.g.
+    SessionCreatedEvent) republished from the OpenCodeEventBridge. These
+    are not real agent events and must NOT trigger assistant message
+    registration. If they do, the assistant message is broadcast before
+    the agent runs, causing notification ID > assistant ID → QUEUED.
+    """
+
+    @pytest.mark.asyncio
+    async def test_custom_event_does_not_register_assistant(self):
+        """CustomEvent should NOT trigger assistant message registration."""
+        from agentpool.agents.events.events import CustomEvent
+        from agentpool.orchestrator.event_bus import EventEnvelope
+        from agentpool_server.opencode_server.models import (
+            MessagePath,
+            MessageTime,
+            MessageWithParts,
+        )
+        from agentpool_server.opencode_server.session_pool_integration import (
+            OpenCodeSessionPoolIntegration,
+        )
+
+        session_pool = Mock()
+        session_pool.sessions = Mock()
+        session_pool.sessions.get_session = Mock(return_value=None)
+        server_state = Mock()
+        server_state.working_dir = "/tmp"
+        server_state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
+        server_state.broadcast_event = AsyncMock()
+
+        integration = OpenCodeSessionPoolIntegration(session_pool, server_state)
+
+        assistant_msg = MessageWithParts.assistant(
+            message_id="msg_test",
+            session_id="test-session",
+            time=MessageTime(created=0),
+            agent_name="agent",
+            model_id="default",
+            parent_id="",
+            provider_id="agentpool",
+            path=MessagePath(cwd="/tmp", root="/tmp"),
+        )
+        ctx = EventProcessorContext(
+            session_id="test-session",
+            assistant_msg_id="msg_test",
+            assistant_msg=assistant_msg,
+            state=server_state,
+            working_dir="/tmp",
+        )
+        integration._contexts["test-session"] = ctx
+        integration._message_registered["test-session"] = False
+
+        # Send a CustomEvent (e.g., wrapping a SessionCreatedEvent)
+        custom_event = CustomEvent(
+            event_data={"type": "session.created"},
+            event_type="opencode:session.created",
+        )
+        envelope = EventEnvelope(
+            event=custom_event,
+            source_session_id="test-session",
+        )
+
+        await integration._handle_event("test-session", envelope)
+
+        # Assistant message should NOT have been registered
+        assert not integration._message_registered.get("test-session", False), (
+            "CustomEvent should NOT trigger assistant message registration (C4)"
+        )
+        # broadcast_event should NOT have been called for MessageUpdatedEvent
+        broadcast_calls = server_state.broadcast_event.call_args_list
+        for call in broadcast_calls:
+            event_arg = call.args[0] if call.args else call.kwargs.get("event")
+            if hasattr(event_arg, "type") and event_arg.type == "message.updated":
+                pytest.fail("CustomEvent should NOT trigger MessageUpdatedEvent broadcast (C4)")
+
+    @pytest.mark.asyncio
+    async def test_real_agent_event_does_register_assistant(self):
+        """RunStartedEvent (a real agent event) SHOULD trigger registration.
+
+        This is the positive control for C4: after skipping CustomEvent,
+        the next real agent event (RunStartedEvent) must trigger assistant
+        registration.
+        """
+        from agentpool.agents.events import RunStartedEvent
+        from agentpool.orchestrator.event_bus import EventEnvelope
+        from agentpool_server.opencode_server.models import (
+            MessagePath,
+            MessageTime,
+            MessageWithParts,
+        )
+        from agentpool_server.opencode_server.session_pool_integration import (
+            OpenCodeSessionPoolIntegration,
+        )
+
+        session_pool = Mock()
+        session_pool.sessions = Mock()
+        session_pool.sessions.get_session = Mock(return_value=None)
+        server_state = Mock()
+        server_state.working_dir = "/tmp"
+        server_state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
+        server_state.broadcast_event = AsyncMock()
+
+        integration = OpenCodeSessionPoolIntegration(session_pool, server_state)
+
+        assistant_msg = MessageWithParts.assistant(
+            message_id="msg_real",
+            session_id="test-session",
+            time=MessageTime(created=0),
+            agent_name="agent",
+            model_id="default",
+            parent_id="",
+            provider_id="agentpool",
+            path=MessagePath(cwd="/tmp", root="/tmp"),
+        )
+        ctx = EventProcessorContext(
+            session_id="test-session",
+            assistant_msg_id="msg_real",
+            assistant_msg=assistant_msg,
+            state=server_state,
+            working_dir="/tmp",
+        )
+        integration._contexts["test-session"] = ctx
+        integration._message_registered["test-session"] = False
+
+        # Mock the adapter to avoid full event processing
+        mock_adapter = Mock()
+
+        async def _empty_convert(event):
+            return
+            yield
+
+        mock_adapter.convert_event = _empty_convert
+        integration._adapters["test-session"] = mock_adapter
+
+        # Patch append_message_to_session to track calls
+        import unittest.mock as _mock
+
+        with _mock.patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
+            new_callable=_mock.AsyncMock,
+        ) as mock_append:
+            event = RunStartedEvent(
+                session_id="test-session",
+                run_id="run_001",
+                agent_name="test-agent",
+            )
+            envelope = EventEnvelope(
+                event=event,
+                source_session_id="test-session",
+            )
+
+            await integration._handle_event("test-session", envelope)
+
+            # Assistant message SHOULD have been registered
+            assert integration._message_registered.get("test-session", False), (
+                "RunStartedEvent should trigger assistant message registration"
+            )
+            # append_message_to_session should have been called
+            mock_append.assert_awaited_once()
+
+        # broadcast_event should have been called with MessageUpdatedEvent
+        broadcast_calls = server_state.broadcast_event.call_args_list
+        event_types = []
+        for call in broadcast_calls:
+            event_arg = call.args[0] if call.args else call.kwargs.get("event")
+            if hasattr(event_arg, "type"):
+                event_types.append(event_arg.type)
+        assert "message.updated" in event_types, (
+            "RunStartedEvent should trigger MessageUpdatedEvent broadcast"
+        )
+
+    @pytest.mark.asyncio
+    async def test_custom_event_then_runstarted_registers_on_runstarted(self):
+        """CustomEvent followed by RunStartedEvent: registration on RunStarted only.
+
+        This simulates the real timeline:
+        1. SessionCreatedEvent → CustomEvent → skip (C4)
+        2. System notifications
+        3. RunStartedEvent → register assistant message
+        """
+        from agentpool.agents.events import RunStartedEvent
+        from agentpool.agents.events.events import CustomEvent
+        from agentpool.orchestrator.event_bus import EventEnvelope
+        from agentpool_server.opencode_server.models import (
+            MessagePath,
+            MessageTime,
+            MessageWithParts,
+        )
+        from agentpool_server.opencode_server.session_pool_integration import (
+            OpenCodeSessionPoolIntegration,
+        )
+
+        session_pool = Mock()
+        session_pool.sessions = Mock()
+        session_pool.sessions.get_session = Mock(return_value=None)
+        server_state = Mock()
+        server_state.working_dir = "/tmp"
+        server_state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
+        server_state.broadcast_event = AsyncMock()
+
+        integration = OpenCodeSessionPoolIntegration(session_pool, server_state)
+
+        assistant_msg = MessageWithParts.assistant(
+            message_id="msg_timeline",
+            session_id="test-session",
+            time=MessageTime(created=0),
+            agent_name="agent",
+            model_id="default",
+            parent_id="",
+            provider_id="agentpool",
+            path=MessagePath(cwd="/tmp", root="/tmp"),
+        )
+        ctx = EventProcessorContext(
+            session_id="test-session",
+            assistant_msg_id="msg_timeline",
+            assistant_msg=assistant_msg,
+            state=server_state,
+            working_dir="/tmp",
+        )
+        integration._contexts["test-session"] = ctx
+        integration._message_registered["test-session"] = False
+
+        # Mock the adapter
+        mock_adapter = Mock()
+
+        async def _empty_convert(event):
+            return
+            yield
+
+        mock_adapter.convert_event = _empty_convert
+        integration._adapters["test-session"] = mock_adapter
+
+        # Step 1: Send CustomEvent (SessionCreatedEvent)
+        custom_event = CustomEvent(
+            event_data={"type": "session.created"},
+            event_type="opencode:session.created",
+        )
+        envelope1 = EventEnvelope(
+            event=custom_event,
+            source_session_id="test-session",
+        )
+        await integration._handle_event("test-session", envelope1)
+
+        # After CustomEvent: NOT registered
+        assert not integration._message_registered.get("test-session", False), (
+            "CustomEvent should NOT trigger registration (C4)"
+        )
+
+        # Step 2: Send RunStartedEvent
+        run_event = RunStartedEvent(
+            session_id="test-session",
+            run_id="run_001",
+            agent_name="test-agent",
+        )
+        envelope2 = EventEnvelope(
+            event=run_event,
+            source_session_id="test-session",
+        )
+
+        import unittest.mock as _mock
+
+        with _mock.patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
+            new_callable=_mock.AsyncMock,
+        ):
+            await integration._handle_event("test-session", envelope2)
+
+        # After RunStartedEvent: registered
+        assert integration._message_registered.get("test-session", False), (
+            "RunStartedEvent after CustomEvent should trigger registration"
+        )
+
+
+# =============================================================================
+# C3: Event bridge creates StepStartPart on assistant registration
+# =============================================================================
+
+
+class TestEventBridgeStepStartPart:
+    """Tests that event bridge broadcasts StepStartPart on registration (C3).
+
+    Issue C3: The REST handler previously broadcast the assistant message
+    and StepStartPart before the agent ran. Now the event bridge is the
+    sole broadcast point. It must create and broadcast a StepStartPart
+    alongside the assistant message so the frontend sees the step-start
+    indicator when the agent actually begins work.
+    """
+
+    @pytest.mark.asyncio
+    async def test_step_start_part_broadcast_on_registration(self):
+        """StepStartPart should be broadcast when assistant message is registered."""
+        from agentpool.agents.events import RunStartedEvent
+        from agentpool.orchestrator.event_bus import EventEnvelope
+        from agentpool_server.opencode_server.models import (
+            MessagePath,
+            MessageTime,
+            MessageWithParts,
+            PartUpdatedEvent,
+            StepStartPart,
+        )
+        from agentpool_server.opencode_server.session_pool_integration import (
+            OpenCodeSessionPoolIntegration,
+        )
+
+        session_pool = Mock()
+        session_pool.sessions = Mock()
+        session_pool.sessions.get_session = Mock(return_value=None)
+        server_state = Mock()
+        server_state.working_dir = "/tmp"
+        server_state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
+        server_state.broadcast_event = AsyncMock()
+
+        integration = OpenCodeSessionPoolIntegration(session_pool, server_state)
+
+        assistant_msg = MessageWithParts.assistant(
+            message_id="msg_step",
+            session_id="test-session",
+            time=MessageTime(created=0),
+            agent_name="agent",
+            model_id="default",
+            parent_id="",
+            provider_id="agentpool",
+            path=MessagePath(cwd="/tmp", root="/tmp"),
+        )
+        ctx = EventProcessorContext(
+            session_id="test-session",
+            assistant_msg_id="msg_step",
+            assistant_msg=assistant_msg,
+            state=server_state,
+            working_dir="/tmp",
+        )
+        integration._contexts["test-session"] = ctx
+        integration._message_registered["test-session"] = False
+
+        # Mock the adapter
+        mock_adapter = Mock()
+
+        async def _empty_convert(event):
+            return
+            yield
+
+        mock_adapter.convert_event = _empty_convert
+        integration._adapters["test-session"] = mock_adapter
+
+        # Patch append_message_to_session
+        import unittest.mock as _mock
+
+        with _mock.patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
+            new_callable=_mock.AsyncMock,
+        ):
+            event = RunStartedEvent(
+                session_id="test-session",
+                run_id="run_001",
+                agent_name="test-agent",
+            )
+            envelope = EventEnvelope(
+                event=event,
+                source_session_id="test-session",
+            )
+
+            await integration._handle_event("test-session", envelope)
+
+        # Check that a PartUpdatedEvent with StepStartPart was broadcast
+        broadcast_calls = server_state.broadcast_event.call_args_list
+        step_start_found = False
+        for call in broadcast_calls:
+            event_arg = call.args[0] if call.args else call.kwargs.get("event")
+            if isinstance(event_arg, PartUpdatedEvent):
+                part = event_arg.properties.part
+                if isinstance(part, StepStartPart):
+                    step_start_found = True
+                    assert part.message_id == "msg_step", (
+                        "StepStartPart message_id should match assistant_msg_id"
+                    )
+                    break
+
+        assert step_start_found, (
+            "StepStartPart should be broadcast alongside assistant message registration (C3)"
+        )
+        # The StepStartPart should also be appended to assistant_msg.parts
+        assert any(isinstance(p, StepStartPart) for p in assistant_msg.parts), (
+            "StepStartPart should be appended to assistant_msg.parts"
+        )
