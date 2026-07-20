@@ -39,6 +39,15 @@ logging.getLogger("vcr.cassette").setLevel(logging.WARNING)
 
 TEST_RESPONSE = "I am a test response"
 
+# Inject a dummy OPENAI_API_KEY when the real one is absent (e.g. fork PRs
+# where GitHub Actions secrets are not available). VCR cassette replay and
+# TestModel-based tests never make real HTTP calls, but the OpenAI SDK client
+# constructor validates the key at init time — without this shim, VCR and E2E
+# smoke tests fail with "Missing credentials" on fork PRs.
+# When the real secret IS available (same-repo PRs), this is a no-op.
+if not os.environ.get("OPENAI_API_KEY"):
+    os.environ["OPENAI_API_KEY"] = "sk-test-dummy-for-ci"
+
 
 @pytest.fixture
 def default_model() -> str:
@@ -264,6 +273,15 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker(
                 pytest.mark.skip(
                     reason="OPENAI_API_KEY not set — skipping credential-dependent test",
+                )
+            )
+        if (
+            "real_model" in item.keywords
+            and os.environ.get("OPENAI_API_KEY") == "sk-test-dummy-for-ci"
+        ):
+            item.add_marker(
+                pytest.mark.skip(
+                    reason="OPENAI_API_KEY is a dummy CI value — skipping real model test",
                 )
             )
         if "incompatible_with_thinking" in item.keywords and is_thinking_model:
