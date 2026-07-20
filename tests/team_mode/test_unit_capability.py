@@ -2202,3 +2202,69 @@ async def test_shutdown_request_marks_member_offline(tmp_path: Any) -> None:
     member = state["members"]["translator_agent"]
     assert member["session_id"] == ""
     assert member["status"] == "shutdown"
+
+
+@pytest.mark.unit
+async def test_team_status_shows_added_member_no_team_mode_config(tmp_path: Any) -> None:
+    """BUG-001 regression: team_status finds team state even when.
+
+    team_mode_config is None in the per-turn AgentContext.
+    team_create stores base_dir in session.metadata['team_base_dir'].
+    _get_team_state falls back to that when team_mode_config is None.
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(
+        member_eligible=["worker", "reviewer", "editor"],
+        base_dir=str(tmp_path),
+    )
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=True)
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    mock_delegation = MagicMock()
+    mock_delegation.create_child_session = AsyncMock(return_value="child_new")
+    metadata = _make_lead_metadata()
+    ctx = _make_run_context(
+        metadata=metadata,
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+        delegation=mock_delegation,
+    )
+    cap = TeamCommCapability(config, "coordinator", metadata)
+
+    # Simulate team_create storing base_dir in metadata.
+    agent_ctx = cap._resolve_agent_context(ctx)
+    agent_ctx.session.metadata["team_base_dir"] = str(tmp_path)
+
+    await cap.team_add_member(ctx, "historian_backup", "editor")
+
+    # Now simulate team_mode_config=None (the bug scenario).
+    agent_ctx.team_mode_config = None  # type: ignore[misc]
+
+    status = await cap.team_status(ctx)
+    assert "historian_backup" in status, (
+        f"BUG-001: member missing when team_mode_config=None\n{status}"
+    )
+
+
+@pytest.mark.unit
+async def test_delete_blackboard_nonexistent_key_returns_not_found(
+    tmp_path: Any,
+) -> None:
+    """NOTE-001: delete_blackboard on non-existent key returns not found.
+
+    Consistent with read_blackboard behavior.
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        config=config,
+        base_dir=str(tmp_path),
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.delete_blackboard(ctx, "nonexistent_key")
+    assert "not found" in result, f"Should return 'not found' for missing key, got: {result}"

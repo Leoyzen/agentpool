@@ -197,11 +197,19 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         team_id: str | None = agent_ctx.session.metadata.get("team_id")
         if team_id is None:
             return None
-        base_dir = (
-            agent_ctx.team_mode_config.effective_base_dir
-            if agent_ctx.team_mode_config is not None
-            else tempfile.gettempdir()
+        # Prefer base_dir from session metadata (set by team_create) so
+        # that team_status and other tools always find the state even if
+        # team_mode_config is None in the per-turn AgentContext.
+        base_dir: str = agent_ctx.session.metadata.get(
+            "team_base_dir",
+            "",
         )
+        if not base_dir:
+            base_dir = (
+                agent_ctx.team_mode_config.effective_base_dir
+                if agent_ctx.team_mode_config is not None
+                else tempfile.gettempdir()
+            )
         return FileTeamState(base_dir)
 
     def _get_team_id(self, agent_ctx: AgentContext) -> str | None:
@@ -711,6 +719,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         # can access the team state without requiring a new session.
         agent_ctx.session.metadata["team_id"] = team_id
         agent_ctx.session.metadata["team_name"] = name
+        agent_ctx.session.metadata["team_base_dir"] = base_dir
         # Store member session IDs so the auto-cleanup callback (and
         # team_delete) can close them without re-reading team state.
         agent_ctx.session.metadata["team_member_sessions"] = list(created_sessions)
@@ -893,6 +902,12 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
             return "Not in a team session"
+
+        existing = team_state.read_blackboard(team_id, key)
+        if existing is None:
+            available = team_state.list_blackboard(team_id)
+            keys_str = ", ".join(available) if available else "(empty)"
+            return f"Key '{key}' not found. Available keys: {keys_str}"
 
         team_state.delete_blackboard(team_id, key)
         return f"Blackboard key '{key}' deleted"
