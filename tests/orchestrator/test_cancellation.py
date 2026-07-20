@@ -378,21 +378,13 @@ async def test_cancellederror_path_captures_history() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.xfail(
-    reason="E1: _consume_run() breaks on StreamCompleteEvent and calls "
-    "gen.aclose(), killing the RunHandle generator after turn 1. "
-    "Turn 2 code never executes because the generator is closed.",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 async def test_consume_run_keeps_generator_alive_after_turn1() -> None:
     """E1: _consume_run should keep the generator alive for multi-turn.
 
-    This is a pure unit test that simulates _consume_run's behavior with
-    a fake multi-turn generator. The generator yields two turns worth of
-    events, but _consume_run breaks after the first StreamCompleteEvent
-    and calls gen.aclose(), preventing turn 2 from executing.
+    This is a pure unit test that simulates _consume_run's drain-only
+    behavior with a fake multi-turn generator. The generator yields two
+    turns worth of events, and the drain-only loop (no break, no aclose)
+    allows turn 2 to execute.
     """
     turn2_executed = False
 
@@ -408,18 +400,14 @@ async def test_consume_run_keeps_generator_alive_after_turn1() -> None:
             message=ChatMessage(content="turn 2", role="assistant"),
         )
 
+    # Fixed _consume_run: drain-only loop, no break, no aclose
     gen = fake_start("")
-    try:
-        async for event in gen:
-            if isinstance(event, StreamCompleteEvent):
-                break  # This is the E1 bug
-    finally:
-        await gen.aclose()
+    async for _event in gen:
+        pass
 
-    await asyncio.sleep(0.01)
     assert turn2_executed, (
-        "Turn 2 never executed because _consume_run broke on "
-        "StreamCompleteEvent and closed the generator (issue E1)."
+        "Turn 2 never executed because the generator was closed "
+        "before reaching turn 2 events (issue E1)."
     )
 
 
@@ -1098,15 +1086,6 @@ async def test_cancel_during_idle_then_new_prompt(minimal_pool: AgentPool) -> No
 
 @pytest.mark.integration
 @pytest.mark.anyio
-@pytest.mark.xfail(
-    reason="E3: cancel_run_for_session() calls run_handle.cancel() without "
-    "checking RunState. If RunHandle is IDLE between turns (after E1 "
-    "fix keeps generator alive), cancel kills the idle RunHandle → "
-    "subsequent turns can't run. Fix: only cancel if RunState.RUNNING.",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 async def test_cancel_idle_runhandle_does_not_kill_generator(
     minimal_pool: AgentPool,
 ) -> None:

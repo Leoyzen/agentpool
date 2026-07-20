@@ -16,7 +16,6 @@ from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     RunErrorEvent,
     RunFailedEvent,
-    StreamCompleteEvent,
 )
 from agentpool.lifecycle import RunState
 from agentpool.log import get_logger
@@ -61,14 +60,21 @@ class SessionControllerRunsMixin:
         """Drive a RunHandle.start() async generator to completion.
 
         Events are published to the EventBus inside ``start()``, so this
-        coroutine only needs to keep the generator alive until the first
-        turn completes (StreamCompleteEvent or RunErrorEvent). After that,
-        the generator is closed so that ``start()`` exits its idle/wake
-        loop and ``complete_event`` is set.
+        coroutine only needs to keep the generator alive. The generator
+        stays alive across turns — ``start()`` implements an idle/wake/turn
+        loop that blocks on the CommChannel feedback queue between turns.
+        Closing the generator prematurely (e.g. after the first
+        ``StreamCompleteEvent``) would kill the RunHandle and prevent
+        subsequent turns from executing.
 
-        If ``start()`` raises an exception before yielding a terminal
-        event, a ``RunErrorEvent`` and ``RunFailedEvent`` are published to
-        the EventBus so that subscribers (e.g. background_output in
+        The generator exits naturally when ``RunHandle.close()`` is called
+        during session cleanup (sets ``_closing`` → loop exits → ``finally``
+        block sets ``complete_event``). This coroutine does NOT call
+        ``gen.aclose()`` — that is handled by ``RunHandle.close()``.
+
+        If ``start()`` raises an exception before exiting, a
+        ``RunErrorEvent`` and ``RunFailedEvent`` are published to the
+        EventBus so that subscribers (e.g. background_output in
         BackgroundTaskCapability) are unblocked instead of waiting forever.
 
         Uses ``safe_span(...)`` instead of ``@logfire.instrument`` or raw
@@ -90,9 +96,13 @@ class SessionControllerRunsMixin:
         ):
             gen = run_handle.start(initial_prompt)
             try:
-                async for event in gen:
-                    if isinstance(event, StreamCompleteEvent | RunErrorEvent):
-                        break
+                # Drain the generator to completion. Do NOT break on
+                # StreamCompleteEvent or RunErrorEvent — the generator
+                # stays alive across turns (idle/wake/turn loop). The
+                # generator exits naturally when RunHandle.close() sets
+                # _closing and the loop exits.
+                async for _event in gen:
+                    pass
             except Exception as exc:
                 logger.exception(
                     "RunHandle.start() raised for run_id=%s session_id=%s",
@@ -117,14 +127,6 @@ class SessionControllerRunsMixin:
                             session_id=run_handle.session_id,
                             exception=exc,
                         ),
-                    )
-            finally:
-                try:
-                    await gen.aclose()
-                except Exception:  # noqa: BLE001
-                    logger.warning(
-                        "Failed to close run generator",
-                        exc_info=True,
                     )
 
     @logfire.instrument("session.start_run_handle")
@@ -329,22 +331,41 @@ class SessionControllerRunsMixin:
                 return run.followup(content, message_id=message_id)
         return None
 
-    def cancel_run_for_session(self, session_id: str) -> None:
+    def cancel_run_for_session(self, session_id: str) -> bool:
         """Cancel the active run for a session.
+
+        Only cancels the run if the RunHandle is in the RUNNING state.
+        If the handle is IDLE (between turns) or DONE, the cancel is
+        skipped to avoid killing the idle/wake/turn generator
+        prematurely — an IDLE RunHandle can still process subsequent
+        turns.
 
         Args:
             session_id: The session whose run should be cancelled.
+
+        Returns:
+            ``True`` if cancellation was initiated (RunHandle was
+            RUNNING), ``False`` if the session/run was not found or
+            the RunHandle was not in the RUNNING state.
         """
         session = self.get_session(session_id)
         if session is None:
-            return
+            return False
         run_id = session.current_run_id
         if run_id is None:
-            return
+            return False
         run_handle = self._runs.get(run_id)
         if run_handle is None:
-            return
+            return False
+        if run_handle._run_state != RunState.RUNNING:
+            logger.warning(
+                "cancel_run_for_session: RunHandle %s is not RUNNING (state=%s), skipping cancel",
+                run_id,
+                run_handle._run_state,
+            )
+            return False
         run_handle.cancel()
+        return True
 
     def revoke_inject(self, session_id: str, message_id: str) -> bool:
         """Revoke a pending steer or followup message by ID.
@@ -372,11 +393,14 @@ class SessionControllerRunsMixin:
         return run_handle.revoke(message_id)
 
     async def wait_for_completion(self, session_id: str, timeout: float | None = 300) -> str:
-        """Wait for the active run on a session to complete.
+        """Wait for the active run on a session to complete a single turn.
 
         Looks up the active run via ``session.current_run_id`` and awaits
-        ``run_handle.complete_event`` with the given timeout. Decouples
-        callers from the ``RunHandle`` type entirely.
+        either ``run_handle._turn_complete_event`` (single-turn completion)
+        or ``run_handle.complete_event`` (full run completion), whichever
+        fires first. This decouples callers from the ``RunHandle`` type
+        entirely while supporting multi-turn RunHandles that stay alive
+        between turns.
 
         Args:
             session_id: The session to wait for.
@@ -406,7 +430,22 @@ class SessionControllerRunsMixin:
         run_handle = self._runs.get(run_id)
         if run_handle is None:
             return session_id
-        await asyncio.wait_for(run_handle.complete_event.wait(), timeout=timeout)
+        # Wait for either the per-turn completion event or the full run
+        # completion event, whichever fires first. _turn_complete_event
+        # is cleared at turn start (run.py _execute_turn) and set when a
+        # single turn finishes (normally or via cancel). complete_event
+        # is set in start()'s finally block when the RunHandle exits.
+        turn_done = asyncio.ensure_future(run_handle._turn_complete_event.wait())
+        run_done = asyncio.ensure_future(run_handle.complete_event.wait())
+        done, pending = await asyncio.wait(
+            {turn_done, run_done},
+            timeout=timeout,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for p in pending:
+            p.cancel()
+        if not done:
+            raise TimeoutError
         return session_id
 
     def _cleanup_run(self, run_id: str) -> None:

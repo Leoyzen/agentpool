@@ -330,7 +330,9 @@ class OpenCodeEventBridgeMixin:
         await self.server_state.broadcast_event(MessageUpdatedEvent.create(user_msg))
         await self.server_state.broadcast_event(PartUpdatedEvent.create(text_part))
 
-    async def _handle_event(self, session_id: str, envelope: EventEnvelope) -> None:
+    async def _handle_event(  # noqa: PLR0915
+        self, session_id: str, envelope: EventEnvelope
+    ) -> None:
         """Handle a single event from the EventBus.
 
         Distinguishes parent vs child events (via the child-to-parent mapping),
@@ -423,6 +425,63 @@ class OpenCodeEventBridgeMixin:
             ctx = self._contexts.get(session_id)
             if ctx is None:
                 return
+
+            # D1: On RunStartedEvent for a subsequent turn (consumer already
+            # running from turn 1), reset per-turn state so turn 2 gets a
+            # fresh assistant message ID instead of reusing turn 1's.
+            # _before_consumer_loop() only runs once (consumer start is
+            # idempotent), so turns 2+ need this explicit reset.
+            if isinstance(event, RunStartedEvent) and self._message_registered.get(
+                session_id, False
+            ):
+                assistant_msg_id = self._pending_message_ids.pop(session_id, None)
+                if assistant_msg_id is None:
+                    assistant_msg_id = identifier.ascending("message")
+
+                agent_name = "agentpool"
+                model_id, provider_id = self.server_state.resolve_default_model_info()
+                session_state = self.session_pool.sessions.get_session(session_id)
+                if session_state is not None:
+                    agent_name = session_state.agent_name
+                pending_meta = self._pending_message_metadata.pop(session_id, None)
+                if pending_meta is not None:
+                    pending_model_id = pending_meta.get("model_id")
+                    if pending_model_id is not None:
+                        model_id = pending_model_id
+                    pending_provider_id = pending_meta.get("provider_id")
+                    if pending_provider_id is not None:
+                        provider_id = pending_provider_id
+
+                ctx.assistant_msg_id = assistant_msg_id
+                ctx.assistant_msg = MessageWithParts.assistant(
+                    message_id=assistant_msg_id,
+                    session_id=session_id,
+                    time=MessageTime(created=now_ms()),
+                    agent_name=agent_name,
+                    model_id=model_id,
+                    parent_id=session_id,
+                    provider_id=provider_id,
+                    path=MessagePath(
+                        cwd=self.server_state.working_dir,
+                        root=self.server_state.working_dir,
+                    ),
+                    mode=agent_name,
+                )
+                # Reset per-turn mutable tracking state
+                ctx.response_text = ""
+                ctx.text_part = None
+                ctx.reasoning_part = None
+                ctx.tool_parts.clear()
+                ctx.tool_outputs.clear()
+                ctx.tool_inputs.clear()
+                ctx.subagent_tool_parts.clear()
+                ctx.is_errored = False
+                ctx.input_tokens = 0
+                ctx.output_tokens = 0
+                ctx.total_cost = 0.0
+                ctx.stream_start_ms = now_ms()
+
+                self._message_registered[session_id] = False
 
             # Update assistant message with real agent info from RunStartedEvent.
             # RunStartedEvent is the first event in a run and carries the real
