@@ -36,7 +36,7 @@ from agentpool.agents.events import (
 from agentpool.lifecycle import RunOutcome
 from agentpool.lifecycle.comm_channel import DirectChannel
 from agentpool.lifecycle.journal import MemoryJournal
-from agentpool.messaging import ChatMessage
+from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.orchestrator.core import EventBus, SessionState
 from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
@@ -94,23 +94,25 @@ class _BlockingTurn(Turn):
         yield  # makes this an async generator
 
 
-def _make_session(*, comm_channel: Any | None = None) -> MagicMock:
-    """Create a mock session with real CommChannel and turn_lock."""
-    session = MagicMock()
-    session.turn_lock = asyncio.Lock()
-    session.parent_session_id = None
-    session.input_provider = None
-    session._active_steer_callback = None
+def _make_session(*, comm_channel: Any | None = None) -> SessionState:
+    """Create a real SessionState with real CommChannel."""
+    session = SessionState(session_id="test-session", agent_name="test-agent")
     if comm_channel is None:
         comm_channel = DirectChannel(MemoryJournal())
     session._comm_channel = comm_channel
     return session
 
 
+# Sentinel to distinguish "event_bus not provided" from "event_bus explicitly None".
+# When not provided, defaults to AsyncMock(). When explicitly None, the
+# standalone path (DirectChannel, no EventBus) is exercised.
+_EVENT_BUS_UNSET = object()
+
+
 def _make_run_handle(
     *,
     agent: Any | None = None,
-    event_bus: Any | None = None,
+    event_bus: Any = _EVENT_BUS_UNSET,
     session: Any | None = None,
     comm_channel: Any | None = None,
     run_id: str = "test-run",
@@ -121,7 +123,9 @@ def _make_run_handle(
 
     Args:
         agent: Agent mock or real Agent. If None, a MagicMock is created.
-        event_bus: EventBus mock or real. If None, AsyncMock is created.
+        event_bus: EventBus mock, real EventBus, or ``None`` for standalone
+            execution. If not provided (sentinel), defaults to ``AsyncMock()``.
+            Pass ``None`` explicitly to test the standalone path.
         session: Session mock or real SessionState. If None, a mock with
             real CommChannel and turn_lock is created.
         comm_channel: CommChannel for the session. If None, DirectChannel
@@ -134,9 +138,10 @@ def _make_run_handle(
         agent = MagicMock()
         agent.create_turn = MagicMock(return_value=_StubTurn())
         agent.name = "test-agent"
-        agent.conversation = MagicMock()
-    if event_bus is None:
+        agent.conversation = MessageHistory()
+    if event_bus is _EVENT_BUS_UNSET:
         event_bus = AsyncMock()
+    # If event_bus is None, keep it — standalone path (DirectChannel)
     if session is None:
         session = _make_session(comm_channel=comm_channel)
     return RunHandle(
@@ -355,14 +360,34 @@ async def test_start_raises_when_agent_none() -> None:
 
 
 @pytest.mark.unit
-async def test_start_raises_when_event_bus_none() -> None:
-    """Given a RunHandle with event_bus=None, start() raises RuntimeError."""
-    handle = _make_run_handle()
-    handle.event_bus = None
+async def test_start_allows_event_bus_none_with_comm_channel() -> None:
+    """Given event_bus=None with DirectChannel, start() does NOT raise.
 
+    Regression test: _initialize_lifecycle_and_recovery() now creates a
+    DirectChannel when event_bus is None, so start() must allow it.
+    """
+    from agentpool.lifecycle import DirectChannel, MemoryJournal
+
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=_StubTurn())
+    agent.name = "test-agent"
+    agent.conversation = MessageHistory()
+    session = _make_session(comm_channel=DirectChannel(MemoryJournal()))
+    handle = _make_run_handle(
+        agent=agent,
+        event_bus=None,  # explicitly None — standalone path
+        session=session,
+    )
+    # start() should NOT raise RuntimeError for event_bus=None
+    events: list[Any] = []
     gen = handle.start("hello")
-    with pytest.raises(RuntimeError, match="event_bus must be set"):
-        await gen.__anext__()
+    try:
+        async with asyncio.timeout(5):
+            events.extend([event async for event in gen])
+    finally:
+        with contextlib.suppress(Exception):
+            await gen.aclose()
+    assert handle.complete_event.is_set()
 
 
 @pytest.mark.unit
@@ -549,7 +574,7 @@ async def test_start_publishes_run_error_on_turn_exception() -> None:
     agent = MagicMock()
     agent.create_turn = MagicMock(return_value=turn)
     agent.name = "test-agent"
-    agent.conversation = MagicMock()
+    agent.conversation = MessageHistory()
     event_bus = AsyncMock()
     session = _make_session()
     handle = _make_run_handle(agent=agent, event_bus=event_bus, session=session)
@@ -618,9 +643,7 @@ async def test_turn_failure_breaks_loop_not_continue_to_idle() -> None:
                     if isinstance(event, RunErrorEvent):
                         break
         except TimeoutError:
-            pytest.fail(
-                "start() hung after turn failure — loop continued instead of terminating"
-            )
+            pytest.fail("start() hung after turn failure — loop continued instead of terminating")
         finally:
             with contextlib.suppress(Exception):
                 await gen.aclose()
@@ -685,9 +708,7 @@ async def test_run_error_event_sets_turn_failed_and_breaks_loop() -> None:
                     if isinstance(event, RunErrorEvent):
                         break
         except TimeoutError:
-            pytest.fail(
-                "start() hung after RunErrorEvent — did not terminate"
-            )
+            pytest.fail("start() hung after RunErrorEvent — did not terminate")
         finally:
             with contextlib.suppress(Exception):
                 await gen.aclose()
@@ -968,14 +989,13 @@ async def test_start_empty_prompt_terminates_immediately() -> None:
     agent = MagicMock()
     agent.create_turn = MagicMock(return_value=_StubTurn())
     agent.name = "test-agent"
-    agent.conversation = MagicMock()
+    agent.conversation = MessageHistory()
     handle = _make_run_handle(agent=agent)
     gen = handle.start("")
     events: list[Any] = []
     try:
         async with asyncio.timeout(5):
-            async for event in gen:
-                events.append(event)
+            events = [event async for event in gen]
     except (TimeoutError, asyncio.CancelledError):
         pass
     finally:
@@ -1116,8 +1136,7 @@ async def test_per_prompt_run_handle_single_turn_termination() -> None:
         events: list[Any] = []
         gen = run_handle.start("hello")
         # In per-prompt model, generator terminates after one turn.
-        async for event in gen:
-            events.append(event)
+        events = [event async for event in gen]
 
         # Generator should have terminated naturally
         assert run_handle.complete_event.is_set()
@@ -1279,8 +1298,7 @@ async def test_run_error_event_causes_natural_termination() -> None:
         gen = run_handle.start("test")
         try:
             async with asyncio.timeout(5):
-                async for event in gen:
-                    events.append(event)
+                events = [event async for event in gen]
         except TimeoutError:
             pytest.fail("start() hung after RunErrorEvent — did not terminate naturally")
 
@@ -1290,3 +1308,104 @@ async def test_run_error_event_causes_natural_termination() -> None:
 
         # Generator terminated naturally (complete_event set)
         assert run_handle.complete_event.is_set()
+
+
+# ---------------------------------------------------------------------------
+# Tests: standalone execution (event_bus=None) and feedback_queue draining
+# Regression tests for code review findings (Gemini Code Assist)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_standalone_session_without_event_bus_executes_turn() -> None:
+    """Standalone session (event_bus=None) must still execute turns.
+
+    Regression test for code review finding: _initialize_lifecycle_and_recovery()
+    didn't create CommChannel when event_bus was None, causing assert comm is not None
+    to fail in _execute_turn(). Now a DirectChannel is created and start() allows
+    event_bus=None when session._comm_channel is set.
+    """
+    from agentpool.lifecycle import DirectChannel, MemoryJournal
+    from agentpool.orchestrator.session_controller import SessionState
+
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=_StubTurn(events=[_stream_complete_event()]))
+    agent.name = "test-agent"
+    agent.conversation = MessageHistory()
+
+    session = SessionState(session_id="test-standalone", agent_name="test-agent")
+    session._comm_channel = DirectChannel(MemoryJournal())  # standalone fallback
+
+    handle = RunHandle(
+        run_id="test-standalone",
+        session_id="test-standalone",
+        agent_type="native",
+        agent=agent,
+        event_bus=None,  # standalone — no event bus
+        session=session,
+    )
+
+    events: list[Any] = []
+    gen = handle.start("hello")
+    try:
+        async with asyncio.timeout(5):
+            events.extend([event async for event in gen])
+    finally:
+        with contextlib.suppress(Exception):
+            await gen.aclose()
+
+    # Turn executed and yielded events
+    assert handle.complete_event.is_set()
+    assert len(events) > 0
+    # No AssertionError on assert comm is not None (turn completed successfully)
+    event_types = [type(e).__name__ for e in events]
+    assert "StreamCompleteEvent" in event_types
+
+
+@pytest.mark.unit
+async def test_feedback_queue_drained_on_new_run_handle_start() -> None:
+    """Steer messages in feedback_queue must be drained when a new RunHandle starts.
+
+    Regression test for code review finding: feedback_queue was never drained
+    when a new RunHandle started, causing idle-state steer messages to be lost.
+    The fix drains feedback_queue in start() before the turn begins, routing
+    messages to queued_steer_messages via self.steer().
+    """
+    from agentpool.lifecycle import DirectChannel, Feedback, MemoryJournal
+    from agentpool.orchestrator.session_controller import SessionState
+
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=_StubTurn())
+    agent.name = "test-agent"
+    agent.conversation = MessageHistory()
+
+    session = SessionState(session_id="test-feedback", agent_name="test-agent")
+    session._comm_channel = DirectChannel(MemoryJournal())
+
+    # Simulate steer message arriving while idle (no RunHandle active)
+    fb = Feedback(content="background task completed", is_steer=True)
+    session.feedback_queue.put_nowait(fb)
+    assert not session.feedback_queue.empty()  # pre-condition
+
+    handle = RunHandle(
+        run_id="test-feedback",
+        session_id="test-feedback",
+        agent_type="native",
+        agent=agent,
+        event_bus=AsyncMock(),
+        session=session,
+    )
+
+    events: list[Any] = []
+    gen = handle.start("hello")
+    try:
+        async with asyncio.timeout(5):
+            events.extend([event async for event in gen])
+    finally:
+        with contextlib.suppress(Exception):
+            await gen.aclose()
+
+    # feedback_queue should be drained by start()
+    assert session.feedback_queue.empty(), "feedback_queue was not drained by start()"
+    # Steer message should be in queued_steer_messages
+    assert "background task completed" in handle.run_ctx.queued_steer_messages

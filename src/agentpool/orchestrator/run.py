@@ -271,8 +271,9 @@ class RunHandle:
         session = self.session
         if agent is None:
             raise RuntimeError("agent must be set before calling start()")
-        if event_bus is None:
-            raise RuntimeError("event_bus must be set before calling start()")
+        # event_bus can be None for standalone execution (no EventBus).
+        # In that case, session._comm_channel must be a DirectChannel
+        # (set by _initialize_lifecycle_and_recovery()).
         if session is None:
             raise RuntimeError("session must be set before calling start()")
 
@@ -290,6 +291,22 @@ class RunHandle:
 
         # Register steer callback on SessionState for background task routing.
         session._active_steer_callback = self._direct_steer
+
+        # Drain any steer messages that arrived while the session was idle.
+        # These were enqueued to SessionState.feedback_queue by
+        # steer_from_background_task() when no RunHandle was active.
+        # self.steer() will queue them to queued_steer_messages (since
+        # active_agent_run is not yet set), and _execute_turn() will
+        # pick them up when the turn starts.
+        while not session.feedback_queue.empty():
+            try:
+                fb = session.feedback_queue.get_nowait()
+                content: str | list[Any] = (
+                    fb.content_blocks if fb.content_blocks is not None else fb.content
+                )
+                self.steer(content, message_id=fb.message_id)
+            except asyncio.QueueEmpty:
+                break
 
         with safe_span(
             "orchestration.run_handle.start",
@@ -340,11 +357,12 @@ class RunHandle:
                 session._active_steer_callback = None
                 self.complete_event.set()
 
-    async def _publish_cancelled_event(self, event_bus: EventBus) -> None:
+    async def _publish_cancelled_event(self, event_bus: EventBus | None) -> None:
         """Publish a RunFailedEvent for cancelled turns.
 
         Args:
-            event_bus: The event bus to publish on.
+            event_bus: The event bus to publish on, or ``None`` for
+                standalone execution (events go to CommChannel only).
         """
         comm = self.session._comm_channel if self.session is not None else None
         cancelled_event = RunFailedEvent(
@@ -352,17 +370,17 @@ class RunHandle:
             session_id=self.session_id,
             exception=RuntimeError("Run cancelled"),
         )
-        if comm is not None and not comm.publishes_to_event_bus:
+        if comm is not None and event_bus is not None and not comm.publishes_to_event_bus:
             await event_bus.publish(self.session_id, cancelled_event)
         if comm is not None:
             await comm.publish(cancelled_event)
-        elif comm is None:
+        elif comm is None and event_bus is not None:
             await event_bus.publish(self.session_id, cancelled_event)
 
     async def _execute_turn(  # noqa: PLR0915
         self,
         agent: BaseAgent[Any, Any],
-        event_bus: EventBus,
+        event_bus: EventBus | None,
         session: SessionState,
         current_prompts: list[str | list[Any]],
     ) -> AsyncGenerator[RichAgentStreamEvent[Any]]:
@@ -411,7 +429,7 @@ class RunHandle:
             agent_name=self.agent.name if self.agent is not None else self.agent_type,
             parent_session_id=session.parent_session_id if session is not None else None,
         )
-        if not comm.publishes_to_event_bus:
+        if event_bus is not None and not comm.publishes_to_event_bus:
             await event_bus.publish(self.session_id, run_started)
         await comm.publish(run_started)
         # Set _current_input_provider ContextVar so MCP elicitation can
@@ -450,7 +468,7 @@ class RunHandle:
             try:
                 async with contextlib.aclosing(turn.execute()) as event_gen:
                     async for event in event_gen:
-                        if not comm.publishes_to_event_bus:
+                        if event_bus is not None and not comm.publishes_to_event_bus:
                             await event_bus.publish(self.session_id, event)
                         await comm.publish(event)
                         # Save assistant final message to conversation BEFORE
@@ -484,7 +502,7 @@ class RunHandle:
                     run_id=self.run_id,
                     agent_name=self.agent.name if self.agent is not None else self.agent_type,
                 )
-                if not comm.publishes_to_event_bus:
+                if event_bus is not None and not comm.publishes_to_event_bus:
                     await event_bus.publish(self.session_id, error_event)
                 await comm.publish(error_event)
                 yield error_event
@@ -577,6 +595,30 @@ class RunHandle:
             The ``message_id`` string on success.
         """
         return self.steer(message)
+
+    def followup(self, message: str) -> str | None:
+        """Queue a follow-up prompt for the next RunHandle.
+
+        In the per-prompt model, a follow-up message is enqueued on
+        ``SessionState.prompt_queue`` and will be drained by
+        ``SessionController._consume_run()`` after the current
+        RunHandle terminates.
+
+        Args:
+            message: The follow-up prompt content.
+
+        Returns:
+            A ``message_id`` string (UUID4) on success, ``None`` if
+            no session is attached.
+        """
+        import uuid
+
+        message_id = str(uuid.uuid4())
+        session = self.session
+        if session is None:
+            return None
+        session.prompt_queue.put_nowait(message)
+        return message_id
 
     async def _steer_callback_wrapper(self, session_id: str, message: str) -> str | None:
         """Adapter wrapping steer for use as AgentRunContext.steer_callback.
