@@ -157,9 +157,9 @@ class MemoryStorageProvider(StorageProvider):
         """Get all messages for a session."""
         messages = [msg for msg in self.messages if msg.session_id == session_id]
 
-        # Sort by timestamp
+        # Sort by timestamp, then by message_id for deterministic ordering
         now = get_now()
-        messages.sort(key=lambda m: m.timestamp or now)
+        messages.sort(key=lambda m: (m.timestamp or now, m.message_id))
 
         if not include_ancestors or not messages:
             return messages
@@ -244,7 +244,7 @@ class MemoryStorageProvider(StorageProvider):
             conv_messages = [m for m in self.messages if m.session_id == source_session_id]
             if conv_messages:
                 now = get_now()
-                conv_messages.sort(key=lambda m: m.timestamp or now)
+                conv_messages.sort(key=lambda m: (m.timestamp or now, m.message_id))
                 fork_point_id = conv_messages[-1].message_id
 
         # Create new conversation

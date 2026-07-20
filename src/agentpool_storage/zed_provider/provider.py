@@ -320,9 +320,9 @@ class ZedStorageProvider(StorageProvider):
         """
         if thread := await self._load_thread(session_id):
             messages = helpers.thread_to_chat_messages(thread, session_id)
-            # Sort by timestamp (though they should already be in order)
+            # Sort by timestamp, then by message_id for deterministic ordering
             now = get_now()
-            messages.sort(key=lambda m: m.timestamp or now)
+            messages.sort(key=lambda m: (m.timestamp or now, m.message_id))
             return messages
         return []
 

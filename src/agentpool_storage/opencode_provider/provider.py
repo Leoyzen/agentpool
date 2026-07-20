@@ -732,9 +732,9 @@ class OpenCodeStorageProvider(StorageProvider):
             chat_msg = helpers.to_chat_message(msg=oc_msg, parts=parts)
             messages.append(chat_msg)
 
-        # Sort by timestamp
+        # Sort by timestamp, then by message_id for deterministic ordering
         now = get_now()
-        messages.sort(key=lambda m: m.timestamp or now)
+        messages.sort(key=lambda m: (m.timestamp or now, m.message_id))
         if not include_ancestors or not messages:
             return messages
         # Get ancestor chain if first message has parent_id

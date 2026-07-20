@@ -168,7 +168,7 @@ def build_message_query(query: SessionQuery) -> SelectOfScalar[Any]:
     """Build SQLModel query from SessionQuery."""
     from agentpool_storage.sql_provider.models import Message
 
-    stmt = select(Message).order_by(Message.timestamp)  # type: ignore
+    stmt = select(Message).order_by(Message.timestamp, Message.id)  # type: ignore
 
     conditions: list[Any] = []
     if query.name:

@@ -92,7 +92,7 @@ class SQLMessagesMixin:
             "provider_response_id": message.provider_response_id,
             "messages": serialize_messages(message.messages),
             "finish_reason": message.finish_reason,
-            "timestamp": get_now(),
+            "timestamp": message.timestamp,
         }
 
         async with AsyncSession(self.engine) as session:
@@ -146,7 +146,7 @@ class SQLMessagesMixin:
             result = await session.execute(
                 select(Message)
                 .where(Message.session_id == session_id)
-                .order_by(Message.timestamp.asc())  # type: ignore
+                .order_by(Message.timestamp.asc(), Message.id.asc())  # type: ignore
             )
             messages = [to_chat_message(m) for m in result.scalars().all()]
 
