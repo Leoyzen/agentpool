@@ -10,11 +10,14 @@ from __future__ import annotations
 from typing import Any
 
 from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
     PartDeltaEvent as PyAIPartDeltaEvent,
     PartStartEvent as PyAIPartStartEvent,
     TextPart,
     ThinkingPart,
     ThinkingPartDelta,
+    UserPromptPart,
 )
 from pydantic_ai.models.openai import _make_raw_content_updater
 import pytest
@@ -23,6 +26,7 @@ from agentpool.agents.events.events import PartDeltaEvent, PartStartEvent
 from agentpool.orchestrator.event_mapper import (
     EventMapper,
     _normalize_thinking_event,
+    normalize_thinking_parts_in_messages,
 )
 
 
@@ -391,3 +395,162 @@ class TestEventMapperIntegration:
         assert isinstance(result, PartStartEvent)
         assert isinstance(result.part, TextPart)
         assert result.part.content == "hello world"
+
+
+# ---------------------------------------------------------------------------
+# ModelResponse message_history normalization (issue #155)
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeThinkingPartsInMessages:
+    """Tests for normalize_thinking_parts_in_messages — the post-stream fix.
+
+    After streaming completes, the final ModelResponse stored in
+    message_history has ThinkingPart.content="" for raw CoT providers.
+    normalize_thinking_parts_in_messages walks the message list and
+    copies raw_content text into content.
+    """
+
+    def test_empty_content_normalized_from_dict_raw_content(self):
+        """ModelResponse with empty ThinkingPart gets content from raw_content."""
+        thinking = ThinkingPart(
+            content="",
+            id="resp_001",
+            provider_name="openai",
+            provider_details={"raw_content": ["The model reasons about the question."]},
+        )
+        response = ModelResponse(parts=[thinking], model_name="svc/kimi-k2")
+        messages: list[Any] = [response]
+
+        normalize_thinking_parts_in_messages(messages)
+
+        assert messages[0].parts[0].content == "The model reasons about the question."
+        assert messages[0].parts[0].provider_details == {
+            "raw_content": ["The model reasons about the question."]
+        }
+
+    def test_multiple_thinking_parts_all_normalized(self):
+        """Multiple ThinkingParts in one ModelResponse are all normalized."""
+        part1 = ThinkingPart(
+            content="",
+            provider_name="openai",
+            provider_details={"raw_content": ["first reasoning"]},
+        )
+        part2 = ThinkingPart(
+            content="",
+            provider_name="openai",
+            provider_details={"raw_content": ["second reasoning"]},
+        )
+        response = ModelResponse(parts=[part1, part2], model_name="svc/kimi-k2")
+        messages: list[Any] = [response]
+
+        normalize_thinking_parts_in_messages(messages)
+
+        assert messages[0].parts[0].content == "first reasoning"
+        assert messages[0].parts[1].content == "second reasoning"
+
+    def test_populated_content_not_modified(self):
+        """ThinkingPart with non-empty content is left unchanged."""
+        thinking = ThinkingPart(content="already has content", id="resp_002")
+        response = ModelResponse(parts=[thinking], model_name="openai:gpt-5.2")
+        messages: list[Any] = [response]
+
+        normalize_thinking_parts_in_messages(messages)
+
+        assert messages[0].parts[0].content == "already has content"
+
+    def test_no_raw_content_not_modified(self):
+        """ThinkingPart without raw_content in provider_details is unchanged."""
+        thinking = ThinkingPart(
+            content="",
+            provider_details={"other_key": "value"},
+        )
+        response = ModelResponse(parts=[thinking], model_name="svc/kimi-k2")
+        messages: list[Any] = [response]
+
+        normalize_thinking_parts_in_messages(messages)
+
+        assert messages[0].parts[0].content == ""
+
+    def test_none_provider_details_not_modified(self):
+        """ThinkingPart with None provider_details is unchanged."""
+        thinking = ThinkingPart(content="", provider_details=None)
+        response = ModelResponse(parts=[thinking], model_name="svc/kimi-k2")
+        messages: list[Any] = [response]
+
+        normalize_thinking_parts_in_messages(messages)
+
+        assert messages[0].parts[0].content == ""
+
+    def test_non_model_response_messages_skipped(self):
+        """ModelRequest messages and other types are not affected."""
+        request = ModelRequest(parts=[UserPromptPart(content="Hello")])
+        thinking = ThinkingPart(
+            content="",
+            provider_name="openai",
+            provider_details={"raw_content": ["reasoning"]},
+        )
+        response = ModelResponse(parts=[thinking], model_name="svc/kimi-k2")
+        messages: list[Any] = [request, response]
+
+        normalize_thinking_parts_in_messages(messages)
+
+        # ModelRequest untouched
+        assert isinstance(messages[0], ModelRequest)
+        assert messages[0].parts[0].content == "Hello"
+        # ModelResponse normalized
+        assert messages[1].parts[0].content == "reasoning"
+
+    def test_mixed_part_types_in_model_response(self):
+        """TextPart and ThinkingPart coexist; only ThinkingPart is normalized."""
+        text_part = TextPart(content="The answer is 42.")
+        thinking = ThinkingPart(
+            content="",
+            provider_name="openai",
+            provider_details={"raw_content": ["I need to calculate."]},
+        )
+        response = ModelResponse(parts=[text_part, thinking], model_name="svc/kimi-k2")
+        messages: list[Any] = [response]
+
+        normalize_thinking_parts_in_messages(messages)
+
+        assert messages[0].parts[0].content == "The answer is 42."
+        assert isinstance(messages[0].parts[0], TextPart)
+        assert messages[0].parts[1].content == "I need to calculate."
+
+    def test_empty_message_list_no_error(self):
+        """Empty list is a no-op, no error raised."""
+        messages: list[Any] = []
+        normalize_thinking_parts_in_messages(messages)
+        assert messages == []
+
+    def test_multi_raw_content_list_uses_last_entry(self):
+        """When raw_content has multiple entries, the last one is used."""
+        thinking = ThinkingPart(
+            content="",
+            provider_name="openai",
+            provider_details={"raw_content": ["", "", "final segment"]},
+        )
+        response = ModelResponse(parts=[thinking], model_name="svc/kimi-k2")
+        messages: list[Any] = [response]
+
+        normalize_thinking_parts_in_messages(messages)
+
+        assert messages[0].parts[0].content == "final segment"
+
+    def test_idempotent_double_normalization(self):
+        """Calling normalize twice does not corrupt content."""
+        thinking = ThinkingPart(
+            content="",
+            provider_name="openai",
+            provider_details={"raw_content": ["reasoning text"]},
+        )
+        response = ModelResponse(parts=[thinking], model_name="svc/kimi-k2")
+        messages: list[Any] = [response]
+
+        normalize_thinking_parts_in_messages(messages)
+        assert messages[0].parts[0].content == "reasoning text"
+
+        # Second call: content is non-empty, so it's a no-op
+        normalize_thinking_parts_in_messages(messages)
+        assert messages[0].parts[0].content == "reasoning text"

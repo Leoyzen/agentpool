@@ -251,3 +251,49 @@ def _normalize_thinking_event(
                 new_delta = dataclasses.replace(delta, content_delta=text)
                 return dataclasses.replace(event, delta=new_delta)
     return event
+
+
+def normalize_thinking_parts_in_messages(
+    messages: list[Any],
+) -> None:
+    """Normalize ``ThinkingPart`` instances in a message list in-place.
+
+    After streaming completes, pydantic-ai's ``StreamedResponse.get()`` builds
+    a final ``ModelResponse`` from ``_parts_manager.get_parts()``.  For raw
+    CoT providers (vLLM, LM Studio, litellm bridge, gpt-oss via OpenRouter),
+    the resulting ``ThinkingPart`` has ``content=""`` while the actual
+    reasoning text lives in ``provider_details['raw_content']``.
+
+    The streaming ``_normalize_thinking_event`` fixes individual stream events
+    but never touches the assembled ``ModelResponse`` stored in
+    ``message_history``.  This function walks every ``ModelResponse`` in the
+    list and copies ``raw_content`` text into ``content`` for each affected
+    ``ThinkingPart``, ensuring downstream consumers (OTel, next-round
+    requests, protocol converters) see the reasoning text.
+
+    This is idempotent: parts with non-empty ``content`` are left unchanged,
+    and parts without ``raw_content`` are skipped.
+
+    Args:
+        messages: A list of pydantic-ai messages (e.g. from
+            ``agent_run.all_messages()``).  Only ``ModelResponse`` messages
+            with ``ThinkingPart`` instances are affected; other messages
+            pass through untouched.
+    """
+    from pydantic_ai.messages import ModelResponse
+
+    for idx, msg in enumerate(messages):
+        if not isinstance(msg, ModelResponse):
+            continue
+        new_parts: list[Any] | None = None
+        for i, part in enumerate(msg.parts):
+            if not isinstance(part, ThinkingPart) or part.content:
+                continue
+            text = _extract_raw_content_text(part.provider_details)
+            if not text:
+                continue
+            if new_parts is None:
+                new_parts = list(msg.parts)
+            new_parts[i] = dataclasses.replace(part, content=text)
+        if new_parts is not None:
+            messages[idx] = dataclasses.replace(msg, parts=new_parts)
