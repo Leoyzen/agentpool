@@ -34,7 +34,6 @@ from agentpool_server.opencode_server.models import (
     SessionStatus,
     SessionStatusEvent,
     SessionUpdatedEvent,
-    StepStartPart,
     SubtaskPartInput,
     TextPartInput,
     TimeCreated,
@@ -61,6 +60,30 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+
+
+async def _ensure_assistant_in_state(
+    state: ServerState,
+    session_id: str,
+    assistant_msg_id: str,
+    msg: MessageWithParts,
+) -> None:
+    """C3 fallback: ensure assistant message is in state.messages before broadcast.
+
+    The event bridge is the primary registration point, but if it didn't
+    register (agent failed before events, test without event bridge), we
+    need to ensure the message is present before broadcasting the final
+    update to avoid missing messages in the session history.
+
+    Args:
+        state: The OpenCode server state.
+        session_id: The session ID.
+        assistant_msg_id: The assistant message ID to check for.
+        msg: The message to append if not already present.
+    """
+    existing = state.messages.get(session_id, [])
+    if not any(m.info.id == assistant_msg_id for m in existing):
+        await append_message_to_session(state, session_id, msg)
 
 
 def _session_disables_title_generation(state: ServerState, session_id: str) -> bool:
@@ -396,11 +419,10 @@ async def _process_message_locked(  # noqa: PLR0915
     # notifications. Broadcasting here would cause the TUI to see the
     # assistant message before the agent runs, leading to notification
     # queuing issues.
-    # Step-start part: keep in parts for API response, but do not broadcast.
-    # The event bridge will broadcast it alongside the assistant message.
-    part_id = identifier.ascending("part")
-    step_start = StepStartPart(id=part_id, message_id=assistant_msg_id, session_id=session_id)
-    assistant_msg_with_parts.parts.append(step_start)
+    # C3: StepStartPart is also created solely by the event bridge at
+    # registration time, not here. The REST handler's assistant_msg_with_parts
+    # starts with empty parts; the event bridge's ctx.assistant_msg (which
+    # shares the same ID via D14 passthrough) gets the StepStartPart.
     # --- Resolve agent and variant ---
     # --- Stream via adapter ---
     adapter = OpenCodeStreamAdapter(
@@ -632,6 +654,9 @@ async def _process_message_locked(  # noqa: PLR0915
                 update = {"time": msg_time, "tokens": tokens, "cost": cost}
                 updated_assistant = assistant_msg.model_copy(update=update)
                 assistant_msg_with_parts.info = updated_assistant
+                await _ensure_assistant_in_state(
+                    state, session_id, assistant_msg_id, assistant_msg_with_parts
+                )
                 await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
                 await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
             else:
@@ -643,6 +668,9 @@ async def _process_message_locked(  # noqa: PLR0915
                 update = {"time": msg_time, "error": aborted_error}
                 updated_assistant = assistant_msg.model_copy(update=update)
                 assistant_msg_with_parts.info = updated_assistant
+                await _ensure_assistant_in_state(
+                    state, session_id, assistant_msg_id, assistant_msg_with_parts
+                )
                 await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
                 await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
 
@@ -671,6 +699,9 @@ async def _process_message_locked(  # noqa: PLR0915
         update = {"time": msg_time, "error": aborted_error}
         updated_assistant = assistant_msg.model_copy(update=update)
         assistant_msg_with_parts.info = updated_assistant
+        await _ensure_assistant_in_state(
+            state, session_id, assistant_msg_id, assistant_msg_with_parts
+        )
         await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
         await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
 
@@ -691,6 +722,9 @@ async def _process_message_locked(  # noqa: PLR0915
         update = {"time": msg_time, "error": aborted_error}
         updated_assistant = assistant_msg.model_copy(update=update)
         assistant_msg_with_parts.info = updated_assistant
+        await _ensure_assistant_in_state(
+            state, session_id, assistant_msg_id, assistant_msg_with_parts
+        )
         await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
         await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
 

@@ -442,8 +442,11 @@ class OpenCodeEventBridgeMixin:
             # C4: CustomEvent wraps SSE broadcast events (e.g.
             # SessionCreatedEvent) republished from the OpenCodeEventBridge.
             # These are not real agent events and must NOT trigger assistant
-            # message registration. Skip them entirely.
-            if isinstance(event, CustomEvent):
+            # message registration. Only skip bridge-wrapped CustomEvents
+            # (source="opencode_event_bridge"); tool-emitted CustomEvents
+            # (source=None or tool name) may carry meaningful payload and
+            # should fall through to adapter processing.
+            if isinstance(event, CustomEvent) and event.source == "opencode_event_bridge":
                 return
 
             ctx = self._contexts.get(session_id)
