@@ -13,6 +13,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any, cast
 
 from agentpool.agents.events.events import (
+    CustomEvent,
     RunErrorEvent,
     RunFailedEvent,
     RunStartedEvent,
@@ -35,6 +36,7 @@ from agentpool_server.opencode_server.models import (
     PartUpdatedEvent,
     SessionErrorEvent,
     SessionStatus,
+    StepStartPart,
     TimeCreated,
     UserMessage,
 )
@@ -136,6 +138,53 @@ class OpenCodeEventBridgeMixin:
         """
         return "session"
 
+    def _create_assistant_message(self, session_id: str) -> tuple[str, MessageWithParts]:
+        """Create a fresh assistant message for a new turn.
+
+        Resolves the canonical message_id from pending IDs (set by the REST
+        handler), agent/model info from session state and pending metadata,
+        and constructs a ``MessageWithParts.assistant`` instance.
+
+        Args:
+            session_id: The session to create the message for.
+
+        Returns:
+            A tuple of (assistant_msg_id, assistant_msg).
+        """
+        assistant_msg_id = self._pending_message_ids.pop(session_id, None)
+        if assistant_msg_id is None:
+            assistant_msg_id = identifier.ascending("message")
+
+        agent_name = "agentpool"
+        model_id, provider_id = self.server_state.resolve_default_model_info()
+        session_state = self.session_pool.sessions.get_session(session_id)
+        if session_state is not None:
+            agent_name = session_state.agent_name
+        pending_meta = self._pending_message_metadata.pop(session_id, None)
+        if pending_meta is not None:
+            pending_model_id = pending_meta.get("model_id")
+            if pending_model_id is not None:
+                model_id = pending_model_id
+            pending_provider_id = pending_meta.get("provider_id")
+            if pending_provider_id is not None:
+                provider_id = pending_provider_id
+
+        assistant_msg = MessageWithParts.assistant(
+            message_id=assistant_msg_id,
+            session_id=session_id,
+            time=MessageTime(created=now_ms()),
+            agent_name=agent_name,
+            model_id=model_id,
+            parent_id=session_id,
+            provider_id=provider_id,
+            path=MessagePath(
+                cwd=self.server_state.working_dir,
+                root=self.server_state.working_dir,
+            ),
+            mode=agent_name,
+        )
+        return assistant_msg_id, assistant_msg
+
     async def _before_consumer_loop(self, session_id: str) -> None:
         """Set up per-session context before the consumer loop starts.
 
@@ -178,40 +227,8 @@ class OpenCodeEventBridgeMixin:
         # D14: Use the canonical message_id from the REST handler if available
         # instead of generating an independent one. This resolves the dual
         # assistant_msg_id split-message issue.
-        assistant_msg_id = self._pending_message_ids.pop(session_id, None)
-        if assistant_msg_id is None:
-            assistant_msg_id = identifier.ascending("message")
+        assistant_msg_id, assistant_msg = self._create_assistant_message(session_id)
 
-        # Agent/model propagation: look up the real agent_name from the
-        # session state and the model info from pending metadata (provided
-        # by the REST handler via route_message). Falls back to
-        # "agentpool"/"default"/"agentpool" when unavailable (graceful
-        # degradation for sessions created outside the REST handler path).
-        agent_name = "agentpool"
-        model_id, provider_id = self.server_state.resolve_default_model_info()
-        session_state = self.session_pool.sessions.get_session(session_id)
-        if session_state is not None:
-            agent_name = session_state.agent_name
-        pending_meta = self._pending_message_metadata.pop(session_id, None)
-        if pending_meta is not None:
-            pending_model_id = pending_meta.get("model_id")
-            if pending_model_id is not None:
-                model_id = pending_model_id
-            pending_provider_id = pending_meta.get("provider_id")
-            if pending_provider_id is not None:
-                provider_id = pending_provider_id
-
-        assistant_msg = MessageWithParts.assistant(
-            message_id=assistant_msg_id,
-            session_id=session_id,
-            time=MessageTime(created=now_ms()),
-            agent_name=agent_name,
-            model_id=model_id,
-            parent_id=session_id,
-            provider_id=provider_id,
-            path=MessagePath(cwd=self.server_state.working_dir, root=self.server_state.working_dir),
-            mode=agent_name,
-        )
         ctx = EventProcessorContext(
             session_id=session_id,
             assistant_msg_id=assistant_msg_id,
@@ -330,7 +347,9 @@ class OpenCodeEventBridgeMixin:
         await self.server_state.broadcast_event(MessageUpdatedEvent.create(user_msg))
         await self.server_state.broadcast_event(PartUpdatedEvent.create(text_part))
 
-    async def _handle_event(self, session_id: str, envelope: EventEnvelope) -> None:
+    async def _handle_event(  # noqa: PLR0915
+        self, session_id: str, envelope: EventEnvelope
+    ) -> None:
         """Handle a single event from the EventBus.
 
         Distinguishes parent vs child events (via the child-to-parent mapping),
@@ -420,9 +439,46 @@ class OpenCodeEventBridgeMixin:
                 case _:
                     pass
 
+            # C4: CustomEvent wraps SSE broadcast events (e.g.
+            # SessionCreatedEvent) republished from the OpenCodeEventBridge.
+            # These are not real agent events and must NOT trigger assistant
+            # message registration. Only skip bridge-wrapped CustomEvents
+            # (source="opencode_event_bridge"); tool-emitted CustomEvents
+            # (source=None or tool name) may carry meaningful payload and
+            # should fall through to adapter processing.
+            if isinstance(event, CustomEvent) and event.source == "opencode_event_bridge":
+                return
+
             ctx = self._contexts.get(session_id)
             if ctx is None:
                 return
+
+            # D1: On RunStartedEvent for a subsequent turn (consumer already
+            # running from turn 1), reset per-turn state so turn 2 gets a
+            # fresh assistant message ID instead of reusing turn 1's.
+            # _before_consumer_loop() only runs once (consumer start is
+            # idempotent), so turns 2+ need this explicit reset.
+            if isinstance(event, RunStartedEvent) and self._message_registered.get(
+                session_id, False
+            ):
+                assistant_msg_id, assistant_msg = self._create_assistant_message(session_id)
+                ctx.assistant_msg_id = assistant_msg_id
+                ctx.assistant_msg = assistant_msg
+                # Reset per-turn mutable tracking state
+                ctx.response_text = ""
+                ctx.text_part = None
+                ctx.reasoning_part = None
+                ctx.tool_parts.clear()
+                ctx.tool_outputs.clear()
+                ctx.tool_inputs.clear()
+                ctx.subagent_tool_parts.clear()
+                ctx.is_errored = False
+                ctx.input_tokens = 0
+                ctx.output_tokens = 0
+                ctx.total_cost = 0.0
+                ctx.stream_start_ms = now_ms()
+
+                self._message_registered[session_id] = False
 
             # Update assistant message with real agent info from RunStartedEvent.
             # RunStartedEvent is the first event in a run and carries the real
@@ -444,12 +500,24 @@ class OpenCodeEventBridgeMixin:
             # handler's ID, so the UI cannot associate parts with the message.
             # The canonical assistant_msg_id from the REST handler is correct.
 
-            # Register assistant message on first non-spawn event
+            # Register assistant message on first non-spawn, non-custom event.
+            # C3: The event bridge is the sole broadcast point for the assistant
+            # message. This ensures the message is visible only when the agent
+            # actually starts producing events, not before.
             if not self._message_registered.get(session_id, False):
                 await append_message_to_session(self.server_state, session_id, ctx.assistant_msg)
                 await self.server_state.broadcast_event(
                     MessageUpdatedEvent.create(ctx.assistant_msg.info)
                 )
+                # C3: Also broadcast a StepStartPart so the frontend sees the
+                # step-start indicator when the agent actually begins work.
+                step_start_part = StepStartPart(
+                    id=identifier.ascending("part"),
+                    message_id=ctx.assistant_msg_id,
+                    session_id=session_id,
+                )
+                ctx.assistant_msg.parts.append(step_start_part)
+                await self.server_state.broadcast_event(PartUpdatedEvent.create(step_start_part))
                 self._message_registered[session_id] = True
 
             adapter = self._adapters.get(session_id)

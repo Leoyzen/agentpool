@@ -27,7 +27,7 @@ from pydantic_ai.exceptions import UndrainedPendingMessagesError
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent
+from agentpool import Agent, AgentPool
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events.events import (
     StreamCompleteEvent,
@@ -305,4 +305,143 @@ def test_native_turn_run_error_event_includes_run_id() -> None:
     source = inspect.getsource(turn_module.NativeTurn.execute)
     assert "run_id=self._run_ctx.run_id" in source, (
         "NativeTurn.execute() must include run_id in RunErrorEvent yields"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: RunAbortedError must set run_ctx.cancelled = True
+#
+# When the user cancels an elicitation question (e.g. via OpenCode TUI
+# POST /question/{id}/reject), the QuestionTool raises RunAbortedError.
+# NativeTurn.execute() catches it and yields StreamCompleteEvent(cancelled=True).
+# But if run_ctx.cancelled is NOT set, _handle_turn_result() returns "proceed"
+# instead of "continue", causing the RunLoop to drain queued messages and
+# continue executing instead of going idle.
+#
+# In ACP this is masked because the ACP client sends a separate session/cancel
+# notification that calls run_handle.cancel() → run_ctx.cancelled = True.
+# In OpenCode the TUI only rejects the question future, never calling cancel().
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_aborted_error_sets_run_ctx_cancelled() -> None:
+    """NativeTurn must set run_ctx.cancelled = True on RunAbortedError.
+
+    Without this, _handle_turn_result() sees run_ctx.cancelled == False and
+    returns "proceed" instead of "continue", causing the RunLoop to continue
+    executing after the user cancelled an elicitation.
+    """
+    agent = Agent(
+        name="test-abort-cancelled",
+        model=TestModel(custom_output_text="hello"),
+    )
+    async with agent:
+        mock_agentlet = MagicMock()
+        mock_run = AsyncMock()
+        mock_run.__aenter__ = AsyncMock(side_effect=RunAbortedError("test abort"))
+        mock_run.__aexit__ = AsyncMock(return_value=None)
+        mock_agentlet.iter = MagicMock(return_value=mock_run)
+
+        run_ctx = AgentRunContext(session_id="test-abort-cancelled-session")
+        turn = NativeTurn(
+            agent=agent,
+            prompts=["test"],
+            run_ctx=run_ctx,
+            message_history=[],
+        )
+
+        events: list[Any] = []
+        with patch.object(agent, "get_agentlet", AsyncMock(return_value=mock_agentlet)):
+            events.extend([event async for event in turn.execute()])
+
+        # Must yield StreamCompleteEvent(cancelled=True)
+        stream_complete = [e for e in events if isinstance(e, StreamCompleteEvent)]
+        assert len(stream_complete) == 1
+        assert stream_complete[0].cancelled is True
+
+        # CRITICAL: run_ctx.cancelled must be True so _handle_turn_result()
+        # detects the cancellation and returns "continue" (not "proceed").
+        assert run_ctx.cancelled is True, (
+            "run_ctx.cancelled must be True after RunAbortedError so that "
+            "_handle_turn_result() returns 'continue' and the RunLoop goes "
+            "idle instead of continuing to execute queued messages."
+        )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_handle_turn_result_returns_continue_after_run_aborted_error(
+    minimal_pool: AgentPool,
+) -> None:
+    """_handle_turn_result() must return 'continue' after RunAbortedError.
+
+    When NativeTurn catches RunAbortedError (from elicitation cancel),
+    the RunLoop must treat the turn as cancelled — not as normal completion.
+    _handle_turn_result() should return "continue" (go idle, clear prompts)
+    instead of "proceed" (drain queued messages, continue executing).
+
+    This test patches get_agentlet to raise RunAbortedError on the first
+    call, simulating an elicitation cancellation. The RunLoop should
+    publish RunFailedEvent (not just StreamCompleteEvent) because
+    run_ctx.cancelled is set to True.
+    """
+    from agentpool.agents.events.events import RunFailedEvent
+
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
+    session_id = "sess-abort-turn-result"
+    await session_pool.create_session(session_id, agent_name="test_agent")
+
+    agent = await session_pool.sessions.get_or_create_session_agent(session_id)
+
+    # Patch get_agentlet so that agentlet.iter() raises RunAbortedError,
+    # simulating an elicitation cancellation inside NativeTurn.execute().
+    mock_agentlet = MagicMock()
+    mock_run = AsyncMock()
+    mock_run.__aenter__ = AsyncMock(side_effect=RunAbortedError("elicitation cancelled"))
+    mock_run.__aexit__ = AsyncMock(return_value=None)
+    mock_agentlet.iter = MagicMock(return_value=mock_run)
+
+    queue = await session_pool.event_bus.subscribe(session_id)
+
+    # Patch must stay active during the entire turn execution because
+    # get_agentlet is called from NativeTurn.execute() in a background task.
+    # send_message is fire-and-forget (starts a background task), so we
+    # collect events inside the patch block.
+    events: list[Any] = []
+    with patch.object(agent, "get_agentlet", AsyncMock(return_value=mock_agentlet)):
+        await session_pool.send_message(session_id, "test prompt")
+
+        # Collect events until RunFailedEvent arrives (with timeout to prevent hang).
+        # RunFailedEvent is only published when _handle_turn_result() sees
+        # run_ctx.cancelled == True. Without the fix, it's never published.
+        try:
+            async with asyncio.timeout(10.0):
+                while True:
+                    envelope = await queue.get()
+                    events.append(envelope)
+                    event = envelope.event if hasattr(envelope, "event") else envelope
+                    if isinstance(event, RunFailedEvent):
+                        break
+        except TimeoutError:
+            pass  # collect whatever we got — assertions below will fail
+
+    event_types = [type(e.event if hasattr(e, "event") else e) for e in events]
+
+    # StreamCompleteEvent(cancelled=True) is always yielded by NativeTurn.
+    has_stream_complete = StreamCompleteEvent in event_types
+    assert has_stream_complete, (
+        f"Expected StreamCompleteEvent from RunAbortedError, got: {event_types}"
+    )
+
+    # RunFailedEvent is only published when run_ctx.cancelled is True.
+    # Without the fix, run_ctx.cancelled remains False, _handle_turn_result()
+    # returns "proceed", and NO RunFailedEvent is published.
+    has_run_failed = RunFailedEvent in event_types
+    assert has_run_failed, (
+        "Expected RunFailedEvent after RunAbortedError — run_ctx.cancelled "
+        "was not set to True, so _handle_turn_result() returned 'proceed' "
+        "instead of 'continue'. The RunLoop will continue executing instead "
+        "of going idle."
     )

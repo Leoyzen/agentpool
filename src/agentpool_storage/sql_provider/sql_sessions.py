@@ -279,7 +279,7 @@ class SQLSessionsMixin:
                 if filters.model:
                     msg_query = msg_query.where(Message.model_name == filters.model)
 
-                msg_query = msg_query.order_by(Message.timestamp.asc())  # type: ignore
+                msg_query = msg_query.order_by(Message.timestamp.asc(), Message.id.asc())  # type: ignore
                 msg_result = await session.execute(msg_query)
                 messages = msg_result.scalars().all()
 

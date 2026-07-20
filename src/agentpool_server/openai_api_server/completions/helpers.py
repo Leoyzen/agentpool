@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, Any
 
 import anyenv
 from pydantic_ai import PartDeltaEvent, TextPartDelta, ThinkingPartDelta
 
 from agentpool.log import get_logger
+from agentpool.utils.time_utils import now_ms
 
 
 if TYPE_CHECKING:
@@ -30,8 +30,9 @@ async def stream_response(
             (e.g. from ``SessionPool.run_stream()``).
         request: The original chat completion request for model metadata.
     """
-    response_id = f"chatcmpl-{int(time.time() * 1000)}"
-    created = int(time.time())
+    ts_ms = now_ms()
+    response_id = f"chatcmpl-{ts_ms}"
+    created = ts_ms // 1000
 
     try:
         # First chunk with role

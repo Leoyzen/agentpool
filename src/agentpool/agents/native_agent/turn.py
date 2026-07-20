@@ -298,6 +298,12 @@ class NativeTurn(HookAwareTurn, Turn):
 
                 except RunAbortedError as exc:
                     logger.info("RunAbortedError caught", reason=str(exc))
+                    # Set run_ctx.cancelled so _handle_turn_result() detects
+                    # the cancellation and returns "continue" (go idle) instead
+                    # of "proceed" (drain queued messages and continue executing).
+                    # Without this, the RunLoop continues after the user cancels
+                    # an elicitation question (e.g. OpenCode TUI question reject).
+                    self._run_ctx.cancelled = True
                     if agent_run is not None:
                         try:
                             self._message_history = agent_run.all_messages()

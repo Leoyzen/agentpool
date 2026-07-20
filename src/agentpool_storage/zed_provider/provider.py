@@ -163,7 +163,7 @@ class ZedStorageProvider(StorageProvider):
                 if query.since and cutoff and msg.timestamp and msg.timestamp < cutoff:
                     continue
                 if query.until and msg.timestamp:
-                    until_dt = datetime.fromisoformat(query.until)
+                    until_dt = parse_iso_timestamp(query.until)
                     if msg.timestamp > until_dt:
                         continue
                 if query.contains and query.contains not in msg.content:
@@ -320,9 +320,9 @@ class ZedStorageProvider(StorageProvider):
         """
         if thread := await self._load_thread(session_id):
             messages = helpers.thread_to_chat_messages(thread, session_id)
-            # Sort by timestamp (though they should already be in order)
+            # Sort by timestamp, then by message_id for deterministic ordering
             now = get_now()
-            messages.sort(key=lambda m: m.timestamp or now)
+            messages.sort(key=lambda m: (m.timestamp or now, m.message_id))
             return messages
         return []
 
