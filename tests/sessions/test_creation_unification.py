@@ -237,17 +237,17 @@ def test_generate_session_id_unique() -> None:
 
 
 def test_session_id_format() -> None:
-    """Session ID follows format: ses_{12 hex chars}{14 base62 chars}."""
+    """Session ID follows format: ses_{16 hex chars}{14 base62 chars}."""
     sid = generate_session_id()
     assert sid.startswith("ses_")
     suffix = sid[4:]  # Remove "ses_"
-    assert len(suffix) == 26, f"Expected 26 chars after prefix, got {len(suffix)}"
-    # First 12 chars should be hex
-    hex_part = suffix[:12]
+    assert len(suffix) == 30, f"Expected 30 chars after prefix, got {len(suffix)}"
+    # First 16 chars should be hex
+    hex_part = suffix[:16]
     int(hex_part, 16)  # Raises ValueError if not hex
     # Last 14 chars should be base62
     base62_chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-    for c in suffix[12:]:
+    for c in suffix[16:]:
         assert c in base62_chars, f"Invalid base62 char: {c!r}"
 
 
