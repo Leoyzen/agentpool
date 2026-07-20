@@ -39,14 +39,20 @@ logging.getLogger("vcr.cassette").setLevel(logging.WARNING)
 
 TEST_RESPONSE = "I am a test response"
 
-# Inject a dummy OPENAI_API_KEY when the real one is absent (e.g. fork PRs
-# where GitHub Actions secrets are not available). VCR cassette replay and
-# TestModel-based tests never make real HTTP calls, but the OpenAI SDK client
-# constructor validates the key at init time — without this shim, VCR and E2E
-# smoke tests fail with "Missing credentials" on fork PRs.
-# When the real secret IS available (same-repo PRs), this is a no-op.
+# Inject dummy OPENAI_API_KEY and OPENAI_BASE_URL when the real ones are absent
+# (e.g. fork PRs where GitHub Actions secrets are not available). VCR cassette
+# replay and TestModel-based tests never make real HTTP calls, but the OpenAI SDK
+# client constructor validates the key at init time — without this shim, VCR and
+# E2E smoke tests fail with "Missing credentials" on fork PRs.
+#
+# OPENAI_BASE_URL must point to the same endpoint the cassettes were recorded
+# against. VCR's match_on is ["method"] but the SDK must still target the same
+# URL so VCR can find and replay the recorded interaction.
+# When the real secrets ARE available (same-repo PRs), this is a no-op.
 if not os.environ.get("OPENAI_API_KEY"):
     os.environ["OPENAI_API_KEY"] = "sk-test-dummy-for-ci"
+if not os.environ.get("OPENAI_BASE_URL"):
+    os.environ["OPENAI_BASE_URL"] = "http://api.ai.rootcloud.info/v1"
 
 
 @pytest.fixture
