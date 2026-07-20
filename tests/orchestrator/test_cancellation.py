@@ -377,6 +377,52 @@ async def test_cancellederror_path_captures_history() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
+@pytest.mark.xfail(
+    reason="E1: _consume_run() breaks on StreamCompleteEvent and calls "
+    "gen.aclose(), killing the RunHandle generator after turn 1. "
+    "Turn 2 code never executes because the generator is closed.",
+    strict=False,
+    raises=AssertionError,
+)
+@pytest.mark.known_bug
+async def test_consume_run_keeps_generator_alive_after_turn1() -> None:
+    """E1: _consume_run should keep the generator alive for multi-turn.
+
+    This is a pure unit test that simulates _consume_run's behavior with
+    a fake multi-turn generator. The generator yields two turns worth of
+    events, but _consume_run breaks after the first StreamCompleteEvent
+    and calls gen.aclose(), preventing turn 2 from executing.
+    """
+    turn2_executed = False
+
+    async def fake_start(initial_prompt: str = "") -> Any:
+        nonlocal turn2_executed
+        yield RunStartedEvent(run_id="r1", session_id="s1")
+        yield StreamCompleteEvent(
+            message=ChatMessage(content="turn 1", role="assistant"),
+        )
+        turn2_executed = True
+        yield RunStartedEvent(run_id="r1", session_id="s1")
+        yield StreamCompleteEvent(
+            message=ChatMessage(content="turn 2", role="assistant"),
+        )
+
+    gen = fake_start("")
+    try:
+        async for event in gen:
+            if isinstance(event, StreamCompleteEvent):
+                break  # This is the E1 bug
+    finally:
+        await gen.aclose()
+
+    await asyncio.sleep(0.01)
+    assert turn2_executed, (
+        "Turn 2 never executed because _consume_run broke on "
+        "StreamCompleteEvent and closed the generator (issue E1)."
+    )
+
+
 @pytest.mark.skip(reason="L2 migration: requires mock pool/agent internals — remains L1 unit test")
 @pytest.mark.unit
 async def test_multi_turn_preserves_context_via_consume_run() -> None:
@@ -1046,6 +1092,98 @@ async def test_cancel_during_idle_then_new_prompt(minimal_pool: AgentPool) -> No
     assert first_handle.run_ctx.cancelled is False, (
         "cancelled flag should remain False — new turn ran without cancel"
     )
+    first_handle.close()
+    await asyncio.sleep(0.1)
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+@pytest.mark.xfail(
+    reason="E3: cancel_run_for_session() calls run_handle.cancel() without "
+    "checking RunState. If RunHandle is IDLE between turns (after E1 "
+    "fix keeps generator alive), cancel kills the idle RunHandle → "
+    "subsequent turns can't run. Fix: only cancel if RunState.RUNNING.",
+    strict=False,
+    raises=AssertionError,
+)
+@pytest.mark.known_bug
+async def test_cancel_idle_runhandle_does_not_kill_generator(
+    minimal_pool: AgentPool,
+) -> None:
+    """E3: Cancel during IDLE between turns should not kill the RunHandle.
+
+    After E1 is fixed (generator stays alive between turns), the RunHandle
+    enters IDLE state between turns. If cancel_run_for_session() is called
+    during this IDLE window, it should be a no-op (not kill the generator),
+    so subsequent turns can still run.
+
+    This test uses _route_message (the opencode server path) instead of
+    send_message, because _route_message creates a persistent RunHandle
+    via _consume_run that stays alive between turns (after E1 fix).
+    """
+    from agentpool.lifecycle.types import DeliveryMode
+    from tests._controller_helpers import send_via_controller
+
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
+    controller = session_pool.sessions
+    session_id = "sess-e3-idle-cancel"
+
+    await session_pool.create_session(session_id, agent_name="test_agent")
+    agent = await _patch_agent_create_turn(
+        session_pool, session_id, _make_cancel_aware_create_turn()
+    )
+    agent.create_turn = lambda prompts, run_ctx, message_history, **kwargs: _StubTurn_e2e(
+        events=[
+            RunStartedEvent(run_id="test-run-e3"),
+            StreamCompleteEvent(message=ChatMessage(content="response", role="assistant")),
+        ],
+        message_history=["msg"],
+    )  # type: ignore[method-assign]
+
+    queue = await session_pool.event_bus.subscribe(session_id)
+
+    # Turn 1 via _route_message (opencode server path)
+    first_handle = await _receive_and_get_handle(session_pool, session_id, "turn 1")
+    assert first_handle is not None
+    await _collect_events_until(queue, StreamCompleteEvent)
+    await asyncio.sleep(0.1)
+
+    # After turn 1, RunHandle should be IDLE (if E1 is fixed)
+    # or DONE (if E1 is not fixed — generator was killed)
+    if first_handle._run_state == RunState.DONE:
+        pytest.skip(
+            "RunHandle is DONE (E1 not fixed — generator killed after turn 1). "
+            "This test is only meaningful after E1 is fixed."
+        )
+
+    assert first_handle._run_state == RunState.IDLE, (
+        f"RunHandle should be IDLE between turns, got {first_handle._run_state}"
+    )
+
+    # Cancel during IDLE — should NOT kill the generator
+    session_pool.sessions.cancel_run_for_session(session_id)
+    await asyncio.sleep(0.05)
+
+    # RunHandle should still be alive (IDLE, not DONE)
+    assert first_handle._run_state != RunState.DONE, (
+        "Cancel during IDLE killed the RunHandle (issue E3). "
+        "cancel_run_for_session should skip IDLE RunHandles."
+    )
+
+    # Turn 2 should still work
+    await send_via_controller(
+        controller,
+        session_id,
+        "turn 2",
+        mode=DeliveryMode.QUEUE,
+    )
+    post_events = await _collect_events_until(queue, StreamCompleteEvent)
+    post_types = [type(_unwrap_event(e)) for e in post_events]
+    assert StreamCompleteEvent in post_types, (
+        f"Turn 2 should complete after idle cancel, got {post_types}"
+    )
+
     first_handle.close()
     await asyncio.sleep(0.1)
 

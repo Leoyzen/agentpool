@@ -189,6 +189,92 @@ async def test_full_session_lifecycle_create_prompt_events_close(
 
 
 @pytest.mark.anyio
+@pytest.mark.xfail(
+    reason="E1: _consume_run() breaks on StreamCompleteEvent and calls "
+    "gen.aclose(), killing the RunHandle generator after turn 1. "
+    "E2: wait_for_completion() waits on complete_event (generator exit) "
+    "instead of _turn_complete_event (per-turn completion). "
+    "Both only manifest through _start_run_handle/_consume_run path "
+    "(used by opencode server), not through run_stream (used by send_message).",
+    strict=False,
+    raises=(AssertionError, TimeoutError),
+)
+@pytest.mark.known_bug
+async def test_multi_turn_same_session_both_complete_via_consume_run(
+    minimal_pool: AgentPool,
+    mock_agent_with_text: MagicMock,
+) -> None:
+    """E1/E2: Two consecutive messages through _start_run_handle must both complete.
+
+    Unlike test_full_session_lifecycle which uses run_stream (single-turn
+    correct path), this test uses _route_message → _start_run_handle →
+    _consume_run — the same path used by the opencode server's route_message().
+
+    Current behavior: _consume_run breaks on StreamCompleteEvent + aclose()
+    → RunHandle killed after turn 1 → turn 2's followup message is lost.
+    """
+    from agentpool.lifecycle.types import DeliveryMode
+    from tests._controller_helpers import send_via_controller
+
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
+    controller = session_pool.sessions
+
+    session_id = "sess-multiturn-e2e"
+    await session_pool.create_session(session_id, agent_name="test_agent")
+
+    # Patch the agent to use our mock create_turn
+    agent = await controller.get_or_create_session_agent(session_id)
+    assert agent is not None
+    agent.create_turn = mock_agent_with_text.create_turn  # type: ignore[method-assign]
+
+    queue = await session_pool.event_bus.subscribe(session_id)
+
+    # Turn 1 via _route_message (opencode server path)
+    await send_via_controller(
+        controller,
+        session_id,
+        "turn 1",
+        mode=DeliveryMode.QUEUE,
+    )
+    events_t1: list[Any] = []
+    while True:
+        try:
+            envelope = await asyncio.wait_for(queue.get(), timeout=10.0)
+        except TimeoutError:
+            break
+        events_t1.append(envelope.event)
+        if isinstance(envelope.event, StreamCompleteEvent):
+            break
+
+    assert any(isinstance(e, StreamCompleteEvent) for e in events_t1), (
+        "Turn 1 should produce a StreamCompleteEvent"
+    )
+
+    # Turn 2 via _route_message — the critical one
+    await send_via_controller(
+        controller,
+        session_id,
+        "turn 2",
+        mode=DeliveryMode.QUEUE,
+    )
+    events_t2: list[Any] = []
+    while True:
+        try:
+            envelope = await asyncio.wait_for(queue.get(), timeout=10.0)
+        except TimeoutError:
+            break
+        events_t2.append(envelope.event)
+        if isinstance(envelope.event, StreamCompleteEvent):
+            break
+
+    assert any(isinstance(e, StreamCompleteEvent) for e in events_t2), (
+        "Turn 2 should produce a StreamCompleteEvent — "
+        "if missing, _consume_run killed the generator (issue E1)"
+    )
+
+
+@pytest.mark.anyio
 async def test_full_lifecycle_session_state_transitions(
     minimal_pool: AgentPool,
     mock_agent_full_lifecycle: MagicMock,

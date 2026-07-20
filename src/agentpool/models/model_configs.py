@@ -7,10 +7,12 @@ Provides Pydantic-based model configurations for agentpool agents.
 from __future__ import annotations
 
 from collections.abc import Callable
+import contextlib
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import ConfigDict, Field, ImportString
 from pydantic_ai import ModelSettings as PyAIModelSettings
+from pydantic_ai.models.test import TestModel
 from schemez import Schema
 from tokonomics.model_names import ModelId
 from tokonomics.model_names.anthropic import AnthropicModelName
@@ -24,6 +26,58 @@ if TYPE_CHECKING:
     from pydantic_ai.models.fallback import FallbackModel
     from pydantic_ai.models.google import GoogleModelSettings as GeminiModelSettings
     from pydantic_ai.models.openai import OpenAIResponsesModelSettings
+
+
+class _SlowTestModel(TestModel):
+    """TestModel with a configurable delay before yielding the streamed response.
+
+    Used by ``TestModelConfig.pre_stream_delay`` to simulate slow model
+    responses for concurrency and lock-contention testing.
+    """
+
+    def __init__(
+        self,
+        *,
+        custom_output_text: str | None = None,
+        call_tools: list[str] | Literal["all"] = "all",
+        seed: int = 0,
+        pre_stream_delay: float = 0.0,
+    ) -> None:
+        super().__init__(
+            custom_output_text=custom_output_text,
+            call_tools=call_tools,
+            seed=seed,
+        )
+        self.pre_stream_delay = pre_stream_delay
+
+    @contextlib.asynccontextmanager
+    async def request_stream(
+        self,
+        messages: list[Any],
+        model_settings: Any,
+        model_request_parameters: Any,
+        run_context: Any = None,
+    ) -> Any:
+        """Yield the streamed response after ``pre_stream_delay`` seconds."""
+        import asyncio
+
+        from pydantic_ai.models.test import TestStreamedResponse
+
+        model_settings, model_request_parameters = self.prepare_request(
+            model_settings,
+            model_request_parameters,
+        )
+        self.last_model_request_parameters = model_request_parameters
+        model_response = self._request(messages, model_settings, model_request_parameters)
+        if self.pre_stream_delay > 0:
+            await asyncio.sleep(self.pre_stream_delay)
+        yield TestStreamedResponse(
+            model_request_parameters=model_request_parameters,
+            _model_name=self._model_name,
+            _structured_response=model_response,
+            _messages=messages,
+            _provider_name=self._system,
+        )
 
 
 class BaseModelConfig(Schema):
@@ -329,6 +383,14 @@ class TestModelConfig(BaseModelConfig):
     seed: int = Field(default=0, title="Random seed")
     """Seed for generating random tool arguments (when tool_args not specified)."""
 
+    pre_stream_delay: float = Field(
+        default=0.0,
+        title="Pre-stream delay (seconds)",
+        description="Delay before yielding the streamed response. "
+        "Useful for testing concurrent/lock-contention scenarios.",
+    )
+    """Delay in seconds before the model yields its streamed response."""
+
     def get_model(self) -> Any:
         if self.tool_args:
             from agentpool.models.fixed_args_test_model import FixedArgsTestModel
@@ -338,6 +400,13 @@ class TestModelConfig(BaseModelConfig):
                 custom_output_text=self.custom_output_text,
                 call_tools=self.call_tools,
                 seed=self.seed,
+            )
+        if self.pre_stream_delay > 0:
+            return _SlowTestModel(
+                custom_output_text=self.custom_output_text,
+                call_tools=self.call_tools,
+                seed=self.seed,
+                pre_stream_delay=self.pre_stream_delay,
             )
         from pydantic_ai.models.test import TestModel
 
