@@ -686,6 +686,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     team_id,
                     member["name"],
                     member_session_id,
+                    agent=member["agent"],
                 )
                 await session_pool.send_message(
                     member_session_id,
@@ -928,7 +929,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         await session_pool.close_session(member_sid)
         return f"Shutdown completed for {member_name}"
 
-    async def team_add_member(  # noqa: PLR0911
+    async def team_add_member(  # noqa: PLR0911, PLR0915
         self,
         ctx: RunContext[Any],
         name: str,
@@ -1017,7 +1018,12 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             return f"Failed to create member session: {exc}"
 
         # Register member in team state.
-        team_state.register_member(team_id, name, member_session_id)
+        team_state.register_member(
+            team_id,
+            name,
+            member_session_id,
+            agent=agent,
+        )
 
         # Send initial prompt to member.
         from agentpool.lifecycle.types import DeliveryMode
@@ -1071,13 +1077,22 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     mode=DeliveryMode.QUEUE,
                 )
 
-        # Write to blackboard.
-        team_state.write_blackboard(
-            team_id,
-            f"member_update/{name}",
-            {"action": "added", "agent": agent, "lifecycle": lifecycle},
-            written_by=self._agent_name,
-        )
+        # Write to blackboard (non-fatal — audit trail only).
+        import re
+
+        safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+        try:
+            team_state.write_blackboard(
+                team_id,
+                f"member_update/{safe_name}",
+                {"action": "added", "agent": agent, "lifecycle": lifecycle, "name": name},
+                written_by=self._agent_name,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to write member_update to blackboard for '%s'",
+                name,
+            )
 
         # Append member_session_id to session metadata.
         team_member_sessions: list[str] = agent_ctx.session.metadata.get(
@@ -1152,13 +1167,22 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             team_member_sessions.remove(member_sid)
             agent_ctx.session.metadata["team_member_sessions"] = team_member_sessions
 
-        # Write to blackboard.
-        team_state.write_blackboard(
-            team_id,
-            f"member_update/{member_name}",
-            {"action": "removed"},
-            written_by=self._agent_name,
-        )
+        # Write to blackboard (non-fatal — audit trail only).
+        import re
+
+        safe_member_name = re.sub(r"[^a-zA-Z0-9_]", "_", member_name)
+        try:
+            team_state.write_blackboard(
+                team_id,
+                f"member_update/{safe_member_name}",
+                {"action": "removed", "name": member_name},
+                written_by=self._agent_name,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to write member_update to blackboard for '%s'",
+                member_name,
+            )
 
         return f"Member '{member_name}' removed from team"
 

@@ -143,6 +143,8 @@ class FileTeamState:
         team_id: str,
         member_name: str,
         session_id: str,
+        *,
+        agent: str | None = None,
     ) -> None:
         """Write a member's session_id into state.json.
 
@@ -150,12 +152,20 @@ class FileTeamState:
             team_id: Team to update.
             member_name: Member whose session to record.
             session_id: Session identifier to persist.
+            agent: Agent type (e.g. "historian").  If provided, stored
+                in the member record.  If not provided, defaults to
+                ``member_name`` for backward compatibility.
         """
         state = self._read_json(self._state_path(team_id))
         members: dict[str, dict[str, str]] = state["members"]
         if member_name not in members:
-            members[member_name] = {"agent": member_name, "session_id": ""}
+            members[member_name] = {
+                "agent": agent or member_name,
+                "session_id": "",
+            }
         members[member_name]["session_id"] = session_id
+        if agent is not None:
+            members[member_name]["agent"] = agent
         self._atomic_write(self._state_path(team_id), state)
 
     def get_member_session_id(self, team_id: str, member_name: str) -> str | None:
