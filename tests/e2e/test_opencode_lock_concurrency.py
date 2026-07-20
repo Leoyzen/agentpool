@@ -45,6 +45,7 @@ pytestmark = [
 # ---------------------------------------------------------------------------
 
 LONG_DELAY_MODEL_CONFIG = """
+
 agents:
   test_agent:
     type: native
@@ -95,6 +96,7 @@ async def subprocess_server_long_delay(
 # ---------------------------------------------------------------------------
 
 FAST_MODEL_CONFIG = """
+
 agents:
   test_agent:
     type: native
@@ -224,7 +226,8 @@ class TestPromptAsyncNotBlockedBySync:
         self,
         subprocess_server_long_delay: SubprocessServer,
     ) -> None:
-        """While sync POST /message is running (10s model), prompt_async
+        """While sync POST /message is running (10s model), prompt_async.
+
         must return 204 within 2s — not wait for the sync message to complete.
 
         Given: a session with a 10s-delay model
@@ -278,7 +281,8 @@ class TestPromptAsyncNotBlockedBySync:
         self,
         subprocess_server_long_delay: SubprocessServer,
     ) -> None:
-        """prompt_async's user message must appear in the session while
+        """prompt_async's user message must appear in the session while.
+
         sync POST /message is still running.
 
         Given: a session with a 10s-delay model
@@ -333,14 +337,17 @@ class TestPromptAsyncNotBlockedBySync:
 
 
 class TestFinalizationAfterLockSplit:
-    """Finalization (time.completed, message persistence) must work
-    correctly when wait_for_completion runs outside the lock."""
+    """Finalization (time.completed, message persistence) must work.
+
+    correctly when wait_for_completion runs outside the lock.
+    """
 
     async def test_sync_message_sets_time_completed(
         self,
         subprocess_server_fast: SubprocessServer,
     ) -> None:
-        """After sync POST /message completes, the assistant message must
+        """After sync POST /message completes, the assistant message must.
+
         have time.completed set — even though finalization runs lock-free.
 
         Given: a session with a fast model
@@ -367,7 +374,8 @@ class TestFinalizationAfterLockSplit:
         self,
         subprocess_server_fast: SubprocessServer,
     ) -> None:
-        """After sync POST /message completes, the assistant message must
+        """After sync POST /message completes, the assistant message must.
+
         be retrievable via GET /message — proving persistence ran lock-free.
 
         Given: a session with a fast model
@@ -381,9 +389,7 @@ class TestFinalizationAfterLockSplit:
 
             await _send_message_sync(base_url, client, session_id, "hello")
 
-            messages = await _wait_for_message_count(
-                base_url, client, session_id, 2, timeout=5.0
-            )
+            messages = await _wait_for_message_count(base_url, client, session_id, 2, timeout=5.0)
             assert len(messages) >= 2, (
                 f"Expected >= 2 messages after sync completion, got {len(messages)}"
             )
@@ -408,14 +414,17 @@ class TestFinalizationAfterLockSplit:
 
 
 class TestSessionCloseDuringSyncRun:
-    """Closing a session while sync POST /message is in the lock-free wait
-    phase must not deadlock or crash."""
+    """Closing a session while sync POST /message is in the lock-free wait.
+
+    phase must not deadlock or crash.
+    """
 
     async def test_close_session_while_sync_running_no_deadlock(
         self,
         subprocess_server_long_delay: SubprocessServer,
     ) -> None:
-        """DELETE /session while sync POST /message is running must
+        """DELETE /session while sync POST /message is running must.
+
         complete without deadlock.
 
         Given: a session with a 10s-delay model
@@ -441,18 +450,15 @@ class TestSessionCloseDuringSyncRun:
             resp = await client.delete(f"{base_url}/session/{session_id}")
             elapsed = time.monotonic() - start
 
-            assert resp.status_code in (200, 204), (
-                f"DELETE /session returned {resp.status_code}"
-            )
+            assert resp.status_code in (200, 204), f"DELETE /session returned {resp.status_code}"
             assert elapsed < 5.0, (
-                f"DELETE /session took {elapsed:.2f}s — possible deadlock "
-                f"with sync message lock."
+                f"DELETE /session took {elapsed:.2f}s — possible deadlock with sync message lock."
             )
 
             # Sync task should complete (not hang)
             try:
                 await asyncio.wait_for(sync_task, timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pytest.fail(
                     "sync POST /message did not complete within 5s after "
                     "session close — possible deadlock."

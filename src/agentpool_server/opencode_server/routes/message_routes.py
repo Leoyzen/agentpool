@@ -57,6 +57,10 @@ if TYPE_CHECKING:
     from pydantic_ai import UserContent
 
     from agentpool.common_types import PathReference
+    from agentpool.orchestrator.session_pool import SessionPool
+    from agentpool_server.opencode_server.session_pool_integration import (
+        OpenCodeSessionPoolIntegration,
+    )
     from agentpool_server.opencode_server.state import ServerState
 
 
@@ -71,14 +75,14 @@ class _MessageRunContext:
     assistant_msg: AssistantMessage
     assistant_msg_with_parts: MessageWithParts
     adapter: OpenCodeStreamAdapter
-    session_pool: Any
-    integration: Any
+    session_pool: SessionPool
+    integration: OpenCodeSessionPoolIntegration | None
     now: int
     mark_idle: bool
     message_id: str | None  # None = message was queued, no waiting needed
     run_failed: bool = False
     adapter_task: asyncio.Task[None] | None = None
-    event_stream: Any | None = None
+    event_stream: asyncio.Queue[Any] | None = None
 
 
 async def _ensure_assistant_in_state(
@@ -698,7 +702,14 @@ async def _wait_and_finalize(  # noqa: PLR0915
                 with contextlib.suppress(asyncio.CancelledError):
                     await ctx.adapter_task
             if ctx.event_stream is not None:
-                await session_pool.event_bus.unsubscribe(session_id, ctx.event_stream)
+                try:
+                    await session_pool.event_bus.unsubscribe(session_id, ctx.event_stream)
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to unsubscribe from event bus during cleanup",
+                        session_id=session_id,
+                        exc_info=True,
+                    )
 
         # Finalize based on run outcome
         if not ctx.run_failed:
