@@ -102,9 +102,7 @@ def _create(prefix: PrefixType, *, descending: bool = False) -> str:
         now = ~now & 0xFFFFFFFFFFFFFFFF  # Invert for descending order (64 bits)
 
     # Encode as 8 bytes (64 bits), big-endian
-    time_bytes = bytearray(8)
-    for i in range(8):
-        time_bytes[i] = (now >> (56 - 8 * i)) & 0xFF
+    time_bytes = now.to_bytes(8, "big")
 
     time_hex = time_bytes.hex()
 
