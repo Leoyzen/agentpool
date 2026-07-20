@@ -578,6 +578,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         lines = [
             f"Team: {team_name}",
             f"Status: {status}",
+            f"Team ID: {team_id}",
+            f"State dir: {team_state._team_dir(team_id)}",
             f"Members ({len(members)}):",
             *member_lines,
         ]
