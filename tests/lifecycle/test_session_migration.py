@@ -28,21 +28,18 @@ from unittest.mock import AsyncMock, MagicMock
 import anyio
 import pytest
 
-from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     RunStartedEvent,
     StreamCompleteEvent,
 )
 from agentpool.lifecycle import (
     DirectChannel,
-    Feedback,
     MemoryJournal,
     ProtocolChannel,
     ProtocolTrigger,
 )
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.event_bus import EventBus
-from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.session_controller import (
     SessionController,
     SessionState,

@@ -143,8 +143,7 @@ async def test_inflight_steer_single_message() -> None:
     mock_agent_run.enqueue = MagicMock()
 
     def create_turn(**kwargs: Any) -> Any:
-        turn = _blocking_stub_turn(block_event=block_event)
-        return turn
+        return _blocking_stub_turn(block_event=block_event)
 
     mock_agent = MagicMock()
     mock_agent.create_turn = create_turn
@@ -224,9 +223,7 @@ async def test_inflight_steer_multiple_messages() -> None:
 
         # All 3 steers should be enqueued.
         assert mock_agent_run.enqueue.call_count == 3
-        enqueued_msgs = [
-            call.args[0] for call in mock_agent_run.enqueue.call_args_list
-        ]
+        enqueued_msgs = [call.args[0] for call in mock_agent_run.enqueue.call_args_list]
         assert enqueued_msgs == ["msg1", "msg2", "msg3"]
         # All with asap priority.
         for call in mock_agent_run.enqueue.call_args_list:
@@ -263,7 +260,7 @@ async def test_queued_steer_delivered_to_next_turn() -> None:
     mock_agent = MagicMock()
     mock_agent.create_turn = create_turn
 
-    handle, _bus, captured = _make_handle(agent=mock_agent)
+    handle, _bus, _captured = _make_handle(agent=mock_agent)
 
     gen = handle.start("tasks")
 
@@ -285,9 +282,9 @@ async def test_queued_steer_delivered_to_next_turn() -> None:
         await anyio.sleep(0.02)
 
         # The steer message should be in queued_steer_messages.
-        assert any(
-            "queued steer" in str(m) for m in handle.run_ctx.queued_steer_messages
-        ), "steer message should be queued in run_ctx.queued_steer_messages"
+        assert any("queued steer" in str(m) for m in handle.run_ctx.queued_steer_messages), (
+            "steer message should be queued in run_ctx.queued_steer_messages"
+        )
 
         # Release turn 1 to complete.
         block_event.set()

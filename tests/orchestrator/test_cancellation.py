@@ -34,7 +34,9 @@ from agentpool.agents.events import (
     ToolCallStartEvent,
 )
 from agentpool.agents.native_agent.turn import NativeTurn
-from agentpool.messaging import ChatMessage
+from agentpool.lifecycle.comm_channel import DirectChannel
+from agentpool.lifecycle.journal import MemoryJournal
+from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionPool, SessionState
 from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.session_pool_messaging import SessionPoolMessagingMixin
@@ -116,11 +118,13 @@ def _make_run_handle(
     if agent is None:
         agent = MagicMock()
         agent.create_turn = MagicMock(return_value=_StubTurn())
+        agent.name = "test-agent"
+        agent.conversation = MessageHistory()
     if event_bus is None:
         event_bus = AsyncMock()
     if session is None:
-        session = MagicMock()
-        session.turn_lock = asyncio.Lock()
+        session = SessionState(session_id=session_id, agent_name="test-agent")
+        session._comm_channel = DirectChannel(MemoryJournal())
     handle = RunHandle(
         run_id=run_id,
         session_id=session_id,
@@ -230,8 +234,8 @@ async def test_new_runhandle_bridges_conversation() -> None:
     # Mock agent with conversation history
     agent = MagicMock()
     agent.AGENT_TYPE = "native"
-    agent.conversation = MagicMock()
-    agent.conversation.get_history.return_value = [chat_msg1, chat_msg2]
+    agent.conversation = MessageHistory()
+    agent.conversation.add_chat_messages([chat_msg1, chat_msg2])
 
     # Use real EventBus and SessionState
     event_bus = EventBus()
@@ -439,8 +443,8 @@ async def test_multi_turn_preserves_context_via_consume_run() -> None:
 
     agent = MagicMock()
     agent.AGENT_TYPE = "native"
-    agent.conversation = MagicMock()
-    agent.conversation.get_history.return_value = [chat_msg, chat_msg2]
+    agent.conversation = MessageHistory()
+    agent.conversation.add_chat_messages([chat_msg, chat_msg2])
     agent.create_turn = MagicMock(
         return_value=_StubTurn(
             events=[_stream_complete_event()],
@@ -548,8 +552,8 @@ async def test_bridged_history_injects_cancelled_tool_results() -> None:
 
     agent = MagicMock()
     agent.AGENT_TYPE = "native"
-    agent.conversation = MagicMock()
-    agent.conversation.get_history.return_value = [chat_msg1, chat_msg2]
+    agent.conversation = MessageHistory()
+    agent.conversation.add_chat_messages([chat_msg1, chat_msg2])
 
     event_bus = EventBus()
     session = SessionState(
@@ -660,10 +664,9 @@ async def test_cancelled_error_cleanup_in_process_prompt() -> None:
     """
     event_bus = EventBus()
     mixin: Any = SessionPoolMessagingMixin.__new__(SessionPoolMessagingMixin)
-    session = MagicMock()
+    session = SessionState(session_id="test-session", agent_name="test-agent")
     session.is_closing = False
     session.current_run_id = None
-    session._request_lock = asyncio.Lock()
     controller = MagicMock()
     controller.get_session = MagicMock(return_value=session)
     controller.get_or_create_session = AsyncMock(return_value=(session, True))
@@ -708,10 +711,9 @@ async def test_cancelled_error_cleanup_in_run_stream() -> None:
     """
     event_bus = EventBus()
     mixin: Any = SessionPoolRunsMixin.__new__(SessionPoolRunsMixin)
-    session = MagicMock()
+    session = SessionState(session_id="test-session", agent_name="test-agent")
     session.is_closing = False
     session.current_run_id = None
-    session._request_lock = asyncio.Lock()
     controller = MagicMock()
     controller.get_session = MagicMock(return_value=session)
     controller.get_or_create_session = AsyncMock(return_value=(session, True))
@@ -925,9 +927,7 @@ async def test_cancel_then_new_prompt_full_flow(minimal_pool: AgentPool) -> None
         second_handle = session_pool._get_active_run_handle(session_id)
         if second_handle is not None and second_handle is not first_handle:
             pass
-    assert first_handle.complete_event.is_set(), (
-        "First RunHandle should be done after cancel"
-    )
+    assert first_handle.complete_event.is_set(), "First RunHandle should be done after cancel"
     first_handle.close()
     await asyncio.sleep(0.1)
 
@@ -1024,9 +1024,7 @@ async def test_double_cancel(minimal_pool: AgentPool) -> None:
     pre_events = await _drain_queue(queue)
     pre_types = [type(_unwrap_event(e)) for e in pre_events]
     assert RunFailedEvent in pre_types, f"Expected RunFailedEvent, got: {pre_types}"
-    assert first_handle.complete_event.is_set(), (
-        "RunHandle should be done after double cancel"
-    )
+    assert first_handle.complete_event.is_set(), "RunHandle should be done after double cancel"
     await asyncio.wait_for(session_pool.send_message(session_id, "second prompt"), timeout=30.0)
     post_events = await _collect_events_until(queue, StreamCompleteEvent)
     post_types = [type(_unwrap_event(e)) for e in post_events]
@@ -1153,9 +1151,7 @@ async def test_cancel_during_tool_execution(minimal_pool: AgentPool) -> None:
     assert RunFailedEvent in event_types, (
         f"Expected RunFailedEvent after cancel, got: {event_types}"
     )
-    assert first_handle.complete_event.is_set(), (
-        "RunHandle should be done after cancel"
-    )
+    assert first_handle.complete_event.is_set(), "RunHandle should be done after cancel"
     first_handle.close()
     await asyncio.sleep(0.1)
 

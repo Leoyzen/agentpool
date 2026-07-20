@@ -20,7 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentpool.agents.events import RunFailedEvent, RunStartedEvent, StreamCompleteEvent
-from agentpool.lifecycle import DirectChannel, MemoryJournal, RunState
+from agentpool.lifecycle import DirectChannel, MemoryJournal
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventEnvelope
 from agentpool.orchestrator.turn import Turn

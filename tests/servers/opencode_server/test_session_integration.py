@@ -26,7 +26,6 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-from agentpool.lifecycle import RunState
 from agentpool.lifecycle.types import DeliveryMode
 from agentpool.orchestrator.core import SessionPool
 from agentpool.sessions.models import SessionData

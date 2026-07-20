@@ -143,9 +143,7 @@ class SessionControllerRunsMixin:
                     agent = current_handle.agent
                     if agent is None:
                         break
-                    current_handle = self._create_per_prompt_handle(
-                        session, agent, next_prompt
-                    )
+                    current_handle = self._create_per_prompt_handle(session, agent, next_prompt)
                     current_prompt = next_prompt
                     # Loop continues — execute the next turn.
 

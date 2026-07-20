@@ -24,7 +24,6 @@ Covers 12 scenarios:
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 import warnings
@@ -43,9 +42,10 @@ from agentpool.lifecycle import (
     MemoryJournal,
     ProtocolChannel,
 )
-from agentpool.messaging import ChatMessage
+from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.orchestrator.core import EventBus, SessionPool
 from agentpool.orchestrator.run import RunHandle
+from agentpool.orchestrator.session_controller import SessionState
 from agentpool.orchestrator.turn import Turn
 
 
@@ -80,15 +80,13 @@ def _make_handle(
         agent = MagicMock()
         agent.create_turn = MagicMock(return_value=_StubTurn())
         agent.name = "test-agent"
-        agent.conversation = MagicMock()
+        agent.conversation = MessageHistory()
     if event_bus is None:
         event_bus = AsyncMock()
     if session is None:
-        from agentpool.orchestrator.session_controller import SessionState
-
         session = SessionState(session_id="test-session", agent_name="test-agent")
     run_ctx = AgentRunContext(session_id="test-session")
-    handle = RunHandle(
+    return RunHandle(
         run_id="test-run",
         session_id="test-session",
         agent_type="native",
@@ -97,7 +95,6 @@ def _make_handle(
         session=session,
         run_ctx=run_ctx,
     )
-    return handle
 
 
 def _make_protocol_channel(
@@ -296,7 +293,7 @@ async def test_receive_request_returns_str_or_none() -> None:
     assert result is None
 
     # Existing session → str (message_id).
-    mock_session = MagicMock()
+    mock_session = SessionState(session_id="sess-1", agent_name="test-agent")
     mock_agent = MagicMock()
     session_pool.sessions.get_session = MagicMock(return_value=mock_session)  # type: ignore[method-assign]
     session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=mock_agent)  # type: ignore[method-assign]
@@ -372,7 +369,7 @@ async def test_opencode_delivery_mode_mapping() -> None:
     pool = _make_mock_pool()
     session_pool = SessionPool(pool=pool)
 
-    mock_session = MagicMock()
+    mock_session = SessionState(session_id="s", agent_name="test-agent")
     mock_agent = MagicMock()
     session_pool.sessions.get_session = MagicMock(return_value=mock_session)  # type: ignore[method-assign]
     session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=mock_agent)  # type: ignore[method-assign]
@@ -451,7 +448,7 @@ async def test_send_message_steer_mode_on_active_session() -> None:
     pool = _make_mock_pool()
     session_pool = SessionPool(pool=pool)
 
-    mock_session = MagicMock()
+    mock_session = SessionState(session_id="s", agent_name="test-agent")
     mock_session.current_run_id = "run-1"
     mock_session.is_closing = False
     mock_agent = MagicMock()

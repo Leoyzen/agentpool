@@ -36,7 +36,7 @@ import pytest
 
 from agentpool.agents.events import StreamCompleteEvent
 from agentpool.lifecycle import DirectChannel, MemoryJournal
-from agentpool.messaging import ChatMessage
+from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.session_controller import SessionState
 from agentpool.orchestrator.turn import Turn
@@ -87,8 +87,7 @@ def _make_run_handle(
         agent = MagicMock()
         agent.create_turn = MagicMock(return_value=_StubTurn())
         agent.name = "test-agent"
-        agent.conversation = MagicMock()
-        agent.conversation.add_chat_messages = MagicMock()
+        agent.conversation = MessageHistory()
     if event_bus is None:
         event_bus = AsyncMock()
     if session is None:
@@ -158,8 +157,7 @@ async def test_close_while_running_lets_turn_finish() -> None:
     agent = MagicMock()
     agent.create_turn = MagicMock(return_value=turn)
     agent.name = "test-agent"
-    agent.conversation = MagicMock()
-    agent.conversation.add_chat_messages = MagicMock()
+    agent.conversation = MessageHistory()
 
     handle = _make_run_handle(agent=agent)
 

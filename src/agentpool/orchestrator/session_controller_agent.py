@@ -335,15 +335,15 @@ class SessionControllerAgentMixin:
 
         # Create ProtocolChannel when EventBus is available (protocol
         # server sessions). Otherwise use DirectChannel (standalone).
-        journal: MemoryJournal | None = None
-        comm_channel: ProtocolChannel | DirectChannel | None = None
+        journal = MemoryJournal()
         if event_bus is not None:
-            journal = MemoryJournal()
-            comm_channel = ProtocolChannel(
+            comm_channel: ProtocolChannel | DirectChannel = ProtocolChannel(
                 journal=journal,
                 event_bus=event_bus,
                 session_id=session.session_id,
             )
+        else:
+            comm_channel = DirectChannel(journal)
 
         # Create SnapshotStore (in-memory for now; durable via
         # agent._lifecycle_config is handled separately).

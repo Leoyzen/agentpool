@@ -19,10 +19,10 @@ import pytest
 
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
-    StateUpdate,
     StreamCompleteEvent,
 )
 from agentpool.lifecycle import (
+    DirectChannel,
     DurableJournal,
     DurableSnapshotStore,
     MemoryJournal,
@@ -31,7 +31,7 @@ from agentpool.lifecycle import (
     ToolExecutionRecord,
 )
 from agentpool.lifecycle.journal import _detect_inflight_turn, _extract_turn_id
-from agentpool.messaging import ChatMessage
+from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.session_controller import SessionState
 from agentpool.orchestrator.turn import HookAwareTurn, Turn
@@ -105,27 +105,24 @@ def _make_run_handle(
     if agent is None:
         agent = MagicMock()
         agent.create_turn = MagicMock(return_value=_StubTurn())
+        agent.name = "test-agent"
+        agent.conversation = MessageHistory()
     if event_bus is None:
         event_bus = AsyncMock()
-    if session is None:
-        session = SessionState(session_id=session_id, agent_name="test-agent")
-        session._comm_channel = MagicMock()
-        session._comm_channel.publishes_to_event_bus = False
-        session._comm_channel.publish = AsyncMock()
-        session._comm_channel.on_state_change = MagicMock()
     # Extract lifecycle kwargs that used to go to RunHandle.
     journal = kwargs.pop("_journal", None)
     snapshot_store = kwargs.pop("_snapshot_store", None)
     recover_strategy = kwargs.pop("_recover_strategy", None)
-    if journal is not None:
-        session._journal = journal
-        # Also set on run_handle dynamically for _log_tool_execution
-        # (turn.py accesses run_handle._journal).
+    if session is None:
+        session = SessionState(session_id=session_id, agent_name="test-agent")
+        # Use the provided journal if given, else a fresh MemoryJournal.
+        chan_journal = journal if journal is not None else MemoryJournal()
+        session._comm_channel = DirectChannel(chan_journal)
     if snapshot_store is not None:
         session._snapshot_store = snapshot_store
     if recover_strategy is not None:
         session._recover_strategy = recover_strategy
-    handle = RunHandle(
+    return RunHandle(
         run_id=run_id,
         session_id=session_id,
         agent_type=agent_type,
@@ -134,10 +131,6 @@ def _make_run_handle(
         session=session,
         **kwargs,
     )
-    # Set _journal on handle for _log_tool_execution (turn.py line 258).
-    if journal is not None:
-        handle._journal = journal  # type: ignore[attr-defined]
-    return handle
 
 
 async def _consume_gen(gen: Any) -> list[Any]:
@@ -380,8 +373,7 @@ async def test_mark_interrupted_skips_inflight_turn():
     agent = MagicMock()
     agent.create_turn = MagicMock(return_value=turn)
     agent.name = "test"
-    agent.conversation = MagicMock()
-    agent.conversation.add_chat_messages = MagicMock()
+    agent.conversation = MessageHistory()
     handle = _make_run_handle(
         agent=agent,
         _journal=journal,
@@ -428,8 +420,7 @@ async def test_mark_interrupted_uses_new_prompt():
         side_effect=lambda prompts, run_ctx, message_history: _CapturingTurn(prompts),
     )
     agent.name = "test"
-    agent.conversation = MagicMock()
-    agent.conversation.add_chat_messages = MagicMock()
+    agent.conversation = MessageHistory()
 
     handle = _make_run_handle(
         agent=agent,
@@ -502,15 +493,11 @@ async def test_retry_requeues_inflight_prompt():
         side_effect=lambda prompts, run_ctx, message_history: _CapturingTurn(prompts),
     )
     agent.name = "test"
-    agent.conversation = MagicMock()
-    agent.conversation.add_chat_messages = MagicMock()
+    agent.conversation = MessageHistory()
 
     session = SessionState(session_id="test-session", agent_name="test")
-    session._comm_channel = MagicMock()
-    session._comm_channel.publishes_to_event_bus = False
-    session._comm_channel.publish = AsyncMock()
-    session._comm_channel.on_state_change = MagicMock()
     session._journal = journal
+    session._comm_channel = DirectChannel(journal)
     session._snapshot_store = snapshot_store
     session._recover_strategy = "retry"
     session._recovered_inflight_turn_id = resume_result.inflight_turn_id
@@ -577,8 +564,7 @@ async def test_retry_recovers_tool_executions():
     agent = MagicMock()
     agent.create_turn = MagicMock(return_value=turn)
     agent.name = "test"
-    agent.conversation = MagicMock()
-    agent.conversation.add_chat_messages = MagicMock()
+    agent.conversation = MessageHistory()
 
     handle = _make_run_handle(
         agent=agent,
@@ -630,8 +616,7 @@ async def test_retry_falls_back_when_no_prompt_in_snapshot():
         side_effect=lambda prompts, run_ctx, message_history: _CapturingTurn(prompts),
     )
     agent.name = "test"
-    agent.conversation = MagicMock()
-    agent.conversation.add_chat_messages = MagicMock()
+    agent.conversation = MessageHistory()
 
     handle = _make_run_handle(
         agent=agent,

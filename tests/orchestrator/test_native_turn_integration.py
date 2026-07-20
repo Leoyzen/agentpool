@@ -370,5 +370,3 @@ async def test_run_aborted_error_sets_run_ctx_cancelled() -> None:
             "_handle_turn_result() returns 'continue' and the RunLoop goes "
             "idle instead of continuing to execute queued messages."
         )
-
-
