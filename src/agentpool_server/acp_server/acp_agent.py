@@ -499,7 +499,14 @@ class AgentPoolACPAgent(ACPAgent):
                             session_id=params.session_id,
                         )
                 if stored_data is not None and stored_data.status == "closed":
-                    raise RequestError.resource_not_found(params.session_id) from None  # noqa: TRY301
+                    # Allow loading closed sessions for read-only history
+                    # replay (e.g. viewing team member conversations after
+                    # team_delete).  resume_session will load the
+                    # conversation history without starting a new run.
+                    logger.info(
+                        "Loading closed session for history replay",
+                        session_id=params.session_id,
+                    )
                 session = await self.session_manager.resume_session(
                     session_id=params.session_id,
                     client=self.client,
