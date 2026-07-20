@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
 
     from agentpool.sessions.models import SessionData
+    from agentpool_server.opencode_server.models.message import MessageRequest, MessageWithParts
 
 
 def _make_functional_event_bus() -> Mock:
@@ -86,6 +87,36 @@ def _make_functional_event_bus() -> Mock:
     bus.unsubscribe = AsyncMock(side_effect=_unsubscribe)
     bus.publish = AsyncMock(side_effect=_publish)
     return bus
+
+
+async def run_message_phases(
+    session_id: str,
+    request: MessageRequest,
+    state: ServerState,
+    user_msg_id: str,
+    user_msg_with_parts: MessageWithParts,
+) -> Any:
+    """Run phases 1 and 2 of message processing without the per-session lock.
+
+    This is the test equivalent of ``_process_message()`` but without the
+    lock (unit tests don't need lock serialization) and without phase 3
+    (``_mark_session_idle_safe`` is a lock concern, not relevant to unit
+    tests).  It runs:
+
+    1. ``_route_message_locked`` — setup + route
+    2. ``_wait_and_finalize`` — wait + finalize
+
+    Returns the ``_MessageRunContext`` so callers that need phase 3 can
+    call ``_mark_session_idle_safe`` explicitly.
+    """
+    from agentpool_server.opencode_server.routes.message_routes import (
+        _route_message_locked,
+        _wait_and_finalize,
+    )
+
+    ctx = await _route_message_locked(session_id, request, state, user_msg_id, user_msg_with_parts)
+    await _wait_and_finalize(session_id, state, ctx)
+    return ctx
 
 
 # =============================================================================

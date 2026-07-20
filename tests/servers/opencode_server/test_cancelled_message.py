@@ -36,8 +36,8 @@ from agentpool_server.opencode_server.models.message import (
     MessageAbortedError,
     MessageWithParts,
 )
-from agentpool_server.opencode_server.routes.message_routes import _process_message_locked
 from agentpool_server.opencode_server.state import ServerState
+from tests.servers.opencode_server.conftest import run_message_phases
 
 
 pytestmark = pytest.mark.integration
@@ -139,7 +139,7 @@ def cancellable_mock_agent():
     session_pool.send_message = AsyncMock(return_value=run_handle)
     # Ensure get_messages returns [] so get_messages_for_session falls back to state.messages
     session_pool.get_messages = AsyncMock(return_value=[])
-    # Set up a mock event_bus so _process_message_locked can subscribe
+    # Set up a mock event_bus so run_message_phases can subscribe
     session_pool.event_bus = Mock()
     from tests._helpers.mock_stream import EmptyReceiveStream
 
@@ -172,7 +172,7 @@ def cancelled_test_state(tmp_project_dir, cancellable_mock_agent):
     state.todos = {}
     state.input_providers = {}
     state.pending_questions = {}
-    # No session_pool_integration — _process_message_locked will use the
+    # No session_pool_integration — run_message_phases will use the
     # fallback path via session_pool.sessions.get_or_create_session.
     return state
 
@@ -203,7 +203,7 @@ def _setup_session(state: ServerState, session_id: str) -> None:
     state.sessions[session_id] = session
     state.messages[session_id] = []
     # Session status is no longer tracked via state.session_status.
-    # _process_message_locked uses set_session_status() which needs
+    # run_message_phases uses set_session_status() which needs
     # session_pool_integration with _status_bridges.
     state.agent.session_id = session_id
 
@@ -252,7 +252,7 @@ class TestCancelledMessageHandling:
         state.messages[session_id].append(user_msg_with_parts)
 
         # Process message — agent will raise CancelledError
-        await _process_message_locked(
+        await run_message_phases(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
 
@@ -287,7 +287,7 @@ class TestCancelledMessageHandling:
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
         state.messages[session_id].append(user_msg_with_parts)
 
-        await _process_message_locked(
+        await run_message_phases(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
 
@@ -331,7 +331,7 @@ class TestCancelledMessageHandling:
 
         state.broadcast_event = tracking_broadcast  # type: ignore[method-assign]
 
-        await _process_message_locked(
+        await run_message_phases(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
 
@@ -383,7 +383,7 @@ class TestCancelledMessageHandling:
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
         state.messages[session_id].append(user_msg_with_parts)
 
-        await _process_message_locked(
+        await run_message_phases(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
 
@@ -415,7 +415,7 @@ class TestCancelledMessageHandling:
         # First message: gets cancelled
         user_msg_id_1, user_msg_1 = _create_user_message(session_id, sample_message_request)
         state.messages[session_id].append(user_msg_1)
-        await _process_message_locked(
+        await run_message_phases(
             session_id, sample_message_request, state, user_msg_id_1, user_msg_1
         )
 
@@ -427,7 +427,7 @@ class TestCancelledMessageHandling:
         )
         user_msg_id_2, user_msg_2 = _create_user_message(session_id, second_request)
         state.messages[session_id].append(user_msg_2)
-        await _process_message_locked(session_id, second_request, state, user_msg_id_2, user_msg_2)
+        await run_message_phases(session_id, second_request, state, user_msg_id_2, user_msg_2)
 
         # Simulate the TUI's pending memo logic
         all_messages = state.messages[session_id]
@@ -471,7 +471,7 @@ class TestCancelledMessageHandling:
         state.messages[session_id].append(user_msg_with_parts)
 
         # Process message — agent will raise CancelledError
-        await _process_message_locked(
+        await run_message_phases(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
 

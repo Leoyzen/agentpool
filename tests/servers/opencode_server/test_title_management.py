@@ -1,13 +1,13 @@
 """Red flag test: title generation must NOT block agent message processing.
 
 Bug: On the first message in a session, ``_maybe_generate_title()`` is
-``await``-ed inside ``_process_message_locked()`` *before* the agent even
+``await``-ed inside ``run_message_phases()`` *before* the agent even
 starts streaming.  Because title generation does a full LLM round-trip
 (``Agent.run()``) with **no timeout**, a slow or unresponsive title model
 blocks the entire message response.
 
 The fix makes title generation fire-and-forget (background task) in
-``_process_message_locked`` and adds a 15-second timeout in
+``_run_message_locked`` and adds a 15-second timeout in
 ``_generate_title_core`` as a safety net.
 
 These tests should FAIL before the fix and PASS afterwards.
@@ -35,10 +35,10 @@ from agentpool_server.opencode_server.models import (
 from agentpool_server.opencode_server.models.message import MessageRequest, TimeCreated
 from agentpool_server.opencode_server.routes.message_routes import (
     _maybe_generate_title,
-    _process_message_locked,
 )
 from agentpool_server.opencode_server.session_pool_integration import get_messages_for_session
 from agentpool_server.opencode_server.state import ServerState
+from tests.servers.opencode_server.conftest import run_message_phases
 
 
 pytestmark = pytest.mark.integration
@@ -76,14 +76,14 @@ def _make_state(tmp_path: Any) -> ServerState:
     env.cwd = str(tmp_path)
     agent.env = env
 
-    # Set up session pool mocks for _process_message_locked
+    # Set up session pool mocks for run_message_phases
     pool.session_pool = Mock()
     pool.session_pool.sessions = Mock()
     pool.session_pool.sessions.get_or_create_session = AsyncMock(return_value=(Mock(), True))
     pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=Mock())
+    pool.session_pool.sessions.get_session = Mock(return_value=None)
     _run_handle = Mock()
-    _run_handle.complete_event = Mock()
-    _run_handle.complete_event.wait = AsyncMock()
+    _run_handle.complete_event = asyncio.Event()
     pool.session_pool.send_message = AsyncMock(return_value=_run_handle)
     pool.session_pool.event_bus = Mock()
     from tests._helpers.mock_stream import EmptyReceiveStream
@@ -94,7 +94,7 @@ def _make_state(tmp_path: Any) -> ServerState:
     state = ServerState(working_dir=str(tmp_path), agent=agent)
     # Initialize backward-compat dicts removed from ServerState dataclass
     state.messages = {}
-    # No session_pool_integration — _process_message_locked will use the
+    # No session_pool_integration — run_message_phases will use the
     # fallback path via session_pool.sessions.get_or_create_session.
     return state
 
@@ -157,18 +157,18 @@ class TestTitleGenerationDoesNotBlockAgent:
     """Title generation must not delay agent response start.
 
     The fix changes ``await _maybe_generate_title()`` to a fire-and-forget
-    background task in ``_process_message_locked``.  We verify this by
+    background task in ``_run_message_locked``.  We verify this by
     measuring wall-clock time.
     """
 
-    async def test_process_message_locked_returns_fast_despite_slow_title(
+    async def test_run_message_locked_returns_fast_despite_slow_title(
         self,
         tmp_path: Any,
     ) -> None:
-        """_process_message_locked must return fast even with slow title gen.
+        """_run_message_locked must return fast even with slow title gen.
 
         We mock _maybe_generate_title to take 1.5s via asyncio.sleep.
-        If _process_message_locked still ``await``s it, total >= 1.5s.
+        If _run_message_locked still ``await``s it, total >= 1.5s.
         After the fix (fire-and-forget background task), total < 0.5s.
         """
         state = _make_state(tmp_path)
@@ -214,7 +214,7 @@ class TestTitleGenerationDoesNotBlockAgent:
 
             messages = await get_messages_for_session(state, session_id)
             user_msg = messages[0]
-            await _process_message_locked(session_id, request, state, user_msg_id, user_msg)
+            await run_message_phases(session_id, request, state, user_msg_id, user_msg)
 
         elapsed = time.monotonic() - start
 
@@ -223,12 +223,12 @@ class TestTitleGenerationDoesNotBlockAgent:
 
         # RED FLAG: Before the fix, the 1.5s title delay is included.
         assert elapsed < 1.5, (
-            f"_process_message_locked took {elapsed:.2f}s — agent processing "
+            f"_run_message_locked took {elapsed:.2f}s — agent processing "
             f"is blocked by slow title generation"
         )
 
     async def test_maybe_generate_title_e2e_returns_fast(self, tmp_path: Any) -> None:
-        """End-to-end: _maybe_generate_title called from _process_message_locked.
+        """End-to-end: _maybe_generate_title called from _run_message_locked.
 
         should not block, even with a slow title model.
 
@@ -278,17 +278,17 @@ class TestTitleGenerationDoesNotBlockAgent:
 
                 messages = await get_messages_for_session(state, session_id)
                 user_msg = messages[0]
-                await _process_message_locked(session_id, request, state, user_msg_id, user_msg)
+                await run_message_phases(session_id, request, state, user_msg_id, user_msg)
 
         elapsed = time.monotonic() - start
 
         # Clean up lingering background tasks.
         await state.cleanup_tasks()
 
-        # RED FLAG: Before the fix, _process_message_locked awaits
+        # RED FLAG: Before the fix, _run_message_locked awaits
         # _maybe_generate_title which awaits _generate_title_core (2s).
         assert elapsed < 1.5, (
-            f"_process_message_locked took {elapsed:.2f}s with slow title "
+            f"_run_message_locked took {elapsed:.2f}s with slow title "
             f"model — title generation should be fire-and-forget"
         )
 
