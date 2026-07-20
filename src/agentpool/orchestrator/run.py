@@ -618,6 +618,32 @@ class RunHandle:
         self._comm_channel.attach(self)
         return recovered_prompt
 
+    def _drain_comm_feedback(
+        self,
+        feedback_steer: list[str | list[Any]],
+    ) -> None:
+        """Drain CommChannel feedback, separating steer from followup.
+
+        Steer messages go to ``feedback_steer``; followup messages go to
+        ``_message_queue``. This ensures steer is prioritized in the final
+        prompts list (``feedback_steer + _message_queue``).
+        """
+        if self._comm_channel is None:
+            return
+        while True:
+            fb = self._comm_channel.recv()
+            if fb is None:
+                break
+            if fb.is_steer:
+                if fb.content_blocks is not None:
+                    feedback_steer.append(fb.content_blocks)
+                else:
+                    feedback_steer.append(fb.content)
+            elif fb.content_blocks is not None:
+                self._message_queue.append(fb.content_blocks)
+            else:
+                self._message_queue.append(fb.content)
+
     async def _idle_loop(self) -> list[str | list[Any]]:
         """Wait for idle, drain feedback, and collect prompts for next turn.
 
@@ -626,61 +652,36 @@ class RunHandle:
         After waking, drains feedback again and returns the collected
         prompts.
 
+        Steer feedback is prioritized over followup messages, consistent
+        with ``_drain_events()``. This ensures steer messages are always
+        processed before followup messages regardless of whether the
+        handle was idle or running when the feedback was enqueued.
+
         Returns:
             List of prompts for the next turn. Empty list if closing
             with no pending messages.
         """
         self._idle_event.clear()
-        # Drain CommChannel feedback queue (ProtocolChannel) BEFORE
-        # deciding to block. Feedback may have been enqueued by
-        # steer/followup via deliver_feedback() while the loop was
-        # running (e.g., during cancel). Without this, the loop would
-        # block on _idle_event.wait() even though feedback is already
-        # available in the CommChannel.
-        if self._comm_channel is not None:
-            while True:
-                fb = self._comm_channel.recv()
-                if fb is None:
-                    break
-                if fb.content_blocks is not None:
-                    self._message_queue.append(fb.content_blocks)
-                else:
-                    self._message_queue.append(fb.content)
+        feedback_steer: list[str | list[Any]] = []
+        # Drain CommChannel feedback queue BEFORE deciding to block.
+        # Feedback may have been enqueued while the loop was running
+        # (e.g., during cancel). Without this, the loop would block on
+        # _idle_event.wait() even though feedback is already available.
+        self._drain_comm_feedback(feedback_steer)
         # Check if messages were queued during cancel/cleanup before
         # blocking. Without this, messages routed through _message_queue
         # by the cancel path would deadlock: cancel() sets _idle_event,
-        # but clear() above removes it, and wait() blocks forever with
-        # no one to re-set it.
-        if not self._message_queue:
+        # but clear() above removes it, and wait() blocks forever.
+        if not feedback_steer and not self._message_queue:
             await self._idle_event.wait()
             if self._closing:
-                # Drain any feedback from CommChannel before checking
-                # for pending messages.
-                if self._comm_channel is not None:
-                    while True:
-                        fb = self._comm_channel.recv()
-                        if fb is None:
-                            break
-                        if fb.content_blocks is not None:
-                            self._message_queue.append(fb.content_blocks)
-                        else:
-                            self._message_queue.append(fb.content)
-                # Process pending messages before exiting so close()
-                # with queued followups are handled as final Turns.
-                if not self._message_queue:
+                self._drain_comm_feedback(feedback_steer)
+                if not feedback_steer and not self._message_queue:
                     return []
         # Drain CommChannel feedback queue again after waking from
         # idle (feedback may have arrived during the wait).
-        if self._comm_channel is not None:
-            while True:
-                fb = self._comm_channel.recv()
-                if fb is None:
-                    break
-                if fb.content_blocks is not None:
-                    self._message_queue.append(fb.content_blocks)
-                else:
-                    self._message_queue.append(fb.content)
-        prompts = list(self._message_queue)
+        self._drain_comm_feedback(feedback_steer)
+        prompts = feedback_steer + list(self._message_queue)
         self._message_queue.clear()
         return prompts
 

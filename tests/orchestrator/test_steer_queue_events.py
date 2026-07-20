@@ -1022,3 +1022,72 @@ async def test_message_history_accumulates_across_three_turns() -> None:
     assert "m2" in all_history_text
     assert "resp1" in all_history_text
     assert "resp2" in all_history_text
+
+
+async def test_steer_prioritized_over_followup_when_idle() -> None:
+    """Steer is prioritized over followup even when handle is idle.
+
+    This test verifies the fix for a behavioral inconsistency where
+    _idle_loop used FIFO ordering (unlike _drain_events which prioritizes
+    steer). After the fix, both paths should prioritize steer.
+
+    Given: A RunHandle with ProtocolChannel, idle after turn 1.
+    When: followup("followup msg") then steer("steer msg") are called
+        while idle.
+    Then: The next turn's prompts have "steer msg" BEFORE "followup msg".
+    """
+    from pydantic_ai.models.test import TestModel
+
+    from agentpool import Agent
+
+    model = TestModel(custom_output_text="done")
+    agent = Agent(name="test-agent", model=model, system_prompt="test")
+    captured_prompts: list[list[Any]] = []
+    original_create_turn = agent.create_turn
+
+    def _capturing_create_turn(**kwargs: Any) -> Any:
+        captured_prompts.append(list(kwargs.get("prompts", [])))
+        return original_create_turn(**kwargs)
+
+    agent.create_turn = _capturing_create_turn
+
+    handle, _bus, _captured, _channel = _make_handle_with_protocol_channel(
+        agent=agent,
+    )
+
+    gen = handle.start("initial")
+
+    async with anyio.create_task_group() as tg:
+
+        async def _consume() -> None:
+            async for _event in gen:
+                pass
+
+        tg.start_soon(_consume)
+        await anyio.sleep(0.1)
+
+        # Handle is idle — call followup FIRST, then steer.
+        handle.followup("followup msg")
+        handle.steer("steer msg")
+        await anyio.sleep(0.1)
+
+        handle.close()
+        await anyio.sleep(0.1)
+
+    # Two turns: initial + one for followup+steer (coalesced).
+    assert len(captured_prompts) >= 2
+    second_prompts = captured_prompts[1]
+    steer_idx = next(
+        (i for i, p in enumerate(second_prompts) if "steer msg" in str(p)),
+        None,
+    )
+    followup_idx = next(
+        (i for i, p in enumerate(second_prompts) if "followup msg" in str(p)),
+        None,
+    )
+    assert steer_idx is not None, "steer msg not found in prompts"
+    assert followup_idx is not None, "followup msg not found in prompts"
+    assert steer_idx < followup_idx, (
+        f"Steer should be prioritized over followup even when idle: "
+        f"steer={steer_idx}, followup={followup_idx}"
+    )
