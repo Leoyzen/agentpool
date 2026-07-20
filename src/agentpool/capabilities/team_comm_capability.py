@@ -19,6 +19,8 @@ Lead-only tools (only agents with ``team_role == "lead"``):
     - team_delete: Delete the current team and close all member sessions.
     - delete_blackboard: Delete a key from the shared blackboard.
     - shutdown_request: Shut down a specific team member.
+    - team_add_member: Add a new member to an existing team.
+    - team_remove_member: Remove a member from the team.
 
     Lead-only tools are registered for all agents but filtered out for
     non-lead members by ``prepare_tools()`` before the model receives the
@@ -136,6 +138,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             self.register_tool(self.team_delete)
             self.register_tool(self.delete_blackboard)
             self.register_tool(self.shutdown_request)
+            self.register_tool(self.team_add_member)
+            self.register_tool(self.team_remove_member)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -922,6 +926,289 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         await session_pool.close_session(member_sid)
         return f"Shutdown completed for {member_name}"
 
+    async def team_add_member(  # noqa: PLR0911
+        self,
+        ctx: RunContext[Any],
+        name: str,
+        agent: str,
+        prompt: str = "",
+        lifecycle: str = "persistent",
+        notify: str | None = None,
+    ) -> str:
+        """Add a new member to an existing team (lead-only).
+
+        Args:
+            ctx: RunContext with AgentContext deps.
+            name: Display name for the new member.
+            agent: Registered agent name to use as the member.
+            prompt: Optional initial prompt to send the member. If empty,
+                the protocol template is used.
+            lifecycle: ``"persistent"`` (default) or ``"ephemeral"``.
+                Ephemeral members are auto-closed when their run completes.
+            notify: Optional message to broadcast to existing members
+                (excluding lead and the new member).
+
+        Returns:
+            Success message or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role != "lead":
+            return "Only lead can use team_add_member"
+
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return "Not in a team session"
+
+        # Check agent exists in registry.
+        if not agent_ctx.agent_registry.exists(agent):
+            return f"Agent '{agent}' not found in registry"
+
+        # Check agent is eligible.
+        if agent not in self._config.member_eligible:
+            return f"Agent '{agent}' is not eligible"
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return "Not in a team session"
+
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        # Check name not already in team state members.
+        state_path = team_state._state_path(team_id)
+        if not state_path.exists():
+            return "Team state not found"
+        state: dict[str, Any] = FileTeamState._read_json(state_path)
+        members: dict[str, dict[str, Any]] = state.get("members", {})
+        if name in members:
+            return f"Member '{name}' already exists"
+
+        # Bounds: max_members check (exclude lead from count).
+        lead_member_name = agent_ctx.session.metadata.get(
+            "team_member_name",
+            self._agent_name,
+        )
+        non_lead_count = sum(1 for mname in members if mname != lead_member_name)
+        if non_lead_count >= self._config.bounds.max_members:
+            return (
+                f"Team exceeds max_members "
+                f"({non_lead_count + 1} > {self._config.bounds.max_members})"
+            )
+
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is None:
+            return "SessionPool not available"
+
+        lead_session_id: str = agent_ctx.session.session_id
+
+        # Create child session for the new member.
+        try:
+            member_session_id = await agent_ctx.delegation.create_child_session(
+                agent,
+                parent_session_id=lead_session_id,
+                team_id=team_id,
+                team_role="member",
+                team_member_name=name,
+                description=f"Team member: {name}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            return f"Failed to create member session: {exc}"
+
+        # Register member in team state.
+        team_state.register_member(team_id, name, member_session_id)
+
+        # Send initial prompt to member.
+        from agentpool.lifecycle.types import DeliveryMode
+
+        team_name: str = state.get("team_name", "unknown")
+        initial_prompt = prompt or self._config.protocol_template.format(
+            team_name=team_name,
+            role="member",
+            member_name=name,
+        )
+        await session_pool.send_message(
+            member_session_id,
+            initial_prompt,
+            mode=DeliveryMode.QUEUE,
+        )
+
+        # Ephemeral lifecycle: schedule auto-close when run completes.
+        if lifecycle == "ephemeral":
+            base_dir = (
+                agent_ctx.team_mode_config.effective_base_dir
+                if agent_ctx.team_mode_config is not None
+                else tempfile.gettempdir()
+            )
+            self._schedule_ephemeral_cleanup(
+                session_pool,
+                member_session_id,
+                team_id,
+                name,
+                base_dir,
+            )
+
+        # Notify existing members (excluding lead and the new member).
+        if notify is not None and notify:
+            # Re-read state to get the updated members dict.
+            updated_state: dict[str, Any] = FileTeamState._read_json(
+                team_state._state_path(team_id),
+            )
+            updated_members: dict[str, dict[str, Any]] = updated_state.get(
+                "members",
+                {},
+            )
+            for existing_name, existing_info in updated_members.items():
+                if existing_name in (lead_member_name, name):
+                    continue
+                existing_sid: str = existing_info.get("session_id", "")
+                if not existing_sid:
+                    continue
+                await session_pool.send_message(
+                    existing_sid,
+                    notify,
+                    mode=DeliveryMode.QUEUE,
+                )
+
+        # Write to blackboard.
+        team_state.write_blackboard(
+            team_id,
+            f"member_update/{name}",
+            {"action": "added", "agent": agent, "lifecycle": lifecycle},
+            written_by=self._agent_name,
+        )
+
+        # Append member_session_id to session metadata.
+        team_member_sessions: list[str] = agent_ctx.session.metadata.get(
+            "team_member_sessions",
+            [],
+        )
+        team_member_sessions.append(member_session_id)
+        agent_ctx.session.metadata["team_member_sessions"] = team_member_sessions
+
+        return f"Member '{name}' added to team (lifecycle={lifecycle})"
+
+    async def team_remove_member(
+        self,
+        ctx: RunContext[Any],
+        member_name: str,
+    ) -> str:
+        """Remove a member from the team (lead-only).
+
+        Args:
+            ctx: RunContext with AgentContext deps.
+            member_name: Name of the member to remove.
+
+        Returns:
+            Success message or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role != "lead":
+            return "Only lead can use team_remove_member"
+
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return "Not in a team session"
+
+        # Cannot remove yourself.
+        lead_member_name = agent_ctx.session.metadata.get(
+            "team_member_name",
+            self._agent_name,
+        )
+        if member_name == lead_member_name:
+            return "Cannot remove yourself"
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return "Not in a team session"
+
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        member_sid = team_state.get_member_session_id(team_id, member_name)
+        if member_sid is None:
+            return f"Member '{member_name}' not found"
+
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is not None:
+            await session_pool.close_session(member_sid)
+
+        # Remove from team state: read, delete member, write back.
+        state_path = team_state._state_path(team_id)
+        if state_path.exists():
+            state: dict[str, Any] = FileTeamState._read_json(state_path)
+            members_dict: dict[str, dict[str, Any]] = state.get("members", {})
+            members_dict.pop(member_name, None)
+            state["members"] = members_dict
+            FileTeamState._atomic_write(state_path, state)
+
+        # Remove from session metadata team_member_sessions.
+        team_member_sessions: list[str] = agent_ctx.session.metadata.get(
+            "team_member_sessions",
+            [],
+        )
+        if member_sid in team_member_sessions:
+            team_member_sessions.remove(member_sid)
+            agent_ctx.session.metadata["team_member_sessions"] = team_member_sessions
+
+        # Write to blackboard.
+        team_state.write_blackboard(
+            team_id,
+            f"member_update/{member_name}",
+            {"action": "removed"},
+            written_by=self._agent_name,
+        )
+
+        return f"Member '{member_name}' removed from team"
+
+    @staticmethod
+    def _schedule_ephemeral_cleanup(
+        session_pool: Any,
+        member_session_id: str,
+        team_id: str,
+        member_name: str,
+        base_dir: str,
+    ) -> None:
+        """Poll member run state; close session when run completes.
+
+        Args:
+            session_pool: The SessionPool managing the member session.
+            member_session_id: Session ID of the ephemeral member.
+            team_id: Team ID for state cleanup.
+            member_name: Member name for state cleanup.
+            base_dir: Base directory for FileTeamState.
+        """
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        async def _poll_and_close() -> None:
+            try:
+                while True:
+                    await asyncio.sleep(5.0)
+                    session = session_pool.sessions.get_session(member_session_id)
+                    if session is None:
+                        return  # Already closed
+                    if session.current_run_id is None:
+                        # Run completed — close and remove from team state.
+                        await session_pool.close_session(member_session_id)
+                        team_state = FileTeamState(base_dir)
+                        state_path = team_state._state_path(team_id)
+                        if state_path.exists():
+                            state = team_state._read_json(state_path)
+                            members = state.get("members", {})
+                            members.pop(member_name, None)
+                            state["members"] = members
+                            team_state._atomic_write(state_path, state)
+                        return
+            except asyncio.CancelledError:
+                pass
+
+        task = asyncio.create_task(_poll_and_close())
+        _cleanup_tasks.add(task)
+
+        def _on_done(t: asyncio.Task[Any]) -> None:
+            _cleanup_tasks.discard(t)
+
+        task.add_done_callback(_on_done)
+
     # ------------------------------------------------------------------
     # AbstractCapability overrides
     # ------------------------------------------------------------------
@@ -937,6 +1224,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             "team_delete",
             "delete_blackboard",
             "shutdown_request",
+            "team_add_member",
+            "team_remove_member",
         },
     )
 
@@ -950,7 +1239,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         For non-lead members:
             - Lead-only tools (``team_create``, ``team_delete``,
-              ``delete_blackboard``, ``shutdown_request``) are removed
+              ``delete_blackboard``, ``shutdown_request``,
+              ``team_add_member``, ``team_remove_member``) are removed
               entirely so the LLM never sees them.
             - ``send_message`` has its ``to`` parameter description
               updated to remove the broadcast (``"*"``) mention, and a

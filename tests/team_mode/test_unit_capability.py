@@ -131,14 +131,14 @@ def test_skeleton_get_instructions_returns_none_when_empty_metadata() -> None:
 
 
 @pytest.mark.unit
-async def test_skeleton_get_tools_returns_12_tools_when_enabled() -> None:
+async def test_skeleton_get_tools_returns_14_tools_when_enabled() -> None:
     """Given: enabled config with T7 universal tools + T8 lead-only tools.
 
     When: get_tools() is called.
-    Then: returns 12 tools (send_message, task_create, task_list,
+    Then: returns 14 tools (send_message, task_create, task_list,
         task_update, read_blackboard, write_blackboard, list_blackboard,
         team_status, team_create, team_delete, delete_blackboard,
-        shutdown_request).
+        shutdown_request, team_add_member, team_remove_member).
     """
     config = _make_enabled_config()
     cap = TeamCommCapability(config, "worker", _make_session_metadata())
@@ -159,6 +159,8 @@ async def test_skeleton_get_tools_returns_12_tools_when_enabled() -> None:
         "team_delete",
         "delete_blackboard",
         "shutdown_request",
+        "team_add_member",
+        "team_remove_member",
     }
 
 
@@ -1545,7 +1547,7 @@ def _make_tool_def(
 
 
 def _all_tool_names() -> list[str]:
-    """Return all 12 team tool names."""
+    """Return all 14 team tool names."""
     return [
         "send_message",
         "task_create",
@@ -1559,15 +1561,17 @@ def _all_tool_names() -> list[str]:
         "team_delete",
         "delete_blackboard",
         "shutdown_request",
+        "team_add_member",
+        "team_remove_member",
     ]
 
 
 @pytest.mark.unit
 async def test_prepare_tools_lead_returns_all_tools() -> None:
-    """Given: lead agent with all 12 tool defs.
+    """Given: lead agent with all 14 tool defs.
 
     When: prepare_tools() is called.
-    Then: all 12 tool defs returned unchanged.
+    Then: all 14 tool defs returned unchanged.
     """
     config = _make_enabled_config()
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
@@ -1576,18 +1580,19 @@ async def test_prepare_tools_lead_returns_all_tools() -> None:
 
     result = await cap.prepare_tools(ctx, tool_defs)
 
-    assert len(result) == 12
+    assert len(result) == 14
     result_names = {td.name for td in result}
     assert result_names == set(_all_tool_names())
 
 
 @pytest.mark.unit
 async def test_prepare_tools_member_filters_lead_only_tools() -> None:
-    """Given: non-lead member with all 12 tool defs.
+    """Given: non-lead member with all 14 tool defs.
 
     When: prepare_tools() is called.
     Then: lead-only tools (team_create, team_delete, delete_blackboard,
-        shutdown_request) are filtered out.  8 universal tools remain.
+        shutdown_request, team_add_member, team_remove_member) are
+        filtered out.  8 universal tools remain.
     """
     config = _make_enabled_config()
     cap = TeamCommCapability(config, "worker", _make_session_metadata())
@@ -1601,6 +1606,8 @@ async def test_prepare_tools_member_filters_lead_only_tools() -> None:
     assert "team_delete" not in result_names
     assert "delete_blackboard" not in result_names
     assert "shutdown_request" not in result_names
+    assert "team_add_member" not in result_names
+    assert "team_remove_member" not in result_names
     assert len(result) == 8
     # Universal tools remain.
     for name in (
@@ -1676,7 +1683,7 @@ async def test_prepare_tools_no_session_metadata_returns_all() -> None:
 
     result = await cap.prepare_tools(ctx, tool_defs)
 
-    assert len(result) == 12
+    assert len(result) == 14
 
 
 # ---- get_instructions role-specific capabilities tests ----
@@ -1721,3 +1728,272 @@ def test_get_instructions_member_includes_individual_messaging_only() -> None:
     assert "not available" in result.lower()
     # Should NOT mention lead-only tools in capabilities section.
     assert "Your Capabilities (Lead)" not in result
+
+
+# ---- team_add_member and team_remove_member tests ----
+
+
+@pytest.mark.unit
+async def test_team_add_member_success(tmp_path: Any) -> None:
+    """Given: lead agent with initialized team and eligible agent.
+
+    When: team_add_member is called with a valid agent name.
+    Then: returns success message and creates child session.
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(
+        member_eligible=["worker", "reviewer", "editor"],
+        base_dir=str(tmp_path),
+    )
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=True)
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    mock_delegation = MagicMock()
+    mock_delegation.create_child_session = AsyncMock(return_value="child_session_new")
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+        delegation=mock_delegation,
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.team_add_member(ctx, "new_member", "editor")
+
+    assert result == "Member 'new_member' added to team (lifecycle=persistent)"
+    mock_delegation.create_child_session.assert_awaited_once()
+    mock_pool.send_message.assert_awaited_once()
+
+
+@pytest.mark.unit
+async def test_team_add_member_not_lead() -> None:
+    """Given: non-lead agent (team_role='translator').
+
+    When: team_add_member is called.
+    Then: returns "Only lead can use team_add_member".
+    """
+    ctx = _make_run_context()
+    cap = TeamCommCapability(_make_enabled_config(), "worker", _make_session_metadata())
+
+    result = await cap.team_add_member(ctx, "new_member", "worker")
+
+    assert result == "Only lead can use team_add_member"
+
+
+@pytest.mark.unit
+async def test_team_add_member_agent_not_eligible(tmp_path: Any) -> None:
+    """Given: lead agent, agent not in member_eligible.
+
+    When: team_add_member is called.
+    Then: returns "Agent '{agent}' is not eligible".
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(
+        member_eligible=["worker", "reviewer"],
+        base_dir=str(tmp_path),
+    )
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=True)
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.team_add_member(ctx, "new_member", "non_eligible")
+
+    assert "not eligible" in result
+
+
+@pytest.mark.unit
+async def test_team_add_member_duplicate_name(tmp_path: Any) -> None:
+    """Given: lead agent, member name already exists in team state.
+
+    When: team_add_member is called with existing name.
+    Then: returns "Member '{name}' already exists".
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(
+        member_eligible=["worker", "reviewer"],
+        base_dir=str(tmp_path),
+    )
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=True)
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.team_add_member(ctx, "translator_agent", "worker")
+
+    assert result == "Member 'translator_agent' already exists"
+
+
+@pytest.mark.unit
+async def test_team_add_member_with_notify(tmp_path: Any) -> None:
+    """Given: lead agent adding a member with notify message.
+
+    When: team_add_member is called with notify="New member joining".
+    Then: notify message is sent to existing members (excluding lead and new member).
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(
+        member_eligible=["worker", "reviewer", "editor"],
+        base_dir=str(tmp_path),
+    )
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=True)
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    mock_delegation = MagicMock()
+    mock_delegation.create_child_session = AsyncMock(return_value="child_session_new")
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+        delegation=mock_delegation,
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.team_add_member(
+        ctx,
+        "new_member",
+        "editor",
+        notify="New member joining",
+    )
+
+    assert "added to team" in result
+    # send_message called: 1 for initial prompt + 2 for notify (translator + reviewer)
+    assert mock_pool.send_message.await_count == 3
+
+
+@pytest.mark.unit
+async def test_team_add_member_ephemeral(tmp_path: Any) -> None:
+    """Given: lead agent adding an ephemeral member.
+
+    When: team_add_member is called with lifecycle="ephemeral".
+    Then: returns success with lifecycle=ephemeral and cleanup task scheduled.
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(
+        member_eligible=["worker", "reviewer", "editor"],
+        base_dir=str(tmp_path),
+    )
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=True)
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    mock_delegation = MagicMock()
+    mock_delegation.create_child_session = AsyncMock(return_value="child_session_new")
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+        delegation=mock_delegation,
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.team_add_member(
+        ctx,
+        "temp_member",
+        "editor",
+        lifecycle="ephemeral",
+    )
+
+    assert result == "Member 'temp_member' added to team (lifecycle=ephemeral)"
+    # Verify the member was registered in team state.
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    team_state = FileTeamState(str(tmp_path))
+    sid = team_state.get_member_session_id("team_123", "temp_member")
+    assert sid == "child_session_new"
+
+
+@pytest.mark.unit
+async def test_team_remove_member_success(tmp_path: Any) -> None:
+    """Given: lead agent with initialized team.
+
+    When: team_remove_member is called with a valid member name.
+    Then: closes the member's session and returns success.
+    """
+    _init_team(str(tmp_path))
+    mock_pool = MagicMock()
+    mock_pool.close_session = AsyncMock()
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.team_remove_member(ctx, "translator_agent")
+
+    assert result == "Member 'translator_agent' removed from team"
+    mock_pool.close_session.assert_awaited_once_with("sess_translator")
+    # Verify member removed from team state.
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    team_state = FileTeamState(str(tmp_path))
+    sid = team_state.get_member_session_id("team_123", "translator_agent")
+    assert sid is None
+
+
+@pytest.mark.unit
+async def test_team_remove_member_not_found(tmp_path: Any) -> None:
+    """Given: lead agent with initialized team.
+
+    When: team_remove_member is called with unknown member name.
+    Then: returns "Member '{name}' not found".
+    """
+    _init_team(str(tmp_path))
+    mock_pool = MagicMock()
+    mock_pool.close_session = AsyncMock()
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.team_remove_member(ctx, "nonexistent")
+
+    assert result == "Member 'nonexistent' not found"
+    mock_pool.close_session.assert_not_awaited()
+
+
+@pytest.mark.unit
+async def test_team_remove_member_is_self(tmp_path: Any) -> None:
+    """Given: lead agent tries to remove themselves.
+
+    When: team_remove_member is called with lead's own member name.
+    Then: returns "Cannot remove yourself".
+    """
+    _init_team(str(tmp_path))
+    mock_pool = MagicMock()
+    mock_pool.close_session = AsyncMock()
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.team_remove_member(ctx, "coordinator")
+
+    assert result == "Cannot remove yourself"
+    mock_pool.close_session.assert_not_awaited()
