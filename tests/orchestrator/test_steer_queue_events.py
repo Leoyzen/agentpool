@@ -330,3 +330,337 @@ async def test_steer_during_failed_turn() -> None:
         )
     assert call_count >= 2
     assert any("retry info" in str(p) for p in captured[1])
+
+
+# ---------------------------------------------------------------------------
+# In-flight steer: steer during an ACTIVE turn (RunState.RUNNING)
+# ---------------------------------------------------------------------------
+
+
+def _blocking_stub_turn(
+    *,
+    block_event: anyio.Event,
+    output: str = "done",
+) -> Any:
+    """Create a stub Turn that blocks on an event before completing.
+
+    This allows testing steer/followup during an active turn.
+    """
+    turn = MagicMock()
+
+    async def _execute() -> Any:
+        yield RunStartedEvent(session_id="test-sess", run_id="test-run")
+        await block_event.wait()
+        yield StreamCompleteEvent(
+            message=ChatMessage(content=output, role="assistant"),
+            cancelled=False,
+            session_id="test-sess",
+        )
+
+    turn.execute = _execute
+    # Simulate message_history accumulation (NativeTurn sets this).
+    turn.message_history = []
+    return turn
+
+
+async def test_inflight_steer_single_message() -> None:
+    """Steer during an active turn is enqueued to agent_run with priority='asap'.
+
+    Given: A RunHandle with a turn actively running (RunState.RUNNING).
+    When: handle.steer("in-flight msg") is called.
+    Then: agent_run.enqueue("in-flight msg", priority="asap") is called.
+    """
+    block_event = anyio.Event()
+    mock_agent_run = MagicMock()
+    mock_agent_run.enqueue = MagicMock()
+
+    def create_turn(**kwargs: Any) -> Any:
+        turn = _blocking_stub_turn(block_event=block_event)
+        # Simulate NativeTurn setting active_agent_run.
+        turn._mock_agent_run = mock_agent_run
+        return turn
+
+    mock_agent = MagicMock()
+    mock_agent.create_turn = create_turn
+
+    handle, bus, captured = _make_handle(agent=mock_agent)
+
+    events: list[Any] = []
+    gen = handle.start("initial")
+
+    async with anyio.create_task_group() as tg:
+
+        async def _consume() -> None:
+            async for event in gen:
+                events.append(event)
+
+        tg.start_soon(_consume)
+        await anyio.sleep(0.05)
+
+        # Turn is now running and blocked on block_event.
+        assert handle._run_state == RunState.RUNNING
+        # Simulate NativeTurn setting active_agent_run during turn execution.
+        handle.active_agent_run = mock_agent_run
+
+        handle.steer("in-flight msg")
+        await anyio.sleep(0.02)
+
+        # Verify enqueue was called with the steer message and asap priority.
+        mock_agent_run.enqueue.assert_called_once()
+        call_args = mock_agent_run.enqueue.call_args
+        assert call_args.args[0] == "in-flight msg"
+        assert call_args.kwargs.get("priority") == "asap"
+
+        # Release the turn to complete.
+        block_event.set()
+        await anyio.sleep(0.05)
+
+        handle.close()
+        await anyio.sleep(0.05)
+
+
+async def test_inflight_steer_multiple_messages() -> None:
+    """Multiple steers during an active turn are all enqueued to agent_run.
+
+    Given: A RunHandle with a turn actively running.
+    When: handle.steer("msg1"), steer("msg2"), steer("msg3") are called.
+    Then: agent_run.enqueue is called 3 times, each with priority="asap".
+    """
+    block_event = anyio.Event()
+    mock_agent_run = MagicMock()
+    mock_agent_run.enqueue = MagicMock()
+
+    def create_turn(**kwargs: Any) -> Any:
+        return _blocking_stub_turn(block_event=block_event)
+
+    mock_agent = MagicMock()
+    mock_agent.create_turn = create_turn
+
+    handle, bus, captured = _make_handle(agent=mock_agent)
+
+    gen = handle.start("initial")
+
+    async with anyio.create_task_group() as tg:
+
+        async def _consume() -> None:
+            async for _event in gen:
+                pass
+
+        tg.start_soon(_consume)
+        await anyio.sleep(0.05)
+
+        handle.active_agent_run = mock_agent_run
+
+        handle.steer("msg1")
+        handle.steer("msg2")
+        handle.steer("msg3")
+        await anyio.sleep(0.02)
+
+        # All 3 steers should be enqueued.
+        assert mock_agent_run.enqueue.call_count == 3
+        enqueued_msgs = [
+            call.args[0] for call in mock_agent_run.enqueue.call_args_list
+        ]
+        assert enqueued_msgs == ["msg1", "msg2", "msg3"]
+        # All with asap priority.
+        for call in mock_agent_run.enqueue.call_args_list:
+            assert call.kwargs.get("priority") == "asap"
+
+        block_event.set()
+        await anyio.sleep(0.05)
+
+        handle.close()
+        await anyio.sleep(0.05)
+
+
+# ---------------------------------------------------------------------------
+# History preservation: steer/followup does not lose conversation history
+# ---------------------------------------------------------------------------
+
+
+def _history_capturing_create_turn(
+    captured_history: list[list[Any]],
+    call_count: list[int],
+    *,
+    output: str = "done",
+    history: list[Any] | None = None,
+) -> Any:
+    """Create a create_turn factory that captures message_history.
+
+    Each call appends the message_history to captured_history.
+    The first call returns a turn with a fake message_history;
+    subsequent calls receive that history.
+    """
+
+    def create_turn(**kwargs: Any) -> Any:
+        call_count[0] += 1
+        msg_history = kwargs.get("message_history", [])
+        captured_history.append(list(msg_history))
+
+        turn = _stub_turn(output=output)
+        # Simulate NativeTurn accumulating message_history after execution.
+        # Each turn adds a user message and assistant response to history.
+        turn.message_history = [
+            *msg_history,
+            ChatMessage(content=f"user-msg-{call_count[0]}", role="user"),
+            ChatMessage(content=output, role="assistant"),
+        ]
+        return turn
+
+    return create_turn
+
+
+async def test_steer_preserves_conversation_history() -> None:
+    """Steer does not lose conversation history across turns.
+
+    Given: A RunHandle that completed turn 1 with some message history.
+    When: handle.steer("steer msg") triggers turn 2.
+    Then: Turn 2's message_history includes turn 1's messages AND the steer msg.
+    """
+    call_count = [0]
+    captured_history: list[list[Any]] = []
+
+    mock_agent = MagicMock()
+    mock_agent.create_turn = _history_capturing_create_turn(
+        captured_history, call_count,
+    )
+
+    handle, bus, captured = _make_handle(agent=mock_agent)
+
+    gen = handle.start("initial")
+
+    async with anyio.create_task_group() as tg:
+
+        async def _consume() -> None:
+            async for _event in gen:
+                pass
+
+        tg.start_soon(_consume)
+        await anyio.sleep(0.05)
+
+        handle.steer("steer msg")
+        await anyio.sleep(0.05)
+
+        handle.close()
+        await anyio.sleep(0.05)
+
+    # Two turns: initial + steer.
+    assert call_count[0] == 2
+    # Turn 1 starts with empty history.
+    assert len(captured_history[0]) == 0
+    # Turn 2 starts with turn 1's accumulated history (2 messages).
+    assert len(captured_history[1]) == 2
+    # History includes user message from turn 1.
+    history_contents = [
+        getattr(msg, "content", str(msg)) for msg in captured_history[1]
+    ]
+    assert any("user-msg-1" in str(c) for c in history_contents)
+    # Steer message appears as a prompt in turn 2.
+    assert any("steer msg" in str(p) for p in captured[1])
+
+
+async def test_followup_preserves_conversation_history() -> None:
+    """Followup does not lose conversation history across turns.
+
+    Given: A RunHandle that completed turn 1 with some message history.
+    When: handle.followup("next prompt") triggers turn 2.
+    Then: Turn 2's message_history includes turn 1's messages AND the followup.
+    """
+    call_count = [0]
+    captured_history: list[list[Any]] = []
+
+    mock_agent = MagicMock()
+    mock_agent.create_turn = _history_capturing_create_turn(
+        captured_history, call_count,
+    )
+
+    handle, bus, captured = _make_handle(agent=mock_agent)
+
+    gen = handle.start("initial")
+
+    async with anyio.create_task_group() as tg:
+
+        async def _consume() -> None:
+            async for _event in gen:
+                pass
+
+        tg.start_soon(_consume)
+        await anyio.sleep(0.05)
+
+        handle.followup("next prompt")
+        await anyio.sleep(0.05)
+
+        handle.close()
+        await anyio.sleep(0.05)
+
+    assert call_count[0] == 2
+    # Turn 1 starts with empty history.
+    assert len(captured_history[0]) == 0
+    # Turn 2 starts with turn 1's accumulated history.
+    assert len(captured_history[1]) == 2
+    history_contents = [
+        getattr(msg, "content", str(msg)) for msg in captured_history[1]
+    ]
+    assert any("user-msg-1" in str(c) for c in history_contents)
+    # Followup message appears as a prompt in turn 2.
+    assert any("next prompt" in str(p) for p in captured[1])
+
+
+# ---------------------------------------------------------------------------
+# In-flight followup: followup during an ACTIVE turn
+# ---------------------------------------------------------------------------
+
+
+async def test_inflight_followup_queued_for_next_turn() -> None:
+    """Followup during an active turn is queued and processed after turn ends.
+
+    Given: A RunHandle with a turn actively running (RunState.RUNNING).
+    When: handle.followup("queued msg") is called.
+    Then: The message is queued (not lost) and processed in the next turn
+        after the current one completes.
+    """
+    block_event = anyio.Event()
+    turn_count = 0
+
+    def create_turn(**kwargs: Any) -> Any:
+        nonlocal turn_count
+        turn_count += 1
+        if turn_count == 1:
+            return _blocking_stub_turn(block_event=block_event)
+        return _stub_turn()
+
+    mock_agent = MagicMock()
+    mock_agent.create_turn = create_turn
+
+    handle, bus, captured = _make_handle(agent=mock_agent)
+
+    gen = handle.start("initial")
+
+    async with anyio.create_task_group() as tg:
+
+        async def _consume() -> None:
+            async for _event in gen:
+                pass
+
+        tg.start_soon(_consume)
+        await anyio.sleep(0.05)
+
+        # Turn 1 is running and blocked.
+        assert handle._run_state == RunState.RUNNING
+
+        # Followup while running — should queue for next turn.
+        handle.followup("queued msg")
+        await anyio.sleep(0.02)
+
+        # Release turn 1 to complete.
+        block_event.set()
+        await anyio.sleep(0.05)
+
+        handle.close()
+        await anyio.sleep(0.05)
+
+    # Two turns: initial + followup.
+    assert turn_count == 2
+    # Turn 2's prompts include the followup message.
+    assert len(captured) >= 2
+    assert any("queued msg" in str(p) for p in captured[1])
