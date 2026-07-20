@@ -1409,3 +1409,164 @@ async def test_feedback_queue_drained_on_new_run_handle_start() -> None:
     assert session.feedback_queue.empty(), "feedback_queue was not drained by start()"
     # Steer message should be in queued_steer_messages
     assert "background task completed" in handle.run_ctx.queued_steer_messages
+
+
+@pytest.mark.unit
+async def test_multiple_steer_messages_drained_fifo_from_feedback_queue() -> None:
+    """Multiple steer messages in feedback_queue are drained in FIFO order.
+
+    When multiple background tasks complete while the session is idle,
+    all their steer messages should be enqueued to feedback_queue and
+    drained in FIFO order when the next RunHandle starts.
+    """
+    from agentpool.lifecycle import DirectChannel, Feedback, MemoryJournal
+    from agentpool.orchestrator.session_controller import SessionState
+
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=_StubTurn())
+    agent.name = "test-agent"
+    agent.conversation = MessageHistory()
+
+    session = SessionState(session_id="test-fifo", agent_name="test-agent")
+    session._comm_channel = DirectChannel(MemoryJournal())
+
+    # Enqueue 3 steer messages in FIFO order
+    for msg in ("msg1", "msg2", "msg3"):
+        session.feedback_queue.put_nowait(Feedback(content=msg, is_steer=True))
+    assert not session.feedback_queue.empty()  # pre-condition
+
+    handle = RunHandle(
+        run_id="test-fifo",
+        session_id="test-fifo",
+        agent_type="native",
+        agent=agent,
+        event_bus=AsyncMock(),
+        session=session,
+    )
+
+    events: list[Any] = []
+    gen = handle.start("hello")
+    try:
+        async with asyncio.timeout(5):
+            events.extend([event async for event in gen])
+    finally:
+        with contextlib.suppress(Exception):
+            await gen.aclose()
+
+    # All messages drained from feedback_queue
+    assert session.feedback_queue.empty(), "feedback_queue was not fully drained"
+    # Messages must appear in queued_steer_messages in FIFO order
+    assert handle.run_ctx.queued_steer_messages == ["msg1", "msg2", "msg3"], (
+        f"Expected FIFO order ['msg1', 'msg2', 'msg3'], got {handle.run_ctx.queued_steer_messages}"
+    )
+
+
+@pytest.mark.unit
+async def test_empty_prompt_drains_feedback_queue_but_messages_unprocessed() -> None:
+    """Empty prompt drains feedback_queue but queued_steer_messages are never processed.
+
+    Known limitation: when initial_prompt is empty, start() drains
+    feedback_queue into queued_steer_messages but returns immediately
+    without executing a turn. The steer messages are technically in
+    queued_steer_messages but no turn processes them.
+
+    This test documents the current behavior. If this is considered a bug,
+    the fix would be to either:
+    1. Not drain feedback_queue when there's no prompt, OR
+    2. Re-enqueue the messages back to feedback_queue for the next RunHandle
+    """
+    from agentpool.lifecycle import DirectChannel, Feedback, MemoryJournal
+    from agentpool.orchestrator.session_controller import SessionState
+
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=_StubTurn())
+    agent.name = "test-agent"
+    agent.conversation = MessageHistory()
+
+    session = SessionState(session_id="test-empty-drain", agent_name="test-agent")
+    session._comm_channel = DirectChannel(MemoryJournal())
+
+    # Enqueue 1 steer message
+    session.feedback_queue.put_nowait(Feedback(content="orphaned steer", is_steer=True))
+    assert not session.feedback_queue.empty()  # pre-condition
+
+    handle = RunHandle(
+        run_id="test-empty-drain",
+        session_id="test-empty-drain",
+        agent_type="native",
+        agent=agent,
+        event_bus=AsyncMock(),
+        session=session,
+    )
+
+    events: list[Any] = []
+    gen = handle.start("")
+    try:
+        async with asyncio.timeout(5):
+            events = [event async for event in gen]
+    finally:
+        with contextlib.suppress(Exception):
+            await gen.aclose()
+
+    # feedback_queue was drained
+    assert session.feedback_queue.empty(), "feedback_queue was not drained"
+    # Message was moved to queued_steer_messages
+    assert "orphaned steer" in handle.run_ctx.queued_steer_messages
+    # RunHandle completed without executing a turn
+    assert handle.complete_event.is_set()
+    # No events yielded — no turn was executed
+    assert events == [], f"Expected no events, got {[type(e).__name__ for e in events]}"
+    # No turn should have been created
+    agent.create_turn.assert_not_called()
+
+
+@pytest.mark.unit
+async def test_feedback_queue_drains_multimodal_content_blocks() -> None:
+    """Feedback with content_blocks (multimodal) is drained correctly.
+
+    When a background task completes with multimodal content (e.g., image +
+    text), the Feedback object has content_blocks set instead of content.
+    The draining code should handle both paths.
+    """
+    from agentpool.lifecycle import DirectChannel, Feedback, MemoryJournal
+    from agentpool.orchestrator.session_controller import SessionState
+
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=_StubTurn())
+    agent.name = "test-agent"
+    agent.conversation = MessageHistory()
+
+    session = SessionState(session_id="test-multimodal", agent_name="test-agent")
+    session._comm_channel = DirectChannel(MemoryJournal())
+
+    # Enqueue a Feedback with content_blocks (multimodal) instead of plain content
+    blocks: list[Any] = [{"type": "text", "text": "image analysis complete"}]
+    session.feedback_queue.put_nowait(Feedback(content="", is_steer=True, content_blocks=blocks))
+    assert not session.feedback_queue.empty()  # pre-condition
+
+    handle = RunHandle(
+        run_id="test-multimodal",
+        session_id="test-multimodal",
+        agent_type="native",
+        agent=agent,
+        event_bus=AsyncMock(),
+        session=session,
+    )
+
+    events: list[Any] = []
+    gen = handle.start("hello")
+    try:
+        async with asyncio.timeout(5):
+            events.extend([event async for event in gen])
+    finally:
+        with contextlib.suppress(Exception):
+            await gen.aclose()
+
+    # feedback_queue drained
+    assert session.feedback_queue.empty(), "feedback_queue was not drained"
+    # The content_blocks list should appear in queued_steer_messages
+    # (content_blocks takes priority over content when not None)
+    assert blocks in handle.run_ctx.queued_steer_messages, (
+        f"Expected content_blocks {blocks} in queued_steer_messages, "
+        f"got {handle.run_ctx.queued_steer_messages}"
+    )
