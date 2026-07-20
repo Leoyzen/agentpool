@@ -13,9 +13,22 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from agentpool.agents.events.events import CustomEvent
+from agentpool.agents.events.events import (
+    CustomEvent,
+    RunStartedEvent,
+    StreamCompleteEvent,
+)
+from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, EventEnvelope
+from agentpool_server.opencode_server.event_processor_context import (
+    EventProcessorContext,
+)
 from agentpool_server.opencode_server.models import (
+    AssistantMessage,
+    MessagePath,
+    MessageTime,
+    MessageUpdatedEvent,
+    MessageWithParts,
     SessionIdleEvent,
     SessionStatus,
     SessionStatusEvent,
@@ -31,6 +44,7 @@ pytestmark = pytest.mark.integration
 
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from pathlib import Path
 
     from agentpool_server.opencode_server.models.events import Event
@@ -310,6 +324,7 @@ class _FakeBridge(OpenCodeEventBridgeMixin):
         self._children_of: dict[str, set[str]] = {}
         self._resume_contexts: dict[str, dict[str, Any]] = {}
         self._pending_message_ids: dict[str, str] = {}
+        self._pending_message_metadata: dict[str, dict[str, str | None]] = {}
 
 
 @pytest.mark.anyio
@@ -385,3 +400,344 @@ async def test_stop_event_consumer_no_children() -> None:
     await bridge._after_consumer_loop(parent)
 
     assert attempted == []
+
+
+# =============================================================================
+# D3/D2: time.completed finalization tests
+# =============================================================================
+
+
+async def _async_iter(items: list[Any]) -> AsyncIterator[Any]:
+    """Yield items from a list as an async iterator."""
+    for item in items:
+        yield item
+
+
+def _make_test_ctx(
+    session_id: str = "sess-d3",
+    *,
+    completed: int | None = None,
+    msg_id: str = "msg-assistant-1",
+) -> EventProcessorContext:
+    """Create an EventProcessorContext with an AssistantMessage for D3 tests.
+
+    Args:
+        session_id: The session ID to use.
+        completed: The value for time.completed (None = not finalized).
+        msg_id: The assistant message ID.
+
+    Returns:
+        An EventProcessorContext with a properly constructed AssistantMessage.
+    """
+    assistant_msg = MessageWithParts.assistant(
+        message_id=msg_id,
+        session_id=session_id,
+        time=MessageTime(created=1000, completed=completed),
+        agent_name="test-agent",
+        model_id="test-model",
+        parent_id=session_id,
+        provider_id="test-provider",
+        path=MessagePath(cwd="/tmp", root="/tmp"),
+        mode="test-agent",
+    )
+    return EventProcessorContext(
+        session_id=session_id,
+        assistant_msg_id=msg_id,
+        assistant_msg=assistant_msg,
+        state=MagicMock(),
+        working_dir="/tmp",
+    )
+
+
+def _setup_bridge_for_handle(
+    session_id: str = "sess-d3",
+    *,
+    completed: int | None = None,
+    message_registered: bool = True,
+) -> tuple[_FakeBridge, EventProcessorContext, list[Any]]:
+    """Set up a _FakeBridge ready for _handle_event calls.
+
+    Returns:
+        A tuple of (bridge, ctx, broadcast_calls) where broadcast_calls is
+        a list that accumulates all events passed to broadcast_event.
+    """
+    bridge = _FakeBridge()
+    ctx = _make_test_ctx(session_id, completed=completed)
+
+    bridge._contexts[session_id] = ctx
+    bridge._message_registered[session_id] = message_registered
+
+    # Adapter mock: convert_event returns empty async iterator
+    adapter_mock = MagicMock()
+    adapter_mock.convert_event = lambda _e: _async_iter([])
+    bridge._adapters[session_id] = adapter_mock
+
+    # Track broadcast_event calls
+    broadcast_calls: list[Any] = []
+
+    async def fake_broadcast(event: Any) -> None:
+        broadcast_calls.append(event)
+
+    bridge.server_state.broadcast_event = fake_broadcast  # type: ignore[method-assign]
+    bridge.server_state.working_dir = "/tmp"
+    bridge.server_state.resolve_default_model_info = Mock(
+        return_value=("test-model", "test-provider")
+    )
+    bridge.session_pool.sessions.get_session = Mock(return_value=None)
+
+    return bridge, ctx, broadcast_calls
+
+
+@pytest.mark.anyio
+@pytest.mark.unit
+async def test_stream_complete_sets_time_completed() -> None:
+    """D3: StreamCompleteEvent must set time.completed on assistant message.
+
+    The prompt_async path returns 204 immediately and never finalizes the
+    assistant message. The event bridge must set time.completed when it
+    receives StreamCompleteEvent.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    session_id = "sess-d3"
+    bridge, ctx, broadcast_calls = _setup_bridge_for_handle(
+        session_id, completed=None, message_registered=True
+    )
+
+    event = StreamCompleteEvent(
+        message=ChatMessage(content="done", role="assistant"),
+        session_id=session_id,
+    )
+    envelope = EventEnvelope(source_session_id=session_id, event=event)
+
+    with (
+        patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.set_session_status",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
+            new_callable=AsyncMock,
+        ) as mock_append,
+    ):
+        await bridge._handle_event(session_id, envelope)
+
+    # Assert time.completed was set
+    info = ctx.assistant_msg.info
+    assert isinstance(info, AssistantMessage)
+    assert info.time.completed is not None, "time.completed should be set after StreamCompleteEvent"
+    assert info.time.completed > 1000, "time.completed should be > created time"
+
+    # Assert MessageUpdatedEvent was broadcast
+    updated_events = [e for e in broadcast_calls if isinstance(e, MessageUpdatedEvent)]
+    assert len(updated_events) >= 1, "MessageUpdatedEvent should be broadcast"
+
+    # Assert append_message_to_session was called (persistence)
+    assert mock_append.called, "append_message_to_session should be called"
+
+
+@pytest.mark.anyio
+@pytest.mark.unit
+async def test_stream_complete_skips_if_already_completed() -> None:
+    """D3: StreamCompleteEvent should not overwrite an existing time.completed."""
+    from unittest.mock import AsyncMock, patch
+
+    session_id = "sess-d3"
+    bridge, ctx, broadcast_calls = _setup_bridge_for_handle(
+        session_id, completed=5000, message_registered=True
+    )
+
+    event = StreamCompleteEvent(
+        message=ChatMessage(content="done", role="assistant"),
+        session_id=session_id,
+    )
+    envelope = EventEnvelope(source_session_id=session_id, event=event)
+
+    with (
+        patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.set_session_status",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
+            new_callable=AsyncMock,
+        ) as mock_append,
+    ):
+        await bridge._handle_event(session_id, envelope)
+
+    # Assert time.completed was NOT overwritten
+    info = ctx.assistant_msg.info
+    assert isinstance(info, AssistantMessage)
+    assert info.time.completed == 5000, "time.completed should not be overwritten"
+
+    # Assert no MessageUpdatedEvent was broadcast for finalization
+    updated_events = [e for e in broadcast_calls if isinstance(e, MessageUpdatedEvent)]
+    assert len(updated_events) == 0, (
+        "No MessageUpdatedEvent should be broadcast if already completed"
+    )
+
+    # Assert append_message_to_session was NOT called for finalization
+    assert not mock_append.called, (
+        "append_message_to_session should not be called if already completed"
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.unit
+async def test_d1_reset_finalizes_previous_turn() -> None:
+    """D3/D2: D1 reset must finalize previous turn's assistant message.
+
+    When RunStartedEvent arrives for a subsequent turn (consumer already
+    running), the D1 reset creates a new assistant message. The previous
+    turn's message must have time.completed set before it's replaced.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    session_id = "sess-d1"
+    bridge, ctx, broadcast_calls = _setup_bridge_for_handle(
+        session_id, completed=None, message_registered=True
+    )
+
+    original_msg_id = ctx.assistant_msg_id
+
+    event = RunStartedEvent(
+        run_id="run-2",
+        agent_name="test-agent",
+        session_id=session_id,
+    )
+    envelope = EventEnvelope(source_session_id=session_id, event=event)
+
+    with (
+        patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.set_session_status",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
+            new_callable=AsyncMock,
+        ) as mock_append,
+    ):
+        await bridge._handle_event(session_id, envelope)
+
+    # Find the MessageUpdatedEvent for the finalization (first one broadcast)
+    updated_events = [e for e in broadcast_calls if isinstance(e, MessageUpdatedEvent)]
+    assert len(updated_events) >= 2, (
+        "Should broadcast at least 2 MessageUpdatedEvents: "
+        "1 for finalization, 1 for new message registration"
+    )
+
+    # First MessageUpdatedEvent should be for the previous message (finalization)
+    first_update = updated_events[0]
+    assert first_update.properties.info.id == original_msg_id, (
+        "First MessageUpdatedEvent should be for the previous assistant message"
+    )
+    # The finalization should have set time.completed
+    first_info = first_update.properties.info
+    assert isinstance(first_info, AssistantMessage)
+    assert first_info.time.completed is not None, (
+        "Previous turn's time.completed should be set during D1 reset"
+    )
+
+    # Second MessageUpdatedEvent should be for the new message
+    second_update = updated_events[1]
+    assert second_update.properties.info.id != original_msg_id, (
+        "Second MessageUpdatedEvent should be for the new assistant message"
+    )
+
+    # append_message_to_session should have been called at least twice:
+    # 1 for finalization, 1 for new message registration
+    assert mock_append.call_count >= 2, (
+        "append_message_to_session should be called for both finalization and registration"
+    )
+
+    # The new assistant message should have completed=None (fresh turn)
+    new_info = ctx.assistant_msg.info
+    assert isinstance(new_info, AssistantMessage)
+    assert new_info.time.completed is None, "New turn's time.completed should be None"
+
+
+@pytest.mark.anyio
+@pytest.mark.unit
+async def test_d1_reset_skips_finalize_if_already_completed() -> None:
+    """D1 reset should skip finalization if time.completed is already set."""
+    from unittest.mock import AsyncMock, patch
+
+    session_id = "sess-d1"
+    bridge, _ctx, broadcast_calls = _setup_bridge_for_handle(
+        session_id, completed=5000, message_registered=True
+    )
+
+    event = RunStartedEvent(
+        run_id="run-2",
+        agent_name="test-agent",
+        session_id=session_id,
+    )
+    envelope = EventEnvelope(source_session_id=session_id, event=event)
+
+    with (
+        patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.set_session_status",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
+            new_callable=AsyncMock,
+        ) as mock_append,
+    ):
+        await bridge._handle_event(session_id, envelope)
+
+    # Only 1 MessageUpdatedEvent (for the new message registration, no finalization)
+    updated_events = [e for e in broadcast_calls if isinstance(e, MessageUpdatedEvent)]
+    assert len(updated_events) == 1, (
+        "Only 1 MessageUpdatedEvent for new message; no finalization needed"
+    )
+
+    # append_message_to_session called once (for new message only, no finalization)
+    assert mock_append.call_count == 1, (
+        "append_message_to_session should be called once (new message only)"
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.unit
+async def test_d2_warning_logged_on_incomplete_turn(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """D2: Warning should be logged when finalizing an incomplete turn.
+
+    If the D1 reset finds time.completed is None, it means StreamCompleteEvent
+    was missed or not yet processed. A warning should be logged so the D2
+    red flag (running turn killed by new turn) is visible.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    session_id = "sess-d2"
+    bridge, _ctx, _broadcast_calls = _setup_bridge_for_handle(
+        session_id, completed=None, message_registered=True
+    )
+
+    event = RunStartedEvent(
+        run_id="run-2",
+        agent_name="test-agent",
+        session_id=session_id,
+    )
+    envelope = EventEnvelope(source_session_id=session_id, event=event)
+
+    with (
+        patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.set_session_status",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
+            new_callable=AsyncMock,
+        ),
+        caplog.at_level("WARNING"),
+    ):
+        await bridge._handle_event(session_id, envelope)
+
+    # Assert a warning was logged about finalizing an incomplete turn
+    warning_messages = [r.message for r in caplog.records if r.levelname == "WARNING"]
+    assert any(
+        "incomplete turn" in msg.lower() or "StreamCompleteEvent" in msg for msg in warning_messages
+    ), f"Should log a warning about finalizing incomplete turn, got: {warning_messages}"
