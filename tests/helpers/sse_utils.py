@@ -9,6 +9,7 @@ Usage:
 
 from __future__ import annotations
 
+import codecs
 import json
 from typing import TYPE_CHECKING
 
@@ -33,7 +34,8 @@ def parse_sse_events(response_body: str) -> list[dict[str, object]]:
     current_event: str | None = None
     current_data_lines: list[str] = []
 
-    for line in response_body.split("\n"):
+    for raw_line in response_body.split("\n"):
+        line = raw_line.rstrip("\r")
         if line.startswith("event: "):
             current_event = line[len("event: ") :]
         elif line.startswith("data: "):
@@ -64,7 +66,8 @@ async def drain_sse_stream(response: object) -> list[dict[str, object]]:
     current_event: str | None = None
     current_data_lines: list[str] = []
 
-    async for line in _iter_response_lines(response):
+    async for raw_line in _iter_response_lines(response):
+        line = raw_line.rstrip("\r")
         if line.startswith("event: "):
             current_event = line[len("event: ") :]
         elif line.startswith("data: "):
@@ -88,12 +91,14 @@ async def _iter_response_lines(response: object) -> AsyncIterator[str]:
         async for line in response.aiter_lines():
             yield line
     elif hasattr(response, "aiter_bytes"):
+        decoder = codecs.getincrementaldecoder("utf-8")()
         buffer = ""
         async for chunk in response.aiter_bytes():
-            buffer += chunk.decode("utf-8")
+            buffer += decoder.decode(chunk)
             while "\n" in buffer:
                 line, buffer = buffer.split("\n", 1)
                 yield line
+        buffer += decoder.decode(b"", final=True)
         if buffer:
             yield buffer
     else:
