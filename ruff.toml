@@ -4,8 +4,10 @@
 line-length = 100
 extend-exclude = ["docs"]
 target-version = "py313"
-# First-party import resolution paths (includes tests for import sorting).
-src = ["src", "tests"]
+# First-party import resolution paths.
+# Note: ruff checks all directories by default regardless of this setting.
+# `src` only affects isort import categorization (first-party vs third-party).
+src = ["src"]
 
 [lint]
 future-annotations = true
