@@ -95,6 +95,7 @@ class _MessageRunContext:
     assistant_msg_id: str
     assistant_msg: AssistantMessage
     assistant_msg_with_parts: MessageWithParts
+    user_msg_with_parts: MessageWithParts
     adapter: OpenCodeStreamAdapter
     session_pool: SessionPool
     integration: OpenCodeSessionPoolIntegration | None
@@ -754,6 +755,7 @@ async def _route_message_locked(  # noqa: PLR0915
         assistant_msg_id=assistant_msg_id,
         assistant_msg=assistant_msg,
         assistant_msg_with_parts=assistant_msg_with_parts,
+        user_msg_with_parts=user_msg_with_parts,
         adapter=adapter,
         session_pool=session_pool,
         integration=integration,
@@ -795,7 +797,9 @@ async def _wait_and_finalize(  # noqa: PLR0915
     etc.) are not blocked while the agent is processing.
     """
     if ctx.message_id is None:
-        # Message was queued for later processing (session busy)
+        # Message was queued for later processing (session busy).
+        # Return the empty assistant placeholder — the actual response
+        # will arrive via SSE in a later turn with a different message ID.
         logger.info(
             "Message queued in SessionPool for later processing",
             session_id=session_id,
@@ -853,10 +857,17 @@ async def _wait_and_finalize(  # noqa: PLR0915
             await _ensure_assistant_in_state(
                 state, session_id, assistant_msg_id, assistant_msg_with_parts
             )
-            await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
+            # NOTE: broadcast is handled by the event bridge via
+            # _finalize_assistant_time() on StreamCompleteEvent.
             await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
         else:
-            # Run failed — finalize assistant message with aborted state
+            # Run failed — finalize assistant message with aborted state.
+            # The event bridge's RunFailedEvent handler calls
+            # _finalize_assistant_time() which broadcasts the finalized
+            # assistant message via SSE. If the agent crashed before C3
+            # fired, the RunFailedEvent handler also registers the
+            # assistant message first (C3 fallback). We only persist to
+            # storage here — no broadcast (prevents duplicate SSE).
             response_time = now_ms()
             reason = "Run failed"
             aborted_error = MessageAbortedError(data=MessageAbortedErrorData(message=reason))
@@ -867,7 +878,6 @@ async def _wait_and_finalize(  # noqa: PLR0915
             await _ensure_assistant_in_state(
                 state, session_id, assistant_msg_id, assistant_msg_with_parts
             )
-            await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
             await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
 
             # Add the aborted assistant message to the SessionPool agent's
@@ -888,7 +898,9 @@ async def _wait_and_finalize(  # noqa: PLR0915
         await _ensure_assistant_in_state(
             state, session_id, assistant_msg_id, assistant_msg_with_parts
         )
-        await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
+        # NOTE: broadcast is handled by the event bridge via
+        # _finalize_assistant_time() on StreamCompleteEvent or
+        # RunFailedEvent. No broadcast here (prevents duplicate SSE).
         await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
 
         # Add the aborted assistant message to the SessionPool agent's
@@ -911,7 +923,9 @@ async def _wait_and_finalize(  # noqa: PLR0915
         await _ensure_assistant_in_state(
             state, session_id, assistant_msg_id, assistant_msg_with_parts
         )
-        await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
+        # NOTE: broadcast is handled by the event bridge via
+        # _finalize_assistant_time() on StreamCompleteEvent or
+        # RunFailedEvent. No broadcast here (prevents duplicate SSE).
         await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
 
         # Add the aborted assistant message to the SessionPool agent's

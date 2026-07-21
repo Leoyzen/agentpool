@@ -501,6 +501,21 @@ class OpenCodeEventBridgeMixin:
                     await set_session_status(
                         self.server_state, session_id, SessionStatus(type="idle")
                     )
+                    # C3 fallback: If the agent crashed before any event
+                    # triggered C3 registration, the assistant message was
+                    # never appended to session state or broadcast via SSE.
+                    # Register it now so _finalize_assistant_time can
+                    # finalize and broadcast it.
+                    if not self._message_registered.get(session_id, False):
+                        ctx = self._contexts.get(session_id)
+                        if ctx is not None:
+                            await append_message_to_session(
+                                self.server_state, session_id, ctx.assistant_msg
+                            )
+                            await self.server_state.broadcast_event(
+                                MessageUpdatedEvent.create(ctx.assistant_msg.info)
+                            )
+                            self._message_registered[session_id] = True
                     # D3: Finalize time.completed for failed runs too,
                     # so the next turn's D1 reset doesn't log a
                     # false-positive warning about a missed
