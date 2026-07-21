@@ -428,6 +428,12 @@ class SessionPoolMessagingMixin:
         # SessionPool.__init__) instead of session._event_bus (SessionState's
         # field, only set by _initialize_lifecycle_and_recovery).
         event_bus = self.event_bus
+        logger.info(
+            "steer_from_background_task called",
+            session_id=session_id,
+            has_event_bus=event_bus is not None,
+            has_session=session is not None,
+        )
         if event_bus is not None:
             with logfire.span(
                 "event.user_message_inserted.emit",
