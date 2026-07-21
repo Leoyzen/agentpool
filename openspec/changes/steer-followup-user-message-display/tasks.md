@@ -7,22 +7,22 @@
 
 ## 2. SessionController Publication
 
-- [ ] 2.1 Add `message_id` parameter to `SessionController._route_message()` — optional `str | None`, defaults to `None`; when `None`, generated as `str(uuid.uuid4())`. Also add `delivery` parameter (optional, inferred from session state and priority if `None`).
-- [ ] 2.2 Publish `UserMessageInsertedEvent` from `SessionController._route_message()` before routing action, if EventBus is available — determine `delivery` from session state and priority (`"initial"` for idle, `"steer"` for asap, `"followup"` for when_idle); set `source="protocol"`
-- [ ] 2.3 Modify `SessionController.steer_from_background_task()` (SYNC method — do NOT make it `async def`) to publish `UserMessageInsertedEvent` with `delivery="steer"`, `source="background_task"`, if EventBus is available. Use `asyncio.create_task()` with `try/except RuntimeError` for no-running-loop scenarios.
-- [ ] 2.4 Publish `UserMessageInsertedEvent` from `SessionController._consume_run()` for followup-from-queue messages (picked up from `prompt_queue` by `_create_per_prompt_handle()` without calling `_route_message()`), if EventBus is available — set `delivery="followup"`, `source="internal"`
-- [ ] 2.5 Pass `message_id` through from `send_message()` to `_route_message()` for dedup with protocol handlers
-- [ ] 2.6 Write unit tests for `_route_message()` event publication (`tests/orchestrator/test_route_message_event.py`) — test all three delivery paths (initial, steer, followup) and EventBus=None guard
-- [ ] 2.7 Write unit tests for `steer_from_background_task()` event publication (`tests/orchestrator/test_steer_background_event.py`) — verify SYNC method, `asyncio.create_task()` usage, `RuntimeError` handling
-- [ ] 2.8 Write unit tests for `_consume_run()` followup-from-queue event publication (`tests/orchestrator/test_consume_run_event.py`)
+- [x] 2.1 Add `message_id` parameter to `SessionController._route_message()` — optional `str | None`, defaults to `None`; when `None`, generated as `str(uuid.uuid4())`. Also add `delivery` parameter (optional, inferred from session state and priority if `None`).
+- [x] 2.2 Publish `UserMessageInsertedEvent` from `SessionController._route_message()` before routing action, if EventBus is available — determine `delivery` from session state and priority (`"initial"` for idle, `"steer"` for asap, `"followup"` for when_idle); set `source="protocol"`
+- [x] 2.3 Modify `SessionController.steer_from_background_task()` (SYNC method — do NOT make it `async def`) to publish `UserMessageInsertedEvent` with `delivery="steer"`, `source="background_task"`, if EventBus is available. Use `asyncio.create_task()` with `try/except RuntimeError` for no-running-loop scenarios.
+- [x] 2.4 Publish `UserMessageInsertedEvent` from `SessionController._consume_run()` for followup-from-queue messages (picked up from `prompt_queue` by `_create_per_prompt_handle()` without calling `_route_message()`), if EventBus is available — set `delivery="followup"`, `source="internal"`
+- [x] 2.5 Pass `message_id` through from `send_message()` to `_route_message()` for dedup with protocol handlers
+- [x] 2.6 Write unit tests for `_route_message()` event publication (`tests/orchestrator/test_route_message_event.py`) — test all three delivery paths (initial, steer, followup) and EventBus=None guard
+- [x] 2.7 Write unit tests for `steer_from_background_task()` event publication (`tests/orchestrator/test_steer_background_event.py`) — verify SYNC method, `asyncio.create_task()` usage, `RuntimeError` handling
+- [x] 2.8 Write unit tests for `_consume_run()` followup-from-queue event publication (`tests/orchestrator/test_consume_run_event.py`)
 
 ## 3. RunHandle steer()/followup() Emission
 
-- [ ] 3.1 Add `emit_user_message: bool = True` parameter to `RunHandle.steer()` in `src/agentpool/orchestrator/run.py`. Signature: `def steer(self, content: str | list[Any], emit_user_message: bool = True) -> None:`
-- [ ] 3.2 Add `emit_user_message: bool = False` parameter to `RunHandle.followup()` in `src/agentpool/orchestrator/run.py`. Signature: `def followup(self, content: str | list[Any], emit_user_message: bool = False) -> None:`
-- [ ] 3.3 Implement emission helper `_emit_user_message_inserted()` on BOTH `RunHandle` (for `steer()`/`followup()` direct calls) and `SessionController` (for `steer_from_background_task()` and `_consume_run()`) — wraps emission in `logfire.span("event.user_message_inserted.emit")` to prevent orphan traces; catches all exceptions with `try/except Exception` and logs warning; checks `if self._event_bus` before publishing. Both classes have `self._event_bus` access. Implementation is identical on both (not shared via mixin).
-- [ ] 3.4 Use `asyncio.get_running_loop().create_task()` fire-and-forget pattern at all `steer()`/`followup()`/`steer_from_background_task()` call sites with `try/except RuntimeError` for no-running-loop scenarios
-- [ ] 3.5 Write unit tests for `steer(emit_user_message=True/False)` and `followup(emit_user_message=True/False)` (`tests/orchestrator/test_steer_user_message.py`) — verify default values, emission suppression, no-running-loop handling
+- [x] 3.1 Add `emit_user_message: bool = True` parameter to `RunHandle.steer()` in `src/agentpool/orchestrator/run.py`. Signature: `def steer(self, content: str | list[Any], emit_user_message: bool = True) -> None:`
+- [x] 3.2 Add `emit_user_message: bool = False` parameter to `RunHandle.followup()` in `src/agentpool/orchestrator/run.py`. Signature: `def followup(self, content: str | list[Any], emit_user_message: bool = False) -> None:`
+- [x] 3.3 Implement emission helper `_emit_user_message_inserted()` on BOTH `RunHandle` (for `steer()`/`followup()` direct calls) and `SessionController` (for `steer_from_background_task()` and `_consume_run()`) — wraps emission in `logfire.span("event.user_message_inserted.emit")` to prevent orphan traces; catches all exceptions with `try/except Exception` and logs warning; checks `if self._event_bus` before publishing. Both classes have `self._event_bus` access. Implementation is identical on both (not shared via mixin).
+- [x] 3.4 Use `asyncio.get_running_loop().create_task()` fire-and-forget pattern at all `steer()`/`followup()`/`steer_from_background_task()` call sites with `try/except RuntimeError` for no-running-loop scenarios
+- [x] 3.5 Write unit tests for `steer(emit_user_message=True/False)` and `followup(emit_user_message=True/False)` (`tests/orchestrator/test_steer_user_message.py`) — verify default values, emission suppression, no-running-loop handling
 
 ## 4. ACP Schema: UserMessage Model
 

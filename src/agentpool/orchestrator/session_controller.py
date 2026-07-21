@@ -11,9 +11,12 @@ import contextlib
 from dataclasses import dataclass, field
 import time
 from typing import TYPE_CHECKING, Any, ClassVar, Final
+import uuid
 
 import anyio
+import logfire
 
+from agentpool.agents.events import UserMessageInsertedEvent
 from agentpool.lifecycle.types import Feedback, ResumeResult
 from agentpool.log import get_logger
 from agentpool.orchestrator.runtime_registry import RuntimeAgentRegistry
@@ -233,6 +236,14 @@ class SessionState:
     """
     _agent_registry: AgentRegistry | None = None
     """Read-only registry of compiled agents for delegation."""
+    _event_bus: EventBus | None = None
+    """EventBus reference for direct event publication from SessionState.
+
+    Set by ``SessionController._initialize_lifecycle_and_recovery()``
+    alongside the other lifecycle dimensions. Enables
+    ``steer_from_background_task()`` to fire-and-forget
+    ``UserMessageInsertedEvent`` without a controller reference.
+    """
     _resume_deferred_tool_results: Any = None
     """Deferred tool results from checkpoint, forwarded to ``agent.create_turn()``
     via ``**pydantic_ai_kwargs`` during resume. Only set by
@@ -312,6 +323,11 @@ class SessionState:
         enqueued to ``feedback_queue`` for delivery to the next
         RunHandle.
 
+        Also publishes ``UserMessageInsertedEvent`` to the EventBus
+        (if available) via ``asyncio.create_task()`` fire-and-forget.
+        The event has ``delivery="steer"`` and
+        ``source="background_task"``.
+
         Args:
             message: The steer message content.
 
@@ -319,6 +335,8 @@ class SessionState:
             A placeholder message ID (always ``None`` since this path
             does not generate message IDs).
         """
+        # Fire-and-forget UserMessageInsertedEvent publication.
+        self._emit_steer_event(message)
         if self.current_run_id is not None:
             # Active RunHandle — inject directly via run_handle.steer().
             # The RunHandle is looked up by _consume_run() which stores
@@ -331,6 +349,47 @@ class SessionState:
         fb = Feedback(content=message, is_steer=True)
         self.feedback_queue.put_nowait(fb)
         return fb.message_id
+
+    def _emit_steer_event(self, message: str) -> None:
+        """Fire-and-forget ``UserMessageInsertedEvent`` for background steer.
+
+        Uses ``asyncio.create_task()`` to publish the event without
+        blocking the synchronous caller. Silently skips when no event
+        loop is running (``RuntimeError``) or no EventBus is available.
+        """
+        event_bus = self._event_bus
+        if event_bus is None:
+            return
+
+        async def _publish() -> None:
+            with logfire.span(
+                "event.user_message_inserted.emit",
+                session_id=self.session_id,
+                delivery="steer",
+                source="background_task",
+            ):
+                try:
+                    event = UserMessageInsertedEvent(
+                        session_id=self.session_id,
+                        message_id=str(uuid.uuid4()),
+                        content=message,
+                        delivery="steer",
+                        source="background_task",
+                    )
+                    await event_bus.publish(self.session_id, event)
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to emit UserMessageInsertedEvent from background task",
+                        exc_info=True,
+                    )
+
+        try:
+            task = asyncio.get_running_loop().create_task(_publish())
+            # Prevent GC from destroying the task before completion.
+            task.add_done_callback(lambda t: None)
+        except RuntimeError:
+            # No running event loop — emission skipped, steer proceeds.
+            pass
 
     _active_steer_callback: Callable[[str], str | None] | None = None
     """Callback set by RunHandle.start() to enable direct steer injection.
@@ -451,6 +510,13 @@ class SessionController(
         self._todo_lock: asyncio.Lock = asyncio.Lock()
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._runtime_registry = RuntimeAgentRegistry()
+        self._displayed_message_ids: dict[str, set[str]] = {}
+        """Per-session dedup set of displayed ``message_id`` values.
+
+        Keyed by ``session_id``. Used by ``ACPEventConverter`` and
+        ``EventProcessor`` (Phase 3) to skip duplicate user message
+        display when both the protocol handler and EventBus event fire.
+        """
 
     @property
     def runtime_registry(self) -> RuntimeAgentRegistry:
@@ -467,6 +533,17 @@ class SessionController(
             The session state, or None if not found.
         """
         return self._sessions.get(session_id)
+
+    def _get_dedup_set(self, session_id: str) -> set[str]:
+        """Get or create the dedup set for a session.
+
+        Args:
+            session_id: The session ID to get the dedup set for.
+
+        Returns:
+            The set of displayed ``message_id`` values for the session.
+        """
+        return self._displayed_message_ids.setdefault(session_id, set())
 
     def get_children(self, session_id: str) -> list[str]:
         """Get child session IDs for a session.
