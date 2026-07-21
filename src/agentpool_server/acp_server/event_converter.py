@@ -91,6 +91,24 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+@dataclass(frozen=True)
+class ACPUserMessageMeta:
+    """Protocol-specific metadata for ACP user messages.
+
+    Carries serialized ContentBlock data so the ACPEventConverter can
+    reconstruct the full user message from the EventBus event without
+    the protocol handler broadcasting separately.
+    """
+
+    content_blocks: list[dict[str, Any]]
+    """Serialized ContentBlock data as dicts.
+
+    Each dict is the ``model_dump()`` output of an ACP ContentBlock.
+    The converter deserializes each dict back to the appropriate
+    ContentBlock type.
+    """
+
+
 # Type alias for all session updates the converter can yield
 ACPSessionUpdate = (
     AgentMessageChunk
@@ -191,15 +209,6 @@ class ACPEventConverter:
 
     subagent_context: SubagentContext | None = None
     """Parent context for child session converters. None for root sessions."""
-
-    displayed_message_ids: set[str] | None = None
-    """Per-session dedup set of displayed ``message_id`` values.
-
-    When set, ``UserMessageInsertedEvent`` handling checks this set and
-    skips emission if ``message_id`` is already present (the protocol
-    handler already displayed the message directly). The ID is added
-    after emission to prevent future duplicates.
-    """
 
     # Internal state
     _tool_states: dict[str, _ToolState] = field(default_factory=dict)
@@ -510,23 +519,33 @@ class ACPEventConverter:
             case UserMessageInsertedEvent(
                 message_id=mid,
                 content=event_content,
+                meta=event_meta,
             ):
-                # Dedup: skip if already displayed by the protocol handler.
-                if (
-                    mid
-                    and self.displayed_message_ids is not None
-                    and mid in self.displayed_message_ids
-                ):
-                    return
-                # Convert content to UserMessageChunk(s) — v1 only.
-                blocks = self._content_to_text_blocks(event_content)
-                for block in blocks:
-                    yield UserMessageChunk(
-                        content=block,
-                        message_id=mid or None,
-                    )
-                if mid and self.displayed_message_ids is not None:
-                    self.displayed_message_ids.add(mid)
+                # Use meta.content_blocks if available, otherwise fall back
+                # to text-only content.
+                if isinstance(event_meta, ACPUserMessageMeta):
+                    from acp.schema import TextContentBlock
+
+                    blocks: list[Any] = []
+                    for block_dict in event_meta.content_blocks:
+                        block_type = block_dict.get("type", "")
+                        if block_type == "text":
+                            text = block_dict.get("text", "")
+                            if text:
+                                blocks.append(TextContentBlock(text=text))
+                    for block in blocks:
+                        yield UserMessageChunk(
+                            content=block,
+                            message_id=mid or None,
+                        )
+                else:
+                    # Fall back to text-only content.
+                    blocks = self._content_to_text_blocks(event_content)
+                    for block in blocks:
+                        yield UserMessageChunk(
+                            content=block,
+                            message_id=mid or None,
+                        )
 
             # Thinking/reasoning
             case (

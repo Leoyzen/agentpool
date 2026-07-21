@@ -1,8 +1,9 @@
-"""Unit tests for ``UserMessageInsertedEvent`` publication from ``_consume_run()``.
+"""Unit tests for ``_consume_run()`` followup-from-queue behavior.
 
 Verifies that when ``_consume_run()`` picks up a followup prompt from
-``prompt_queue``, it publishes ``UserMessageInsertedEvent`` with
-``delivery="followup"`` and ``source="internal"``.
+``prompt_queue``, it does NOT publish ``UserMessageInsertedEvent``
+(since ``_route_message()`` already displayed the message before
+enqueuing).
 """
 
 from __future__ import annotations
@@ -85,15 +86,21 @@ def controller(minimal_pool: AgentPool) -> SessionController:
 
 
 # ---------------------------------------------------------------------------
-# Tests: followup-from-queue event publication
+# Tests: followup-from-queue — NO event published (single-path architecture)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_consume_run_publishes_event_for_followup_from_queue(
+async def test_consume_run_does_not_publish_event_for_followup_from_queue(
     controller: SessionController,
 ) -> None:
-    """Given a prompt in prompt_queue, _consume_run publishes UserMessageInsertedEvent."""
+    """Given a prompt in prompt_queue, _consume_run does NOT publish UserMessageInsertedEvent.
+
+    In the single-path display architecture, ``_route_message()`` is the
+    sole publication point. Messages in ``prompt_queue`` were already
+    displayed by ``_route_message()`` before being enqueued, so
+    ``_consume_run()`` must NOT re-emit the event.
+    """
     recorder = _EventRecorder()
     controller._event_bus = recorder  # type: ignore[assignment]
 
@@ -130,16 +137,12 @@ async def test_consume_run_publishes_event_for_followup_from_queue(
     # Drive _consume_run to completion.
     await controller._consume_run(initial_handle, "initial prompt")
 
-    # The followup event should have been published.
+    # No UserMessageInsertedEvent should have been published —
+    # _route_message() already displayed the message before enqueuing.
     user_msg_events = [
         (sid, ev) for sid, ev in recorder.published if isinstance(ev, UserMessageInsertedEvent)
     ]
-    assert len(user_msg_events) == 1
-    sid, event = user_msg_events[0]
-    assert sid == "cr-sess-1"
-    assert event.delivery == "followup"
-    assert event.source == "internal"
-    assert event.content == "followup prompt text"
+    assert len(user_msg_events) == 0
 
 
 # ---------------------------------------------------------------------------

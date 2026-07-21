@@ -31,10 +31,8 @@ async def test_meta_delivery_ster_routes_as_asap() -> None:
     """
     from agentpool_server.acp_server.handler import ACPProtocolHandler
 
-    # Build a handler with a mocked session_pool.
     host_context = MagicMock()
     session_pool = MagicMock()
-    session_pool.sessions._get_dedup_set.return_value = set()
     session_pool.create_session = AsyncMock()
     session_pool.send_message = AsyncMock(return_value="msg_123")
     session_pool.wait_for_completion = AsyncMock()
@@ -60,7 +58,6 @@ async def test_meta_delivery_ster_routes_as_asap() -> None:
     )
     handler._ensure_event_consumer = AsyncMock()
 
-    # Call handle_prompt directly with delivery="steer"
     with patch(
         "agentpool_server.acp_server.handler.ACPEventConverter.build_user_message_chunks",
         return_value=[],
@@ -71,7 +68,6 @@ async def test_meta_delivery_ster_routes_as_asap() -> None:
             delivery="steer",
         )
 
-    # Verify send_message was called with DeliveryMode.STEER
     send_call = session_pool.send_message.call_args
     assert send_call is not None
     assert send_call.kwargs["mode"] is DeliveryMode.STEER
@@ -88,7 +84,6 @@ async def test_meta_delivery_followup_routes_as_when_idle() -> None:
 
     host_context = MagicMock()
     session_pool = MagicMock()
-    session_pool.sessions._get_dedup_set.return_value = set()
     session_pool.create_session = AsyncMock()
     session_pool.send_message = AsyncMock(return_value="msg_456")
     session_pool.wait_for_completion = AsyncMock()
@@ -140,7 +135,6 @@ async def test_no_meta_delivery_defaults_to_queue() -> None:
 
     host_context = MagicMock()
     session_pool = MagicMock()
-    session_pool.sessions._get_dedup_set.return_value = set()
     session_pool.create_session = AsyncMock()
     session_pool.send_message = AsyncMock(return_value="msg_789")
     session_pool.wait_for_completion = AsyncMock()
@@ -186,15 +180,12 @@ async def test_message_id_generated_and_passed_through() -> None:
 
     Given: A valid ``handle_prompt`` call.
     When: The prompt is processed.
-    Then: ``send_message`` is called with a non-None ``message_id`` UUID string,
-        and the same ID is registered in the dedup set.
+    Then: ``send_message`` is called with a non-None ``message_id`` UUID string.
     """
     from agentpool_server.acp_server.handler import ACPProtocolHandler
 
-    dedup_set: set[str] = set()
     host_context = MagicMock()
     session_pool = MagicMock()
-    session_pool.sessions._get_dedup_set.return_value = dedup_set
     session_pool.create_session = AsyncMock()
     session_pool.send_message = AsyncMock(return_value="msg_gen")
     session_pool.wait_for_completion = AsyncMock()
@@ -236,5 +227,3 @@ async def test_message_id_generated_and_passed_through() -> None:
     assert passed_mid is not None
     assert isinstance(passed_mid, str)
     assert len(passed_mid) > 0
-    # The message_id should have been registered in the dedup set.
-    assert passed_mid in dedup_set

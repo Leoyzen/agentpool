@@ -219,23 +219,6 @@ class OpenCodeEventBridgeMixin:
             await self.server_state.broadcast_event(MessageUpdatedEvent.create(info))
             await append_message_to_session(self.server_state, session_id, ctx.assistant_msg)
 
-    def _get_dedup_set(self, session_id: str) -> set[str] | None:
-        """Get the per-session dedup set for user message IDs.
-
-        Returns the set from ``SessionController._get_dedup_set`` when a
-        ``SessionController`` is available on the server state, or ``None``
-        when it is not (e.g. in tests without a full server setup).
-
-        Args:
-            session_id: The session ID to get the dedup set for.
-
-        Returns:
-            The dedup set, or ``None`` if unavailable.
-        """
-        if self.server_state.session_controller is not None:
-            return self.server_state.session_controller._get_dedup_set(session_id)
-        return None
-
     async def _before_consumer_loop(self, session_id: str) -> None:
         """Set up per-session context before the consumer loop starts.
 
@@ -260,10 +243,7 @@ class OpenCodeEventBridgeMixin:
                 state=self.server_state,
                 working_dir=self.server_state.working_dir,
             )
-            event_adapter = OpenCodeEventAdapter(
-                ctx,
-                displayed_message_ids=self._get_dedup_set(session_id),
-            )
+            event_adapter = OpenCodeEventAdapter(ctx)
             self._contexts[session_id] = ctx
             self._adapters[session_id] = event_adapter
             # On resume, the assistant message was already registered in the
@@ -290,10 +270,7 @@ class OpenCodeEventBridgeMixin:
             state=self.server_state,
             working_dir=self.server_state.working_dir,
         )
-        event_adapter = OpenCodeEventAdapter(
-            ctx,
-            displayed_message_ids=self._get_dedup_set(session_id),
-        )
+        event_adapter = OpenCodeEventAdapter(ctx)
         self._contexts[session_id] = ctx
         self._adapters[session_id] = event_adapter
         self._message_registered[session_id] = False
@@ -403,12 +380,6 @@ class OpenCodeEventBridgeMixin:
         await append_message_to_session(self.server_state, child_session_id, user_msg_with_parts)
         await self.server_state.broadcast_event(MessageUpdatedEvent.create(user_msg))
         await self.server_state.broadcast_event(PartUpdatedEvent.create(text_part))
-
-        # Register user_msg_id in dedup set so EventProcessor skips the
-        # EventBus-derived UserMessageInsertedEvent (no double display).
-        controller = self.server_state.session_controller
-        if controller is not None:
-            controller._get_dedup_set(child_session_id).add(user_msg.id)
 
     async def _handle_event(  # noqa: PLR0915
         self, session_id: str, envelope: EventEnvelope
@@ -697,10 +668,6 @@ class OpenCodeEventBridgeMixin:
         self._message_registered.pop(session_id, None)
         self._child_to_parent.pop(session_id, None)
         self._child_spawns.pop(session_id, None)
-
-        # Clean up dedup set for this session on SessionController
-        if self.server_state.session_controller is not None:
-            self.server_state.session_controller._displayed_message_ids.pop(session_id, None)
 
     # ------------------------------------------------------------------
     # Backward-compatible wrappers (used by tests)

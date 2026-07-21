@@ -1,7 +1,9 @@
 """Unit tests for ``ACPEventConverter`` handling ``UserMessageInsertedEvent``.
 
 Tests v1-only path: ``UserMessageInsertedEvent`` → ``UserMessageChunk``
-emission, dedup skip, and multi-modal content conversion.
+emission, meta-based content block reconstruction, and text-only fallback.
+
+The dedup set has been removed — there is only one publication path now.
 """
 
 from __future__ import annotations
@@ -12,7 +14,10 @@ import pytest
 
 from acp.schema import UserMessageChunk
 from agentpool.agents.events.events import UserMessageInsertedEvent
-from agentpool_server.acp_server.event_converter import ACPEventConverter
+from agentpool_server.acp_server.event_converter import (
+    ACPEventConverter,
+    ACPUserMessageMeta,
+)
 
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
@@ -28,8 +33,7 @@ async def _collect(converter: ACPEventConverter, event: Any) -> list[Any]:
 async def test_user_message_inserted_emits_user_message_chunk() -> None:
     """``UserMessageInsertedEvent`` with text content emits ``UserMessageChunk``.
 
-    Given: A converter with no dedup set and a ``UserMessageInsertedEvent``
-        with string content.
+    Given: A converter and a ``UserMessageInsertedEvent`` with string content.
     When: The event is converted.
     Then: Exactly one ``UserMessageChunk`` is yielded with the event's text.
     """
@@ -51,48 +55,35 @@ async def test_user_message_inserted_emits_user_message_chunk() -> None:
     assert chunk.content.text == "Hello from steer!"
 
 
-async def test_user_message_inserted_dedup_skip() -> None:
-    """Converter skips emission when ``message_id`` is already in dedup set.
+async def test_user_message_inserted_with_meta_reconstructs_blocks() -> None:
+    """``ACPUserMessageMeta`` content_blocks are used to reconstruct the message.
 
-    Given: A converter with a dedup set containing ``"msg_dup"``.
-    When: A ``UserMessageInsertedEvent`` with ``message_id="msg_dup"`` arrives.
-    Then: No notifications are yielded.
+    Given: A converter and a ``UserMessageInsertedEvent`` with
+        ``ACPUserMessageMeta`` containing serialized TextContentBlock data.
+    When: The event is converted.
+    Then: ``UserMessageChunk`` notifications are yielded for each text block.
     """
-    dedup_set: set[str] = {"msg_dup"}
-    converter = ACPEventConverter(displayed_message_ids=dedup_set)
+    converter = ACPEventConverter()
+    content_blocks = [
+        {"type": "text", "text": "Reconstructed from meta"},
+    ]
+    meta = ACPUserMessageMeta(content_blocks=content_blocks)
+
     event = UserMessageInsertedEvent(
         session_id="s1",
-        message_id="msg_dup",
-        content="This should be skipped",
-        delivery="steer",
+        message_id="msg_meta",
+        content="Reconstructed from meta",
+        delivery="initial",
         source="protocol",
+        meta=meta,
     )
 
     results = await _collect(converter, event)
 
-    assert results == []
-
-
-async def test_user_message_inserted_adds_to_dedup_set_after_emission() -> None:
-    """After emitting, the ``message_id`` is added to the dedup set.
-
-    Given: A converter with an empty dedup set.
-    When: A ``UserMessageInsertedEvent`` with ``message_id="msg_new"`` is converted.
-    Then: The dedup set now contains ``"msg_new"``.
-    """
-    dedup_set: set[str] = set()
-    converter = ACPEventConverter(displayed_message_ids=dedup_set)
-    event = UserMessageInsertedEvent(
-        session_id="s1",
-        message_id="msg_new",
-        content="Content here",
-        delivery="followup",
-        source="internal",
-    )
-
-    await _collect(converter, event)
-
-    assert "msg_new" in dedup_set
+    assert len(results) == 1
+    chunk = results[0]
+    assert isinstance(chunk, UserMessageChunk)
+    assert chunk.content.text == "Reconstructed from meta"
 
 
 async def test_user_message_inserted_multimodal_content() -> None:
@@ -170,26 +161,3 @@ async def test_user_message_inserted_empty_string_content_yields_nothing() -> No
     results = await _collect(converter, event)
 
     assert results == []
-
-
-async def test_user_message_inserted_no_dedup_set_always_emits() -> None:
-    """Without a dedup set, the converter always emits (no dedup).
-
-    Given: A converter with ``displayed_message_ids=None`` (default).
-    When: The same ``message_id`` arrives twice.
-    Then: Both events emit ``UserMessageChunk`` notifications.
-    """
-    converter = ACPEventConverter()
-    event = UserMessageInsertedEvent(
-        session_id="s1",
-        message_id="msg_repeat",
-        content="Repeat",
-        delivery="steer",
-        source="protocol",
-    )
-
-    results1 = await _collect(converter, event)
-    results2 = await _collect(converter, event)
-
-    assert len(results1) == 1
-    assert len(results2) == 1

@@ -421,13 +421,6 @@ class SessionController(
         self._todo_lock: asyncio.Lock = asyncio.Lock()
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._runtime_registry = RuntimeAgentRegistry()
-        self._displayed_message_ids: dict[str, set[str]] = {}
-        """Per-session dedup set of displayed ``message_id`` values.
-
-        Keyed by ``session_id``. Used by ``ACPEventConverter`` and
-        ``EventProcessor`` (Phase 3) to skip duplicate user message
-        display when both the protocol handler and EventBus event fire.
-        """
 
     @property
     def runtime_registry(self) -> RuntimeAgentRegistry:
@@ -444,17 +437,6 @@ class SessionController(
             The session state, or None if not found.
         """
         return self._sessions.get(session_id)
-
-    def _get_dedup_set(self, session_id: str) -> set[str]:
-        """Get or create the dedup set for a session.
-
-        Args:
-            session_id: The session ID to get the dedup set for.
-
-        Returns:
-            The set of displayed ``message_id`` values for the session.
-        """
-        return self._displayed_message_ids.setdefault(session_id, set())
 
     def get_children(self, session_id: str) -> list[str]:
         """Get child session IDs for a session.

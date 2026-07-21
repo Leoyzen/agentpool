@@ -306,13 +306,12 @@ async def test_message_id_ordering_between_assistant_messages(
 async def test_dedup_protocol_handler_same_message_id(
     minimal_pool: AgentPool,
 ) -> None:
-    """Dedup set does not filter EventBus publication — it's consumer-side.
+    """EventBus publication is delivered to subscribers regardless of message_id.
 
-    Given: A session with ``"msg_123"`` in the dedup set.
-    When: A ``UserMessageInsertedEvent`` with ``message_id="msg_123"`` is
-        published to the EventBus.
-    Then: The event IS delivered to subscribers (dedup is at consumer side,
-        not publisher side).
+    Given: A session and a ``UserMessageInsertedEvent`` with ``message_id="msg_123"``.
+    When: The event is published to the EventBus.
+    Then: The event IS delivered to subscribers (single-path architecture,
+        no consumer-side filtering).
     """
     session_pool = minimal_pool.session_pool
     assert session_pool is not None
@@ -320,10 +319,6 @@ async def test_dedup_protocol_handler_same_message_id(
     await session_pool.create_session(session_id, agent_name="test_agent")
     # Ensure agent is created so session._event_bus is set.
     await session_pool.sessions.get_or_create_session_agent(session_id)
-    # Manually add "msg_123" to the dedup set.
-    dedup_set = session_pool.sessions._get_dedup_set(session_id)
-    dedup_set.add("msg_123")
-    assert "msg_123" in dedup_set
     # Subscribe BEFORE publishing.
     queue = await session_pool.event_bus.subscribe(session_id, scope="session")
     # Publish a UserMessageInsertedEvent with message_id="msg_123".
@@ -347,8 +342,6 @@ async def test_dedup_protocol_handler_same_message_id(
         pass
     assert len(received) == 1, f"Expected 1 UserMessageInsertedEvent on EventBus, got {received}"
     assert received[0].message_id == "msg_123"
-    # The dedup set still contains "msg_123" — it's a consumer-side filter.
-    assert "msg_123" in dedup_set
 
 
 # ---------------------------------------------------------------------------
@@ -357,13 +350,12 @@ async def test_dedup_protocol_handler_same_message_id(
 
 
 async def test_dedup_internal_steer_not_deduped(minimal_pool: AgentPool) -> None:
-    """Internal steer paths do not pre-register message_id in dedup set.
+    """Internal steer paths publish UserMessageInsertedEvent to EventBus.
 
     Given: A session with an active turn.
     When: ``steer_from_background_task()`` is called (internal path).
     Then: The event appears on EventBus with ``source="background_task"`` and
-        the ``message_id`` is NOT in the dedup set (so the consumer WILL
-        display it).
+        ``delivery="steer"``.
     """
     session_pool = minimal_pool.session_pool
     assert session_pool is not None
@@ -406,12 +398,6 @@ async def test_dedup_internal_steer_not_deduped(minimal_pool: AgentPool) -> None
     evt = bg_events[0]
     assert evt.source == "background_task"
     assert evt.content == "internal steer"
-    # The message_id should NOT be in the dedup set.
-    dedup_set = session_pool.sessions._get_dedup_set(session_id)
-    assert evt.message_id not in dedup_set, (
-        f"Internal steer message_id {evt.message_id!r} should NOT be in dedup set "
-        f"(dedup set: {dedup_set})"
-    )
     release.set()
     await asyncio.sleep(0.2)
 
@@ -674,13 +660,17 @@ async def test_steer_during_tool_execution_event_before_processing(
 async def test_followup_from_prompt_queue_event_published(
     minimal_pool: AgentPool,
 ) -> None:
-    """Followup from prompt_queue publishes UserMessageInsertedEvent.
+    """Followup from prompt_queue does NOT publish UserMessageInsertedEvent.
+
+    In the single-path display architecture, ``_route_message()`` is the
+    sole publication point. Messages in ``prompt_queue`` were already
+    displayed by ``_route_message()`` before being enqueued, so
+    ``_consume_run()`` must NOT re-emit the event.
 
     Given: A session with an active blocking turn.
     When: A followup is queued via ``pool.followup()`` and the turn completes.
-    Then: ``_consume_run()`` picks up the followup from ``prompt_queue`` and
-        publishes ``UserMessageInsertedEvent`` with ``delivery="followup"``,
-        ``source="internal"``.
+    Then: ``_consume_run()`` picks up the followup from ``prompt_queue`` but
+        does NOT publish ``UserMessageInsertedEvent``.
     """
     session_pool = minimal_pool.session_pool
     assert session_pool is not None
@@ -696,7 +686,7 @@ async def test_followup_from_prompt_queue_event_published(
     assert followup_result is not None
     # Release the blocking turn — _consume_run will pick up the followup.
     release.set()
-    # Collect events — looking for the followup UserMessageInsertedEvent.
+    # Collect events — looking for absence of followup UserMessageInsertedEvent.
     received: list[Any] = []
     try:
         async with asyncio.timeout(5.0):
@@ -707,12 +697,6 @@ async def test_followup_from_prompt_queue_event_published(
                     break
                 unwrapped = _unwrap(raw)
                 received.append(unwrapped)
-                if (
-                    isinstance(unwrapped, UserMessageInsertedEvent)
-                    and unwrapped.delivery == "followup"
-                    and unwrapped.source == "internal"
-                ):
-                    break
     except TimeoutError:
         pass
     followup_events = [
@@ -722,13 +706,10 @@ async def test_followup_from_prompt_queue_event_published(
         and e.delivery == "followup"
         and e.source == "internal"
     ]
-    assert len(followup_events) >= 1, (
-        f"Expected UserMessageInsertedEvent with delivery=followup source=internal, "
+    assert len(followup_events) == 0, (
+        f"Expected NO UserMessageInsertedEvent from _consume_run (single-path), "
         f"got {followup_events}. All received: {received}"
     )
-    evt = followup_events[0]
-    assert evt.content == "queued followup"
-    assert evt.message_id.startswith("msg_")
     await asyncio.sleep(0.2)
 
 

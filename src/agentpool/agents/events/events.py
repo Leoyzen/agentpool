@@ -903,17 +903,17 @@ class MessageReplacementEvent:
 
 
 @dataclass(frozen=True, kw_only=True)
-class UserMessageInsertedEvent:
+class UserMessageInsertedEvent[T]:
     """User message inserted into the conversation mid-run.
 
     Emitted when a steer/followup message is injected into an active session
     so that protocol frontends can display it as a user message. Supports
     multi-modal content via ``list[Any]``.
 
-    !!! note "Phase 1 — event type only"
-
-        This dataclass is defined and exported but not yet published by any
-        component. Publication logic is added in Phase 2.
+    The ``meta`` field carries protocol-specific metadata (e.g. serialized
+    parts for OpenCode, content blocks for ACP) so that the EventBus is
+    the sole publication point and protocol handlers do not need to
+    broadcast user messages themselves.
     """
 
     session_id: str = ""
@@ -933,6 +933,14 @@ class UserMessageInsertedEvent:
 
     timestamp: float = field(default_factory=time.time)
     """Wall-clock time the event was created (epoch seconds)."""
+
+    meta: T | None = None
+    """Protocol-specific metadata for rich user message display.
+
+    When set, protocol event consumers use this to reconstruct the full
+    user message (e.g. OpenCode parts, ACP content blocks) instead of
+    falling back to text-only ``content``.
+    """
 
 
 type RichAgentStreamEvent[OutputDataT] = (
@@ -956,7 +964,7 @@ type RichAgentStreamEvent[OutputDataT] = (
     | StateUpdate
     | ToolCallUpdateEvent
     | MessageReplacementEvent
-    | UserMessageInsertedEvent
+    | UserMessageInsertedEvent[Any]
 )
 
 

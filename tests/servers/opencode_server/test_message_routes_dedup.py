@@ -1,20 +1,21 @@
-"""Tests for dedup integration between REST handler and EventProcessor.
+"""Tests for single-path user message display architecture.
 
-Verifies that when a user message is created by the REST handler, the
-message_id is registered in the shared dedup set. When the EventBus-derived
-``UserMessageInsertedEvent`` arrives at ``EventProcessor``, it finds the
-message_id in the dedup set and skips (no double display).
+Verifies that the EventProcessor correctly handles UserMessageInsertedEvent
+with meta (OpenCodeUserMessageMeta) and without meta (text-only fallback).
+The dedup set has been removed — there is only one publication path now.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import Mock
 
 import pytest
 
 from agentpool.agents.events import UserMessageInsertedEvent
-from agentpool_server.opencode_server.event_processor import EventProcessor
+from agentpool_server.opencode_server.event_processor import (
+    EventProcessor,
+    OpenCodeUserMessageMeta,
+)
 from agentpool_server.opencode_server.event_processor_context import (
     EventProcessorContext,
 )
@@ -34,108 +35,91 @@ if TYPE_CHECKING:
 def _make_ctx(server_state: ServerState) -> EventProcessorContext:
     """Create a minimal EventProcessorContext for testing."""
     assistant_msg = MessageWithParts.assistant(
-        message_id="msg-assistant-dedup",
-        session_id="test-session-dedup",
+        message_id="msg-assistant",
+        session_id="test-session",
         time=MessageTime(created=0),
         agent_name="test-agent",
         model_id="test-model",
-        parent_id="parent-dedup",
+        parent_id="parent",
         provider_id="agentpool",
         path=MessagePath(cwd="/tmp", root="/tmp"),
     )
     return EventProcessorContext(
-        session_id="test-session-dedup",
-        assistant_msg_id="msg-assistant-dedup",
+        session_id="test-session",
+        assistant_msg_id="msg-assistant",
         assistant_msg=assistant_msg,
         state=server_state,
         working_dir="/tmp",
     )
 
 
-def _setup_dedup_mock(server_state: ServerState) -> dict[str, set[str]]:
-    """Set up a real dedup set on the mock session_controller."""
-    dedup_store: dict[str, set[str]] = {}
-
-    def _get_dedup_set(session_id: str) -> set[str]:
-        return dedup_store.setdefault(session_id, set())
-
-    controller = server_state.session_controller
-    if controller is None:
-        controller = Mock()
-        server_state.session_controller = controller
-    controller._get_dedup_set = _get_dedup_set
-    controller._displayed_message_ids = dedup_store
-    return dedup_store
-
-
 @pytest.mark.asyncio
-async def test_no_double_display_when_rest_and_event_bus_fire(
+async def test_event_processor_emits_with_meta(
     server_state: ServerState,
 ) -> None:
-    """REST handler registers message_id → EventProcessor skips EventBus event.
+    """EventProcessor uses meta.parts to reconstruct user message.
 
-    Given: A REST handler registers a message_id in the dedup set.
-    When: EventBus-derived UserMessageInsertedEvent arrives with the same
-        message_id.
-    Then: EventProcessor skips the event (finds message_id in dedup set).
+    Given: A UserMessageInsertedEvent with OpenCodeUserMessageMeta containing
+        serialized TextPart data.
+    When: EventProcessor processes the event.
+    Then: It emits MessageUpdatedEvent and PartUpdatedEvent for each part.
     """
-    from agentpool_server.opencode_server.routes.message_routes import _register_dedup
-
-    dedup_store = _setup_dedup_mock(server_state)
-    session_id = "test-session-dedup"
-    message_id = "user-msg-integration"
-
-    _register_dedup(server_state, session_id, message_id)
-    dedup_set = dedup_store[session_id]
-
-    processor = EventProcessor(displayed_message_ids=dedup_set)
+    processor = EventProcessor()
     ctx = _make_ctx(server_state)
+    session_id = "test-session"
+    message_id = "user-msg-with-meta"
+
+    parts_data = [
+        {
+            "type": "text",
+            "id": "part-1",
+            "message_id": message_id,
+            "session_id": session_id,
+            "text": "Hello from meta",
+        }
+    ]
+    meta = OpenCodeUserMessageMeta(parts=parts_data)
 
     event = UserMessageInsertedEvent(
         session_id=session_id,
         message_id=message_id,
-        content="Message already displayed by REST handler",
+        content="Hello from meta",
         delivery="initial",
         source="protocol",
+        meta=meta,
     )
 
     events = [e async for e in processor.process(event, ctx)]
 
-    assert events == [], "EventBus event with REST-registered message_id should be skipped"
+    # Should emit MessageUpdatedEvent + PartUpdatedEvent for each part
+    assert len(events) >= 2
 
 
 @pytest.mark.asyncio
-async def test_dedup_does_not_affect_different_message_ids(
+async def test_event_processor_emits_without_meta(
     server_state: ServerState,
 ) -> None:
-    """Dedup for message_id "A" does not block message_id "B".
+    """EventProcessor falls back to text-only content when meta is None.
 
-    Given: A dedup set containing message_id "A".
-    When: UserMessageInsertedEvent arrives with message_id "B".
-    Then: EventProcessor emits events for "B" (not deduped).
+    Given: A UserMessageInsertedEvent with meta=None.
+    When: EventProcessor processes the event.
+    Then: It creates a TextPart from the content string and emits events.
     """
-    from agentpool_server.opencode_server.routes.message_routes import _register_dedup
-
-    dedup_store = _setup_dedup_mock(server_state)
-    session_id = "test-session-dedup"
-    msg_a = "user-msg-a"
-    msg_b = "user-msg-b"
-
-    _register_dedup(server_state, session_id, msg_a)
-    dedup_set = dedup_store[session_id]
-
-    processor = EventProcessor(displayed_message_ids=dedup_set)
+    processor = EventProcessor()
     ctx = _make_ctx(server_state)
+    session_id = "test-session"
+    message_id = "user-msg-no-meta"
 
-    event_b = UserMessageInsertedEvent(
+    event = UserMessageInsertedEvent(
         session_id=session_id,
-        message_id=msg_b,
-        content="Different message — should be emitted",
+        message_id=message_id,
+        content="Text-only fallback",
         delivery="steer",
-        source="protocol",
+        source="internal",
+        meta=None,
     )
 
-    events = [e async for e in processor.process(event_b, ctx)]
+    events = [e async for e in processor.process(event, ctx)]
 
+    # Should emit MessageUpdatedEvent + PartUpdatedEvent for the text part
     assert len(events) >= 2
-    assert msg_b in dedup_set

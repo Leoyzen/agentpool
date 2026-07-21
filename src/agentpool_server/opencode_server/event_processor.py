@@ -7,6 +7,7 @@ state, enabling stateless recursive processing.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import FunctionToolCallEvent
@@ -41,6 +42,7 @@ from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.converters import _convert_params_for_ui
 from agentpool_server.opencode_server.models import (
     MessageUpdatedEvent,
+    Part,
     PartDeltaEvent,
     PartUpdatedEvent,
     SessionErrorEvent,
@@ -59,6 +61,7 @@ from agentpool_server.opencode_server.models.message import (
     UserMessage,
 )
 from agentpool_server.opencode_server.models.parts import (
+    FilePart,
     ReasoningPart,
     StepFinishPart,
     TextPart,
@@ -88,6 +91,24 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+@dataclass(frozen=True)
+class OpenCodeUserMessageMeta:
+    """Protocol-specific metadata for OpenCode user messages.
+
+    Carries serialized Part data (TextPart, FilePart, etc.) so the
+    EventProcessor can reconstruct the full user message from the
+    EventBus event without the protocol handler broadcasting separately.
+    """
+
+    parts: list[dict[str, Any]]
+    """Serialized Part data (TextPart, FilePart, etc.) as dicts.
+
+    Each dict is the ``model_dump()`` output of an OpenCode Part model.
+    The EventProcessor deserializes each dict back to the appropriate
+    Part type using the ``type`` discriminator field.
+    """
+
+
 class EventProcessor:
     """Processes RichAgentStreamEvent objects into OpenCode SSE events.
 
@@ -98,17 +119,8 @@ class EventProcessor:
     The processor yields OpenCode Event objects ready for broadcasting.
     """
 
-    def __init__(self, displayed_message_ids: set[str] | None = None) -> None:
-        """Initialize the event processor.
-
-        Args:
-            displayed_message_ids: Per-session dedup set for user message IDs.
-                When provided, the processor skips emission of user messages
-                whose ``message_id`` is already in the set, and adds new
-                ``message_id`` values after emission. When ``None``, no
-                deduplication is performed.
-        """
-        self._displayed_message_ids: set[str] | None = displayed_message_ids
+    def __init__(self) -> None:
+        """Initialize the event processor."""
 
     @staticmethod
     def create_mcp_tools_changed_event(server: str) -> McpToolsChangedEvent:
@@ -245,8 +257,11 @@ class EventProcessor:
                 message_id=mid,
                 content=event_content,
                 timestamp=ts,
+                meta=event_meta,
             ):
-                async for e in self._process_user_message_inserted(ctx, mid, event_content, ts):
+                async for e in self._process_user_message_inserted(
+                    ctx, mid, event_content, ts, event_meta
+                ):
                     yield e
 
     def _process_text_start(
@@ -921,39 +936,31 @@ class EventProcessor:
         message_id: str,
         content: str | list[Any],
         timestamp: float,
+        meta: Any = None,
     ) -> AsyncIterator[Event]:
         """Process a UserMessageInsertedEvent into OpenCode SSE events.
 
-        Creates a ``UserMessage`` with text parts from the event content,
-        appends it to the session state, and yields ``MessageUpdatedEvent``
-        and ``PartUpdatedEvent`` for each part.
+        Creates a ``UserMessage`` with parts from the event, appends it to
+        the session state, and yields ``MessageUpdatedEvent`` and
+        ``PartUpdatedEvent`` for each part.
 
-        Deduplication: when ``displayed_message_ids`` is set on the processor,
-        skips emission if ``message_id`` is already in the set, and adds it
-        after emission.
+        When ``meta`` is an :class:`OpenCodeUserMessageMeta`, uses
+        ``meta.parts`` to deserialize rich parts (TextPart, FilePart, etc.).
+        When ``meta`` is ``None``, falls back to text-only ``content`` →
+        ``TextPart``.
 
         Args:
             ctx: The event processor context.
             message_id: Unique ID for the inserted user message.
             content: Message content — plain text or multi-modal part list.
             timestamp: Wall-clock time the event was created (epoch seconds).
+            meta: Optional protocol-specific metadata carrying serialized
+                Part data for rich user message reconstruction.
 
         Yields:
             ``MessageUpdatedEvent`` for the user message, followed by
-            ``PartUpdatedEvent`` for each text part.
+            ``PartUpdatedEvent`` for each part.
         """
-        # Dedup check
-        if self._displayed_message_ids is not None:
-            if message_id in self._displayed_message_ids:
-                logger.debug(
-                    "UserMessageInsertedEvent DEDUP SKIP",
-                    message_id=message_id,
-                    session_id=ctx.session_id,
-                    dedup_size=len(self._displayed_message_ids),
-                )
-                return
-            self._displayed_message_ids.add(message_id)
-
         # Convert epoch seconds to milliseconds for OpenCode's TimeCreated
         created_ms = int(timestamp * 1000)
 
@@ -964,8 +971,13 @@ class EventProcessor:
         )
         user_msg_with_parts = MessageWithParts(info=user_message)
 
-        # Convert content to text parts
-        if isinstance(content, str):
+        # Reconstruct parts from meta or fall back to text-only content.
+        if isinstance(meta, OpenCodeUserMessageMeta):
+            for part_dict in meta.parts:
+                part = _deserialize_part(part_dict, user_message.id, ctx.session_id)
+                if part is not None:
+                    user_msg_with_parts.parts.append(part)
+        elif isinstance(content, str):
             if content:
                 user_msg_with_parts.add_text_part(content)
         elif isinstance(content, list):
@@ -989,6 +1001,44 @@ class EventProcessor:
         yield MessageUpdatedEvent.create(user_message)
         for part in user_msg_with_parts.parts:
             yield PartUpdatedEvent.create(part)
+
+
+def _deserialize_part(
+    part_dict: dict[str, Any],
+    message_id: str,
+    session_id: str,
+) -> Part | None:
+    """Deserialize a Part dict back to the appropriate Part type.
+
+    Uses the ``type`` discriminator field to select the correct Part
+    subclass. Overrides ``id``, ``message_id``, and ``session_id`` to
+    ensure the part belongs to the given message and session.
+
+    Args:
+        part_dict: The serialized Part data (from ``model_dump()``).
+        message_id: The message ID to assign to the part.
+        session_id: The session ID to assign to the part.
+
+    Returns:
+        The deserialized Part, or ``None`` if the type is unknown.
+    """
+    part_type = part_dict.get("type", "")
+    # Map type discriminator to Part subclass.
+    type_to_cls: dict[str, type[Part]] = {
+        "text": TextPart,
+        "file": FilePart,
+    }
+    cls = type_to_cls.get(part_type)
+    if cls is None:
+        return None
+    # Override identity fields to ensure consistency.
+    data = {
+        **part_dict,
+        "id": part_dict.get("id", identifier.ascending("part")),
+        "message_id": message_id,
+        "session_id": session_id,
+    }
+    return cls.model_validate(data)
 
 
 def _extract_title_from_tool_state(state: ToolState) -> str:

@@ -100,10 +100,6 @@ class _FakeBridge(OpenCodeEventBridgeMixin):
         """No resume context for fresh test sessions."""
         return None
 
-    def _get_dedup_set(self, session_id: str) -> set[str] | None:
-        """Return None so EventProcessor does not dedup user messages."""
-        return None
-
 
 def _make_envelope(session_id: str, event: Any) -> EventEnvelope:
     """Create an EventEnvelope for the given session and event."""

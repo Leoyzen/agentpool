@@ -67,6 +67,7 @@ class SessionControllerRunsMixin:
         delivery: str,
         source: str,
         message_id: str | None = None,
+        meta: Any = None,
     ) -> None:
         """Publish ``UserMessageInsertedEvent`` to the EventBus.
 
@@ -80,6 +81,10 @@ class SessionControllerRunsMixin:
             delivery: ``"initial"``, ``"steer"``, or ``"followup"``.
             source: ``"protocol"``, ``"background_task"``, or ``"internal"``.
             message_id: Optional message ID; auto-generated if ``None``.
+            meta: Optional protocol-specific metadata for rich user message
+                display. When set, protocol event consumers use it to
+                reconstruct the full user message instead of falling back
+                to text-only ``content``.
         """
         with logfire.span(
             "event.user_message_inserted.emit",
@@ -96,6 +101,7 @@ class SessionControllerRunsMixin:
                     content=content,
                     delivery=delivery,  # type: ignore[arg-type]
                     source=source,  # type: ignore[arg-type]
+                    meta=meta,
                 )
                 if self._event_bus is not None:
                     await self._event_bus.publish(session_id, event)
@@ -185,15 +191,8 @@ class SessionControllerRunsMixin:
                         next_prompt = session.prompt_queue.get_nowait()
                     except asyncio.QueueEmpty:
                         break
-                    # Publish UserMessageInsertedEvent for followup-from-queue.
-                    # This covers the gap where _create_per_prompt_handle()
-                    # creates a RunHandle WITHOUT calling _route_message().
-                    await self._emit_user_message_inserted(
-                        current_handle.session_id,
-                        next_prompt,
-                        delivery="followup",
-                        source="internal",
-                    )
+                    # Messages in prompt_queue were already displayed by
+                    # _route_message() — no need to emit again.
                     # Create a new RunHandle for the next prompt.
                     agent = current_handle.agent
                     if agent is None:
@@ -354,6 +353,7 @@ class SessionControllerRunsMixin:
         deps: Any = None,
         message_id: str | None = None,
         delivery: str | None = None,
+        meta: Any = None,
     ) -> str | None:
         """Route a message to the appropriate handler based on session state.
 
@@ -377,6 +377,8 @@ class SessionControllerRunsMixin:
             delivery: Optional delivery label (``"initial"``, ``"steer"``,
                 ``"followup"``). If ``None``, inferred from session state
                 and priority.
+            meta: Optional protocol-specific metadata carried through to
+                ``UserMessageInsertedEvent`` for rich user message display.
 
         Returns:
             The ``message_id`` string on success, ``None`` for rejection.
@@ -400,6 +402,7 @@ class SessionControllerRunsMixin:
                     delivery=inferred_delivery,
                     source="protocol",
                     message_id=message_id,
+                    meta=meta,
                 )
                 return self._start_run_handle(
                     session,
@@ -420,6 +423,7 @@ class SessionControllerRunsMixin:
                         delivery=inferred_delivery,
                         source="protocol",
                         message_id=message_id,
+                        meta=meta,
                     )
                     return run.steer(content, message_id=message_id, emit_user_message=False)
                 # Followup: enqueue to SessionState.prompt_queue.
@@ -430,6 +434,7 @@ class SessionControllerRunsMixin:
                     delivery=inferred_delivery,
                     source="protocol",
                     message_id=message_id,
+                    meta=meta,
                 )
                 from agentpool.lifecycle.types import Feedback
 

@@ -190,6 +190,7 @@ class SessionPoolMessagingMixin:
         message_id: str | None = None,
         deps: Any = None,
         input_provider: Any = None,
+        meta: Any = None,
     ) -> str | None:
         """Send a message to a session using the typed ``DeliveryMode`` enum.
 
@@ -213,6 +214,11 @@ class SessionPoolMessagingMixin:
                 before agent resolution. When provided, the session's
                 ``input_provider`` is updated so the agent is created
                 with the correct provider.
+            meta: Protocol-specific metadata to carry through to
+                ``UserMessageInsertedEvent``. When set, the event consumer
+                uses it to reconstruct the full user message (e.g. OpenCode
+                parts, ACP content blocks) instead of falling back to
+                text-only content.
 
         Returns:
             The ``message_id`` string on success (both new runs and
@@ -241,6 +247,7 @@ class SessionPoolMessagingMixin:
             priority=priority,
             deps=deps,
             message_id=message_id,
+            meta=meta,
         )
 
     async def run_agent(

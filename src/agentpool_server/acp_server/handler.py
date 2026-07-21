@@ -130,15 +130,10 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                     self.client_capabilities is not None
                     and self.client_capabilities.turn_complete is True
                 )
-                session_pool = self._host_context.session_pool
-                child_dedup_set: set[str] | None = None
-                if session_pool is not None:
-                    child_dedup_set = session_pool.sessions._get_dedup_set(child_sid)
                 self._converters[child_sid] = ACPEventConverter(
                     subagent_display_mode=self._event_converter_template.subagent_display_mode,
                     raw_input_mode=self._event_converter_template.raw_input_mode,
                     client_supports_turn_complete=client_supports_turn_complete,
-                    displayed_message_ids=child_dedup_set,
                     subagent_context=SubagentContext(
                         parent_tool_call_id=event.tool_call_id or "",
                         subagent_type=event.source_name or "",
@@ -256,15 +251,10 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         client_supports_turn_complete = (
             self.client_capabilities is not None and self.client_capabilities.turn_complete is True
         )
-        session_pool = self._host_context.session_pool
-        dedup_set: set[str] | None = None
-        if session_pool is not None:
-            dedup_set = session_pool.sessions._get_dedup_set(session_id)
         converter = ACPEventConverter(
             subagent_display_mode=self._event_converter_template.subagent_display_mode,
             raw_input_mode=self._event_converter_template.raw_input_mode,
             client_supports_turn_complete=client_supports_turn_complete,
-            displayed_message_ids=dedup_set,
         )
         self._converters[session_id] = converter
 
@@ -615,15 +605,17 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         # Emit user_message_chunk notifications for the user's input before
         # processing the prompt. Per the ACP spec, the server should notify
         # the client of the user's message chunks.
-        # Generate a single message_id shared between the direct emission
-        # and the EventBus UserMessageInsertedEvent so the dedup set can
-        # prevent double display.
+        # Generate a message_id for the user message. The EventBus
+        # UserMessageInsertedEvent (published by _route_message) is the
+        # sole publication point — the ACPEventConverter reconstructs
+        # the content blocks from meta.
         message_id = str(uuid.uuid4())
-        # Register in the per-session dedup set BEFORE emitting so the
-        # EventBus-driven ACPEventConverter skips the duplicate.
-        dedup_set = session_pool.sessions._get_dedup_set(session_id)
-        dedup_set.add(message_id)
-        await self._emit_user_message_chunks(session_id, prompt, message_id=message_id)
+
+        # Build ACP meta from content blocks for the EventBus event.
+        from agentpool_server.acp_server.event_converter import ACPUserMessageMeta
+
+        content_block_dicts = [block.model_dump() for block in prompt]
+        acp_meta = ACPUserMessageMeta(content_blocks=content_block_dicts)
 
         # Map delivery hint to DeliveryMode for send_message().
         delivery_mode = DeliveryMode.STEER if delivery == "steer" else DeliveryMode.QUEUE
@@ -636,6 +628,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                 mode=delivery_mode,
                 input_provider=input_provider,
                 message_id=message_id,
+                meta=acp_meta,
             )
             # Legacy clients (no turn_complete support) block until the run finishes
             # so they don't need session/update turn_complete notifications.
@@ -784,10 +777,6 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         # Signal EventBus to close session
         if session_pool is not None:
             await session_pool.event_bus.close_session(session_id)
-
-        # Clean up the per-session dedup set.
-        if session_pool is not None:
-            session_pool.sessions._displayed_message_ids.pop(session_id, None)
 
         # Delegate to SessionPool for final cleanup
         if session_pool is not None:

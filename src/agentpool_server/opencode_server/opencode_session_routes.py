@@ -447,6 +447,7 @@ class OpenCodeSessionRoutesMixin:
         model_id: str | None = None,
         provider_id: str | None = None,
         assistant_msg_id: str | None = None,
+        meta: Any = None,
         **kwargs: Any,
     ) -> str | None:
         """Route a message through SessionPool.receive_request().
@@ -479,6 +480,10 @@ class OpenCodeSessionRoutesMixin:
                 can reuse it instead of generating an independent
                 ``assistant_msg_id`` (D14). Falls back to ``message_id`` if
                 not provided.
+            meta: Protocol-specific metadata to carry through to
+                ``UserMessageInsertedEvent``. When set, the event consumer
+                uses it to reconstruct the full user message (e.g. OpenCode
+                parts) instead of falling back to text-only content.
             **kwargs: Additional arguments passed to the turn runner.
                 Supports ``deferred_tool_results`` for checkpoint replay.
 
@@ -535,6 +540,7 @@ class OpenCodeSessionRoutesMixin:
             mode=delivery_mode,
             input_provider=input_provider,
             message_id=message_id,
+            meta=meta,
         )
 
     async def abort_session(self, session_id: str) -> None:

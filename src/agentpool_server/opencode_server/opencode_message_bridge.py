@@ -447,30 +447,31 @@ class OpenCodeMessageBridgeMixin:
             spawn_event: The spawn event containing subagent metadata.
             event: The StreamCompleteEvent from the child.
         """
-        # Find the parent session's latest assistant message from in-memory state
-        messages = getattr(self.server_state, "messages", {}).get(parent_session_id, []) or []
-        assistant_msg = None
+        # Find the ToolPart for this child session across ALL assistant
+        # messages (not just the last one). A background task may start in
+        # turn 1 (ToolPart in msg_A1) and complete after turn 2 has started
+        # (msg_A2 is now the last assistant message). Searching only the last
+        # message would miss the ToolPart in the earlier message.
+        messages = self.server_state.messages.get(parent_session_id, [])
+        assistant_msg: MessageWithParts | None = None
+        tool_part: ToolPart | None = None
         for msg in reversed(messages):
-            if msg.info.role == "assistant":
-                assistant_msg = msg
+            if msg.info.role != "assistant":
+                continue
+            for part in msg.parts:
+                metadata = part.state.metadata if isinstance(part, ToolPart) else None
+                if (
+                    isinstance(part, ToolPart)
+                    and isinstance(metadata, dict)
+                    and metadata.get("sessionId") == child_session_id
+                ):
+                    tool_part = part
+                    assistant_msg = msg
+                    break
+            if tool_part is not None:
                 break
 
-        if assistant_msg is None:
-            return
-
-        # Find the ToolPart for this child session
-        tool_part = None
-        for part in assistant_msg.parts:
-            if (
-                isinstance(part, ToolPart)
-                and hasattr(part.state, "metadata")
-                and isinstance(part.state.metadata, dict)
-                and part.state.metadata.get("sessionId") == child_session_id
-            ):
-                tool_part = part
-                break
-
-        if tool_part is None:
+        if tool_part is None or assistant_msg is None:
             logger.warning(
                 "No ToolPart found for child session %s in parent %s",
                 child_session_id,
@@ -536,30 +537,29 @@ class OpenCodeMessageBridgeMixin:
             spawn_event: The spawn event containing subagent metadata.
             event: The RunErrorEvent from the child.
         """
-        # Find the parent session's latest assistant message from in-memory state
-        messages = getattr(self.server_state, "messages", {}).get(parent_session_id, []) or []
-        assistant_msg = None
+        # Find the ToolPart for this child session across ALL assistant
+        # messages (not just the last one). See _update_parent_toolpart for
+        # the cross-turn background task rationale.
+        messages = self.server_state.messages.get(parent_session_id, [])
+        assistant_msg: MessageWithParts | None = None
+        tool_part: ToolPart | None = None
         for msg in reversed(messages):
-            if msg.info.role == "assistant":
-                assistant_msg = msg
+            if msg.info.role != "assistant":
+                continue
+            for part in msg.parts:
+                metadata = part.state.metadata if isinstance(part, ToolPart) else None
+                if (
+                    isinstance(part, ToolPart)
+                    and isinstance(metadata, dict)
+                    and metadata.get("sessionId") == child_session_id
+                ):
+                    tool_part = part
+                    assistant_msg = msg
+                    break
+            if tool_part is not None:
                 break
 
-        if assistant_msg is None:
-            return
-
-        # Find the ToolPart for this child session
-        tool_part = None
-        for part in assistant_msg.parts:
-            if (
-                isinstance(part, ToolPart)
-                and hasattr(part.state, "metadata")
-                and isinstance(part.state.metadata, dict)
-                and part.state.metadata.get("sessionId") == child_session_id
-            ):
-                tool_part = part
-                break
-
-        if tool_part is None:
+        if tool_part is None or assistant_msg is None:
             return
 
         source_name = spawn_event.source_name or "subagent"
