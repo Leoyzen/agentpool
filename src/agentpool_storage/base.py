@@ -386,6 +386,22 @@ class StorageProvider:
 
         Returns:
             The count of removed messages
+
+        Provider contract:
+            Storage providers SHOULD implement this method. If a provider
+            does not implement it, the base class raises ``NotImplementedError``,
+            which is suppressed by the COMMIT phase
+            (``contextlib.suppress(NotImplementedError, KeyError, TypeError)``).
+            When the error is suppressed, the in-memory message list and agent
+            ``ChatMessage`` history are still truncated, but the DB retains
+            stale messages — resulting in DB/in-memory divergence. On the next
+            session reload from DB, the stale messages will reappear because
+            the revert marker has already been cleared.
+
+            To avoid this divergence, providers that do not support
+            ``truncate_messages`` SHOULD override this method to explicitly
+            no-op (return 0) and log a warning, rather than relying on the
+            base class ``NotImplementedError``.
         """
         msg = f"{self.__class__.__name__} does not support truncating messages"
         raise NotImplementedError(msg)
