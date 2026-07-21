@@ -10,12 +10,13 @@ Covers four scenarios:
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from agentpool_server.opencode_server.routes.session_routes import _ensure_session_idle
+
 
 if TYPE_CHECKING:
     from agentpool_server.opencode_server.state import ServerState

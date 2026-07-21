@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock
 
 import pytest
@@ -25,12 +25,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from agentpool.messaging import ChatMessage
-from agentpool.utils.streams import FileOpsTracker
+from agentpool.storage import StorageManager
 from agentpool.utils.time_utils import now_ms
 from agentpool_config.storage import SQLStorageConfig, StorageConfig
-from agentpool.storage import StorageManager
-from agentpool_storage.sql_provider.models import Message
-from agentpool_storage.sql_provider.sql_provider import SQLModelProvider
 from agentpool_server.opencode_server.models import (
     AssistantMessage,
     MessagePath,
@@ -48,6 +45,8 @@ from agentpool_server.opencode_server.routes.session_routes import (
     RevertRequest,
     revert_session,
 )
+from agentpool_storage.sql_provider.models import Message
+from agentpool_storage.sql_provider.sql_provider import SQLModelProvider
 
 
 if TYPE_CHECKING:
@@ -288,8 +287,10 @@ def _wire_session_controller_noop(state: ServerState) -> None:
 
 
 class TestCommitRevertRealDb:
-    """Verify ``_commit_revert`` actually deletes rows from the DB when
-    wired to a real ``SQLModelProvider`` with in-memory SQLite."""
+    """Verify ``_commit_revert`` actually deletes rows from the DB when.
+
+    wired to a real ``SQLModelProvider`` with in-memory SQLite.
+    """
 
     async def test_commit_revert_deletes_db_rows(
         self,
@@ -297,9 +298,11 @@ class TestCommitRevertRealDb:
         tmp_path: Path,
     ) -> None:
         """Given: 5 messages in real DB, session in STAGED state (revert at index 2).
+
         When: ``_commit_revert`` is called.
         Then: DB rows from index 2 onwards are deleted, in-memory messages
-              are truncated, and the revert marker is cleared."""
+              are truncated, and the revert marker is cleared.
+        """
         # --- Setup: real SQLModelProvider with in-memory SQLite ---
         db_path = tmp_path / "test_commit_revert.db"
         sql_config = SQLStorageConfig(url=f"sqlite:///{db_path}", auto_migration=False)
@@ -328,9 +331,7 @@ class TestCommitRevertRealDb:
             _set_revert_marker(server_state, session_id, revert_msg_id)
 
             # Store reverted messages (as revert_session does)
-            server_state.reverted_messages[session_id] = list(
-                server_state.messages[session_id][2:]
-            )
+            server_state.reverted_messages[session_id] = list(server_state.messages[session_id][2:])
 
             # --- Call _commit_revert ---
             await _commit_revert(server_state, session_id)
@@ -370,12 +371,14 @@ class TestStageCommitFlowRealDb:
         tmp_path: Path,
     ) -> None:
         """Given: 5 messages in real DB.
+
         When: ``revert_session`` (STAGE) is called at message index 2,
               then ``_commit_revert`` (COMMIT) is called,
               then a new message is inserted into the DB.
         Then: After STAGE, DB still has all 5 messages.
               After COMMIT, DB has only messages 0-1.
-              After new message insert, DB has messages 0-1 + new message."""
+              After new message insert, DB has messages 0-1 + new message.
+        """
         # --- Setup: real SQLModelProvider with in-memory SQLite ---
         db_path = tmp_path / "test_stage_commit.db"
         sql_config = SQLStorageConfig(url=f"sqlite:///{db_path}", auto_migration=False)
@@ -437,7 +440,7 @@ class TestStageCommitFlowRealDb:
 
             # --- Simulate new message after COMMIT ---
             new_msg_time = base_time + timedelta(seconds=10)
-            new_msg = await _insert_single_message_into_db(
+            await _insert_single_message_into_db(
                 provider,
                 msg_id="db-msg-new",
                 session_id=session_id,

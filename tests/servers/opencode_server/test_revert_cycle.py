@@ -134,14 +134,16 @@ class TestStageCommitCycle:
         server_state: ServerState,
     ) -> None:
         """Given: A session with 6 messages (3 user + 3 assistant alternating).
+
         When: STAGE at msg-003, send new message (COMMIT), STAGE at msg-001,
               send another new message (COMMIT).
-        Then: Final state has msg-000 + new_msg_1 + new_msg_2, all others gone."""
+        Then: Final state has msg-000 + new_msg_1 + new_msg_2, all others gone.
+        """
         # --- Setup: create session with 6 messages ---
         create_response = await async_client.post("/session", json={"title": "Cycle Test"})
         session_id = create_response.json()["id"]
 
-        messages = await _add_messages_to_state(server_state, session_id, count=6)
+        await _add_messages_to_state(server_state, session_id, count=6)
         assert _message_ids(server_state, session_id) == [
             "msg-000",
             "msg-001",
@@ -277,8 +279,10 @@ class TestHttpRevertUnrevertMessage:
         server_state: ServerState,
     ) -> None:
         """Given: A session with messages.
+
         When: POST /revert (STAGE) → POST /unrevert (CLEAR) → POST /message.
-        Then: COMMIT does NOT fire (marker was cleared), all messages visible."""
+        Then: COMMIT does NOT fire (marker was cleared), all messages visible.
+        """
         # --- Setup ---
         create_response = await async_client.post("/session", json={"title": "HTTP Cycle"})
         session_id = create_response.json()["id"]
@@ -363,14 +367,14 @@ class TestRegression500Bug:
         async_client: AsyncClient,
         server_state: ServerState,
     ) -> None:
-        """Given: A session with messages and a provider that raises
+        """Given: A session with messages and a provider that raises.
+
         NotImplementedError on truncate_messages.
         When: POST /revert (STAGE).
-        Then: Response is 200 (not 500), truncate_messages NOT called."""
+        Then: Response is 200 (not 500), truncate_messages NOT called.
+        """
         # --- Setup ---
-        create_response = await async_client.post(
-            "/session", json={"title": "500 Bug Regression"}
-        )
+        create_response = await async_client.post("/session", json={"title": "500 Bug Regression"})
         session_id = create_response.json()["id"]
 
         await _add_messages_to_state(server_state, session_id, count=4)
@@ -379,9 +383,7 @@ class TestRegression500Bug:
         # the original SQLModelProvider that didn't support truncation.
         session_pool = cast(Mock, server_state.pool.session_pool)
         session_pool.truncate_messages = AsyncMock(
-            side_effect=NotImplementedError(
-                "SQLModelProvider does not support truncating messages"
-            )
+            side_effect=NotImplementedError("SQLModelProvider does not support truncating messages")
         )
 
         # --- STAGE: POST /revert ---
@@ -425,9 +427,11 @@ class TestCommitTruncatesBeforeAppend:
         server_state: ServerState,
     ) -> None:
         """Given: A session with 6 messages, STAGE at msg-003.
+
         When: A new message is sent (triggers COMMIT).
         Then: in-memory messages = [msg-000, msg-001, msg-002, new_message]
-              (NOT [msg-000, ..., msg-005, new_message])."""
+              (NOT [msg-000, ..., msg-005, new_message]).
+        """
         # --- Setup ---
         create_response = await async_client.post(
             "/session", json={"title": "Truncated Append Test"}

@@ -77,7 +77,9 @@ class TestTruncateMessages:
         base = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
         session_id = "s-truncate-middle"
         messages = [
-            _make_message(msg_id=f"m{i}", session_id=session_id, timestamp=base + timedelta(seconds=i))
+            _make_message(
+                msg_id=f"m{i}", session_id=session_id, timestamp=base + timedelta(seconds=i)
+            )
             for i in range(1, 6)
         ]
 
@@ -95,7 +97,9 @@ class TestTruncateMessages:
         base = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
         session_id = "s-unknown"
         messages = [
-            _make_message(msg_id=f"m{i}", session_id=session_id, timestamp=base + timedelta(seconds=i))
+            _make_message(
+                msg_id=f"m{i}", session_id=session_id, timestamp=base + timedelta(seconds=i)
+            )
             for i in range(1, 6)
         ]
 
@@ -113,7 +117,9 @@ class TestTruncateMessages:
         base = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
         session_id = "s-truncate-first"
         messages = [
-            _make_message(msg_id=f"m{i}", session_id=session_id, timestamp=base + timedelta(seconds=i))
+            _make_message(
+                msg_id=f"m{i}", session_id=session_id, timestamp=base + timedelta(seconds=i)
+            )
             for i in range(1, 6)
         ]
 
@@ -144,7 +150,9 @@ class TestTruncateMessages:
         assert remaining == []
 
     @pytest.mark.unit
-    async def test_truncate_with_real_sqlalchemy_timestamps(self, provider: SQLModelProvider) -> None:
+    async def test_truncate_with_real_sqlalchemy_timestamps(
+        self, provider: SQLModelProvider
+    ) -> None:
         """Verify SQLite timestamp storage format works with the >= comparison.
 
         Inserts messages with timezone-aware datetimes, truncates, and verifies
@@ -178,7 +186,9 @@ class TestTruncateMessages:
         assert remaining == ["early"]
 
     @pytest.mark.unit
-    async def test_truncate_does_not_affect_other_sessions(self, provider: SQLModelProvider) -> None:
+    async def test_truncate_does_not_affect_other_sessions(
+        self, provider: SQLModelProvider
+    ) -> None:
         """Truncating one session does not touch messages in another session."""
         base = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
         session_a = "s-a"

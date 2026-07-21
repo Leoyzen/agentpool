@@ -9,7 +9,6 @@ Covers OpenSpec tasks 7.4-7.7 for session-revert-stage-clear-commit.
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest

@@ -11,7 +11,6 @@ Covers OpenSpec tasks 3.10-3.13 (STAGE) and 4.7-4.11 (CLEAR).
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock, Mock
 
@@ -122,10 +121,12 @@ class TestStageRevert:
         self,
         async_client: AsyncClient,
         server_state: ServerState,
-        event_capture,  # noqa: ANN001
+        event_capture,
     ):
-        """3.10: STAGE sets revert marker, broadcasts MessageRemovedEvent and PartRemovedEvent,
-        but does NOT delete messages from DB."""
+        """3.10: STAGE sets revert marker, broadcasts MessageRemovedEvent and PartRemovedEvent,.
+
+        but does NOT delete messages from DB.
+        """
         create_response = await async_client.post("/session", json={"title": "STAGE Test"})
         session_id = create_response.json()["id"]
 
@@ -218,6 +219,7 @@ class TestStageRevert:
         mock_session_state.prompt_queue.put_nowait("queued prompt 1")
         mock_session_state.prompt_queue.put_nowait("queued prompt 2")
         from agentpool.lifecycle.types import Feedback
+
         mock_session_state.feedback_queue.put_nowait(Feedback(content="feedback 1", is_steer=False))
 
         # Wire it into the session controller
@@ -244,8 +246,10 @@ class TestStageRevert:
         async_client: AsyncClient,
         server_state: ServerState,
     ):
-        """3.13: Double STAGE - STAGE at point A, then STAGE at point B -> marker overwritten to B,
-        previous reverted_changes cleared."""
+        """3.13: Double STAGE - STAGE at point A, then STAGE at point B -> marker overwritten to B,.
+
+        previous reverted_changes cleared.
+        """
         create_response = await async_client.post("/session", json={"title": "Double STAGE"})
         session_id = create_response.json()["id"]
 
@@ -266,6 +270,7 @@ class TestStageRevert:
 
         # Pre-create the file so file rollback (writing old_content) succeeds
         import pathlib
+
         pathlib.Path("/tmp/file_a.py").write_text("dummy")
 
         # STAGE at point A
@@ -364,7 +369,10 @@ class TestClearUnrevert:
         async_client: AsyncClient,
         server_state: ServerState,
     ):
-        """4.8: CLEAR without revert marker -> HTTP 400 with detail 'No reverted messages to restore'."""
+        """4.8: CLEAR without revert marker -> HTTP 400.
+
+        Detail: 'No reverted messages to restore'.
+        """
         create_response = await async_client.post("/session", json={"title": "No Marker CLEAR"})
         session_id = create_response.json()["id"]
 
@@ -436,7 +444,10 @@ class TestClearUnrevert:
         async_client: AsyncClient,
         server_state: ServerState,
     ):
-        """4.11: CLEAR does not restore cleared queues - STAGE clears queues, CLEAR does not restore them."""
+        """4.11: CLEAR does not restore cleared queues.
+
+        STAGE clears queues, CLEAR does not restore them.
+        """
         create_response = await async_client.post("/session", json={"title": "Queue CLEAR"})
         session_id = create_response.json()["id"]
 
@@ -444,8 +455,8 @@ class TestClearUnrevert:
         revert_message_id = messages[0].info.id
 
         # Set up a mock session state with populated queues
-        from agentpool.orchestrator.session_controller import SessionState
         from agentpool.lifecycle.types import Feedback
+        from agentpool.orchestrator.session_controller import SessionState
 
         mock_session_state = SessionState(session_id=session_id, agent_name="test-agent")
         mock_session_state.prompt_queue.put_nowait("queued prompt")
@@ -494,9 +505,11 @@ class TestCloseSessionWithRevert:
         server_state: ServerState,
     ):
         """Given: a session with a revert marker (STAGE).
+
         When: the session is deleted (DELETE /{session_id}).
         Then: the revert marker is gone (session deleted),
-              truncate_messages was NOT called (no COMMIT on close)."""
+              truncate_messages was NOT called (no COMMIT on close).
+        """
         # Create a session
         create_response = await async_client.post("/session", json={"title": "Close Revert Test"})
         session_id = create_response.json()["id"]

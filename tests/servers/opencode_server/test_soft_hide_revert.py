@@ -4,13 +4,12 @@ Tests that ``get_messages_for_session()`` correctly filters out messages
 at and after the revert point when ``session.revert`` is set, while
 preserving all messages when no revert is active.
 
-Covers tasks 6.1–6.4 from session-revert-stage-clear-commit.
+Covers tasks 6.1-6.4 from session-revert-stage-clear-commit.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -33,6 +32,7 @@ from agentpool_server.opencode_server.opencode_message_bridge import (
     get_messages_for_session,
 )
 from agentpool_server.opencode_server.state import ServerState
+
 
 pytestmark = pytest.mark.unit
 
@@ -149,7 +149,8 @@ class TestSoftHideRevertFilter:
     """Tests for soft-hide filtering via ``session.revert``."""
 
     async def test_revert_set_filters_messages_at_and_after_revert_point(self):
-        """When ``session.revert`` is set, messages at and after the revert
+        """When ``session.revert`` is set, messages at and after the revert.
+
         message_id are excluded; messages before it are included.
         """
         session_id = "test-session"
@@ -170,7 +171,8 @@ class TestSoftHideRevertFilter:
         assert "msg-005" not in result_ids
 
     async def test_revert_none_returns_all_messages(self):
-        """When ``session.revert`` is ``None``, all messages are returned
+        """When ``session.revert`` is ``None``, all messages are returned.
+
         without filtering.
         """
         session_id = "test-session"
@@ -185,7 +187,8 @@ class TestSoftHideRevertFilter:
         assert result_ids == [m.info.id for m in messages]
 
     async def test_revert_message_id_not_found_returns_all_messages(self):
-        """When ``session.revert.message_id`` doesn't match any message,
+        """When ``session.revert.message_id`` doesn't match any message,.
+
         all messages are returned (defensive fallback).
         """
         session_id = "test-session"
@@ -236,7 +239,8 @@ class TestSoftHideEmptyMessages:
     """Tests for soft-hide with empty message list and revert set."""
 
     async def test_empty_messages_with_revert_returns_empty_list(self):
-        """When ``state.messages[session_id]`` is empty and ``session.revert``
+        """When ``state.messages[session_id]`` is empty and ``session.revert``.
+
         is set, the function returns an empty list, not crash.
         """
         session_id = "test-session"
@@ -249,7 +253,8 @@ class TestSoftHideEmptyMessages:
         assert result == []
 
     async def test_missing_session_id_with_revert_returns_empty_list(self):
-        """When ``state.messages`` doesn't have the session_id key at all
+        """When ``state.messages`` doesn't have the session_id key at all.
+
         and ``session.revert`` is set, the function returns an empty list.
         """
         session_id = "test-session"
@@ -267,7 +272,8 @@ class TestSoftHideEmptyMessages:
         assert result == []
 
     async def test_session_not_cached_returns_all_messages(self):
-        """When the session is not in ``state.sessions`` (cached_session is
+        """When the session is not in ``state.sessions`` (cached_session is.
+
         None), no filtering is applied and all messages are returned.
         """
         session_id = "test-session"
@@ -341,7 +347,8 @@ class TestSoftHideSessionPool:
     async def test_revert_filter_with_non_empty_session_pool(
         self,
     ) -> None:
-        """When ``state.messages`` is empty but ``session_pool.get_messages()``
+        """When ``state.messages`` is empty but ``session_pool.get_messages()``.
+
         returns ChatMessage objects, the revert filter is applied to the converted
         messages. Messages at and after the revert point are excluded.
         """
@@ -396,8 +403,10 @@ class TestSoftHideSessionPool:
     async def test_session_pool_with_no_revert_returns_all(
         self,
     ) -> None:
-        """When session.revert is None, all ChatMessage objects from
-        session_pool.get_messages() are returned unfiltered."""
+        """When session.revert is None, all ChatMessage objects from.
+
+        session_pool.get_messages() are returned unfiltered.
+        """
         session_id = "test-session"
 
         chat_messages: list[ChatMessage[str]] = []

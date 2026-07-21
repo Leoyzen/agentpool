@@ -12,12 +12,12 @@ propagation, and interaction with STAGE/CLEAR.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from agentpool.messaging import ChatMessage
-from agentpool.utils.streams import FileChange, FileOpsTracker
+from agentpool.utils.streams import FileChange
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.models import (
     AssistantMessage,
@@ -36,9 +36,6 @@ from agentpool_server.opencode_server.models import (
 from agentpool_server.opencode_server.routes.message_routes import (
     _commit_revert,
     _truncate_agent_history,
-)
-from agentpool_server.opencode_server.session_pool_integration import (
-    append_message_to_session,
 )
 
 
@@ -205,18 +202,22 @@ def _setup_agent_history(
 
 
 class TestCommitFull:
-    """5.4: Full COMMIT — messages deleted from DB, in-memory, agent history,
-    marker cleared, FileOps backup cleared, new message created."""
+    """5.4: Full COMMIT — messages deleted from DB, in-memory, agent history,.
+
+    marker cleared, FileOps backup cleared, new message created.
+    """
 
     async def test_commit_deletes_from_db_and_memory_and_agent(
         self,
-        async_client,  # noqa: ARG002
+        async_client,
         server_state: ServerState,
     ) -> None:
         """Given: Session in STAGED state with 5 messages, revert at index 2.
+
         When: _commit_revert is called.
         Then: DB truncated, in-memory truncated, agent history truncated,
-              marker cleared, reverted_messages cleared, FileOps cleared."""
+              marker cleared, reverted_messages cleared, FileOps cleared.
+        """
         session_id = "test-commit-full"
         _create_session_in_state(server_state, session_id)
         revert_msg_id, messages = _setup_staged_session(
@@ -230,9 +231,7 @@ class TestCommitFull:
         await _commit_revert(server_state, session_id)
 
         # 1. DB truncate called with correct args
-        session_pool.truncate_messages.assert_awaited_once_with(
-            session_id, revert_msg_id
-        )
+        session_pool.truncate_messages.assert_awaited_once_with(session_id, revert_msg_id)
 
         # 2. In-memory messages truncated (messages before index 2 remain)
         remaining = server_state.messages[session_id]
@@ -263,20 +262,24 @@ class TestCommitFull:
 
 
 class TestCommitSuppressPath:
-    """5.5: COMMIT where truncate_messages raises NotImplementedError —
-    in-memory still correct, marker cleared, new message processed."""
+    """5.5: COMMIT where truncate_messages raises NotImplementedError —.
+
+    in-memory still correct, marker cleared, new message processed.
+    """
 
     async def test_commit_suppresses_not_implemented_error(
         self,
-        async_client,  # noqa: ARG002
+        async_client,
         server_state: ServerState,
     ) -> None:
         """Given: truncate_messages raises NotImplementedError.
+
         When: _commit_revert is called.
-        Then: Error suppressed, in-memory truncated, marker cleared."""
+        Then: Error suppressed, in-memory truncated, marker cleared.
+        """
         session_id = "test-commit-nie"
         _create_session_in_state(server_state, session_id)
-        revert_msg_id, messages = _setup_staged_session(
+        _revert_msg_id, messages = _setup_staged_session(
             server_state, session_id, num_messages=5, revert_at_index=2
         )
         _setup_agent_history(server_state, session_id, messages)
@@ -295,12 +298,14 @@ class TestCommitSuppressPath:
 
     async def test_commit_suppresses_key_error(
         self,
-        async_client,  # noqa: ARG002
+        async_client,
         server_state: ServerState,
     ) -> None:
         """Given: truncate_messages raises KeyError.
+
         When: _commit_revert is called.
-        Then: Error suppressed, in-memory truncated, marker cleared."""
+        Then: Error suppressed, in-memory truncated, marker cleared.
+        """
         session_id = "test-commit-ke"
         _create_session_in_state(server_state, session_id)
         _setup_staged_session(server_state, session_id, num_messages=3, revert_at_index=1)
@@ -316,12 +321,14 @@ class TestCommitSuppressPath:
 
     async def test_commit_suppresses_type_error(
         self,
-        async_client,  # noqa: ARG002
+        async_client,
         server_state: ServerState,
     ) -> None:
         """Given: truncate_messages raises TypeError.
+
         When: _commit_revert is called.
-        Then: Error suppressed, in-memory truncated, marker cleared."""
+        Then: Error suppressed, in-memory truncated, marker cleared.
+        """
         session_id = "test-commit-te"
         _create_session_in_state(server_state, session_id)
         _setup_staged_session(server_state, session_id, num_messages=3, revert_at_index=1)
@@ -342,17 +349,21 @@ class TestCommitSuppressPath:
 
 
 class TestCommitNonSuppressedError:
-    """5.6: COMMIT where truncate_messages raises a non-suppressed error —
-    error propagates, in-memory NOT truncated, marker NOT cleared."""
+    """5.6: COMMIT where truncate_messages raises a non-suppressed error —.
+
+    error propagates, in-memory NOT truncated, marker NOT cleared.
+    """
 
     async def test_commit_runtime_error_propagates(
         self,
-        async_client,  # noqa: ARG002
+        async_client,
         server_state: ServerState,
     ) -> None:
         """Given: truncate_messages raises RuntimeError.
+
         When: _commit_revert is called.
-        Then: RuntimeError propagates, in-memory NOT truncated, marker NOT cleared."""
+        Then: RuntimeError propagates, in-memory NOT truncated, marker NOT cleared.
+        """
         session_id = "test-commit-runtime"
         _create_session_in_state(server_state, session_id)
         revert_msg_id, messages = _setup_staged_session(
@@ -382,12 +393,14 @@ class TestCommitNonSuppressedError:
 
     async def test_commit_value_error_propagates(
         self,
-        async_client,  # noqa: ARG002
+        async_client,
         server_state: ServerState,
     ) -> None:
         """Given: truncate_messages raises ValueError (non-suppressed).
+
         When: _commit_revert is called.
-        Then: ValueError propagates, in-memory NOT truncated."""
+        Then: ValueError propagates, in-memory NOT truncated.
+        """
         session_id = "test-commit-value"
         _create_session_in_state(server_state, session_id)
         _setup_staged_session(server_state, session_id, num_messages=3, revert_at_index=1)
@@ -410,20 +423,24 @@ class TestCommitNonSuppressedError:
 
 
 class TestCommitOrdering:
-    """5.7: Verify DB truncate called BEFORE in-memory truncation, and
-    in-memory truncation BEFORE marker clearing."""
+    """5.7: Verify DB truncate called BEFORE in-memory truncation, and.
+
+    in-memory truncation BEFORE marker clearing.
+    """
 
     async def test_commit_db_before_memory_before_marker(
         self,
-        async_client,  # noqa: ARG002
+        async_client,
         server_state: ServerState,
     ) -> None:
         """Given: Session in STAGED state.
+
         When: _commit_revert is called with ordered mock tracking.
-        Then: DB truncate happens first, then in-memory, then marker clear."""
+        Then: DB truncate happens first, then in-memory, then marker clear.
+        """
         session_id = "test-commit-order"
         _create_session_in_state(server_state, session_id)
-        revert_msg_id, _messages = _setup_staged_session(
+        _revert_msg_id, _messages = _setup_staged_session(
             server_state, session_id, num_messages=5, revert_at_index=2
         )
 
@@ -473,15 +490,18 @@ class TestCommitOrdering:
 
 
 class TestCommitSuppressScope:
-    """5.8: Verify suppress wraps ONLY truncate_messages call. Errors in
-    in-memory access or other steps are NOT suppressed."""
+    """5.8: Verify suppress wraps ONLY truncate_messages call. Errors in.
+
+    in-memory access or other steps are NOT suppressed.
+    """
 
     async def test_key_error_in_messages_access_not_suppressed(
         self,
-        async_client,  # noqa: ARG002
+        async_client,
         server_state: ServerState,
     ) -> None:
         """Given: state.messages access raises KeyError (not from truncate).
+
         When: _commit_revert is called.
         Then: KeyError propagates (NOT suppressed by the DB suppress).
 
@@ -516,18 +536,22 @@ class TestCommitSuppressScope:
 
 
 class TestCommitDbReload:
-    """5.9: After COMMIT, truncated messages are gone from DB, not just
-    in-memory. Verify by checking truncate_messages was called (DB path)."""
+    """5.9: After COMMIT, truncated messages are gone from DB, not just.
+
+    in-memory. Verify by checking truncate_messages was called (DB path).
+    """
 
     async def test_commit_calls_truncate_on_db(
         self,
-        async_client,  # noqa: ARG002
+        async_client,
         server_state: ServerState,
     ) -> None:
         """Given: Session in STAGED state with messages in DB.
+
         When: _commit_revert is called.
         Then: session_pool.truncate_messages is called with correct args,
-              confirming DB truncation occurred."""
+              confirming DB truncation occurred.
+        """
         session_id = "test-commit-dbreload"
         _create_session_in_state(server_state, session_id)
         revert_msg_id, _messages = _setup_staged_session(
@@ -540,9 +564,7 @@ class TestCommitDbReload:
         await _commit_revert(server_state, session_id)
 
         # DB truncate was called — this is the proof that DB was truncated
-        session_pool.truncate_messages.assert_awaited_once_with(
-            session_id, revert_msg_id
-        )
+        session_pool.truncate_messages.assert_awaited_once_with(session_id, revert_msg_id)
 
         # After COMMIT, a fresh get_messages call would return truncated list
         # (In mock setup, get_messages returns from _mock_chat_store, but
@@ -556,17 +578,21 @@ class TestCommitDbReload:
 
 
 class TestCommitAfterClear:
-    """5.10: After CLEAR (which clears the revert marker), a new message
-    does NOT trigger COMMIT. All messages visible, new message appended."""
+    """5.10: After CLEAR (which clears the revert marker), a new message.
+
+    does NOT trigger COMMIT. All messages visible, new message appended.
+    """
 
     async def test_no_commit_after_clear(
         self,
-        async_client,  # noqa: ARG002
+        async_client,
         server_state: ServerState,
     ) -> None:
         """Given: Session was STAGED then CLEARed (revert marker = None).
+
         When: _commit_revert is called.
-        Then: No truncation occurs, all messages remain visible."""
+        Then: No truncation occurs, all messages remain visible.
+        """
         session_id = "test-commit-after-clear"
         _create_session_in_state(server_state, session_id)
         _setup_staged_session(server_state, session_id, num_messages=5, revert_at_index=2)
@@ -605,8 +631,10 @@ class TestTruncateAgentHistory:
         server_state: ServerState,
     ) -> None:
         """Given: Agent has 5 ChatMessages with known message IDs.
+
         When: _truncate_agent_history is called with message_id at index 2.
-        Then: ChatMessages from index 2 onwards are removed."""
+        Then: ChatMessages from index 2 onwards are removed.
+        """
         session_pool = cast(Mock, server_state.pool.session_pool)
         chat_messages = [
             _make_chat_message(f"msg-{i:03d}", role="user" if i % 2 == 0 else "assistant")
@@ -637,12 +665,12 @@ class TestTruncateAgentHistory:
         server_state: ServerState,
     ) -> None:
         """Given: Agent has 3 ChatMessages, none matching the target ID.
+
         When: _truncate_agent_history is called with a non-existent ID.
-        Then: No truncation occurs, all messages remain."""
+        Then: No truncation occurs, all messages remain.
+        """
         session_pool = cast(Mock, server_state.pool.session_pool)
-        chat_messages = [
-            _make_chat_message(f"msg-{i:03d}") for i in range(3)
-        ]
+        chat_messages = [_make_chat_message(f"msg-{i:03d}") for i in range(3)]
 
         session_state = Mock()
         agent = Mock()
@@ -664,8 +692,10 @@ class TestTruncateAgentHistory:
         server_state: ServerState,
     ) -> None:
         """Given: Session does not exist in session_pool.
+
         When: _truncate_agent_history is called.
-        Then: No error, no-op."""
+        Then: No error, no-op.
+        """
         session_pool = cast(Mock, server_state.pool.session_pool)
         session_pool.sessions.get_session = Mock(return_value=None)
 
@@ -677,8 +707,10 @@ class TestTruncateAgentHistory:
         server_state: ServerState,
     ) -> None:
         """Given: Session exists but has no agent.
+
         When: _truncate_agent_history is called.
-        Then: No error, no-op."""
+        Then: No error, no-op.
+        """
         session_pool = cast(Mock, server_state.pool.session_pool)
         session_state = Mock()
         session_state.agent = None
@@ -691,8 +723,10 @@ class TestTruncateAgentHistory:
         server_state: ServerState,
     ) -> None:
         """Given: Agent has no conversation attribute.
+
         When: _truncate_agent_history is called.
-        Then: No error, no-op (AttributeError caught)."""
+        Then: No error, no-op (AttributeError caught).
+        """
         session_pool = cast(Mock, server_state.pool.session_pool)
         session_state = Mock()
         agent = Mock(spec=[])  # No attributes
@@ -716,8 +750,10 @@ class TestCommitInPromptAsync:
         server_state: ServerState,
     ) -> None:
         """Given: Session in STAGED state.
+
         When: POST /prompt_async is called.
-        Then: COMMIT fires (truncate_messages called) before message routing."""
+        Then: COMMIT fires (truncate_messages called) before message routing.
+        """
         response = await async_client.post("/session", json={"title": "Async Commit"})
         session_id = response.json()["id"]
 
