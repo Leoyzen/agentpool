@@ -246,9 +246,7 @@ class EventProcessor:
                 content=event_content,
                 timestamp=ts,
             ):
-                async for e in self._process_user_message_inserted(
-                    ctx, mid, event_content, ts
-                ):
+                async for e in self._process_user_message_inserted(ctx, mid, event_content, ts):
                     yield e
 
     def _process_text_start(

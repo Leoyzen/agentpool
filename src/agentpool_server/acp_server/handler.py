@@ -839,9 +839,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             text = block.text
             if not text:
                 continue
-            chunks = ACPEventConverter.build_user_message_chunks(
-                text, message_id=message_id
-            )
+            chunks = ACPEventConverter.build_user_message_chunks(text, message_id=message_id)
             for chunk in chunks:
                 notification = SessionNotification(
                     session_id=session_id,
