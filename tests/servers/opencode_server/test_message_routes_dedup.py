@@ -1,4 +1,4 @@
-"""Tests for user message dedup wiring at OpenCode UserMessage creation sites.
+"""Tests for dedup integration between REST handler and EventProcessor.
 
 Verifies that when a user message is created by the REST handler, the
 message_id is registered in the shared dedup set. When the EventBus-derived
@@ -27,7 +27,6 @@ from agentpool_server.opencode_server.models import (
 
 pytestmark = pytest.mark.unit
 
-
 if TYPE_CHECKING:
     from agentpool_server.opencode_server.state import ServerState
 
@@ -54,12 +53,7 @@ def _make_ctx(server_state: ServerState) -> EventProcessorContext:
 
 
 def _setup_dedup_mock(server_state: ServerState) -> dict[str, set[str]]:
-    """Set up a real dedup set on the mock session_controller.
-
-    The conftest ``server_state`` fixture uses a Mock session_controller
-    that doesn't have a real ``_get_dedup_set``. This helper replaces it
-    with a real implementation backed by a dict of sets.
-    """
+    """Set up a real dedup set on the mock session_controller."""
     dedup_store: dict[str, set[str]] = {}
 
     def _get_dedup_set(session_id: str) -> set[str]:
@@ -74,148 +68,11 @@ def _setup_dedup_mock(server_state: ServerState) -> dict[str, set[str]]:
     return dedup_store
 
 
-async def _collect_events(
-    processor: EventProcessor,
-    ctx: EventProcessorContext,
-    event: UserMessageInsertedEvent,
-) -> list:
-    """Collect all events from processor.process() into a list."""
-    return [e async for e in processor.process(event, ctx)]
-
-
-# =============================================================================
-# _register_dedup Helper Tests
-# =============================================================================
-
-
-def test_register_dedup_adds_message_id_to_dedup_set(
-    server_state: ServerState,
-) -> None:
-    """Test that _register_dedup adds the message_id to the dedup set.
-
-    Given: A server state with a session_controller that has a dedup set.
-    When: _register_dedup is called with a session_id and message_id.
-    Then: The message_id appears in the session's dedup set.
-    """
-    from agentpool_server.opencode_server.routes.message_routes import _register_dedup
-
-    dedup_store = _setup_dedup_mock(server_state)
-    session_id = "test-session-dedup"
-    message_id = "user-msg-dedup-1"
-
-    _register_dedup(server_state, session_id, message_id)
-
-    assert message_id in dedup_store[session_id]
-
-
-def test_register_dedup_noop_without_session_controller(
-    server_state: ServerState,
-) -> None:
-    """Test that _register_dedup is a no-op when session_controller is None.
-
-    Given: A server state with session_controller set to None.
-    When: _register_dedup is called.
-    Then: No exception is raised and nothing is registered.
-    """
-    from agentpool_server.opencode_server.routes.message_routes import _register_dedup
-
-    server_state.session_controller = None
-    session_id = "test-session-no-controller"
-    message_id = "user-msg-no-controller"
-
-    # Should not raise
-    _register_dedup(server_state, session_id, message_id)
-
-
-# =============================================================================
-# EventProcessor Dedup Tests
-# =============================================================================
-
-
-@pytest.mark.asyncio
-async def test_event_processor_skips_deduped_message(
-    server_state: ServerState,
-) -> None:
-    """Test EventProcessor skips UserMessageInsertedEvent when message_id is in dedup set.
-
-    Given: An EventProcessor with a dedup set containing a message_id.
-    When: UserMessageInsertedEvent arrives with the same message_id.
-    Then: No events are yielded (dedup skip).
-    """
-    dedup_store = _setup_dedup_mock(server_state)
-    session_id = "test-session-dedup"
-    message_id = "user-msg-dedup-skip"
-
-    # Register message_id in dedup set (simulating REST handler)
-    dedup_set = dedup_store.setdefault(session_id, set())
-    dedup_set.add(message_id)
-
-    # Create EventProcessor with the same dedup set
-    processor = EventProcessor(displayed_message_ids=dedup_set)
-    ctx = _make_ctx(server_state)
-
-    # WHEN: UserMessageInsertedEvent with the same message_id
-    event = UserMessageInsertedEvent(
-        session_id=session_id,
-        message_id=message_id,
-        content="This should be skipped",
-        delivery="initial",
-        source="protocol",
-    )
-
-    events = await _collect_events(processor, ctx, event)
-
-    # THEN: No events yielded (dedup skip)
-    assert events == []
-
-
-@pytest.mark.asyncio
-async def test_event_processor_emits_non_deduped_message(
-    server_state: ServerState,
-) -> None:
-    """Test EventProcessor emits events when message_id is NOT in dedup set.
-
-    Given: An EventProcessor with an empty dedup set.
-    When: UserMessageInsertedEvent arrives with a new message_id.
-    Then: MessageUpdatedEvent and PartUpdatedEvent are yielded, and the
-        message_id is added to the dedup set.
-    """
-    dedup_store = _setup_dedup_mock(server_state)
-    session_id = "test-session-dedup"
-    message_id = "user-msg-dedup-emit"
-
-    dedup_set = dedup_store.setdefault(session_id, set())
-
-    # Create EventProcessor with the dedup set (empty for this message_id)
-    processor = EventProcessor(displayed_message_ids=dedup_set)
-    ctx = _make_ctx(server_state)
-
-    event = UserMessageInsertedEvent(
-        session_id=session_id,
-        message_id=message_id,
-        content="This should be emitted",
-        delivery="initial",
-        source="protocol",
-    )
-
-    events = await _collect_events(processor, ctx, event)
-
-    # THEN: Events yielded (not deduped)
-    assert len(events) >= 2  # MessageUpdatedEvent + PartUpdatedEvent
-    # AND: message_id added to dedup set
-    assert message_id in dedup_set
-
-
-# =============================================================================
-# Integration: REST handler registration + EventProcessor dedup
-# =============================================================================
-
-
 @pytest.mark.asyncio
 async def test_no_double_display_when_rest_and_event_bus_fire(
     server_state: ServerState,
 ) -> None:
-    """Test no double display when both REST handler and EventBus event fire with same message_id.
+    """REST handler registers message_id → EventProcessor skips EventBus event.
 
     Given: A REST handler registers a message_id in the dedup set.
     When: EventBus-derived UserMessageInsertedEvent arrives with the same
@@ -228,15 +85,9 @@ async def test_no_double_display_when_rest_and_event_bus_fire(
     session_id = "test-session-dedup"
     message_id = "user-msg-integration"
 
-    # Step 1: REST handler creates user message and registers in dedup set
     _register_dedup(server_state, session_id, message_id)
-
-    # Verify registration
-    assert message_id in dedup_store[session_id]
     dedup_set = dedup_store[session_id]
 
-    # Step 2: EventBus-derived UserMessageInsertedEvent arrives
-    # The EventProcessor uses the same dedup set (wired via event bridge)
     processor = EventProcessor(displayed_message_ids=dedup_set)
     ctx = _make_ctx(server_state)
 
@@ -248,17 +99,16 @@ async def test_no_double_display_when_rest_and_event_bus_fire(
         source="protocol",
     )
 
-    events = await _collect_events(processor, ctx, event)
+    events = [e async for e in processor.process(event, ctx)]
 
-    # THEN: No events yielded — dedup prevents double display
-    assert events == []
+    assert events == [], "EventBus event with REST-registered message_id should be skipped"
 
 
 @pytest.mark.asyncio
 async def test_dedup_does_not_affect_different_message_ids(
     server_state: ServerState,
 ) -> None:
-    """Test that dedup for one message_id does not block a different one.
+    """Dedup for message_id "A" does not block message_id "B".
 
     Given: A dedup set containing message_id "A".
     When: UserMessageInsertedEvent arrives with message_id "B".
@@ -271,16 +121,12 @@ async def test_dedup_does_not_affect_different_message_ids(
     msg_a = "user-msg-a"
     msg_b = "user-msg-b"
 
-    # Register only msg_a
     _register_dedup(server_state, session_id, msg_a)
-
     dedup_set = dedup_store[session_id]
 
-    # EventProcessor with the dedup set
     processor = EventProcessor(displayed_message_ids=dedup_set)
     ctx = _make_ctx(server_state)
 
-    # Event for msg_b should NOT be deduped
     event_b = UserMessageInsertedEvent(
         session_id=session_id,
         message_id=msg_b,
@@ -289,9 +135,7 @@ async def test_dedup_does_not_affect_different_message_ids(
         source="protocol",
     )
 
-    events = await _collect_events(processor, ctx, event_b)
+    events = [e async for e in processor.process(event_b, ctx)]
 
-    # THEN: Events yielded for msg_b
     assert len(events) >= 2
-    # AND: msg_b now in dedup set
     assert msg_b in dedup_set

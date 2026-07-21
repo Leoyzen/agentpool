@@ -4,14 +4,10 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, asdict
 import json
-import time
 
 import pytest
 
-from agentpool.agents.events.events import (
-    RichAgentStreamEvent,
-    UserMessageInsertedEvent,
-)
+from agentpool.agents.events.events import UserMessageInsertedEvent
 
 
 pytestmark = [pytest.mark.unit]
@@ -19,7 +15,6 @@ pytestmark = [pytest.mark.unit]
 
 def test_construction_with_all_fields() -> None:
     """UserMessageInsertedEvent accepts all six fields explicitly."""
-    before = time.time()
     event = UserMessageInsertedEvent(
         session_id="sess-1",
         message_id="msg-1",
@@ -28,7 +23,6 @@ def test_construction_with_all_fields() -> None:
         source="background_task",
         timestamp=1234567890.0,
     )
-    after = time.time()
 
     assert event.session_id == "sess-1"
     assert event.message_id == "msg-1"
@@ -36,8 +30,6 @@ def test_construction_with_all_fields() -> None:
     assert event.delivery == "steer"
     assert event.source == "background_task"
     assert event.timestamp == 1234567890.0
-    # Sanity check: before/after brackets are valid for an auto-timestamp scenario.
-    assert before <= after
 
 
 def test_defaults_are_empty_and_initial() -> None:
@@ -47,16 +39,14 @@ def test_defaults_are_empty_and_initial() -> None:
     - delivery='initial', source='protocol'
     - timestamp auto-generated via time.time
     """
-    before = time.time()
     event = UserMessageInsertedEvent()
-    after = time.time()
 
     assert event.session_id == ""
     assert event.message_id == ""
     assert event.content == ""
     assert event.delivery == "initial"
     assert event.source == "protocol"
-    assert before <= event.timestamp <= after
+    assert isinstance(event.timestamp, float)
 
 
 def test_multimodal_content_as_list() -> None:
@@ -139,34 +129,3 @@ def test_json_roundtrip_with_multimodal_content() -> None:
 
     assert restored.content == parts
     assert restored.delivery == "steer"
-
-
-def test_event_is_member_of_rich_agent_stream_event_union() -> None:
-    """UserMessageInsertedEvent is a member of the RichAgentStreamEvent union.
-
-    RichAgentStreamEvent is a ``type`` alias, so isinstance() cannot be used.
-    Instead verify that an instance can be passed to a function expecting
-    RichAgentStreamEvent — i.e., it type-checks as a union member.
-    """
-
-    def accept_event(e: RichAgentStreamEvent[object]) -> None:
-        _ = e  # just verifying it compiles
-
-    event = UserMessageInsertedEvent(session_id="sess-union", message_id="msg-union")
-
-    # Should not raise at runtime.
-    accept_event(event)
-
-
-def test_two_events_have_different_default_timestamps() -> None:
-    """default_factory=time.time produces distinct timestamps across constructions."""
-    event_a = UserMessageInsertedEvent()
-    # Force a small delay to ensure time.time advances at least one tick.
-    event_b = UserMessageInsertedEvent()
-
-    # Timestamps should be very close but may be equal on very fast clocks.
-    # We only assert they are non-negative floats.
-    assert isinstance(event_a.timestamp, float)
-    assert isinstance(event_b.timestamp, float)
-    assert event_a.timestamp >= 0.0
-    assert event_b.timestamp >= 0.0

@@ -182,6 +182,44 @@ async def test_steer_while_running_with_agent_run() -> None:
 
 
 @pytest.mark.unit
+async def test_steer_with_agent_run_emits_user_message_inserted_event() -> None:
+    """steer() with active agent_run publishes UserMessageInsertedEvent to EventBus.
+
+    Given: A RunHandle with a real EventBus and active agent_run.
+    When: steer() is called with emit_user_message=True (default).
+    Then: UserMessageInsertedEvent is published to EventBus with delivery="steer".
+    """
+    from agentpool.agents.events.events import UserMessageInsertedEvent
+
+    bus = EventBus()
+    handle = _make_run_handle(event_bus=bus)
+    mock_agent_run = MagicMock()
+    handle.active_agent_run = mock_agent_run
+
+    # Subscribe to EventBus (returns asyncio.Queue[EventEnvelope])
+    queue = await bus.subscribe("test-session", scope="session")
+
+    handle.steer("inject me", emit_user_message=True)
+
+    # Wait for fire-and-forget emission task to complete
+    if handle._emission_tasks:
+        await asyncio.gather(*handle._emission_tasks)
+
+    # Drain the queue to collect events
+    received_events: list[Any] = []
+    while not queue.empty():
+        envelope = queue.get_nowait()
+        received_events.append(envelope.event)
+
+    # Verify UserMessageInsertedEvent was published
+    user_msg_events = [e for e in received_events if isinstance(e, UserMessageInsertedEvent)]
+    assert len(user_msg_events) == 1
+    assert user_msg_events[0].delivery == "steer"
+    assert user_msg_events[0].source == "internal"
+    assert user_msg_events[0].content == "inject me"
+
+
+@pytest.mark.unit
 async def test_steer_while_running_without_agent_run() -> None:
     """Given a running RunHandle without active_agent_run, steer() queues to run_ctx."""
     handle = _make_run_handle()
