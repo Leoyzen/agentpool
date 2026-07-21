@@ -97,14 +97,6 @@ class SessionControllerRunsMixin:
                     delivery=delivery,  # type: ignore[arg-type]
                     source=source,  # type: ignore[arg-type]
                 )
-                logger.info(
-                    "UserMessageInsertedEvent PUBLISHED",
-                    message_id=event.message_id,
-                    session_id=session_id,
-                    delivery=delivery,
-                    source=source,
-                    content_preview=str(content)[:100],
-                )
                 if self._event_bus is not None:
                     await self._event_bus.publish(session_id, event)
             except Exception:  # noqa: BLE001
