@@ -255,9 +255,13 @@ class HookAwareTurn:
         run_handle = self._run_ctx._run_handle
         if run_handle is None:
             return
-        journal = run_handle._journal
-        if journal is None:
+        session = run_handle.session
+        if session is None:
             return
+        comm = session._comm_channel
+        if comm is None:
+            return
+        journal = comm.journal
         turn_id = self._run_ctx.turn_id
         if turn_id is None:
             return

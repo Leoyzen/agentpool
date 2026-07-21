@@ -1,4 +1,9 @@
-"""Ephemeral run handle for agent execution lifecycle management."""
+"""Ephemeral run handle for agent execution lifecycle management.
+
+In the per-prompt RunHandle model, each RunHandle executes exactly one
+turn and terminates naturally. Session-level state (lifecycle dimensions,
+conversation history, message routing) is owned by ``SessionState``.
+"""
 
 from __future__ import annotations
 
@@ -15,23 +20,9 @@ from agentpool.agents.events import (
     RunErrorEvent,
     RunFailedEvent,
     RunStartedEvent,
-    StateUpdate,
     StreamCompleteEvent,
 )
-from agentpool.lifecycle import (
-    DirectChannel,
-    EventTransport,
-    Feedback,
-    ImmediateTrigger,
-    InProcessTransport,
-    Journal,
-    MemoryJournal,
-    MemorySnapshotStore,
-    RunOutcome,
-    RunState,
-    SnapshotStore,
-    TriggerSource,
-)
+from agentpool.lifecycle import RunOutcome
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
 from agentpool.observability.spans import safe_span
@@ -48,25 +39,17 @@ if TYPE_CHECKING:
     from agentpool.agents.events.events import RichAgentStreamEvent
     from agentpool.host.context import HostContext
     from agentpool.host.registry import AgentRegistry
-    from agentpool.lifecycle.protocols import CommChannel
     from agentpool.orchestrator.core import EventBus, SessionState
 
 
 logger = get_logger(__name__)
 
 
-def _create_set_event() -> asyncio.Event:
-    """Create an asyncio.Event initialized to the set (signaled) state."""
-    event = asyncio.Event()
-    event.set()
-    return event
-
-
 def inject_cancelled_tool_results(messages: list[ModelMessage]) -> list[ModelMessage]:
     r"""Inject RetryPromptPart for unprocessed tool calls in message history.
 
     When a turn is cancelled mid-tool-call, the message history ends with a
-    ``ModelResponse`` containing ``ToolCallPart``\\s but no corresponding
+    ``ModelResponse`` containing ``ToolCallPart``\s but no corresponding
     ``ModelRequest`` with tool results. PydanticAI rejects new user prompts
     in this state with:
     "Cannot provide a new user prompt when the message history contains
@@ -132,41 +115,32 @@ def inject_cancelled_tool_results(messages: list[ModelMessage]) -> list[ModelMes
 
 @dataclass
 class RunHandle:
-    """Ephemeral runtime handle for a single agent run.
+    """Ephemeral runtime handle for a single agent turn.
 
-    RunHandle is not serializable and exists only for the duration of a run.
-    It bridges the SessionPool's run tracking with the actual asyncio.Task
-    and AgentRunContext.
+    In the per-prompt model, each ``RunHandle`` executes exactly one turn
+    and terminates naturally. Session-level state (lifecycle dimensions,
+    conversation history, message routing) is owned by ``SessionState``.
 
-    In the new session-level lifecycle, RunHandle owns an idle/wake/turn
-    loop via :meth:`start` (async generator). The loop alternates between
-    idle (waiting for messages) and running (executing a single
-    :class:`~agentpool.orchestrator.turn.Turn`). Messages can be injected
-    mid-turn via :meth:`steer` or queued for the next turn via
-    :meth:`followup`.
+    ``start()`` is an async generator that yields stream events from a
+    single turn, then exits. There is no idle loop — between turns,
+    ``SessionState`` creates a new ``RunHandle`` for the next prompt.
 
     Attributes:
         run_id: Unique identifier for this run.
         session_id: Session this run belongs to.
         agent_type: Type of agent running (e.g. ``"native"``, ``"claude"``).
         outcome: Terminal outcome (``RunOutcome.COMPLETED``, ``FAILED``,
-            ``CHECKPOINTED``) set when the run reaches ``RunState.DONE``.
-            ``None`` while the run is active or was closed without outcome.
+            ``CHECKPOINTED``) set when the run completes.
         agent: The agent instance driving turns.
         event_bus: Event bus for publishing stream events.
         session: Per-session state containing the turn lock.
         run_ctx: Per-run isolated state container.
-        complete_event: Set after cleanup finishes.
+        complete_event: Set after the turn completes and cleanup finishes.
         _cleanup_callback: Optional callback invoked with run_id during cleanup.
         active_agent_run: Reference to PydanticAI AgentRun, set by
             NativeTurn during execution and cleared in ``finally``.
-        _closing: Flag indicating :meth:`close` has been called.
-        _idle_event: asyncio.Event that is set when idle (for wake-up).
-        _message_queue: Queued prompts for the next turn.
-        _message_history: Accumulated message history across turns.
-        _turn_complete_event: Per-turn completion event, set when a single
-            turn finishes (normally or via cancel). Replaces session-level
-            ``complete_event`` for ACP client blocking on a single turn.
+        _message_history: Constructor-only field, derived from
+            ``agent.conversation.get_history()`` at RunHandle creation.
     """
 
     run_id: str
@@ -181,57 +155,21 @@ class RunHandle:
     _cleanup_callback: Callable[[str], None] | None = None
     active_agent_run: AgentRun[Any, Any] | None = None
     _cancel_fn: Callable[[], None] | None = None
-    _closing: bool = False
-    _closed: bool = False
-    _force_cancelling: bool = False
-    """Set by ``cancel()`` before calling ``task.cancel()`` to distinguish
-    internal force-cancel (break through __aexit__ hang) from external
-    ``task.cancel()`` (e.g. test cleanup). In ``start()``, only the
-    force-cancel path catches ``CancelledError`` and continues to idle;
-    external cancellation propagates and exits the loop."""
-    _idle_event: asyncio.Event = field(default_factory=_create_set_event)
-    _message_queue: list[str | list[Any]] = field(default_factory=list)
     _message_history: list[ModelMessage] = field(default_factory=list)
-    _turn_complete_event: asyncio.Event = field(default_factory=asyncio.Event)
-    _turn_was_cancelled: bool = False
-    _interrupt_task: asyncio.Task[None] | None = None
+    """Constructor-only field. Bridged from ``agent.conversation.get_history()``
+    at RunHandle creation. NOT accumulated after turns — the next RunHandle
+    gets a fresh copy from ``agent.conversation``.
+    """
     _current_turn: Any = None
     """The current Turn being executed. Set by ``_execute_turn()``, read by
-    ``_handle_turn_result()`` and ``_drain_events()``."""
-    _current_turn_id: str | None = None
-    """The current turn ID. Set by ``_execute_turn()``, read by
-    ``_drain_events()``."""
-    _current_turn_failed: bool = False
-    """Whether the current turn failed. Set by ``_execute_turn()``, read by
     ``_handle_turn_result()``."""
+    _current_turn_failed: bool = False
+    """Whether the current turn failed. Set by ``_execute_turn()``."""
+    _interrupt_task: asyncio.Task[None] | None = None
+    """Background task for agent._interrupt(), stored to prevent GC."""
 
     # ------------------------------------------------------------------
-    # Lifecycle dimensions (M2)
-    # ------------------------------------------------------------------
-    _trigger_source: TriggerSource | None = None
-    _journal: Journal | None = None
-    _snapshot_store: SnapshotStore | None = None
-    _comm_channel: CommChannel | None = None
-    _event_transport: EventTransport | None = None
-    _lifecycle_session_id: str = "default"
-    _run_state: RunState = RunState.IDLE
-    _state_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    _recover_strategy: str = "mark_interrupted"
-    """Crash recovery strategy: ``"mark_interrupted"`` or ``"retry"``.
-
-    Only active when both ``lifecycle.journal`` and ``lifecycle.snapshot``
-    are durable.
-    """
-    _recovered_inflight_turn_id: str | None = None
-    """Turn ID of the in-flight Turn detected during crash recovery.
-
-    Set by ``start()`` when ``resume_result.is_inflight`` is ``True``.
-    Used by the ``"retry"`` strategy to check
-    ``journal.get_tool_executions(turn_id)`` before re-executing.
-    """
-
-    # ------------------------------------------------------------------
-    # AgentContext injection (M3 task group 15)
+    # HostContext injection (M3 task group 15) — now sourced from SessionState
     # ------------------------------------------------------------------
     _host_context: HostContext | None = None
     """HostContext for constructing per-turn AgentContext.
@@ -247,66 +185,15 @@ class RunHandle:
     via ``**pydantic_ai_kwargs`` during resume. Only set by
     ``_create_run_handle()`` when resuming from a checkpoint."""
 
-    def __post_init__(self) -> None:
-        """Initialize default lifecycle dimensions.
-
-        Any dimension left as ``None`` is populated with the default
-        in-process implementation. Both ``DirectChannel`` and
-        ``ProtocolChannel`` receive the journal via their constructor,
-        so no post-hoc journal injection is needed.
-
-        If ``_comm_channel`` is provided but ``_journal`` is ``None``,
-        the CommChannel's journal is reused. This ensures
-        ``journal.resume()`` reads the same events that ``publish()``
-        writes — without it, crash recovery silently fails because
-        ``resume()`` reads from a fresh empty journal while events
-        are written to the CommChannel's journal instance.
-        """
-        # If CommChannel is provided but _journal is not, reuse the
-        # CommChannel's journal to ensure resume() reads the same events
-        # that publish() writes. Without this, crash recovery silently
-        # fails because resume() reads an empty journal.
-        if self._journal is None and self._comm_channel is not None:
-            self._journal = self._comm_channel.journal
-        if self._journal is None:
-            self._journal = MemoryJournal()
-        if self._snapshot_store is None:
-            self._snapshot_store = MemorySnapshotStore()
-        if self._comm_channel is None:
-            self._comm_channel = DirectChannel(self._journal)
-        if self._event_transport is None:
-            self._event_transport = InProcessTransport()
-        if self._trigger_source is None:
-            self._trigger_source = ImmediateTrigger("")
-
     @property
     def is_running(self) -> bool:
-        """Whether the RunLoop is in the RUNNING state.
+        """Whether the RunHandle is actively executing a turn.
 
         Returns:
-            ``True`` if the lifecycle state is ``RunState.RUNNING``.
+            ``True`` if the turn has not yet completed (``complete_event``
+            is not set).
         """
-        return self._run_state == RunState.RUNNING
-
-    @property
-    def recovered_tool_executions(self) -> list[Any]:
-        """Tool executions from the interrupted Turn, for idempotent retry.
-
-        When ``recover_strategy == "retry"`` and an in-flight Turn was
-        detected, this property returns the list of completed tool
-        execution records from the journal. The Turn execution path
-        can check this to skip already-completed tools during
-        re-execution.
-
-        Returns:
-            List of ``ToolExecutionRecord`` objects, or empty list if
-            no in-flight Turn was recovered or no journal is configured.
-        """
-        if self._recovered_inflight_turn_id is None:
-            return []
-        if self._journal is None:
-            return []
-        return self._journal.get_tool_executions(self._recovered_inflight_turn_id)
+        return not self.complete_event.is_set()
 
     @property
     def _active_agent_run(self) -> AgentRun[Any, Any] | None:
@@ -316,34 +203,6 @@ class RunHandle:
         that prefer the private naming convention.
         """
         return self.active_agent_run
-
-    async def _transition(
-        self,
-        new_state: RunState,
-        stop_reason: str | None = None,
-    ) -> None:
-        """Transition to a new RunState, notifying CommChannel and publishing StateUpdate.
-
-        Acquires the internal state lock to serialize transitions. After
-        setting the state, calls ``comm_channel.on_state_change()`` and
-        publishes a ``StateUpdate`` event via ``comm_channel.publish()``.
-
-        Args:
-            new_state: The target RunState.
-            stop_reason: Optional reason for the transition.
-        """
-        async with self._state_lock:
-            if self._run_state == new_state and stop_reason is None:
-                return
-            self._run_state = new_state
-        if self._comm_channel is not None:
-            self._comm_channel.on_state_change(new_state)
-            state_event = StateUpdate(
-                session_id=self._lifecycle_session_id,
-                state=new_state,
-                stop_reason=stop_reason,
-            )
-            await self._comm_channel.publish(state_event)
 
     def _inject_agent_context(self) -> None:
         """Construct and inject AgentContext into run_ctx.deps.
@@ -390,43 +249,37 @@ class RunHandle:
         self.run_ctx.deps = ctx
 
     # ------------------------------------------------------------------
-    # New session-level lifecycle
+    # Per-prompt execution: single turn, then natural termination
     # ------------------------------------------------------------------
 
-    async def start(  # noqa: PLR0915
+    async def start(
         self, initial_prompt: str | list[Any] = ""
     ) -> AsyncGenerator[RichAgentStreamEvent[Any]]:
-        """Start the idle/wake/turn loop as an async generator.
+        """Execute a single turn and yield stream events, then terminate.
 
-        Yields :class:`RichAgentStreamEvent` tokens from each turn's
-        :meth:`~agentpool.orchestrator.turn.Turn.execute`. Between turns,
-        the handle goes idle and waits for :meth:`steer` or
-        :meth:`followup` to wake it.
-
-        When ``initial_prompt`` is empty (default), the loop starts in
-        idle mode and picks up the first prompt from
-        :meth:`followup` via the CommChannel feedback queue (D17). This
-        ensures the initial prompt gets a ``message_id`` and can be
-        revoked before delivery.
+        In the per-prompt model, ``start()`` executes exactly one turn
+        (1 prompt) and exits naturally. There is no idle loop — the
+        caller (``_consume_run()``) is responsible for creating a new
+        ``RunHandle`` for the next prompt.
 
         Args:
-            initial_prompt: The first user prompt to process. Empty
-                string (default) triggers idle-first startup via
-                followup/CommChannel. Can be a ``list`` for multimodal
-                content (images, audio, etc.).
+            initial_prompt: The user prompt to process. Can be a ``list``
+                for multimodal content (images, audio, etc.).
         """
         agent = self.agent
         event_bus = self.event_bus
         session = self.session
         if agent is None:
             raise RuntimeError("agent must be set before calling start()")
-        if event_bus is None:
-            raise RuntimeError("event_bus must be set before calling start()")
+        # event_bus can be None for standalone execution (no EventBus).
+        # In that case, session._comm_channel must be a DirectChannel
+        # (set by _initialize_lifecycle_and_recovery()).
         if session is None:
             raise RuntimeError("session must be set before calling start()")
 
-        # Wire steer_callback so complete_background_task() can inject
-        # messages into the active turn via RunHandle.steer().
+        # Wire steer_callback to SessionState.steer_from_background_task()
+        # so complete_background_task() routes to active RunHandle or
+        # feedback_queue (per-prompt migration, task 3.7).
         self.run_ctx.steer_callback = self._steer_callback_wrapper
         # Set _run_handle on run_ctx so NativeTurn can access active_agent_run
         self.run_ctx._run_handle = self
@@ -436,7 +289,24 @@ class RunHandle:
         # CancelNotification, native _iteration_task cancel).
         self._cancel_fn = self._create_cancel_fn()
 
-        recovered_prompt = await self._handle_recovery()
+        # Register steer callback on SessionState for background task routing.
+        session._active_steer_callback = self._direct_steer
+
+        # Drain any steer messages that arrived while the session was idle.
+        # These were enqueued to SessionState.feedback_queue by
+        # steer_from_background_task() when no RunHandle was active.
+        # self.steer() will queue them to queued_steer_messages (since
+        # active_agent_run is not yet set), and _execute_turn() will
+        # pick them up when the turn starts.
+        while not session.feedback_queue.empty():
+            try:
+                fb = session.feedback_queue.get_nowait()
+                content: str | list[Any] = (
+                    fb.content_blocks if fb.content_blocks is not None else fb.content
+                )
+                self.steer(content, message_id=fb.message_id)
+            except asyncio.QueueEmpty:
+                break
 
         with safe_span(
             "orchestration.run_handle.start",
@@ -446,249 +316,71 @@ class RunHandle:
             from agentpool.observability.trace import get_trace_id
 
             logfire.info(
-                "RunLoop started",
+                "RunHandle started (per-prompt)",
                 trace_id=get_trace_id(),
                 session_id=self.session_id,
                 agent_type=self.agent_type,
             )
             try:
                 async with session.turn_lock:
-                    # For "retry" recovery, prepend the recovered prompt.
-                    if recovered_prompt is not None:
-                        current_prompts: list[str | list[Any]] = [recovered_prompt]
-                    else:
-                        # CRITICAL: empty string must produce [] not [""].
-                        # [""] is a non-empty list that bypasses _idle_loop()
-                        # and executes a spurious empty-prompt turn.
-                        current_prompts = [initial_prompt] if initial_prompt else []
-                    while not self._closing:
-                        try:
-                            if not current_prompts:
-                                current_prompts = await self._idle_loop()
-                                if not current_prompts:
-                                    continue
+                    # Execute exactly one turn.
+                    # CRITICAL: empty string must produce [] not [""].
+                    current_prompts: list[str | list[Any]] = (
+                        [initial_prompt] if initial_prompt else []
+                    )
+                    if not current_prompts:
+                        # No prompt — nothing to do, terminate immediately.
+                        return
 
-                            try:
-                                async with contextlib.aclosing(
-                                    self._execute_turn(
-                                        agent,
-                                        event_bus,
-                                        session,
-                                        current_prompts,
-                                    ),
-                                ) as turn_gen:
-                                    async for event in turn_gen:
-                                        yield event
-
-                                action = await self._handle_turn_result(event_bus)
-                            except asyncio.CancelledError:
-                                # Force-cancel was triggered by cancel() to
-                                # break through __aexit__ hangs. Only catch
-                                # if _force_cancelling is set; external
-                                # task.cancel() (e.g. test cleanup) must
-                                # propagate so start() exits.
-                                if not self._force_cancelling:
-                                    raise
-                                self._force_cancelling = False
-                                with contextlib.suppress(Exception):
-                                    await self._handle_turn_result(event_bus)
-                                current_prompts = []
-                                continue
-
-                            if action == "continue":
-                                current_prompts = []  # Prevent re-execution of cancelled prompt
-                                continue
-                            if action == "break":
-                                break
-
-                            current_prompts = await self._drain_events()
-                        except asyncio.CancelledError:
-                            # Catch CancelledError from _idle_loop() too
-                            # (e.g. double cancel() throws at
-                            # _idle_event.wait()). Without this, the
-                            # generator dies and all subsequent messages
-                            # get stuck. Re-check _force_cancelling: if
-                            # set, swallow and continue to idle.
-                            if not self._force_cancelling:
-                                raise
-                            self._force_cancelling = False
-                            current_prompts = []
-                            continue
-
+                    try:
+                        async with contextlib.aclosing(
+                            self._execute_turn(
+                                agent,
+                                event_bus,
+                                session,
+                                current_prompts,
+                            ),
+                        ) as turn_gen:
+                            async for event in turn_gen:
+                                yield event
+                    except asyncio.CancelledError:
+                        # External cancellation (e.g. session close).
+                        # Publish RunFailedEvent and let the generator
+                        # terminate naturally.
+                        with contextlib.suppress(Exception):
+                            await self._publish_cancelled_event(event_bus)
+                        raise
             finally:
-                self._closed = True
-                # Set complete_event FIRST, before any await that might
-                # raise CancelledError (BaseException, not caught by
-                # suppress(Exception)). Without this, shutdown() hangs
-                # waiting for complete_event when pydantic-ai's anyio
-                # cancel scope triggers CancelledError during cleanup.
-                self._turn_complete_event.set()
+                # Per-turn cleanup: clear steer callback, set complete_event.
+                # Do NOT close lifecycle dimensions — they are session-owned.
+                # Do NOT call agent.__aexit__() — that's session-level.
+                session._active_steer_callback = None
                 self.complete_event.set()
-                # Lifecycle state transition: → DONE.
-                with contextlib.suppress(Exception, asyncio.CancelledError):
-                    await self._transition(RunState.DONE)
-                # Close lifecycle dimensions.
-                with contextlib.suppress(Exception, asyncio.CancelledError):
-                    if self._trigger_source is not None:
-                        self._trigger_source.close()
-                with contextlib.suppress(Exception, asyncio.CancelledError):
-                    if self._comm_channel is not None:
-                        self._comm_channel.close()
-                with contextlib.suppress(Exception, asyncio.CancelledError):
-                    if self._event_transport is not None:
-                        self._event_transport.close()
 
-    async def _handle_recovery(self) -> str | None:
-        """Perform crash recovery and subscribe lifecycle dimensions.
+    async def _publish_cancelled_event(self, event_bus: EventBus | None) -> None:
+        """Publish a RunFailedEvent for cancelled turns.
 
-        Checks the journal for prior state. If an in-flight Turn is
-        detected, replays journaled events and applies the recovery
-        strategy (``"retry"`` or ``"mark_interrupted"``). Saves the
-        initial snapshot for fresh starts. Subscribes the trigger
-        source and CommChannel to this handle.
-
-        Returns:
-            The recovered prompt for the ``"retry"`` strategy, or ``None``.
+        Args:
+            event_bus: The event bus to publish on, or ``None`` for
+                standalone execution (events go to CommChannel only).
         """
-        assert self._journal is not None
-        assert self._snapshot_store is not None
-        assert self._comm_channel is not None
-        assert self._trigger_source is not None
-        recovered_prompt: str | None = None
-        resume_result = self._journal.resume(self._snapshot_store)
-        if resume_result is not None:
-            if resume_result.is_inflight:
-                # In-flight crash recovery: replay journaled events.
-                self._comm_channel.set_replaying(True)
-                try:
-                    for event in resume_result.events:
-                        await self._comm_channel.publish(event)
-                finally:
-                    self._comm_channel.set_replaying(False)
-                self._recovered_inflight_turn_id = resume_result.inflight_turn_id
-                # Apply recovery strategy.
-                if self._recover_strategy == "retry":
-                    # Re-queue the interrupted Turn's prompt for re-execution.
-                    # Prefer the full serialized prompts (with multimodal
-                    # content) if available; fall back to text prompt.
-                    state_dict = resume_result.state
-                    if isinstance(state_dict, dict):
-                        prompts_serialized: Any = state_dict.get("prompts_serialized")
-                        if isinstance(prompts_serialized, str) and prompts_serialized:
-                            from agentpool.storage.serialization import deserialize_prompts
-
-                            deserialized = deserialize_prompts(prompts_serialized)
-                            if deserialized:
-                                # Store the full prompts for the idle loop
-                                # to pick up. We extend the message queue
-                                # so _idle_loop() collects each prompt as
-                                # an individual item, preserving the
-                                # original prompt structure.
-                                self._message_queue.extend(deserialized)
-                            else:
-                                # Fall back to text prompt if deserialization fails
-                                prompt_val: Any = state_dict.get("prompt")
-                                if isinstance(prompt_val, str) and prompt_val:
-                                    recovered_prompt = prompt_val
-                        else:
-                            prompt_val = state_dict.get("prompt")
-                            if isinstance(prompt_val, str) and prompt_val:
-                                recovered_prompt = prompt_val
-                elif self._recover_strategy == "mark_interrupted":
-                    # Mark the interrupted Turn's result as interrupted in
-                    # the snapshot store so it's not re-detected on next
-                    # recovery.
-                    if resume_result.inflight_turn_id is not None:
-                        self._snapshot_store.save_turn_result(
-                            resume_result.inflight_turn_id,
-                            {"status": "interrupted"},
-                        )
-                await self._transition(RunState.IDLE, stop_reason="crash_recovery")
-            else:
-                await self._transition(RunState.IDLE)
-        else:
-            # Fresh start: save initial snapshot.
-            self._snapshot_store.save(
-                {"state": RunState.IDLE.value, "run_id": self.run_id},
-            )
-            await self._transition(RunState.IDLE)
-
-        # Subscribe dimensions.
-        self._trigger_source.subscribe(self)
-        self._comm_channel.attach(self)
-        return recovered_prompt
-
-    def _drain_comm_feedback(
-        self,
-        feedback_steer: list[str | list[Any]],
-    ) -> None:
-        """Drain CommChannel feedback, separating steer from followup.
-
-        Steer messages go to ``feedback_steer``; followup messages go to
-        ``_message_queue``. This ensures steer is prioritized in the final
-        prompts list (``feedback_steer + _message_queue``).
-        """
-        if self._comm_channel is None:
-            return
-        while True:
-            fb = self._comm_channel.recv()
-            if fb is None:
-                break
-            if fb.is_steer:
-                if fb.content_blocks is not None:
-                    feedback_steer.append(fb.content_blocks)
-                else:
-                    feedback_steer.append(fb.content)
-            elif fb.content_blocks is not None:
-                self._message_queue.append(fb.content_blocks)
-            else:
-                self._message_queue.append(fb.content)
-
-    async def _idle_loop(self) -> list[str | list[Any]]:
-        """Wait for idle, drain feedback, and collect prompts for next turn.
-
-        Clears the idle event, drains CommChannel feedback and message
-        queue, then blocks on the idle event if no prompts are available.
-        After waking, drains feedback again and returns the collected
-        prompts.
-
-        Steer feedback is prioritized over followup messages, consistent
-        with ``_drain_events()``. This ensures steer messages are always
-        processed before followup messages regardless of whether the
-        handle was idle or running when the feedback was enqueued.
-
-        Returns:
-            List of prompts for the next turn. Empty list if closing
-            with no pending messages.
-        """
-        self._idle_event.clear()
-        feedback_steer: list[str | list[Any]] = []
-        # Drain CommChannel feedback queue BEFORE deciding to block.
-        # Feedback may have been enqueued while the loop was running
-        # (e.g., during cancel). Without this, the loop would block on
-        # _idle_event.wait() even though feedback is already available.
-        self._drain_comm_feedback(feedback_steer)
-        # Check if messages were queued during cancel/cleanup before
-        # blocking. Without this, messages routed through _message_queue
-        # by the cancel path would deadlock: cancel() sets _idle_event,
-        # but clear() above removes it, and wait() blocks forever.
-        if not feedback_steer and not self._message_queue:
-            await self._idle_event.wait()
-            if self._closing:
-                self._drain_comm_feedback(feedback_steer)
-                if not feedback_steer and not self._message_queue:
-                    return []
-        # Drain CommChannel feedback queue again after waking from
-        # idle (feedback may have arrived during the wait).
-        self._drain_comm_feedback(feedback_steer)
-        prompts = feedback_steer + list(self._message_queue)
-        self._message_queue.clear()
-        return prompts
+        comm = self.session._comm_channel if self.session is not None else None
+        cancelled_event = RunFailedEvent(
+            run_id=self.run_id,
+            session_id=self.session_id,
+            exception=RuntimeError("Run cancelled"),
+        )
+        if comm is not None and event_bus is not None and not comm.publishes_to_event_bus:
+            await event_bus.publish(self.session_id, cancelled_event)
+        if comm is not None:
+            await comm.publish(cancelled_event)
+        elif comm is None and event_bus is not None:
+            await event_bus.publish(self.session_id, cancelled_event)
 
     async def _execute_turn(  # noqa: PLR0915
         self,
         agent: BaseAgent[Any, Any],
-        event_bus: EventBus,
+        event_bus: EventBus | None,
         session: SessionState,
         current_prompts: list[str | list[Any]],
     ) -> AsyncGenerator[RichAgentStreamEvent[Any]]:
@@ -696,13 +388,8 @@ class RunHandle:
 
         Creates a Turn from the current prompts, publishes
         ``RunStartedEvent``, saves the user prompt to conversation
-        history, takes a pre-turn snapshot, then executes the Turn
-        and yields each event. On exception, publishes and yields a
-        ``RunErrorEvent``.
-
-        Stores the Turn, turn_id, and turn_failed flag on ``self`` for
-        downstream sub-methods (``_handle_turn_result``,
-        ``_drain_events``).
+        history, then executes the Turn and yields each event. On
+        exception, publishes and yields a ``RunErrorEvent``.
 
         Args:
             agent: The agent driving the turn.
@@ -710,17 +397,12 @@ class RunHandle:
             session: The per-session state.
             current_prompts: Prompts for this turn.
         """
-        assert self._comm_channel is not None
-        assert self._snapshot_store is not None
-        # Lifecycle state transition: IDLE -> RUNNING.
-        await self._transition(RunState.RUNNING)
+        comm = session._comm_channel
+        assert comm is not None
         # Generate a unique turn_id for this Turn.
         turn_id = str(uuid.uuid4())
         self.run_ctx.turn_id = turn_id
-        # Reset per-turn state: clear the completion event and clear
-        # any stale cancelled flag from a prior turn.
-        self._turn_complete_event.clear()
-        self._turn_was_cancelled = False
+        # Reset per-turn state.
         if self.run_ctx.cancelled:
             self.run_ctx.cancelled = False
         # Construct per-turn AgentContext and inject as deps so
@@ -747,25 +429,19 @@ class RunHandle:
             agent_name=self.agent.name if self.agent is not None else self.agent_type,
             parent_session_id=session.parent_session_id if session is not None else None,
         )
-        if not self._comm_channel.publishes_to_event_bus:
+        if event_bus is not None and not comm.publishes_to_event_bus:
             await event_bus.publish(self.session_id, run_started)
-        await self._comm_channel.publish(run_started)
+        await comm.publish(run_started)
         # Set _current_input_provider ContextVar so MCP elicitation can
-        # access it during turn execution. Only set() without reset():
-        # start() runs inside an asyncio.Task which copies the parent
-        # Context, so set() only affects this task's private context
-        # copy. When the task ends the context is discarded.
+        # access it during turn execution.
         if session.input_provider is not None:
             from agentpool.mcp_server.manager import _current_input_provider
 
             _current_input_provider.set(session.input_provider)
         # Save user prompt to agent conversation before execution.
         # This ensures user messages are preserved even if the turn
-        # fails or is cancelled. For list prompts (content_blocks),
-        # extract text from each block for the ChatMessage.content
-        # string representation.
+        # fails or is cancelled.
         from agentpool.agents.native_agent.helpers import _summarize_content_block
-        from agentpool.storage.serialization import serialize_prompts
 
         prompt_text = "\n".join(
             p if isinstance(p, str) else " ".join(_summarize_content_block(b) for b in p)
@@ -779,21 +455,8 @@ class RunHandle:
                 session_id=self.session_id,
             ),
         ])
-        # Pre-turn snapshot: save prompt and turn_id for crash
-        # recovery. If the process crashes during turn.execute(),
-        # this snapshot allows the "retry" strategy to recover.
-        # Save BOTH text prompt (for logging) and full serialized
-        # prompts (for crash recovery with multimodal content).
-        self._snapshot_store.save({
-            "state": RunState.RUNNING.value,
-            "run_id": self.run_id,
-            "turn_id": turn_id,
-            "prompt": prompt_text,
-            "prompts_serialized": serialize_prompts(current_prompts),
-        })
         # Store turn state for downstream sub-methods.
         self._current_turn = turn
-        self._current_turn_id = turn_id
         self._current_turn_failed = False
         turn_failed = False
         stream_complete_saved = False
@@ -805,9 +468,9 @@ class RunHandle:
             try:
                 async with contextlib.aclosing(turn.execute()) as event_gen:
                     async for event in event_gen:
-                        if not self._comm_channel.publishes_to_event_bus:
+                        if event_bus is not None and not comm.publishes_to_event_bus:
                             await event_bus.publish(self.session_id, event)
-                        await self._comm_channel.publish(event)
+                        await comm.publish(event)
                         # Save assistant final message to conversation BEFORE
                         # yielding. The _consume_run caller closes the generator
                         # immediately after receiving StreamCompleteEvent, which
@@ -839,9 +502,9 @@ class RunHandle:
                     run_id=self.run_id,
                     agent_name=self.agent.name if self.agent is not None else self.agent_type,
                 )
-                if not self._comm_channel.publishes_to_event_bus:
+                if event_bus is not None and not comm.publishes_to_event_bus:
                     await event_bus.publish(self.session_id, error_event)
-                await self._comm_channel.publish(error_event)
+                await comm.publish(error_event)
                 yield error_event
             finally:
                 self._current_turn_failed = turn_failed
@@ -864,166 +527,6 @@ class RunHandle:
                         extend_last=True,
                     )
 
-    async def _handle_turn_result(self, event_bus: EventBus) -> str:
-        """Handle cancel and error outcomes after turn execution.
-
-        If the turn was cancelled, publishes ``RunFailedEvent``, routes
-        queued steer messages, transitions to IDLE, and returns
-        ``"continue"``. If the turn failed, returns ``"break"``.
-        Otherwise saves message history and returns ``"proceed"``.
-
-        Args:
-            event_bus: The event bus for publishing events.
-
-        Returns:
-            ``"continue"`` (cancel path), ``"break"`` (failure), or
-            ``"proceed"`` (normal completion).
-        """
-        turn = self._current_turn
-        turn_failed = self._current_turn_failed
-        if turn is None:
-            return "break"
-
-        assert self._comm_channel is not None
-
-        if self.run_ctx.cancelled:
-            # Turn was cancelled -- publish RunFailedEvent, set turn
-            # complete, clear prompts, and continue to idle for next
-            # turn. RunFailedEvent must be published BEFORE
-            # _turn_complete_event so the event converter can emit
-            # TurnCompleteUpdate(stop_reason="cancelled").
-            cancelled_event = RunFailedEvent(
-                run_id=self.run_id,
-                session_id=self.session_id,
-                exception=RuntimeError("Run cancelled"),
-            )
-            if not self._comm_channel.publishes_to_event_bus:
-                await event_bus.publish(self.session_id, cancelled_event)
-            await self._comm_channel.publish(cancelled_event)
-            # Capture cancelled state BEFORE setting _turn_complete_event.
-            # handle_prompt() checks run_handle.cancelled after waking
-            # from _turn_complete_event.wait(). But the loop may reset
-            # cancelled=False before handle_prompt() gets scheduled.
-            # _turn_was_cancelled preserves the state for observation.
-            self._turn_was_cancelled = True
-            self._turn_complete_event.set()
-            # Route queued steer messages through _message_queue instead
-            # of directly into current_prompts. This forces the loop
-            # through idle, preserving cancelled=True for handle_prompt()
-            # to observe before the next turn resets it.
-            if self.run_ctx.queued_steer_messages:
-                self._message_queue.extend(self.run_ctx.queued_steer_messages)
-                self.run_ctx.queued_steer_messages.clear()
-            # Prevent re-execution of cancelled prompt.
-            # Preserve the cancelled turn's message history so the next
-            # turn sees the partial conversation context.
-            if not turn_failed:
-                with contextlib.suppress(RuntimeError):
-                    self._message_history = turn.message_history
-            # Do NOT reset cancelled here -- handle_prompt() needs to
-            # observe it. It will be reset at the start of the next turn.
-            # Lifecycle state transition: RUNNING -> IDLE (cancel path).
-            await self._transition(RunState.IDLE)
-            return "continue"
-
-        if turn_failed:
-            return "break"
-
-        with contextlib.suppress(RuntimeError):
-            self._message_history = turn.message_history
-        return "proceed"
-
-    async def _drain_events(self) -> list[str | list[Any]]:
-        """Post-turn snapshot, child event collection, and feedback drain.
-
-        Transitions to IDLE, saves a turn-boundary snapshot, saves the
-        turn result for idempotency, waits for background child tasks,
-        collects queued steer messages, drains CommChannel feedback,
-        and signals turn completion.
-
-        Returns:
-            Prompts for the next turn (steer feedback + queued messages).
-        """
-        turn = self._current_turn
-        turn_id = self._current_turn_id
-        assert turn is not None
-        assert turn_id is not None
-        assert self._snapshot_store is not None
-
-        # Lifecycle state transition: RUNNING -> IDLE.
-        await self._transition(RunState.IDLE)
-        # Snapshot at turn boundary (after state transition).
-        self._snapshot_store.save(
-            {
-                "state": self._run_state.value,
-                "run_id": self.run_id,
-                "turn_id": turn_id,
-            },
-        )
-        # Save turn result for idempotency.
-        with contextlib.suppress(RuntimeError):
-            final_msg = turn.final_message
-            self._snapshot_store.save_turn_result(turn_id, final_msg)
-        # Between turns: wait for background child tasks to complete,
-        # then collect their steer messages as prompts for next turn.
-        child_events_timed_out = False
-        if self.run_ctx.child_done_events:
-            try:
-                async with asyncio.timeout(30):
-                    await asyncio.gather(*[
-                        e.wait() for e in list(self.run_ctx.child_done_events.values())
-                    ])
-            except TimeoutError:
-                child_events_timed_out = True
-                logger.warning(
-                    "Timeout waiting for child_done_events",
-                    run_id=self.run_id,
-                    pending=len(self.run_ctx.child_done_events),
-                )
-        # Collect queued steer messages from completed children as
-        # prompts for the next turn.
-        if self.run_ctx.queued_steer_messages:
-            self._message_queue.extend(self.run_ctx.queued_steer_messages)
-            self.run_ctx.queued_steer_messages.clear()
-        if child_events_timed_out:
-            # On timeout, clear ALL child_done_events since we are
-            # proceeding regardless. New child tasks may have been
-            # registered during the wait, but we cannot wait further.
-            self.run_ctx.child_done_events.clear()
-        else:
-            # Only remove completed events; new child tasks may have
-            # been registered between gather() and here.
-            completed_keys = [
-                k for k, e in list(self.run_ctx.child_done_events.items()) if e.is_set()
-            ]
-            for k in completed_keys:
-                del self.run_ctx.child_done_events[k]
-        # Drain CommChannel feedback queue (ProtocolChannel). Feedback
-        # may have been enqueued by steer/followup via deliver_feedback()
-        # during the Turn. Steer feedback is prioritized as next-turn
-        # prompts.
-        feedback_steer: list[str | list[Any]] = []
-        if self._comm_channel is not None:
-            while True:
-                fb = self._comm_channel.recv()
-                if fb is None:
-                    break
-                if fb.is_steer:
-                    if fb.content_blocks is not None:
-                        feedback_steer.append(fb.content_blocks)
-                    else:
-                        feedback_steer.append(fb.content)
-                elif fb.content_blocks is not None:
-                    self._message_queue.append(fb.content_blocks)
-                else:
-                    self._message_queue.append(fb.content)
-        prompts = feedback_steer + list(self._message_queue)
-        self._message_queue.clear()
-        # Signal that this turn has completed normally.
-        self._turn_was_cancelled = False
-        self._turn_complete_event.set()
-        return prompts
-
     @logfire.instrument("orchestration.run_handle.steer")
     def steer(
         self,
@@ -1031,27 +534,12 @@ class RunHandle:
         *,
         message_id: str | None = None,
     ) -> str | None:
-        """Inject a steer message into the active turn or wake idle handle.
+        """Inject a steer message into the active turn.
 
-        For ProtocolChannel (bidirectional CommChannel with
-        ``deliver_feedback()``), routes through the CommChannel feedback
-        loop. For DirectChannel (unidirectional), falls back to the
-        existing ``_message_queue`` / ``active_agent_run.enqueue()``
-        logic.
-
-        When ``message`` is a ``list``, it is stored as
-        ``Feedback.content_blocks`` (structured/multimodal content). For
-        native agents with an active ``agent_run``, the content blocks
-        are unpacked via ``agent_run.enqueue(*content_blocks,
-        priority="asap")``.
-
-        Design note: Once feedback is dequeued by ``recv()`` and
-        delivered to the agent runtime (via ``_idle_loop`` →
-        ``_execute_turn`` → ``agent_run``), it cannot be revoked.
-        This is a deliberate design choice — post-delivery revocation
-        would require deep integration with pydantic_ai's
-        ``PendingMessage`` lifecycle, which is fragile and provides
-        little value.
+        Called by ``SessionState`` when a RunHandle is active. Directly
+        calls ``agent_run.enqueue()`` to inject the message into
+        PydanticAI's pending message drain. If no ``agent_run`` is
+        active, queues the message on ``run_ctx.queued_steer_messages``.
 
         Args:
             message: The steer message (plain text or structured content
@@ -1060,22 +548,12 @@ class RunHandle:
                 not provided.
 
         Returns:
-            The ``message_id`` string on success, ``None`` if the handle
-            is closing or in a non-steerable state.
-
-        Raises:
-            RuntimeError: If :meth:`close` has already been called.
+            The ``message_id`` string on success, ``None`` if no agent_run
+            is active and the message was queued.
         """
-        if self._closed:
-            msg = "Cannot steer after close()"
-            raise RuntimeError(msg)
-
-        if self._closing:
-            return None
+        from agentpool.lifecycle.types import Feedback
 
         # Construct Feedback with message_id and content_blocks.
-        # When message_id is None, omit it so Feedback's default_factory
-        # auto-generates a UUID4.
         fb_kwargs: dict[str, Any] = {}
         if message_id is not None:
             fb_kwargs["message_id"] = message_id
@@ -1093,183 +571,94 @@ class RunHandle:
                 **fb_kwargs,
             )
 
-        # Try CommChannel feedback path (ProtocolChannel returns True).
-        if self._comm_channel is not None and self._comm_channel.deliver_feedback(fb):
-            # Always set _idle_event when delivering via ProtocolChannel.
-            # If the loop is running, the event is cleared when entering
-            # idle, and the loop then drains CommChannel feedback. If the
-            # loop is transitioning to idle (e.g., after cancel), the
-            # event prevents blocking on _idle_event.wait() when the
-            # feedback is already in the CommChannel queue.
-            self._idle_event.set()
-            return fb.message_id
-
-        # Fallback: DirectChannel path (existing logic).
-        if self._run_state == RunState.IDLE:
+        agent_run = self.active_agent_run
+        if agent_run is not None:
             if fb.content_blocks is not None:
-                self._message_queue.append(fb.content_blocks)
+                agent_run.enqueue(*fb.content_blocks, priority="asap")
             else:
-                self._message_queue.append(fb.content)
-            self._idle_event.set()
+                agent_run.enqueue(fb.content, priority="asap")
             return fb.message_id
-
-        if self._run_state == RunState.RUNNING:
-            agent_run = self.active_agent_run
-            if agent_run is not None:
-                if fb.content_blocks is not None:
-                    agent_run.enqueue(*fb.content_blocks, priority="asap")
-                else:
-                    agent_run.enqueue(fb.content, priority="asap")
-                return fb.message_id
-            # No active agent_run — queue for next turn.
-            if fb.content_blocks is not None:
-                self.run_ctx.queued_steer_messages.append(fb.content_blocks)
-            else:
-                self.run_ctx.queued_steer_messages.append(fb.content)
-            return fb.message_id
-
-        return None
-
-    @logfire.instrument("orchestration.run_handle.followup")
-    def followup(
-        self,
-        message: str | list[Any],
-        *,
-        message_id: str | None = None,
-    ) -> str | None:
-        """Queue a follow-up prompt for the next turn.
-
-        For ProtocolChannel, routes through the CommChannel feedback
-        loop with ``is_steer=False``. For DirectChannel, falls back
-        to the existing ``_message_queue`` logic.
-
-        When ``message`` is a ``list``, it is stored as
-        ``Feedback.content_blocks`` (structured/multimodal content).
-
-        Args:
-            message: The follow-up message (plain text or structured
-                content blocks).
-            message_id: Optional message ID. Auto-generated as UUID4 if
-                not provided.
-
-        Returns:
-            The ``message_id`` string on success, ``None`` if the handle
-            is closing or closed.
-        """
-        if self._closing or self._closed:
-            return None
-
-        # Construct Feedback BEFORE deliver_feedback to preserve
-        # message_id generation for both ProtocolChannel and
-        # DirectChannel paths (D17 BLOCKER 2 fix).
-        # When message_id is None, omit it so Feedback's default_factory
-        # auto-generates a UUID4.
-        fb_kwargs: dict[str, Any] = {}
-        if message_id is not None:
-            fb_kwargs["message_id"] = message_id
-        if isinstance(message, list):
-            fb = Feedback(
-                content="",
-                is_steer=False,
-                content_blocks=message,
-                **fb_kwargs,
-            )
-        else:
-            fb = Feedback(
-                content=message,
-                is_steer=False,
-                **fb_kwargs,
-            )
-
-        # Try CommChannel feedback path (ProtocolChannel returns True).
-        if self._comm_channel is not None and self._comm_channel.deliver_feedback(fb):
-            # Always set _idle_event (see steer() for rationale).
-            self._idle_event.set()
-            return fb.message_id
-
-        # Fallback: DirectChannel path (existing logic).
+        # No active agent_run — queue for this turn's steer messages.
         if fb.content_blocks is not None:
-            self._message_queue.append(fb.content_blocks)
+            self.run_ctx.queued_steer_messages.append(fb.content_blocks)
         else:
-            self._message_queue.append(fb.content)
-        if self._run_state == RunState.IDLE:
-            self._idle_event.set()
+            self.run_ctx.queued_steer_messages.append(fb.content)
         return fb.message_id
 
-    def revoke(self, message_id: str) -> bool:
-        """Revoke a pending steer or followup message by ID.
-
-        Delegates to ``comm_channel.revoke()`` which operates at the
-        CommChannel queue layer. If the feedback is still pending in
-        the channel's feedback queue, it is removed and marked as
-        revoked. Once delivered to the agent runtime, revocation is
-        not possible (by design).
+    def _direct_steer(self, message: str) -> str | None:
+        """Direct steer callback for SessionState.steer_from_background_task().
 
         Args:
-            message_id: The ID of the message to revoke.
+            message: The steer message content.
 
         Returns:
-            ``True`` if revoked or already gone (idempotent), ``False``
-            if already delivered or no CommChannel configured.
+            The ``message_id`` string on success.
         """
-        if self._comm_channel is None:
-            return False
-        return self._comm_channel.revoke(message_id)
+        return self.steer(message)
+
+    def followup(self, message: str) -> str | None:
+        """Queue a follow-up prompt for the next RunHandle.
+
+        In the per-prompt model, a follow-up message is enqueued on
+        ``SessionState.prompt_queue`` and will be drained by
+        ``SessionController._consume_run()`` after the current
+        RunHandle terminates.
+
+        Args:
+            message: The follow-up prompt content.
+
+        Returns:
+            A ``message_id`` string (UUID4) on success, ``None`` if
+            no session is attached.
+        """
+        import uuid
+
+        message_id = str(uuid.uuid4())
+        session = self.session
+        if session is None:
+            return None
+        session.prompt_queue.put_nowait(message)
+        return message_id
 
     async def _steer_callback_wrapper(self, session_id: str, message: str) -> str | None:
-        """Adapter wrapping :meth:`steer` for use as :attr:`AgentRunContext.steer_callback`.
+        """Adapter wrapping steer for use as AgentRunContext.steer_callback.
 
-        The :attr:`~agentpool.agents.context.AgentRunContext.steer_callback` field
-        expects ``Callable[[str, str], Awaitable[bool]]``, called as
-        ``await callback(session_id, message)`` from
-        :meth:`~agentpool.agents.context.AgentRunContext.complete_background_task`.
-        This adapter discards the ``session_id`` argument (``RunHandle`` is already
-        bound to a single session) and delegates to :meth:`steer`.
+        The steer_callback field expects ``Callable[[str, str],
+        Awaitable[str | None]]``, called as ``await callback(session_id,
+        message)`` from complete_background_task(). This adapter
+        delegates to SessionState.steer_from_background_task() which
+        routes to the active RunHandle or queues for the next.
 
         Args:
             session_id: Ignored; required by the callback signature convention.
-            message: The steer message to inject into the active turn.
+            message: The steer message to inject.
 
         Returns:
             The ``message_id`` string on success, ``None`` otherwise.
         """
+        session = self.session
+        if session is not None:
+            return session.steer_from_background_task(message)
         return self.steer(message)
 
     def close(self) -> None:
-        """Signal the run loop to stop after the current turn.
+        """Set complete_event and perform per-turn cleanup.
 
-        Sets ``_closing`` flag to signal the loop to exit. Wakes any
-        idle wait via ``_idle_event.set()``. If the loop is idle (not
-        actively running a Turn), schedules an immediate transition
-        to ``RunState.DONE``.
-
-        The ``start()`` finally block sets ``_closed=True`` and closes
-        all lifecycle dimensions (comm_channel, trigger_source,
-        event_transport). This method only sets ``_closing`` — it does
-        NOT close dimensions or set ``_closed``.
+        In the per-prompt model, ``close()`` only sets ``complete_event``
+        and clears the steer callback on SessionState. It does NOT close
+        lifecycle dimensions (they are session-owned) and does NOT call
+        ``agent.__aexit__()`` (that's session-level).
 
         Calling ``close()`` twice is a no-op: the second call returns
-        immediately because ``_closing`` is already ``True``.
-
-        After the ``start()`` finally block has run (``_closed=True``),
-        calling :meth:`steer` raises ``RuntimeError``.
+        immediately because ``complete_event`` is already set.
         """
-        if self._closing:
+        if self.complete_event.is_set():
             return
-        self._closing = True
-        self._idle_event.set()
-        # If idle and not in the start() loop, schedule immediate
-        # transition to DONE. The start() loop's finally block also
-        # transitions to DONE, so this handles the case where the
-        # loop isn't running or has already exited.
-        if self._run_state != RunState.DONE:
-
-            async def _safe_done() -> None:
-                with contextlib.suppress(Exception):
-                    await self._transition(RunState.DONE)
-
-            with contextlib.suppress(RuntimeError):
-                self._close_task: asyncio.Task[None] | None = asyncio.create_task(_safe_done())
+        # Clear steer callback on SessionState.
+        session = self.session
+        if session is not None:
+            session._active_steer_callback = None
+        self.complete_event.set()
 
     async def __aenter__(self) -> Self:
         return self
@@ -1278,27 +667,16 @@ class RunHandle:
         self.close()
 
     # ------------------------------------------------------------------
-    # Legacy lifecycle (old code paths)
+    # Legacy lifecycle (old code paths — simplified for per-prompt model)
     # ------------------------------------------------------------------
-
-    def _start_task(self, task: asyncio.Task[Any] | None = None) -> None:
-        """Transition the run to running and store the task.
-
-        Args:
-            task: The asyncio.Task driving this run, if any.
-        """
-        self._run_state = RunState.RUNNING
-        self.run_ctx.current_task = task
 
     def complete(self) -> None:
         """Transition the run to completed and trigger cleanup."""
-        self._run_state = RunState.DONE
         self.outcome = RunOutcome.COMPLETED
         self._cleanup_run()
 
     def checkpoint(self) -> None:
         """Transition the run to checkpointed and trigger cleanup."""
-        self._run_state = RunState.DONE
         self.outcome = RunOutcome.CHECKPOINTED
         self._cleanup_run()
 
@@ -1314,7 +692,6 @@ class RunHandle:
             exception: Optional exception that caused the failure.
             event_bus: Optional event bus to publish RunFailedEvent on.
         """
-        self._run_state = RunState.DONE
         self.outcome = RunOutcome.FAILED
         if exception is not None:
             self.run_ctx.cancelled = True
@@ -1333,34 +710,34 @@ class RunHandle:
 
     @property
     def cancelled(self) -> bool:
-        """Whether the last completed turn was cancelled.
+        """Whether the run was cancelled.
 
-        Returns ``_turn_was_cancelled`` (captured at the moment
-        ``_turn_complete_event`` was set) rather than the live
-        ``run_ctx.cancelled`` flag, which may have been reset by
-        the time the caller observes it.
+        Returns the ``run_ctx.cancelled`` flag, which is set by
+        ``cancel()`` and may be reset at turn start.
         """
-        return self._turn_was_cancelled
+        return self.run_ctx.cancelled
 
     def cancel(self) -> None:
-        """Cancel the run cooperatively, then force-cancel if needed.
+        """Cancel the run cooperatively.
 
-        Sets the cancelled flag on the run context and wakes the idle
-        event to unblock the turn loop. Calls the registered cancel
-        function (wired in ``start()``) which schedules
-        ``agent._interrupt()`` for subclass-specific cleanup.
+        Sets the cancelled flag on the run context and calls the
+        registered cancel function (wired in ``start()``) which
+        schedules ``agent._interrupt()`` for subclass-specific cleanup.
 
         Also force-cancels ``run_ctx.current_task`` to inject
-        ``CancelledError`` into a hung ``__aexit__`` (e.g. MCP
-        streamable-http cleanup stuck behind an HTTP proxy). The
+        ``CancelledError`` into a hung ``__aexit__``. The
         ``CancelledError`` is caught by ``NativeTurn.execute()``'s
         ``except asyncio.CancelledError`` handler which checks
-        ``run_ctx.cancelled`` and exits gracefully. The ``start()``
-        ``finally`` block still runs, setting ``complete_event`` and
-        releasing ``turn_lock``.
+        ``run_ctx.cancelled`` and exits gracefully.
+
+        Idempotency guard: if ``complete_event`` is already set, the
+        RunHandle has terminated and cancel is a no-op.
         """
+        # Idempotency guard: if already complete, no-op.
+        if self.complete_event.is_set():
+            return
+
         self.run_ctx.cancelled = True
-        self._idle_event.set()
 
         if self._cancel_fn is not None:
             self._cancel_fn()
@@ -1370,19 +747,8 @@ class RunHandle:
         # handler which checks run_ctx.cancelled and exits gracefully. The
         # start() finally block will still run, setting complete_event and
         # releasing turn_lock.
-        #
-        # Idempotency guard: if _force_cancelling is already True, a
-        # previous cancel() already called task.cancel(). Calling
-        # task.cancel() again would throw a second CancelledError at
-        # _idle_event.wait() in _idle_loop() — outside the inner except
-        # handler — killing the start() generator. Just set the idle
-        # event (done above) and return.
-        if self._force_cancelling:
-            return
-
         task = self.run_ctx.current_task
         if task is not None and not task.done():
-            self._force_cancelling = True
             task.cancel()
 
     def _create_cancel_fn(self) -> Callable[[], None]:

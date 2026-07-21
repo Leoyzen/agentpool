@@ -621,7 +621,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                 # When client sends session/cancel, cancel_session() calls
                 # cancel_run_for_session() which sets run_ctx.cancelled.
                 # The start() loop then publishes RunFailedEvent, which sets
-                # _turn_complete_event. We detect the cancelled flag to
+                # complete_event. We detect the cancelled flag to
                 # return stopReason="cancelled".
                 if run_handle is not None and run_handle.cancelled:
                     stop_reason = "cancelled"
@@ -648,7 +648,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         session/prompt request with stopReason: "cancelled". This is achieved
         without calling ``run_handle.fail()``: the ``start()`` loop detects
         the cancellation, publishes ``RunFailedEvent``, and sets
-        ``_turn_complete_event`` — which ``handle_prompt()`` is waiting on.
+        ``complete_event`` — which ``handle_prompt()`` is waiting on.
         The ``cancelled`` flag on ``run_ctx`` is set by ``cancel()``, so
         ``handle_prompt()`` can detect it and return the correct stop_reason.
 
@@ -675,10 +675,10 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         session_pool.sessions.cancel_run_for_session(session_id)
 
         # The start() loop detects the cancelled flag, publishes
-        # RunFailedEvent (which sets _turn_complete_event), and the
+        # RunFailedEvent (which sets complete_event), and the
         # event consumer converts it to session/update with
         # stop_reason="cancelled". handle_prompt() unblocks on
-        # _turn_complete_event and returns the cancelled stop_reason.
+        # complete_event and returns the cancelled stop_reason.
         # No explicit fail() call is needed here.
 
         # Note: Event consumer is NOT stopped here. It will continue running

@@ -27,6 +27,7 @@ from agentpool import Agent
 from agentpool.agents.acp_agent.turn import ACPTurn
 from agentpool.agents.context import AgentRunContext
 from agentpool.hooks import AgentHooks, CallableHook, HookResult
+from agentpool.lifecycle import DirectChannel, MemoryJournal
 from agentpool.orchestrator.core import EventBus, SessionState
 from agentpool.orchestrator.run import RunHandle
 
@@ -136,6 +137,7 @@ async def _run_native_sessionpool(hook_type: HookType) -> None:
         run_ctx = AgentRunContext(session_id="smoke-pool-session")
         event_bus = EventBus()
         session = SessionState(session_id="smoke-pool-session", agent_name="smoke-native-pool")
+        session._comm_channel = DirectChannel(MemoryJournal())
         handle = RunHandle(
             run_id="smoke-run",
             session_id="smoke-pool-session",

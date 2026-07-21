@@ -22,6 +22,7 @@ from agentpool.agents.events import (
     ToolCallCompleteEvent,
     ToolCallStartEvent,
 )
+from agentpool.lifecycle import DirectChannel, MemoryJournal
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionPool
 
@@ -57,6 +58,9 @@ async def _attach_agent(
     state.agent = agent
     pool.sessions._session_agents[session_id] = agent
     real_pool.get_agent = MagicMock(return_value=agent)  # type: ignore[assignment]
+    # Set up lifecycle dimensions for RunHandle._execute_turn()
+    # session._comm_channel must be set before start() accesses it.
+    state._comm_channel = DirectChannel(MemoryJournal())
 
 
 @pytest.fixture
@@ -189,17 +193,6 @@ async def test_full_session_lifecycle_create_prompt_events_close(
 
 
 @pytest.mark.anyio
-@pytest.mark.xfail(
-    reason="E1: _consume_run() breaks on StreamCompleteEvent and calls "
-    "gen.aclose(), killing the RunHandle generator after turn 1. "
-    "E2: wait_for_completion() waits on complete_event (generator exit) "
-    "instead of _turn_complete_event (per-turn completion). "
-    "Both only manifest through _start_run_handle/_consume_run path "
-    "(used by opencode server), not through run_stream (used by send_message).",
-    strict=False,
-    raises=(AssertionError, TimeoutError),
-)
-@pytest.mark.known_bug
 async def test_multi_turn_same_session_both_complete_via_consume_run(
     minimal_pool: AgentPool,
     mock_agent_with_text: MagicMock,

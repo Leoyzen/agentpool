@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
+from agentpool.lifecycle import DirectChannel, MemoryJournal
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, SessionPool
 from agentpool.orchestrator.metrics import MetricsCollector
@@ -85,6 +86,7 @@ async def _attach_agent(
     state.agent = agent  # type: ignore[assignment]
     pool.sessions._session_agents[session_id] = agent  # type: ignore[assignment]
     real_pool.get_agent = MagicMock(return_value=agent)  # type: ignore[assignment]
+    state._comm_channel = DirectChannel(MemoryJournal())
 
 
 # ============================================================================

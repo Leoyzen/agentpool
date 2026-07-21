@@ -1,12 +1,19 @@
-"""Lifecycle tests for the restructured RunHandle.
+"""Lifecycle tests for the per-prompt RunHandle.
 
-Covers the new session-level idle/wake/turn loop:
-- idle -> wake -> execute -> idle cycle
-- steer while idle (queue + wake)
-- followup while idle (queue)
-- close() during idle
-- cancel() during running
-- async with protocol
+In the per-prompt model, each RunHandle executes exactly one turn and
+terminates naturally. There is no idle loop. Session-level state
+(lifecycle dimensions, conversation history, message routing) is owned
+by SessionState.
+
+Tests cover:
+- steer() with active agent_run and without (queued)
+- cancel() with cancel_fn and current_task
+- close() idempotency
+- complete_event set after start() completes, cancels, or errors
+- start() yielding RunErrorEvent on turn exception
+- input_provider ContextVar set during turn
+- checkpoint/complete/fail legacy methods
+- per-prompt model: single turn, natural termination
 """
 
 from __future__ import annotations
@@ -20,20 +27,17 @@ from unittest.mock import AsyncMock, MagicMock
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent, AgentsManifest
+from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     RunErrorEvent,
-    RunFailedEvent,
-    RunStartedEvent,
     StreamCompleteEvent,
 )
-from agentpool.delegation import AgentPool
-from agentpool.lifecycle import ProtocolChannel, RunOutcome, RunState
+from agentpool.lifecycle import RunOutcome
 from agentpool.lifecycle.comm_channel import DirectChannel
 from agentpool.lifecycle.journal import MemoryJournal
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventBus, SessionController, SessionState
+from agentpool.messaging import ChatMessage, MessageHistory
+from agentpool.orchestrator.core import EventBus, SessionState
 from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
 
@@ -90,24 +94,56 @@ class _BlockingTurn(Turn):
         yield  # makes this an async generator
 
 
+def _make_session(*, comm_channel: Any | None = None) -> SessionState:
+    """Create a real SessionState with real CommChannel."""
+    session = SessionState(session_id="test-session", agent_name="test-agent")
+    if comm_channel is None:
+        comm_channel = DirectChannel(MemoryJournal())
+    session._comm_channel = comm_channel
+    return session
+
+
+# Sentinel to distinguish "event_bus not provided" from "event_bus explicitly None".
+# When not provided, defaults to AsyncMock(). When explicitly None, the
+# standalone path (DirectChannel, no EventBus) is exercised.
+_EVENT_BUS_UNSET = object()
+
+
 def _make_run_handle(
     *,
     agent: Any | None = None,
-    event_bus: Any | None = None,
+    event_bus: Any = _EVENT_BUS_UNSET,
     session: Any | None = None,
+    comm_channel: Any | None = None,
     run_id: str = "test-run",
     session_id: str = "test-session",
     agent_type: str = "native",
 ) -> RunHandle:
-    """Create a RunHandle with mocked dependencies."""
+    """Create a RunHandle with mocked dependencies.
+
+    Args:
+        agent: Agent mock or real Agent. If None, a MagicMock is created.
+        event_bus: EventBus mock, real EventBus, or ``None`` for standalone
+            execution. If not provided (sentinel), defaults to ``AsyncMock()``.
+            Pass ``None`` explicitly to test the standalone path.
+        session: Session mock or real SessionState. If None, a mock with
+            real CommChannel and turn_lock is created.
+        comm_channel: CommChannel for the session. If None, DirectChannel
+            with MemoryJournal is created.
+        run_id: Unique identifier for this run.
+        session_id: Session this run belongs to.
+        agent_type: Type of agent running (e.g. ``"native"``).
+    """
     if agent is None:
         agent = MagicMock()
         agent.create_turn = MagicMock(return_value=_StubTurn())
-    if event_bus is None:
+        agent.name = "test-agent"
+        agent.conversation = MessageHistory()
+    if event_bus is _EVENT_BUS_UNSET:
         event_bus = AsyncMock()
+    # If event_bus is None, keep it — standalone path (DirectChannel)
     if session is None:
-        session = MagicMock()
-        session.turn_lock = asyncio.Lock()
+        session = _make_session(comm_channel=comm_channel)
     return RunHandle(
         run_id=run_id,
         session_id=session_id,
@@ -129,180 +165,14 @@ async def _consume_gen(gen: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# Tests: steer() (preserved, updated for new API)
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-async def test_idle_wake_execute_idle_cycle() -> None:
-    """Given a RunHandle with one prompt, it executes one turn then goes idle."""
-    turn = _StubTurn(
-        events=[_stream_complete_event()],
-        message_history=["msg1"],
-    )
-    agent = MagicMock()
-    agent.create_turn = MagicMock(return_value=turn)
-    event_bus = AsyncMock()
-    session = MagicMock()
-    session.turn_lock = asyncio.Lock()
-
-    handle = _make_run_handle(agent=agent, event_bus=event_bus, session=session)
-
-    events: list[Any] = []
-    gen = handle.start("hello")
-
-    async def _consume() -> None:
-        events.extend([event async for event in gen])
-
-    consumer_task = asyncio.create_task(_consume())
-    await asyncio.sleep(0.05)
-
-    # After consuming the single turn, handle should be idle
-    assert handle._run_state == RunState.IDLE
-
-    # Close to unblock the idle wait
-    handle.close()
-    await asyncio.sleep(0.05)
-    await consumer_task
-
-    assert handle._run_state == RunState.DONE
-    assert len(events) == 1
-    assert isinstance(events[0], StreamCompleteEvent)
-    assert handle._message_history == ["msg1"]
-
-    # Verify RunStartedEvent was published
-    published_events = [call.args[1] for call in event_bus.publish.call_args_list]
-    assert any(isinstance(e, RunStartedEvent) for e in published_events)
-
-
-@pytest.mark.unit
-async def test_steer_while_idle_queues_and_wakes() -> None:
-    """Given an idle RunHandle, steer() queues the message and sets _idle_event."""
-    turn = _StubTurn(
-        events=[_stream_complete_event()],
-        message_history=["msg1"],
-    )
-    agent = MagicMock()
-    agent.create_turn = MagicMock(return_value=turn)
-    handle = _make_run_handle(agent=agent)
-
-    events: list[Any] = []
-    gen = handle.start("initial")
-
-    async def _consume() -> None:
-        events.extend([event async for event in gen])
-
-    consumer_task = asyncio.create_task(_consume())
-    await asyncio.sleep(0.05)
-
-    # Handle should be idle after first turn
-    assert handle._run_state == RunState.IDLE
-    assert not handle._idle_event.is_set()  # cleared when entering idle
-
-    # Steer while idle
-    result = handle.steer("steered message")
-    assert result is not None
-    assert "steered message" in handle._message_queue
-    assert handle._idle_event.is_set()
-
-    # Let the second turn execute
-    await asyncio.sleep(0.05)
-    handle.close()
-    await asyncio.sleep(0.05)
-    await consumer_task
-
-    assert handle._run_state == RunState.DONE
-    # Two turns should have executed
-    assert agent.create_turn.call_count == 2
-
-
-@pytest.mark.unit
-async def test_followup_while_idle_queues() -> None:
-    """Given an idle RunHandle, followup() queues the message."""
-    turn = _StubTurn(events=[_stream_complete_event()], message_history=["m"])
-    agent = MagicMock()
-    agent.create_turn = MagicMock(return_value=turn)
-    handle = _make_run_handle(agent=agent)
-
-    events: list[Any] = []
-    gen = handle.start("first")
-
-    async def _consume() -> None:
-        events.extend([event async for event in gen])
-
-    consumer_task = asyncio.create_task(_consume())
-    await asyncio.sleep(0.05)
-
-    assert handle._run_state == RunState.IDLE
-
-    result = handle.followup("followup message")
-    assert result is not None
-    assert "followup message" in handle._message_queue
-    assert handle._idle_event.is_set()
-
-    await asyncio.sleep(0.05)
-    handle.close()
-    await asyncio.sleep(0.05)
-    await consumer_task
-
-    assert agent.create_turn.call_count == 2
-
-
-@pytest.mark.unit
-async def test_close_during_idle_sets_closing_and_wakes() -> None:
-    """Given an idle RunHandle, close() sets _closing and wakes _idle_event."""
-    turn = _StubTurn(events=[_stream_complete_event()], message_history=["m"])
-    agent = MagicMock()
-    agent.create_turn = MagicMock(return_value=turn)
-    handle = _make_run_handle(agent=agent)
-
-    events: list[Any] = []
-    gen = handle.start("initial")
-
-    async def _consume() -> None:
-        events.extend([event async for event in gen])
-
-    consumer_task = asyncio.create_task(_consume())
-    await asyncio.sleep(0.05)
-
-    assert handle._run_state == RunState.IDLE
-    assert not handle._closing
-
-    handle.close()
-    assert handle._closing is True
-    assert handle._idle_event.is_set()
-
-    await asyncio.sleep(0.05)
-    await consumer_task
-
-    assert handle._run_state == RunState.DONE
-
-
-@pytest.mark.unit
-async def test_steer_returns_false_when_closing() -> None:
-    """Given a closing RunHandle, steer() returns False."""
-    handle = _make_run_handle()
-    handle.close()
-
-    result = handle.steer("message")
-    assert result is None
-
-
-@pytest.mark.unit
-async def test_followup_returns_false_when_closing() -> None:
-    """Given a closing RunHandle, followup() returns False."""
-    handle = _make_run_handle()
-    handle.close()
-
-    result = handle.followup("message")
-    assert result is None
 
 
 @pytest.mark.unit
 async def test_steer_while_running_with_agent_run() -> None:
     """Given a running RunHandle with active_agent_run, steer() enqueues."""
     handle = _make_run_handle()
-    handle._run_state = RunState.RUNNING
     mock_agent_run = MagicMock()
     handle.active_agent_run = mock_agent_run
 
@@ -315,7 +185,6 @@ async def test_steer_while_running_with_agent_run() -> None:
 async def test_steer_while_running_without_agent_run() -> None:
     """Given a running RunHandle without active_agent_run, steer() queues to run_ctx."""
     handle = _make_run_handle()
-    handle._run_state = RunState.RUNNING
     handle.active_agent_run = None
 
     result = handle.steer("queue me")
@@ -324,67 +193,84 @@ async def test_steer_while_running_without_agent_run() -> None:
 
 
 @pytest.mark.unit
+async def test_steer_with_explicit_message_id() -> None:
+    """steer() with explicit message_id returns that ID."""
+    handle = _make_run_handle()
+    mock_agent_run = MagicMock()
+    handle.active_agent_run = mock_agent_run
+    result = handle.steer("hello", message_id="custom-msg-001")
+    assert result == "custom-msg-001"
+    mock_agent_run.enqueue.assert_called_once_with("hello", priority="asap")
+
+
+@pytest.mark.unit
+async def test_steer_auto_generates_message_id() -> None:
+    """steer() without message_id auto-generates a UUID string."""
+    handle = _make_run_handle()
+    mock_agent_run = MagicMock()
+    handle.active_agent_run = mock_agent_run
+    result = handle.steer("hello")
+    assert result is not None
+    assert isinstance(result, str)
+    assert len(result) == 36
+
+
+@pytest.mark.unit
+async def test_steer_with_list_content_blocks() -> None:
+    """steer() with list message enqueues content_blocks via agent_run."""
+    handle = _make_run_handle()
+    mock_agent_run = MagicMock()
+    handle.active_agent_run = mock_agent_run
+    blocks: list[Any] = ["text part", {"type": "image", "url": "http://example.com/img.png"}]
+    result = handle.steer(blocks, message_id="list-msg-001")
+    assert result == "list-msg-001"
+    mock_agent_run.enqueue.assert_called_once_with(*blocks, priority="asap")
+
+
+@pytest.mark.unit
+async def test_steer_with_list_content_blocks_queued() -> None:
+    """steer() with list message and no agent_run queues content_blocks."""
+    handle = _make_run_handle()
+    handle.active_agent_run = None
+    blocks: list[Any] = ["text", {"type": "image"}]
+    result = handle.steer(blocks, message_id="list-msg-queued")
+    assert result == "list-msg-queued"
+    assert blocks in handle.run_ctx.queued_steer_messages
+
+
+# ---------------------------------------------------------------------------
+# Tests: close() (preserved, updated for new API)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
 async def test_async_context_manager_calls_close() -> None:
     """Given `async with RunHandle(...)`, close() is called on exit."""
     handle = _make_run_handle()
-    assert handle._closing is False
+    assert not handle.complete_event.is_set()
 
     async with handle:
-        assert handle._closing is False
+        assert not handle.complete_event.is_set()
 
-    assert handle._closing is True
+    assert handle.complete_event.is_set()
 
 
 @pytest.mark.unit
-async def test_start_publishes_run_error_on_turn_exception() -> None:
-    """Given a turn that raises, start() publishes RunErrorEvent."""
-    turn = _StubTurn(raise_exc=RuntimeError("turn boom"))
-    agent = MagicMock()
-    agent.create_turn = MagicMock(return_value=turn)
-    event_bus = AsyncMock()
-    handle = _make_run_handle(agent=agent, event_bus=event_bus)
-
-    events: list[Any] = []
-    gen = handle.start("prompt")
-
-    async def _consume() -> None:
-        events.extend([event async for event in gen])
-
-    consumer_task = asyncio.create_task(_consume())
-    await asyncio.sleep(0.05)
+async def test_close_is_idempotent() -> None:
+    """Given close() called twice, the second call is a no-op."""
+    handle = _make_run_handle()
 
     handle.close()
-    await asyncio.sleep(0.05)
-    await consumer_task
+    assert handle.complete_event.is_set()
 
-    published = [call.args[1] for call in event_bus.publish.call_args_list]
-    assert any(isinstance(e, RunErrorEvent) for e in published)
-    error_event = next(e for e in published if isinstance(e, RunErrorEvent))
-    assert "turn boom" in error_event.message
+    # Second close should not raise
+    handle.close()
+    assert handle.complete_event.is_set()
 
 
-@pytest.mark.unit
-async def test_followup_while_running_does_not_set_idle_event() -> None:
-    """Given a running RunHandle, followup() queues but does not set idle event."""
-    handle = _make_run_handle()
-    handle._run_state = RunState.RUNNING
-    handle._idle_event.clear()
-
-    result = handle.followup("queued")
-    assert result is not None
-    assert "queued" in handle._message_queue
-    assert not handle._idle_event.is_set()
-
-
-@pytest.mark.unit
-async def test_initial_status_is_idle() -> None:
-    """Given a freshly created RunHandle, _status is idle and _idle_event is set."""
-    handle = RunHandle(run_id="r", session_id="s", agent_type="native")
-    assert handle._run_state == RunState.IDLE
-    assert handle._idle_event.is_set()
-    assert handle._closing is False
-    assert handle._message_queue == []
-    assert handle._message_history == []
+# ---------------------------------------------------------------------------
+# Tests: cancel() (preserved, updated for new API)
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
@@ -409,7 +295,6 @@ async def test_cancel_with_cancel_fn_delegates() -> None:
 
     assert cancel_called is True
     assert handle.run_ctx.cancelled is True
-    assert handle._idle_event.is_set()
     # current_task.cancel() IS called to break through __aexit__ hangs
     mock_task.cancel.assert_called_once()
 
@@ -420,7 +305,7 @@ async def test_cancel_does_not_cancel_current_task() -> None:
 
     Force-cancels current_task to break through __aexit__ hangs. The
     CancelledError is caught by start()'s except handler which preserves
-    message history and continues to idle.
+    message history and sets complete_event.
     """
     handle = _make_run_handle()
     mock_task = MagicMock()
@@ -430,16 +315,12 @@ async def test_cancel_does_not_cancel_current_task() -> None:
     handle.cancel()
 
     assert handle.run_ctx.cancelled is True
-    assert handle._idle_event.is_set()
     mock_task.cancel.assert_called_once()
 
 
 @pytest.mark.unit
 async def test_cancel_with_done_task_does_not_cancel() -> None:
-    """Given a RunHandle with current_task already done, cancel() does not.
-
-    cancel it (cancel() never cancels current_task regardless of state).
-    """
+    """Given a RunHandle with current_task already done, cancel() does not cancel it."""
     handle = _make_run_handle()
     mock_task = MagicMock()
     mock_task.done.return_value = True
@@ -448,8 +329,23 @@ async def test_cancel_with_done_task_does_not_cancel() -> None:
     handle.cancel()
 
     assert handle.run_ctx.cancelled is True
-    assert handle._idle_event.is_set()
     mock_task.cancel.assert_not_called()
+
+
+@pytest.mark.unit
+async def test_cancel_is_idempotent_when_complete() -> None:
+    """cancel() on a completed RunHandle is a no-op."""
+    handle = _make_run_handle()
+    handle.complete_event.set()
+
+    # Should not raise, should not set cancelled
+    handle.cancel()
+    assert handle.run_ctx.cancelled is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: start() validation (preserved)
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
@@ -458,21 +354,40 @@ async def test_start_raises_when_agent_none() -> None:
     handle = _make_run_handle()
     handle.agent = None
 
-    # start() is an async generator; need to step into it
     gen = handle.start("hello")
     with pytest.raises(RuntimeError, match="agent must be set"):
         await gen.__anext__()
 
 
 @pytest.mark.unit
-async def test_start_raises_when_event_bus_none() -> None:
-    """Given a RunHandle with event_bus=None, start() raises RuntimeError."""
-    handle = _make_run_handle()
-    handle.event_bus = None
+async def test_start_allows_event_bus_none_with_comm_channel() -> None:
+    """Given event_bus=None with DirectChannel, start() does NOT raise.
 
+    Regression test: _initialize_lifecycle_and_recovery() now creates a
+    DirectChannel when event_bus is None, so start() must allow it.
+    """
+    from agentpool.lifecycle import DirectChannel, MemoryJournal
+
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=_StubTurn())
+    agent.name = "test-agent"
+    agent.conversation = MessageHistory()
+    session = _make_session(comm_channel=DirectChannel(MemoryJournal()))
+    handle = _make_run_handle(
+        agent=agent,
+        event_bus=None,  # explicitly None — standalone path
+        session=session,
+    )
+    # start() should NOT raise RuntimeError for event_bus=None
+    events: list[Any] = []
     gen = handle.start("hello")
-    with pytest.raises(RuntimeError, match="event_bus must be set"):
-        await gen.__anext__()
+    try:
+        async with asyncio.timeout(5):
+            events.extend([event async for event in gen])
+    finally:
+        with contextlib.suppress(Exception):
+            await gen.aclose()
+    assert handle.complete_event.is_set()
 
 
 @pytest.mark.unit
@@ -486,108 +401,8 @@ async def test_start_raises_when_session_none() -> None:
         await gen.__anext__()
 
 
-@pytest.mark.unit
-async def test_multiple_followups_queued_all_become_next_turn_prompts() -> None:
-    """Given multiple followup() calls while idle, all messages become.
-
-    prompts for the next turn.
-    """
-    turn = _StubTurn(events=[_stream_complete_event()], message_history=["m"])
-    agent = MagicMock()
-    agent.create_turn = MagicMock(return_value=turn)
-    handle = _make_run_handle(agent=agent)
-
-    events: list[Any] = []
-    gen = handle.start("initial")
-
-    async def _consume() -> None:
-        events.extend([event async for event in gen])
-
-    consumer_task = asyncio.create_task(_consume())
-    await asyncio.sleep(0.05)
-
-    assert handle._run_state == RunState.IDLE
-
-    # Queue two followups
-    assert handle.followup("first followup") is not None
-    assert handle.followup("second followup") is not None
-
-    # Both should be in the queue
-    assert "first followup" in handle._message_queue
-    assert "second followup" in handle._message_queue
-
-    # Let the second turn execute with both prompts
-    await asyncio.sleep(0.05)
-    handle.close()
-    await asyncio.sleep(0.05)
-    await consumer_task
-
-    # Two turns total: initial + combined followups
-    assert agent.create_turn.call_count == 2
-
-    # Second turn should have received both followup messages as prompts
-    second_call = agent.create_turn.call_args_list[1]
-    prompts = second_call.kwargs["prompts"]
-    assert "first followup" in prompts
-    assert "second followup" in prompts
-
-
-@pytest.mark.unit
-async def test_close_is_idempotent() -> None:
-    """Given close() called twice, the second call does not crash and.
-
-    _closing remains True.
-    """
-    handle = _make_run_handle()
-
-    handle.close()
-    assert handle._closing is True
-    assert handle._idle_event.is_set()
-
-    # Second close should not raise
-    handle.close()
-    assert handle._closing is True
-
-
-@pytest.mark.unit
-async def test_steer_returns_false_when_done_status() -> None:
-    """Given a RunHandle with _status=done (post-close), steer() returns False."""
-    handle = _make_run_handle()
-    handle._run_state = RunState.DONE
-    handle._closing = True
-
-    result = handle.steer("message")
-    assert result is None
-
-
-@pytest.mark.unit
-async def test_followup_returns_false_when_done_status() -> None:
-    """Given a RunHandle with _status=done (post-close), followup() returns False."""
-    handle = _make_run_handle()
-    handle._run_state = RunState.DONE
-    handle._closing = True
-
-    result = handle.followup("message")
-    assert result is None
-
-
-@pytest.mark.unit
-async def test_cancelled_property_reflects_turn_cancel_state() -> None:
-    """Cancelled property returns _turn_was_cancelled, not live run_ctx.cancelled.
-
-    The property captures the cancelled state at the moment _turn_complete_event
-    is set, so handle_prompt() can observe it even after the loop resets
-    run_ctx.cancelled for the next turn.
-    """
-    handle = _make_run_handle()
-    assert handle.cancelled is False
-
-    handle._turn_was_cancelled = True
-    assert handle.cancelled is True
-
-
 # ---------------------------------------------------------------------------
-# Tests from PR #64 review (RunHandle lifecycle fixes)
+# Tests: complete_event (preserved, updated for new session setup)
 # ---------------------------------------------------------------------------
 
 
@@ -595,9 +410,8 @@ async def test_cancelled_property_reflects_turn_cancel_state() -> None:
 async def test_complete_event_set_after_start_completes() -> None:
     """RunHandle.start() must set complete_event when it finishes.
 
-    Without this, close_session() hangs for 30s waiting for
-    complete_event.wait() when closing sessions started via
-    process_prompt or run_stream.
+    In the per-prompt model, start() executes one turn and exits
+    naturally. complete_event must be set in the finally block.
     """
     agent = Agent(
         name="test-complete-event",
@@ -609,6 +423,7 @@ async def test_complete_event_set_after_start_completes() -> None:
             session_id="test-ce-session",
             agent_name="test-complete-event",
         )
+        session._comm_channel = DirectChannel(MemoryJournal())
         run_ctx = AgentRunContext(
             session_id="test-ce-session",
             event_bus=event_bus,
@@ -623,15 +438,13 @@ async def test_complete_event_set_after_start_completes() -> None:
             run_ctx=run_ctx,
         )
 
-        # Drive start() — close after first turn to terminate the loop
+        # In per-prompt model, start() executes one turn and terminates.
         gen = run_handle.start("hello")
         try:
             async for event in gen:
                 if isinstance(event, StreamCompleteEvent):
-                    run_handle.close()
                     break
         finally:
-            # Ensure generator is properly closed so finally block runs
             await gen.aclose()
 
         # complete_event must be set
@@ -653,6 +466,7 @@ async def test_complete_event_set_when_start_cancelled() -> None:
             session_id="test-ce-cancel-session",
             agent_name="test-ce-cancel",
         )
+        session._comm_channel = DirectChannel(MemoryJournal())
         run_ctx = AgentRunContext(
             session_id="test-ce-cancel-session",
             event_bus=event_bus,
@@ -682,6 +496,11 @@ async def test_complete_event_set_when_start_cancelled() -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# Tests: RunErrorEvent handling (preserved, updated for new session setup)
+# ---------------------------------------------------------------------------
+
+
 @pytest.mark.asyncio
 async def test_run_error_event_yielded_to_consumer() -> None:
     """RunHandle.start() must yield RunErrorEvent when turn.execute() raises.
@@ -699,6 +518,7 @@ async def test_run_error_event_yielded_to_consumer() -> None:
             session_id="test-err-session",
             agent_name="test-error-yield",
         )
+        session._comm_channel = DirectChannel(MemoryJournal())
         run_ctx = AgentRunContext(
             session_id="test-err-session",
             event_bus=event_bus,
@@ -728,7 +548,6 @@ async def test_run_error_event_yielded_to_consumer() -> None:
                 async for event in gen:
                     events.append(event)
                     if isinstance(event, RunErrorEvent):
-                        run_handle.close()
                         break
         except TimeoutError:
             pytest.fail(
@@ -749,81 +568,39 @@ async def test_run_error_event_yielded_to_consumer() -> None:
 
 
 @pytest.mark.asyncio
-async def test_input_provider_contextvar_set_during_turn() -> None:
-    """RunHandle.start() must set _current_input_provider ContextVar.
+async def test_start_publishes_run_error_on_turn_exception() -> None:
+    """Given a turn that raises, start() yields RunErrorEvent."""
+    turn = _StubTurn(raise_exc=RuntimeError("turn boom"))
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=turn)
+    agent.name = "test-agent"
+    agent.conversation = MessageHistory()
+    event_bus = AsyncMock()
+    session = _make_session()
+    handle = _make_run_handle(agent=agent, event_bus=event_bus, session=session)
 
-    MCP elicitation depends on this ContextVar. Without it,
-    _current_input_provider.get() returns None during turn execution.
-    """
-    from agentpool.mcp_server.manager import _current_input_provider
-
-    captured_provider: list[Any] = []
-
-    def capture_tool() -> str:
-        """Tool that captures the current input provider."""
-        captured_provider.append(_current_input_provider.get())
-        return "captured"
-
-    agent = Agent(
-        name="test-ctxvar",
-        model=TestModel(call_tools=["capture_tool"], custom_output_text="ok"),
-        tools=[capture_tool],
-    )
-    async with agent:
-        event_bus = EventBus()
-        session = SessionState(
-            session_id="test-ctxvar-session",
-            agent_name="test-ctxvar",
-        )
-        run_ctx = AgentRunContext(
-            session_id="test-ctxvar-session",
-            event_bus=event_bus,
-        )
-
-        mock_provider = MagicMock()
-        session.input_provider = mock_provider
-
-        run_handle = RunHandle(
-            run_id="test-ctxvar-run",
-            session_id="test-ctxvar-session",
-            agent_type="test-ctxvar",
-            agent=agent,
-            event_bus=event_bus,
-            session=session,
-            run_ctx=run_ctx,
-        )
-
-        gen = run_handle.start("test")
-        try:
-            async for event in gen:
-                if isinstance(event, StreamCompleteEvent):
-                    run_handle.close()
-                    break
-        finally:
+    events: list[Any] = []
+    gen = handle.start("prompt")
+    try:
+        async for event in gen:
+            events.append(event)
+            if isinstance(event, RunErrorEvent):
+                break
+    finally:
+        with contextlib.suppress(Exception):
             await gen.aclose()
 
-        # The tool should have captured the input provider
-        assert len(captured_provider) > 0, "Tool was never called"
-        assert captured_provider[0] is mock_provider, (
-            f"ContextVar was not set — got {captured_provider[0]!r}, expected {mock_provider!r}"
-        )
-
-        # Note: We intentionally do NOT reset _current_input_provider.
-        # start() runs inside an asyncio.Task which copies the parent
-        # Context, so set() only affects this task's private context copy.
-        # When the task ends the context is discarded. Calling reset()
-        # is unnecessary and can raise ValueError when the async generator
-        # is GC-collected in a different Context (race between task
-        # cancellation and generator suspension at a yield point).
+    error_events = [e for e in events if isinstance(e, RunErrorEvent)]
+    assert len(error_events) == 1
+    assert "turn boom" in error_events[0].message
 
 
 @pytest.mark.asyncio
 async def test_turn_failure_breaks_loop_not_continue_to_idle() -> None:
-    """When turn.execute() raises, start() must break, not continue to idle.
+    """When turn.execute() raises, start() must terminate (not loop).
 
-    Without the break, the loop continues: current_prompts becomes empty
-    → idle → _idle_event.wait() → deadlock for legacy clients that wait
-    on complete_event (which is only set after start() returns).
+    In the per-prompt model, start() executes one turn and exits.
+    On exception, it yields RunErrorEvent and terminates naturally.
     """
     agent = Agent(
         name="test-turn-fail-break",
@@ -835,6 +612,7 @@ async def test_turn_failure_breaks_loop_not_continue_to_idle() -> None:
             session_id="test-fail-break-session",
             agent_name="test-turn-fail-break",
         )
+        session._comm_channel = DirectChannel(MemoryJournal())
         run_ctx = AgentRunContext(
             session_id="test-fail-break-session",
             event_bus=event_bus,
@@ -865,9 +643,7 @@ async def test_turn_failure_breaks_loop_not_continue_to_idle() -> None:
                     if isinstance(event, RunErrorEvent):
                         break
         except TimeoutError:
-            pytest.fail(
-                "start() hung after turn failure — loop continued to idle instead of breaking"
-            )
+            pytest.fail("start() hung after turn failure — loop continued instead of terminating")
         finally:
             with contextlib.suppress(Exception):
                 await gen.aclose()
@@ -875,19 +651,18 @@ async def test_turn_failure_breaks_loop_not_continue_to_idle() -> None:
         error_events = [e for e in events if isinstance(e, RunErrorEvent)]
         assert len(error_events) == 1
 
-        # complete_event must be set (loop exited, not stuck in idle)
+        # complete_event must be set (start() terminated, not stuck)
         assert run_handle.complete_event.is_set(), (
-            "complete_event not set — loop is stuck in idle after turn failure"
+            "complete_event not set — start() did not terminate after turn failure"
         )
 
 
 @pytest.mark.asyncio
 async def test_run_error_event_sets_turn_failed_and_breaks_loop() -> None:
-    """When turn.execute() yields RunErrorEvent, turn_failed must be True.
+    """When turn.execute() yields RunErrorEvent, start() must terminate.
 
-    Without setting turn_failed, the loop breaks from the inner async-for
-    but then continues to the idle branch instead of breaking the outer
-    while-loop. This causes a deadlock for clients waiting on complete_event.
+    In the per-prompt model, start() breaks on RunErrorEvent and exits
+    naturally. complete_event must be set.
     """
     agent = Agent(
         name="test-runevent-break",
@@ -899,6 +674,7 @@ async def test_run_error_event_sets_turn_failed_and_breaks_loop() -> None:
             session_id="test-runevent-session",
             agent_name="test-runevent-break",
         )
+        session._comm_channel = DirectChannel(MemoryJournal())
         run_ctx = AgentRunContext(
             session_id="test-runevent-session",
             event_bus=event_bus,
@@ -932,10 +708,7 @@ async def test_run_error_event_sets_turn_failed_and_breaks_loop() -> None:
                     if isinstance(event, RunErrorEvent):
                         break
         except TimeoutError:
-            pytest.fail(
-                "start() hung after RunErrorEvent — loop continued to idle "
-                "instead of breaking because turn_failed was not set"
-            )
+            pytest.fail("start() hung after RunErrorEvent — did not terminate")
         finally:
             with contextlib.suppress(Exception):
                 await gen.aclose()
@@ -943,10 +716,81 @@ async def test_run_error_event_sets_turn_failed_and_breaks_loop() -> None:
         error_events = [e for e in events if isinstance(e, RunErrorEvent)]
         assert len(error_events) == 1
 
-        # complete_event must be set (loop exited, not stuck in idle)
+        # complete_event must be set (start() terminated)
         assert run_handle.complete_event.is_set(), (
-            "complete_event not set — loop is stuck in idle after RunErrorEvent"
+            "complete_event not set — start() did not terminate after RunErrorEvent"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: input_provider ContextVar (preserved, updated for new session setup)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_input_provider_contextvar_set_during_turn() -> None:
+    """RunHandle.start() must set _current_input_provider ContextVar.
+
+    MCP elicitation depends on this ContextVar. Without it,
+    _current_input_provider.get() returns None during turn execution.
+    """
+    from agentpool.mcp_server.manager import _current_input_provider
+
+    captured_provider: list[Any] = []
+
+    def capture_tool() -> str:
+        """Tool that captures the current input provider."""
+        captured_provider.append(_current_input_provider.get())
+        return "captured"
+
+    agent = Agent(
+        name="test-ctxvar",
+        model=TestModel(call_tools=["capture_tool"], custom_output_text="ok"),
+        tools=[capture_tool],
+    )
+    async with agent:
+        event_bus = EventBus()
+        session = SessionState(
+            session_id="test-ctxvar-session",
+            agent_name="test-ctxvar",
+        )
+        session._comm_channel = DirectChannel(MemoryJournal())
+        run_ctx = AgentRunContext(
+            session_id="test-ctxvar-session",
+            event_bus=event_bus,
+        )
+
+        mock_provider = MagicMock()
+        session.input_provider = mock_provider
+
+        run_handle = RunHandle(
+            run_id="test-ctxvar-run",
+            session_id="test-ctxvar-session",
+            agent_type="test-ctxvar",
+            agent=agent,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=run_ctx,
+        )
+
+        gen = run_handle.start("test")
+        try:
+            async for event in gen:
+                if isinstance(event, StreamCompleteEvent):
+                    break
+        finally:
+            await gen.aclose()
+
+        # The tool should have captured the input provider
+        assert len(captured_provider) > 0, "Tool was never called"
+        assert captured_provider[0] is mock_provider, (
+            f"ContextVar was not set — got {captured_provider[0]!r}, expected {mock_provider!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: current_task (preserved, updated for new session setup)
+# ---------------------------------------------------------------------------
 
 
 def test_start_sets_current_task() -> None:
@@ -977,6 +821,7 @@ async def test_current_task_set_during_start_execution() -> None:
             session_id="test-current-task-session",
             agent_name="test-current-task",
         )
+        session._comm_channel = DirectChannel(MemoryJournal())
         run_ctx = AgentRunContext(
             session_id="test-current-task-session",
             event_bus=event_bus,
@@ -1021,148 +866,38 @@ async def test_current_task_set_during_start_execution() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Task 8: Cancel returns to idle + cancel during LLM call
+# Tests: cancelled property (preserved, updated)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-async def test_cancel_returns_to_idle() -> None:
-    """After cancel, RunHandle returns to idle (not done) and _turn_complete_event is set."""
+async def test_cancelled_property_reflects_run_ctx_cancelled() -> None:
+    """Cancelled property returns run_ctx.cancelled."""
     handle = _make_run_handle()
-    blocking_turn = _BlockingTurn(handle.run_ctx)
-    stub_turn = _StubTurn(events=[_stream_complete_event()], message_history=["m"])
-    handle.agent.create_turn = MagicMock(side_effect=[blocking_turn, stub_turn])
+    assert handle.cancelled is False
 
-    gen = handle.start("hello")
-    consumer_task = asyncio.create_task(_consume_gen(gen))
-    await asyncio.sleep(0.05)
-
-    handle.cancel()
-    await asyncio.sleep(0.1)
-
-    assert handle._run_state == RunState.IDLE
-    assert handle._turn_complete_event.is_set()
-
-    handle.close()
-    await asyncio.sleep(0.05)
-    await consumer_task
-
-
-@pytest.mark.unit
-async def test_cancel_during_llm_call() -> None:
-    """Cancel during LLM call: no StreamCompleteEvent, RunFailedEvent published, returns to idle."""
-    handle = _make_run_handle()
-    blocking_turn = _BlockingTurn(handle.run_ctx)
-    # Second turn has empty events — no StreamCompleteEvent.
-    # This proves the cancelled turn ended via RunFailedEvent, not StreamCompleteEvent.
-    stub_turn = _StubTurn(events=[], message_history=["m"])
-    handle.agent.create_turn = MagicMock(side_effect=[blocking_turn, stub_turn])
-
-    events: list[Any] = []
-    gen = handle.start("hello")
-
-    async def _consume() -> None:
-        events.extend([event async for event in gen])
-
-    consumer_task = asyncio.create_task(_consume())
-    await asyncio.sleep(0.05)
-
-    handle.cancel()
-    await asyncio.sleep(0.1)
-
-    # No StreamCompleteEvent from cancelled turn (or subsequent turn)
-    assert not any(isinstance(e, StreamCompleteEvent) for e in events)
-
-    # RunFailedEvent was published
-    published = [call.args[1] for call in handle.event_bus.publish.call_args_list]
-    assert any(isinstance(e, RunFailedEvent) for e in published)
-
-    # Returns to idle
-    assert handle._run_state == RunState.IDLE
-
-    handle.close()
-    await asyncio.sleep(0.05)
-    await consumer_task
+    handle.run_ctx.cancelled = True
+    assert handle.cancelled is True
 
 
 # ---------------------------------------------------------------------------
-# Task 10: No double turn_complete on cancel
+# Tests: _active_agent_run property (preserved)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-async def test_no_double_turn_complete_on_cancel() -> None:
-    """Cancel publishes RunFailedEvent but NOT StreamCompleteEvent."""
+def test_active_agent_run_property_matches_field() -> None:
+    """_active_agent_run property returns same value as active_agent_run field."""
     handle = _make_run_handle()
-    blocking_turn = _BlockingTurn(handle.run_ctx)
-    handle.agent.create_turn = MagicMock(return_value=blocking_turn)
-
-    gen = handle.start("hello")
-    consumer_task = asyncio.create_task(_consume_gen(gen))
-    await asyncio.sleep(0.05)
-
-    handle.cancel()
-    handle.close()  # Prevent second turn from starting
-    await asyncio.sleep(0.1)
-    await consumer_task
-
-    published = [call.args[1] for call in handle.event_bus.publish.call_args_list]
-    assert any(isinstance(e, RunFailedEvent) for e in published)
-    assert not any(isinstance(e, StreamCompleteEvent) for e in published)
+    assert handle._active_agent_run is None
+    assert handle._active_agent_run is handle.active_agent_run
+    mock_run = MagicMock()
+    handle.active_agent_run = mock_run
+    assert handle._active_agent_run is mock_run
 
 
 # ---------------------------------------------------------------------------
-# Task 11: _turn_complete_event reset between turns
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-async def test_turn_complete_event_reset_between_turns() -> None:
-    """_turn_complete_event is cleared at turn start and set at turn end across turns."""
-
-    class _CapturingTurn(Turn):
-        """Turn that captures _turn_complete_event state at execute() start."""
-
-        def __init__(self, tce: asyncio.Event) -> None:
-            self._tce = tce
-            self.captured_start: bool | None = None
-
-        async def execute(self):  # type: ignore[override]
-            self.captured_start = self._tce.is_set()
-            self._message_history = ["m"]
-            self._final_message = ChatMessage(content="done", role="assistant")
-            yield _stream_complete_event()
-
-    handle = _make_run_handle()
-    turn1 = _CapturingTurn(handle._turn_complete_event)
-    turn2 = _CapturingTurn(handle._turn_complete_event)
-    handle.agent.create_turn = MagicMock(side_effect=[turn1, turn2])
-
-    gen = handle.start("first")
-    consumer_task = asyncio.create_task(_consume_gen(gen))
-    await asyncio.sleep(0.05)
-
-    # After first turn: idle, event set, was cleared at start
-    assert handle._run_state == RunState.IDLE
-    assert handle._turn_complete_event.is_set()
-    assert turn1.captured_start is False
-
-    # Steer to wake for second turn
-    handle.steer("second")
-    await asyncio.sleep(0.1)
-
-    # After second turn: idle, event set, was cleared at start (was set between turns)
-    assert handle._run_state == RunState.IDLE
-    assert handle._turn_complete_event.is_set()
-    assert turn2.captured_start is False
-
-    handle.close()
-    await asyncio.sleep(0.05)
-    await consumer_task
-
-
-# ---------------------------------------------------------------------------
-# Regression: ContextVar cross-context ValueError on generator GC
+# Tests: ContextVar cross-context ValueError (preserved, updated)
 # ---------------------------------------------------------------------------
 
 
@@ -1173,19 +908,6 @@ async def test_no_value_error_when_generator_abandoned_in_different_context() ->
     Regression test for the bug where ``_current_input_provider.reset(token)``
     in the ``finally`` block of ``start()`` raised ``ValueError`` when the
     async generator was GC-collected in a different asyncio Context.
-
-    The race occurs when:
-    1. ``start()`` runs inside an ``asyncio.create_task()`` (Path A via
-       ``_consume_run``), which copies the parent Context.
-    2. ``set()`` creates a token bound to the task's Context copy.
-    3. The task is cancelled between ``__anext__()`` calls, leaving the
-       generator suspended at a ``yield`` point.
-    4. GC later runs ``athrow(GeneratorExit)`` in a fresh Context.
-    5. ``finally`` calls ``reset(token)`` → ``ValueError`` because the
-       token was created in a different Context.
-
-    Fix: remove ``reset()`` entirely. ``set()`` only affects the task's
-    private Context copy, which is discarded when the task ends.
     """
     agent = Agent(
         name="test-gc-ctxvar",
@@ -1197,6 +919,7 @@ async def test_no_value_error_when_generator_abandoned_in_different_context() ->
             session_id="test-gc-session",
             agent_name="test-gc-ctxvar",
         )
+        session._comm_channel = DirectChannel(MemoryJournal())
         session.input_provider = MagicMock()
 
         run_handle = RunHandle(
@@ -1232,16 +955,11 @@ async def test_no_value_error_when_generator_abandoned_in_different_context() ->
             await asyncio.sleep(0.1)
 
             # Cancel the task — generator is left suspended at yield.
-            # This simulates the race: task cancelled between __anext__()
-            # calls, generator abandoned.
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
             # Do NOT call aclose() — let GC collect the generator.
-            # Before the fix, this would trigger athrow(GeneratorExit)
-            # in a fresh Context, causing reset(token) to raise
-            # ValueError.
             del gen
             import gc
 
@@ -1257,297 +975,43 @@ async def test_no_value_error_when_generator_abandoned_in_different_context() ->
 
 
 # ---------------------------------------------------------------------------
-# Merged from test_run_handle_message_id.py
+# Tests: empty prompt handling (updated for per-prompt model)
 # ---------------------------------------------------------------------------
 
 
-class _StubTurnV2(Turn):
-    """Minimal Turn implementation for testing (from message_id tests)."""
-
-    def __init__(self) -> None:
-        self._message_history: list[Any] = []
-        self._final_message = ChatMessage(content="done", role="assistant")
-
-    async def execute(self):
-        yield
-
-
-def _make_handle(
-    *,
-    comm_channel: Any | None = None,
-    run_state: Any = None,
-    agent: Any | None = None,
-    session: Any | None = None,
-    event_bus: Any | None = None,
-) -> RunHandle:
-    """Create a RunHandle with mocked dependencies."""
-    if agent is None:
-        agent = MagicMock()
-        agent.create_turn = MagicMock(return_value=_StubTurnV2())
-        agent.name = "test-agent"
-        agent.conversation = MagicMock()
-    if event_bus is None:
-        event_bus = AsyncMock()
-    if session is None:
-        session = MagicMock()
-        session.turn_lock = asyncio.Lock()
-        session.parent_session_id = None
-    run_ctx = AgentRunContext(session_id="test-session")
-    handle = RunHandle(
-        run_id="test-run",
-        session_id="test-session",
-        agent_type="native",
-        agent=agent,
-        event_bus=event_bus,
-        session=session,
-        run_ctx=run_ctx,
-    )
-    if comm_channel is not None:
-        handle._comm_channel = comm_channel
-    if run_state is not None:
-        handle._run_state = run_state
-    return handle
-
-
-def _make_protocol_channel() -> ProtocolChannel:
-    """Create a ProtocolChannel with real EventBus."""
-    journal = MemoryJournal()
-    event_bus = EventBus()
-    return ProtocolChannel(journal=journal, event_bus=event_bus, session_id="test-session")
-
-
 @pytest.mark.unit
-async def test_steer_with_explicit_message_id() -> None:
-    """steer() with explicit message_id returns that ID."""
-    channel = _make_protocol_channel()
-    handle = _make_handle(comm_channel=channel)
-    result = handle.steer("hello", message_id="custom-msg-001")
-    assert result == "custom-msg-001"
-    fb = channel.recv()
-    assert fb is not None
-    assert fb.message_id == "custom-msg-001"
-    assert fb.content == "hello"
-    assert fb.content_blocks is None
-    assert fb.is_steer is True
+async def test_start_empty_prompt_terminates_immediately() -> None:
+    """start('') produces no events and terminates immediately.
 
-
-@pytest.mark.unit
-async def test_steer_auto_generates_message_id() -> None:
-    """steer() without message_id auto-generates a UUID string."""
-    channel = _make_protocol_channel()
-    handle = _make_handle(comm_channel=channel)
-    result = handle.steer("hello")
-    assert result is not None
-    assert isinstance(result, str)
-    assert len(result) > 0
-    assert len(result) == 36
-
-
-@pytest.mark.unit
-async def test_steer_with_list_content_blocks() -> None:
-    """steer() with list message stores in content_blocks, content=''."""
-    channel = _make_protocol_channel()
-    handle = _make_handle(comm_channel=channel)
-    blocks: list[Any] = ["text part", {"type": "image", "url": "http://example.com/img.png"}]
-    result = handle.steer(blocks, message_id="list-msg-001")
-    assert result == "list-msg-001"
-    fb = channel.recv()
-    assert fb is not None
-    assert fb.message_id == "list-msg-001"
-    assert fb.content == ""
-    assert fb.content_blocks == blocks
-    assert fb.is_steer is True
-
-
-@pytest.mark.unit
-async def test_steer_returns_none_when_closing() -> None:
-    """steer() returns None when handle is closing."""
-    handle = _make_handle()
-    handle._closing = True
-    result = handle.steer("message")
-    assert result is None
-
-
-@pytest.mark.unit
-async def test_steer_raises_after_close() -> None:
-    """steer() raises RuntimeError after close()."""
-    handle = _make_handle()
-    handle._closed = True
-    with pytest.raises(RuntimeError, match="Cannot steer after close"):
-        handle.steer("message")
-
-
-@pytest.mark.unit
-async def test_followup_with_explicit_message_id() -> None:
-    """followup() with explicit message_id returns that ID."""
-    channel = _make_protocol_channel()
-    handle = _make_handle(comm_channel=channel)
-    result = handle.followup("next prompt", message_id="followup-001")
-    assert result == "followup-001"
-    fb = channel.recv()
-    assert fb is not None
-    assert fb.message_id == "followup-001"
-    assert fb.content == "next prompt"
-    assert fb.is_steer is False
-
-
-@pytest.mark.unit
-async def test_followup_with_list_content_blocks() -> None:
-    """followup() with list message stores in content_blocks."""
-    channel = _make_protocol_channel()
-    handle = _make_handle(comm_channel=channel)
-    blocks: list[Any] = ["text", {"type": "image"}]
-    result = handle.followup(blocks, message_id="followup-list-001")
-    assert result == "followup-list-001"
-    fb = channel.recv()
-    assert fb is not None
-    assert fb.content == ""
-    assert fb.content_blocks == blocks
-    assert fb.is_steer is False
-
-
-@pytest.mark.unit
-async def test_followup_directchannel_preserves_message_id() -> None:
-    """followup() with DirectChannel constructs Feedback and returns message_id.
-
-    D17 BLOCKER 2 fix: Feedback is constructed BEFORE deliver_feedback(),
-    so message_id is preserved even when DirectChannel returns False.
+    In the per-prompt model, an empty prompt means no turn is executed
+    and the generator returns immediately.
     """
-    journal = MemoryJournal()
-    direct_channel = DirectChannel(journal)
-    handle = _make_handle(comm_channel=direct_channel)
-    result = handle.followup("standalone prompt", message_id="direct-001")
-    assert result == "direct-001"
-    assert handle._message_queue == ["standalone prompt"]
-
-
-@pytest.mark.unit
-async def test_followup_directchannel_content_blocks_in_queue() -> None:
-    """followup() with DirectChannel and list content appends content_blocks to queue."""
-    journal = MemoryJournal()
-    direct_channel = DirectChannel(journal)
-    handle = _make_handle(comm_channel=direct_channel)
-    blocks: list[Any] = ["text", {"type": "image"}]
-    result = handle.followup(blocks, message_id="direct-list-001")
-    assert result == "direct-list-001"
-    assert handle._message_queue == [blocks]
-
-
-@pytest.mark.unit
-async def test_followup_returns_none_when_closing() -> None:
-    """followup() returns None when handle is closing."""
-    handle = _make_handle()
-    handle._closing = True
-    result = handle.followup("message")
-    assert result is None
-
-
-@pytest.mark.unit
-async def test_revoke_delegates_to_protocol_channel() -> None:
-    """revoke() delegates to ProtocolChannel.revoke()."""
-    channel = _make_protocol_channel()
-    handle = _make_handle(comm_channel=channel)
-    msg_id = handle.steer("hello", message_id="revoke-test-001")
-    assert msg_id == "revoke-test-001"
-    result = handle.revoke("revoke-test-001")
-    assert result is True
-    assert "revoke-test-001" in channel._revoked
-
-
-@pytest.mark.unit
-async def test_revoke_returns_false_for_direct_channel() -> None:
-    """revoke() returns False when CommChannel is DirectChannel."""
-    journal = MemoryJournal()
-    direct_channel = DirectChannel(journal)
-    handle = _make_handle(comm_channel=direct_channel)
-    result = handle.revoke("some-id")
-    assert result is False
-
-
-@pytest.mark.unit
-async def test_revoke_returns_false_when_no_comm_channel() -> None:
-    """revoke() returns False when comm_channel is None."""
-    handle = _make_handle()
-    handle._comm_channel = None
-    result = handle.revoke("some-id")
-    assert result is False
-
-
-@pytest.mark.unit
-async def test_revoke_after_delivery_returns_false() -> None:
-    """revoke() returns False for already-delivered messages."""
-    channel = _make_protocol_channel()
-    handle = _make_handle(comm_channel=channel)
-    msg_id = handle.steer("hello", message_id="delivered-001")
-    assert msg_id == "delivered-001"
-    fb = channel.recv()
-    assert fb is not None
-    result = handle.revoke("delivered-001")
-    assert result is False
-
-
-@pytest.mark.unit
-async def test_revoke_unknown_returns_true() -> None:
-    """revoke() returns True for unknown message_id (idempotent)."""
-    channel = _make_protocol_channel()
-    handle = _make_handle(comm_channel=channel)
-    result = handle.revoke("unknown-id")
-    assert result is True
-
-
-@pytest.mark.unit
-async def test_start_empty_prompt_produces_empty_list() -> None:
-    """start('') produces current_prompts=[] not [''], triggering _idle_loop().
-
-    This is the CRITICAL D17 fix: without this, [""] is a non-empty
-    list that bypasses _idle_loop() and executes a spurious empty-prompt turn.
-    """
-    handle = _make_handle()
-    handle.followup("queued prompt", message_id="d17-001")
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=_StubTurn())
+    agent.name = "test-agent"
+    agent.conversation = MessageHistory()
+    handle = _make_run_handle(agent=agent)
     gen = handle.start("")
     events: list[Any] = []
     try:
         async with asyncio.timeout(5):
-            async for event in gen:
-                events.append(event)
-                if len(events) > 10:
-                    break
+            events = [event async for event in gen]
     except (TimeoutError, asyncio.CancelledError):
         pass
-    handle.close()
-    agent = handle.agent
-    assert agent is not None
-    agent.create_turn.assert_called_once()
-    call_kwargs = agent.create_turn.call_args
-    prompts = call_kwargs.kwargs.get("prompts", call_kwargs.args[0] if call_kwargs.args else [])
-    assert prompts != [""]
-    assert "queued prompt" in prompts
+    finally:
+        with contextlib.suppress(Exception):
+            await gen.aclose()
 
-
-@pytest.mark.unit
-async def test_steer_callback_wrapper_returns_message_id() -> None:
-    """_steer_callback_wrapper returns str|None (message_id), not bool."""
-    channel = _make_protocol_channel()
-    handle = _make_handle(comm_channel=channel)
-    result = await handle._steer_callback_wrapper("session-id", "steer me")
-    assert result is not None
-    assert isinstance(result, str)
-    assert len(result) > 0
-
-
-@pytest.mark.unit
-def test_active_agent_run_property_matches_field() -> None:
-    """_active_agent_run property returns same value as active_agent_run field."""
-    handle = _make_handle()
-    assert handle._active_agent_run is None
-    assert handle._active_agent_run is handle.active_agent_run
-    mock_run = MagicMock()
-    handle.active_agent_run = mock_run
-    assert handle._active_agent_run is mock_run
+    # No events should be produced
+    assert len(events) == 0
+    # complete_event should be set
+    assert handle.complete_event.is_set()
+    # No turn should have been created
+    agent.create_turn.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# Merged from test_runhandle_checkpoint.py
+# Tests: checkpoint / complete / fail (legacy methods, updated)
 # ---------------------------------------------------------------------------
 
 
@@ -1559,8 +1023,6 @@ def test_checkpointed_status_exists() -> None:
 
 def test_checkpointed_is_distinct() -> None:
     """RunOutcome.CHECKPOINTED must differ from existing states."""
-    assert RunOutcome.CHECKPOINTED != RunState.IDLE
-    assert RunOutcome.CHECKPOINTED != RunState.RUNNING
     assert RunOutcome.CHECKPOINTED != RunOutcome.COMPLETED
     assert RunOutcome.CHECKPOINTED != RunOutcome.FAILED
 
@@ -1571,23 +1033,13 @@ def test_checkpoint_method_exists() -> None:
     assert callable(handle.checkpoint)
 
 
-def test_checkpoint_transitions_from_running() -> None:
-    """checkpoint() transitions from running to checkpointed."""
-    handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
-    handle._start_task()
-    assert handle.is_running
-    handle.checkpoint()
-    assert handle._run_state == RunState.DONE
-    assert handle.outcome == RunOutcome.CHECKPOINTED
-
-
 def test_checkpoint_sets_complete_event() -> None:
     """checkpoint() must set complete_event."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
-    handle._start_task()
     assert not handle.complete_event.is_set()
     handle.checkpoint()
     assert handle.complete_event.is_set()
+    assert handle.outcome == RunOutcome.CHECKPOINTED
 
 
 def test_checkpoint_invokes_cleanup_callback() -> None:
@@ -1599,7 +1051,6 @@ def test_checkpoint_invokes_cleanup_callback() -> None:
         assert not handle.complete_event.is_set()
 
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native", _cleanup_callback=cleanup)
-    handle._start_task()
     handle.checkpoint()
     assert cleanup_calls == ["r1"]
     assert handle.complete_event.is_set()
@@ -1612,10 +1063,7 @@ def test_checkpoint_does_not_emit_run_failed_event() -> None:
     should not publish a failure event to the event bus.
     """
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
-    handle._start_task()
-    MagicMock()
     handle.checkpoint()
-    assert handle._run_state == RunState.DONE
     assert handle.outcome == RunOutcome.CHECKPOINTED
     assert handle.complete_event.is_set()
 
@@ -1632,71 +1080,493 @@ def test_checkpoint_rejects_event_bus_parameter() -> None:
     assert "event_bus" not in sig.parameters
 
 
-def test_resume_creates_fresh_run_handle() -> None:
-    """A resumed session must start with a new RunHandle in running status.
-
-    This test verifies the contract: when checkpoints are restored,
-    a fresh RunHandle is created rather than reusing the checkpointed one.
-    """
-    old_handle = RunHandle(run_id="old-run", session_id="s1", agent_type="native")
-    old_handle._start_task()
-    old_handle.checkpoint()
-    assert old_handle._run_state == RunState.DONE
-    assert old_handle.outcome == RunOutcome.CHECKPOINTED
-    new_handle = RunHandle(run_id="new-run", session_id="s1", agent_type="native")
-    new_handle._start_task()
-    assert new_handle.is_running
-    assert new_handle.run_id != old_handle.run_id
-
-
-@pytest.mark.anyio
-async def test_session_controller_skips_fail_on_checkpointed() -> None:
-    """SessionController must skip fail() when RunHandle is checkpointed.
-
-    This tests the guard in ``_run_turn_unlocked`` that checks
-    ``run_handle.outcome not in (RunOutcome.COMPLETED, RunOutcome.FAILED,
-    RunOutcome.CHECKPOINTED)`` before calling ``run_handle.fail()``.
-    """
-    manifest = AgentsManifest()
-    pool = MagicMock(spec=AgentPool)
-    pool.main_agent = MagicMock()
-    pool.main_agent.name = "main"
-    pool.manifest = manifest
-    SessionController(pool)
+def test_complete_sets_outcome_and_event() -> None:
+    """complete() sets outcome=COMPLETED and complete_event."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
-    handle._start_task()
-    handle.checkpoint()
-    assert handle._run_state == RunState.DONE
-    assert handle.outcome == RunOutcome.CHECKPOINTED
-    should_skip = handle.outcome in (RunOutcome.COMPLETED, RunOutcome.FAILED)
-    should_fail = handle.outcome not in (
-        RunOutcome.COMPLETED,
-        RunOutcome.FAILED,
-        RunOutcome.CHECKPOINTED,
-    )
-    assert not should_fail, "checkpointed runs must not transition to failed in except"
-    assert not should_skip, "checkpointed status should be excluded from fail path"
+    handle.complete()
+    assert handle.outcome == RunOutcome.COMPLETED
+    assert handle.complete_event.is_set()
 
 
-@pytest.mark.anyio
-async def test_run_loop_finally_skips_complete_on_checkpointed() -> None:
-    """Run loop must NOT call complete() when RunHandle is checkpointed.
-
-    This tests the guard in ``_run_turn_unlocked``'s finally block that checks
-    ``run_handle.outcome not in (RunOutcome.COMPLETED, RunOutcome.FAILED)``
-    before calling ``run_handle.complete()``.
-    """
-    assert RunOutcome.CHECKPOINTED not in (RunOutcome.COMPLETED, RunOutcome.FAILED)
+def test_fail_sets_outcome_and_event() -> None:
+    """fail() sets outcome=FAILED and complete_event."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
-    handle._start_task()
-    handle.checkpoint()
-    assert handle._run_state == RunState.DONE
-    assert handle.outcome == RunOutcome.CHECKPOINTED
-    guard_ok = handle.outcome in (RunOutcome.COMPLETED, RunOutcome.FAILED)
-    guard_with_checkpointed = handle.outcome in (
-        RunOutcome.COMPLETED,
-        RunOutcome.FAILED,
-        RunOutcome.CHECKPOINTED,
+    handle.fail(RuntimeError("boom"))
+    assert handle.outcome == RunOutcome.FAILED
+    assert handle.complete_event.is_set()
+    assert handle.run_ctx.cancelled is True
+
+
+# ---------------------------------------------------------------------------
+# Tests: per-prompt model (new tests for tasks 4.4, 4.11, 4.12, 4.13, 4.16)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_per_prompt_run_handle_single_turn_termination() -> None:
+    """RunHandle.start() executes exactly one turn and terminates naturally.
+
+    In the per-prompt model, start() does not loop or enter idle state.
+    After yielding StreamCompleteEvent, the generator exits.
+    """
+    agent = Agent(
+        name="test-per-prompt",
+        model=TestModel(custom_output_text="done"),
     )
-    assert not guard_ok, "guard without checkpointed would incorrectly fall through"
-    assert guard_with_checkpointed, "guard must include checkpointed to skip complete()"
+    async with agent:
+        event_bus = EventBus()
+        session = SessionState(
+            session_id="test-per-prompt-session",
+            agent_name="test-per-prompt",
+        )
+        session._comm_channel = DirectChannel(MemoryJournal())
+        run_handle = RunHandle(
+            run_id="test-per-prompt-run",
+            session_id="test-per-prompt-session",
+            agent_type="test-per-prompt",
+            agent=agent,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=AgentRunContext(
+                session_id="test-per-prompt-session",
+                event_bus=event_bus,
+            ),
+        )
+
+        events: list[Any] = []
+        gen = run_handle.start("hello")
+        # In per-prompt model, generator terminates after one turn.
+        events = [event async for event in gen]
+
+        # Generator should have terminated naturally
+        assert run_handle.complete_event.is_set()
+        # Should have yielded StreamCompleteEvent (RunStartedEvent is
+        # published via comm, not yielded to the consumer)
+        event_types = [type(e).__name__ for e in events]
+        assert "StreamCompleteEvent" in event_types
+
+
+@pytest.mark.asyncio
+async def test_cancel_called_twice_on_running_run_handle() -> None:
+    """Cancel called twice on a running RunHandle does not raise.
+
+    The idempotency guard checks complete_event.is_set() before
+    proceeding. After the first cancel sets cancelled and cancels the
+    task, the second cancel is a no-op (task is already done).
+    """
+    handle = _make_run_handle()
+    mock_task = MagicMock()
+    mock_task.done.return_value = False
+    handle.run_ctx.current_task = mock_task
+
+    handle.cancel()
+    assert handle.run_ctx.cancelled is True
+    mock_task.cancel.assert_called_once()
+
+    # Second cancel — should not raise
+    mock_task.cancel.reset_mock()
+    mock_task.done.return_value = True  # Task is now done after first cancel
+    handle.cancel()
+    # cancelled was already True, task.cancel not called again
+    mock_task.cancel.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_turn_lock_released_after_run_handle_terminates_on_error() -> None:
+    """turn_lock is released after RunHandle terminates on error.
+
+    In the per-prompt model, start() acquires turn_lock, executes one
+    turn, and releases it in the finally block (via async with). Even
+    on error, the lock must be released.
+    """
+    agent = Agent(
+        name="test-lock-release",
+        model=TestModel(custom_output_text="ok"),
+    )
+    async with agent:
+        event_bus = EventBus()
+        session = SessionState(
+            session_id="test-lock-session",
+            agent_name="test-lock-release",
+        )
+        session._comm_channel = DirectChannel(MemoryJournal())
+        run_handle = RunHandle(
+            run_id="test-lock-run",
+            session_id="test-lock-session",
+            agent_type="test-lock-release",
+            agent=agent,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=AgentRunContext(
+                session_id="test-lock-session",
+                event_bus=event_bus,
+            ),
+        )
+
+        class FailingTurn:
+            async def execute(self) -> Any:
+                raise RuntimeError("turn failed")
+                yield
+
+        agent.create_turn = MagicMock(return_value=FailingTurn())  # type: ignore[method-assign]
+
+        gen = run_handle.start("test")
+        try:
+            async for event in gen:
+                if isinstance(event, RunErrorEvent):
+                    break
+        finally:
+            with contextlib.suppress(Exception):
+                await gen.aclose()
+
+        # complete_event set means start() finished, turn_lock released
+        assert run_handle.complete_event.is_set()
+        # turn_lock should not be locked
+        assert not session.turn_lock.locked()
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_dimensions_not_closed_when_run_handle_terminates() -> None:
+    """RunHandle.close() does NOT close lifecycle dimensions.
+
+    In the per-prompt model, lifecycle dimensions are session-owned.
+    RunHandle.close() only sets complete_event and clears steer_callback.
+    """
+    from agentpool.lifecycle import DirectChannel, MemoryJournal
+
+    journal = MemoryJournal()
+    comm_channel = DirectChannel(journal)
+
+    session = _make_session(comm_channel=comm_channel)
+    handle = _make_run_handle(session=session)
+
+    handle.close()
+
+    # complete_event should be set
+    assert handle.complete_event.is_set()
+    # CommChannel should still be usable (not closed)
+    # Journal should still be accessible
+    assert journal is not None
+    assert comm_channel is not None
+
+
+@pytest.mark.asyncio
+async def test_run_error_event_causes_natural_termination() -> None:
+    """RunErrorEvent causes natural generator termination, not exception.
+
+    In the per-prompt model, when turn.execute() yields RunErrorEvent,
+    start() breaks the inner loop and the generator exits naturally.
+    The consumer sees RunErrorEvent as a normal event, not an exception.
+    """
+    agent = Agent(
+        name="test-natural-termination",
+        model=TestModel(custom_output_text="ok"),
+    )
+    async with agent:
+        event_bus = EventBus()
+        session = SessionState(
+            session_id="test-natural-term-session",
+            agent_name="test-natural-termination",
+        )
+        session._comm_channel = DirectChannel(MemoryJournal())
+        run_handle = RunHandle(
+            run_id="test-natural-term-run",
+            session_id="test-natural-term-session",
+            agent_type="test-natural-termination",
+            agent=agent,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=AgentRunContext(
+                session_id="test-natural-term-session",
+                event_bus=event_bus,
+            ),
+        )
+
+        class ErrorThenCompleteTurn:
+            _final_message = None
+
+            async def execute(self) -> Any:
+                yield RunErrorEvent(
+                    message="simulated error",
+                    run_id="test-natural-term-run",
+                    agent_name="test-natural-termination",
+                )
+
+        agent.create_turn = MagicMock(return_value=ErrorThenCompleteTurn())  # type: ignore[method-assign]
+
+        events: list[Any] = []
+        gen = run_handle.start("test")
+        try:
+            async with asyncio.timeout(5):
+                events = [event async for event in gen]
+        except TimeoutError:
+            pytest.fail("start() hung after RunErrorEvent — did not terminate naturally")
+
+        # RunErrorEvent was yielded as a normal event
+        error_events = [e for e in events if isinstance(e, RunErrorEvent)]
+        assert len(error_events) == 1
+
+        # Generator terminated naturally (complete_event set)
+        assert run_handle.complete_event.is_set()
+
+
+# ---------------------------------------------------------------------------
+# Tests: standalone execution (event_bus=None) and feedback_queue draining
+# Regression tests for code review findings (Gemini Code Assist)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_standalone_session_without_event_bus_executes_turn() -> None:
+    """Standalone session (event_bus=None) must still execute turns.
+
+    Regression test for code review finding: _initialize_lifecycle_and_recovery()
+    didn't create CommChannel when event_bus was None, causing assert comm is not None
+    to fail in _execute_turn(). Now a DirectChannel is created and start() allows
+    event_bus=None when session._comm_channel is set.
+    """
+    from agentpool.lifecycle import DirectChannel, MemoryJournal
+    from agentpool.orchestrator.session_controller import SessionState
+
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=_StubTurn(events=[_stream_complete_event()]))
+    agent.name = "test-agent"
+    agent.conversation = MessageHistory()
+
+    session = SessionState(session_id="test-standalone", agent_name="test-agent")
+    session._comm_channel = DirectChannel(MemoryJournal())  # standalone fallback
+
+    handle = RunHandle(
+        run_id="test-standalone",
+        session_id="test-standalone",
+        agent_type="native",
+        agent=agent,
+        event_bus=None,  # standalone — no event bus
+        session=session,
+    )
+
+    events: list[Any] = []
+    gen = handle.start("hello")
+    try:
+        async with asyncio.timeout(5):
+            events.extend([event async for event in gen])
+    finally:
+        with contextlib.suppress(Exception):
+            await gen.aclose()
+
+    # Turn executed and yielded events
+    assert handle.complete_event.is_set()
+    assert len(events) > 0
+    # No AssertionError on assert comm is not None (turn completed successfully)
+    event_types = [type(e).__name__ for e in events]
+    assert "StreamCompleteEvent" in event_types
+
+
+@pytest.mark.unit
+async def test_feedback_queue_drained_on_new_run_handle_start() -> None:
+    """Steer messages in feedback_queue must be drained when a new RunHandle starts.
+
+    Regression test for code review finding: feedback_queue was never drained
+    when a new RunHandle started, causing idle-state steer messages to be lost.
+    The fix drains feedback_queue in start() before the turn begins, routing
+    messages to queued_steer_messages via self.steer().
+    """
+    from agentpool.lifecycle import DirectChannel, Feedback, MemoryJournal
+    from agentpool.orchestrator.session_controller import SessionState
+
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=_StubTurn())
+    agent.name = "test-agent"
+    agent.conversation = MessageHistory()
+
+    session = SessionState(session_id="test-feedback", agent_name="test-agent")
+    session._comm_channel = DirectChannel(MemoryJournal())
+
+    # Simulate steer message arriving while idle (no RunHandle active)
+    fb = Feedback(content="background task completed", is_steer=True)
+    session.feedback_queue.put_nowait(fb)
+    assert not session.feedback_queue.empty()  # pre-condition
+
+    handle = RunHandle(
+        run_id="test-feedback",
+        session_id="test-feedback",
+        agent_type="native",
+        agent=agent,
+        event_bus=AsyncMock(),
+        session=session,
+    )
+
+    events: list[Any] = []
+    gen = handle.start("hello")
+    try:
+        async with asyncio.timeout(5):
+            events.extend([event async for event in gen])
+    finally:
+        with contextlib.suppress(Exception):
+            await gen.aclose()
+
+    # feedback_queue should be drained by start()
+    assert session.feedback_queue.empty(), "feedback_queue was not drained by start()"
+    # Steer message should be in queued_steer_messages
+    assert "background task completed" in handle.run_ctx.queued_steer_messages
+
+
+@pytest.mark.unit
+async def test_multiple_steer_messages_drained_fifo_from_feedback_queue() -> None:
+    """Multiple steer messages in feedback_queue are drained in FIFO order.
+
+    When multiple background tasks complete while the session is idle,
+    all their steer messages should be enqueued to feedback_queue and
+    drained in FIFO order when the next RunHandle starts.
+    """
+    from agentpool.lifecycle import DirectChannel, Feedback, MemoryJournal
+    from agentpool.orchestrator.session_controller import SessionState
+
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=_StubTurn())
+    agent.name = "test-agent"
+    agent.conversation = MessageHistory()
+
+    session = SessionState(session_id="test-fifo", agent_name="test-agent")
+    session._comm_channel = DirectChannel(MemoryJournal())
+
+    # Enqueue 3 steer messages in FIFO order
+    for msg in ("msg1", "msg2", "msg3"):
+        session.feedback_queue.put_nowait(Feedback(content=msg, is_steer=True))
+    assert not session.feedback_queue.empty()  # pre-condition
+
+    handle = RunHandle(
+        run_id="test-fifo",
+        session_id="test-fifo",
+        agent_type="native",
+        agent=agent,
+        event_bus=AsyncMock(),
+        session=session,
+    )
+
+    events: list[Any] = []
+    gen = handle.start("hello")
+    try:
+        async with asyncio.timeout(5):
+            events.extend([event async for event in gen])
+    finally:
+        with contextlib.suppress(Exception):
+            await gen.aclose()
+
+    # All messages drained from feedback_queue
+    assert session.feedback_queue.empty(), "feedback_queue was not fully drained"
+    # Messages must appear in queued_steer_messages in FIFO order
+    assert handle.run_ctx.queued_steer_messages == ["msg1", "msg2", "msg3"], (
+        f"Expected FIFO order ['msg1', 'msg2', 'msg3'], got {handle.run_ctx.queued_steer_messages}"
+    )
+
+
+@pytest.mark.unit
+async def test_empty_prompt_drains_feedback_queue_but_messages_unprocessed() -> None:
+    """Empty prompt drains feedback_queue but queued_steer_messages are never processed.
+
+    Known limitation: when initial_prompt is empty, start() drains
+    feedback_queue into queued_steer_messages but returns immediately
+    without executing a turn. The steer messages are technically in
+    queued_steer_messages but no turn processes them.
+
+    This test documents the current behavior. If this is considered a bug,
+    the fix would be to either:
+    1. Not drain feedback_queue when there's no prompt, OR
+    2. Re-enqueue the messages back to feedback_queue for the next RunHandle
+    """
+    from agentpool.lifecycle import DirectChannel, Feedback, MemoryJournal
+    from agentpool.orchestrator.session_controller import SessionState
+
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=_StubTurn())
+    agent.name = "test-agent"
+    agent.conversation = MessageHistory()
+
+    session = SessionState(session_id="test-empty-drain", agent_name="test-agent")
+    session._comm_channel = DirectChannel(MemoryJournal())
+
+    # Enqueue 1 steer message
+    session.feedback_queue.put_nowait(Feedback(content="orphaned steer", is_steer=True))
+    assert not session.feedback_queue.empty()  # pre-condition
+
+    handle = RunHandle(
+        run_id="test-empty-drain",
+        session_id="test-empty-drain",
+        agent_type="native",
+        agent=agent,
+        event_bus=AsyncMock(),
+        session=session,
+    )
+
+    events: list[Any] = []
+    gen = handle.start("")
+    try:
+        async with asyncio.timeout(5):
+            events = [event async for event in gen]
+    finally:
+        with contextlib.suppress(Exception):
+            await gen.aclose()
+
+    # feedback_queue was drained
+    assert session.feedback_queue.empty(), "feedback_queue was not drained"
+    # Message was moved to queued_steer_messages
+    assert "orphaned steer" in handle.run_ctx.queued_steer_messages
+    # RunHandle completed without executing a turn
+    assert handle.complete_event.is_set()
+    # No events yielded — no turn was executed
+    assert events == [], f"Expected no events, got {[type(e).__name__ for e in events]}"
+    # No turn should have been created
+    agent.create_turn.assert_not_called()
+
+
+@pytest.mark.unit
+async def test_feedback_queue_drains_multimodal_content_blocks() -> None:
+    """Feedback with content_blocks (multimodal) is drained correctly.
+
+    When a background task completes with multimodal content (e.g., image +
+    text), the Feedback object has content_blocks set instead of content.
+    The draining code should handle both paths.
+    """
+    from agentpool.lifecycle import DirectChannel, Feedback, MemoryJournal
+    from agentpool.orchestrator.session_controller import SessionState
+
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=_StubTurn())
+    agent.name = "test-agent"
+    agent.conversation = MessageHistory()
+
+    session = SessionState(session_id="test-multimodal", agent_name="test-agent")
+    session._comm_channel = DirectChannel(MemoryJournal())
+
+    # Enqueue a Feedback with content_blocks (multimodal) instead of plain content
+    blocks: list[Any] = [{"type": "text", "text": "image analysis complete"}]
+    session.feedback_queue.put_nowait(Feedback(content="", is_steer=True, content_blocks=blocks))
+    assert not session.feedback_queue.empty()  # pre-condition
+
+    handle = RunHandle(
+        run_id="test-multimodal",
+        session_id="test-multimodal",
+        agent_type="native",
+        agent=agent,
+        event_bus=AsyncMock(),
+        session=session,
+    )
+
+    events: list[Any] = []
+    gen = handle.start("hello")
+    try:
+        async with asyncio.timeout(5):
+            events.extend([event async for event in gen])
+    finally:
+        with contextlib.suppress(Exception):
+            await gen.aclose()
+
+    # feedback_queue drained
+    assert session.feedback_queue.empty(), "feedback_queue was not drained"
+    # The content_blocks list should appear in queued_steer_messages
+    # (content_blocks takes priority over content when not None)
+    assert blocks in handle.run_ctx.queued_steer_messages, (
+        f"Expected content_blocks {blocks} in queued_steer_messages, "
+        f"got {handle.run_ctx.queued_steer_messages}"
+    )

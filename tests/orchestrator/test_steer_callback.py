@@ -1,8 +1,9 @@
 """Tests for steer_callback wiring in RunHandle.
 
 Verifies that ``RunHandle.start()`` sets ``run_ctx.steer_callback`` to an
-adapter that delegates to ``RunHandle.steer()``, enabling subagent
-``complete_background_task()`` to inject messages into the active turn.
+adapter that delegates to ``SessionState.steer_from_background_task()``,
+enabling subagent ``complete_background_task()`` to inject messages into
+the active turn or queue them for the next RunHandle.
 """
 
 from __future__ import annotations
@@ -13,6 +14,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agentpool.agents.context import AgentRunContext
+from agentpool.lifecycle.comm_channel import DirectChannel
+from agentpool.lifecycle.journal import MemoryJournal
+from agentpool.orchestrator.core import SessionState
 from agentpool.orchestrator.run import RunHandle
 
 from .test_run_handle import _stream_complete_event, _StubTurn
@@ -32,9 +36,15 @@ def _make_handle(
     )
     agent = MagicMock()
     agent.create_turn = MagicMock(return_value=turn)
+    agent.name = "test-agent"
+    agent.conversation = MagicMock()
     event_bus = AsyncMock()
-    session = MagicMock()
-    session.turn_lock = asyncio.Lock()
+    # Use real SessionState so steer_from_background_task works properly
+    session = SessionState(
+        session_id="test-session",
+        agent_name="test-agent",
+    )
+    session._comm_channel = DirectChannel(MemoryJournal())
     return RunHandle(
         run_id="test-run",
         session_id="test-session",
@@ -79,7 +89,7 @@ async def test_steer_callback_is_set_after_start() -> None:
 @pytest.mark.unit
 async def test_steer_callback_delegates_to_handle_steer() -> None:
     """Given steer_callback is set, calling it with (session_id, message)
-    delegates to RunHandle.steer(message) and returns the message_id.
+    delegates to steer and returns the message_id.
     """  # noqa: D205
     run_ctx = AgentRunContext()
     handle = _make_handle(run_ctx=run_ctx)
@@ -104,10 +114,13 @@ async def test_steer_callback_delegates_to_handle_steer() -> None:
 @pytest.mark.unit
 async def test_steer_callback_queues_message_when_running() -> None:
     """Given steer_callback is called during a running turn, the message
-    is queued on the handle.
+    is queued on run_ctx.queued_steer_messages.
     """  # noqa: D205
     run_ctx = AgentRunContext()
     handle = _make_handle(run_ctx=run_ctx)
+    # Simulate active run so steer_from_background_task routes to the handle
+    assert handle.session is not None
+    handle.session.current_run_id = "test-run"
 
     gen = handle.start("hello")
 
@@ -115,9 +128,9 @@ async def test_steer_callback_queues_message_when_running() -> None:
         async for _ in gen:
             assert run_ctx.steer_callback is not None
             await run_ctx.steer_callback("any-session", "steer msg")
-            # Message should be queued in queued_steer_messages or
-            # _message_queue depending on handle state.
-            assert len(run_ctx.queued_steer_messages) > 0 or len(handle._message_queue) > 0
+            # Message should be queued in queued_steer_messages (when
+            # no active agent_run) or enqueued via agent_run.
+            assert len(run_ctx.queued_steer_messages) > 0
             break
 
     consumer = asyncio.create_task(_consume())
