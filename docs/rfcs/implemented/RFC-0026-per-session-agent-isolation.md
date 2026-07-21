@@ -337,7 +337,7 @@ Self-contained change. Revert by restoring `state.agent` + `state.agent_lock` + 
 
 ## References
 
-- [RFC-0021: Agent Concurrent Execution Safety](../accepted/RFC-0021-agent-concurrent-execution-safety.md) — Per-run isolation via `AgentRunContext`
+- [RFC-0021: Agent Concurrent Execution Safety](./RFC-0021-agent-concurrent-execution-safety.md) — Per-run isolation via `AgentRunContext`
 - [RFC-0024: Agent Stateless Refactor](./RFC-0024-agent-stateless-refactor.md) — Phase 2: Make `BaseAgent` stateless
 - [RFC-0025: Shared Agent Architecture](./RFC-0025-shared-agent-architecture.md) — Phase 3: Single agent, per-session state
 

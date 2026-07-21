@@ -22,7 +22,7 @@ related_rfcs:
 
 ## Overview
 
-This RFC proposes migrating the `TodoTracker` from a single global instance on `AgentPool` to per-session isolated instances. Currently, `AgentPool.todos` is shared across all sessions and protocols, causing cross-session todo contamination, inability to clean up per-session todos on session deletion, and wasteful broadcast of todo updates to all sessions. This RFC adapts the proven per-session isolation pattern established in [RFC-0026](./implemented/RFC-0026-per-session-agent-isolation.md) and [RFC-0031](./implemented/RFC-0031-acp-per-session-agent-isolation.md) to the `TodoTracker` domain.
+This RFC proposes migrating the `TodoTracker` from a single global instance on `AgentPool` to per-session isolated instances. Currently, `AgentPool.todos` is shared across all sessions and protocols, causing cross-session todo contamination, inability to clean up per-session todos on session deletion, and wasteful broadcast of todo updates to all sessions. This RFC adapts the proven per-session isolation pattern established in [RFC-0026](../implemented/RFC-0026-per-session-agent-isolation.md) and [RFC-0031](../implemented/RFC-0031-acp-per-session-agent-isolation.md) to the `TodoTracker` domain.
 
 ## Table of Contents
 
@@ -771,10 +771,10 @@ Self-contained change. Revert by:
 
 ### Related RFCs
 
-- [RFC-0026: Per-Session Agent Instances](./implemented/RFC-0026-per-session-agent-isolation.md) — OpenCode server per-session agent isolation (proven pattern)
-- [RFC-0031: ACP Per-Session Agent Isolation](./implemented/RFC-0031-acp-per-session-agent-isolation.md) — ACP server per-session agent isolation (proven pattern)
-- [RFC-0021: Agent Concurrent Execution Safety](./implemented/RFC-0021-agent-concurrent-execution-safety.md) — Per-run isolation via `AgentRunContext`
-- [RFC-0024: Agent Stateless Refactor](./draft/RFC-0024-agent-stateless-refactor.md) — Future: Make `BaseAgent` stateless (may enable agent-owned todos)
+- [RFC-0026: Per-Session Agent Instances](../implemented/RFC-0026-per-session-agent-isolation.md) — OpenCode server per-session agent isolation (proven pattern)
+- [RFC-0031: ACP Per-Session Agent Isolation](../implemented/RFC-0031-acp-per-session-agent-isolation.md) — ACP server per-session agent isolation (proven pattern)
+- [RFC-0021: Agent Concurrent Execution Safety](../implemented/RFC-0021-agent-concurrent-execution-safety.md) — Per-run isolation via `AgentRunContext`
+- [RFC-0024: Agent Stateless Refactor](./RFC-0024-agent-stateless-refactor.md) — Future: Make `BaseAgent` stateless (may enable agent-owned todos)
 
 ### Key Source Files
 

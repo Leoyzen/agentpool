@@ -2784,7 +2784,7 @@ Implement `ChannelTrigger`, `GatewayChannel`, `BidirectionalChannel` base, and `
 - [RFC-0041: Run vs Turn Separation](RFC-0041-loop-run-separation.md) — Prerequisite. Defines RunLoop (restructured RunHandle) with idle/running/done states.
 - [RFC-0037: Unify Steer and Followup](RFC-0037-unify-steer-followup.md) — Subsumed by TriggerSource dimension. Steer/followup now works across all modes via CommChannel feedback.
 - [RFC-0029: Agent Reactivation](RFC-0029-agent-reactivation-pending-prompt-queue.md) — Legacy mechanism, superseded by RunLoop's steer/followup.
-- [Lifecycle Analysis](../../design/lifecycle-analysis.md) — Cross-framework research basis for this RFC.
+- [Lifecycle Analysis](../../adr/lifecycle-analysis.md) — Cross-framework research basis for this RFC.
 - [OpenSpec: introduce-anyio-structured-concurrency](../../../openspec/changes/archive/introduce-anyio-structured-concurrency/) — CancelScope hierarchy used by RunLoop.
 
 ### External
