@@ -15,6 +15,7 @@ Key differences from ``test_commit_revert.py``:
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import Mock
@@ -264,13 +265,17 @@ def _wire_session_controller_noop(state: ServerState) -> None:
     it to ``None`` makes the function a no-op. ``get_or_load_session`` checks
     ``session_controller.get_session(session_id)`` for the fast path; returning
     a non-None mock ensures the cached session is returned.
+
+    Uses real ``asyncio.Queue`` objects for ``prompt_queue`` and ``feedback_queue``
+    so that ``get_nowait()`` raises ``asyncio.QueueEmpty`` on empty queues —
+    matching production behavior. Using ``Mock()`` here would cause
+    ``get_nowait()`` to return a truthy Mock, never raising QueueEmpty,
+    and the queue-draining loop in ``revert_session`` would hang forever.
     """
     mock_session_state = Mock()
     mock_session_state.current_run_id = None
-    mock_session_state.prompt_queue = Mock()
-    mock_session_state.prompt_queue.empty = Mock(return_value=True)
-    mock_session_state.feedback_queue = Mock()
-    mock_session_state.feedback_queue.empty = Mock(return_value=True)
+    mock_session_state.prompt_queue = asyncio.Queue()
+    mock_session_state.feedback_queue = asyncio.Queue()
 
     state.session_controller = Mock()
     state.session_controller.get_session = Mock(return_value=mock_session_state)
@@ -359,7 +364,6 @@ class TestStageCommitFlowRealDb:
     COMMIT (``_commit_revert``) deletes messages from the DB.
     """
 
-    @pytest.mark.skip(reason="Hangs — revert_session via HTTP needs mock session_controller with current_run_id=None; fix in follow-up")
     async def test_stage_then_commit_with_real_db(
         self,
         server_state: ServerState,
