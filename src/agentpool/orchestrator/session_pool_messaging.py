@@ -397,6 +397,31 @@ class SessionPoolMessagingMixin:
             return run_handle.steer(message)
         return None
 
+    async def steer_from_background_task(self, session_id: str, message: str) -> str | None:
+        """Inject a steer message from a background task completion.
+
+        Delegates to ``SessionState.steer_from_background_task()`` which:
+        - Emits ``UserMessageInsertedEvent(source="background_task")``
+        - Uses ``_active_steer_callback`` if a RunHandle is active
+        - Falls back to ``feedback_queue`` if no active run
+
+        This is the preferred entry point for background task capabilities
+        (e.g. ``SubagentCapability``, ``BackgroundTaskCapability``) because
+        it carries the correct ``source="background_task"`` semantic and
+        survives across RunHandle boundaries (SessionState is persistent).
+
+        Args:
+            session_id: Target session.
+            message: The steer message to deliver.
+
+        Returns:
+            message_id if delivered, None otherwise.
+        """
+        session = self.sessions._sessions.get(session_id)
+        if session is not None:
+            return session.steer_from_background_task(message)
+        return None
+
     async def followup(self, session_id: str, message: str, **kwargs: Any) -> str | None:
         """Queue a follow-up message with agent-type-aware routing.
 
