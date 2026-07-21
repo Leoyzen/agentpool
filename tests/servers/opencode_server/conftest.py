@@ -381,7 +381,7 @@ def mock_agent(mock_env: Mock, mock_pool: Mock, storage_manager: StorageManager)
 
 
 @pytest.fixture
-def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
+def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:  # noqa: PLR0915
     """Create a server state for testing."""
     # Extract session_controller from mock pool so _event_generator can
     # subscribe to the EventBus and receive events broadcast via event_bridge.
@@ -460,13 +460,57 @@ def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
         # Ensure session exists (idempotent)
         await sp.sessions.get_or_create_session(session_id)
         delivery_mode = DeliveryMode.STEER if priority == "asap" else DeliveryMode.QUEUE
-        return await sp.send_message(
+        result = await sp.send_message(
             session_id=session_id,
             content=content,
             mode=delivery_mode,
             input_provider=input_provider,
             message_id=message_id,
         )
+
+        # Simulate EventProcessor: add user message to state.
+        # In production, EventProcessor._process_user_message_inserted
+        # receives UserMessageInsertedEvent from the EventBus and calls
+        # append_message_to_session. The EventProcessor isn't running in
+        # unit tests, so we simulate it here.
+        if message_id is not None:
+            import time as _time
+
+            from agentpool_server.opencode_server.event_processor import (
+                OpenCodeUserMessageMeta,
+                _deserialize_part,
+            )
+            from agentpool_server.opencode_server.models.common import TimeCreated
+            from agentpool_server.opencode_server.models.message import (
+                MessageWithParts,
+                UserMessage,
+            )
+            from agentpool_server.opencode_server.opencode_message_bridge import (
+                append_message_to_session,
+            )
+
+            agent_name = kwargs.get("agent_name") or "default"
+            user_message = UserMessage(
+                id=message_id,
+                session_id=session_id,
+                time=TimeCreated(created=int(_time.time() * 1000)),
+                agent=agent_name,
+            )
+            user_msg_with_parts = MessageWithParts(info=user_message)
+
+            # Reconstruct parts from meta or fall back to text content.
+            meta = kwargs.get("meta")
+            if isinstance(meta, OpenCodeUserMessageMeta):
+                for part_dict in meta.parts:
+                    part = _deserialize_part(part_dict, user_message.id, session_id)
+                    if part is not None:
+                        user_msg_with_parts.parts.append(part)
+            elif isinstance(content, str) and content:
+                user_msg_with_parts.add_text_part(content)
+
+            await append_message_to_session(state, session_id, user_msg_with_parts)
+
+        return result
 
     state.session_pool_integration.route_message = AsyncMock(side_effect=_mock_route_message)
     # event_bridge is automatically set up by __post_init__ when

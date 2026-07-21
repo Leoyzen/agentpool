@@ -353,14 +353,6 @@ async def _process_message(
                     assert_never(unreachable)
         # NOTE: append_message_to_session is NOT called here — the
         # EventProcessor handles that via UserMessageInsertedEvent.
-        logger.info(
-            "REST handler user message CREATED",
-            session_id=session_id,
-            user_msg_id=user_msg_id,
-            parts_count=len(user_msg_with_parts.parts),
-            parts_types=[p.type for p in user_msg_with_parts.parts],
-            endpoint="send_message",
-        )
         await persist_message_to_storage(state, user_msg_with_parts, session_id)
 
         ctx = await _route_message_locked(
@@ -1054,14 +1046,6 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
                     assert_never(unreachable)
         # NOTE: append_message_to_session is NOT called here — the
         # EventProcessor handles that via UserMessageInsertedEvent.
-        logger.info(
-            "REST handler user message CREATED",
-            session_id=session_id,
-            user_msg_id=user_msg_id,
-            parts_count=len(user_msg_with_parts.parts),
-            parts_types=[p.type for p in user_msg_with_parts.parts],
-            endpoint="prompt_async",
-        )
         await persist_message_to_storage(state, user_msg_with_parts, session_id)
 
         # Serialize parts for meta — the EventBus event carries this so

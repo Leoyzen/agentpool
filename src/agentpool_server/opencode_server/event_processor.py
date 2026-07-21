@@ -258,9 +258,10 @@ class EventProcessor:
                 content=event_content,
                 timestamp=ts,
                 meta=event_meta,
+                source=event_source,
             ):
                 async for e in self._process_user_message_inserted(
-                    ctx, mid, event_content, ts, event_meta
+                    ctx, mid, event_content, ts, event_meta, event_source
                 ):
                     yield e
 
@@ -937,6 +938,7 @@ class EventProcessor:
         content: str | list[Any],
         timestamp: float,
         meta: Any = None,
+        source: str = "protocol",
     ) -> AsyncIterator[Event]:
         """Process a UserMessageInsertedEvent into OpenCode SSE events.
 
@@ -949,6 +951,17 @@ class EventProcessor:
         When ``meta`` is ``None``, falls back to text-only ``content`` →
         ``TextPart``.
 
+        For ``source="protocol"`` messages (from REST handler), only
+        ``MessageUpdatedEvent`` is yielded — parts come from the TUI's
+        ``sync.session.sync()`` which loads from DB. Sending
+        ``PartUpdatedEvent`` with original part IDs would conflict with
+        the DB-reconstructed parts (which have different IDs from
+        ``chat_message_to_opencode``), causing duplicate text rendering.
+
+        For internal sources (``"background_task"``, ``"internal"``),
+        both ``MessageUpdatedEvent`` and ``PartUpdatedEvent`` are yielded
+        because there is no ``sync()`` to load parts from DB.
+
         Args:
             ctx: The event processor context.
             message_id: Unique ID for the inserted user message.
@@ -956,10 +969,12 @@ class EventProcessor:
             timestamp: Wall-clock time the event was created (epoch seconds).
             meta: Optional protocol-specific metadata carrying serialized
                 Part data for rich user message reconstruction.
+            source: Where the message originated — ``"protocol"``,
+                ``"background_task"``, or ``"internal"``.
 
         Yields:
             ``MessageUpdatedEvent`` for the user message, followed by
-            ``PartUpdatedEvent`` for each part.
+            ``PartUpdatedEvent`` for each part (internal sources only).
         """
         # Convert epoch seconds to milliseconds for OpenCode's TimeCreated
         created_ms = int(timestamp * 1000)
@@ -997,10 +1012,17 @@ class EventProcessor:
 
         await append_message_to_session(ctx.state, ctx.session_id, user_msg_with_parts)
 
-        # Yield events for SSE broadcast
+        # Always yield MessageUpdatedEvent so the TUI sees the message info
         yield MessageUpdatedEvent.create(user_message)
-        for part in user_msg_with_parts.parts:
-            yield PartUpdatedEvent.create(part)
+
+        # Only yield PartUpdatedEvent for internal sources.
+        # For protocol sources, parts come from sync.session.sync() (DB).
+        # DB-reconstructed parts have different part IDs than the original
+        # parts in meta, so sending PartUpdatedEvent would cause the TUI
+        # to render both sets of parts — duplicated text.
+        if source != "protocol":
+            for part in user_msg_with_parts.parts:
+                yield PartUpdatedEvent.create(part)
 
 
 def _deserialize_part(

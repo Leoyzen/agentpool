@@ -242,6 +242,44 @@ def concurrent_test_state(tmp_project_dir, slow_mock_agent):
     state.todos = {}
     state.input_providers = {}
     state.pending_questions = {}
+
+    # Simulate EventProcessor: wrap send_message to also add user messages
+    # to state. In production, EventProcessor._process_user_message_inserted
+    # receives UserMessageInsertedEvent from the EventBus and calls
+    # append_message_to_session. The EventProcessor isn't running in tests,
+    # so we simulate it here.
+    original_send_message = state.pool.session_pool.send_message
+
+    async def _wrapping_send_message(*args: Any, **kwargs: Any) -> Any:
+        result = await original_send_message(*args, **kwargs)
+        message_id = kwargs.get("message_id")
+        content = kwargs.get("content")
+        sid = kwargs.get("session_id", "")
+        if message_id is not None and content is not None:
+            import time as _time
+
+            from agentpool_server.opencode_server.models.common import TimeCreated
+            from agentpool_server.opencode_server.models.message import (
+                MessageWithParts,
+                UserMessage,
+            )
+            from agentpool_server.opencode_server.opencode_message_bridge import (
+                append_message_to_session,
+            )
+
+            user_message = UserMessage(
+                id=message_id,
+                session_id=sid,
+                time=TimeCreated(created=int(_time.time() * 1000)),
+            )
+            user_msg_with_parts = MessageWithParts(info=user_message)
+            if isinstance(content, str) and content:
+                user_msg_with_parts.add_text_part(content)
+            await append_message_to_session(state, sid, user_msg_with_parts)
+        return result
+
+    state.pool.session_pool.send_message = _wrapping_send_message
+
     return state
 
 

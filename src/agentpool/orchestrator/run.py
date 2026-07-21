@@ -697,7 +697,7 @@ class RunHandle:
             try:
                 from agentpool.utils.identifiers import ascending
 
-                event = UserMessageInsertedEvent(
+                event: UserMessageInsertedEvent[Any] = UserMessageInsertedEvent(
                     session_id=self.session_id,
                     message_id=message_id or ascending("message"),
                     content=content,

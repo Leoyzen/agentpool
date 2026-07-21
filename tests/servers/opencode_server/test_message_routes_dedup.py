@@ -85,7 +85,7 @@ async def test_event_processor_emits_with_meta(
         message_id=message_id,
         content="Hello from meta",
         delivery="initial",
-        source="protocol",
+        source="internal",
         meta=meta,
     )
 

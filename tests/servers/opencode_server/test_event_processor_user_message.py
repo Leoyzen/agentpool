@@ -84,7 +84,7 @@ async def test_user_message_inserted_creates_user_message(
         message_id="user-msg-1",
         content="Steer this conversation",
         delivery="steer",
-        source="protocol",
+        source="internal",
         timestamp=1700000000.0,
     )
     events = [e async for e in processor.process(event, ctx)]
@@ -139,7 +139,7 @@ async def test_user_message_inserted_with_meta_reconstructs_parts(
         message_id="user-msg-meta",
         content="Reconstructed from meta",
         delivery="initial",
-        source="protocol",
+        source="internal",
         timestamp=1700000000.0,
         meta=meta,
     )
@@ -174,6 +174,7 @@ async def test_user_message_inserted_multimodal_content(
         message_id="user-msg-multi",
         content=["First part", {"text": "Second part"}, "Third part"],
         delivery="followup",
+        source="internal",
         timestamp=1700000001.0,
     )
     events = [e async for e in processor.process(event, ctx)]

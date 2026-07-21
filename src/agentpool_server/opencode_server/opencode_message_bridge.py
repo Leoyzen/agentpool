@@ -34,6 +34,12 @@ from agentpool_server.opencode_server.models.parts import (
 from agentpool_server.opencode_server.models.session import Session
 
 
+# ToolState variants that have a ``metadata`` attribute.
+# ``ToolStatePending`` does NOT have ``metadata`` — only Running, Completed,
+# and Error states do.
+_ToolStateWithMetadata = ToolStateRunning | ToolStateCompleted | ToolStateError
+
+
 if TYPE_CHECKING:
     from agentpool.agents.events.events import RunErrorEvent, SpawnSessionStart, StreamCompleteEvent
     from agentpool_server.opencode_server.state import ServerState
@@ -197,8 +203,6 @@ async def append_message_to_session(
                 role=getattr(msg.info, "role", "unknown"),
                 list_len=len(messages[session_id]),
                 all_ids=[m.info.id for m in messages[session_id]],
-                parts_count=len(msg.parts),
-                parts_types=[getattr(p, "type", "?") for p in msg.parts],
             )
 
 
@@ -461,7 +465,11 @@ class OpenCodeMessageBridgeMixin:
             if msg.info.role != "assistant":
                 continue
             for part in msg.parts:
-                metadata = part.state.metadata if isinstance(part, ToolPart) else None
+                metadata = (
+                    part.state.metadata
+                    if isinstance(part, ToolPart) and isinstance(part.state, _ToolStateWithMetadata)
+                    else None
+                )
                 if (
                     isinstance(part, ToolPart)
                     and isinstance(metadata, dict)
@@ -549,7 +557,11 @@ class OpenCodeMessageBridgeMixin:
             if msg.info.role != "assistant":
                 continue
             for part in msg.parts:
-                metadata = part.state.metadata if isinstance(part, ToolPart) else None
+                metadata = (
+                    part.state.metadata
+                    if isinstance(part, ToolPart) and isinstance(part.state, _ToolStateWithMetadata)
+                    else None
+                )
                 if (
                     isinstance(part, ToolPart)
                     and isinstance(metadata, dict)

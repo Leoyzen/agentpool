@@ -188,9 +188,7 @@ async def test_prompt_async_user_message_renders_once(  # noqa: PLR0915
                 f"{base_url}/session/{session_id}/prompt_async",
                 json={"parts": [{"type": "text", "text": prompt_text}]},
             )
-            assert resp.status_code == 204, (
-                f"prompt_async failed: {resp.status_code}: {resp.text}"
-            )
+            assert resp.status_code == 204, f"prompt_async failed: {resp.status_code}: {resp.text}"
 
         sse_task = asyncio.create_task(collect_sse_events(), name="sse_collector")
         prompt_task = asyncio.create_task(send_prompt(), name="prompt_sender")
@@ -247,8 +245,7 @@ async def test_prompt_async_user_message_renders_once(  # noqa: PLR0915
 
     # --- Assertion 3: SSE and REST agree on the message ID ---
     assert seen_user_ids[0] == user_msg_ids_rest[0], (
-        f"SSE user message ID ({seen_user_ids[0]}) != "
-        f"REST user message ID ({user_msg_ids_rest[0]})"
+        f"SSE user message ID ({seen_user_ids[0]}) != REST user message ID ({user_msg_ids_rest[0]})"
     )
 
     # --- Assertion 4: The user message content matches ---
@@ -259,6 +256,5 @@ async def test_prompt_async_user_message_renders_once(  # noqa: PLR0915
         p for p in rest_parts if p.get("type") == "text" and prompt_text in p.get("text", "")
     ]
     assert len(rest_text_parts) >= 1, (
-        f"Prompt text '{prompt_text}' not found in REST user message parts. "
-        f"Parts: {rest_parts}"
+        f"Prompt text '{prompt_text}' not found in REST user message parts. Parts: {rest_parts}"
     )

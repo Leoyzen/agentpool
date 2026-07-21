@@ -143,7 +143,7 @@ async def test_event_processor_with_meta_reconstructs_parts(
         message_id="msg_meta",
         content="Reconstructed from meta",
         delivery="initial",
-        source="protocol",
+        source="internal",
         meta=meta,
     )
     events = [e async for e in processor.process(event, ctx)]
