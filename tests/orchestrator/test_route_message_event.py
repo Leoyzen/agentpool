@@ -170,19 +170,13 @@ async def test_route_message_followup_delivery_publishes_event(
         priority="when_idle",
     )
 
-    # Debug: diagnose CI-only failure
     assert len(recorder.published) == 1
     _, event = recorder.published[0]
     assert isinstance(event, UserMessageInsertedEvent)
     assert event.delivery == "followup"
     assert event.source == "protocol"
     assert event.content == "followup text"
-    assert result is not None, (
-        f"result is None — current_run_id={session.current_run_id!r}, "
-        f"runs={list(controller._runs.keys())}, "
-        f"closing={session.closing}, is_closing={session.is_closing}, "
-        f"prompt_queue_empty={session.prompt_queue.empty()}"
-    )
+    assert result is None  # Queued — _wait_and_finalize will early-return
     # Prompt should be enqueued.
     assert not session.prompt_queue.empty()
 
