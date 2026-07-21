@@ -313,43 +313,6 @@ class SessionState:
         with contextlib.suppress(Exception):
             asyncio.get_running_loop().create_task(comm.publish(state_event))
 
-    def steer_from_background_task(self, message: str) -> str | None:
-        """Route a steer message from a background subagent completion.
-
-        Called by ``AgentRunContext.complete_background_task()`` (via
-        ``steer_callback``) when a background subagent completes. If a
-        RunHandle is active, the message is injected into it directly.
-        If no RunHandle is active (between turns), the message is
-        enqueued to ``feedback_queue`` for delivery to the next
-        RunHandle.
-
-        Also publishes ``UserMessageInsertedEvent`` to the EventBus
-        (if available) via ``asyncio.create_task()`` fire-and-forget.
-        The event has ``delivery="steer"`` and
-        ``source="background_task"``.
-
-        Args:
-            message: The steer message content.
-
-        Returns:
-            A placeholder message ID (always ``None`` since this path
-            does not generate message IDs).
-        """
-        # Fire-and-forget UserMessageInsertedEvent publication.
-        self._emit_steer_event(message)
-        if self.current_run_id is not None:
-            # Active RunHandle — inject directly via run_handle.steer().
-            # The RunHandle is looked up by _consume_run() which stores
-            # a back-reference. We use a lightweight callback registered
-            # by RunHandle.start().
-            steer_cb = self._active_steer_callback
-            if steer_cb is not None:
-                return steer_cb(message)
-        # No active RunHandle — enqueue for next RunHandle.
-        fb = Feedback(content=message, is_steer=True)
-        self.feedback_queue.put_nowait(fb)
-        return fb.message_id
-
     def _emit_steer_event(self, message: str) -> None:
         """Fire-and-forget ``UserMessageInsertedEvent`` for background steer.
 
@@ -358,19 +321,7 @@ class SessionState:
         loop is running (``RuntimeError``) or no EventBus is available.
         """
         event_bus = self._event_bus
-        logger.info(
-            "_emit_steer_event called",
-            extra={
-                "session_id": self.session_id,
-                "has_event_bus": event_bus is not None,
-                "message_preview": message[:80],
-            },
-        )
         if event_bus is None:
-            logger.warning(
-                "_emit_steer_event skipped: event_bus is None",
-                extra={"session_id": self.session_id},
-            )
             return
 
         async def _publish() -> None:
@@ -402,14 +353,6 @@ class SessionState:
         except RuntimeError:
             # No running event loop — emission skipped, steer proceeds.
             pass
-
-    _active_steer_callback: Callable[[str], str | None] | None = None
-    """Callback set by RunHandle.start() to enable direct steer injection.
-
-    When a RunHandle is active, it registers a callback here so
-    ``steer_from_background_task()`` can inject messages without
-    needing a direct RunHandle reference. Cleared in RunHandle.close().
-    """
 
     def revoke(self, message_id: str) -> bool:
         """Revoke a queued steer message in ``feedback_queue`` by ID.

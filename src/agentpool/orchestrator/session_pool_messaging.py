@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 import logfire
 
 from agentpool.agents.events import StreamCompleteEvent
-from agentpool.lifecycle.types import DeliveryMode
+from agentpool.lifecycle.types import DeliveryMode, Feedback
 from agentpool.log import get_logger
 
 
@@ -400,15 +400,13 @@ class SessionPoolMessagingMixin:
     async def steer_from_background_task(self, session_id: str, message: str) -> str | None:
         """Inject a steer message from a background task completion.
 
-        Delegates to ``SessionState.steer_from_background_task()`` which:
-        - Emits ``UserMessageInsertedEvent(source="background_task")``
-        - Uses ``_active_steer_callback`` if a RunHandle is active
-        - Falls back to ``feedback_queue`` if no active run
-
         This is the preferred entry point for background task capabilities
-        (e.g. ``SubagentCapability``, ``BackgroundTaskCapability``) because
-        it carries the correct ``source="background_task"`` semantic and
-        survives across RunHandle boundaries (SessionState is persistent).
+        (e.g. ``SubagentCapability``, ``BackgroundTaskCapability``) because:
+        - It emits ``UserMessageInsertedEvent(source="background_task")``
+          for TUI display
+        - It injects into the active RunHandle when one exists
+        - It falls back to ``feedback_queue`` when no run is active
+        - It survives across RunHandle boundaries (uses SessionState)
 
         Args:
             session_id: Target session.
@@ -418,9 +416,18 @@ class SessionPoolMessagingMixin:
             message_id if delivered, None otherwise.
         """
         session = self.sessions._sessions.get(session_id)
-        if session is not None:
-            return session.steer_from_background_task(message)
-        return None
+        if session is None:
+            return None
+        # Emit UserMessageInsertedEvent for TUI display.
+        session._emit_steer_event(message)
+        # Try injecting into the active RunHandle.
+        run_handle = self._get_active_run_handle(session_id)
+        if run_handle is not None:
+            return run_handle.steer(message, emit_user_message=False)
+        # No active run — enqueue for next RunHandle via feedback_queue.
+        fb = Feedback(content=message, is_steer=True)
+        session.feedback_queue.put_nowait(fb)
+        return fb.message_id
 
     async def followup(self, session_id: str, message: str, **kwargs: Any) -> str | None:
         """Queue a follow-up message with agent-type-aware routing.

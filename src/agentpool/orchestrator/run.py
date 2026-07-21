@@ -284,10 +284,6 @@ class RunHandle:
         if session is None:
             raise RuntimeError("session must be set before calling start()")
 
-        # Wire steer_callback to SessionState.steer_from_background_task()
-        # so complete_background_task() routes to active RunHandle or
-        # feedback_queue (per-prompt migration, task 3.7).
-        self.run_ctx.steer_callback = self._steer_callback_wrapper
         # Set _run_handle on run_ctx so NativeTurn can access active_agent_run
         self.run_ctx._run_handle = self
         # Set current_task so cancel() can interrupt the running turn.
@@ -296,12 +292,9 @@ class RunHandle:
         # CancelNotification, native _iteration_task cancel).
         self._cancel_fn = self._create_cancel_fn()
 
-        # Register steer callback on SessionState for background task routing.
-        session._active_steer_callback = self._direct_steer
-
         # Drain any steer messages that arrived while the session was idle.
         # These were enqueued to SessionState.feedback_queue by
-        # steer_from_background_task() when no RunHandle was active.
+        # SessionPool.steer_from_background_task() when no RunHandle was active.
         # self.steer() will queue them to queued_steer_messages (since
         # active_agent_run is not yet set), and _execute_turn() will
         # pick them up when the turn starts.
@@ -358,10 +351,9 @@ class RunHandle:
                             await self._publish_cancelled_event(event_bus)
                         raise
             finally:
-                # Per-turn cleanup: clear steer callback, set complete_event.
+                # Per-turn cleanup: set complete_event.
                 # Do NOT close lifecycle dimensions — they are session-owned.
                 # Do NOT call agent.__aexit__() — that's session-level.
-                session._active_steer_callback = None
                 self.complete_event.set()
 
     async def _publish_cancelled_event(self, event_bus: EventBus | None) -> None:
@@ -598,31 +590,9 @@ class RunHandle:
 
         # Fire-and-forget UserMessageInsertedEvent publication.
         if emit_user_message:
-            logger.info(
-                "RunHandle.steer: scheduling user message emission",
-                extra={
-                    "session_id": self.session_id,
-                    "has_event_bus": self.event_bus is not None,
-                    "message_preview": str(message)[:80],
-                },
-            )
             self._schedule_user_message_emission(message, "steer", message_id=fb.message_id)
 
         return fb.message_id
-
-    def _direct_steer(self, message: str) -> str | None:
-        """Direct steer callback for SessionState.steer_from_background_task().
-
-        Args:
-            message: The steer message content.
-
-        Returns:
-            The ``message_id`` string on success.
-        """
-        # SessionController.steer_from_background_task() emits its own
-        # UserMessageInsertedEvent, so suppress emission here to avoid
-        # duplicate events.
-        return self.steer(message, emit_user_message=False)
 
     def followup(
         self,
@@ -730,49 +700,13 @@ class RunHandle:
                     delivery=delivery,
                     source=source,
                 )
-                logger.info(
-                    "UserMessageInsertedEvent emitting",
-                    extra={
-                        "session_id": self.session_id,
-                        "message_id": event.message_id,
-                        "has_event_bus": self.event_bus is not None,
-                        "delivery": delivery,
-                        "source": source,
-                    },
-                )
                 if self.event_bus is not None:
                     await self.event_bus.publish(self.session_id, event)
-                else:
-                    logger.warning(
-                        "UserMessageInsertedEvent skipped: event_bus is None",
-                        extra={"session_id": self.session_id},
-                    )
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "Failed to emit UserMessageInsertedEvent",
                     exc_info=True,
                 )
-
-    async def _steer_callback_wrapper(self, session_id: str, message: str) -> str | None:
-        """Adapter wrapping steer for use as AgentRunContext.steer_callback.
-
-        The steer_callback field expects ``Callable[[str, str],
-        Awaitable[str | None]]``, called as ``await callback(session_id,
-        message)`` from complete_background_task(). This adapter
-        delegates to SessionState.steer_from_background_task() which
-        routes to the active RunHandle or queues for the next.
-
-        Args:
-            session_id: Ignored; required by the callback signature convention.
-            message: The steer message to inject.
-
-        Returns:
-            The ``message_id`` string on success, ``None`` otherwise.
-        """
-        session = self.session
-        if session is not None:
-            return session.steer_from_background_task(message)
-        return self.steer(message)
 
     def close(self) -> None:
         """Set complete_event and perform per-turn cleanup.
@@ -787,10 +721,6 @@ class RunHandle:
         """
         if self.complete_event.is_set():
             return
-        # Clear steer callback on SessionState.
-        session = self.session
-        if session is not None:
-            session._active_steer_callback = None
         self.complete_event.set()
 
     async def __aenter__(self) -> Self:
