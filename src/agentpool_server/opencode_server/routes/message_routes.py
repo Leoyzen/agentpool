@@ -307,6 +307,12 @@ async def _process_message(
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
 
+        # COMMIT: If session has a revert marker, delete reverted messages
+        # BEFORE creating the new user message (DB-first ordering, D10).
+        # This must happen before append_message_to_session, otherwise the
+        # newly-created user message would be truncated by COMMIT.
+        await _commit_revert(state, session_id)
+
         agent_name = _resolve_message_agent_name(state, session_id, request.agent)
         user_msg_id = identifier.ascending("message", request.message_id)
         user_message = UserMessage(
