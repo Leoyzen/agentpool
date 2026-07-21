@@ -96,7 +96,7 @@ async def test_plain_tool_no_context():
 @pytest.mark.xfail(
     reason="Test passes toolsets via Agent() constructor, but session_pool path "
     "recreates agent from manifest config (without toolsets). SubagentTools "
-    "capability is lost. Fix: configure SubagentToolsetConfig in manifest.tools.",
+    "capability is lost. Fix: configure SubagentToolsetConfig in manifest.tools. (#252)",
     strict=False,
 )
 async def test_capability_tools(default_model: str):

@@ -240,7 +240,7 @@ async def test_session_not_found(
 
 
 @pytest.mark.xfail(
-    reason="Fork endpoint returns 500 — deeper issue beyond OTel fix",
+    reason="Fork endpoint returns 500 — deeper issue beyond OTel fix (#250)",
     strict=False,
     raises=AssertionError,
 )
