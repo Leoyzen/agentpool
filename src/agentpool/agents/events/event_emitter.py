@@ -373,7 +373,7 @@ class StreamEventEmitter:
     async def _emit(self, event: RichAgentStreamEvent[Any]) -> None:
         """Internal method to emit events to EventBus."""
         if self._event_bus is not None:
-            session_id = getattr(self._context.agent, "session_id", None)  # noqa: B009
+            session_id = getattr(self._context.agent, "session_id", None)
             if not session_id and self._context.run_ctx is not None:
                 session_id = self._context.run_ctx.session_id
             if session_id:

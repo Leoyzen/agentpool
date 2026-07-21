@@ -329,9 +329,9 @@ class SQLMessagesMixin:
 
             # Delete the boundary message and everything after it.
             await session.execute(
-                delete(Message).where(  # type: ignore[arg-type]
-                    Message.session_id == session_id,
-                    Message.timestamp >= boundary_timestamp,
+                delete(Message).where(
+                    Message.session_id == session_id,  # type: ignore[arg-type]
+                    Message.timestamp >= boundary_timestamp,  # type: ignore[arg-type]
                 )
             )
             await session.commit()

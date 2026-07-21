@@ -1842,9 +1842,10 @@ async def _ensure_session_idle(state: ServerState, session_id: str) -> None:
                 session_pool.wait_for_completion(session_id),
                 timeout=_IDLE_WAIT_TIMEOUT,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
-                "Run %s for session %s did not complete within %.1fs — force-clearing current_run_id",
+                "Run %s for session %s did not complete within %.1fs"
+                " — force-clearing current_run_id",
                 run_id,
                 session_id,
                 _IDLE_WAIT_TIMEOUT,
@@ -1873,7 +1874,7 @@ class RevertRequest(OpenCodeBaseModel):
 
 
 @router.post("/{session_id}/revert")
-async def revert_session(session_id: str, request: RevertRequest, state: StateDep) -> Session:
+async def revert_session(session_id: str, request: RevertRequest, state: StateDep) -> Session:  # noqa: PLR0915
     """STAGE: set a revert marker, roll back files, and broadcast hide events.
 
     This is the soft-marker model — messages are NOT deleted from the database
@@ -1903,10 +1904,16 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
     if state.session_controller is not None:
         session_state = state.session_controller.get_session(session_id)
         if session_state is not None:
-            while not session_state.prompt_queue.empty():
-                session_state.prompt_queue.get_nowait()
-            while not session_state.feedback_queue.empty():
-                session_state.feedback_queue.get_nowait()
+            while True:
+                try:
+                    session_state.prompt_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+            while True:
+                try:
+                    session_state.feedback_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
 
     # Get ALL messages for this session, bypassing the revert filter.
     # We need the full unfiltered list so we can find any message ID, even

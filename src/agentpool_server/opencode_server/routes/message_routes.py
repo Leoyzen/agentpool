@@ -397,11 +397,7 @@ async def _truncate_agent_history(
         return
     chat_messages: list[ChatMessage[Any]] = list(conversation.chat_messages)
     truncate_index = next(
-        (
-            i
-            for i, msg in enumerate(chat_messages)
-            if msg.message_id == up_to_message_id
-        ),
+        (i for i, msg in enumerate(chat_messages) if msg.message_id == up_to_message_id),
         None,
     )
     if truncate_index is not None:
