@@ -26,7 +26,7 @@ from agentpool_server.opencode_server.session_pool_integration import (
 )
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:

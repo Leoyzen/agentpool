@@ -9,11 +9,13 @@ Covers tasks 6.1–6.4 from session-revert-stage-clear-commit.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from agentpool.messaging.messages import ChatMessage
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.models import (
     AssistantMessage,
@@ -326,3 +328,110 @@ class TestApplyRevertFilterHelper:
         session = _make_session("s1", revert=SessionRevert(message_id="msg-002"))
         _ = _apply_revert_filter(session, messages)
         assert len(messages) == original_len
+
+
+# =============================================================================
+# 6.5: Soft-hide with SessionPool-backed messages
+# =============================================================================
+
+
+class TestSoftHideSessionPool:
+    """Tests for soft-hide filtering when messages come from ``session_pool.get_messages()``."""
+
+    async def test_revert_filter_with_non_empty_session_pool(
+        self,
+    ) -> None:
+        """When ``state.messages`` is empty but ``session_pool.get_messages()``
+        returns ChatMessage objects, the revert filter is applied to the converted
+        messages. Messages at and after the revert point are excluded.
+        """
+        session_id = "test-session"
+
+        # Create ChatMessage objects to be returned by session_pool.get_messages()
+        chat_messages: list[ChatMessage[str]] = []
+        for i in range(5):
+            role = "user" if i % 2 == 0 else "assistant"
+            chat_messages.append(
+                ChatMessage[str](
+                    content=f"Message {i}",
+                    role=role,
+                    message_id=f"msg-{i:03d}",
+                    timestamp=datetime(2024, 1, 1 + i),
+                    name="test-agent",
+                )
+            )
+
+        revert = SessionRevert(message_id="msg-002")
+        session = _make_session(session_id, revert=revert)
+
+        # Mock state: empty in-memory messages + session_pool that returns ChatMessages
+        state = Mock(spec=ServerState)
+        state.messages = {}
+        state.sessions = {session_id: session}
+        state.agent = Mock()
+        state.agent.name = "test-agent"
+        state.agent.model_name = None
+        state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
+        state.working_dir = "/tmp"
+
+        pool_mock = Mock()
+        pool_mock.session_pool = Mock()
+        pool_mock.session_pool.get_messages = AsyncMock(return_value=chat_messages)
+        pool_mock.session_pool.sessions = Mock()
+        pool_mock.session_pool.sessions.get_session_agent = Mock(return_value=None)
+        state.pool = pool_mock
+
+        result = await get_messages_for_session(state, session_id)
+
+        # msg and msg-003, msg-004 should be hidden
+        assert len(result) == 2
+        result_ids = [m.info.id for m in result]
+        assert result_ids == ["msg-000", "msg-001"]
+
+        # Messages at and after revert point must be excluded
+        assert "msg-002" not in result_ids
+        assert "msg-003" not in result_ids
+        assert "msg-004" not in result_ids
+
+    async def test_session_pool_with_no_revert_returns_all(
+        self,
+    ) -> None:
+        """When session.revert is None, all ChatMessage objects from
+        session_pool.get_messages() are returned unfiltered."""
+        session_id = "test-session"
+
+        chat_messages: list[ChatMessage[str]] = []
+        for i in range(3):
+            role = "user" if i % 2 == 0 else "assistant"
+            chat_messages.append(
+                ChatMessage[str](
+                    content=f"Message {i}",
+                    role=role,
+                    message_id=f"msg-{i:03d}",
+                    timestamp=datetime(2024, 1, 1 + i),
+                    name="test-agent",
+                )
+            )
+
+        session = _make_session(session_id, revert=None)
+        state = Mock(spec=ServerState)
+        state.messages = {}
+        state.sessions = {session_id: session}
+        state.agent = Mock()
+        state.agent.name = "test-agent"
+        state.agent.model_name = None
+        state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
+        state.working_dir = "/tmp"
+
+        pool_mock = Mock()
+        pool_mock.session_pool = Mock()
+        pool_mock.session_pool.get_messages = AsyncMock(return_value=chat_messages)
+        pool_mock.session_pool.sessions = Mock()
+        pool_mock.session_pool.sessions.get_session_agent = Mock(return_value=None)
+        state.pool = pool_mock
+
+        result = await get_messages_for_session(state, session_id)
+
+        assert len(result) == 3
+        result_ids = [m.info.id for m in result]
+        assert result_ids == [f"msg-{i:03d}" for i in range(3)]

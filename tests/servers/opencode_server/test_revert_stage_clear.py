@@ -1,4 +1,4 @@
-"""Integration tests for STAGE (revert_session) and CLEAR (unrevert_session).
+"""Unit tests for STAGE (revert_session) and CLEAR (unrevert_session).
 
 Tests the soft-marker model:
 - STAGE: sets a revert marker, rolls back files, broadcasts hide events, but
@@ -33,7 +33,7 @@ from agentpool_server.opencode_server.session_pool_integration import (
 )
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:
@@ -116,7 +116,7 @@ async def _add_messages_to_state(
 
 
 class TestStageRevert:
-    """STAGE integration tests for revert_session (soft-marker model)."""
+    """STAGE unit tests for revert_session (soft-marker model)."""
 
     async def test_stage_sets_marker_and_broadcasts_hide_events(
         self,
@@ -143,7 +143,7 @@ class TestStageRevert:
         reverted_session = revert_response.json()
         assert reverted_session["revert"]["messageID"] == revert_message_id
 
-        # MessageRemovedEvent should be broadcast for each soft-hidden message (indices 2, 3, 4)
+        # MessagedRemovedEvent should be broadcast for each soft-hidden message (indices 2, 3, 4)
         removed_events = event_capture.get_events_by_type("message.removed")
         removed_msg_ids = {e.properties.message_id for e in removed_events}
         expected_hidden = {messages[i].info.id for i in range(2, 5)}
@@ -168,7 +168,7 @@ class TestStageRevert:
         async_client: AsyncClient,
         server_state: ServerState,
     ):
-        """3.11: STAGE with unknown message_id → HTTP 404, no marker set, no file rollback."""
+        """3.11: STAGE with unknown message_id -> HTTP 404, no marker set, no file rollback."""
         create_response = await async_client.post("/session", json={"title": "Bad STAGE"})
         session_id = create_response.json()["id"]
 
@@ -244,7 +244,7 @@ class TestStageRevert:
         async_client: AsyncClient,
         server_state: ServerState,
     ):
-        """3.13: Double-STAGE — STAGE at point A, then STAGE at point B → marker overwritten to B,
+        """3.13: Double STAGE - STAGE at point A, then STAGE at point B -> marker overwritten to B,
         previous reverted_changes cleared."""
         create_response = await async_client.post("/session", json={"title": "Double STAGE"})
         session_id = create_response.json()["id"]
@@ -298,7 +298,7 @@ class TestStageRevert:
         assert revert_response_b.status_code == 200
         assert revert_response_b.json()["revert"]["messageID"] == point_b
 
-        # After double-STAGE, the previous reverted_changes should be cleared,
+        # After double STAGE, the previous reverted_changes should be cleared,
         # and only the new change (from point_b) should be in reverted_changes.
         assert len(file_ops.reverted_changes) == 1  # Only point_b's change
 
@@ -309,7 +309,7 @@ class TestStageRevert:
 
 
 class TestClearUnrevert:
-    """CLEAR integration tests for unrevert_session (soft-marker model)."""
+    """CLEAR unit tests for unrevert_session (soft-marker model)."""
 
     async def test_clear_clears_marker_and_restores_files(
         self,
@@ -364,7 +364,7 @@ class TestClearUnrevert:
         async_client: AsyncClient,
         server_state: ServerState,
     ):
-        """4.8: CLEAR without revert marker → HTTP 400 with detail 'No reverted messages to restore'."""
+        """4.8: CLEAR without revert marker -> HTTP 400 with detail 'No reverted messages to restore'."""
         create_response = await async_client.post("/session", json={"title": "No Marker CLEAR"})
         session_id = create_response.json()["id"]
 
@@ -381,7 +381,7 @@ class TestClearUnrevert:
         self,
         async_client: AsyncClient,
     ):
-        """4.9: CLEAR when session not found → HTTP 404."""
+        """4.9: CLEAR when session not found -> HTTP 404."""
         clear_response = await async_client.post(
             "/session/nonexistent-session-id/unrevert",
         )
@@ -392,7 +392,7 @@ class TestClearUnrevert:
         async_client: AsyncClient,
         server_state: ServerState,
     ):
-        """4.10: CLEAR while busy → auto-cancel → CLEAR succeeds."""
+        """4.10: CLEAR while busy -> auto-cancel -> CLEAR succeeds."""
         create_response = await async_client.post("/session", json={"title": "Busy CLEAR"})
         session_id = create_response.json()["id"]
 
@@ -436,7 +436,7 @@ class TestClearUnrevert:
         async_client: AsyncClient,
         server_state: ServerState,
     ):
-        """4.11: CLEAR does not restore cleared queues — STAGE clears queues, CLEAR does not restore them."""
+        """4.11: CLEAR does not restore cleared queues - STAGE clears queues, CLEAR does not restore them."""
         create_response = await async_client.post("/session", json={"title": "Queue CLEAR"})
         session_id = create_response.json()["id"]
 
@@ -455,7 +455,7 @@ class TestClearUnrevert:
         session_controller.get_session = Mock(return_value=mock_session_state)
         server_state.session_controller = session_controller
 
-        # STAGE — should clear queues
+        # STAGE - should clear queues
         stage_response = await async_client.post(
             f"/session/{session_id}/revert",
             json={"message_id": revert_message_id},
@@ -464,7 +464,7 @@ class TestClearUnrevert:
         assert mock_session_state.prompt_queue.empty()
         assert mock_session_state.feedback_queue.empty()
 
-        # CLEAR — should NOT restore the queues
+        # CLEAR - should NOT restore the queues
         clear_response = await async_client.post(
             f"/session/{session_id}/unrevert",
         )
@@ -473,3 +473,57 @@ class TestClearUnrevert:
         # Queues should still be empty
         assert mock_session_state.prompt_queue.empty()
         assert mock_session_state.feedback_queue.empty()
+
+
+# =============================================================================
+# Close Session with Revert Marker Tests
+# =============================================================================
+
+
+class TestCloseSessionWithRevert:
+    """Tests for closing a session with a revert marker set.
+
+    Closing (DELETE /{session_id}) a session with a revert marker should
+    remove the session entirely - no COMMIT should fire since the session
+    is being deleted, not continued.
+    """
+
+    async def test_delete_session_with_revert_marker_clears_marker_without_commit(
+        self,
+        async_client: AsyncClient,
+        server_state: ServerState,
+    ):
+        """Given: a session with a revert marker (STAGE).
+        When: the session is deleted (DELETE /{session_id}).
+        Then: the revert marker is gone (session deleted),
+              truncate_messages was NOT called (no COMMIT on close)."""
+        # Create a session
+        create_response = await async_client.post("/session", json={"title": "Close Revert Test"})
+        session_id = create_response.json()["id"]
+
+        # Add messages
+        await _add_messages_to_state(server_state, session_id, count=5)
+
+        # STAGE - set revert marker
+        revert_response = await async_client.post(
+            f"/session/{session_id}/revert",
+            json={"message_id": "msg-002"},
+        )
+        assert revert_response.status_code == 200
+        assert revert_response.json()["revert"]["messageID"] == "msg-002"
+
+        # Reset the truncate_messages mock so we can assert on new calls during DELETE
+        session_pool = cast(Mock, server_state.pool.session_pool)
+        session_pool.truncate_messages.reset_mock()
+
+        # DELETE the session
+        delete_response = await async_client.delete(f"/session/{session_id}")
+        assert delete_response.status_code == 200
+        assert delete_response.json() is True
+
+        # Session should be deleted - no marker remains
+        get_response = await async_client.get(f"/session/{session_id}")
+        assert get_response.status_code == 404
+
+        # truncate_messages should NOT have been called (no COMMIT on close)
+        session_pool.truncate_messages.assert_not_awaited()
