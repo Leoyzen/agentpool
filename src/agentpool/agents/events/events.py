@@ -18,6 +18,7 @@ If no content is emitted, the return value is automatically converted for UI (fa
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import time
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic_ai import (
@@ -901,6 +902,39 @@ class MessageReplacementEvent:
     """Event type identifier."""
 
 
+@dataclass(frozen=True, kw_only=True)
+class UserMessageInsertedEvent:
+    """User message inserted into the conversation mid-run.
+
+    Emitted when a steer/followup message is injected into an active session
+    so that protocol frontends can display it as a user message. Supports
+    multi-modal content via ``list[Any]``.
+
+    !!! note "Phase 1 — event type only"
+
+        This dataclass is defined and exported but not yet published by any
+        component. Publication logic is added in Phase 2.
+    """
+
+    session_id: str = ""
+    """ID of the session the message was inserted into."""
+
+    message_id: str = ""
+    """Unique ID for the inserted user message."""
+
+    content: str | list[Any] = ""
+    """Message content — plain text or multi-modal part list."""
+
+    delivery: Literal["initial", "steer", "followup"] = "initial"
+    """How the message was delivered to the run."""
+
+    source: Literal["protocol", "background_task", "internal"] = "protocol"
+    """Originator of the inserted message."""
+
+    timestamp: float = field(default_factory=time.time)
+    """Wall-clock time the event was created (epoch seconds)."""
+
+
 type RichAgentStreamEvent[OutputDataT] = (
     AgentStreamEvent
     | StreamCompleteEvent[OutputDataT]
@@ -922,6 +956,7 @@ type RichAgentStreamEvent[OutputDataT] = (
     | StateUpdate
     | ToolCallUpdateEvent
     | MessageReplacementEvent
+    | UserMessageInsertedEvent
 )
 
 

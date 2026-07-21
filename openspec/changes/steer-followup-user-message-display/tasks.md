@@ -1,9 +1,9 @@
 ## 1. Core Event Type
 
-- [ ] 1.1 Add `UserMessageInsertedEvent` frozen dataclass to `src/agentpool/agents/events/events.py` with fields: `session_id` (str), `message_id` (str), `content` (`str | list[Any]` — supports multi-modal prompts), `delivery` (Literal["initial", "steer", "followup"]), `source` (Literal["protocol", "background_task", "internal"]), `timestamp` (float, default_factory=time.time)
-- [ ] 1.2 Add `UserMessageInsertedEvent` to the `RichAgentStreamEvent` PEP 695 `type` statement
-- [ ] 1.3 Export `UserMessageInsertedEvent` from `src/agentpool/agents/events/__init__.py`
-- [ ] 1.4 Write unit tests for `UserMessageInsertedEvent` construction and field defaults, including multi-modal `content` as `list[Any]` (`tests/agents/events/test_user_message_inserted_event.py`)
+- [x] 1.1 Add `UserMessageInsertedEvent` frozen dataclass to `src/agentpool/agents/events/events.py` with fields: `session_id` (str), `message_id` (str), `content` (`str | list[Any]` — supports multi-modal prompts), `delivery` (Literal["initial", "steer", "followup"]), `source` (Literal["protocol", "background_task", "internal"]), `timestamp` (float, default_factory=time.time)
+- [x] 1.2 Add `UserMessageInsertedEvent` to the `RichAgentStreamEvent` PEP 695 `type` statement
+- [x] 1.3 Export `UserMessageInsertedEvent` from `src/agentpool/agents/events/__init__.py`
+- [x] 1.4 Write unit tests for `UserMessageInsertedEvent` construction and field defaults, including multi-modal `content` as `list[Any]` (`tests/agents/events/test_user_message_inserted_event.py`)
 
 ## 2. SessionController Publication
 
