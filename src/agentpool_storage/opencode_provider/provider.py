@@ -462,11 +462,21 @@ class OpenCodeStorageProvider(StorageProvider):
                         part_file.write_text(anyenv.dump_json(dct, indent=True), encoding="utf-8")
 
                     elif isinstance(part, ThinkingPart):
+                        reasoning_metadata: dict[str, Any] = {}
+                        if part.id is not None:
+                            reasoning_metadata["thinking_id"] = part.id
+                        if part.provider_name is not None:
+                            reasoning_metadata["provider_name"] = part.provider_name
+                        if part.signature is not None:
+                            reasoning_metadata["signature"] = part.signature
+                        if part.provider_details is not None:
+                            reasoning_metadata["provider_details"] = part.provider_details
                         reasoning_part = OpenCodeReasoningPart(
                             id=part_id,
                             session_id=session_id,
                             message_id=message_id,
                             text=part.content,
+                            metadata=reasoning_metadata or None,
                             time=TimeStartEndOptional(start=now_ms),
                         )
                         part_file = parts_dir / f"{part_id}.json"
