@@ -485,3 +485,357 @@ class TestCommitTruncatesBeforeAppend:
 
         # Marker cleared
         assert server_state.sessions[session_id].revert is None
+
+
+# =============================================================================
+# Test 5: Sync path COMMIT — STAGE → POST /message (sync) → COMMIT fires
+# =============================================================================
+
+
+class TestSyncPathCommit:
+    """Verify COMMIT fires on the SYNC path (POST /session/{id}/message).
+
+    All previous COMMIT tests use prompt_async (async path). This test
+    covers the sync path where _process_message must run COMMIT BEFORE
+    creating the user message (fixed in commit 990c0069e).
+    """
+
+    async def test_sync_path_commit_before_user_message(
+        self,
+        async_client: AsyncClient,
+        server_state: ServerState,
+    ) -> None:
+        """Given: A session with 4 messages, STAGE at msg-002.
+
+        When: POST /session/{id}/message (sync path) sends a new message.
+        Then: COMMIT fires (truncate_messages called), the new user message
+              exists in state.messages (NOT truncated by COMMIT), and
+              messages at/after msg-002 are gone.
+        """
+        # --- Setup ---
+        create_response = await async_client.post("/session", json={"title": "Sync Commit Test"})
+        session_id = create_response.json()["id"]
+
+        await _add_messages_to_state(server_state, session_id, count=4)
+        assert _message_ids(server_state, session_id) == [
+            "msg-000",
+            "msg-001",
+            "msg-002",
+            "msg-003",
+        ]
+
+        session_pool = cast(Mock, server_state.pool.session_pool)
+        session_pool.truncate_messages.reset_mock()
+
+        # --- STAGE at msg-002 ---
+        stage_response = await async_client.post(
+            f"/session/{session_id}/revert",
+            json={"message_id": "msg-002"},
+        )
+        assert stage_response.status_code == 200
+
+        # --- Send via SYNC path (POST /message, not /prompt_async) ---
+        request = MessageRequest(
+            parts=[TextPartInput(text="sync path message after revert")],
+            agent="default",
+            message_id="msg_sync_new",
+        )
+        # The sync path calls _process_message which calls pool.session_pool.send_message.
+        # pool.session_pool.send_message is an AsyncMock that returns a Mock run_handle.
+        # This means the sync path will return quickly (mocked agent).
+        # We just need to verify COMMIT fired and the new message wasn't truncated.
+        sync_response = await async_client.post(
+            f"/session/{session_id}/message",
+            json=request.model_dump(mode="json"),
+        )
+        # Sync path returns the created MessageWithParts
+        assert sync_response.status_code == 200
+
+        # COMMIT fired: truncate_messages called with msg-002
+        session_pool.truncate_messages.assert_awaited_once_with(session_id, "msg-002")
+
+        # The new user message exists in state.messages (NOT truncated by COMMIT)
+        final_ids = _message_ids(server_state, session_id)
+        assert "msg_sync_new" in final_ids, (
+            f"New message msg_sync_new missing from state.messages: {final_ids}"
+        )
+
+        # Reverted messages are gone
+        assert "msg-002" not in final_ids
+        assert "msg-003" not in final_ids
+
+        # Pre-revert messages preserved
+        assert "msg-000" in final_ids
+        assert "msg-001" in final_ids
+
+        # Marker cleared
+        assert server_state.sessions[session_id].revert is None
+
+
+# =============================================================================
+# Test 6: STAGE → CLEAR → STAGE → CLEAR (repeated undo/redo, task 9.1)
+# =============================================================================
+
+
+class TestStageClearCycle:
+    """Repeated undo/redo cycle — messages are never deleted from in-memory."""
+
+    async def test_stage_clear_stage_clear_cycle(
+        self,
+        async_client: AsyncClient,
+        server_state: ServerState,
+    ) -> None:
+        """Given: A session with 6 messages.
+
+        When: STAGE → CLEAR → STAGE → CLEAR (two full undo/redo cycles).
+        Then: All 6 messages remain in state.messages throughout (soft-hide only),
+              truncate_messages is NEVER called, and the marker toggles correctly.
+        """
+        # --- Setup ---
+        create_response = await async_client.post("/session", json={"title": "Undo/Redo Cycle"})
+        session_id = create_response.json()["id"]
+
+        await _add_messages_to_state(server_state, session_id, count=6)
+        initial_ids = _message_ids(server_state, session_id)
+
+        session_pool = cast(Mock, server_state.pool.session_pool)
+        session_pool.truncate_messages.reset_mock()
+
+        # --- STAGE 1: revert at msg-004 ---
+        stage_1 = await async_client.post(
+            f"/session/{session_id}/revert",
+            json={"message_id": "msg-004"},
+        )
+        assert stage_1.status_code == 200
+        assert server_state.sessions[session_id].revert is not None
+        assert server_state.sessions[session_id].revert.message_id == "msg-004"
+
+        # Messages NOT deleted
+        assert _message_ids(server_state, session_id) == initial_ids
+        session_pool.truncate_messages.assert_not_awaited()
+
+        # --- CLEAR 1: unrevert ---
+        clear_1 = await async_client.post(
+            f"/session/{session_id}/unrevert",
+        )
+        assert clear_1.status_code == 200
+        assert server_state.sessions[session_id].revert is None
+
+        # Messages still NOT deleted
+        assert _message_ids(server_state, session_id) == initial_ids
+        session_pool.truncate_messages.assert_not_awaited()
+
+        # --- STAGE 2: revert at msg-002 (different point) ---
+        stage_2 = await async_client.post(
+            f"/session/{session_id}/revert",
+            json={"message_id": "msg-002"},
+        )
+        assert stage_2.status_code == 200
+        assert server_state.sessions[session_id].revert is not None
+        assert server_state.sessions[session_id].revert.message_id == "msg-002"
+
+        # Messages still NOT deleted
+        assert _message_ids(server_state, session_id) == initial_ids
+        session_pool.truncate_messages.assert_not_awaited()
+
+        # --- CLEAR 2: unrevert ---
+        clear_2 = await async_client.post(
+            f"/session/{session_id}/unrevert",
+        )
+        assert clear_2.status_code == 200
+        assert server_state.sessions[session_id].revert is None
+
+        # Messages still NOT deleted
+        assert _message_ids(server_state, session_id) == initial_ids
+        session_pool.truncate_messages.assert_not_awaited()
+
+
+# =============================================================================
+# Test 7: Concurrent STAGE calls (task 9.6)
+# =============================================================================
+
+
+class TestConcurrentStage:
+    """Two simultaneous POST /revert requests — verify no corruption."""
+
+    async def test_concurrent_stage_calls_no_corruption(
+        self,
+        async_client: AsyncClient,
+        server_state: ServerState,
+    ) -> None:
+        """Given: A session with 6 messages.
+
+        When: Two STAGE requests are sent concurrently (both targeting different
+              message IDs).
+        Then: Both complete without error, the session has a valid revert marker
+              (one of the two), and messages are not corrupted.
+        """
+        import asyncio
+
+        # --- Setup ---
+        create_response = await async_client.post("/session", json={"title": "Concurrent STAGE"})
+        session_id = create_response.json()["id"]
+
+        await _add_messages_to_state(server_state, session_id, count=6)
+        original_ids = _message_ids(server_state, session_id)
+
+        # --- Fire two STAGE requests concurrently ---
+        task_a = asyncio.create_task(
+            async_client.post(
+                f"/session/{session_id}/revert",
+                json={"message_id": "msg-002"},
+            )
+        )
+        task_b = asyncio.create_task(
+            async_client.post(
+                f"/session/{session_id}/revert",
+                json={"message_id": "msg-004"},
+            )
+        )
+
+        response_a, response_b = await asyncio.gather(task_a, task_b)
+
+        # Both should succeed (200) — the session lock serializes them
+        assert response_a.status_code == 200
+        assert response_b.status_code == 200
+
+        # The session should have a valid revert marker (the last one to acquire the lock wins)
+        session = server_state.sessions.get(session_id)
+        assert session is not None
+        assert session.revert is not None
+        assert session.revert.message_id in {"msg-002", "msg-004"}
+
+        # Messages are not corrupted — all still present (soft-hide)
+        assert _message_ids(server_state, session_id) == original_ids
+
+
+# =============================================================================
+# Test 8: Auto-cancel timeout integration (task 9.11)
+# =============================================================================
+
+
+class TestAutoCancelTimeoutIntegration:
+    """STAGE while busy with a run that blocks >10s — timeout force-clears."""
+
+    async def test_stage_proceeds_after_cancel_timeout(
+        self,
+        async_client: AsyncClient,
+        server_state: ServerState,
+    ) -> None:
+        """Given: A session with messages and a busy run that doesn't respond to cancel.
+
+        When: POST /revert is called while the session is busy.
+        Then: _ensure_session_idle times out (10s), force-clears current_run_id,
+              and STAGE proceeds — revert marker is set.
+        """
+        # --- Setup ---
+        create_response = await async_client.post("/session", json={"title": "Timeout Integration"})
+        session_id = create_response.json()["id"]
+
+        await _add_messages_to_state(server_state, session_id, count=4)
+
+        # Simulate a busy session: set current_run_id on the session state
+        from agentpool.orchestrator.session_pool import SessionState as PoolSessionState
+
+        busy_session = PoolSessionState(
+            session_id=session_id,
+            agent_name="test-agent",
+            current_run_id="run-that-never-completes",
+        )
+
+        # Override get_session to return our busy session
+        session_controller = server_state.session_controller
+        if session_controller is not None:
+            session_controller.get_session = Mock(return_value=busy_session)
+
+        # Make cancel_run a no-op (doesn't actually cancel)
+        session_controller.cancel_run_for_session = Mock()
+
+        # Patch asyncio.wait_for to timeout immediately (can't wait 10s in a test)
+        import asyncio as asyncio_mod
+
+        original_wait_for = asyncio_mod.wait_for
+
+        async def _quick_timeout(coro, timeout):
+            coro.close()
+            raise TimeoutError("Simulated timeout")
+
+        asyncio_mod.wait_for = _quick_timeout
+
+        try:
+            # --- STAGE while busy ---
+            stage_response = await async_client.post(
+                f"/session/{session_id}/revert",
+                json={"message_id": "msg-002"},
+            )
+            # STAGE should succeed despite the timeout
+            assert stage_response.status_code == 200
+
+            # Revert marker is set
+            session = server_state.sessions.get(session_id)
+            assert session is not None
+            assert session.revert is not None
+            assert session.revert.message_id == "msg-002"
+
+            # current_run_id was force-cleared
+            assert busy_session.current_run_id is None
+        finally:
+            # Restore original wait_for
+            asyncio_mod.wait_for = original_wait_for
+
+
+# =============================================================================
+# Test 9: Stale RunHandle — current_run_id set but handle gone (task 2.3)
+# =============================================================================
+
+
+class TestStaleRunHandle:
+    """_ensure_session_idle when current_run_id is set but the RunHandle is gone."""
+
+    async def test_stale_run_handle_force_clears(
+        self,
+        async_client: AsyncClient,
+        server_state: ServerState,
+    ) -> None:
+        """Given: A session where current_run_id is stale (RunHandle gone).
+
+        When: POST /revert is called.
+        Then: _ensure_session_idle detects the stale reference, force-clears
+              current_run_id, and STAGE proceeds without waiting.
+        """
+        # --- Setup ---
+        create_response = await async_client.post("/session", json={"title": "Stale Handle"})
+        session_id = create_response.json()["id"]
+
+        await _add_messages_to_state(server_state, session_id, count=4)
+
+        # Simulate stale run handle
+        from agentpool.orchestrator.session_pool import SessionState as PoolSessionState
+
+        stale_session = PoolSessionState(
+            session_id=session_id,
+            agent_name="test-agent",
+            current_run_id="stale-run-id",
+        )
+
+        session_controller = server_state.session_controller
+        if session_controller is not None:
+            session_controller.get_session = Mock(return_value=stale_session)
+            # cancel_run_for_session is already a Mock (no-op from conftest)
+
+        # --- STAGE ---
+        stage_response = await async_client.post(
+            f"/session/{session_id}/revert",
+            json={"message_id": "msg-002"},
+        )
+        # Should succeed — stale run is force-cleared
+        assert stage_response.status_code == 200
+
+        # Revert marker set
+        session = server_state.sessions.get(session_id)
+        assert session is not None
+        assert session.revert is not None
+        assert session.revert.message_id == "msg-002"
+
+        # current_run_id force-cleared
+        assert stale_session.current_run_id is None
