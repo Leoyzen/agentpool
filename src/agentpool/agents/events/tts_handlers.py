@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic_ai import PartDeltaEvent, PartStartEvent, TextPart, TextPartDelta
 
+from agentpool.agents.events import UserMessageInsertedEvent
+
 
 if TYPE_CHECKING:
     from anyvoice import TTSStream
@@ -86,6 +88,9 @@ class BaseTTSEventHandler:
 
             case StreamCompleteEvent():
                 await self._close_stream()
+
+            case UserMessageInsertedEvent():
+                pass  # User message insertions don't require TTS
 
 
 class OpenAITTSEventHandler(BaseTTSEventHandler):

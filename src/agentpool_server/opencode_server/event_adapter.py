@@ -78,8 +78,16 @@ class OpenCodeEventAdapter:
             reference — the caller is responsible for the context lifecycle.
     """
 
-    def __init__(self, context: EventProcessorContext) -> None:
-        """Initialize the adapter with an existing context."""
+    def __init__(
+        self,
+        context: EventProcessorContext,
+    ) -> None:
+        """Initialize the adapter with an existing context.
+
+        Args:
+            context: The mutable event processor context.  The adapter borrows a
+                reference — the caller is responsible for the context lifecycle.
+        """
         self._context = context
         self._processor = EventProcessor()
 

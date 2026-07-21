@@ -20,6 +20,7 @@ from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     RunErrorEvent,
     RunFailedEvent,
+    UserMessageInsertedEvent,
 )
 from agentpool.log import get_logger
 from agentpool.observability.spans import safe_span
@@ -58,6 +59,57 @@ class SessionControllerRunsMixin:
     _background_tasks: set[asyncio.Task[Any]]
 
     def get_session(self, session_id: str) -> SessionState | None: ...
+
+    async def _emit_user_message_inserted(
+        self,
+        session_id: str,
+        content: str | list[Any],
+        delivery: str,
+        source: str,
+        message_id: str | None = None,
+        meta: Any = None,
+    ) -> None:
+        """Publish ``UserMessageInsertedEvent`` to the EventBus.
+
+        Wraps emission in a ``logfire.span`` to prevent orphan traces.
+        Catches all exceptions and logs a warning — emission failures
+        must never break the routing path.
+
+        Args:
+            session_id: The session the message was inserted into.
+            content: Message content (text or multi-modal part list).
+            delivery: ``"initial"``, ``"steer"``, or ``"followup"``.
+            source: ``"protocol"``, ``"background_task"``, or ``"internal"``.
+            message_id: Optional message ID; auto-generated if ``None``.
+            meta: Optional protocol-specific metadata for rich user message
+                display. When set, protocol event consumers use it to
+                reconstruct the full user message instead of falling back
+                to text-only ``content``.
+        """
+        with logfire.span(
+            "event.user_message_inserted.emit",
+            session_id=session_id,
+            delivery=delivery,
+            source=source,
+        ):
+            try:
+                from agentpool.utils.identifiers import ascending
+
+                event = UserMessageInsertedEvent(
+                    session_id=session_id,
+                    message_id=message_id or ascending("message"),
+                    content=content,
+                    delivery=delivery,  # type: ignore[arg-type]
+                    source=source,  # type: ignore[arg-type]
+                    meta=meta,
+                )
+                if self._event_bus is not None:
+                    await self._event_bus.publish(session_id, event)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Failed to emit UserMessageInsertedEvent",
+                    exc_info=True,
+                )
 
     async def _consume_run(self, run_handle: RunHandle, initial_prompt: str | list[Any]) -> None:
         """Drive RunHandle execution to completion, chaining prompts.
@@ -139,6 +191,8 @@ class SessionControllerRunsMixin:
                         next_prompt = session.prompt_queue.get_nowait()
                     except asyncio.QueueEmpty:
                         break
+                    # Messages in prompt_queue were already displayed by
+                    # _route_message() — no need to emit again.
                     # Create a new RunHandle for the next prompt.
                     agent = current_handle.agent
                     if agent is None:
@@ -298,12 +352,18 @@ class SessionControllerRunsMixin:
         priority: str = "when_idle",
         deps: Any = None,
         message_id: str | None = None,
+        delivery: str | None = None,
+        meta: Any = None,
     ) -> str | None:
         """Route a message to the appropriate handler based on session state.
 
         Idle sessions create a RunHandle via :meth:`_start_run_handle`.
         Busy sessions call ``RunHandle.steer()`` (``"asap"``) or enqueue
         to ``SessionState.prompt_queue`` (``"when_idle"``).
+
+        Before the routing action, publishes ``UserMessageInsertedEvent``
+        to the EventBus (if available) so protocol frontends can display
+        the user message.
 
         Args:
             session: The live session state (must already exist).
@@ -314,6 +374,11 @@ class SessionControllerRunsMixin:
             priority: ``"when_idle"`` to queue, ``"asap"`` to inject.
             deps: Optional dependencies for the agent run context.
             message_id: Optional message ID.
+            delivery: Optional delivery label (``"initial"``, ``"steer"``,
+                ``"followup"``). If ``None``, inferred from session state
+                and priority.
+            meta: Optional protocol-specific metadata carried through to
+                ``UserMessageInsertedEvent`` for rich user message display.
 
         Returns:
             The ``message_id`` string on success, ``None`` for rejection.
@@ -329,6 +394,16 @@ class SessionControllerRunsMixin:
                 if existing_run is None or existing_run.complete_event.is_set():
                     session.set_current_run_id(None)
             if session.current_run_id is None:
+                # Idle session — initial delivery.
+                inferred_delivery = delivery or "initial"
+                await self._emit_user_message_inserted(
+                    session_id,
+                    content,
+                    delivery=inferred_delivery,
+                    source="protocol",
+                    message_id=message_id,
+                    meta=meta,
+                )
                 return self._start_run_handle(
                     session,
                     agent,
@@ -340,8 +415,27 @@ class SessionControllerRunsMixin:
             run = self._runs.get(session.current_run_id) if session.current_run_id else None
             if run is not None:
                 if resolved == "asap":
-                    return run.steer(content, message_id=message_id)
+                    # Steer — inject into active turn.
+                    inferred_delivery = delivery or "steer"
+                    await self._emit_user_message_inserted(
+                        session_id,
+                        content,
+                        delivery=inferred_delivery,
+                        source="protocol",
+                        message_id=message_id,
+                        meta=meta,
+                    )
+                    return run.steer(content, message_id=message_id, emit_user_message=False)
                 # Followup: enqueue to SessionState.prompt_queue.
+                inferred_delivery = delivery or "followup"
+                await self._emit_user_message_inserted(
+                    session_id,
+                    content,
+                    delivery=inferred_delivery,
+                    source="protocol",
+                    message_id=message_id,
+                    meta=meta,
+                )
                 from agentpool.lifecycle.types import Feedback
 
                 fb_kwargs: dict[str, Any] = {}

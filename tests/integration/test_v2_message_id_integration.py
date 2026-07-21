@@ -132,16 +132,20 @@ async def test_steer_revoke_flow() -> None:
     """Steer a message, revoke it before delivery, verify it's removed.
 
     In the per-prompt model, steer routing is handled by
-    ``SessionState.steer_from_background_task()`` which enqueues to
+    ``SessionPool.steer_from_background_task()`` which enqueues to
     ``feedback_queue`` when no RunHandle is active. ``SessionState.revoke()``
     removes a queued steer message by ID.
     """
+    from agentpool.lifecycle.types import Feedback
     from agentpool.orchestrator.session_controller import SessionState
 
     session = SessionState(session_id="test-session", agent_name="test-agent")
 
-    # Steer from background task with no active RunHandle → feedback_queue.
-    msg_id = session.steer_from_background_task("interrupt the agent")
+    # Simulate background task steer by enqueuing a Feedback directly.
+    msg_id = "test-steer-msg-1"
+    session.feedback_queue.put_nowait(
+        Feedback(content="interrupt the agent", is_steer=True, message_id=msg_id)
+    )
     assert msg_id is not None
 
     # Verify the Feedback is in the feedback_queue.

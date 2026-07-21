@@ -60,6 +60,7 @@ class MockServerState:
         self.agent.name = "test-agent"
         self.agent.model_name = None
         self.pool: Any = None
+        self.session_controller: Any = None
         self.session_status: dict[str, Any] = {}
         self.config = MagicMock()
         # Required by ensure_session() and related helpers in

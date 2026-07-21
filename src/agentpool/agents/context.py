@@ -24,8 +24,6 @@ from agentpool.tools import CallDeferred
 
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-
     from upathtools.filesystems import IsolatedMemoryFileSystem, OverlayFileSystem
 
     from agentpool import Agent
@@ -174,9 +172,6 @@ class AgentRunContext:
     queued_steer_messages: list[str | list[Any]] = field(default_factory=list)
     """Steer messages queued during post-iteration wait window."""
 
-    steer_callback: Callable[[str, str], Awaitable[str | None]] | None = None
-    """Set by RunHandle.start(), allows tools to call steer() via run_ctx."""
-
     turn_id: str | None = None
     """Unique identifier for the current Turn, set by RunHandle.start().
 
@@ -199,23 +194,9 @@ class AgentRunContext:
     async def complete_background_task(self, child_session_id: str, message: str) -> None:
         """Signal that a background child task has completed.
 
-        Calls steer_callback first (if set), then pops and sets the done_event.
-        Ordering is critical: steer BEFORE signal to prevent NativeTurn
-        from waking before the steer message is queued.
+        Pops and sets the done_event for the child session. Steer
+        injection is handled separately by ``SessionPool.steer_from_background_task()``.
         """
-        if self.steer_callback is not None:
-            try:
-                await self.steer_callback(self.session_id, message)
-            except Exception:
-                logger.exception(
-                    "steer_callback raised in complete_background_task",
-                    child_session_id=child_session_id,
-                )
-        else:
-            logger.warning(
-                "complete_background_task called without steer_callback",
-                child_session_id=child_session_id,
-            )
         event = self.child_done_events.pop(child_session_id, None)
         if event is not None:
             event.set()

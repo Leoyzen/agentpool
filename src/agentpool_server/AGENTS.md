@@ -69,3 +69,62 @@
 - **MCP server** does NOT extend `ProtocolEventConsumerMixin`. It uses FastMCP decorators and exposes agents as tools/prompts/resources — no session-level event streaming.
 - **A2A server** does NOT extend `ProtocolEventConsumerMixin` either. It's a request-response HTTP server with no event subscription.
 - **OpenAI API server** extends both `BaseServer` and `ProtocolEventConsumerMixin`. It uses the mixin only for child consumer lifecycle (subagent sessions). The main chat completions endpoint does not use EventBus directly.
+
+### UserMessageInsertedEvent — ACP Server
+
+The `UserMessageInsertedEvent` (defined in `agentpool.agents.events.events`) carries inserted user message content through the EventBus. For ACP, this is handled in two places:
+
+**1. `_meta.delivery` extraction at `acp_agent.py:prompt()`**
+
+When a protocol handler calls `handle_prompt()`, `_meta` is already extracted at `acp_agent.py:prompt()` (~line 698) for trace context. The `delivery` field is extracted from `_meta` and passed through the call chain:
+
+- `"steer"` → priority `"asap"` (mid-turn injection)
+- `"followup"` → priority `"when_idle"` (between-turn queue)
+- Absent → defaults to `"when_idle"`
+
+The delivery value flows through `handle_prompt()` → `send_message()` → `_route_message()` where it determines the priority and populates the `UserMessageInsertedEvent.delivery` field. `message_id` is generated in `handle_prompt()` and passed through the same chain for dedup correlation.
+
+**2. `ACPEventConverter` handling of `UserMessageInsertedEvent`**
+
+`ACPEventConverter` (in `acp_server/event_converter.py`) is modified to accept `protocol_version: int = 1` from the ACP agent (stored at `acp_agent.py:380`). When the converter hits a `UserMessageInsertedEvent`:
+
+```python
+case UserMessageInsertedEvent(message_id=mid, content=content):
+    if mid in self._displayed_message_ids:
+        return  # dedup — already emitted by protocol handler
+    blocks = _content_to_blocks(content)
+    if self._protocol_version >= 2:
+        yield SessionUpdate(
+            session_update=SessionUpdateKind.UserMessage,
+            message_id=mid, content=blocks,
+        )
+    else:
+        for block in blocks:
+            yield SessionUpdate(
+                session_update=SessionUpdateKind.UserMessageChunk,
+                message_id=mid, content=block,
+            )
+        self._displayed_message_ids.add(mid)
+```
+
+- **ACP v1** (`protocol_version < 2`): Emits one `UserMessageChunk` with `TextContentBlock` per content block. This works with current Zed clients.
+- **ACP v2** (`protocol_version >= 2`): Emits a whole-message `UserMessage` upsert with patch semantics. The `UserMessage` model is defined in `src/acp/schema/session_updates.py` with fields `message_id`, `content` (list of ContentBlocks), and `meta`.
+- Multi-modal content (`str | list[Any]`) is converted to appropriate `ContentBlock` instances (`str` → `TextContentBlock`, dict with image → `ImageContentBlock`).
+
+**3. Dedup Mechanism**
+
+Dedup uses a per-session `dict[str, set[str]]` on `SessionController` (keyed by `session_id`), passed to `ACPEventConverter` as `displayed_message_ids: set[str]`. The protocol handler (`_emit_user_message_chunks()`) generates the `message_id` first, registers it in the set, emits to the client, then passes the same ID to `send_message(message_id=mid)`. The EventBus event carries the same ID, and the converter checks the set before emitting. Entries are removed on session close.
+
+**4. ACP UserMessage Schema**
+
+The ACP Python schema defines the `UserMessage` Pydantic model in `session_updates.py`:
+
+```python
+class UserMessage(BaseModel):
+    session_update: Literal["user_message"] = "user_message"
+    message_id: str
+    content: list[ContentBlock] | None = None
+    meta: dict[str, Any] | None = None
+```
+
+This is added to the `SessionUpdate` union for v2 protocol support. The existing `UserMessageChunk` is unchanged and remains the v1 path.

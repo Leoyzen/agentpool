@@ -373,6 +373,7 @@ class SessionControllerAgentMixin:
         )
         session._host_context = host_ctx
         session._agent_registry = agent_registry
+        session._event_bus = event_bus
 
         # Run crash recovery (full _handle_recovery logic, task 1.2).
         if journal is not None and comm_channel is not None and snapshot_store is not None:

@@ -1551,7 +1551,7 @@ async def summarize_session(  # noqa: PLR0915
         TextPartDelta,
     )
 
-    from agentpool.agents.events import StreamCompleteEvent
+    from agentpool.agents.events import StreamCompleteEvent, UserMessageInsertedEvent
     from agentpool.messaging.compaction import compact_conversation, summarizing_context
 
     session = await get_or_load_session(state, session_id)
@@ -1674,6 +1674,9 @@ async def summarize_session(  # noqa: PLR0915
                                 if complete_msg.cost_info
                                 else 0
                             )
+
+                        case UserMessageInsertedEvent():
+                            pass  # User message insertions not relevant to summary generation
 
             except Exception as e:  # noqa: BLE001
                 response_text = f"Error generating summary: {e}"
