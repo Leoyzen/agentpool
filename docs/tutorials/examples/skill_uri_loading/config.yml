@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/phil65/agentpool/refs/heads/main/schema/config-schema.json
+# Example: Loading Skills by URI
+#
+# This example demonstrates how to load skills using the skill:// URI scheme.
+# Skills can be loaded by short name (auto-routing) or by full URI.
+
+skills:
+  paths:
+    # Local skills directory
+    - ./skills
+
+agents:
+  # Agent that can load skills by URI
+  skill_loader:
+    type: native
+    model: openai:gpt-4o-mini
+    description: Agent that demonstrates skill URI loading
+    system_prompt: |
+      You are a skill loading assistant. You can load skills using the load_skill tool.
+
+      Available loading methods:
+      1. By short name: "python-expert" (auto-routes to first provider with match)
+      2. By full URI: "skill://local/python-expert" (explicit provider)
+      3. With arguments: "greeting" with "Alice Company formal"
+      4. Reference content: "skill://local/python-expert/references/guide.md"
+
+      When asked to load a skill, use the load_skill tool with the appropriate format.
+    tools:
+      - type: skills
+
+  # Agent that lists available skills
+  skill_lister:
+    type: native
+    model: openai:gpt-4o-mini
+    description: Agent that lists available skills
+    system_prompt: |
+      You are a skill catalog assistant. You can list all available skills
+      using the list_skills tool. This shows skills from all providers
+      with their URIs.
+    tools:
+      - type: skills

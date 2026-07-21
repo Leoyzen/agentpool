@@ -1,7 +1,6 @@
 ---
 title: Home
 description: A brand new AI framework. Fully async. Excellently typed. MCP & ACP Integration. Human in the loop. Unique messaging features.
-icon: material/robot-outline
 order: 0
 hide:
   - navigation
@@ -58,6 +57,16 @@ Everything is a MessageNode - enabling seamless composition:
 ## License
 
 MIT License - see [LICENSE](https://github.com/phil65/agentpool/blob/main/LICENSE) for details.
+
+## Documentation
+
+- [Tutorials](tutorials/index.md) — Getting started and learning guides
+- [How-To Guides](how-to/) — Task-oriented guides for configuration, servers, and advanced features
+- [Reference](reference/) — CLI commands, core concepts, and API reference
+- [Architecture](explanation/) — How and why AgentPool works
+- [Decision Records](adr/) — Architecture Decision Records (ADRs)
+- [RFCs](rfcs/STATUS.md) — Request for Comments proposals and status
+- [Documentation Guide](meta/documentation-guide.md) — Where to put new documentation
 
 ## Quick Start
 

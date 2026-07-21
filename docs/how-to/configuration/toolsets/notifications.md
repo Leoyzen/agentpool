@@ -1,0 +1,45 @@
+---
+title: Notifications Toolset
+description: Send notifications via various channels
+---
+
+# Notifications Toolset
+
+Send notifications through various channels like email, Slack, or webhooks.
+
+## Basic Usage
+
+```yaml
+agents:
+  notifier:
+    tools:
+      - type: notifications
+        email:
+          smtp_host: smtp.gmail.com
+          smtp_port: 587
+          username: ${EMAIL_USER}
+          password: ${EMAIL_PASS}
+```
+
+## Available Tools
+
+```python exec="true"
+from agentpool_toolsets.notifications import NotificationsTools
+from agentpool.docs.utils import generate_tool_docs
+
+toolset = NotificationsTools()
+print(generate_tool_docs(toolset))
+```
+
+## Supported Channels
+
+- Email (SMTP)
+- Slack
+- Webhooks
+- Desktop notifications
+
+## Configuration Reference
+
+/// mknodes
+{{ "agentpool_config.toolsets.NotificationsToolsetConfig" | schema_to_markdown(display_mode="yaml", header_style="pymdownx", wrapped_in="toolsets", header_level=3) }}
+///
