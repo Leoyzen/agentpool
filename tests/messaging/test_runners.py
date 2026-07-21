@@ -5,8 +5,6 @@ from __future__ import annotations
 from pydantic import BaseModel
 import pytest
 
-from agentpool import AgentPool, AgentsManifest
-
 
 pytestmark = pytest.mark.integration
 

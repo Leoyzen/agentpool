@@ -138,7 +138,9 @@ def test_config_resolution_async_no_ctx():
     """Test resolution of async processor without context."""
     config = NativeAgentConfig(
         model="test",
-        session=MemoryConfig(history_processors=["tests._helpers.test_processors:filter_thinking_async"]),
+        session=MemoryConfig(
+            history_processors=["tests._helpers.test_processors:filter_thinking_async"]
+        ),
     )
     processors = config.get_history_processors()
     assert len(processors) == 1
@@ -150,7 +152,9 @@ def test_config_resolution_sync_ctx():
     """Test resolution of sync processor with context."""
     config = NativeAgentConfig(
         model="test",
-        session=MemoryConfig(history_processors=["tests._helpers.test_processors:context_aware_sync"]),
+        session=MemoryConfig(
+            history_processors=["tests._helpers.test_processors:context_aware_sync"]
+        ),
     )
     processors = config.get_history_processors()
     assert len(processors) == 1
@@ -161,7 +165,9 @@ def test_config_resolution_async_ctx():
     """Test resolution of async processor with context."""
     config = NativeAgentConfig(
         model="test",
-        session=MemoryConfig(history_processors=["tests._helpers.test_processors:context_aware_async"]),
+        session=MemoryConfig(
+            history_processors=["tests._helpers.test_processors:context_aware_async"]
+        ),
     )
     processors = config.get_history_processors()
     assert len(processors) == 1

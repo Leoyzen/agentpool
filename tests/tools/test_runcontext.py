@@ -115,7 +115,9 @@ async def test_capability_tools(default_model: str):
         test_model = TestModel(call_tools=["list_available_nodes"])
         await session_pool.sessions.get_or_create_session_agent("sess-test", agent_name="test")
         agent = session_pool.sessions.get_session_agent("sess-test")
-        assert agent is not None, "Agent should be created from manifest config with SubagentToolsetConfig"
+        assert agent is not None, (
+            "Agent should be created from manifest config with SubagentToolsetConfig"
+        )
 
         await agent.set_model(test_model)
         run_handle = await session_pool.send_message(

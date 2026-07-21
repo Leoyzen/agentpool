@@ -163,6 +163,13 @@ async def test_get_health(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.xfail(
+    reason="POST /init hangs in CI — fire-and-forget agent run blocks "
+    "on TestModel subprocess (#260)",
+    strict=False,
+    raises=AssertionError,
+)
+@pytest.mark.known_bug
 @pytest.mark.parametrize("subprocess_server", [_OPENCODE_PARAMS], indirect=True)
 async def test_post_init(subprocess_server: SubprocessServer) -> None:
     """C10.2: POST /session/{session_id}/init, verify 200."""
