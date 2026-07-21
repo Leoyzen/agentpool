@@ -65,13 +65,13 @@
 
 ## 9. OpenCode Server: UserMessage Creation Site Dedup Wiring
 
-- [ ] 9.1 In `src/agentpool_server/opencode_server/routes/message_routes.py`, add generated `message_id` to the shared dedup set after creating `UserMessage` — covers `message_routes.py:311` and `message_routes.py:884`
-- [ ] 9.2 Pass `message_id` to `route_message()` / `send_message()` for EventBus event correlation
-- [ ] 9.3 Audit and wire dedup at ALL 6+ `UserMessage` creation sites in OpenCode:
+- [x] 9.1 In `src/agentpool_server/opencode_server/routes/message_routes.py`, add generated `message_id` to the shared dedup set after creating `UserMessage` — covers `message_routes.py:311` and `message_routes.py:884`
+- [x] 9.2 Pass `message_id` to `route_message()` / `send_message()` for EventBus event correlation
+- [x] 9.3 Audit and wire dedup at ALL 6+ `UserMessage` creation sites in OpenCode:
   - `message_routes.py:311,884`
   - `session_routes.py:414,638`
   - `opencode_event_bridge.py:368,638`
-- [ ] 9.4 Write unit test verifying no double display when both REST handler and EventBus event fire (`tests/servers/opencode_server/test_message_routes_dedup.py`)
+- [x] 9.4 Write unit test verifying no double display when both REST handler and EventBus event fire (`tests/servers/opencode_server/test_message_routes_dedup.py`)
 
 ## 10. Exhaustive Match Audit
 
@@ -93,12 +93,12 @@
 
 ## 12. Documentation
 
-- [ ] 12.1 Update `src/agentpool/AGENTS.md` — add `UserMessageInsertedEvent` to Event Types taxonomy table
-- [ ] 12.2 Update `src/agentpool/AGENTS.md` — document `steer(emit_user_message=)` (default `True`) and `followup(emit_user_message=)` (default `False`) parameters
-- [ ] 12.3 Update `src/agentpool_server/AGENTS.md` — document ACP `_meta.delivery` extraction at `acp_agent.py:prompt()` and `UserMessage` schema addition
-- [ ] 12.4 Update `src/agentpool_server/AGENTS.md` — document `ACPEventConverter(protocol_version=)` constructor parameter
-- [ ] 12.5 Document the relationship between `UserMessageInsertedEvent` (this change) and `SystemNotificationEvent` (RFC-0056 / PR #219) — complementary, not replacing. RFC-0056 is not a dependency.
-- [ ] 12.6 Document the `source` field mapping table (protocol, background_task, internal)
+- [x] 12.1 Update `src/agentpool/AGENTS.md` — add UserMessageInsertedEvent to Event Types taxonomy table
+- [x] 12.2 Update `src/agentpool/AGENTS.md` — document `steer(emit_user_message=)` (default `True`) and `followup(emit_user_message=)` (default `False`) parameters
+- [x] 12.3 Update `src/agentpool_server/AGENTS.md` — document ACP `_meta.delivery` extraction at `acp_agent.py:prompt()` and `UserMessage` schema addition
+- [x] 12.4 Update `src/agentpool_server/AGENTS.md` — document `ACPEventConverter(protocol_version=)` constructor parameter
+- [x] 12.5 Document the relationship between `UserMessageInsertedEvent` (this change) and `SystemNotificationEvent` (RFC-0056 / PR #219) — complementary, not replacing. RFC-0056 is not a dependency.
+- [x] 12.6 Document the `source` field mapping table (protocol, background_task, internal)
 
 ## 13. Quality Gates
 

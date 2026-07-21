@@ -68,6 +68,26 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _register_dedup(state: StateDep, session_id: str, message_id: str) -> None:
+    """Register a user message ID in the per-session dedup set.
+
+    When the EventBus-derived ``UserMessageInsertedEvent`` arrives at
+    ``EventProcessor``, it finds the ``message_id`` in the dedup set and
+    skips emission, preventing double display.
+
+    Silently does nothing when ``SessionController`` is unavailable (e.g.
+    in tests without a full server setup).
+
+    Args:
+        state: The server state holding the session controller.
+        session_id: The session to register the message ID for.
+        message_id: The user message ID to register.
+    """
+    controller = state.session_controller
+    if controller is not None:
+        controller._get_dedup_set(session_id).add(message_id)
+
+
 @dataclass
 class _MessageRunContext:
     """Context carried from lock-held routing phase to lock-free wait phase."""
@@ -355,6 +375,10 @@ async def _process_message(
         await append_message_to_session(state, session_id, user_msg_with_parts)
         await persist_message_to_storage(state, user_msg_with_parts, session_id)
         await state.broadcast_event(MessageUpdatedEvent.create(user_message))
+
+        # Register user_msg_id in dedup set so EventProcessor skips the
+        # EventBus-derived UserMessageInsertedEvent (no double display).
+        _register_dedup(state, session_id, user_msg_id)
 
         ctx = await _route_message_locked(
             session_id, request, state, user_msg_id, user_msg_with_parts
@@ -708,7 +732,8 @@ async def _route_message_locked(  # noqa: PLR0915
             priority=delivery_priority,
             input_provider=input_provider,
             agent_name=agent_name,
-            message_id=assistant_msg_id,
+            message_id=user_msg_id,
+            assistant_msg_id=assistant_msg_id,
             model_id=request.model.model_id if request.model else None,
             provider_id=request.model.provider_id if request.model else None,
         )
@@ -721,7 +746,7 @@ async def _route_message_locked(  # noqa: PLR0915
             content=user_prompt if isinstance(user_prompt, str) else list(user_prompt),
             mode=delivery_mode,
             input_provider=input_provider,
-            message_id=assistant_msg_id,
+            message_id=user_msg_id,
         )
 
     # --- Create context ---
@@ -1025,6 +1050,10 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
         await persist_message_to_storage(state, user_msg_with_parts, session_id)
         await state.broadcast_event(MessageUpdatedEvent.create(user_message))
 
+        # Register user_msg_id in dedup set so EventProcessor skips the
+        # EventBus-derived UserMessageInsertedEvent (no double display).
+        _register_dedup(state, session_id, user_msg_id)
+
         # 2. Route through SessionPool instead of server-owned queue
         session_pool = state.pool.session_pool
         if session_pool is not None:
@@ -1050,7 +1079,8 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
                     priority=delivery_priority,
                     input_provider=input_provider,
                     agent_name=agent_name,
-                    message_id=async_assistant_msg_id,
+                    message_id=user_msg_id,
+                    assistant_msg_id=async_assistant_msg_id,
                     model_id=request.model.model_id if request.model else None,
                     provider_id=request.model.provider_id if request.model else None,
                 )
@@ -1071,7 +1101,7 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
                     content=user_prompt if isinstance(user_prompt, str) else list(user_prompt),
                     mode=delivery_mode,
                     input_provider=input_provider,
-                    message_id=async_assistant_msg_id,
+                    message_id=user_msg_id,
                 )
 
 

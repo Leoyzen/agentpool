@@ -433,6 +433,12 @@ async def _execute_skill_command(  # noqa: PLR0915
         await state.broadcast_event(PartUpdatedEvent.create(user_msg_with_parts.parts[0]))
         await state.broadcast_event(MessageUpdatedEvent.create(user_message))
 
+        # Register user_msg_id in dedup set so EventProcessor skips the
+        # EventBus-derived UserMessageInsertedEvent (no double display).
+        controller = state.session_controller
+        if controller is not None:
+            controller._get_dedup_set(session_id).add(user_msg_id)
+
         # Create assistant message (for response)
         # D14: Use request.message_id if provided for end-to-end ID consistency.
         assistant_msg_id = identifier.ascending("message", request.message_id)

@@ -403,6 +403,12 @@ class OpenCodeEventBridgeMixin:
         await self.server_state.broadcast_event(MessageUpdatedEvent.create(user_msg))
         await self.server_state.broadcast_event(PartUpdatedEvent.create(text_part))
 
+        # Register user_msg_id in dedup set so EventProcessor skips the
+        # EventBus-derived UserMessageInsertedEvent (no double display).
+        controller = self.server_state.session_controller
+        if controller is not None:
+            controller._get_dedup_set(child_session_id).add(user_msg.id)
+
     async def _handle_event(  # noqa: PLR0915
         self, session_id: str, envelope: EventEnvelope
     ) -> None:
@@ -582,10 +588,7 @@ class OpenCodeEventBridgeMixin:
             # UserMessageInsertedEvent creates a user message, not an assistant
             # message, so it must not trigger assistant registration.
             is_user_message_inserted = isinstance(event, UserMessageInsertedEvent)
-            if (
-                not is_user_message_inserted
-                and not self._message_registered.get(session_id, False)
-            ):
+            if not is_user_message_inserted and not self._message_registered.get(session_id, False):
                 await append_message_to_session(self.server_state, session_id, ctx.assistant_msg)
                 await self.server_state.broadcast_event(
                     MessageUpdatedEvent.create(ctx.assistant_msg.info)
@@ -640,9 +643,7 @@ class OpenCodeEventBridgeMixin:
 
         # Clean up dedup set for this session on SessionController
         if self.server_state.session_controller is not None:
-            self.server_state.session_controller._displayed_message_ids.pop(
-                session_id, None
-            )
+            self.server_state.session_controller._displayed_message_ids.pop(session_id, None)
 
     # ------------------------------------------------------------------
     # Backward-compatible wrappers (used by tests)

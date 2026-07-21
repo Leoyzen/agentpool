@@ -434,15 +434,17 @@ def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
     ) -> Any:
         from agentpool.lifecycle.types import DeliveryMode
 
-        # D14: Store the canonical message_id so _before_consumer_loop
-        # can reuse it instead of generating an independent one. This
-        # mimics the real route_message behavior and is critical for
-        # catching duplicate-write bugs where the REST handler pre-stores
-        # the assistant message and the event bridge tries to store it
-        # again with the same ID.
+        # D14: Store the canonical assistant_msg_id (or fallback to
+        # message_id) so _before_consumer_loop can reuse it instead of
+        # generating an independent one. This mimics the real route_message
+        # behavior and is critical for catching duplicate-write bugs where
+        # the REST handler pre-stores the assistant message and the event
+        # bridge tries to store it again with the same ID.
         message_id = kwargs.get("message_id")
-        if message_id is not None:
-            state.session_pool_integration._pending_message_ids[session_id] = message_id
+        assistant_msg_id = kwargs.get("assistant_msg_id")
+        pending_id = assistant_msg_id if assistant_msg_id is not None else message_id
+        if pending_id is not None:
+            state.session_pool_integration._pending_message_ids[session_id] = pending_id
         # Also store model metadata for agent/model propagation.
         model_id = kwargs.get("model_id")
         provider_id = kwargs.get("provider_id")
@@ -463,6 +465,7 @@ def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
             content=content,
             mode=delivery_mode,
             input_provider=input_provider,
+            message_id=message_id,
         )
 
     state.session_pool_integration.route_message = AsyncMock(side_effect=_mock_route_message)

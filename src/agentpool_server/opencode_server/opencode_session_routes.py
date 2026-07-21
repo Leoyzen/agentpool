@@ -446,6 +446,7 @@ class OpenCodeSessionRoutesMixin:
         message_id: str | None = None,
         model_id: str | None = None,
         provider_id: str | None = None,
+        assistant_msg_id: str | None = None,
         **kwargs: Any,
     ) -> str | None:
         """Route a message through SessionPool.receive_request().
@@ -463,15 +464,21 @@ class OpenCodeSessionRoutesMixin:
             priority: "when_idle" to queue, "asap" to inject into active turn.
             input_provider: Optional input provider for the agent.
             agent_name: Agent to bind if the session must be created.
-            message_id: Optional canonical message ID from the REST handler.
-                Stored as pending so ``_before_consumer_loop`` can reuse it
-                instead of generating an independent ``assistant_msg_id``.
+            message_id: Optional user message ID from the REST handler.
+                Passed to ``send_message()`` so it flows to
+                ``UserMessageInsertedEvent`` for dedup with the protocol
+                handler's own emission.
             model_id: Optional model ID from the REST handler (for agent/model
-                propagation). Stored as pending so ``_before_consumer_loop``
-                can set it on the assistant message instead of hardcoding
+                propagation). Stored as pending so ``_before_consumer_loop`` can
+                set it on the assistant message instead of hardcoding
                 "default".
             provider_id: Optional provider ID from the REST handler. Same
                 propagation path as ``model_id``.
+            assistant_msg_id: Optional canonical assistant message ID from the
+                REST handler. Stored as pending so ``_before_consumer_loop``
+                can reuse it instead of generating an independent
+                ``assistant_msg_id`` (D14). Falls back to ``message_id`` if
+                not provided.
             **kwargs: Additional arguments passed to the turn runner.
                 Supports ``deferred_tool_results`` for checkpoint replay.
 
@@ -489,10 +496,12 @@ class OpenCodeSessionRoutesMixin:
                     source="opencode_route_message",
                 )
 
-        # Store the canonical message_id so _before_consumer_loop can reuse it
-        # instead of generating an independent assistant_msg_id (D14).
-        if message_id is not None:
-            self._pending_message_ids[session_id] = message_id
+        # Store the canonical assistant_msg_id so _before_consumer_loop can
+        # reuse it instead of generating an independent assistant_msg_id (D14).
+        # Falls back to message_id for backward compatibility.
+        pending_id = assistant_msg_id if assistant_msg_id is not None else message_id
+        if pending_id is not None:
+            self._pending_message_ids[session_id] = pending_id
         # Store model metadata so _before_consumer_loop can propagate the
         # real agent/model onto the assistant message instead of hardcoding
         # "agentpool"/"default"/"agentpool".
