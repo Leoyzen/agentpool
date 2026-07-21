@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 import logfire
 
 from agentpool.agents.events import StreamCompleteEvent
-from agentpool.lifecycle.types import DeliveryMode
+from agentpool.lifecycle.types import DeliveryMode, Feedback
 from agentpool.log import get_logger
 
 
@@ -190,6 +190,7 @@ class SessionPoolMessagingMixin:
         message_id: str | None = None,
         deps: Any = None,
         input_provider: Any = None,
+        meta: Any = None,
     ) -> str | None:
         """Send a message to a session using the typed ``DeliveryMode`` enum.
 
@@ -213,6 +214,11 @@ class SessionPoolMessagingMixin:
                 before agent resolution. When provided, the session's
                 ``input_provider`` is updated so the agent is created
                 with the correct provider.
+            meta: Protocol-specific metadata to carry through to
+                ``UserMessageInsertedEvent``. When set, the event consumer
+                uses it to reconstruct the full user message (e.g. OpenCode
+                parts, ACP content blocks) instead of falling back to
+                text-only content.
 
         Returns:
             The ``message_id`` string on success (both new runs and
@@ -241,6 +247,7 @@ class SessionPoolMessagingMixin:
             priority=priority,
             deps=deps,
             message_id=message_id,
+            meta=meta,
         )
 
     async def run_agent(
@@ -396,6 +403,67 @@ class SessionPoolMessagingMixin:
         if run_handle is not None:
             return run_handle.steer(message)
         return None
+
+    async def steer_from_background_task(self, session_id: str, message: str) -> str | None:
+        """Inject a steer message from a background task completion.
+
+        This is the preferred entry point for background task capabilities
+        (e.g. ``SubagentCapability``, ``BackgroundTaskCapability``) because:
+        - It emits ``UserMessageInsertedEvent(source="background_task")``
+          for TUI display
+        - It injects into the active RunHandle when one exists
+        - It falls back to ``feedback_queue`` when no run is active
+        - It survives across RunHandle boundaries (uses SessionState)
+
+        Args:
+            session_id: Target session.
+            message: The steer message to deliver.
+
+        Returns:
+            message_id if delivered, None otherwise.
+        """
+        from agentpool.agents.events.events import UserMessageInsertedEvent
+        from agentpool.utils.identifiers import ascending
+
+        session = self.sessions._sessions.get(session_id)
+        if session is None:
+            return None
+        # Publish UserMessageInsertedEvent FIRST (await, not fire-and-forget).
+        # This ensures the TUI creates the UserMessage with a timestamp-based
+        # message_id BEFORE the agent processes the steer and produces output.
+        # Use self.event_bus (SessionPoolMessagingMixin property, always set by
+        # SessionPool.__init__) instead of session._event_bus (SessionState's
+        # field, only set by _initialize_lifecycle_and_recovery).
+        event_bus = self.event_bus
+        if event_bus is not None:
+            with logfire.span(
+                "event.user_message_inserted.emit",
+                session_id=session_id,
+                delivery="steer",
+                source="background_task",
+            ):
+                try:
+                    event: UserMessageInsertedEvent[Any] = UserMessageInsertedEvent(
+                        session_id=session_id,
+                        message_id=ascending("message"),
+                        content=message,
+                        delivery="steer",
+                        source="background_task",
+                    )
+                    await event_bus.publish(session_id, event)
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to emit UserMessageInsertedEvent from background task",
+                        exc_info=True,
+                    )
+        # Try injecting into the active RunHandle.
+        run_handle = self._get_active_run_handle(session_id)
+        if run_handle is not None:
+            return run_handle.steer(message, emit_user_message=False)
+        # No active run — enqueue for next RunHandle via feedback_queue.
+        fb = Feedback(content=message, is_steer=True)
+        session.feedback_queue.put_nowait(fb)
+        return fb.message_id
 
     async def followup(self, session_id: str, message: str, **kwargs: Any) -> str | None:
         """Queue a follow-up message with agent-type-aware routing.

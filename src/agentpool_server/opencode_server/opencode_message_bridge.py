@@ -34,12 +34,50 @@ from agentpool_server.opencode_server.models.parts import (
 from agentpool_server.opencode_server.models.session import Session
 
 
+# ToolState variants that have a ``metadata`` attribute.
+# ``ToolStatePending`` does NOT have ``metadata`` — only Running, Completed,
+# and Error states do.
+_ToolStateWithMetadata = ToolStateRunning | ToolStateCompleted | ToolStateError
+
+
 if TYPE_CHECKING:
     from agentpool.agents.events.events import RunErrorEvent, SpawnSessionStart, StreamCompleteEvent
     from agentpool_server.opencode_server.state import ServerState
 
 
 logger = get_logger(__name__)
+
+
+def _apply_revert_filter(
+    session: Session | None,
+    messages: list[MessageWithParts],
+) -> list[MessageWithParts]:
+    """Apply soft-hide filter based on ``session.revert``.
+
+    If the session has a revert point set, messages at and after the revert
+    message are hidden from the returned list.  Messages before the revert
+    point are returned unchanged.  The underlying message list is not
+    modified — this is a read-only filter.
+
+    Args:
+        session: The OpenCode Session model (may be ``None`` if not cached).
+        messages: The full message list.
+
+    Returns:
+        Filtered message list, or the original list if no revert is set
+        or the revert message_id is not found (defensive fallback).
+    """
+    if session is None or session.revert is None:
+        return messages
+
+    revert_msg_id = session.revert.message_id
+    for i, msg in enumerate(messages):
+        if msg.info.id == revert_msg_id:
+            return messages[:i]
+
+    # Defensive fallback: revert message_id not found in the message list.
+    # This can happen if the message was already deleted or the ID is stale.
+    return messages
 
 
 async def get_messages_for_session(
@@ -52,6 +90,11 @@ async def get_messages_for_session(
     ``state.messages`` cache is consulted first because streaming parts are
     updated in-place on those objects and may be more recent than the
     SessionPool snapshot.
+
+    A soft-hide filter is applied to all return paths: when
+    ``session.revert`` is set, messages at and after the revert point are
+    hidden from the result, even though they still exist in the DB and
+    in-memory state.
 
     Args:
         state: The OpenCode server state.
@@ -67,7 +110,7 @@ async def get_messages_for_session(
     cached_session = state.sessions.get(session_id)
     is_subagent = cached_session is not None and cached_session.parent_id is not None
     if is_subagent and messages:
-        return messages
+        return _apply_revert_filter(cached_session, messages)
 
     session_pool = getattr(state.pool, "session_pool", None)
     if session_pool is not None:
@@ -83,7 +126,7 @@ async def get_messages_for_session(
             if existing_agent is not None:
                 agent = existing_agent
             default_model_id, default_provider_id = state.resolve_default_model_info()
-            return [
+            converted = [
                 chat_message_to_opencode(
                     chat_msg,
                     session_id=session_id,
@@ -94,7 +137,8 @@ async def get_messages_for_session(
                 )
                 for chat_msg in sp_messages
             ]
-    return messages
+            return _apply_revert_filter(cached_session, converted)
+    return _apply_revert_filter(cached_session, messages)
 
 
 async def append_message_to_session(
@@ -152,6 +196,14 @@ async def append_message_to_session(
         already_in_memory = any(m.info.id == msg_id for m in messages[session_id])
         if not already_in_memory:
             messages[session_id].append(msg)
+            logger.info(
+                "append_message_to_session APPENDED",
+                session_id=session_id,
+                message_id=msg_id,
+                role=getattr(msg.info, "role", "unknown"),
+                list_len=len(messages[session_id]),
+                all_ids=[m.info.id for m in messages[session_id]],
+            )
 
 
 async def set_messages_for_session(
@@ -401,30 +453,35 @@ class OpenCodeMessageBridgeMixin:
             spawn_event: The spawn event containing subagent metadata.
             event: The StreamCompleteEvent from the child.
         """
-        # Find the parent session's latest assistant message from in-memory state
-        messages = getattr(self.server_state, "messages", {}).get(parent_session_id, []) or []
-        assistant_msg = None
+        # Find the ToolPart for this child session across ALL assistant
+        # messages (not just the last one). A background task may start in
+        # turn 1 (ToolPart in msg_A1) and complete after turn 2 has started
+        # (msg_A2 is now the last assistant message). Searching only the last
+        # message would miss the ToolPart in the earlier message.
+        messages = self.server_state.messages.get(parent_session_id, [])
+        assistant_msg: MessageWithParts | None = None
+        tool_part: ToolPart | None = None
         for msg in reversed(messages):
-            if msg.info.role == "assistant":
-                assistant_msg = msg
+            if msg.info.role != "assistant":
+                continue
+            for part in msg.parts:
+                metadata = (
+                    part.state.metadata
+                    if isinstance(part, ToolPart) and isinstance(part.state, _ToolStateWithMetadata)
+                    else None
+                )
+                if (
+                    isinstance(part, ToolPart)
+                    and isinstance(metadata, dict)
+                    and metadata.get("sessionId") == child_session_id
+                ):
+                    tool_part = part
+                    assistant_msg = msg
+                    break
+            if tool_part is not None:
                 break
 
-        if assistant_msg is None:
-            return
-
-        # Find the ToolPart for this child session
-        tool_part = None
-        for part in assistant_msg.parts:
-            if (
-                isinstance(part, ToolPart)
-                and hasattr(part.state, "metadata")
-                and isinstance(part.state.metadata, dict)
-                and part.state.metadata.get("sessionId") == child_session_id
-            ):
-                tool_part = part
-                break
-
-        if tool_part is None:
+        if tool_part is None or assistant_msg is None:
             logger.warning(
                 "No ToolPart found for child session %s in parent %s",
                 child_session_id,
@@ -490,30 +547,33 @@ class OpenCodeMessageBridgeMixin:
             spawn_event: The spawn event containing subagent metadata.
             event: The RunErrorEvent from the child.
         """
-        # Find the parent session's latest assistant message from in-memory state
-        messages = getattr(self.server_state, "messages", {}).get(parent_session_id, []) or []
-        assistant_msg = None
+        # Find the ToolPart for this child session across ALL assistant
+        # messages (not just the last one). See _update_parent_toolpart for
+        # the cross-turn background task rationale.
+        messages = self.server_state.messages.get(parent_session_id, [])
+        assistant_msg: MessageWithParts | None = None
+        tool_part: ToolPart | None = None
         for msg in reversed(messages):
-            if msg.info.role == "assistant":
-                assistant_msg = msg
+            if msg.info.role != "assistant":
+                continue
+            for part in msg.parts:
+                metadata = (
+                    part.state.metadata
+                    if isinstance(part, ToolPart) and isinstance(part.state, _ToolStateWithMetadata)
+                    else None
+                )
+                if (
+                    isinstance(part, ToolPart)
+                    and isinstance(metadata, dict)
+                    and metadata.get("sessionId") == child_session_id
+                ):
+                    tool_part = part
+                    assistant_msg = msg
+                    break
+            if tool_part is not None:
                 break
 
-        if assistant_msg is None:
-            return
-
-        # Find the ToolPart for this child session
-        tool_part = None
-        for part in assistant_msg.parts:
-            if (
-                isinstance(part, ToolPart)
-                and hasattr(part.state, "metadata")
-                and isinstance(part.state.metadata, dict)
-                and part.state.metadata.get("sessionId") == child_session_id
-            ):
-                tool_part = part
-                break
-
-        if tool_part is None:
+        if tool_part is None or assistant_msg is None:
             return
 
         source_name = spawn_event.source_name or "subagent"

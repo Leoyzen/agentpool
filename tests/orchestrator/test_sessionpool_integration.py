@@ -86,6 +86,7 @@ class MockServerState:
         self.working_dir = "/tmp"
         self.agent: Any = None
         self.pool: Any = None
+        self.session_controller: Any = None
         self.session_status: dict[str, Any] = {}
         self.sessions: dict[str, Any] = {}
         self.session_locks: dict[str, Any] = {}

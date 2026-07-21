@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Any, Literal
+import uuid
 
 import anyio
 
@@ -462,6 +463,8 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         self,
         session_id: str,
         prompt: Sequence[ContentBlock],
+        *,
+        delivery: str | None = None,
     ) -> PromptResponse:
         """Process a prompt through the SessionPool.
 
@@ -472,10 +475,15 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         Args:
             session_id: The ACP session identifier.
             prompt: ACP content blocks from the prompt request.
+            delivery: Optional delivery hint extracted from ACP ``_meta``.
+                ``"steer"`` → inject mid-turn (``asap``), ``"followup"`` →
+                queue for next turn (``when_idle``), ``None`` → default
+                (``when_idle``).
 
         Returns:
             A ``PromptResponse`` with the stop reason.
         """
+        from agentpool.lifecycle.types import DeliveryMode
         from agentpool_server.acp_server.converters import from_acp_content
 
         session_pool = self._host_context.session_pool
@@ -597,16 +605,34 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         # Emit user_message_chunk notifications for the user's input before
         # processing the prompt. Per the ACP spec, the server should notify
         # the client of the user's message chunks.
-        await self._emit_user_message_chunks(session_id, prompt)
+        # Generate a message_id for the user message. The EventBus
+        # UserMessageInsertedEvent (published by _route_message) is the
+        # sole publication point — the ACPEventConverter reconstructs
+        # the content blocks from meta.
+        message_id = str(uuid.uuid4())
+
+        # Build ACP meta from content blocks for the EventBus event.
+        from agentpool_server.acp_server.event_converter import ACPUserMessageMeta
+
+        content_block_dicts = [block.model_dump() for block in prompt]
+        acp_meta = ACPUserMessageMeta(content_blocks=content_block_dicts)
+
+        # Map delivery hint to DeliveryMode for send_message().
+        delivery_mode = DeliveryMode.STEER if delivery == "steer" else DeliveryMode.QUEUE
 
         stop_reason: StopReason = "end_turn"
         try:
-            message_id = await session_pool.send_message(
-                session_id, contents, input_provider=input_provider
+            returned_id = await session_pool.send_message(
+                session_id,
+                contents,
+                mode=delivery_mode,
+                input_provider=input_provider,
+                message_id=message_id,
+                meta=acp_meta,
             )
             # Legacy clients (no turn_complete support) block until the run finishes
             # so they don't need session/update turn_complete notifications.
-            if message_id is not None and not (
+            if returned_id is not None and not (
                 self.client_capabilities is not None and self.client_capabilities.turn_complete
             ):
                 # Get run handle reference before waiting (cleaned up after completion).
@@ -776,6 +802,8 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         self,
         session_id: str,
         prompt: Sequence[ContentBlock],
+        *,
+        message_id: str | None = None,
     ) -> None:
         """Emit ``user_message_chunk`` SessionUpdate notifications for user input.
 
@@ -788,6 +816,9 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         Args:
             session_id: The ACP session identifier.
             prompt: ACP content blocks from the prompt request.
+            message_id: Optional message ID for correlating chunks. If
+                provided, all chunks share this ID. If ``None``, each
+                call to ``build_user_message_chunks`` generates its own.
         """
         from acp.schema import SessionNotification, TextContentBlock
 
@@ -797,7 +828,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             text = block.text
             if not text:
                 continue
-            chunks = ACPEventConverter.build_user_message_chunks(text)
+            chunks = ACPEventConverter.build_user_message_chunks(text, message_id=message_id)
             for chunk in chunks:
                 notification = SessionNotification(
                     session_id=session_id,

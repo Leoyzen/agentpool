@@ -702,8 +702,15 @@ class AgentPoolACPAgent(ACPAgent):
         # Delegate to SessionPool-backed handler when feature flag is enabled
         if self._protocol_handler is not None:
             # Extract W3C trace context from _meta to link spans to the client's trace
-            context = TraceContextTextMapPropagator().extract(params.field_meta or {})
+            meta = params.field_meta or {}
+            context = TraceContextTextMapPropagator().extract(meta)
             token = attach(context)
+            # Extract delivery hint from _meta — "steer" → asap, "followup" → when_idle
+            delivery: str | None = None
+            if isinstance(meta, dict):
+                raw_delivery = meta.get("delivery")
+                if isinstance(raw_delivery, str) and raw_delivery in ("steer", "followup"):
+                    delivery = raw_delivery
             try:
                 with logfire.span(
                     "acp.agent.handle_prompt",
@@ -712,6 +719,7 @@ class AgentPoolACPAgent(ACPAgent):
                     return await self._protocol_handler.handle_prompt(
                         params.session_id,
                         params.prompt,
+                        delivery=delivery,
                     )
             finally:
                 detach(token)

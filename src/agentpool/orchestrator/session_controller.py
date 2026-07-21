@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 import anyio
 
-from agentpool.lifecycle.types import Feedback, ResumeResult
 from agentpool.log import get_logger
 from agentpool.orchestrator.runtime_registry import RuntimeAgentRegistry
 from agentpool.utils.time_utils import get_now
@@ -34,6 +33,7 @@ if TYPE_CHECKING:
         SnapshotStore,
         TriggerSource,
     )
+    from agentpool.lifecycle.types import Feedback, ResumeResult
     from agentpool.models.pending_interaction import PendingPermission
     from agentpool.orchestrator.event_bus import EventBus
     from agentpool_storage.protocols import SessionPersistence
@@ -233,6 +233,14 @@ class SessionState:
     """
     _agent_registry: AgentRegistry | None = None
     """Read-only registry of compiled agents for delegation."""
+    _event_bus: EventBus | None = None
+    """EventBus reference for direct event publication from SessionState.
+
+    Set by ``SessionController._initialize_lifecycle_and_recovery()``
+    alongside the other lifecycle dimensions. Enables
+    ``steer_from_background_task()`` to fire-and-forget
+    ``UserMessageInsertedEvent`` without a controller reference.
+    """
     _resume_deferred_tool_results: Any = None
     """Deferred tool results from checkpoint, forwarded to ``agent.create_turn()``
     via ``**pydantic_ai_kwargs`` during resume. Only set by
@@ -301,44 +309,6 @@ class SessionState:
         )
         with contextlib.suppress(Exception):
             asyncio.get_running_loop().create_task(comm.publish(state_event))
-
-    def steer_from_background_task(self, message: str) -> str | None:
-        """Route a steer message from a background subagent completion.
-
-        Called by ``AgentRunContext.complete_background_task()`` (via
-        ``steer_callback``) when a background subagent completes. If a
-        RunHandle is active, the message is injected into it directly.
-        If no RunHandle is active (between turns), the message is
-        enqueued to ``feedback_queue`` for delivery to the next
-        RunHandle.
-
-        Args:
-            message: The steer message content.
-
-        Returns:
-            A placeholder message ID (always ``None`` since this path
-            does not generate message IDs).
-        """
-        if self.current_run_id is not None:
-            # Active RunHandle — inject directly via run_handle.steer().
-            # The RunHandle is looked up by _consume_run() which stores
-            # a back-reference. We use a lightweight callback registered
-            # by RunHandle.start().
-            steer_cb = self._active_steer_callback
-            if steer_cb is not None:
-                return steer_cb(message)
-        # No active RunHandle — enqueue for next RunHandle.
-        fb = Feedback(content=message, is_steer=True)
-        self.feedback_queue.put_nowait(fb)
-        return fb.message_id
-
-    _active_steer_callback: Callable[[str], str | None] | None = None
-    """Callback set by RunHandle.start() to enable direct steer injection.
-
-    When a RunHandle is active, it registers a callback here so
-    ``steer_from_background_task()`` can inject messages without
-    needing a direct RunHandle reference. Cleared in RunHandle.close().
-    """
 
     def revoke(self, message_id: str) -> bool:
         """Revoke a queued steer message in ``feedback_queue`` by ID.

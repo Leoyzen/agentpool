@@ -24,7 +24,7 @@ from pydantic_ai.messages import (
     VideoUrl,
 )
 
-from agentpool.agents.events import ToolCallCompleteEvent
+from agentpool.agents.events import ToolCallCompleteEvent, UserMessageInsertedEvent
 from agentpool.agents.modes import ModeCategory, ModeInfo
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 
@@ -82,6 +82,8 @@ async def process_tool_event(
                     agent_name=agent_name,
                     message_id=message_id,
                 )
+        case UserMessageInsertedEvent():
+            pass  # Not a tool event
     return None
 
 

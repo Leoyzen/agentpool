@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 import uuid
 
 import logfire
@@ -21,6 +21,7 @@ from agentpool.agents.events import (
     RunFailedEvent,
     RunStartedEvent,
     StreamCompleteEvent,
+    UserMessageInsertedEvent,
 )
 from agentpool.lifecycle import RunOutcome
 from agentpool.log import get_logger
@@ -167,6 +168,12 @@ class RunHandle:
     """Whether the current turn failed. Set by ``_execute_turn()``."""
     _interrupt_task: asyncio.Task[None] | None = None
     """Background task for agent._interrupt(), stored to prevent GC."""
+    _emission_tasks: set[asyncio.Task[None]] = field(default_factory=set)
+    """References to fire-and-forget UserMessageInsertedEvent emission tasks.
+
+    Stored to prevent GC of tasks created by ``_schedule_user_message_emission()``.
+    Tasks are removed via a ``done_callback`` when they complete.
+    """
 
     # ------------------------------------------------------------------
     # HostContext injection (M3 task group 15) — now sourced from SessionState
@@ -277,10 +284,6 @@ class RunHandle:
         if session is None:
             raise RuntimeError("session must be set before calling start()")
 
-        # Wire steer_callback to SessionState.steer_from_background_task()
-        # so complete_background_task() routes to active RunHandle or
-        # feedback_queue (per-prompt migration, task 3.7).
-        self.run_ctx.steer_callback = self._steer_callback_wrapper
         # Set _run_handle on run_ctx so NativeTurn can access active_agent_run
         self.run_ctx._run_handle = self
         # Set current_task so cancel() can interrupt the running turn.
@@ -289,12 +292,9 @@ class RunHandle:
         # CancelNotification, native _iteration_task cancel).
         self._cancel_fn = self._create_cancel_fn()
 
-        # Register steer callback on SessionState for background task routing.
-        session._active_steer_callback = self._direct_steer
-
         # Drain any steer messages that arrived while the session was idle.
         # These were enqueued to SessionState.feedback_queue by
-        # steer_from_background_task() when no RunHandle was active.
+        # SessionPool.steer_from_background_task() when no RunHandle was active.
         # self.steer() will queue them to queued_steer_messages (since
         # active_agent_run is not yet set), and _execute_turn() will
         # pick them up when the turn starts.
@@ -304,7 +304,7 @@ class RunHandle:
                 content: str | list[Any] = (
                     fb.content_blocks if fb.content_blocks is not None else fb.content
                 )
-                self.steer(content, message_id=fb.message_id)
+                self.steer(content, message_id=fb.message_id, emit_user_message=False)
             except asyncio.QueueEmpty:
                 break
 
@@ -351,10 +351,9 @@ class RunHandle:
                             await self._publish_cancelled_event(event_bus)
                         raise
             finally:
-                # Per-turn cleanup: clear steer callback, set complete_event.
+                # Per-turn cleanup: set complete_event.
                 # Do NOT close lifecycle dimensions — they are session-owned.
                 # Do NOT call agent.__aexit__() — that's session-level.
-                session._active_steer_callback = None
                 self.complete_event.set()
 
     async def _publish_cancelled_event(self, event_bus: EventBus | None) -> None:
@@ -533,6 +532,7 @@ class RunHandle:
         message: str | list[Any],
         *,
         message_id: str | None = None,
+        emit_user_message: bool = True,
     ) -> str | None:
         """Inject a steer message into the active turn.
 
@@ -546,6 +546,11 @@ class RunHandle:
                 blocks).
             message_id: Optional message ID. Auto-generated as UUID4 if
                 not provided.
+            emit_user_message: When ``True`` (default), schedule a
+                fire-and-forget ``UserMessageInsertedEvent`` publication
+                so protocol frontends display the injected message. Set
+                to ``False`` to suppress emission (e.g. internal
+                chaining that should not produce a visible user message).
 
         Returns:
             The ``message_id`` string on success, ``None`` if no agent_run
@@ -577,26 +582,24 @@ class RunHandle:
                 agent_run.enqueue(*fb.content_blocks, priority="asap")
             else:
                 agent_run.enqueue(fb.content, priority="asap")
-            return fb.message_id
-        # No active agent_run — queue for this turn's steer messages.
-        if fb.content_blocks is not None:
+        elif fb.content_blocks is not None:
+            # No active agent_run — queue for this turn's steer messages.
             self.run_ctx.queued_steer_messages.append(fb.content_blocks)
         else:
             self.run_ctx.queued_steer_messages.append(fb.content)
+
+        # Fire-and-forget UserMessageInsertedEvent publication.
+        if emit_user_message:
+            self._schedule_user_message_emission(message, "steer", message_id=fb.message_id)
+
         return fb.message_id
 
-    def _direct_steer(self, message: str) -> str | None:
-        """Direct steer callback for SessionState.steer_from_background_task().
-
-        Args:
-            message: The steer message content.
-
-        Returns:
-            The ``message_id`` string on success.
-        """
-        return self.steer(message)
-
-    def followup(self, message: str) -> str | None:
+    def followup(
+        self,
+        message: str | list[Any],
+        *,
+        emit_user_message: bool = False,
+    ) -> str | None:
         """Queue a follow-up prompt for the next RunHandle.
 
         In the per-prompt model, a follow-up message is enqueued on
@@ -605,41 +608,109 @@ class RunHandle:
         RunHandle terminates.
 
         Args:
-            message: The follow-up prompt content.
+            message: The follow-up prompt content (plain text or
+                structured content blocks).
+            emit_user_message: When ``True``, schedule a fire-and-forget
+                ``UserMessageInsertedEvent`` publication so protocol
+                frontends display the queued message. Defaults to
+                ``False`` — followup is usually internal chaining, not
+                a user-visible action.
 
         Returns:
-            A ``message_id`` string (UUID4) on success, ``None`` if
+            A ``message_id`` string on success, ``None`` if
             no session is attached.
         """
-        import uuid
+        from agentpool.utils.identifiers import ascending
 
-        message_id = str(uuid.uuid4())
+        message_id = ascending("message")
         session = self.session
         if session is None:
             return None
         session.prompt_queue.put_nowait(message)
+
+        # Fire-and-forget UserMessageInsertedEvent publication.
+        if emit_user_message:
+            self._schedule_user_message_emission(message, "followup", message_id=message_id)
+
         return message_id
 
-    async def _steer_callback_wrapper(self, session_id: str, message: str) -> str | None:
-        """Adapter wrapping steer for use as AgentRunContext.steer_callback.
+    def _schedule_user_message_emission(
+        self,
+        content: str | list[Any],
+        delivery: Literal["steer", "followup"],
+        *,
+        message_id: str | None = None,
+    ) -> None:
+        """Schedule a fire-and-forget ``UserMessageInsertedEvent`` publication.
 
-        The steer_callback field expects ``Callable[[str, str],
-        Awaitable[str | None]]``, called as ``await callback(session_id,
-        message)`` from complete_background_task(). This adapter
-        delegates to SessionState.steer_from_background_task() which
-        routes to the active RunHandle or queues for the next.
+        Uses ``asyncio.get_running_loop().create_task()`` so the emission
+        runs concurrently without blocking the caller. If no event loop
+        is running (e.g. called from a sync context), the emission is
+        silently skipped — the steer/followup itself has already succeeded.
 
         Args:
-            session_id: Ignored; required by the callback signature convention.
-            message: The steer message to inject.
-
-        Returns:
-            The ``message_id`` string on success, ``None`` otherwise.
+            content: The message content that was inserted.
+            delivery: Delivery mode — ``"steer"`` or ``"followup"``.
+            message_id: Optional message ID for dedup correlation. If
+                ``None``, a new UUID is generated in the emission helper.
         """
-        session = self.session
-        if session is not None:
-            return session.steer_from_background_task(message)
-        return self.steer(message)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop — emission silently skipped. The
+            # steer/followup operation itself has already completed.
+            return
+        task = loop.create_task(
+            self._emit_user_message_inserted(content, delivery, "internal", message_id=message_id),
+        )
+        # Store reference to prevent GC of the fire-and-forget task.
+        self._emission_tasks.add(task)
+        task.add_done_callback(self._emission_tasks.discard)
+
+    async def _emit_user_message_inserted(
+        self,
+        content: str | list[Any],
+        delivery: Literal["initial", "steer", "followup"],
+        source: Literal["protocol", "background_task", "internal"],
+        *,
+        message_id: str | None = None,
+    ) -> None:
+        """Publish a ``UserMessageInsertedEvent`` to the EventBus.
+
+        Wraps emission in a ``logfire.span`` to prevent orphan traces and
+        catches all exceptions so a failing EventBus never breaks the
+        steer/followup path.
+
+        Args:
+            content: The message content that was inserted.
+            delivery: Delivery mode — ``"initial"``, ``"steer"``, or
+                ``"followup"``.
+            source: Originator — ``"protocol"``, ``"background_task"``,
+                or ``"internal"``.
+            message_id: Optional message ID for dedup correlation. If
+                ``None``, a new UUID is generated.
+        """
+        with logfire.span(
+            "event.user_message_inserted.emit",
+            session_id=self.session_id,
+        ):
+            try:
+                from agentpool.utils.identifiers import ascending
+
+                event: UserMessageInsertedEvent[Any] = UserMessageInsertedEvent(
+                    session_id=self.session_id,
+                    message_id=message_id or ascending("message"),
+                    content=content,
+                    delivery=delivery,
+                    source=source,
+                )
+                if self.event_bus is not None:
+                    await self.event_bus.publish(self.session_id, event)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Failed to emit UserMessageInsertedEvent",
+                    exc_info=True,
+                )
 
     def close(self) -> None:
         """Set complete_event and perform per-turn cleanup.
@@ -654,10 +725,6 @@ class RunHandle:
         """
         if self.complete_event.is_set():
             return
-        # Clear steer callback on SessionState.
-        session = self.session
-        if session is not None:
-            session._active_steer_callback = None
         self.complete_event.set()
 
     async def __aenter__(self) -> Self:

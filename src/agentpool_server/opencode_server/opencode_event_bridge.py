@@ -14,11 +14,13 @@ from typing import TYPE_CHECKING, Any, cast
 
 from agentpool.agents.events.events import (
     CustomEvent,
+    PartStartEvent,
     RunErrorEvent,
     RunFailedEvent,
     RunStartedEvent,
     SpawnSessionStart,
     StreamCompleteEvent,
+    UserMessageInsertedEvent,
 )
 from agentpool.log import get_logger
 from agentpool.utils import identifiers as identifier
@@ -42,7 +44,6 @@ from agentpool_server.opencode_server.models import (
 )
 from agentpool_server.opencode_server.opencode_message_bridge import (
     append_message_to_session,
-    get_messages_for_session,
 )
 from agentpool_server.opencode_server.opencode_session_routes import (
     ensure_session,
@@ -346,9 +347,13 @@ class OpenCodeEventBridgeMixin:
         """Create OpenCode-visible child session scaffolding for task navigation.
 
         SessionPool owns the execution session. OpenCode also needs a session
-        model and at least the delegated prompt in message storage so the TUI
-        can open the child task immediately, even before the child stream emits
-        its first token.
+        model so the TUI can open the child task immediately, even before the
+        child stream emits its first token.
+
+        Note: User message creation is NOT done here — the
+        ``UserMessageInsertedEvent`` from ``_route_message()`` is the sole
+        creator of user messages via the EventProcessor. Creating a duplicate
+        user message here would cause double-rendering in the TUI.
         """
         child_session_id = spawn_event.child_session_id
         await ensure_session(
@@ -356,28 +361,6 @@ class OpenCodeEventBridgeMixin:
             child_session_id,
             parent_id=parent_session_id,
         )
-
-        existing_messages = await get_messages_for_session(self.server_state, child_session_id)
-        if existing_messages:
-            return
-
-        prompt = spawn_event.metadata.get("prompt") or spawn_event.description
-        if not prompt:
-            prompt = f"Run {spawn_event.source_name or 'subagent'} task"
-
-        user_msg = UserMessage(
-            id=identifier.ascending("message"),
-            session_id=child_session_id,
-            time=TimeCreated.now(),
-            agent=spawn_event.source_name or "subagent",
-            model=None,
-        )
-        user_msg_with_parts = MessageWithParts(info=user_msg)
-        text_part = user_msg_with_parts.add_text_part(prompt)
-
-        await append_message_to_session(self.server_state, child_session_id, user_msg_with_parts)
-        await self.server_state.broadcast_event(MessageUpdatedEvent.create(user_msg))
-        await self.server_state.broadcast_event(PartUpdatedEvent.create(text_part))
 
     async def _handle_event(  # noqa: PLR0915
         self, session_id: str, envelope: EventEnvelope
@@ -470,6 +453,21 @@ class OpenCodeEventBridgeMixin:
                     await set_session_status(
                         self.server_state, session_id, SessionStatus(type="idle")
                     )
+                    # C3 fallback: If the agent crashed before any event
+                    # triggered C3 registration, the assistant message was
+                    # never appended to session state or broadcast via SSE.
+                    # Register it now so _finalize_assistant_time can
+                    # finalize and broadcast it.
+                    if not self._message_registered.get(session_id, False):
+                        ctx = self._contexts.get(session_id)
+                        if ctx is not None:
+                            await append_message_to_session(
+                                self.server_state, session_id, ctx.assistant_msg
+                            )
+                            await self.server_state.broadcast_event(
+                                MessageUpdatedEvent.create(ctx.assistant_msg.info)
+                            )
+                            self._message_registered[session_id] = True
                     # D3: Finalize time.completed for failed runs too,
                     # so the next turn's D1 reset doesn't log a
                     # false-positive warning about a missed
@@ -550,11 +548,56 @@ class OpenCodeEventBridgeMixin:
             # handler's ID, so the UI cannot associate parts with the message.
             # The canonical assistant_msg_id from the REST handler is correct.
 
-            # Register assistant message on first non-spawn, non-custom event.
+            # Steer split: When a steer UserMessageInsertedEvent was received
+            # during an active turn, the next PartStartEvent (from the new
+            # ModelRequestNode after steer drain) triggers a logical turn split.
+            # This finalizes the current assistant message (A1) and creates a
+            # new one (A2) with a fresh message ID, so the steer user message
+            # sorts between A1 and A2 in the TUI's lexicographic message ID
+            # ordering. Without this split, the steer user message would sort
+            # after the entire assistant message (which reuses one ID for both
+            # pre-steer and post-steer content).
+            if (
+                isinstance(event, PartStartEvent)
+                and ctx._steer_received
+                and self._message_registered.get(session_id, False)
+            ):
+                await self._finalize_assistant_time(session_id)
+
+                assistant_msg_id, assistant_msg = self._create_assistant_message(session_id)
+                ctx.assistant_msg_id = assistant_msg_id
+                ctx.assistant_msg = assistant_msg
+                # Reset per-turn mutable tracking state (same as D1 reset)
+                ctx.response_text = ""
+                ctx.text_part = None
+                ctx.reasoning_part = None
+                ctx.tool_parts.clear()
+                ctx.tool_outputs.clear()
+                ctx.tool_inputs.clear()
+                ctx.subagent_tool_parts.clear()
+                ctx.is_errored = False
+                ctx.input_tokens = 0
+                ctx.output_tokens = 0
+                ctx.total_cost = 0.0
+                ctx.stream_start_ms = now_ms()
+
+                self._message_registered[session_id] = False
+                ctx._steer_received = False
+
+            # Set _steer_received flag when a steer user message arrives during
+            # an active turn. The next PartStartEvent will trigger the split.
+            if isinstance(event, UserMessageInsertedEvent) and event.delivery == "steer":
+                ctx._steer_received = True
+
+            # Register assistant message on first non-spawn, non-custom,
+            # non-user-message-inserted event.
             # C3: The event bridge is the sole broadcast point for the assistant
             # message. This ensures the message is visible only when the agent
             # actually starts producing events, not before.
-            if not self._message_registered.get(session_id, False):
+            # UserMessageInsertedEvent creates a user message, not an assistant
+            # message, so it must not trigger assistant registration.
+            is_user_message_inserted = isinstance(event, UserMessageInsertedEvent)
+            if not is_user_message_inserted and not self._message_registered.get(session_id, False):
                 await append_message_to_session(self.server_state, session_id, ctx.assistant_msg)
                 await self.server_state.broadcast_event(
                     MessageUpdatedEvent.create(ctx.assistant_msg.info)

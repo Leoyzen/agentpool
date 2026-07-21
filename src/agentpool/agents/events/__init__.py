@@ -33,6 +33,7 @@ from .events import (
     ToolCallStartEvent,
     ToolCallUpdateEvent,
     ToolResultMetadataEvent,
+    UserMessageInsertedEvent,
 )
 from .event_emitter import StreamEventEmitter
 from .builtin_handlers import (
@@ -90,6 +91,7 @@ __all__ = [
     "ToolCallStartEvent",
     "ToolCallUpdateEvent",
     "ToolResultMetadataEvent",
+    "UserMessageInsertedEvent",
     "detailed_print_handler",
     "event_handler_processor",
     "resolve_event_handlers",

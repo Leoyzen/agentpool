@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
+from agentpool.agents.events.events import UserMessageInsertedEvent
 from agentpool.messaging.messages import ChatMessage
 from agentpool.orchestrator.core import SessionPool
 from agentpool_server.opencode_server.models import (
@@ -29,7 +30,6 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 def mock_agent_pool() -> Mock:
     """Create a mock AgentPool for SessionPool construction."""
-    from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
     from agentpool.messaging.messages import ChatMessage
 
     pool = Mock()
@@ -395,6 +395,20 @@ async def test_consumer_handles_spawn_session_start(
     assert "test-parent-session" in integration._session_groups
     assert "test-child-session" in server_state.sessions
     assert server_state.sessions["test-child-session"].parent_id == "test-parent-session"
+
+    # Publish UserMessageInsertedEvent for child session (simulates what
+    # _route_message() does in production when the child agent's run starts).
+    await session_pool.event_bus.publish(
+        "test-child-session",
+        UserMessageInsertedEvent(
+            session_id="test-child-session",
+            message_id="msg_child_prompt",
+            content="Inspect child task",
+            delivery="initial",
+            source="protocol",
+        ),
+    )
+    await asyncio.sleep(0.1)
 
     child_messages = await get_messages_for_session(server_state, "test-child-session")
     assert child_messages

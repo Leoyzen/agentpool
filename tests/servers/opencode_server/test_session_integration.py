@@ -349,14 +349,15 @@ class TestMessageRouting:
         assert run_handle_1 is not None
 
         # Second message should be queued (session is busy).
-        # D14: receive_request now returns str (message_id) for both new runs
-        # and steer/followup. A non-None return means the message was accepted.
+        # Issue #253: followup messages return None instead of message_id
+        # to avoid duplicate session_created broadcasts. A None return means
+        # the message was queued successfully (not rejected).
         run_handle_2 = await integration.route_message(
             session_id="test-session-005",
             content="Second message",
             mode=DeliveryMode.QUEUE,
         )
-        assert run_handle_2 is not None  # Queued successfully (followup returned message_id)
+        assert run_handle_2 is None  # Queued successfully (followup returns None per #253)
 
     @pytest.mark.asyncio
     async def test_route_message_with_asap_priority_injects(

@@ -101,3 +101,94 @@
 - **mcp.json format follows Claude Desktop**: The companion file uses `{"mcpServers": {"name": {"command": "...", "args": [...], ...}}}` JSON format. The `_load_mcp_json()` function handles env var expansion and converts entries to `SkillMcpServerConfig` objects. Only filesystem skills (UPath paths) can have companion files — virtual skills (PurePosixPath) cannot.
 - **Tool prefixing prevents name collisions**: Python tools get the prefix `{skill_name}__tool__` and MCP tools get `{skill_name}__mcp__`. This ensures tool names from different skills never collide in the agent's tool namespace.
 - **Config model lives in separate package**: `agentpool_config/` exists solely to prevent import cycles with protocol servers.
+
+## Stream Event Types
+
+`RichAgentStreamEvent` (defined in `agents/events/events.py`) is a PEP 695 `type` union of all event variants flowing through the agent stream. Events are published through the `EventBus` and consumed by protocol server converters (`ACPEventConverter`, `EventProcessor`).
+
+**Event Taxonomy**:
+
+| Event | Kind | Purpose |
+|---|---|---|
+| `RunStartedEvent` | Lifecycle | Agent run started |
+| `PartStartEvent` | Stream | Model response part started |
+| `PartDeltaEvent` | Stream | Streamed text delta |
+| `PartEndEvent` | Stream | Model response part ended |
+| `ToolCallStartEvent` | Tool | Tool invocation started |
+| `ToolCallProgressEvent` | Tool | Tool execution progress |
+| `ToolCallCompleteEvent` | Tool | Tool invocation completed |
+| `StreamCompleteEvent` | Lifecycle | Stream completed (with final message) |
+| `RunErrorEvent` | Lifecycle | Run errored |
+| `SpawnSessionStart` | Subagent | Subagent session spawned |
+| `SpawnSessionComplete` | Subagent | Subagent session completed |
+| `SessionResumeEvent` | Lifecycle | Session resumed from checkpoint |
+| `CompactionEvent` | Lifecycle | Message compaction applied |
+| `PlanUpdateEvent` | Plan | Agent plan updated |
+| `CustomEvent[T]` | Generic | Custom payload event |
+| `UserMessageInsertedEvent` | **System** | **Inserted user message display for steer/followup** |
+| `UserPromptEvent` | User | User prompt forwarded |
+| `SystemNotificationEvent` | System | System notification (RFC-0056) |
+
+### UserMessageInsertedEvent
+
+A system-level event that carries inserted user message content through the event stream, enabling all steer/followup entry points to trigger user message display in protocol frontends (ACP and OpenCode).
+
+**Fields**:
+
+| Field | Type | Description |
+|---|---|---|
+| `session_id` | `str` | Session ID where message was inserted |
+| `message_id` | `str` | Unique per insertion, used for dedup with protocol handler emission |
+| `content` | `str \| list[Any]` | Message content; `str` for text, `list[Any]` for multi-modal (text + images, structured blocks) |
+| `delivery` | `Literal["initial", "steer", "followup"]` | How the message was delivered — initial prompt, mid-turn steer, or between-turn followup |
+| `source` | `Literal["protocol", "background_task", "internal"]` | Where the message originated — see `source` field mapping below |
+| `timestamp` | `float` | UNIX timestamp of insertion (default: `time.time()`) |
+
+**`source` Field Mapping**:
+
+| Call site | `source` value |
+|---|---|
+| `_route_message()` from protocol handler | `"protocol"` |
+| `steer_from_background_task()` | `"background_task"` |
+| `steer()` / `followup()` direct call | `"internal"` |
+| `_consume_run()` followup-from-queue | `"internal"` |
+
+Internal paths (`"background_task"`, `"internal"`) are always displayed since they have no prior protocol emission. Protocol paths (`"protocol"`) may be deduplicated against the protocol handler's own ad-hoc emission.
+
+**Dedup Mechanism**: The event carries `message_id`, which is shared with the protocol handler's ad-hoc emission path. Protocol handlers generate the ID first, register it in a per-session dedup set, emit the message to the client, then pass the same ID to `send_message()` -> `_route_message()`. The `ACPEventConverter` and `EventProcessor` check the dedup set and skip if the `message_id` is already displayed. The dedup set lives as `dict[str, set[str]]` on `SessionController` (keyed by `session_id`) and is passed to converters as `displayed_message_ids: set[str]`.
+
+**Publication Points**: The event is published from:
+- `SessionController._route_message()` — for all routing paths (initial, steer, followup), if EventBus is available
+- `steer_from_background_task()` — for internal steer visibility (sync method, uses `asyncio.create_task()`), if EventBus is available
+- `_consume_run()` — for followup-from-queue messages picked up from `prompt_queue`, if EventBus is available
+- `RunHandle.steer(emit_user_message=True)` — fire-and-forget via `asyncio.create_task()`, as secondary mechanism
+- `RunHandle.followup(emit_user_message=False)` — fire-and-forget via `asyncio.create_task()`, default suppressed
+
+When `EventBus` is `None` (standalone `agent.run()` without a protocol server), publication is silently skipped. Display notifications are only meaningful in protocol server contexts.
+
+### RunHandle steer()/followup() emit_user_message Parameter
+
+`RunHandle.steer()` and `followup()` accept the `emit_user_message` parameter to control whether the event is published:
+
+```python
+def steer(self, content: str | list[Any], emit_user_message: bool = True) -> None: ...
+def followup(self, content: str | list[Any], emit_user_message: bool = False) -> None: ...
+```
+
+- `steer(emit_user_message=True)` (default): Publishes `UserMessageInsertedEvent` with `delivery="steer"`, `source="internal"` via `asyncio.create_task()`. Suppress by passing `False`.
+- `followup(emit_user_message=False)` (default): Does NOT publish by default. Pass `True` to enable emission. Suppressed by default to avoid redundant display when `_route_message()` or `_consume_run()` already publishes.
+
+Emission uses `asyncio.get_running_loop().create_task()` (fire-and-forget) because `steer()` / `followup()` are synchronous methods (constrained by RFC-0037). The emission helper wraps in `logfire.span("event.user_message_inserted.emit")` to prevent orphan traces. If no event loop is running, the event is silently skipped (`RuntimeError` caught).
+
+### Relationship with SystemNotificationEvent (RFC-0056 / PR #219)
+
+`UserMessageInsertedEvent` and `SystemNotificationEvent` (proposed in RFC-0056 / PR #219) are complementary event types serving different rendering targets:
+
+| Aspect | UserMessageInsertedEvent | SystemNotificationEvent |
+|---|---|---|
+| Rendering target | `role="user"` message | `ToolPart(tool="system")` notification |
+| Trigger | steer/followup entry points | System lifecycle events |
+| Dependency | None | None (independent) |
+| Dedup scope | Protocol handler ad-hoc emission | N/A (distinct type) |
+
+When both are implemented, `SystemNotificationEvent` for the same steer message should default to suppressed to avoid redundant display — if `UserMessageInsertedEvent` is emitted for a given `message_id`, the `SystemNotificationEvent` for the same content is redundant. This is a forward-looking decision, not a current constraint.

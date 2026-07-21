@@ -30,7 +30,10 @@ from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
 from agentpool.messaging.messages import TokenCost
 from agentpool.observability.spans import safe_span
-from agentpool.orchestrator.event_mapper import EventMapper
+from agentpool.orchestrator.event_mapper import (
+    EventMapper,
+    normalize_thinking_parts_in_messages,
+)
 from agentpool.orchestrator.turn import HookAwareTurn, Turn
 from agentpool.tasks.exceptions import RunAbortedError
 from agentpool.tools.base import is_terminal_tool
@@ -117,6 +120,17 @@ class NativeTurn(HookAwareTurn, Turn):
     def _hook_prompt(self) -> str:
         """The user prompt for this turn."""
         return str(self._prompts)
+
+    def _set_message_history(self, messages: list[ModelMessage]) -> None:
+        """Store message history with ThinkingPart normalization.
+
+        Wraps ``self._message_history = ...`` to ensure raw CoT providers
+        (vLLM, gpt-oss, etc.) have their reasoning text copied from
+        ``provider_details['raw_content']`` into ``ThinkingPart.content``
+        before the history is persisted.  See issue #155.
+        """
+        normalize_thinking_parts_in_messages(messages)
+        self._message_history = messages
 
     async def execute(self) -> AsyncGenerator[RichAgentStreamEvent[Any]]:  # noqa: PLR0915, PLR0911
         """Execute one reactive cycle of the pydantic-ai agent loop.
@@ -293,7 +307,7 @@ class NativeTurn(HookAwareTurn, Turn):
                             finally:
                                 self._agent._iteration_task = None
 
-                        self._message_history = agent_run.all_messages()
+                        self._set_message_history(agent_run.all_messages())
                         logger.info("After while loop — building final message")
 
                 except RunAbortedError as exc:
@@ -306,7 +320,7 @@ class NativeTurn(HookAwareTurn, Turn):
                     self._run_ctx.cancelled = True
                     if agent_run is not None:
                         try:
-                            self._message_history = agent_run.all_messages()
+                            self._set_message_history(agent_run.all_messages())
                         except Exception:  # noqa: BLE001
                             logger.debug(
                                 "Could not retrieve agent_run messages after RunAbortedError",
@@ -344,7 +358,7 @@ class NativeTurn(HookAwareTurn, Turn):
                     logger.info("UndrainedPendingMessagesError caught", error=str(exc))
                     if agent_run is not None:
                         with contextlib.suppress(Exception):
-                            self._message_history = agent_run.all_messages()
+                            self._set_message_history(agent_run.all_messages())
 
                 except asyncio.CancelledError:
                     if self._run_ctx.cancelled:
@@ -355,7 +369,7 @@ class NativeTurn(HookAwareTurn, Turn):
                         # turn's partial messages are preserved for the next turn.
                         if agent_run is not None:
                             with contextlib.suppress(Exception):
-                                self._message_history = agent_run.all_messages()
+                                self._set_message_history(agent_run.all_messages())
                         self._final_message = ChatMessage(
                             content="",
                             role="assistant",
@@ -379,7 +393,7 @@ class NativeTurn(HookAwareTurn, Turn):
                     if "ignored GeneratorExit" in str(exc):
                         if agent_run is not None:
                             with contextlib.suppress(Exception):
-                                self._message_history = agent_run.all_messages()
+                                self._set_message_history(agent_run.all_messages())
                         return
                     raise
 

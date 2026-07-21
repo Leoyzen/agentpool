@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 import anyenv
 from pydantic_ai import PartDeltaEvent, TextPartDelta, ThinkingPartDelta
 
+from agentpool.agents.events import UserMessageInsertedEvent
 from agentpool.log import get_logger
 from agentpool.utils.time_utils import now_ms
 
@@ -75,6 +76,8 @@ async def stream_response(
                         "choices": [choice],
                     }
                     yield f"data: {anyenv.dump_json(chunk_data)}\n\n"
+                case UserMessageInsertedEvent():
+                    pass  # User message insertions don't produce completion chunks
         final_chunk = {
             "id": response_id,
             "object": "chat.completion.chunk",

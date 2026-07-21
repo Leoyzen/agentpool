@@ -327,7 +327,18 @@ def _build_assistant_pydantic_messages(
                 response_parts.append(PydanticTextPart(content=part.text))
         elif isinstance(part, ReasoningPart):
             if part.text:
-                response_parts.append(ThinkingPart(content=part.text))
+                thinking_kwargs: dict[str, Any] = {"content": part.text}
+                meta = part.metadata
+                if meta:
+                    if meta.get("thinking_id") is not None:
+                        thinking_kwargs["id"] = meta["thinking_id"]
+                    if meta.get("provider_name") is not None:
+                        thinking_kwargs["provider_name"] = meta["provider_name"]
+                    if meta.get("signature") is not None:
+                        thinking_kwargs["signature"] = meta["signature"]
+                    if meta.get("provider_details") is not None:
+                        thinking_kwargs["provider_details"] = meta["provider_details"]
+                response_parts.append(ThinkingPart(**thinking_kwargs))
         elif isinstance(part, ToolPart):
             tc_part = ToolCallPart(
                 tool_name=part.tool,

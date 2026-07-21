@@ -27,7 +27,6 @@ from agentpool_server.opencode_server.models import (
     MessagePath,
     MessageRequest,
     MessageTime,
-    MessageUpdatedEvent,
     MessageWithParts,
     Part,
     PartRemovedEvent,
@@ -57,6 +56,7 @@ if TYPE_CHECKING:
     from pydantic_ai import UserContent
 
     from agentpool.common_types import PathReference
+    from agentpool.messaging import ChatMessage
     from agentpool.orchestrator.session_pool import SessionPool
     from agentpool_server.opencode_server.session_pool_integration import (
         OpenCodeSessionPoolIntegration,
@@ -74,6 +74,7 @@ class _MessageRunContext:
     assistant_msg_id: str
     assistant_msg: AssistantMessage
     assistant_msg_with_parts: MessageWithParts
+    user_msg_with_parts: MessageWithParts
     adapter: OpenCodeStreamAdapter
     session_pool: SessionPool
     integration: OpenCodeSessionPoolIntegration | None
@@ -306,6 +307,12 @@ async def _process_message(
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
 
+        # COMMIT: If session has a revert marker, delete reverted messages
+        # BEFORE creating the new user message (DB-first ordering, D10).
+        # This must happen before append_message_to_session, otherwise the
+        # newly-created user message would be truncated by COMMIT.
+        await _commit_revert(state, session_id)
+
         agent_name = _resolve_message_agent_name(state, session_id, request.agent)
         user_msg_id = identifier.ascending("message", request.message_id)
         user_message = UserMessage(
@@ -320,23 +327,23 @@ async def _process_message(
         for part in request.parts:
             match part:
                 case TextPartInput(text=text):
-                    created: Part = user_msg_with_parts.add_text_part(text)
+                    user_msg_with_parts.add_text_part(text)
                 case FilePartInput(mime=mime, url=url, filename=filename, source=source):
-                    created = user_msg_with_parts.add_file_part(
+                    user_msg_with_parts.add_file_part(
                         mime,
                         url,
                         filename=filename,
                         source=source,
                     )
                 case AgentPartInput(name=name, source=source):
-                    created = user_msg_with_parts.add_agent_part(name, source=source)
+                    user_msg_with_parts.add_agent_part(name, source=source)
                 case SubtaskPartInput(
                     prompt=subtask_prompt,
                     description=desc,
                     agent=subtask_agent,
                     model=subtask_model,
                 ):
-                    created = user_msg_with_parts.add_subtask_part(
+                    user_msg_with_parts.add_subtask_part(
                         subtask_prompt,
                         desc,
                         subtask_agent,
@@ -344,10 +351,9 @@ async def _process_message(
                     )
                 case _ as unreachable:
                     assert_never(unreachable)
-            await state.broadcast_event(PartUpdatedEvent.create(created))
-        await append_message_to_session(state, session_id, user_msg_with_parts)
+        # NOTE: append_message_to_session is NOT called here — the
+        # EventProcessor handles that via UserMessageInsertedEvent.
         await persist_message_to_storage(state, user_msg_with_parts, session_id)
-        await state.broadcast_event(MessageUpdatedEvent.create(user_message))
 
         ctx = await _route_message_locked(
             session_id, request, state, user_msg_id, user_msg_with_parts
@@ -362,6 +368,105 @@ async def _process_message(
             await _mark_session_idle_safe(state, session_id, ctx)
 
     return result
+
+
+async def _truncate_agent_history(
+    session_pool: SessionPool,
+    session_id: str,
+    up_to_message_id: str,
+) -> None:
+    """Truncate the agent's in-memory ChatMessage list at the given message ID.
+
+    Finds the ChatMessage whose ``message_id`` matches ``up_to_message_id``
+    in the agent's conversation history and removes it and all subsequent
+    messages.  The OpenCode message ID is stored as the ``message_id``
+    field on each ChatMessage (set by ``opencode_to_chat_message``).
+
+    Args:
+        session_pool: The SessionPool owning the session's agent.
+        session_id: The session whose agent history should be truncated.
+        up_to_message_id: The OpenCode message ID marking the truncation
+            boundary. This message and everything after it is removed.
+    """
+    session_state = session_pool.sessions.get_session(session_id)
+    if session_state is None:
+        return
+    agent = session_state.agent
+    if agent is None:
+        return
+    try:
+        conversation = agent.conversation
+    except AttributeError:
+        return
+    if conversation is None:
+        return
+    chat_messages: list[ChatMessage[Any]] = list(conversation.chat_messages)
+    truncate_index = next(
+        (i for i, msg in enumerate(chat_messages) if msg.message_id == up_to_message_id),
+        None,
+    )
+    if truncate_index is not None:
+        conversation.set_history(chat_messages[:truncate_index])
+
+
+async def _commit_revert(state: ServerState, session_id: str) -> None:
+    """COMMIT: delete reverted messages before creating a new user message.
+
+    When a session has a ``revert`` marker (set by STAGE), the next new
+    message triggers a COMMIT that truncates all messages from the revert
+    boundary onwards — from the DB, in-memory state, and the agent's
+    conversation history — then clears the marker.
+
+    Ordering (D10 — DB-first):
+        1. DB truncate FIRST (narrowly scoped ``contextlib.suppress`` wrapping
+           ONLY this call — suppresses ``NotImplementedError``, ``KeyError``,
+           ``TypeError``).
+        2. In-memory truncate (NOT inside suppress).
+        3. Agent history truncate (NOT inside suppress).
+        4. Clear marker + FileOps backup (NOT inside suppress).
+        5. Broadcast (NOT inside suppress).
+
+    If the DB raises a non-suppressed exception (e.g., ``SQLAlchemyError``),
+    in-memory is NOT truncated and the error propagates. The session remains
+    in STAGED state.
+
+    Args:
+        state: The OpenCode server state.
+        session_id: The session to COMMIT.
+    """
+    session = state.sessions.get(session_id)
+    if session is None or session.revert is None:
+        return
+
+    revert_msg_id = session.revert.message_id
+    session_pool = state.pool.session_pool
+
+    # 1. Truncate DB FIRST (narrowly scoped suppress — wraps ONLY this call)
+    if session_pool is not None:
+        with contextlib.suppress(NotImplementedError, KeyError, TypeError):
+            await session_pool.truncate_messages(session_id, revert_msg_id)
+
+    # 2. Truncate in-memory messages (NOT inside suppress)
+    messages = state.messages.get(session_id, [])
+    revert_index = next(
+        (i for i, m in enumerate(messages) if m.info.id == revert_msg_id),
+        None,
+    )
+    if revert_index is not None:
+        state.messages[session_id] = messages[:revert_index]
+
+    # 3. Truncate agent ChatMessage history (NOT inside suppress)
+    if session_pool is not None:
+        await _truncate_agent_history(session_pool, session_id, revert_msg_id)
+
+    # 4. Clear revert marker + FileOps backup (NOT inside suppress)
+    updated_session = session.model_copy(update={"revert": None})
+    state.sessions[session_id] = updated_session
+    state.reverted_messages.pop(session_id, None)
+    state.pool.file_ops.reverted_changes.clear()
+
+    # 5. Broadcast (NOT inside suppress)
+    await state.broadcast_event(SessionUpdatedEvent.create(updated_session))
 
 
 async def _route_message_locked(  # noqa: PLR0915
@@ -385,19 +490,12 @@ async def _route_message_locked(  # noqa: PLR0915
         mark_busy: Whether to emit a busy transition before processing.
         mark_idle: Whether to emit an idle transition when processing completes.
     """
-    # --- Clear revert marker (mirrors opencode-native's revert.cleanup()) ---
-    # When a user does /undo then sends a new message, the session.revert
-    # marker must be cleared so the frontend stops filtering messages with
-    # ``message.id >= revert.messageID``.  Without this, ALL new messages
-    # are hidden because their ascending IDs are always >= revert.messageID.
-    session = state.sessions.get(session_id)
-    if session is not None and session.revert is not None:
-        updated_session = session.model_copy(update={"revert": None})
-        state.sessions[session_id] = updated_session
-        # Discard any stored reverted messages for this session
-        state.reverted_messages.pop(session_id, None)
-        # Broadcast so the frontend removes the revert filter immediately
-        await state.broadcast_event(SessionUpdatedEvent.create(updated_session))
+    # --- COMMIT: If session has a revert marker, delete reverted messages ---
+    # When a user does /undo then sends a new message, COMMIT truncates all
+    # messages from the revert boundary onwards (DB + in-memory + agent
+    # history) and clears the marker.  See ``_commit_revert`` for details
+    # on the DB-first ordering (D10).
+    await _commit_revert(state, session_id)
 
     # --- Mark session busy ---
     if mark_busy:
@@ -602,6 +700,15 @@ async def _route_message_locked(  # noqa: PLR0915
     # D13: Map delivery mode from request to priority.
     # "steer" → "asap" (inject into active turn), "queue" → "when_idle".
     delivery_priority = "asap" if request.delivery == "steer" else "when_idle"
+    # Build meta from parts — the EventBus event carries this so the
+    # EventProcessor can reconstruct and broadcast the full user message
+    # as the sole publication point.
+    from agentpool_server.opencode_server.event_processor import (
+        OpenCodeUserMessageMeta,
+    )
+
+    parts_data = [part.model_dump() for part in user_msg_with_parts.parts]
+    route_meta = OpenCodeUserMessageMeta(parts=parts_data)
     if integration is not None:
         message_id = await integration.route_message(
             session_id=session_id,
@@ -609,9 +716,11 @@ async def _route_message_locked(  # noqa: PLR0915
             priority=delivery_priority,
             input_provider=input_provider,
             agent_name=agent_name,
-            message_id=assistant_msg_id,
+            message_id=user_msg_id,
+            assistant_msg_id=assistant_msg_id,
             model_id=request.model.model_id if request.model else None,
             provider_id=request.model.provider_id if request.model else None,
+            meta=route_meta,
         )
     else:
         from agentpool.lifecycle.types import DeliveryMode
@@ -622,7 +731,8 @@ async def _route_message_locked(  # noqa: PLR0915
             content=user_prompt if isinstance(user_prompt, str) else list(user_prompt),
             mode=delivery_mode,
             input_provider=input_provider,
-            message_id=assistant_msg_id,
+            message_id=user_msg_id,
+            meta=route_meta,
         )
 
     # --- Create context ---
@@ -630,6 +740,7 @@ async def _route_message_locked(  # noqa: PLR0915
         assistant_msg_id=assistant_msg_id,
         assistant_msg=assistant_msg,
         assistant_msg_with_parts=assistant_msg_with_parts,
+        user_msg_with_parts=user_msg_with_parts,
         adapter=adapter,
         session_pool=session_pool,
         integration=integration,
@@ -671,7 +782,9 @@ async def _wait_and_finalize(  # noqa: PLR0915
     etc.) are not blocked while the agent is processing.
     """
     if ctx.message_id is None:
-        # Message was queued for later processing (session busy)
+        # Message was queued for later processing (session busy).
+        # Return the empty assistant placeholder — the actual response
+        # will arrive via SSE in a later turn with a different message ID.
         logger.info(
             "Message queued in SessionPool for later processing",
             session_id=session_id,
@@ -729,10 +842,17 @@ async def _wait_and_finalize(  # noqa: PLR0915
             await _ensure_assistant_in_state(
                 state, session_id, assistant_msg_id, assistant_msg_with_parts
             )
-            await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
+            # NOTE: broadcast is handled by the event bridge via
+            # _finalize_assistant_time() on StreamCompleteEvent.
             await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
         else:
-            # Run failed — finalize assistant message with aborted state
+            # Run failed — finalize assistant message with aborted state.
+            # The event bridge's RunFailedEvent handler calls
+            # _finalize_assistant_time() which broadcasts the finalized
+            # assistant message via SSE. If the agent crashed before C3
+            # fired, the RunFailedEvent handler also registers the
+            # assistant message first (C3 fallback). We only persist to
+            # storage here — no broadcast (prevents duplicate SSE).
             response_time = now_ms()
             reason = "Run failed"
             aborted_error = MessageAbortedError(data=MessageAbortedErrorData(message=reason))
@@ -743,7 +863,6 @@ async def _wait_and_finalize(  # noqa: PLR0915
             await _ensure_assistant_in_state(
                 state, session_id, assistant_msg_id, assistant_msg_with_parts
             )
-            await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
             await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
 
             # Add the aborted assistant message to the SessionPool agent's
@@ -764,7 +883,9 @@ async def _wait_and_finalize(  # noqa: PLR0915
         await _ensure_assistant_in_state(
             state, session_id, assistant_msg_id, assistant_msg_with_parts
         )
-        await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
+        # NOTE: broadcast is handled by the event bridge via
+        # _finalize_assistant_time() on StreamCompleteEvent or
+        # RunFailedEvent. No broadcast here (prevents duplicate SSE).
         await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
 
         # Add the aborted assistant message to the SessionPool agent's
@@ -787,7 +908,9 @@ async def _wait_and_finalize(  # noqa: PLR0915
         await _ensure_assistant_in_state(
             state, session_id, assistant_msg_id, assistant_msg_with_parts
         )
-        await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
+        # NOTE: broadcast is handled by the event bridge via
+        # _finalize_assistant_time() on StreamCompleteEvent or
+        # RunFailedEvent. No broadcast here (prevents duplicate SSE).
         await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
 
         # Add the aborted assistant message to the SessionPool agent's
@@ -879,6 +1002,10 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
 
+        # COMMIT: If session has a revert marker, delete reverted messages
+        # before creating the new user message (DB-first ordering, D10).
+        await _commit_revert(state, session_id)
+
         agent_name = _resolve_message_agent_name(state, session_id, request.agent)
         user_msg_id = identifier.ascending("message", request.message_id)
         user_message = UserMessage(
@@ -893,23 +1020,23 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
         for part in request.parts:
             match part:
                 case TextPartInput(text=text):
-                    created: Part = user_msg_with_parts.add_text_part(text)
+                    user_msg_with_parts.add_text_part(text)
                 case FilePartInput(mime=mime, url=url, filename=filename, source=source):
-                    created = user_msg_with_parts.add_file_part(
+                    user_msg_with_parts.add_file_part(
                         mime,
                         url,
                         filename=filename,
                         source=source,
                     )
                 case AgentPartInput(name=name, source=source):
-                    created = user_msg_with_parts.add_agent_part(name, source=source)
+                    user_msg_with_parts.add_agent_part(name, source=source)
                 case SubtaskPartInput(
                     prompt=subtask_prompt,
                     description=desc,
                     agent=subtask_agent,
                     model=subtask_model,
                 ):
-                    created = user_msg_with_parts.add_subtask_part(
+                    user_msg_with_parts.add_subtask_part(
                         subtask_prompt,
                         desc,
                         subtask_agent,
@@ -917,10 +1044,19 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
                     )
                 case _ as unreachable:
                     assert_never(unreachable)
-            await state.broadcast_event(PartUpdatedEvent.create(created))
-        await append_message_to_session(state, session_id, user_msg_with_parts)
+        # NOTE: append_message_to_session is NOT called here — the
+        # EventProcessor handles that via UserMessageInsertedEvent.
         await persist_message_to_storage(state, user_msg_with_parts, session_id)
-        await state.broadcast_event(MessageUpdatedEvent.create(user_message))
+
+        # Serialize parts for meta — the EventBus event carries this so
+        # the EventProcessor can reconstruct and broadcast the full user
+        # message (parts + message) as the sole publication point.
+        from agentpool_server.opencode_server.event_processor import (
+            OpenCodeUserMessageMeta,
+        )
+
+        parts_data = [part.model_dump() for part in user_msg_with_parts.parts]
+        meta = OpenCodeUserMessageMeta(parts=parts_data)
 
         # 2. Route through SessionPool instead of server-owned queue
         session_pool = state.pool.session_pool
@@ -947,9 +1083,11 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
                     priority=delivery_priority,
                     input_provider=input_provider,
                     agent_name=agent_name,
-                    message_id=async_assistant_msg_id,
+                    message_id=user_msg_id,
+                    assistant_msg_id=async_assistant_msg_id,
                     model_id=request.model.model_id if request.model else None,
                     provider_id=request.model.provider_id if request.model else None,
+                    meta=meta,
                 )
             else:
                 sp_state, _was_created = await session_pool.sessions.get_or_create_session(
@@ -968,7 +1106,8 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
                     content=user_prompt if isinstance(user_prompt, str) else list(user_prompt),
                     mode=delivery_mode,
                     input_provider=input_provider,
-                    message_id=async_assistant_msg_id,
+                    message_id=user_msg_id,
+                    meta=meta,
                 )
 
 

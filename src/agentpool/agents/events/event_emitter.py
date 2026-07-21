@@ -102,6 +102,7 @@ class StreamEventEmitter:
         """
         # Record file changes from DiffContentItem for diff/revert support
         if self._context.pool and self._context.pool.file_ops and items:
+            message_id = self._resolve_message_id()
             for item in items:
                 if isinstance(item, DiffContentItem):
                     self._context.pool.file_ops.record_change(
@@ -110,6 +111,7 @@ class StreamEventEmitter:
                         new_content=item.new_text,
                         operation="create" if item.old_text is None else "write",
                         agent_name=self._context.node_name,
+                        message_id=message_id,
                     )
 
         event = ToolCallProgressEvent(
@@ -197,6 +199,7 @@ class StreamEventEmitter:
                 new_content=new_text,
                 operation="edit",
                 agent_name=self._context.node_name,
+                message_id=self._resolve_message_id(),
             )
 
         event = ToolCallProgressEvent.file_edit(
@@ -350,6 +353,22 @@ class StreamEventEmitter:
     # =========================================================================
     # Private helpers
     # =========================================================================
+
+    def _resolve_message_id(self) -> str | None:
+        """Resolve the message ID for file change tracking.
+
+        Prefers ``opencode_message_id`` from the run context (same ID space
+        as the revert endpoint's ``request.message_id``). Falls back to
+        ``turn_id`` when ``opencode_message_id`` is not set (e.g. standalone
+        execution without the OpenCode server).
+
+        Returns:
+            The resolved message ID, or ``None`` if no run context is available.
+        """
+        run_ctx = self._context.run_ctx
+        if run_ctx is None:
+            return None
+        return run_ctx.opencode_message_id or run_ctx.turn_id
 
     async def _emit(self, event: RichAgentStreamEvent[Any]) -> None:
         """Internal method to emit events to EventBus."""
