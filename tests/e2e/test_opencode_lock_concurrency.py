@@ -110,12 +110,63 @@ storage:
 """
 
 
+# ---------------------------------------------------------------------------
+# Config: medium delay model (2s) for race condition tests
+# ---------------------------------------------------------------------------
+
+MEDIUM_DELAY_MODEL_CONFIG = """
+
+agents:
+  test_agent:
+    type: native
+    model:
+      type: test
+      custom_output_text: "Response after delay"
+      pre_stream_delay: 2.0
+    system_prompt: "You are a test assistant."
+storage:
+  providers:
+    - type: memory
+"""
+
+
 @pytest.fixture
 def fast_config(tmp_path: Path) -> Path:
     """YAML config with a fast test model (no delay)."""
     config_path = tmp_path / "fast_config.yml"
     config_path.write_text(FAST_MODEL_CONFIG.strip() + "\n")
     return config_path
+
+
+@pytest.fixture
+def medium_delay_config(tmp_path: Path) -> Path:
+    """YAML config with a 2s-delay test model.
+
+    The 2s delay is long enough to ensure the first run is still active
+    when the second concurrent request arrives (triggering the followup
+    path), but short enough to keep the test under ~5s total.
+    """
+    config_path = tmp_path / "medium_delay_config.yml"
+    config_path.write_text(MEDIUM_DELAY_MODEL_CONFIG.strip() + "\n")
+    return config_path
+
+
+@pytest.fixture
+async def subprocess_server_medium_delay(
+    process_registry: Any,
+    medium_delay_config: Path,
+    allow_model_requests: Any,
+) -> Any:
+    """Spawn an opencode server with the 2s-delay test model config."""
+    async for server in _spawn_server(
+        "serve-opencode",
+        medium_delay_config,
+        process_registry=process_registry,
+        is_stdio=False,
+        health_path="/session",
+        health_timeout=15.0,
+    ):
+        yield server
 
 
 @pytest.fixture
@@ -465,3 +516,82 @@ class TestSessionCloseDuringSyncRun:
                 )
             except asyncio.CancelledError:
                 pass  # Acceptable — request was cancelled
+
+
+# ---------------------------------------------------------------------------
+# Tests: Duplicate finalization — concurrent sync must not double-broadcast
+# ---------------------------------------------------------------------------
+
+
+class TestNoDuplicateFinalizationOnConcurrentSync:
+    """Concurrent sync POST /message must not produce duplicate assistant messages.
+
+    Regression test for issue #253: when a second sync /message arrives
+    while the first is still running, both requests used to wait on the
+    same complete_event and finalize independently, causing the TUI to
+    show the response twice.
+    """
+
+    async def test_concurrent_sync_no_duplicate_assistant_message(
+        self,
+        subprocess_server_medium_delay: SubprocessServer,
+    ) -> None:
+        """Two concurrent sync POSTs must not produce duplicate assistant messages.
+
+        Given: a session with a 2s-delay model
+        When: two sync POST /message are sent concurrently (second arrives
+              while first run is still active)
+        Then: GET /message returns exactly 4 messages (2 user + 2 assistant)
+              — not 5 (2 user + 3 assistant with duplicate from first run)
+
+        Without the fix: Request 2 also waits on the same complete_event
+        and finalizes independently, producing a duplicate assistant
+        message for the first run → 3 assistant messages total.
+        With the fix: Request 2 returns None (followup), only Request 1
+        finalizes the first run. The followup is processed as a chained
+        turn → 2 assistant messages total (1 per turn).
+        """
+        base_url = subprocess_server_medium_delay.base_url
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            session_id = await _create_session(base_url, client)
+
+            # Send first sync message (starts 2s run)
+            first_task = asyncio.create_task(
+                _send_message_sync(base_url, client, session_id, "first")
+            )
+
+            # Wait for first run to be active
+            await asyncio.sleep(0.5)
+
+            # Send second sync message while first run is active
+            # This should be routed as a followup (returns None)
+            second_resp = await _send_message_sync(base_url, client, session_id, "second")
+            assert second_resp.status_code in (200, 201), (
+                f"Second request failed: {second_resp.status_code}"
+            )
+
+            # Wait for first request to complete
+            first_resp = await first_task
+            assert first_resp.status_code in (200, 201), (
+                f"First request failed: {first_resp.status_code}"
+            )
+
+            # Wait for the followup turn to complete and messages to settle
+            # First run: 2s, followup turn: 2s → ~4s total
+            messages = await _wait_for_message_count(base_url, client, session_id, 4, timeout=15.0)
+
+            # Should have exactly 4 messages: 2 user + 2 assistant
+            # - Turn 1 ("first"): 1 assistant message (finalized by Request 1)
+            # - Turn 2 ("second"): 1 assistant message (chained followup turn)
+            # Without fix: 3 assistant messages (duplicate from first run)
+            roles = [m.get("info", {}).get("role") for m in messages]
+            assistant_count = roles.count("assistant")
+            user_count = roles.count("user")
+
+            assert user_count == 2, f"Expected 2 user messages, got {user_count}. Roles: {roles}"
+            assert assistant_count == 2, (
+                f"Expected 2 assistant messages (1 per turn), got {assistant_count}. "
+                f"If 3, the duplicate finalization bug is present (both requests "
+                f"finalized the first run independently). Roles: {roles}"
+            )

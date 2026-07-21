@@ -253,18 +253,26 @@ class RunHandle:
     # ------------------------------------------------------------------
 
     async def start(
-        self, initial_prompt: str | list[Any] = ""
+        self,
+        initial_prompt: str | list[Any] = "",
     ) -> AsyncGenerator[RichAgentStreamEvent[Any]]:
         """Execute a single turn and yield stream events, then terminate.
 
         In the per-prompt model, ``start()`` executes exactly one turn
-        (1 prompt) and exits naturally. There is no idle loop — the
-        caller (``_consume_run()``) is responsible for creating a new
+        and exits naturally. There is no idle loop — the caller
+        (``_consume_run()``) is responsible for creating a new
         ``RunHandle`` for the next prompt.
+
+        When ``initial_prompt`` is a list of prompts (from
+        ``_consume_run`` draining the followup queue), the flattening
+        in ``_execute_turn`` and ``NativeTurn``/``ACPTurn`` merges
+        them into one model request — so all queued followups are
+        processed in a single turn (issue #253).
 
         Args:
             initial_prompt: The user prompt to process. Can be a ``list``
-                for multimodal content (images, audio, etc.).
+                for multimodal content (images, audio, etc.) or a
+                ``list`` of prompts drained from the followup queue.
         """
         agent = self.agent
         event_bus = self.event_bus
@@ -440,16 +448,22 @@ class RunHandle:
             _current_input_provider.set(session.input_provider)
         # Save user prompt to agent conversation before execution.
         # This ensures user messages are preserved even if the turn
-        # fails or is cancelled.
-        from agentpool.agents.native_agent.helpers import _summarize_content_block
+        # fails or is cancelled. Flatten prompts into a list of
+        # UserContent items — same logic as NativeTurn/ACPTurn — so
+        # structured content (images, files, etc.) is preserved in
+        # conversation history for subsequent turns (issue #253).
 
-        prompt_text = "\n".join(
-            p if isinstance(p, str) else " ".join(_summarize_content_block(b) for b in p)
-            for p in current_prompts
-        )
+        flattened_prompts: list[str | list[Any]] = []
+        for p in current_prompts:
+            if isinstance(p, str):
+                flattened_prompts.append(p)
+            elif isinstance(p, list):
+                flattened_prompts.extend(p)
+            else:
+                flattened_prompts.append(p)
         agent.conversation.add_chat_messages([
             ChatMessage(
-                content=prompt_text,
+                content=flattened_prompts,
                 role="user",
                 name=agent.name,
                 session_id=self.session_id,

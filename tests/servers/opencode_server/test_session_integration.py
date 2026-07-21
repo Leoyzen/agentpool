@@ -349,14 +349,120 @@ class TestMessageRouting:
         assert run_handle_1 is not None
 
         # Second message should be queued (session is busy).
-        # D14: receive_request now returns str (message_id) for both new runs
-        # and steer/followup. A non-None return means the message was accepted.
+        # After fix for issue #253: followup/queued messages return None
+        # to prevent duplicate finalization in _wait_and_finalize.
         run_handle_2 = await integration.route_message(
             session_id="test-session-005",
             content="Second message",
             mode=DeliveryMode.QUEUE,
         )
-        assert run_handle_2 is not None  # Queued successfully (followup returned message_id)
+        assert run_handle_2 is None  # Queued — no new run started (issue #253)
+
+    @pytest.mark.asyncio
+    async def test_steer_on_busy_session_returns_non_none(
+        self,
+        session_pool: SessionPool,
+        server_state: ServerState,
+    ) -> None:
+        """Steer (asap) on a busy session must return non-None.
+
+        Regression test for issue #253 fix: the fix only changes followup
+        (when_idle) to return None. Steers (asap) must still return
+        non-None so they wait for completion and finalize.
+
+        Given: a session with an active run
+        When: a steer (DeliveryMode.STEER) is sent while the run is active
+        Then: route_message returns non-None (steer accepted, not queued)
+        """
+        from agentpool_server.opencode_server.session_pool_integration import (
+            OpenCodeSessionPoolIntegration,
+        )
+
+        integration = OpenCodeSessionPoolIntegration(
+            session_pool=session_pool,
+            server_state=server_state,
+        )
+
+        await integration.create_session(
+            session_id="test-session-steer-busy",
+            agent_name="test-agent",
+        )
+
+        # First message starts a run
+        run_handle_1 = await integration.route_message(
+            session_id="test-session-steer-busy",
+            content="First message",
+            priority="when_idle",
+        )
+        assert run_handle_1 is not None
+
+        # Steer while run is active — must return non-None
+        run_handle_2 = await integration.route_message(
+            session_id="test-session-steer-busy",
+            content="Steer this",
+            priority="asap",
+        )
+        assert run_handle_2 is not None, (
+            "Steer on busy session must return non-None. "
+            "The fix for #253 only affects followups (when_idle), "
+            "not steers (asap)."
+        )
+
+    @pytest.mark.asyncio
+    async def test_concurrent_queue_one_run_one_followup(
+        self,
+        session_pool: SessionPool,
+        server_state: ServerState,
+    ) -> None:
+        """Two concurrent QUEUE messages: first starts run, second returns None.
+
+        This is the integration-level test for issue #253: it goes through
+        the real _route_message code and verifies that the followup
+        returns None, preventing duplicate finalization.
+
+        Given: a session
+        When: two QUEUE messages are sent concurrently via route_message
+        Then: first returns non-None (new run), second returns None (followup)
+        """
+        from agentpool_server.opencode_server.session_pool_integration import (
+            OpenCodeSessionPoolIntegration,
+        )
+
+        integration = OpenCodeSessionPoolIntegration(
+            session_pool=session_pool,
+            server_state=server_state,
+        )
+
+        await integration.create_session(
+            session_id="test-session-concurrent-queue",
+            agent_name="test-agent",
+        )
+
+        # Send two concurrent QUEUE messages
+        results = await asyncio.gather(
+            integration.route_message(
+                session_id="test-session-concurrent-queue",
+                content="First message",
+                priority="when_idle",
+            ),
+            integration.route_message(
+                session_id="test-session-concurrent-queue",
+                content="Second message",
+                priority="when_idle",
+            ),
+        )
+
+        # One should be non-None (new run), one should be None (followup)
+        non_none = [r for r in results if r is not None]
+        none_count = sum(1 for r in results if r is None)
+
+        assert len(non_none) == 1, (
+            f"Expected exactly 1 non-None result (new run), got {len(non_none)}. Results: {results}"
+        )
+        assert none_count == 1, (
+            f"Expected exactly 1 None result (followup queued), got {none_count}. "
+            f"Results: {results}"
+        )
 
     @pytest.mark.asyncio
     async def test_route_message_with_asap_priority_injects(

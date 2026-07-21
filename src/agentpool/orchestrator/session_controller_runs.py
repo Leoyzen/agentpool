@@ -135,23 +135,35 @@ class SessionControllerRunsMixin:
                         session.set_current_run_id(None)
                     if session.prompt_queue.empty():
                         break  # No more prompts, session goes idle.
-                    try:
-                        next_prompt = session.prompt_queue.get_nowait()
-                    except asyncio.QueueEmpty:
+                    # Drain ALL queued followup prompts at once so the
+                    # next turn receives every followup message together
+                    # (issue #253). Each followup's user message was
+                    # already persisted in _process_message Phase 1;
+                    # merging them into one turn avoids N separate model
+                    # calls. The flattening in _execute_turn →
+                    # NativeTurn/ACPTurn handles the list-of-prompts
+                    # correctly.
+                    prompts: list[str | list[Any]] = []
+                    while not session.prompt_queue.empty():
+                        try:
+                            prompts.append(session.prompt_queue.get_nowait())
+                        except asyncio.QueueEmpty:
+                            break
+                    if not prompts:
                         break
-                    # Create a new RunHandle for the next prompt.
+                    # Create a new RunHandle for the drained prompts.
                     agent = current_handle.agent
                     if agent is None:
                         break
-                    current_handle = self._create_per_prompt_handle(session, agent, next_prompt)
-                    current_prompt = next_prompt
+                    current_handle = self._create_per_prompt_handle(session, agent, prompts)
+                    current_prompt = prompts
                     # Loop continues — execute the next turn.
 
     def _create_per_prompt_handle(
         self,
         session: SessionState,
         agent: BaseAgent[Any, Any],
-        prompt: str | list[Any],
+        prompt: str | list[Any] | list[str | list[Any]],
     ) -> RunHandle:
         """Create a new RunHandle for a single prompt (chaining).
 
@@ -162,7 +174,9 @@ class SessionControllerRunsMixin:
         Args:
             session: The session state.
             agent: The agent instance.
-            prompt: The prompt for this turn.
+            prompt: The prompt(s) for this turn. Unused inside this
+                method — the prompt is passed to ``start()`` by the
+                caller. Kept for API compatibility.
 
         Returns:
             A newly created and registered RunHandle.
@@ -352,7 +366,14 @@ class SessionControllerRunsMixin:
                 else:
                     fb = Feedback(content=content, is_steer=False, **fb_kwargs)
                 session.prompt_queue.put_nowait(fb.content_blocks or fb.content)
-                return fb.message_id
+                # Return None for queued followups so that _wait_and_finalize
+                # takes the early-return path (line 673: ``if ctx.message_id
+                # is None: return``). Returning non-None here causes both
+                # the original request and the followup to wait on the same
+                # complete_event and finalize independently, producing
+                # duplicate MessageUpdatedEvent broadcasts.
+                # See issue #253 for details.
+                return None
         return None
 
     def cancel_run_for_session(self, session_id: str) -> bool:

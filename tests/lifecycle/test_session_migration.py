@@ -568,8 +568,10 @@ async def test_route_message_when_idle_enqueues_to_prompt_queue() -> None:
         priority="when_idle",
     )
 
-    # Should return a message_id (not None).
-    assert result is not None
+    # Should return None — followup is enqueued, not started as a new run.
+    # This prevents duplicate finalization when the sync /message handler
+    # calls _wait_and_finalize (issue #253).
+    assert result is None
     # The message should be in prompt_queue.
     assert not session.prompt_queue.empty()
     queued = session.prompt_queue.get_nowait()
@@ -678,7 +680,11 @@ async def test_consume_run_chains_via_prompt_queue() -> None:
         f"Expected 2 turns, got {len(captured_prompts)}: {captured_prompts}"
     )
     assert captured_prompts[0] == ["first prompt"]
-    assert captured_prompts[1] == ["second prompt"]
+    # _consume_run drains all queued prompts into a list and passes
+    # them to start(). start() wraps the list, so create_turn receives
+    # [["second prompt"]] (list containing one list). The flatten in
+    # NativeTurn/ACPTurn undoes the extra wrapping (issue #253).
+    assert captured_prompts[1] == [["second prompt"]]
 
     # prompt_queue should be drained.
     assert session.prompt_queue.empty()
@@ -761,10 +767,13 @@ async def test_consume_run_fifo_ordering_of_queued_prompts() -> None:
 
     await asyncio.sleep(0.5)
 
-    # Three turns in order: first, second, third.
-    assert len(captured_prompts) == 3
+    # Two turns: first prompt alone, then both followups drained together.
+    # drain-all behavior: _consume_run drains ALL queued prompts at once
+    # and passes them as a single list to the next turn.
+    assert len(captured_prompts) == 2
     assert captured_prompts[0] == ["first"]
-    assert captured_prompts[1] == ["second"]
-    assert captured_prompts[2] == ["third"]
+    # Followups are drained together: ["second", "third"] wrapped by
+    # start() → [["second", "third"]] → flattened by Turn layer.
+    assert captured_prompts[1] == [["second", "third"]]
     assert session.prompt_queue.empty()
     assert session.current_run_id is None
