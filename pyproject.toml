@@ -31,8 +31,8 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "alembic>=1.16.5",
   "ag-ui-protocol>=0.1.10",
+  "alembic>=1.16.5",
   "anyenv[httpx]>=0.3.0",
   "anyio>=4.0",
   # "clawd-code-sdk@git+https://github.com/phil65/claude-agent-sdk-python.git@efbaa798",
@@ -94,6 +94,14 @@ acp-bridge = "acp.bridge.__main__:main"
 agentpool = "agentpool_cli.__main__:cli"
 agentpool-db = "agentpool_storage.sql_provider.cli:main"
 
+[project.entry-points."agentpool.capabilities"]
+mcp = "agentpool.capabilities.mcp_server_cap:McpServerCap"
+function_tools = "agentpool.capabilities.function_toolset:FunctionToolsetCapability"
+subagent = "agentpool.capabilities.subagent_capability:SubagentCapability"
+skill = "agentpool.capabilities.skill_manager_cap:SkillManagerCap"
+combined = "agentpool.capabilities.combined_toolset:CombinedToolsetCapability"
+code_mode = "agentpool.capabilities.code_mode_capability:CodeModeCapability"
+
 [project.entry-points."fsspec.specs"]
 acp = "acp.filesystem:ACPFileSystem"
 
@@ -102,14 +110,6 @@ agentpool = "agentpool.utils:setup_env"
 
 [project.entry-points."universal_pathlib.implementations"]
 acp = "acp.filesystem:ACPPath"
-
-[project.entry-points."agentpool.capabilities"]
-mcp = "agentpool.capabilities.mcp_server_cap:McpServerCap"
-function_tools = "agentpool.capabilities.function_toolset:FunctionToolsetCapability"
-subagent = "agentpool.capabilities.subagent_capability:SubagentCapability"
-skill = "agentpool.capabilities.skill_manager_cap:SkillManagerCap"
-combined = "agentpool.capabilities.combined_toolset:CombinedToolsetCapability"
-code_mode = "agentpool.capabilities.code_mode_capability:CodeModeCapability"
 
 [project.optional-dependencies]
 a2a = ["fasta2a", "starlette"]  # A2A Server
@@ -221,6 +221,136 @@ exclude_lines = [
 ]
 show_missing = true
 skip_covered = true
+
+[tool.importlinter]
+root_packages = [
+  "agentpool",
+  "agentpool_config",
+  "agentpool_server",
+  "agentpool_toolsets",
+  "agentpool_storage",
+  "agentpool_cli",
+  "agentpool_commands",
+  "agentpool_prompts",
+  "acp",
+]
+
+[[tool.importlinter.contracts]]
+name = "Server must not import from core app logic"
+type = "forbidden"
+source_modules = ["agentpool_server"]
+forbidden_modules = ["agentpool_commands", "agentpool_cli"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Config must not import from core"
+type = "forbidden"
+source_modules = ["agentpool_config"]
+forbidden_modules = [
+  "agentpool",
+  "agentpool_server",
+  "agentpool_toolsets",
+  "agentpool_storage",
+  "agentpool_commands",
+  "agentpool_cli"
+]
+# Pre-existing direct violations are listed in ignore_imports; remove entries
+# as imports are fixed during Phase 7 refactoring. Indirect violations are
+# excluded via allow_indirect_imports until the config→core dependency chains
+# are untangled (see OpenSpec thin-wrapper-refactor Phase 7 tasks).
+allow_indirect_imports = true
+ignore_imports = [
+  "agentpool_config.agentpool_tools -> agentpool.prompts.conversion_manager",
+  "agentpool_config.agentpool_tools -> agentpool.tool_impls.agent_cli",
+  "agentpool_config.agentpool_tools -> agentpool.tool_impls.bash",
+  "agentpool_config.agentpool_tools -> agentpool.tool_impls.delete_path",
+  "agentpool_config.agentpool_tools -> agentpool.tool_impls.download_file",
+  "agentpool_config.agentpool_tools -> agentpool.tool_impls.execute_code",
+  "agentpool_config.agentpool_tools -> agentpool.tool_impls.grep",
+  "agentpool_config.agentpool_tools -> agentpool.tool_impls.list_directory",
+  "agentpool_config.agentpool_tools -> agentpool.tool_impls.question",
+  "agentpool_config.agentpool_tools -> agentpool.tool_impls.read",
+  "agentpool_config.agentpool_tools -> agentpool.tools.base",
+  "agentpool_config.compaction -> agentpool.messaging.compaction",
+  "agentpool_config.conditions -> agentpool.talk.registry",
+  "agentpool_config.conditions -> agentpool.utils.inspection",
+  "agentpool_config.conditions -> agentpool.utils.time_utils",
+  "agentpool_config.durable -> agentpool.utils.parse_time",
+  "agentpool_config.event_handlers -> agentpool.agents.events",
+  "agentpool_config.event_handlers -> agentpool.agents.events.builtin_handlers",
+  "agentpool_config.event_handlers -> agentpool.agents.events.tts_handlers",
+  "agentpool_config.event_handlers -> agentpool.common_types",
+  "agentpool_config.event_handlers -> agentpool.utils.importing",
+  "agentpool_config.events -> agentpool.messaging.events",
+  "agentpool_config.forward_targets -> agentpool",
+  "agentpool_config.forward_targets -> agentpool.messaging",
+  "agentpool_config.forward_targets -> agentpool.utils.inspection",
+  "agentpool_config.forward_targets -> agentpool.utils.model_helpers",
+  "agentpool_config.forward_targets -> agentpool.utils.time_utils",
+  "agentpool_config.hooks -> agentpool.hooks",
+  "agentpool_config.hooks -> agentpool.hooks.base",
+  "agentpool_config.knowledge -> agentpool.prompts.prompts",
+  "agentpool_config.loaders -> agentpool.common_types",
+  "agentpool_config.loaders -> agentpool.mime_utils",
+  "agentpool_config.loaders -> agentpool.utils.importing",
+  "agentpool_config.nodes -> agentpool.common_types",
+  "agentpool_config.prompt_hubs -> agentpool_prompts.braintrust_hub",
+  "agentpool_config.prompt_hubs -> agentpool_prompts.fabric",
+  "agentpool_config.prompt_hubs -> agentpool_prompts.langfuse_hub",
+  "agentpool_config.prompt_hubs -> agentpool_prompts.promptlayer_provider",
+  "agentpool_config.prompts -> agentpool.log",
+  "agentpool_config.session -> agentpool.utils.parse_time",
+  "agentpool_config.session -> agentpool.utils.time_utils",
+  "agentpool_config.storage -> agentpool_storage.acp_provider",
+  "agentpool_config.storage -> agentpool_storage.base",
+  "agentpool_config.storage -> agentpool_storage.file_provider",
+  "agentpool_config.storage -> agentpool_storage.memory_provider",
+  "agentpool_config.storage -> agentpool_storage.opencode_provider",
+  "agentpool_config.storage -> agentpool_storage.sql_provider",
+  "agentpool_config.storage -> agentpool_storage.zed_provider",
+  "agentpool_config.task -> agentpool.agents",
+  "agentpool_config.task -> agentpool.prompts.prompts",
+  "agentpool_config.task -> agentpool.tools.base",
+  "agentpool_config.task -> agentpool.utils.model_capabilities",
+  "agentpool_config.tools -> agentpool.tools.base",
+  "agentpool_config.tools -> agentpool.utils.parse_time",
+  "agentpool_config.toolsets -> agentpool.prompts.conversion_manager",
+  "agentpool_config.toolsets -> agentpool.capabilities.combined_toolset",
+  "agentpool_config.toolsets -> agentpool.capabilities.filtered_toolset",
+  "agentpool_config.toolsets -> agentpool.capabilities.function_toolset",
+  "agentpool_config.toolsets -> agentpool.models.model_configs",
+  "agentpool_config.toolsets -> agentpool.utils.importing",
+  "agentpool_config.toolsets -> agentpool_toolsets.builtin",
+  "agentpool_config.toolsets -> agentpool_toolsets.builtin.code",
+  "agentpool_config.toolsets -> agentpool_toolsets.builtin.debug",
+  "agentpool_config.toolsets -> agentpool_toolsets.builtin.subagent_tools",
+  "agentpool_config.toolsets -> agentpool_toolsets.builtin.workers",
+  "agentpool_config.toolsets -> agentpool_toolsets.composio_toolset",
+  "agentpool_config.toolsets -> agentpool_toolsets.config_creation",
+  "agentpool_config.toolsets -> agentpool_toolsets.cron",
+  "agentpool_config.toolsets -> agentpool_toolsets.entry_points",
+  "agentpool_config.toolsets -> agentpool_toolsets.fsspec_toolset",
+  "agentpool_config.toolsets -> agentpool_toolsets.mcp_discovery.toolset",
+  "agentpool_config.toolsets -> agentpool_toolsets.notifications",
+  "agentpool_config.toolsets -> agentpool_toolsets.openapi",
+  "agentpool_config.toolsets -> agentpool_toolsets.search_toolset",
+  "agentpool_config.toolsets -> agentpool_toolsets.vfs_toolset",
+]
+
+[[tool.importlinter.contracts]]
+name = "ACP package must not import from server"
+type = "forbidden"
+source_modules = ["acp"]
+forbidden_modules = ["agentpool_server", "agentpool_commands", "agentpool_cli"]
+# No direct violations exist; all violations are indirect (acp -> agentpool.utils
+# -> ... -> server). Indirect checks are disabled via allow_indirect_imports
+# until the downstream agentpool.common_types -> agentpool_server chain is fixed
+# (see OpenSpec thin-wrapper-refactor Phase 7 tasks).
+allow_indirect_imports = true
+
+# [tool.uv.sources]
+# exxec = { path = "../exxec", editable = true }
+# schemez = { path = "../schemez", editable = true }
 
 [tool.logfire]
 ignore_no_config = true
@@ -339,7 +469,10 @@ reportPrivateImportUsage = false
 reportUnusedExpression = false
 
 [tool.pytest]
-addopts = ["-m", "not slow and not snapshot and not e2e and not real_model and not real_mcp"]
+addopts = [
+  "-m",
+  "not slow and not snapshot and not e2e and not real_model and not real_mcp"
+]
 filterwarnings = [
   "ignore::DeprecationWarning:psygnal.*",
   "ignore::DeprecationWarning:pydantic.*:",
@@ -356,6 +489,7 @@ markers = [
   "incompatible_with_thinking: marks tests that use structured output (tool_choice: required) which is incompatible with thinking-mode models (DeepSeek, Kimi) — see issue #84",
   "integration: marks tests as integration tests",
   "isolated: test requires fresh server (bypasses subprocess cache)",
+  "known_bug: Test that reproduces a known bug (xfail until fixed)",
   "real_mcp: marks tests that use real MCPToolset connections (skips __aenter__/__aexit__ mock fixture)",
   "real_model: marks tests that make real model API calls (auto-skipped without OPENAI_API_KEY, replaces requires_openai_key)",
   "security: security-related tests",
@@ -363,7 +497,6 @@ markers = [
   "snapshot: marks tests as syrupy snapshot tests (excluded by default, renamed from acp_snapshot)",
   "unit: marks tests as unit tests",
   "vcr: marks tests as VCR cassette replay tests",
-  "known_bug: Test that reproduces a known bug (xfail until fixed)",
 ]
 minversion = "9.0"
 python_files = ["test_*.py"]
@@ -405,126 +538,3 @@ source-exclude = [
   ".pytest_cache/**",
   ".ruff_cache/**",
 ]
-
-[tool.importlinter]
-root_packages = [
-    "agentpool",
-    "agentpool_config",
-    "agentpool_server",
-    "agentpool_toolsets",
-    "agentpool_storage",
-    "agentpool_cli",
-    "agentpool_commands",
-    "agentpool_prompts",
-    "acp",
-]
-
-[[tool.importlinter.contracts]]
-name = "Server must not import from core app logic"
-type = "forbidden"
-source_modules = ["agentpool_server"]
-forbidden_modules = ["agentpool_commands", "agentpool_cli"]
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-name = "Config must not import from core"
-type = "forbidden"
-source_modules = ["agentpool_config"]
-forbidden_modules = ["agentpool", "agentpool_server", "agentpool_toolsets", "agentpool_storage", "agentpool_commands", "agentpool_cli"]
-# Pre-existing direct violations are listed in ignore_imports; remove entries
-# as imports are fixed during Phase 7 refactoring. Indirect violations are
-# excluded via allow_indirect_imports until the config→core dependency chains
-# are untangled (see OpenSpec thin-wrapper-refactor Phase 7 tasks).
-allow_indirect_imports = true
-ignore_imports = [
-    "agentpool_config.agentpool_tools -> agentpool.prompts.conversion_manager",
-    "agentpool_config.agentpool_tools -> agentpool.tool_impls.agent_cli",
-    "agentpool_config.agentpool_tools -> agentpool.tool_impls.bash",
-    "agentpool_config.agentpool_tools -> agentpool.tool_impls.delete_path",
-    "agentpool_config.agentpool_tools -> agentpool.tool_impls.download_file",
-    "agentpool_config.agentpool_tools -> agentpool.tool_impls.execute_code",
-    "agentpool_config.agentpool_tools -> agentpool.tool_impls.grep",
-    "agentpool_config.agentpool_tools -> agentpool.tool_impls.list_directory",
-    "agentpool_config.agentpool_tools -> agentpool.tool_impls.question",
-    "agentpool_config.agentpool_tools -> agentpool.tool_impls.read",
-    "agentpool_config.agentpool_tools -> agentpool.tools.base",
-    "agentpool_config.compaction -> agentpool.messaging.compaction",
-    "agentpool_config.conditions -> agentpool.talk.registry",
-    "agentpool_config.conditions -> agentpool.utils.inspection",
-    "agentpool_config.conditions -> agentpool.utils.time_utils",
-    "agentpool_config.durable -> agentpool.utils.parse_time",
-    "agentpool_config.event_handlers -> agentpool.agents.events",
-    "agentpool_config.event_handlers -> agentpool.agents.events.builtin_handlers",
-    "agentpool_config.event_handlers -> agentpool.agents.events.tts_handlers",
-    "agentpool_config.event_handlers -> agentpool.common_types",
-    "agentpool_config.event_handlers -> agentpool.utils.importing",
-    "agentpool_config.events -> agentpool.messaging.events",
-    "agentpool_config.forward_targets -> agentpool",
-    "agentpool_config.forward_targets -> agentpool.messaging",
-    "agentpool_config.forward_targets -> agentpool.utils.inspection",
-    "agentpool_config.forward_targets -> agentpool.utils.model_helpers",
-    "agentpool_config.forward_targets -> agentpool.utils.time_utils",
-    "agentpool_config.hooks -> agentpool.hooks",
-    "agentpool_config.hooks -> agentpool.hooks.base",
-    "agentpool_config.knowledge -> agentpool.prompts.prompts",
-    "agentpool_config.loaders -> agentpool.common_types",
-    "agentpool_config.loaders -> agentpool.mime_utils",
-    "agentpool_config.loaders -> agentpool.utils.importing",
-    "agentpool_config.nodes -> agentpool.common_types",
-    "agentpool_config.prompt_hubs -> agentpool_prompts.braintrust_hub",
-    "agentpool_config.prompt_hubs -> agentpool_prompts.fabric",
-    "agentpool_config.prompt_hubs -> agentpool_prompts.langfuse_hub",
-    "agentpool_config.prompt_hubs -> agentpool_prompts.promptlayer_provider",
-    "agentpool_config.prompts -> agentpool.log",
-    "agentpool_config.session -> agentpool.utils.parse_time",
-    "agentpool_config.session -> agentpool.utils.time_utils",
-    "agentpool_config.storage -> agentpool_storage.acp_provider",
-    "agentpool_config.storage -> agentpool_storage.base",
-    "agentpool_config.storage -> agentpool_storage.file_provider",
-    "agentpool_config.storage -> agentpool_storage.memory_provider",
-    "agentpool_config.storage -> agentpool_storage.opencode_provider",
-    "agentpool_config.storage -> agentpool_storage.sql_provider",
-    "agentpool_config.storage -> agentpool_storage.zed_provider",
-    "agentpool_config.task -> agentpool.agents",
-    "agentpool_config.task -> agentpool.prompts.prompts",
-    "agentpool_config.task -> agentpool.tools.base",
-    "agentpool_config.task -> agentpool.utils.model_capabilities",
-    "agentpool_config.tools -> agentpool.tools.base",
-    "agentpool_config.tools -> agentpool.utils.parse_time",
-    "agentpool_config.toolsets -> agentpool.prompts.conversion_manager",
-    "agentpool_config.toolsets -> agentpool.capabilities.combined_toolset",
-    "agentpool_config.toolsets -> agentpool.capabilities.filtered_toolset",
-    "agentpool_config.toolsets -> agentpool.capabilities.function_toolset",
-    "agentpool_config.toolsets -> agentpool.models.model_configs",
-    "agentpool_config.toolsets -> agentpool.utils.importing",
-    "agentpool_config.toolsets -> agentpool_toolsets.builtin",
-    "agentpool_config.toolsets -> agentpool_toolsets.builtin.code",
-    "agentpool_config.toolsets -> agentpool_toolsets.builtin.debug",
-    "agentpool_config.toolsets -> agentpool_toolsets.builtin.subagent_tools",
-    "agentpool_config.toolsets -> agentpool_toolsets.builtin.workers",
-    "agentpool_config.toolsets -> agentpool_toolsets.composio_toolset",
-    "agentpool_config.toolsets -> agentpool_toolsets.config_creation",
-    "agentpool_config.toolsets -> agentpool_toolsets.cron",
-    "agentpool_config.toolsets -> agentpool_toolsets.entry_points",
-    "agentpool_config.toolsets -> agentpool_toolsets.fsspec_toolset",
-    "agentpool_config.toolsets -> agentpool_toolsets.mcp_discovery.toolset",
-    "agentpool_config.toolsets -> agentpool_toolsets.notifications",
-    "agentpool_config.toolsets -> agentpool_toolsets.openapi",
-    "agentpool_config.toolsets -> agentpool_toolsets.search_toolset",
-    "agentpool_config.toolsets -> agentpool_toolsets.vfs_toolset",
-]
-
-[[tool.importlinter.contracts]]
-name = "ACP package must not import from server"
-type = "forbidden"
-source_modules = ["acp"]
-forbidden_modules = ["agentpool_server", "agentpool_commands", "agentpool_cli"]
-# No direct violations exist; all violations are indirect (acp -> agentpool.utils
-# -> ... -> server). Indirect checks are disabled via allow_indirect_imports
-# until the downstream agentpool.common_types -> agentpool_server chain is fixed
-# (see OpenSpec thin-wrapper-refactor Phase 7 tasks).
-allow_indirect_imports = true
-
-# [tool.uv.sources]
-# exxec = { path = "../exxec", editable = true }
-# schemez = { path = "../schemez", editable = true }

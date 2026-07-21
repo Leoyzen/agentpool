@@ -289,7 +289,7 @@ class TestConcurrentMessageHandling:
             all_events.append(event)
             await original_broadcast(event)
 
-        state.broadcast_event = tracking_broadcast  # type: ignore[method-assign]
+        state.broadcast_event = tracking_broadcast  # type: ignore[method-assign]  # ty: ignore[invalid-assignment]
 
         # Send two messages concurrently to the same session
         # This should NOT cause concurrent processing
@@ -354,7 +354,7 @@ class TestConcurrentMessageHandling:
                 status_types_seen.append(event.properties.status.type)
             await original_broadcast(event)
 
-        state.broadcast_event = tracking_broadcast  # type: ignore[method-assign]
+        state.broadcast_event = tracking_broadcast  # type: ignore[method-assign]  # ty: ignore[invalid-assignment]
 
         # Process a message
         await _process_message(session_id, sample_message_request, state)

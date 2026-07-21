@@ -33,24 +33,30 @@ replace-imports-with-any = [
   "fastmcp.prompts.**",
   "fastmcp.tools.**",
   "apprise.**",
+  # TODO: ty has ~81% false-positive rate on pydantic-ai due to unsupported
+  # PEP 696 TypeVar defaults (ty#592), ParamSpec+Concatenate (ty#1535),
+  # TypedDict narrowing (ty#154), kwargs tracking (ty#1332), etc.
+  # Tracked in pydantic-ai#3970. Remove these once ty upstream fixes land.
+  "pydantic_ai.**",
+  "pydantic_graph.**",
 ]
 # Respect existing `# type: ignore` comments for mypy compatibility.
 respect-type-ignore-comments = true
 
 [rules]
 # --- Suppressed rules (known false positives or migration period) ---
-unused-type-ignore-comment = "ignore" # Migration: don't warn about stale ignores
-invalid-type-form = "ignore"          # Known FP in complex generics
-not-subscriptable = "ignore"          # Known FP with dynamic types
+unused-type-ignore-comment = "ignore"  # Migration: don't warn about stale ignores
+invalid-type-form = "ignore"  # Known FP in complex generics
+not-subscriptable = "ignore"  # Known FP with dynamic types
 
 # --- Warn-level rules ---
-division-by-zero = "warn"             # Default is ignore; enable as warning
-possibly-missing-import = "warn"      # Imports that might be missing
-possibly-unresolved-reference = "warn" # Approximates mypy warn_return_any
-unresolved-import = "warn"            # Import resolution failures
+division-by-zero = "warn"  # Default is ignore; enable as warning
+possibly-missing-import = "warn"  # Imports that might be missing
+possibly-unresolved-reference = "warn"  # Approximates mypy warn_return_any
+unresolved-import = "warn"  # Import resolution failures
 
 # --- Error-level rules (approximate mypy strict) ---
-missing-type-argument = "error"       # Approximates mypy disallow_any_generics
+missing-type-argument = "error"  # Approximates mypy disallow_any_generics
 
 [terminal]
 # Migration period: warnings don't cause non-zero exit code.
