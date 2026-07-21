@@ -42,6 +42,38 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _apply_revert_filter(
+    session: Session | None,
+    messages: list[MessageWithParts],
+) -> list[MessageWithParts]:
+    """Apply soft-hide filter based on ``session.revert``.
+
+    If the session has a revert point set, messages at and after the revert
+    message are hidden from the returned list.  Messages before the revert
+    point are returned unchanged.  The underlying message list is not
+    modified — this is a read-only filter.
+
+    Args:
+        session: The OpenCode Session model (may be ``None`` if not cached).
+        messages: The full message list.
+
+    Returns:
+        Filtered message list, or the original list if no revert is set
+        or the revert message_id is not found (defensive fallback).
+    """
+    if session is None or session.revert is None:
+        return messages
+
+    revert_msg_id = session.revert.message_id
+    for i, msg in enumerate(messages):
+        if msg.info.id == revert_msg_id:
+            return messages[:i]
+
+    # Defensive fallback: revert message_id not found in the message list.
+    # This can happen if the message was already deleted or the ID is stale.
+    return messages
+
+
 async def get_messages_for_session(
     state: ServerState,
     session_id: str,
@@ -52,6 +84,11 @@ async def get_messages_for_session(
     ``state.messages`` cache is consulted first because streaming parts are
     updated in-place on those objects and may be more recent than the
     SessionPool snapshot.
+
+    A soft-hide filter is applied to all return paths: when
+    ``session.revert`` is set, messages at and after the revert point are
+    hidden from the result, even though they still exist in the DB and
+    in-memory state.
 
     Args:
         state: The OpenCode server state.
@@ -67,7 +104,7 @@ async def get_messages_for_session(
     cached_session = state.sessions.get(session_id)
     is_subagent = cached_session is not None and cached_session.parent_id is not None
     if is_subagent and messages:
-        return messages
+        return _apply_revert_filter(cached_session, messages)
 
     session_pool = getattr(state.pool, "session_pool", None)
     if session_pool is not None:
@@ -83,7 +120,7 @@ async def get_messages_for_session(
             if existing_agent is not None:
                 agent = existing_agent
             default_model_id, default_provider_id = state.resolve_default_model_info()
-            return [
+            converted = [
                 chat_message_to_opencode(
                     chat_msg,
                     session_id=session_id,
@@ -94,7 +131,8 @@ async def get_messages_for_session(
                 )
                 for chat_msg in sp_messages
             ]
-    return messages
+            return _apply_revert_filter(cached_session, converted)
+    return _apply_revert_filter(cached_session, messages)
 
 
 async def append_message_to_session(

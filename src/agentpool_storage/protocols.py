@@ -135,7 +135,7 @@ class MessagePersistence(Protocol):
         session_id: str,
         up_to_message_id: str,
     ) -> int:
-        """Remove messages after the given ID. Returns count removed."""
+        """Delete the message with up_to_message_id and all after it. Returns count removed."""
         ...
 
     async def fork_conversation(

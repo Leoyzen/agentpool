@@ -287,3 +287,52 @@ class SQLMessagesMixin:
             )
             await session.commit()
             return count
+
+    async def truncate_messages(self, session_id: str, up_to_message_id: str) -> int:
+        """Delete the message with up_to_message_id and all messages after it.
+
+        Finds the boundary message by ``session_id`` + ``up_to_message_id``,
+        reads its timestamp, then deletes every message in the session whose
+        timestamp is greater than or equal to that boundary timestamp.
+
+        Args:
+            session_id: ID of the conversation to truncate.
+            up_to_message_id: ID of the message that marks the truncation
+                boundary. This message and everything after it is deleted.
+
+        Returns:
+            The count of deleted messages. Returns 0 when the boundary
+            message does not exist in the session.
+        """
+        from sqlalchemy import delete, func
+
+        async with AsyncSession(self.engine) as session:
+            # Find the boundary message to get its timestamp.
+            boundary_result = await session.execute(
+                select(Message.timestamp).where(
+                    Message.id == up_to_message_id,
+                    Message.session_id == session_id,
+                )
+            )
+            boundary_timestamp = boundary_result.scalar_one_or_none()
+            if boundary_timestamp is None:
+                return 0
+
+            # Count the messages that will be deleted.
+            count_result = await session.execute(
+                select(func.count()).where(
+                    Message.session_id == session_id,
+                    Message.timestamp >= boundary_timestamp,
+                )
+            )
+            count = count_result.scalar() or 0
+
+            # Delete the boundary message and everything after it.
+            await session.execute(
+                delete(Message).where(  # type: ignore[arg-type]
+                    Message.session_id == session_id,
+                    Message.timestamp >= boundary_timestamp,
+                )
+            )
+            await session.commit()
+            return count

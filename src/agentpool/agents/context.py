@@ -185,6 +185,17 @@ class AgentRunContext:
     share the same ``turn_id`` for idempotent crash recovery.
     """
 
+    opencode_message_id: str | None = None
+    """OpenCode message ID for the current user message.
+
+    Set by the OpenCode server when routing a user message. This is the
+    same ID space as ``request.message_id`` in the revert endpoint, so
+    ``FileOpsTracker.record_change()`` uses this field (with ``turn_id``
+    as fallback) as the ``message_id`` for file change tracking. Without
+    this, file rollback would silently fail because ``turn_id`` (UUID)
+    and the OpenCode message ID are different ID spaces.
+    """
+
     async def complete_background_task(self, child_session_id: str, message: str) -> None:
         """Signal that a background child task has completed.
 

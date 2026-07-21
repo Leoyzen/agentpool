@@ -352,7 +352,7 @@ class SessionControllerRunsMixin:
                 else:
                     fb = Feedback(content=content, is_steer=False, **fb_kwargs)
                 session.prompt_queue.put_nowait(fb.content_blocks or fb.content)
-                return fb.message_id
+                return None  # Queued — _wait_and_finalize will early-return
         return None
 
     def cancel_run_for_session(self, session_id: str) -> bool:

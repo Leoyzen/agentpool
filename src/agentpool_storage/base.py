@@ -374,14 +374,15 @@ class StorageProvider:
         session_id: str,
         up_to_message_id: str,
     ) -> int:
-        """Remove all messages after the given message ID.
+        """Delete the message with up_to_message_id and all messages after it.
 
-        Keeps messages up to and including up_to_message_id,
-        removes everything after it. Used by revert_session.
+        Removes the target message and every message whose timestamp is
+        greater than or equal to the target message's timestamp. Used by
+        ``revert_session`` to roll a conversation back to a prior point.
 
         Args:
             session_id: ID of the conversation to truncate
-            up_to_message_id: Keep messages up to and including this ID
+            up_to_message_id: Delete this message and everything after it
 
         Returns:
             The count of removed messages

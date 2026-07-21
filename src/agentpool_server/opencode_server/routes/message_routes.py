@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     from pydantic_ai import UserContent
 
     from agentpool.common_types import PathReference
+    from agentpool.messaging import ChatMessage
     from agentpool.orchestrator.session_pool import SessionPool
     from agentpool_server.opencode_server.session_pool_integration import (
         OpenCodeSessionPoolIntegration,
@@ -364,6 +365,109 @@ async def _process_message(
     return result
 
 
+async def _truncate_agent_history(
+    session_pool: SessionPool,
+    session_id: str,
+    up_to_message_id: str,
+) -> None:
+    """Truncate the agent's in-memory ChatMessage list at the given message ID.
+
+    Finds the ChatMessage whose ``message_id`` matches ``up_to_message_id``
+    in the agent's conversation history and removes it and all subsequent
+    messages.  The OpenCode message ID is stored as the ``message_id``
+    field on each ChatMessage (set by ``opencode_to_chat_message``).
+
+    Args:
+        session_pool: The SessionPool owning the session's agent.
+        session_id: The session whose agent history should be truncated.
+        up_to_message_id: The OpenCode message ID marking the truncation
+            boundary. This message and everything after it is removed.
+    """
+    session_state = session_pool.sessions.get_session(session_id)
+    if session_state is None:
+        return
+    agent = session_state.agent
+    if agent is None:
+        return
+    try:
+        conversation = agent.conversation
+    except AttributeError:
+        return
+    if conversation is None:
+        return
+    chat_messages: list[ChatMessage[Any]] = list(conversation.chat_messages)
+    truncate_index = next(
+        (
+            i
+            for i, msg in enumerate(chat_messages)
+            if msg.message_id == up_to_message_id
+        ),
+        None,
+    )
+    if truncate_index is not None:
+        conversation.set_history(chat_messages[:truncate_index])
+
+
+async def _commit_revert(state: ServerState, session_id: str) -> None:
+    """COMMIT: delete reverted messages before creating a new user message.
+
+    When a session has a ``revert`` marker (set by STAGE), the next new
+    message triggers a COMMIT that truncates all messages from the revert
+    boundary onwards — from the DB, in-memory state, and the agent's
+    conversation history — then clears the marker.
+
+    Ordering (D10 — DB-first):
+        1. DB truncate FIRST (narrowly scoped ``contextlib.suppress`` wrapping
+           ONLY this call — suppresses ``NotImplementedError``, ``KeyError``,
+           ``TypeError``).
+        2. In-memory truncate (NOT inside suppress).
+        3. Agent history truncate (NOT inside suppress).
+        4. Clear marker + FileOps backup (NOT inside suppress).
+        5. Broadcast (NOT inside suppress).
+
+    If the DB raises a non-suppressed exception (e.g., ``SQLAlchemyError``),
+    in-memory is NOT truncated and the error propagates. The session remains
+    in STAGED state.
+
+    Args:
+        state: The OpenCode server state.
+        session_id: The session to COMMIT.
+    """
+    session = state.sessions.get(session_id)
+    if session is None or session.revert is None:
+        return
+
+    revert_msg_id = session.revert.message_id
+    session_pool = state.pool.session_pool
+
+    # 1. Truncate DB FIRST (narrowly scoped suppress — wraps ONLY this call)
+    if session_pool is not None:
+        with contextlib.suppress(NotImplementedError, KeyError, TypeError):
+            await session_pool.truncate_messages(session_id, revert_msg_id)
+
+    # 2. Truncate in-memory messages (NOT inside suppress)
+    messages = state.messages.get(session_id, [])
+    revert_index = next(
+        (i for i, m in enumerate(messages) if m.info.id == revert_msg_id),
+        None,
+    )
+    if revert_index is not None:
+        state.messages[session_id] = messages[:revert_index]
+
+    # 3. Truncate agent ChatMessage history (NOT inside suppress)
+    if session_pool is not None:
+        await _truncate_agent_history(session_pool, session_id, revert_msg_id)
+
+    # 4. Clear revert marker + FileOps backup (NOT inside suppress)
+    updated_session = session.model_copy(update={"revert": None})
+    state.sessions[session_id] = updated_session
+    state.reverted_messages.pop(session_id, None)
+    state.pool.file_ops.reverted_changes.clear()
+
+    # 5. Broadcast (NOT inside suppress)
+    await state.broadcast_event(SessionUpdatedEvent.create(updated_session))
+
+
 async def _route_message_locked(  # noqa: PLR0915
     session_id: str,
     request: MessageRequest,
@@ -385,19 +489,12 @@ async def _route_message_locked(  # noqa: PLR0915
         mark_busy: Whether to emit a busy transition before processing.
         mark_idle: Whether to emit an idle transition when processing completes.
     """
-    # --- Clear revert marker (mirrors opencode-native's revert.cleanup()) ---
-    # When a user does /undo then sends a new message, the session.revert
-    # marker must be cleared so the frontend stops filtering messages with
-    # ``message.id >= revert.messageID``.  Without this, ALL new messages
-    # are hidden because their ascending IDs are always >= revert.messageID.
-    session = state.sessions.get(session_id)
-    if session is not None and session.revert is not None:
-        updated_session = session.model_copy(update={"revert": None})
-        state.sessions[session_id] = updated_session
-        # Discard any stored reverted messages for this session
-        state.reverted_messages.pop(session_id, None)
-        # Broadcast so the frontend removes the revert filter immediately
-        await state.broadcast_event(SessionUpdatedEvent.create(updated_session))
+    # --- COMMIT: If session has a revert marker, delete reverted messages ---
+    # When a user does /undo then sends a new message, COMMIT truncates all
+    # messages from the revert boundary onwards (DB + in-memory + agent
+    # history) and clears the marker.  See ``_commit_revert`` for details
+    # on the DB-first ordering (D10).
+    await _commit_revert(state, session_id)
 
     # --- Mark session busy ---
     if mark_busy:
@@ -878,6 +975,10 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
         session = await get_or_load_session(state, session_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
+
+        # COMMIT: If session has a revert marker, delete reverted messages
+        # before creating the new user message (DB-first ordering, D10).
+        await _commit_revert(state, session_id)
 
         agent_name = _resolve_message_agent_name(state, session_id, request.agent)
         user_msg_id = identifier.ascending("message", request.message_id)
