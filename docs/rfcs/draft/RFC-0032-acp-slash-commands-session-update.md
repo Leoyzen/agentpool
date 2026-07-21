@@ -599,8 +599,8 @@ Revert by restoring:
 ### Related Documents
 
 - [ACP Slash Commands Protocol Spec](../../agent-client-protocol/docs/protocol/slash-commands.mdx)
-- [RFC-0016: Skill Slash Commands](./draft/RFC-0016-skill-slash-commands.md)
-- [RFC-0031: ACP Server Per-Session Agent Isolation](./RFC-0031-acp-per-session-agent-isolation.md)
+- [RFC-0016: Skill Slash Commands](./RFC-0016-skill-slash-commands.md)
+- [RFC-0031: ACP Server Per-Session Agent Isolation](../implemented/RFC-0031-acp-per-session-agent-isolation.md)
 
 ### Code References
 
