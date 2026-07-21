@@ -190,6 +190,14 @@ async def append_message_to_session(
         already_in_memory = any(m.info.id == msg_id for m in messages[session_id])
         if not already_in_memory:
             messages[session_id].append(msg)
+            logger.info(
+                "append_message_to_session APPENDED",
+                session_id=session_id,
+                message_id=msg_id,
+                role=getattr(msg.info, "role", "unknown"),
+                list_len=len(messages[session_id]),
+                all_ids=[m.info.id for m in messages[session_id]],
+            )
 
 
 async def set_messages_for_session(

@@ -11,13 +11,11 @@ import contextlib
 from dataclasses import dataclass, field
 import time
 from typing import TYPE_CHECKING, Any, ClassVar, Final
-import uuid
 
 import anyio
 import logfire
 
 from agentpool.agents.events import UserMessageInsertedEvent
-from agentpool.lifecycle.types import Feedback, ResumeResult
 from agentpool.log import get_logger
 from agentpool.orchestrator.runtime_registry import RuntimeAgentRegistry
 from agentpool.utils.time_utils import get_now
@@ -37,6 +35,7 @@ if TYPE_CHECKING:
         SnapshotStore,
         TriggerSource,
     )
+    from agentpool.lifecycle.types import Feedback, ResumeResult
     from agentpool.models.pending_interaction import PendingPermission
     from agentpool.orchestrator.event_bus import EventBus
     from agentpool_storage.protocols import SessionPersistence
@@ -320,8 +319,11 @@ class SessionState:
         blocking the synchronous caller. Silently skips when no event
         loop is running (``RuntimeError``) or no EventBus is available.
         """
+        from agentpool.utils.identifiers import ascending
+
         event_bus = self._event_bus
         if event_bus is None:
+            logger.debug("_emit_steer_event SKIP no EventBus", session_id=self.session_id)
             return
 
         async def _publish() -> None:
@@ -334,10 +336,16 @@ class SessionState:
                 try:
                     event = UserMessageInsertedEvent(
                         session_id=self.session_id,
-                        message_id=str(uuid.uuid4()),
+                        message_id=ascending("message"),
                         content=message,
                         delivery="steer",
                         source="background_task",
+                    )
+                    logger.info(
+                        "_emit_steer_event PUBLISHING",
+                        session_id=self.session_id,
+                        message_id=event.message_id,
+                        content_preview=message[:100],
                     )
                     await event_bus.publish(self.session_id, event)
                 except Exception:  # noqa: BLE001

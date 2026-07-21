@@ -617,10 +617,12 @@ class RunHandle:
                 a user-visible action.
 
         Returns:
-            A ``message_id`` string (UUID4) on success, ``None`` if
+            A ``message_id`` string on success, ``None`` if
             no session is attached.
         """
-        message_id = str(uuid.uuid4())
+        from agentpool.utils.identifiers import ascending
+
+        message_id = ascending("message")
         session = self.session
         if session is None:
             return None
@@ -693,9 +695,11 @@ class RunHandle:
             session_id=self.session_id,
         ):
             try:
+                from agentpool.utils.identifiers import ascending
+
                 event = UserMessageInsertedEvent(
                     session_id=self.session_id,
-                    message_id=message_id or str(uuid.uuid4()),
+                    message_id=message_id or ascending("message"),
                     content=content,
                     delivery=delivery,
                     source=source,

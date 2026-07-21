@@ -88,12 +88,22 @@ class SessionControllerRunsMixin:
             source=source,
         ):
             try:
+                from agentpool.utils.identifiers import ascending
+
                 event = UserMessageInsertedEvent(
                     session_id=session_id,
-                    message_id=message_id or str(uuid.uuid4()),
+                    message_id=message_id or ascending("message"),
                     content=content,
                     delivery=delivery,  # type: ignore[arg-type]
                     source=source,  # type: ignore[arg-type]
+                )
+                logger.info(
+                    "UserMessageInsertedEvent PUBLISHED",
+                    message_id=event.message_id,
+                    session_id=session_id,
+                    delivery=delivery,
+                    source=source,
+                    content_preview=str(content)[:100],
                 )
                 if self._event_bus is not None:
                     await self._event_bus.publish(session_id, event)

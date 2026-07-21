@@ -945,8 +945,23 @@ class EventProcessor:
         # Dedup check
         if self._displayed_message_ids is not None:
             if message_id in self._displayed_message_ids:
+                logger.debug(
+                    "UserMessageInsertedEvent DEDUP SKIP",
+                    message_id=message_id,
+                    session_id=ctx.session_id,
+                    dedup_size=len(self._displayed_message_ids),
+                )
                 return
             self._displayed_message_ids.add(message_id)
+
+        logger.info(
+            "UserMessageInsertedEvent PROCESSING",
+            message_id=message_id,
+            session_id=ctx.session_id,
+            timestamp=timestamp,
+            content_preview=str(content)[:100],
+            dedup_size=len(self._displayed_message_ids) if self._displayed_message_ids else -1,
+        )
 
         # Convert epoch seconds to milliseconds for OpenCode's TimeCreated
         created_ms = int(timestamp * 1000)

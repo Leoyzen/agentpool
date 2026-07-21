@@ -415,11 +415,47 @@ class SessionPoolMessagingMixin:
         Returns:
             message_id if delivered, None otherwise.
         """
+        from agentpool.agents.events.events import UserMessageInsertedEvent
+        from agentpool.utils.identifiers import ascending
+
         session = self.sessions._sessions.get(session_id)
         if session is None:
             return None
-        # Emit UserMessageInsertedEvent for TUI display.
-        session._emit_steer_event(message)
+        # Publish UserMessageInsertedEvent FIRST (await, not fire-and-forget).
+        # This ensures the TUI creates the UserMessage with a timestamp-based
+        # message_id BEFORE the agent processes the steer and produces output.
+        # Use self._event_bus (SessionController's EventBus, always set by
+        # SessionPool.__init__) instead of session._event_bus (SessionState's
+        # field, only set by _initialize_lifecycle_and_recovery which is NOT
+        # called for ACP sessions).
+        event_bus = self._event_bus
+        logger.info(
+            "steer_from_background_task: event_bus check",
+            session_id=session_id,
+            has_event_bus=event_bus is not None,
+            session_event_bus=session._event_bus is not None if session else False,
+        )
+        if event_bus is not None:
+            with logfire.span(
+                "event.user_message_inserted.emit",
+                session_id=session_id,
+                delivery="steer",
+                source="background_task",
+            ):
+                try:
+                    event = UserMessageInsertedEvent(
+                        session_id=session_id,
+                        message_id=ascending("message"),
+                        content=message,
+                        delivery="steer",
+                        source="background_task",
+                    )
+                    await event_bus.publish(session_id, event)
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to emit UserMessageInsertedEvent from background task",
+                        exc_info=True,
+                    )
         # Try injecting into the active RunHandle.
         run_handle = self._get_active_run_handle(session_id)
         if run_handle is not None:

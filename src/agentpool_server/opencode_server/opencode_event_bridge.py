@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from agentpool.agents.events.events import (
     CustomEvent,
+    PartStartEvent,
     RunErrorEvent,
     RunFailedEvent,
     RunStartedEvent,
@@ -579,6 +580,47 @@ class OpenCodeEventBridgeMixin:
             # their message_id while the assistant message keeps the REST
             # handler's ID, so the UI cannot associate parts with the message.
             # The canonical assistant_msg_id from the REST handler is correct.
+
+            # Steer split: When a steer UserMessageInsertedEvent was received
+            # during an active turn, the next PartStartEvent (from the new
+            # ModelRequestNode after steer drain) triggers a logical turn split.
+            # This finalizes the current assistant message (A1) and creates a
+            # new one (A2) with a fresh message ID, so the steer user message
+            # sorts between A1 and A2 in the TUI's lexicographic message ID
+            # ordering. Without this split, the steer user message would sort
+            # after the entire assistant message (which reuses one ID for both
+            # pre-steer and post-steer content).
+            if (
+                isinstance(event, PartStartEvent)
+                and ctx._steer_received
+                and self._message_registered.get(session_id, False)
+            ):
+                await self._finalize_assistant_time(session_id)
+
+                assistant_msg_id, assistant_msg = self._create_assistant_message(session_id)
+                ctx.assistant_msg_id = assistant_msg_id
+                ctx.assistant_msg = assistant_msg
+                # Reset per-turn mutable tracking state (same as D1 reset)
+                ctx.response_text = ""
+                ctx.text_part = None
+                ctx.reasoning_part = None
+                ctx.tool_parts.clear()
+                ctx.tool_outputs.clear()
+                ctx.tool_inputs.clear()
+                ctx.subagent_tool_parts.clear()
+                ctx.is_errored = False
+                ctx.input_tokens = 0
+                ctx.output_tokens = 0
+                ctx.total_cost = 0.0
+                ctx.stream_start_ms = now_ms()
+
+                self._message_registered[session_id] = False
+                ctx._steer_received = False
+
+            # Set _steer_received flag when a steer user message arrives during
+            # an active turn. The next PartStartEvent will trigger the split.
+            if isinstance(event, UserMessageInsertedEvent) and event.delivery == "steer":
+                ctx._steer_received = True
 
             # Register assistant message on first non-spawn, non-custom,
             # non-user-message-inserted event.
