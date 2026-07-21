@@ -358,7 +358,19 @@ class SessionState:
         loop is running (``RuntimeError``) or no EventBus is available.
         """
         event_bus = self._event_bus
+        logger.info(
+            "_emit_steer_event called",
+            extra={
+                "session_id": self.session_id,
+                "has_event_bus": event_bus is not None,
+                "message_preview": message[:80],
+            },
+        )
         if event_bus is None:
+            logger.warning(
+                "_emit_steer_event skipped: event_bus is None",
+                extra={"session_id": self.session_id},
+            )
             return
 
         async def _publish() -> None:

@@ -598,7 +598,15 @@ class RunHandle:
 
         # Fire-and-forget UserMessageInsertedEvent publication.
         if emit_user_message:
-            self._schedule_user_message_emission(message, "steer")
+            logger.info(
+                "RunHandle.steer: scheduling user message emission",
+                extra={
+                    "session_id": self.session_id,
+                    "has_event_bus": self.event_bus is not None,
+                    "message_preview": str(message)[:80],
+                },
+            )
+            self._schedule_user_message_emission(message, "steer", message_id=fb.message_id)
 
         return fb.message_id
 
@@ -650,7 +658,7 @@ class RunHandle:
 
         # Fire-and-forget UserMessageInsertedEvent publication.
         if emit_user_message:
-            self._schedule_user_message_emission(message, "followup")
+            self._schedule_user_message_emission(message, "followup", message_id=message_id)
 
         return message_id
 
@@ -658,6 +666,8 @@ class RunHandle:
         self,
         content: str | list[Any],
         delivery: Literal["steer", "followup"],
+        *,
+        message_id: str | None = None,
     ) -> None:
         """Schedule a fire-and-forget ``UserMessageInsertedEvent`` publication.
 
@@ -669,6 +679,8 @@ class RunHandle:
         Args:
             content: The message content that was inserted.
             delivery: Delivery mode — ``"steer"`` or ``"followup"``.
+            message_id: Optional message ID for dedup correlation. If
+                ``None``, a new UUID is generated in the emission helper.
         """
         try:
             loop = asyncio.get_running_loop()
@@ -677,7 +689,7 @@ class RunHandle:
             # steer/followup operation itself has already completed.
             return
         task = loop.create_task(
-            self._emit_user_message_inserted(content, delivery, "internal"),
+            self._emit_user_message_inserted(content, delivery, "internal", message_id=message_id),
         )
         # Store reference to prevent GC of the fire-and-forget task.
         self._emission_tasks.add(task)
@@ -688,6 +700,8 @@ class RunHandle:
         content: str | list[Any],
         delivery: Literal["initial", "steer", "followup"],
         source: Literal["protocol", "background_task", "internal"],
+        *,
+        message_id: str | None = None,
     ) -> None:
         """Publish a ``UserMessageInsertedEvent`` to the EventBus.
 
@@ -701,6 +715,8 @@ class RunHandle:
                 ``"followup"``.
             source: Originator — ``"protocol"``, ``"background_task"``,
                 or ``"internal"``.
+            message_id: Optional message ID for dedup correlation. If
+                ``None``, a new UUID is generated.
         """
         with logfire.span(
             "event.user_message_inserted.emit",
@@ -709,13 +725,28 @@ class RunHandle:
             try:
                 event = UserMessageInsertedEvent(
                     session_id=self.session_id,
-                    message_id=str(uuid.uuid4()),
+                    message_id=message_id or str(uuid.uuid4()),
                     content=content,
                     delivery=delivery,
                     source=source,
                 )
+                logger.info(
+                    "UserMessageInsertedEvent emitting",
+                    extra={
+                        "session_id": self.session_id,
+                        "message_id": event.message_id,
+                        "has_event_bus": self.event_bus is not None,
+                        "delivery": delivery,
+                        "source": source,
+                    },
+                )
                 if self.event_bus is not None:
                     await self.event_bus.publish(self.session_id, event)
+                else:
+                    logger.warning(
+                        "UserMessageInsertedEvent skipped: event_bus is None",
+                        extra={"session_id": self.session_id},
+                    )
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "Failed to emit UserMessageInsertedEvent",

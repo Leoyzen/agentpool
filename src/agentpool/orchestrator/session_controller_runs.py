@@ -419,7 +419,7 @@ class SessionControllerRunsMixin:
                         source="protocol",
                         message_id=message_id,
                     )
-                    return run.steer(content, message_id=message_id)
+                    return run.steer(content, message_id=message_id, emit_user_message=False)
                 # Followup: enqueue to SessionState.prompt_queue.
                 inferred_delivery = delivery or "followup"
                 await self._emit_user_message_inserted(
