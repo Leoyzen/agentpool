@@ -26,7 +26,7 @@ from agentpool_server.opencode_server.session_pool_integration import (
 )
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:
@@ -244,14 +244,14 @@ class TestShareSession:
 
 
 class TestRevertSession:
-    """Tests for session reverting via the revert endpoint."""
+    """Tests for session reverting via the revert endpoint (STAGE model)."""
 
-    async def test_revert_session_truncates_messages(
+    async def test_revert_session_sets_revert_marker(
         self,
         async_client: AsyncClient,
         server_state: ServerState,
     ):
-        """Reverting to a message should truncate all messages after it."""
+        """STAGE: reverting to a message should set the revert marker without deleting messages."""
         # Create a session
         create_response = await async_client.post("/session", json={"title": "Revert Test"})
         session_id = create_response.json()["id"]
@@ -270,16 +270,20 @@ class TestRevertSession:
         reverted_session = revert_response.json()
         assert reverted_session["revert"]["messageID"] == revert_message_id
 
-        # Verify SessionPool.truncate_messages was called
+        # STAGE: truncate_messages should NOT be called
         session_pool = cast(Mock, server_state.pool.session_pool)
-        session_pool.truncate_messages.assert_awaited_once_with(session_id, revert_message_id)
+        session_pool.truncate_messages.assert_not_awaited()
+
+        # STAGE: messages should still be in state.messages (not deleted)
+        state_messages = server_state.messages.get(session_id, [])
+        assert len(state_messages) == 10
 
     async def test_revert_session_with_single_message(
         self,
         async_client: AsyncClient,
         server_state: ServerState,
     ):
-        """Reverting a session with a single message should keep that message."""
+        """STAGE: reverting a session with a single message sets the marker."""
         create_response = await async_client.post("/session", json={"title": "Single Revert"})
         session_id = create_response.json()["id"]
 
@@ -292,9 +296,11 @@ class TestRevertSession:
         )
 
         assert revert_response.status_code == 200
+        assert revert_response.json()["revert"]["messageID"] == message_id
 
+        # STAGE: truncate_messages should NOT be called
         session_pool = cast(Mock, server_state.pool.session_pool)
-        session_pool.truncate_messages.assert_awaited_once_with(session_id, message_id)
+        session_pool.truncate_messages.assert_not_awaited()
 
     async def test_revert_empty_session_returns_400(
         self,
@@ -317,7 +323,7 @@ class TestRevertSession:
         async_client: AsyncClient,
         server_state: ServerState,
     ):
-        """Reverting to a non-existent message should return 404."""
+        """STAGE: reverting to a non-existent message should return 404, no marker set."""
         create_response = await async_client.post("/session", json={"title": "Bad Revert"})
         session_id = create_response.json()["id"]
 
@@ -331,6 +337,11 @@ class TestRevertSession:
         assert revert_response.status_code == 404
         assert "not found" in revert_response.json()["detail"].lower()
 
+        # No revert marker should be set
+        session = server_state.sessions.get(session_id)
+        assert session is not None
+        assert session.revert is None
+
     async def test_revert_nonexistent_session_returns_404(
         self,
         async_client: AsyncClient,
@@ -342,12 +353,12 @@ class TestRevertSession:
         )
         assert response.status_code == 404
 
-    async def test_revert_session_stores_removed_messages(
+    async def test_revert_session_does_not_store_removed_messages(
         self,
         async_client: AsyncClient,
         server_state: ServerState,
     ):
-        """Reverting should store removed messages for potential unrevert."""
+        """STAGE: reverting should NOT store messages in reverted_messages (they stay in place)."""
         create_response = await async_client.post("/session", json={"title": "Store Revert"})
         session_id = create_response.json()["id"]
 
@@ -359,10 +370,13 @@ class TestRevertSession:
             json={"message_id": revert_message_id},
         )
 
-        # Verify reverted messages are stored.
-        # The revert message itself (index 2) and everything after it are removed.
+        # STAGE: reverted_messages should NOT contain the session's messages
         reverted = server_state.reverted_messages.get(session_id, [])
-        assert len(reverted) == 3  # Messages 2, 3, 4 (indices 2, 3, 4) were removed
+        assert len(reverted) == 0
+
+        # Messages should still be in state.messages
+        state_messages = server_state.messages.get(session_id, [])
+        assert len(state_messages) == 5
 
 
 # =============================================================================

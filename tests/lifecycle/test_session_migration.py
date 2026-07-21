@@ -568,8 +568,10 @@ async def test_route_message_when_idle_enqueues_to_prompt_queue() -> None:
         priority="when_idle",
     )
 
-    # Should return a message_id (not None).
-    assert result is not None
+    # Should return None (message is queued, not processed immediately).
+    # This was changed in issue #253: followup messages return None instead
+    # of fb.message_id to avoid duplicate session_created broadcasts.
+    assert result is None
     # The message should be in prompt_queue.
     assert not session.prompt_queue.empty()
     queued = session.prompt_queue.get_nowait()
