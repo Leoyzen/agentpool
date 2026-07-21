@@ -23,6 +23,7 @@ from agentpool.agents.events import (
     StreamCompleteEvent,
     ToolCallProgressEvent,
     ToolCallStartEvent,
+    UserMessageInsertedEvent,
 )
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 
@@ -63,6 +64,9 @@ async def simple_print_handler(ctx: AgentContext[Any], event: RichAgentStreamEve
 
         case StreamCompleteEvent():
             print(file=sys.stderr)  # Final newline
+
+        case UserMessageInsertedEvent():
+            pass  # User message insertions are handled by protocol servers
 
 
 async def detailed_print_handler(ctx: AgentContext[Any], event: RichAgentStreamEvent[Any]) -> None:
@@ -117,6 +121,9 @@ async def detailed_print_handler(ctx: AgentContext[Any], event: RichAgentStreamE
 
         case StreamCompleteEvent():
             print(file=sys.stderr)  # Final newline
+
+        case UserMessageInsertedEvent():
+            pass  # User message insertions are handled by protocol servers
 
 
 def create_file_stream_handler(
@@ -180,6 +187,9 @@ def create_file_stream_handler(
             case StreamCompleteEvent():
                 file_handle.write("\n")
                 file_handle.flush()
+
+            case UserMessageInsertedEvent():
+                pass  # User message insertions are handled by protocol servers
 
     return file_stream_handler
 

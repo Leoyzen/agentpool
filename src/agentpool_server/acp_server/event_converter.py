@@ -75,6 +75,7 @@ from agentpool.agents.events import (
     ToolCallProgressEvent,
     ToolCallStartEvent,
     ToolResultMetadataEvent,
+    UserMessageInsertedEvent,
 )
 from agentpool.log import get_logger
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
@@ -83,6 +84,7 @@ from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from acp.schema import TextContentBlock
     from acp.schema.tool_call import ToolCallContent, ToolCallKind
     from agentpool.agents.events import RichAgentStreamEvent
 
@@ -190,6 +192,15 @@ class ACPEventConverter:
     subagent_context: SubagentContext | None = None
     """Parent context for child session converters. None for root sessions."""
 
+    displayed_message_ids: set[str] | None = None
+    """Per-session dedup set of displayed ``message_id`` values.
+
+    When set, ``UserMessageInsertedEvent`` handling checks this set and
+    skips emission if ``message_id`` is already present (the protocol
+    handler already displayed the message directly). The ID is added
+    after emission to prevent future duplicates.
+    """
+
     # Internal state
     _tool_states: dict[str, _ToolState] = field(default_factory=dict)
     """Active tool call states."""
@@ -293,6 +304,40 @@ class ACPEventConverter:
             return []
         mid = message_id or str(uuid.uuid4())
         return [UserMessageChunk.text(text, message_id=mid)]
+
+    @staticmethod
+    def _content_to_text_blocks(content: str | list[Any]) -> list[TextContentBlock]:
+        """Convert ``UserMessageInsertedEvent.content`` to text content blocks.
+
+        Handles both plain string content and multi-modal part lists:
+        - ``str`` → single ``TextContentBlock``
+        - ``list`` → iterate, extract text from dicts with ``"type": "text"``
+          or bare strings; skip non-text items (images, etc.) in v1.
+
+        Args:
+            content: The event content — plain text or multi-modal part list.
+
+        Returns:
+            List of ``TextContentBlock`` instances (may be empty).
+        """
+        from acp.schema import TextContentBlock
+
+        if isinstance(content, str):
+            if not content:
+                return []
+            return [TextContentBlock(text=content)]
+        if isinstance(content, list):
+            blocks: list[TextContentBlock] = []
+            for item in content:
+                if isinstance(item, str):
+                    if item:
+                        blocks.append(TextContentBlock(text=item))
+                elif isinstance(item, dict) and item.get("type") == "text":
+                    text = item.get("text", "")
+                    if text:
+                        blocks.append(TextContentBlock(text=text))
+            return blocks
+        return []
 
     def cleanup(self) -> None:
         """Clean up converter state.
@@ -460,6 +505,28 @@ class ACPEventConverter:
                 | PartDeltaEvent(delta=TextPartDelta(content_delta=delta))
             ):
                 yield AgentMessageChunk.text(delta, message_id=self._get_message_id(event))
+
+            # User message inserted (steer/followup display)
+            case UserMessageInsertedEvent(
+                message_id=mid,
+                content=event_content,
+            ):
+                # Dedup: skip if already displayed by the protocol handler.
+                if (
+                    mid
+                    and self.displayed_message_ids is not None
+                    and mid in self.displayed_message_ids
+                ):
+                    return
+                # Convert content to UserMessageChunk(s) — v1 only.
+                blocks = self._content_to_text_blocks(event_content)
+                for block in blocks:
+                    yield UserMessageChunk(
+                        content=block,
+                        message_id=mid or None,
+                    )
+                if mid and self.displayed_message_ids is not None:
+                    self.displayed_message_ids.add(mid)
 
             # Thinking/reasoning
             case (

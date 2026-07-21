@@ -31,6 +31,7 @@ from agentpool.agents.events import (
     ToolCallDeferredEvent,
     ToolCallProgressEvent,
     ToolCallStartEvent,
+    UserMessageInsertedEvent,
 )
 from agentpool.agents.events.infer_info import derive_rich_tool_info
 from agentpool.log import get_logger
@@ -39,10 +40,12 @@ from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.converters import _convert_params_for_ui
 from agentpool_server.opencode_server.models import (
+    MessageUpdatedEvent,
     PartDeltaEvent,
     PartUpdatedEvent,
     SessionErrorEvent,
     SessionStatusEvent,
+    TimeCreated,
     TokenCache,
     Tokens,
 )
@@ -50,7 +53,11 @@ from agentpool_server.opencode_server.models import (
 # Cross-layer import: McpToolsChangedEvent is an OpenCode SSE event that
 # EventProcessor creates from core-layer ChangeEvent(kind="tools_changed").
 from agentpool_server.opencode_server.models.events import McpToolsChangedEvent
-from agentpool_server.opencode_server.models.message import AssistantMessage
+from agentpool_server.opencode_server.models.message import (
+    AssistantMessage,
+    MessageWithParts,
+    UserMessage,
+)
 from agentpool_server.opencode_server.models.parts import (
     ReasoningPart,
     StepFinishPart,
@@ -78,7 +85,6 @@ if TYPE_CHECKING:
     from agentpool_server.opencode_server.models.events import Event
     from agentpool_server.opencode_server.models.parts import ToolState
     from agentpool_server.opencode_server.models.session import SessionStatusType
-
 logger = get_logger(__name__)
 
 
@@ -92,8 +98,17 @@ class EventProcessor:
     The processor yields OpenCode Event objects ready for broadcasting.
     """
 
-    def __init__(self) -> None:
-        """Initialize the event processor."""
+    def __init__(self, displayed_message_ids: set[str] | None = None) -> None:
+        """Initialize the event processor.
+
+        Args:
+            displayed_message_ids: Per-session dedup set for user message IDs.
+                When provided, the processor skips emission of user messages
+                whose ``message_id`` is already in the set, and adds new
+                ``message_id`` values after emission. When ``None``, no
+                deduplication is performed.
+        """
+        self._displayed_message_ids: set[str] | None = displayed_message_ids
 
     @staticmethod
     def create_mcp_tools_changed_event(server: str) -> McpToolsChangedEvent:
@@ -225,6 +240,16 @@ class EventProcessor:
                     error_name=run_error_event.code or "RunError",
                     error_message=run_error_event.message,
                 )
+
+            case UserMessageInsertedEvent(
+                message_id=mid,
+                content=event_content,
+                timestamp=ts,
+            ):
+                async for e in self._process_user_message_inserted(
+                    ctx, mid, event_content, ts
+                ):
+                    yield e
 
     def _process_text_start(
         self,
@@ -891,6 +916,75 @@ class EventProcessor:
         )
         ctx.assistant_msg.parts.append(step_finish)
         yield PartUpdatedEvent.create(step_finish)
+
+    async def _process_user_message_inserted(
+        self,
+        ctx: EventProcessorContext,
+        message_id: str,
+        content: str | list[Any],
+        timestamp: float,
+    ) -> AsyncIterator[Event]:
+        """Process a UserMessageInsertedEvent into OpenCode SSE events.
+
+        Creates a ``UserMessage`` with text parts from the event content,
+        appends it to the session state, and yields ``MessageUpdatedEvent``
+        and ``PartUpdatedEvent`` for each part.
+
+        Deduplication: when ``displayed_message_ids`` is set on the processor,
+        skips emission if ``message_id`` is already in the set, and adds it
+        after emission.
+
+        Args:
+            ctx: The event processor context.
+            message_id: Unique ID for the inserted user message.
+            content: Message content — plain text or multi-modal part list.
+            timestamp: Wall-clock time the event was created (epoch seconds).
+
+        Yields:
+            ``MessageUpdatedEvent`` for the user message, followed by
+            ``PartUpdatedEvent`` for each text part.
+        """
+        # Dedup check
+        if self._displayed_message_ids is not None:
+            if message_id in self._displayed_message_ids:
+                return
+            self._displayed_message_ids.add(message_id)
+
+        # Convert epoch seconds to milliseconds for OpenCode's TimeCreated
+        created_ms = int(timestamp * 1000)
+
+        user_message = UserMessage(
+            id=message_id,
+            session_id=ctx.session_id,
+            time=TimeCreated(created=created_ms),
+        )
+        user_msg_with_parts = MessageWithParts(info=user_message)
+
+        # Convert content to text parts
+        if isinstance(content, str):
+            if content:
+                user_msg_with_parts.add_text_part(content)
+        elif isinstance(content, list):
+            for item in content:
+                if isinstance(item, str):
+                    if item:
+                        user_msg_with_parts.add_text_part(item)
+                elif isinstance(item, dict) and "text" in item:
+                    text_val = item["text"]
+                    if isinstance(text_val, str) and text_val:
+                        user_msg_with_parts.add_text_part(text_val)
+
+        # Append to session state
+        from agentpool_server.opencode_server.opencode_message_bridge import (
+            append_message_to_session,
+        )
+
+        await append_message_to_session(ctx.state, ctx.session_id, user_msg_with_parts)
+
+        # Yield events for SSE broadcast
+        yield MessageUpdatedEvent.create(user_message)
+        for part in user_msg_with_parts.parts:
+            yield PartUpdatedEvent.create(part)
 
 
 def _extract_title_from_tool_state(state: ToolState) -> str:

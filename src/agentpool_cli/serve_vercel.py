@@ -54,7 +54,7 @@ def vercel_command(  # noqa: PLR0915
     import uvicorn
 
     from agentpool import AgentPool, AgentsManifest
-    from agentpool.agents.events import StreamCompleteEvent
+    from agentpool.agents.events import StreamCompleteEvent, UserMessageInsertedEvent
     from agentpool_config.context import ConfigContextManager
 
     logger.info("Server PID", pid=os.getpid())
@@ -102,7 +102,7 @@ def vercel_command(  # noqa: PLR0915
         )
 
     @app.post("/chat")
-    async def chat(request: Request) -> Response:
+    async def chat(request: Request) -> Response:  # noqa: PLR0915
         """Handle Vercel AI protocol chat requests.
 
         Implements the Vercel AI Data Stream Protocol:
@@ -169,6 +169,8 @@ def vercel_command(  # noqa: PLR0915
                             # Stream complete - we've received the final message
                             # The content has already been streamed via deltas
                             pass
+                        case UserMessageInsertedEvent():
+                            pass  # User message insertions not streamed via Vercel protocol
 
                 # Send finish event
                 usage = {"promptTokens": 0, "completionTokens": 0}

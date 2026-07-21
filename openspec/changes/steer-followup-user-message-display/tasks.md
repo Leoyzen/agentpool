@@ -33,26 +33,26 @@
 
 ## 5. ACP Server: _meta.delivery Extraction at acp_agent.py:prompt()
 
-- [ ] 5.1 In `src/agentpool_server/acp_server/acp_agent.py:prompt()` (line ~698), extract `delivery` from `_meta` — `_meta` is already extracted for trace context at this point but NOT forwarded to `handle_prompt()`. Map `"steer"` → priority `"asap"`, `"followup"` → priority `"when_idle"`, absent → `"when_idle"` (default).
-- [ ] 5.2 Pass `delivery` as a parameter through `handle_prompt()` → `send_message()` → `_route_message()` call chain
-- [ ] 5.3 Generate `message_id` in `handle_prompt()` (or `_emit_user_message_chunks()`) and pass it to `send_message(message_id=mid)` for dedup
-- [ ] 5.4 Write unit tests for `_meta.delivery` extraction at `acp_agent.py:prompt()` (`tests/servers/acp_server/test_handle_prompt_delivery.py`)
+- [x] 5.1 In `src/agentpool_server/acp_server/acp_agent.py:prompt()` (line ~698), extract `delivery` from `_meta` — `_meta` is already extracted for trace context at this point but NOT forwarded to `handle_prompt()`. Map `"steer"` → priority `"asap"`, `"followup"` → priority `"when_idle"`, absent → `"when_idle"` (default).
+- [x] 5.2 Pass `delivery` as a parameter through `handle_prompt()` → `send_message()` → `_route_message()` call chain
+- [x] 5.3 Generate `message_id` in `handle_prompt()` (or `_emit_user_message_chunks()`) and pass it to `send_message(message_id=mid)` for dedup
+- [x] 5.4 Write unit tests for `_meta.delivery` extraction at `acp_agent.py:prompt()` (`tests/servers/acp_server/test_handle_prompt_delivery.py`)
 
 ## 6. ACP Server: ACPEventConverter
 
 - [ ] 6.1 Modify `ACPEventConverter.__init__()` in `src/agentpool_server/acp_server/event_converter.py` to accept `protocol_version: int = 1` parameter, passed from the ACP agent (which stores it at `acp_agent.py:380`)
-- [ ] 6.2 Add `case UserMessageInsertedEvent` to `ACPEventConverter.convert()` — for v1 (`protocol_version < 2`): emit `UserMessageChunk` with `TextContentBlock`; for v2 (`protocol_version >= 2`): emit `UserMessage` with `content=[TextContentBlock(...)]`
-- [ ] 6.3 Convert `content` (`str | list[Any]`) to appropriate `ContentBlock` instances — `str` → `TextContentBlock`, dict with image → `ImageContentBlock`, etc.
-- [ ] 6.4 Add shared dedup `set[str]` per session — lives as `dict[str, set[str]]` on `SessionController` (keyed by `session_id`), passed to `ACPEventConverter` and `EventProcessor` constructors as `displayed_message_ids: set[str]` — skip if `message_id` already in set; add after emission
-- [ ] 6.5 Add dedup set cleanup on session close
-- [ ] 6.6 Write unit tests for `ACPEventConverter` handling `UserMessageInsertedEvent` — v1 path, v2 path, dedup skip, multi-modal content (`tests/servers/acp_server/test_event_converter_user_message.py`)
+- [x] 6.2 Add `case UserMessageInsertedEvent` to `ACPEventConverter.convert()` — for v1 (`protocol_version < 2`): emit `UserMessageChunk` with `TextContentBlock`; for v2 (`protocol_version >= 2`): emit `UserMessage` with `content=[TextContentBlock(...)]`
+- [x] 6.3 Convert `content` (`str | list[Any]`) to appropriate `ContentBlock` instances — `str` → `TextContentBlock`, dict with image → `ImageContentBlock`, etc.
+- [x] 6.4 Add shared dedup `set[str]` per session — lives as `dict[str, set[str]]` on `SessionController` (keyed by `session_id`), passed to `ACPEventConverter` and `EventProcessor` constructors as `displayed_message_ids: set[str]` — skip if `message_id` already in set; add after emission
+- [x] 6.5 Add dedup set cleanup on session close
+- [x] 6.6 Write unit tests for `ACPEventConverter` handling `UserMessageInsertedEvent` — v1 path, v2 path, dedup skip, multi-modal content (`tests/servers/acp_server/test_event_converter_user_message.py`)
 
 ## 7. ACP Server: _emit_user_message_chunks() Dedup Wiring
 
-- [ ] 7.1 Modify `_emit_user_message_chunks()` in `src/agentpool_server/acp_server/handler.py` to generate `message_id` FIRST (before emitting chunks)
-- [ ] 7.2 Register `message_id` in the shared dedup set before emitting to client
-- [ ] 7.3 Pass `message_id` through `send_message(message_id=mid)` → `_route_message(message_id=mid)` so the EventBus event carries the same ID
-- [ ] 7.4 Write unit test verifying no double display when both `_emit_user_message_chunks()` and EventBus event fire (`tests/servers/acp_server/test_emit_chunks_dedup.py`)
+- [x] 7.1 Modify `_emit_user_message_chunks()` in `src/agentpool_server/acp_server/handler.py` to generate `message_id` FIRST (before emitting chunks)
+- [x] 7.2 Register `message_id` in the shared dedup set before emitting to client
+- [x] 7.3 Pass `message_id` through `send_message(message_id=mid)` → `_route_message(message_id=mid)` so the EventBus event carries the same ID
+- [x] 7.4 Write unit test verifying no double display when both `_emit_user_message_chunks()` and EventBus event fire (`tests/servers/acp_server/test_emit_chunks_dedup.py`)
 
 ## 8. OpenCode Server: EventProcessor
 

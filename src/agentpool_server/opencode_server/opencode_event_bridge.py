@@ -19,6 +19,7 @@ from agentpool.agents.events.events import (
     RunStartedEvent,
     SpawnSessionStart,
     StreamCompleteEvent,
+    UserMessageInsertedEvent,
 )
 from agentpool.log import get_logger
 from agentpool.utils import identifiers as identifier
@@ -217,6 +218,23 @@ class OpenCodeEventBridgeMixin:
             await self.server_state.broadcast_event(MessageUpdatedEvent.create(info))
             await append_message_to_session(self.server_state, session_id, ctx.assistant_msg)
 
+    def _get_dedup_set(self, session_id: str) -> set[str] | None:
+        """Get the per-session dedup set for user message IDs.
+
+        Returns the set from ``SessionController._get_dedup_set`` when a
+        ``SessionController`` is available on the server state, or ``None``
+        when it is not (e.g. in tests without a full server setup).
+
+        Args:
+            session_id: The session ID to get the dedup set for.
+
+        Returns:
+            The dedup set, or ``None`` if unavailable.
+        """
+        if self.server_state.session_controller is not None:
+            return self.server_state.session_controller._get_dedup_set(session_id)
+        return None
+
     async def _before_consumer_loop(self, session_id: str) -> None:
         """Set up per-session context before the consumer loop starts.
 
@@ -241,7 +259,10 @@ class OpenCodeEventBridgeMixin:
                 state=self.server_state,
                 working_dir=self.server_state.working_dir,
             )
-            event_adapter = OpenCodeEventAdapter(ctx)
+            event_adapter = OpenCodeEventAdapter(
+                ctx,
+                displayed_message_ids=self._get_dedup_set(session_id),
+            )
             self._contexts[session_id] = ctx
             self._adapters[session_id] = event_adapter
             # On resume, the assistant message was already registered in the
@@ -268,7 +289,10 @@ class OpenCodeEventBridgeMixin:
             state=self.server_state,
             working_dir=self.server_state.working_dir,
         )
-        event_adapter = OpenCodeEventAdapter(ctx)
+        event_adapter = OpenCodeEventAdapter(
+            ctx,
+            displayed_message_ids=self._get_dedup_set(session_id),
+        )
         self._contexts[session_id] = ctx
         self._adapters[session_id] = event_adapter
         self._message_registered[session_id] = False
@@ -550,11 +574,18 @@ class OpenCodeEventBridgeMixin:
             # handler's ID, so the UI cannot associate parts with the message.
             # The canonical assistant_msg_id from the REST handler is correct.
 
-            # Register assistant message on first non-spawn, non-custom event.
+            # Register assistant message on first non-spawn, non-custom,
+            # non-user-message-inserted event.
             # C3: The event bridge is the sole broadcast point for the assistant
             # message. This ensures the message is visible only when the agent
             # actually starts producing events, not before.
-            if not self._message_registered.get(session_id, False):
+            # UserMessageInsertedEvent creates a user message, not an assistant
+            # message, so it must not trigger assistant registration.
+            is_user_message_inserted = isinstance(event, UserMessageInsertedEvent)
+            if (
+                not is_user_message_inserted
+                and not self._message_registered.get(session_id, False)
+            ):
                 await append_message_to_session(self.server_state, session_id, ctx.assistant_msg)
                 await self.server_state.broadcast_event(
                     MessageUpdatedEvent.create(ctx.assistant_msg.info)
@@ -606,6 +637,12 @@ class OpenCodeEventBridgeMixin:
         self._message_registered.pop(session_id, None)
         self._child_to_parent.pop(session_id, None)
         self._child_spawns.pop(session_id, None)
+
+        # Clean up dedup set for this session on SessionController
+        if self.server_state.session_controller is not None:
+            self.server_state.session_controller._displayed_message_ids.pop(
+                session_id, None
+            )
 
     # ------------------------------------------------------------------
     # Backward-compatible wrappers (used by tests)
