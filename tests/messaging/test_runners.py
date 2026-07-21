@@ -61,16 +61,5 @@ agents:
 """
 
 
-@pytest.mark.skip(reason="Flaky: fails due to cross-test state pollution in batch runs")
-async def test_agent_pool_conversation_flow():
-    """Test conversation flow maintaining history between messages."""
-    manifest = AgentsManifest.from_yaml(TEST_CONFIG)
-
-    async with AgentPool(manifest):
-        # NOTE: pool.get_agent() was removed. Agent instances are now managed
-        # per-session via SessionPool. This test needs rewriting for the new API.
-        pass
-
-
 if __name__ == "__main__":
     pytest.main([__file__, "-vv"])

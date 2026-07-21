@@ -110,15 +110,35 @@ def test_agent_type_property_on_teamrun() -> None:
 
 
 def test_circular_import_safety() -> None:
-    """Importing get_source_type must not create circular imports."""
-    import importlib
+    """Importing get_source_type must not create circular imports.
 
-    # Force re-import of messagenode to verify no circular import
-    mod = importlib.import_module("agentpool.messaging.messagenode")
-    importlib.reload(mod)
+    Uses a subprocess to avoid polluting the main process's module cache —
+    ``importlib.reload(messagenode)`` replaces the ``MessageNode`` class object,
+    which breaks ``isinstance`` and ``match`` checks for all previously created
+    instances in the same process.
+    """
+    import subprocess
+    import sys
 
-    # Verify the module still exports the expected symbols
-    assert hasattr(mod, "SourceType")
-    assert hasattr(mod, "get_source_type")
-
-    importlib.import_module("agentpool.delegation.base_team")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import importlib; "
+                "mod = importlib.import_module('agentpool.messaging.messagenode'); "
+                "importlib.reload(mod); "
+                "assert hasattr(mod, 'SourceType'); "
+                "assert hasattr(mod, 'get_source_type'); "
+                "importlib.import_module('agentpool.delegation.base_team'); "
+                "print('OK')"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, (
+        f"Circular import check failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    assert "OK" in result.stdout
