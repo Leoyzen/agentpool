@@ -207,9 +207,9 @@ async def test_e2e_lifecycle_create_message_task_blackboard_delete(
         ],
     )
 
-    assert "Team 'alpha_team' created with 2 members" in create_result
-    assert "team_id=" in create_result
-    team_id = create_result.split("team_id=")[1].strip()
+    assert "Team 'alpha_team' created with 2 members" in create_result.return_value
+    assert "team_id=" in create_result.return_value
+    team_id = create_result.return_value.split("team_id=")[1].strip()
     # team_create writes team_id back to agent_ctx.session.metadata;
     # update cap._session_metadata for consistency.
     cap._session_metadata["team_id"] = team_id
@@ -229,31 +229,31 @@ async def test_e2e_lifecycle_create_message_task_blackboard_delete(
 
     # --- Step 2: Send a message ---
     msg_result = await cap.send_message(ctx, "translator_agent", "Start translating")
-    assert msg_result == "Message sent to translator_agent"
+    assert msg_result.return_value == "Message sent to translator_agent"
 
     # --- Step 3: Create a task ---
     task_result = await cap.task_create(ctx, "Translate docs", "Translate API docs")
-    assert task_result.startswith("Task created: ")
-    task_id = task_result.replace("Task created: ", "")
+    assert task_result.return_value.startswith("Task created: ")
+    task_id = task_result.return_value.replace("Task created: ", "")
 
     # --- Step 4: Complete the task ---
     update_result = await cap.task_update(ctx, task_id, status="completed")
-    assert 'status="completed"' in update_result
-    assert "<task" in update_result
+    assert 'status="completed"' in update_result.return_value
+    assert "<task" in update_result.return_value
 
     # --- Step 5: Write blackboard ---
     wb_write_result = await cap.write_blackboard(ctx, "glossary", "v1 content")
-    assert wb_write_result == "Written, version=1"
+    assert wb_write_result.return_value == "Written, version=1"
 
     # --- Step 6: Read blackboard ---
     rb_result = await cap.read_blackboard(ctx, "glossary")
-    assert "<blackboard" in rb_result
-    assert "v1 content" in rb_result
-    assert 'version="1"' in rb_result
+    assert "<blackboard" in rb_result.return_value
+    assert "v1 content" in rb_result.return_value
+    assert 'version="1"' in rb_result.return_value
 
     # --- Step 7: Delete team ---
     del_result = await cap.team_delete(ctx)
-    assert del_result == "Team deleted"
+    assert del_result.return_value == "Team deleted"
 
     # Verify real member sessions are closed (exclude lead — lead session stays alive).
     for member_info in members.values():
@@ -331,7 +331,7 @@ async def test_standalone_mode_team_create_without_session_pool(
         [{"agent": "worker", "name": "translator_agent"}],
     )
 
-    assert result == "SessionPool not available"
+    assert result.return_value == "SessionPool not available"
 
 
 @pytest.mark.integration
@@ -355,7 +355,7 @@ async def test_standalone_mode_session_pool_none_returns_error(tmp_path: Any) ->
 
     result = await cap.send_message(ctx, "reviewer_agent", "hello")
 
-    assert result == "SessionPool not available"
+    assert result.return_value == "SessionPool not available"
 
 
 # ---------------------------------------------------------------------------
@@ -378,19 +378,19 @@ async def test_no_team_id_universal_tools_return_error() -> None:
 
     # team_status
     ctx_status = _make_run_context(metadata=metadata, config=config)
-    assert await cap.team_status(ctx_status) == "Not in a team session"
+    assert (await cap.team_status(ctx_status)).return_value == "Not in a team session"
 
     # task_list
     ctx_tasks = _make_run_context(metadata=metadata, config=config)
-    assert await cap.task_list(ctx_tasks) == "Not in a team session"
+    assert (await cap.task_list(ctx_tasks)).return_value == "Not in a team session"
 
     # read_blackboard
     ctx_read = _make_run_context(metadata=metadata, config=config)
-    assert await cap.read_blackboard(ctx_read, "some_key") == "Not in a team session"
+    assert (await cap.read_blackboard(ctx_read, "some_key")).return_value == "Not in a team session"
 
     # list_blackboard
     ctx_list = _make_run_context(metadata=metadata, config=config)
-    assert await cap.list_blackboard(ctx_list) == "Not in a team session"
+    assert (await cap.list_blackboard(ctx_list)).return_value == "Not in a team session"
 
 
 # ---------------------------------------------------------------------------
@@ -499,7 +499,7 @@ async def test_team_status_with_existing_team_id_no_session_creation(
     result = await cap.team_status(ctx)
 
     # team_status should show the manually-created team.
-    assert "manual_team" in result
+    assert "manual_team" in result.return_value
 
 
 @pytest.mark.integration
@@ -544,8 +544,8 @@ async def test_team_create_uses_config_default_members_when_empty(
 
     # team_create with empty members should use defaults config defaults.
     create_result = await cap.team_create(ctx, "my_team", [])
-    assert "Team 'my_team' created with 2 members" in create_result
-    team_id = create_result.split("team_id=")[1].strip()
+    assert "Team 'my_team' created with 2 members" in create_result.return_value
+    team_id = create_result.return_value.split("team_id=")[1].strip()
     cap._session_metadata["team_id"] = team_id
     cap._session_metadata["team_name"] = "my_team"
 
@@ -563,7 +563,7 @@ async def test_team_create_uses_config_default_members_when_empty(
 
     # team_status should show the created team.
     status_result = await cap.team_status(ctx)
-    assert "my_team" in status_result
+    assert "my_team" in status_result.return_value
 
     # Cleanup.
     await cap.team_delete(ctx)
@@ -596,41 +596,41 @@ async def test_e2e_task_and_blackboard_lifecycle(tmp_path: Any) -> None:
 
     # Create a task
     create_result = await cap.task_create(ctx, "Review PR", "Review PR #42")
-    assert create_result.startswith("Task created: ")
-    task_id = create_result.replace("Task created: ", "")
+    assert create_result.return_value.startswith("Task created: ")
+    task_id = create_result.return_value.replace("Task created: ", "")
 
     # List tasks
     list_result = await cap.task_list(ctx)
-    assert "<task_list>" in list_result
-    assert "Review PR" in list_result
+    assert "<task_list>" in list_result.return_value
+    assert "Review PR" in list_result.return_value
 
     # Update task status
     update_result = await cap.task_update(ctx, task_id, status="in_progress")
-    assert 'status="in_progress"' in update_result
-    assert "<task" in update_result
+    assert 'status="in_progress"' in update_result.return_value
+    assert "<task" in update_result.return_value
 
     # Write blackboard
     wb_result = await cap.write_blackboard(ctx, "review_notes", "LGTM")
-    assert wb_result == "Written, version=1"
+    assert wb_result.return_value == "Written, version=1"
 
     # Read blackboard
     rb_result = await cap.read_blackboard(ctx, "review_notes")
-    assert "<blackboard" in rb_result
-    assert "LGTM" in rb_result
-    assert 'version="1"' in rb_result
+    assert "<blackboard" in rb_result.return_value
+    assert "LGTM" in rb_result.return_value
+    assert 'version="1"' in rb_result.return_value
 
     # List blackboard keys
     lb_result = await cap.list_blackboard(ctx)
-    assert "<blackboard_keys>" in lb_result
-    assert "review_notes" in lb_result
+    assert "<blackboard_keys>" in lb_result.return_value
+    assert "review_notes" in lb_result.return_value
 
     # Delete blackboard key (lead-only)
     db_result = await cap.delete_blackboard(ctx, "review_notes")
-    assert db_result == "Blackboard key 'review_notes' deleted"
+    assert db_result.return_value == "Blackboard key 'review_notes' deleted"
 
     # Verify deletion
     rb_after = await cap.read_blackboard(ctx, "review_notes")
-    assert rb_after == "Key not found"
+    assert rb_after.return_value == "Key not found"
 
 
 # ---------------------------------------------------------------------------
@@ -680,21 +680,21 @@ async def test_e2e_broadcast_and_status(
             {"agent": "reviewer", "name": "reviewer_agent"},
         ],
     )
-    assert "team_id=" in create_result
-    team_id = create_result.split("team_id=")[1].strip()
+    assert "team_id=" in create_result.return_value
+    team_id = create_result.return_value.split("team_id=")[1].strip()
     cap._session_metadata["team_id"] = team_id
     cap._session_metadata["team_name"] = "alpha_team"
 
     # Broadcast (excludes lead, so 2 members receive).
     broadcast_result = await cap.send_message(ctx, "*", "Team meeting at 3pm")
-    assert "Broadcast sent to 2 members" in broadcast_result
+    assert "Broadcast sent to 2 members" in broadcast_result.return_value
 
     # Team status.
     status_result = await cap.team_status(ctx)
-    assert "alpha_team" in status_result
-    assert "active" in status_result
-    assert "translator_agent" in status_result
-    assert "reviewer_agent" in status_result
+    assert "alpha_team" in status_result.return_value
+    assert "active" in status_result.return_value
+    assert "translator_agent" in status_result.return_value
+    assert "reviewer_agent" in status_result.return_value
 
     # Cleanup.
     await cap.team_delete(ctx)

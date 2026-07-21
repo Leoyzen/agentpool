@@ -979,6 +979,13 @@ class EventProcessor:
         # Convert epoch seconds to milliseconds for OpenCode's TimeCreated
         created_ms = int(timestamp * 1000)
 
+        # For team messages, prefix with sender info for visual distinction.
+        effective_content: str | list[Any] = content
+        if source == "team" and isinstance(meta, dict):
+            from_member: str = meta.get("from", "team")
+            if isinstance(content, str):
+                effective_content = f"[Team · {from_member}] {content}"
+
         user_message = UserMessage(
             id=message_id,
             session_id=ctx.session_id,
@@ -992,11 +999,11 @@ class EventProcessor:
                 part = _deserialize_part(part_dict, user_message.id, ctx.session_id)
                 if part is not None:
                     user_msg_with_parts.parts.append(part)
-        elif isinstance(content, str):
-            if content:
-                user_msg_with_parts.add_text_part(content)
-        elif isinstance(content, list):
-            for item in content:
+        elif isinstance(effective_content, str):
+            if effective_content:
+                user_msg_with_parts.add_text_part(effective_content)
+        elif isinstance(effective_content, list):
+            for item in effective_content:
                 if isinstance(item, str):
                     if item:
                         user_msg_with_parts.add_text_part(item)

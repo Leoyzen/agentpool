@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from pydantic_ai.tools import ToolReturn
 import pytest
 
 from agentpool.capabilities.file_team_state import FileTeamState
@@ -85,8 +86,8 @@ async def _create_team(
     """
     ctx = make_mock_run_context(agent_ctx)
     result = await cap.team_create(ctx, team_name, members)
-    assert "team_id=" in result
-    team_id = result.split("team_id=")[1].strip()
+    assert "team_id=" in result.return_value
+    team_id = result.return_value.split("team_id=")[1].strip()
     # Update lead metadata so subsequent tool calls find the team_id.
     agent_ctx.session.metadata["team_id"] = team_id
     agent_ctx.session.metadata["team_name"] = team_name
@@ -155,8 +156,8 @@ async def test_member_crash_returns_error_to_lead(
     result = await cap.send_message(ctx, "worker_1", "Are you there?")
 
     # The result is an error string, NOT an exception.
-    assert isinstance(result, str)
-    assert "Failed to deliver" in result or "not found" in result.lower()
+    assert isinstance(result, ToolReturn)
+    assert "Failed to deliver" in result.return_value or "not found" in result.return_value.lower()
 
     # Cleanup: close the lead session.
     await session_pool.close_session(session_id)
@@ -218,7 +219,7 @@ async def test_team_delete_cleans_up_all_members(
     ctx = make_mock_run_context(agent_ctx)
     result = await cap.team_delete(ctx)
 
-    assert result == "Team deleted"
+    assert result.return_value == "Team deleted"
 
     # Verify both member sessions are now gone.
     assert session_pool.sessions.get_session(worker_session_id) is None
@@ -267,7 +268,7 @@ async def test_blackboard_write_failure_is_soft_error(
 
     # First write succeeds (version=1).
     write_result = await cap.write_blackboard(ctx, "status", "in_progress")
-    assert write_result == "Written, version=1"
+    assert write_result.return_value == "Written, version=1"
 
     # Second write with stale expected_version=0 → conflict (soft error).
     conflict_result = await cap.write_blackboard(
@@ -277,14 +278,14 @@ async def test_blackboard_write_failure_is_soft_error(
         expected_version=0,
     )
 
-    assert isinstance(conflict_result, str)
-    assert conflict_result == "Conflict: current version is 1"
+    assert isinstance(conflict_result, ToolReturn)
+    assert conflict_result.return_value == "Conflict: current version is 1"
 
     # Verify the blackboard value was NOT overwritten.
     read_result = await cap.read_blackboard(ctx, "status")
-    assert "<blackboard" in read_result
-    assert "in_progress" in read_result
-    assert 'version="1"' in read_result
+    assert "<blackboard" in read_result.return_value
+    assert "in_progress" in read_result.return_value
+    assert 'version="1"' in read_result.return_value
 
     # Cleanup.
     session_pool = team_mode_pool.session_pool

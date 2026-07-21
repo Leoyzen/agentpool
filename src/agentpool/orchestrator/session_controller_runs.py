@@ -354,6 +354,7 @@ class SessionControllerRunsMixin:
         message_id: str | None = None,
         delivery: str | None = None,
         meta: Any = None,
+        source: str = "protocol",
     ) -> str | None:
         """Route a message to the appropriate handler based on session state.
 
@@ -379,6 +380,10 @@ class SessionControllerRunsMixin:
                 and priority.
             meta: Optional protocol-specific metadata carried through to
                 ``UserMessageInsertedEvent`` for rich user message display.
+            source: Originator of the message — ``"protocol"`` (default)
+                for protocol handler requests, ``"team"`` for team-mode
+                coordination messages. Passed to
+                ``UserMessageInsertedEvent.source``.
 
         Returns:
             The ``message_id`` string on success, ``None`` for rejection.
@@ -400,7 +405,7 @@ class SessionControllerRunsMixin:
                     session_id,
                     content,
                     delivery=inferred_delivery,
-                    source="protocol",
+                    source=source,
                     message_id=message_id,
                     meta=meta,
                 )
@@ -421,7 +426,7 @@ class SessionControllerRunsMixin:
                         session_id,
                         content,
                         delivery=inferred_delivery,
-                        source="protocol",
+                        source=source,
                         message_id=message_id,
                         meta=meta,
                     )
@@ -432,7 +437,7 @@ class SessionControllerRunsMixin:
                     session_id,
                     content,
                     delivery=inferred_delivery,
-                    source="protocol",
+                    source=source,
                     message_id=message_id,
                     meta=meta,
                 )

@@ -538,7 +538,7 @@ async def test_send_message_happy_path(tmp_path: Any) -> None:
 
     result = await cap.send_message(ctx, "reviewer_agent", "hello")
 
-    assert result == "Message sent to reviewer_agent"
+    assert result.return_value == "Message sent to reviewer_agent"
     mock_pool.send_message.assert_awaited_once()
 
 
@@ -554,7 +554,7 @@ async def test_send_message_broadcast_returns_error() -> None:
 
     result = await cap.send_message(ctx, "*", "announcement")
 
-    assert result == "Broadcast is lead-only"
+    assert result.return_value == "Broadcast is lead-only"
 
 
 @pytest.mark.unit
@@ -569,7 +569,7 @@ async def test_send_message_no_team_id() -> None:
 
     result = await cap.send_message(ctx, "reviewer_agent", "hello")
 
-    assert result == "Not in a team session"
+    assert result.return_value == "Not in a team session"
 
 
 @pytest.mark.unit
@@ -586,7 +586,7 @@ async def test_send_message_no_session_pool(tmp_path: Any) -> None:
 
     result = await cap.send_message(ctx, "reviewer_agent", "hello")
 
-    assert result == "SessionPool not available"
+    assert result.return_value == "SessionPool not available"
 
 
 @pytest.mark.unit
@@ -604,7 +604,7 @@ async def test_send_message_member_not_found(tmp_path: Any) -> None:
 
     result = await cap.send_message(ctx, "nonexistent", "hello")
 
-    assert "not found" in result
+    assert "not found" in result.return_value
 
 
 @pytest.mark.unit
@@ -625,7 +625,7 @@ async def test_send_message_urgent_uses_steer(tmp_path: Any) -> None:
 
     result = await cap.send_message(ctx, "reviewer_agent", "urgent msg", urgent=True)
 
-    assert result == "Message sent to reviewer_agent"
+    assert result.return_value == "Message sent to reviewer_agent"
     call_kwargs = mock_pool.send_message.call_args
     assert call_kwargs.kwargs["mode"] is DeliveryMode.STEER
 
@@ -670,9 +670,9 @@ async def test_bounds_max_members_exceeded(tmp_path: Any) -> None:
         ],
     )
 
-    assert "exceeds max_members" in result
-    assert "4" in result
-    assert "3" in result
+    assert "exceeds max_members" in result.return_value
+    assert "4" in result.return_value
+    assert "3" in result.return_value
 
 
 @pytest.mark.unit
@@ -712,7 +712,7 @@ async def test_bounds_max_members_ok(tmp_path: Any) -> None:
         ],
     )
 
-    assert "Team 'ok_team' created with 2 members" in result
+    assert "Team 'ok_team' created with 2 members" in result.return_value
 
 
 @pytest.mark.unit
@@ -753,8 +753,8 @@ async def test_bounds_started_at_recorded(tmp_path: Any) -> None:
         ],
     )
 
-    assert "team_id=" in result
-    team_id = result.split("team_id=")[1].strip()
+    assert "team_id=" in result.return_value
+    team_id = result.return_value.split("team_id=")[1].strip()
     state = FileTeamState._read_json(FileTeamState(str(tmp_path))._state_path(team_id))
     assert "started_at" in state
     assert state["started_at"] is not None
@@ -784,13 +784,13 @@ async def test_bounds_inbox_max_bytes_exceeded(tmp_path: Any) -> None:
 
     # First message should succeed (inbox is empty, body is small).
     result1 = await cap.send_message(ctx, "reviewer_agent", "hi")
-    assert result1 == "Message sent to reviewer_agent"
+    assert result1.return_value == "Message sent to reviewer_agent"
 
     # Second message with a large body should exceed the inbox limit.
     big_body = "x" * 100
     result2 = await cap.send_message(ctx, "reviewer_agent", big_body)
 
-    assert "Inbox exceeds max size" in result2
+    assert "Inbox exceeds max size" in result2.return_value
 
 
 @pytest.mark.unit
@@ -814,14 +814,14 @@ async def test_bounds_max_member_turns_exceeded(tmp_path: Any) -> None:
 
     # Send 2 messages (should succeed, turn_count goes 0->1, 1->2).
     result1 = await cap.send_message(ctx, "reviewer_agent", "msg1")
-    assert result1 == "Message sent to reviewer_agent"
+    assert result1.return_value == "Message sent to reviewer_agent"
     result2 = await cap.send_message(ctx, "reviewer_agent", "msg2")
-    assert result2 == "Message sent to reviewer_agent"
+    assert result2.return_value == "Message sent to reviewer_agent"
 
     # Third message should be rejected (turn_count=2 >= max_member_turns=2).
     result3 = await cap.send_message(ctx, "reviewer_agent", "msg3")
-    assert "exceeded max turns" in result3
-    assert "2" in result3
+    assert "exceeded max turns" in result3.return_value
+    assert "2" in result3.return_value
 
 
 @pytest.mark.unit
@@ -845,9 +845,8 @@ async def test_bounds_blackboard_max_size_exceeded(tmp_path: Any) -> None:
     # Write > 1MB of data.
     big_value = "x" * (1024 * 1024 + 1)
     result = await cap.write_blackboard(ctx, "big_key", big_value)
-
-    assert "Blackboard write exceeds max size" in result
-    assert "MB" in result
+    assert "Blackboard write exceeds max size" in result.return_value
+    assert "MB" in result.return_value
 
 
 @pytest.mark.unit
@@ -864,7 +863,7 @@ async def test_task_create_happy_path(tmp_path: Any) -> None:
 
     result = await cap.task_create(ctx, "Translate docs", "Translate API docs to French")
 
-    assert result.startswith("Task created: ")
+    assert result.return_value.startswith("Task created: ")
 
 
 @pytest.mark.unit
@@ -879,7 +878,7 @@ async def test_task_create_no_team_id() -> None:
 
     result = await cap.task_create(ctx, "Task")
 
-    assert result == "Not in a team session"
+    assert result.return_value == "Not in a team session"
 
 
 @pytest.mark.unit
@@ -899,9 +898,9 @@ async def test_task_list_returns_tasks(tmp_path: Any) -> None:
 
     result = await cap.task_list(ctx)
 
-    assert "<task_list>" in result
-    assert "Task A" in result
-    assert "Task B" in result
+    assert "<task_list>" in result.return_value
+    assert "Task A" in result.return_value
+    assert "Task B" in result.return_value
 
 
 @pytest.mark.unit
@@ -917,12 +916,12 @@ async def test_task_update_changes_status(tmp_path: Any) -> None:
     cap = TeamCommCapability(config, "worker", _make_session_metadata())
 
     create_result = await cap.task_create(ctx, "Task X")
-    task_id = create_result.replace("Task created: ", "")
+    task_id = create_result.return_value.replace("Task created: ", "")
 
     update_result = await cap.task_update(ctx, task_id, status="completed")
 
-    assert 'status="completed"' in update_result
-    assert "<task" in update_result
+    assert 'status="completed"' in update_result.return_value
+    assert "<task" in update_result.return_value
 
 
 @pytest.mark.unit
@@ -939,7 +938,7 @@ async def test_task_update_no_updates_specified(tmp_path: Any) -> None:
 
     result = await cap.task_update(ctx, "some_id")
 
-    assert result == "No updates specified"
+    assert result.return_value == "No updates specified"
 
 
 @pytest.mark.unit
@@ -957,9 +956,9 @@ async def test_read_blackboard_returns_value(tmp_path: Any) -> None:
     await cap.write_blackboard(ctx, "config", "value1")
     result = await cap.read_blackboard(ctx, "config")
 
-    assert "<blackboard" in result
-    assert "value1" in result
-    assert 'version="1"' in result
+    assert "<blackboard" in result.return_value
+    assert "value1" in result.return_value
+    assert 'version="1"' in result.return_value
 
 
 @pytest.mark.unit
@@ -976,7 +975,7 @@ async def test_read_blackboard_key_not_found(tmp_path: Any) -> None:
 
     result = await cap.read_blackboard(ctx, "nonexistent")
 
-    assert result == "Key not found"
+    assert result.return_value == "Key not found"
 
 
 @pytest.mark.unit
@@ -993,7 +992,7 @@ async def test_write_blackboard_returns_version(tmp_path: Any) -> None:
 
     result = await cap.write_blackboard(ctx, "key1", "val1")
 
-    assert result == "Written, version=1"
+    assert result.return_value == "Written, version=1"
 
 
 @pytest.mark.unit
@@ -1011,7 +1010,7 @@ async def test_write_blackboard_conflict(tmp_path: Any) -> None:
     await cap.write_blackboard(ctx, "key1", "val1")
     result = await cap.write_blackboard(ctx, "key1", "val2", expected_version=0)
 
-    assert result == "Conflict: current version is 1"
+    assert result.return_value == "Conflict: current version is 1"
 
 
 @pytest.mark.unit
@@ -1031,9 +1030,9 @@ async def test_list_blackboard_returns_keys(tmp_path: Any) -> None:
 
     result = await cap.list_blackboard(ctx)
 
-    assert "<blackboard_keys>" in result
-    assert "alpha" in result
-    assert "zebra" in result
+    assert "<blackboard_keys>" in result.return_value
+    assert "alpha" in result.return_value
+    assert "zebra" in result.return_value
 
 
 @pytest.mark.unit
@@ -1050,10 +1049,10 @@ async def test_team_status_returns_formatted_string(tmp_path: Any) -> None:
 
     result = await cap.team_status(ctx)
 
-    assert "alpha_team" in result
-    assert "active" in result
-    assert "translator_agent" in result
-    assert "reviewer_agent" in result
+    assert "alpha_team" in result.return_value
+    assert "active" in result.return_value
+    assert "translator_agent" in result.return_value
+    assert "reviewer_agent" in result.return_value
 
 
 @pytest.mark.unit
@@ -1068,7 +1067,7 @@ async def test_team_status_no_team_id() -> None:
 
     result = await cap.team_status(ctx)
 
-    assert result == "Not in a team session"
+    assert result.return_value == "Not in a team session"
 
 
 @pytest.mark.unit
@@ -1125,8 +1124,8 @@ async def test_team_create_success(tmp_path: Any) -> None:
         ],
     )
 
-    assert "Team 'my_team' created with 2 members" in result
-    assert "team_id=" in result
+    assert "Team 'my_team' created with 2 members" in result.return_value
+    assert "team_id=" in result.return_value
     assert mock_delegation.create_child_session.await_count == 2
     assert mock_pool.send_message.await_count == 2
 
@@ -1143,7 +1142,7 @@ async def test_team_create_not_lead() -> None:
 
     result = await cap.team_create(ctx, "test", [])
 
-    assert result == "Only lead can use team_create"
+    assert result.return_value == "Only lead can use team_create"
 
 
 @pytest.mark.unit
@@ -1173,7 +1172,7 @@ async def test_team_create_agent_not_in_registry(tmp_path: Any) -> None:
         [{"agent": "ghost", "name": "ghost_member"}],
     )
 
-    assert "not found in registry" in result
+    assert "not found in registry" in result.return_value
 
 
 @pytest.mark.unit
@@ -1203,7 +1202,7 @@ async def test_team_create_agent_not_eligible(tmp_path: Any) -> None:
         [{"agent": "non_eligible", "name": "member1"}],
     )
 
-    assert "not eligible for team membership" in result
+    assert "not eligible for team membership" in result.return_value
 
 
 @pytest.mark.unit
@@ -1226,7 +1225,7 @@ async def test_team_delete_success(tmp_path: Any) -> None:
 
     result = await cap.team_delete(ctx)
 
-    assert result == "Team deleted"
+    assert result.return_value == "Team deleted"
     # Two members registered in _init_team.
     assert mock_pool.close_session.await_count == 2
 
@@ -1243,7 +1242,7 @@ async def test_team_delete_not_lead() -> None:
 
     result = await cap.team_delete(ctx)
 
-    assert result == "Only lead can use team_delete"
+    assert result.return_value == "Only lead can use team_delete"
 
 
 @pytest.mark.unit
@@ -1266,7 +1265,7 @@ async def test_shutdown_request_success(tmp_path: Any) -> None:
 
     result = await cap.shutdown_request(ctx, "translator_agent")
 
-    assert result == "Shutdown completed for translator_agent"
+    assert result.return_value == "Shutdown completed for translator_agent"
     mock_pool.close_session.assert_awaited_once_with("sess_translator")
 
 
@@ -1282,7 +1281,7 @@ async def test_shutdown_request_not_lead() -> None:
 
     result = await cap.shutdown_request(ctx, "some_member")
 
-    assert result == "Only lead can use shutdown_request"
+    assert result.return_value == "Only lead can use shutdown_request"
 
 
 @pytest.mark.unit
@@ -1304,10 +1303,10 @@ async def test_delete_blackboard_success(tmp_path: Any) -> None:
     await cap.write_blackboard(ctx, "test_key", "test_value")
     result = await cap.delete_blackboard(ctx, "test_key")
 
-    assert result == "Blackboard key 'test_key' deleted"
+    assert result.return_value == "Blackboard key 'test_key' deleted"
     # Verify it's gone.
     read_result = await cap.read_blackboard(ctx, "test_key")
-    assert read_result == "Key not found"
+    assert read_result.return_value == "Key not found"
 
 
 @pytest.mark.unit
@@ -1322,7 +1321,7 @@ async def test_delete_blackboard_not_lead() -> None:
 
     result = await cap.delete_blackboard(ctx, "some_key")
 
-    assert result == "Only lead can use delete_blackboard"
+    assert result.return_value == "Only lead can use delete_blackboard"
 
 
 @pytest.mark.unit
@@ -1345,7 +1344,7 @@ async def test_broadcast_lead(tmp_path: Any) -> None:
 
     result = await cap.send_message(ctx, "*", "announcement")
 
-    assert "Broadcast sent to 2 members" in result
+    assert "Broadcast sent to 2 members" in result.return_value
     assert mock_pool.send_message.await_count == 2
 
 
@@ -1361,7 +1360,7 @@ async def test_broadcast_not_lead() -> None:
 
     result = await cap.send_message(ctx, "*", "announcement")
 
-    assert result == "Broadcast is lead-only"
+    assert result.return_value == "Broadcast is lead-only"
 
 
 @pytest.mark.unit
@@ -1379,9 +1378,9 @@ async def test_message_size_exceeds_limit() -> None:
     big_body = "x" * 100
     result = await cap.send_message(ctx, "reviewer_agent", big_body)
 
-    assert "exceeds max size" in result
-    assert "100" in result
-    assert "10" in result
+    assert "exceeds max size" in result.return_value
+    assert "100" in result.return_value
+    assert "10" in result.return_value
 
 
 @pytest.mark.unit
@@ -1410,7 +1409,7 @@ async def test_auto_urgent(tmp_path: Any) -> None:
         message_type="escalation",
     )
 
-    assert result == "Message sent to reviewer_agent"
+    assert result.return_value == "Message sent to reviewer_agent"
     call_kwargs = mock_pool.send_message.call_args
     assert call_kwargs.kwargs["mode"] is DeliveryMode.STEER
 
@@ -1459,7 +1458,7 @@ async def test_team_create_uses_config_default_members(tmp_path: Any) -> None:
 
     result = await cap.team_create(ctx, "my_team", [])
 
-    assert "Team 'my_team' created with 2 members" in result
+    assert "Team 'my_team' created with 2 members" in result.return_value
     assert mock_delegation.create_child_session.await_count == 2
     assert mock_pool.send_message.await_count == 2
 
@@ -1536,7 +1535,7 @@ async def test_team_create_empty_members_no_defaults(tmp_path: Any) -> None:
 
     result = await cap.team_create(ctx, "empty_team", [])
 
-    assert "Team 'empty_team' created with 0 members" in result
+    assert "Team 'empty_team' created with 0 members" in result.return_value
     assert mock_delegation.create_child_session.await_count == 0
 
 
@@ -1775,7 +1774,7 @@ async def test_team_add_member_success(tmp_path: Any) -> None:
 
     result = await cap.team_add_member(ctx, "new_member", "editor")
 
-    assert result == "Member 'new_member' added to team (lifecycle=persistent)"
+    assert result.return_value == "Member 'new_member' added to team (lifecycle=persistent)"
     mock_delegation.create_child_session.assert_awaited_once()
     mock_pool.send_message.assert_awaited_once()
 
@@ -1804,7 +1803,7 @@ async def test_team_add_member_not_lead() -> None:
 
     result = await cap.team_add_member(ctx, "new_member", "worker")
 
-    assert result == "Only lead can use team_add_member"
+    assert result.return_value == "Only lead can use team_add_member"
 
 
 @pytest.mark.unit
@@ -1821,7 +1820,7 @@ async def test_team_add_member_agent_not_eligible(tmp_path: Any) -> None:
 
     result = await cap.team_add_member(ctx, "new_member", "non_eligible")
 
-    assert "not eligible" in result
+    assert "not eligible" in result.return_value
 
 
 @pytest.mark.unit
@@ -1838,7 +1837,7 @@ async def test_team_add_member_duplicate_name(tmp_path: Any) -> None:
 
     result = await cap.team_add_member(ctx, "translator_agent", "worker")
 
-    assert result == "Member 'translator_agent' already exists"
+    assert result.return_value == "Member 'translator_agent' already exists"
 
 
 @pytest.mark.unit
@@ -1857,7 +1856,7 @@ async def test_team_add_member_with_notify(tmp_path: Any) -> None:
         notify="New member joining",
     )
 
-    assert "added to team" in result
+    assert "added to team" in result.return_value
     # send_message called: 1 for initial prompt + 2 for notify (translator + reviewer)
     assert mock_pool.send_message.await_count == 3
 
@@ -1889,7 +1888,7 @@ async def test_team_add_member_ephemeral(tmp_path: Any) -> None:
         lifecycle="ephemeral",
     )
 
-    assert result == "Member 'temp_member' added to team (lifecycle=ephemeral)"
+    assert result.return_value == "Member 'temp_member' added to team (lifecycle=ephemeral)"
     # Verify the member was registered in team state.
     from agentpool.capabilities.file_team_state import FileTeamState
 
@@ -1918,7 +1917,7 @@ async def test_team_remove_member_success(tmp_path: Any) -> None:
 
     result = await cap.team_remove_member(ctx, "translator_agent")
 
-    assert result == "Member 'translator_agent' removed from team"
+    assert result.return_value == "Member 'translator_agent' removed from team"
     mock_pool.close_session.assert_awaited_once_with("sess_translator")
     # Verify member removed from team state.
     from agentpool.capabilities.file_team_state import FileTeamState
@@ -1953,7 +1952,7 @@ async def test_team_remove_member_not_found(tmp_path: Any) -> None:
 
     result = await cap.team_remove_member(ctx, "nonexistent")
 
-    assert result == "Member 'nonexistent' not found"
+    assert result.return_value == "Member 'nonexistent' not found"
     mock_pool.close_session.assert_not_awaited()
 
 
@@ -1977,7 +1976,7 @@ async def test_team_remove_member_is_self(tmp_path: Any) -> None:
 
     result = await cap.team_remove_member(ctx, "coordinator")
 
-    assert result == "Cannot remove yourself"
+    assert result.return_value == "Cannot remove yourself"
     mock_pool.close_session.assert_not_awaited()
 
 
@@ -1991,7 +1990,7 @@ async def test_team_add_member_non_ascii_name(tmp_path: Any) -> None:
 
     cap, ctx, _mock_pool, _mock_delegation, _mock_registry = _make_add_member_setup(tmp_path)
     result = await cap.team_add_member(ctx, "推理员B", "editor")
-    assert "added to team" in result
+    assert "added to team" in result.return_value
 
     # Verify blackboard key was sanitized (non-ASCII chars replaced with _).
     from agentpool.capabilities.file_team_state import FileTeamState
@@ -2010,7 +2009,7 @@ async def test_team_add_member_hyphen_in_name(tmp_path: Any) -> None:
 
     cap, ctx, _mock_pool, _mock_delegation, _mock_registry = _make_add_member_setup(tmp_path)
     result = await cap.team_add_member(ctx, "logician-B", "editor")
-    assert "added to team" in result
+    assert "added to team" in result.return_value
 
     # Verify blackboard key was sanitized (hyphen replaced with _).
     from agentpool.capabilities.file_team_state import FileTeamState
@@ -2067,7 +2066,7 @@ async def test_team_add_member_max_members_exceeded(tmp_path: Any) -> None:
 
     result = await cap.team_add_member(ctx, "extra", "editor")
 
-    assert "max_members" in result
+    assert "max_members" in result.return_value
 
 
 @pytest.mark.unit
@@ -2078,7 +2077,7 @@ async def test_team_add_member_agent_not_in_registry(tmp_path: Any) -> None:
 
     result = await cap.team_add_member(ctx, "new_member", "nonexistent_agent")
 
-    assert "not found in registry" in result
+    assert "not found in registry" in result.return_value
 
 
 @pytest.mark.unit
@@ -2103,7 +2102,7 @@ async def test_team_remove_member_non_ascii_name(tmp_path: Any) -> None:
 
     # Then remove it.
     result = await cap.team_remove_member(ctx, "推理员")
-    assert "removed from team" in result
+    assert "removed from team" in result.return_value
 
     # Verify blackboard was written with sanitized key.
     from agentpool.capabilities.file_team_state import FileTeamState
@@ -2158,7 +2157,7 @@ async def test_send_message_to_nonexistent_member_no_phantom(tmp_path: Any) -> N
 
     result = await cap.send_message(ctx, "ghost_member", "hello")
 
-    assert "not found" in result
+    assert "not found" in result.return_value
     # Verify NO phantom entry was created in team state.
     from agentpool.capabilities.file_team_state import FileTeamState
 
@@ -2188,7 +2187,7 @@ async def test_shutdown_request_marks_member_offline(tmp_path: Any) -> None:
 
     result = await cap.shutdown_request(ctx, "translator_agent")
 
-    assert result == "Shutdown completed for translator_agent"
+    assert result.return_value == "Shutdown completed for translator_agent"
     mock_pool.close_session.assert_awaited_once_with("sess_translator")
     # Verify member marked as shutdown in team state.
     from agentpool.capabilities.file_team_state import FileTeamState
@@ -2240,8 +2239,8 @@ async def test_team_status_shows_added_member_no_team_mode_config(tmp_path: Any)
     agent_ctx.team_mode_config = None  # type: ignore[misc]
 
     status = await cap.team_status(ctx)
-    assert "historian_backup" in status, (
-        f"BUG-001: member missing when team_mode_config=None\n{status}"
+    assert "historian_backup" in status.return_value, (
+        f"BUG-001: member missing when team_mode_config=None\n{status.return_value}"
     )
 
 
@@ -2263,15 +2262,18 @@ async def test_delete_blackboard_nonexistent_key_returns_not_found(
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
     result = await cap.delete_blackboard(ctx, "nonexistent_key")
-    assert "not found" in result, f"Should return 'not found' for missing key, got: {result}"
+    assert "not found" in result.return_value, (
+        f"Should return 'not found' for missing key, got: {result.return_value}"
+    )
 
 
 @pytest.mark.unit
 async def test_task_update_invalid_task_id_returns_friendly_error(
     tmp_path: Any,
 ) -> None:
-    """BUG-01: task_update with invalid task_id returns friendly error,
-    not raw FileNotFoundError.
+    """BUG-01: task_update with invalid task_id returns friendly error.
+
+    Not raw FileNotFoundError.
     """
     _init_team(str(tmp_path))
     config = _make_enabled_config(base_dir=str(tmp_path))
@@ -2283,7 +2285,7 @@ async def test_task_update_invalid_task_id_returns_friendly_error(
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
     result = await cap.task_update(ctx, "nonexistent_task_id", status="completed")
-    assert "Task not found" in result
-    assert "nonexistent_task_id" in result
-    assert "Errno" not in result
-    assert "No such file" not in result
+    assert "Task not found" in result.return_value
+    assert "nonexistent_task_id" in result.return_value
+    assert "Errno" not in result.return_value
+    assert "No such file" not in result.return_value

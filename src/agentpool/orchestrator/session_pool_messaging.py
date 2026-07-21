@@ -191,6 +191,7 @@ class SessionPoolMessagingMixin:
         deps: Any = None,
         input_provider: Any = None,
         meta: Any = None,
+        source: str = "protocol",
     ) -> str | None:
         """Send a message to a session using the typed ``DeliveryMode`` enum.
 
@@ -219,10 +220,22 @@ class SessionPoolMessagingMixin:
                 uses it to reconstruct the full user message (e.g. OpenCode
                 parts, ACP content blocks) instead of falling back to
                 text-only content.
+            source: Originator of the message — ``"protocol"`` (default)
+                for protocol handler requests, ``"team"`` for team-mode
+                coordination messages. Passed through to
+                ``UserMessageInsertedEvent.source`` so protocol frontends
+                can render team messages with a distinct visual style.
 
         Returns:
             The ``message_id`` string on success (both new runs and
             steer/followup), ``None`` on failure.
+
+        Note:
+            For ``DeliveryMode.QUEUE`` when the session is busy, the
+            return value is ``None`` even though the message was
+            successfully queued. Callers that need to distinguish
+            ``None``-as-queued from ``None``-as-failure should verify
+            session existence before calling.
         """
         priority = "asap" if mode is DeliveryMode.STEER else "when_idle"
         # Delegate directly to _route_message() to avoid the deprecated
@@ -248,6 +261,7 @@ class SessionPoolMessagingMixin:
             deps=deps,
             message_id=message_id,
             meta=meta,
+            source=source,
         )
 
     async def run_agent(

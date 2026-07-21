@@ -928,8 +928,15 @@ class UserMessageInsertedEvent[T]:
     delivery: Literal["initial", "steer", "followup"] = "initial"
     """How the message was delivered to the run."""
 
-    source: Literal["protocol", "background_task", "internal"] = "protocol"
-    """Originator of the inserted message."""
+    source: Literal["protocol", "background_task", "internal", "team"] = "protocol"
+    """Originator of the inserted message.
+
+    ``"team"`` indicates a team-mode coordination message (e.g.
+    ``send_message`` between team members).  Protocol frontends should
+    render these with a distinct visual style (e.g. team badge) and the
+    ``meta`` field carries team-specific metadata such as ``from_member``,
+    ``to_member``, ``team_name``, and ``message_type``.
+    """
 
     timestamp: float = field(default_factory=time.time)
     """Wall-clock time the event was created (epoch seconds)."""

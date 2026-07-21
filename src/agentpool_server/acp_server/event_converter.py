@@ -520,7 +520,15 @@ class ACPEventConverter:
                 message_id=mid,
                 content=event_content,
                 meta=event_meta,
+                source=event_source,
             ):
+                # For team messages, prefix with sender info for visual
+                # distinction in the frontend.
+                effective_content: str | list[Any] = event_content
+                if event_source == "team" and isinstance(event_meta, dict):
+                    from_member = str(event_meta.get("from", "team"))
+                    if isinstance(event_content, str):
+                        effective_content = f"[Team · {from_member}] {event_content}"
                 # Use meta.content_blocks if available, otherwise fall back
                 # to text-only content.
                 if isinstance(event_meta, ACPUserMessageMeta):
@@ -539,8 +547,8 @@ class ACPEventConverter:
                             message_id=mid or None,
                         )
                 else:
-                    # Fall back to text-only content.
-                    blocks = self._content_to_text_blocks(event_content)
+                    # Fall back to text-only content (with team prefix if applicable).
+                    blocks = self._content_to_text_blocks(effective_content)
                     for block in blocks:
                         yield UserMessageChunk(
                             content=block,

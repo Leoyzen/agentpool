@@ -90,9 +90,9 @@ async def test_team_create_with_config_default_members(tmp_path: Any) -> None:
 
     result = await cap.team_create(ctx, "my_team", [])
 
-    assert "Team 'my_team' created with 2 members" in result
-    assert "team_id=" in result
-    team_id = result.split("team_id=")[1].strip()
+    assert "Team 'my_team' created with 2 members" in result.return_value
+    assert "team_id=" in result.return_value
+    team_id = result.return_value.split("team_id=")[1].strip()
 
     # FileTeamState should have the team on disk.
     team_state = FileTeamState(str(tmp_path))
@@ -141,8 +141,8 @@ async def test_team_create_config_default_members_graceful_degradation(
 
     result = await cap.team_create(ctx, "my_team", [])
 
-    assert "Failed to create team" in result
-    assert "Session creation failed" in result
+    assert "Failed to create team" in result.return_value
+    assert "Session creation failed" in result.return_value
 
 
 @pytest.mark.integration
@@ -178,8 +178,8 @@ async def test_team_create_config_default_members_then_delete(tmp_path: Any) -> 
 
     # Create the team with empty members (uses defaults config).
     create_result = await cap.team_create(ctx, "my_team", [])
-    assert "Team 'my_team' created with 2 members" in create_result
-    team_id = create_result.split("team_id=")[1].strip()
+    assert "Team 'my_team' created with 2 members" in create_result.return_value
+    team_id = create_result.return_value.split("team_id=")[1].strip()
 
     # Verify team exists on disk.
     team_state = FileTeamState(str(tmp_path))
@@ -192,6 +192,6 @@ async def test_team_create_config_default_members_then_delete(tmp_path: Any) -> 
     # Now delete the team.
     result = await cap.team_delete(ctx)
 
-    assert result == "Team deleted"
+    assert result.return_value == "Team deleted"
     assert not team_state._state_path(team_id).exists()
     assert mock_pool.close_session.await_count == 2

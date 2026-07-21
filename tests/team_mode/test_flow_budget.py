@@ -155,8 +155,8 @@ async def _create_team(
     """
     ctx = make_mock_run_context(agent_ctx)
     result = await cap.team_create(ctx, team_name, members)
-    if "team_id=" in result:
-        team_id = result.split("team_id=")[1].strip()
+    if "team_id=" in result.return_value:
+        team_id = result.return_value.split("team_id=")[1].strip()
         agent_ctx.session.metadata["team_id"] = team_id
         agent_ctx.session.metadata["team_name"] = team_name
         cap._session_metadata["team_id"] = team_id
@@ -202,9 +202,9 @@ async def test_max_members_enforced(budget_pool: AgentPool[Any]) -> None:
         ],
     )
 
-    assert "exceeds max_members" in result
-    assert "3" in result
-    assert "2" in result
+    assert "exceeds max_members" in result.return_value
+    assert "3" in result.return_value
+    assert "2" in result.return_value
 
     # Cleanup.
     session_pool = budget_pool.session_pool
@@ -247,14 +247,14 @@ async def test_max_member_turns_enforced(budget_pool: AgentPool[Any]) -> None:
     # Send 3 messages — all should succeed (turn_count goes 0→1, 1→2, 2→3).
     for i in range(3):
         result = await cap.send_message(ctx, "worker_1", f"message {i + 1}")
-        assert result == "Message sent to worker_1", (
-            f"Message {i + 1} should succeed, got: {result}"
+        assert result.return_value == "Message sent to worker_1", (
+            f"Message {i + 1} should succeed, got: {result.return_value}"
         )
 
     # 4th message should be rejected (turn_count=3 >= max_member_turns=3).
     result = await cap.send_message(ctx, "worker_1", "message 4")
-    assert "exceeded max turns" in result
-    assert "3" in result
+    assert "exceeded max turns" in result.return_value
+    assert "3" in result.return_value
 
     # Cleanup.
     session_pool = budget_pool.session_pool
@@ -326,8 +326,8 @@ async def test_wall_clock_timeout(budget_pool: AgentPool[Any]) -> None:
     # prerequisite infrastructure).
     ctx = make_mock_run_context(agent_ctx)
     status_result = await cap.team_status(ctx)
-    assert "clock_test_team" in status_result
-    assert "worker_1" in status_result
+    assert "clock_test_team" in status_result.return_value
+    assert "worker_1" in status_result.return_value
 
     # Cleanup.
     session_pool = budget_pool.session_pool

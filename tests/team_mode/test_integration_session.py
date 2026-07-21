@@ -191,12 +191,12 @@ async def test_member_sessions_closed_when_lead_run_terminates(
                 {"agent": "reviewer", "name": "reviewer_1"},
             ],
         )
-        assert "Team 'test_team' created with 2 members" in create_result
+        assert "Team 'test_team' created with 2 members" in create_result.return_value
 
         # Extract member session IDs from team state (exclude lead).
         from agentpool.capabilities.file_team_state import FileTeamState
 
-        team_id = create_result.split("team_id=")[1].strip()
+        team_id = create_result.return_value.split("team_id=")[1].strip()
         team_state = FileTeamState(str(tmp_path))
         state = team_state._read_json(team_state._state_path(team_id))
         lead_sid = session_pool.sessions.get_session("lead-session-001")

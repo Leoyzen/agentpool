@@ -390,36 +390,36 @@ async def test_flow_full_lifecycle(tmp_path: Any) -> None:
     assert len(results) == 7
 
     # Turn 1: team_create
-    assert "Team 'test_team' created with 2 members" in results[0]
-    assert "team_id=" in results[0]
-    team_id = results[0].split("team_id=")[1].strip()
+    assert "Team 'test_team' created with 2 members" in results[0].return_value
+    assert "team_id=" in results[0].return_value
+    team_id = results[0].return_value.split("team_id=")[1].strip()
     lead_meta["team_id"] = team_id
     lead_meta["team_name"] = "test_team"
 
     # Turn 2: team_status
-    assert "test_team" in results[1]
-    assert "analyst" in results[1]
-    assert "reviewer" in results[1]
+    assert "test_team" in results[1].return_value
+    assert "analyst" in results[1].return_value
+    assert "reviewer" in results[1].return_value
 
     # Turn 3: task_create
-    assert results[2].startswith("Task created: ")
-    task_id = results[2].replace("Task created: ", "")
+    assert results[2].return_value.startswith("Task created: ")
+    task_id = results[2].return_value.replace("Task created: ", "")
 
     # Turn 4: task_list
-    assert "<task_list>" in results[3]
-    assert "Review PR" in results[3]
-    assert task_id in results[3]
+    assert "<task_list>" in results[3].return_value
+    assert "Review PR" in results[3].return_value
+    assert task_id in results[3].return_value
 
     # Turn 5: write_blackboard
-    assert results[4] == "Written, version=1"
+    assert results[4].return_value == "Written, version=1"
 
     # Turn 6: read_blackboard
-    assert "<blackboard" in results[5]
-    assert "in_progress" in results[5]
-    assert 'version="1"' in results[5]
+    assert "<blackboard" in results[5].return_value
+    assert "in_progress" in results[5].return_value
+    assert 'version="1"' in results[5].return_value
 
     # Turn 7: team_delete
-    assert results[6] == "Team deleted"
+    assert results[6].return_value == "Team deleted"
     assert mock_pool.close_session.await_count == 2
 
 
@@ -515,8 +515,8 @@ async def test_flow_send_message_and_task_update(tmp_path: Any) -> None:
     )
     all_results.append(r1)
     messages.append(resp)
-    assert "Team 'solo_team' created with 1 members" in r1
-    team_id = r1.split("team_id=")[1].strip()
+    assert "Team 'solo_team' created with 1 members" in r1.return_value
+    team_id = r1.return_value.split("team_id=")[1].strip()
     lead_meta["team_id"] = team_id
     lead_meta["team_name"] = "solo_team"
 
@@ -531,7 +531,7 @@ async def test_flow_send_message_and_task_update(tmp_path: Any) -> None:
     )
     all_results.append(r2)
     messages.append(resp)
-    assert r2 == "Message sent to worker_agent"
+    assert r2.return_value == "Message sent to worker_agent"
 
     # Turn 3: task_create
     resp = await model_fn(messages, agent_info)
@@ -548,8 +548,8 @@ async def test_flow_send_message_and_task_update(tmp_path: Any) -> None:
     )
     all_results.append(r3)
     messages.append(resp)
-    assert r3.startswith("Task created: ")
-    task_id = r3.replace("Task created: ", "")
+    assert r3.return_value.startswith("Task created: ")
+    task_id = r3.return_value.replace("Task created: ", "")
 
     # Turn 4: task_update with the actual task_id
     resp = await model_fn(messages, agent_info)
@@ -566,8 +566,8 @@ async def test_flow_send_message_and_task_update(tmp_path: Any) -> None:
     all_results.append(r4)
     messages.append(resp)
     updated = r4
-    assert 'status="completed"' in updated
-    assert "<task" in updated
+    assert 'status="completed"' in updated.return_value
+    assert "<task" in updated.return_value
 
     # Turn 5: team_delete
     resp = await model_fn(messages, agent_info)
@@ -575,7 +575,7 @@ async def test_flow_send_message_and_task_update(tmp_path: Any) -> None:
     r5 = await _dispatch_tool(cap, "team_delete", ctx, {})
     all_results.append(r5)
     messages.append(resp)
-    assert r5 == "Team deleted"
+    assert r5.return_value == "Team deleted"
     assert mock_pool.close_session.await_count == 1
 
 
@@ -643,18 +643,18 @@ async def test_flow_broadcast_message(tmp_path: Any) -> None:
     assert len(results) == 3
 
     # Turn 1: team_create
-    assert "Team 'broadcast_team' created with 2 members" in results[0]
-    team_id = results[0].split("team_id=")[1].strip()
+    assert "Team 'broadcast_team' created with 2 members" in results[0].return_value
+    team_id = results[0].return_value.split("team_id=")[1].strip()
     lead_meta["team_id"] = team_id
     lead_meta["team_name"] = "broadcast_team"
 
     # Turn 2: broadcast
-    assert "Broadcast sent to 2 members" in results[1]
+    assert "Broadcast sent to 2 members" in results[1].return_value
     # 2 send_message calls for broadcast (one per member) + 2 from team_create = 4 total
     assert mock_pool.send_message.await_count >= 4
 
     # Turn 3: team_delete
-    assert results[2] == "Team deleted"
+    assert results[2].return_value == "Team deleted"
     assert mock_pool.close_session.await_count == 2
 
 
@@ -739,22 +739,22 @@ async def test_flow_blackboard_versioning(tmp_path: Any) -> None:
     assert len(results) == 5
 
     # Turn 1: team_create
-    assert "Team 'bb_team' created with 1 members" in results[0]
-    team_id = results[0].split("team_id=")[1].strip()
+    assert "Team 'bb_team' created with 1 members" in results[0].return_value
+    team_id = results[0].return_value.split("team_id=")[1].strip()
     lead_meta["team_id"] = team_id
     lead_meta["team_name"] = "bb_team"
 
     # Turn 2: first write — version=1
-    assert results[1] == "Written, version=1"
+    assert results[1].return_value == "Written, version=1"
 
     # Turn 3: second write with correct expected_version=1 → version=2
-    assert results[2] == "Written, version=2"
+    assert results[2].return_value == "Written, version=2"
 
     # Turn 4: third write with stale expected_version=1 → conflict
-    assert results[3] == "Conflict: current version is 2"
+    assert results[3].return_value == "Conflict: current version is 2"
 
     # Turn 5: team_delete
-    assert results[4] == "Team deleted"
+    assert results[4].return_value == "Team deleted"
 
 
 # ---------------------------------------------------------------------------
@@ -830,26 +830,26 @@ async def test_flow_error_recovery(tmp_path: Any) -> None:
     assert len(results) == 3
 
     # Turn 1: task_create without team → error
-    assert results[0] == "Not in a team session"
+    assert results[0].return_value == "Not in a team session"
 
     # Turn 2: team_create → success
-    assert "Team 'recovery_team' created with 1 members" in results[1]
-    team_id = results[1].split("team_id=")[1].strip()
+    assert "Team 'recovery_team' created with 1 members" in results[1].return_value
+    team_id = results[1].return_value.split("team_id=")[1].strip()
     lead_meta["team_id"] = team_id
     lead_meta["team_name"] = "recovery_team"
 
     # Turn 3: task_create → success (recovery)
-    assert results[2].startswith("Task created: ")
-    task_id = results[2].replace("Task created: ", "")
+    assert results[2].return_value.startswith("Task created: ")
+    task_id = results[2].return_value.replace("Task created: ", "")
 
     # Verify the task was actually created (before team_delete cleans up)
     ctx_verify = ctx_factory()
     list_result = await cap.task_list(ctx_verify)
-    assert "<task_list>" in list_result
-    assert "Recovered task" in list_result
-    assert task_id in list_result
+    assert "<task_list>" in list_result.return_value
+    assert "Recovered task" in list_result.return_value
+    assert task_id in list_result.return_value
 
     # Turn 4: team_delete (run separately to preserve verification above)
     delete_result = await cap.team_delete(ctx_factory())
-    assert delete_result == "Team deleted"
+    assert delete_result.return_value == "Team deleted"
     assert mock_pool.close_session.await_count == 1

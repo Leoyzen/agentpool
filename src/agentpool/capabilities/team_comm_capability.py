@@ -57,8 +57,9 @@ from typing import TYPE_CHECKING, Any, cast, override
 import uuid
 
 from pydantic_ai.tools import (
-    RunContext,  # noqa: TC002  # needed at runtime for PydanticAI type resolution
-    ToolDefinition,  # noqa: TC002  # needed at runtime for PydanticAI type resolution
+    RunContext,
+    ToolDefinition,
+    ToolReturn,
 )
 
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
@@ -226,9 +227,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         ctx: RunContext[Any],
         to: str,
         body: str,
-        urgent: bool = False,
+        urgent: bool = True,
         message_type: str = "",
-    ) -> str:
+    ) -> ToolReturn:
         """Send a message to a teammate's inbox.
 
         Args:
@@ -247,8 +248,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         # Message size enforcement.
         body_bytes = len(body.encode())
         if body_bytes > self._config.message_max_bytes:
-            return (
-                f"Message exceeds max size ({body_bytes} > {self._config.message_max_bytes} bytes)"
+            return ToolReturn(
+                return_value=(
+                    f"Message exceeds max size "
+                    f"({body_bytes} > {self._config.message_max_bytes} bytes)"
+                )
             )
 
         # Auto-urgent: force urgent=True for configured message types.
@@ -260,22 +264,22 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             agent_ctx = self._resolve_agent_context(ctx)
             role: str = agent_ctx.session.metadata.get("team_role", "")
             if role != "lead":
-                return "Broadcast is lead-only"
+                return ToolReturn(return_value="Broadcast is lead-only")
 
             team_state = self._get_team_state(agent_ctx)
             if team_state is None:
-                return "Not in a team session"
+                return ToolReturn(return_value="Not in a team session")
 
             team_id: str = agent_ctx.session.metadata["team_id"]
             session_pool = agent_ctx.host.session_pool
             if session_pool is None:
-                return "SessionPool not available"
+                return ToolReturn(return_value="SessionPool not available")
 
             from agentpool.capabilities.file_team_state import FileTeamState
 
             state_path = team_state._state_path(team_id)
             if not state_path.exists():
-                return "Team state not found"
+                return ToolReturn(return_value="Team state not found")
             state: dict[str, Any] = FileTeamState._read_json(state_path)
             members: dict[str, dict[str, str]] = state.get("members", {})
 
@@ -288,31 +292,45 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 target_sid = team_state.get_member_session_id(team_id, member_name)
                 if target_sid is None or target_sid == lead_sid:
                     continue  # Skip self (lead broadcasting to itself).
-                result = await session_pool.send_message(target_sid, body, mode=mode)
+                result = await session_pool.send_message(
+                    target_sid,
+                    body,
+                    mode=mode,
+                    source="team",
+                    meta={"from": self._agent_name, "team_id": team_id},
+                )
+                # Distinguish None-as-queued from None-as-failure:
+                # - STEER: None = failure.
+                # - QUEUE: None = queued (success) OR failure. Check
+                #   session existence to disambiguate.
                 if result is not None:
                     delivered += 1
+                elif not urgent:
+                    target_session = session_pool.sessions.get_session(target_sid)
+                    if target_session is not None and not target_session.closing:
+                        delivered += 1
                 team_state.write_message(
                     team_id,
                     member_name,
                     {"from": self._agent_name, "body": body, "urgent": urgent},
                 )
-            return f"Broadcast sent to {delivered} members"
+            return ToolReturn(return_value=f"Broadcast sent to {delivered} members")
 
         agent_ctx = self._resolve_agent_context(ctx)
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         team_id = agent_ctx.session.metadata["team_id"]
         session_pool = agent_ctx.host.session_pool
         if session_pool is None:
-            return "SessionPool not available"
+            return ToolReturn(return_value="SessionPool not available")
 
         # Check member exists BEFORE bounds check to avoid creating
         # phantom entries in team state for non-existent members.
         target_sid = team_state.get_member_session_id(team_id, to)
         if target_sid is None:
-            return f"Member '{to}' not found or no session registered"
+            return ToolReturn(return_value=f"Member '{to}' not found or no session registered")
 
         # Bounds: max_member_turns and inbox_max_bytes checks.
         from agentpool.capabilities.file_team_state import FileTeamState
@@ -324,18 +342,22 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             member_info: dict[str, Any] = members_state.get(to, {})
             turn_count: int = member_info.get("turn_count", 0)
             if turn_count >= self._config.bounds.max_member_turns:
-                return (
-                    f"Member '{to}' has exceeded max turns "
-                    f"({turn_count} >= {self._config.bounds.max_member_turns})"
+                return ToolReturn(
+                    return_value=(
+                        f"Member '{to}' has exceeded max turns "
+                        f"({turn_count} >= {self._config.bounds.max_member_turns})"
+                    )
                 )
 
             existing_messages = team_state.read_messages(team_id, to)
             inbox_size = sum(len(json.dumps(m).encode()) for m in existing_messages)
             body_bytes_len = len(body.encode())
             if inbox_size + body_bytes_len > self._config.inbox_max_bytes:
-                return (
-                    f"Inbox exceeds max size ({inbox_size + body_bytes_len} > "
-                    f"{self._config.inbox_max_bytes} bytes)"
+                return ToolReturn(
+                    return_value=(
+                        f"Inbox exceeds max size ({inbox_size + body_bytes_len} > "
+                        f"{self._config.inbox_max_bytes} bytes)"
+                    )
                 )
 
             member_info["turn_count"] = turn_count + 1
@@ -346,9 +368,24 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         from agentpool.lifecycle.types import DeliveryMode
 
         mode = DeliveryMode.STEER if urgent else DeliveryMode.QUEUE
-        result = await session_pool.send_message(target_sid, body, mode=mode)
+        result = await session_pool.send_message(
+            target_sid,
+            body,
+            mode=mode,
+            source="team",
+            meta={"from": self._agent_name, "team_id": team_id},
+        )
+        # Distinguish None-as-queued from None-as-failure:
+        # - STEER mode: None always means failure (session not found/closing).
+        # - QUEUE mode: None means queued (success) OR failure. Check
+        #   session existence to disambiguate.
         if result is None:
-            return f"Failed to deliver message to '{to}'"
+            if urgent:
+                return ToolReturn(return_value=f"Failed to deliver message to '{to}'")
+            # QUEUE mode — verify session still exists.
+            target_session = session_pool.sessions.get_session(target_sid)
+            if target_session is None or target_session.closing or target_session.is_closing:
+                return ToolReturn(return_value=f"Failed to deliver message to '{to}'")
 
         # Persist to inbox for audit trail.
         team_state.write_message(
@@ -356,7 +393,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             to,
             {"from": self._agent_name, "body": body, "urgent": urgent},
         )
-        return f"Message sent to {to}"
+        return ToolReturn(return_value=f"Message sent to {to}")
 
     async def task_create(
         self,
@@ -364,7 +401,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         subject: str,
         description: str = "",
         blocked_by: list[str] | None = None,
-    ) -> str:
+    ) -> ToolReturn:
         """Create a task on the shared task board.
 
         Args:
@@ -379,11 +416,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         task_id = team_state.create_task(
             team_id,
@@ -393,9 +430,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 "blocked_by": blocked_by or [],
             },
         )
-        return f"Task created: {task_id}"
+        return ToolReturn(return_value=f"Task created: {task_id}")
 
-    async def task_list(self, ctx: RunContext[Any]) -> str:
+    async def task_list(self, ctx: RunContext[Any]) -> ToolReturn:
         """List all tasks on the shared task board.
 
         Args:
@@ -407,15 +444,15 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         tasks = team_state.list_tasks(team_id)
         if not tasks:
-            return "<task_list>(empty)</task_list>"
+            return ToolReturn(return_value="<task_list>(empty)</task_list>")
         lines = ["<task_list>"]
         for t in tasks:
             tid = t.get("task_id", "?")
@@ -433,7 +470,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 lines.append(f"    {subject}")
             lines.append("  </task>")
         lines.append("</task_list>")
-        return "\n".join(lines)
+        return ToolReturn(return_value="\n".join(lines))
 
     async def task_update(
         self,
@@ -441,7 +478,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         task_id: str,
         status: str = "",
         owner: str = "",
-    ) -> str:
+    ) -> ToolReturn:
         """Update a task's status or owner on the shared task board.
 
         Args:
@@ -456,11 +493,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         updates: dict[str, Any] = {}
         if status:
@@ -468,12 +505,12 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if owner:
             updates["owner"] = owner
         if not updates:
-            return "No updates specified"
+            return ToolReturn(return_value="No updates specified")
 
         try:
             updated = team_state.update_task(team_id, task_id, updates)
         except (FileNotFoundError, OSError):
-            return f"Task not found: {task_id}"
+            return ToolReturn(return_value=f"Task not found: {task_id}")
         tid = updated.get("task_id", "?")
         status = updated.get("status", "?")
         owner = updated.get("owner", "")
@@ -481,9 +518,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         description = updated.get("description", "")
         owner_attr = f' owner="{owner}"' if owner else ""
         content = f"{subject}: {description}" if description else subject
-        return f'<task id="{tid}" status="{status}"{owner_attr}>\n{content}\n</task>'
+        return ToolReturn(
+            return_value=(f'<task id="{tid}" status="{status}"{owner_attr}>\n{content}\n</task>')
+        )
 
-    async def read_blackboard(self, ctx: RunContext[Any], key: str) -> str:
+    async def read_blackboard(self, ctx: RunContext[Any], key: str) -> ToolReturn:
         """Read a key from the shared blackboard.
 
         Args:
@@ -496,22 +535,24 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         result = team_state.read_blackboard(team_id, key)
         if result is None:
-            return "Key not found"
+            return ToolReturn(return_value="Key not found")
         value_text = result.get("value", {}).get("text", "")
         version = result.get("version", 0)
         written_by = result.get("written_by", "unknown")
         written_at = result.get("written_at", "")
-        return (
-            f'<blackboard version="{version}" written_by="{written_by}" '
-            f'written_at="{written_at}">\n{value_text}\n</blackboard>'
+        return ToolReturn(
+            return_value=(
+                f'<blackboard version="{version}" written_by="{written_by}" '
+                f'written_at="{written_at}">\n{value_text}\n</blackboard>'
+            )
         )
 
     async def write_blackboard(
@@ -520,7 +561,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         key: str,
         value: str,
         expected_version: int | None = None,
-    ) -> str:
+    ) -> ToolReturn:
         """Write a key to the shared blackboard with optimistic locking.
 
         Args:
@@ -536,11 +577,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         result = team_state.write_blackboard(
             team_id,
@@ -556,15 +597,17 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             file_size = key_path.stat().st_size
             max_size = self._config.blackboard.max_size_mb * 1024 * 1024
             if file_size > max_size:
-                return (
-                    f"Blackboard write exceeds max size "
-                    f"({file_size / 1024 / 1024:.1f}MB > "
-                    f"{self._config.blackboard.max_size_mb}MB)"
+                return ToolReturn(
+                    return_value=(
+                        f"Blackboard write exceeds max size "
+                        f"({file_size / 1024 / 1024:.1f}MB > "
+                        f"{self._config.blackboard.max_size_mb}MB)"
+                    )
                 )
 
-        return result
+        return ToolReturn(return_value=result)
 
-    async def list_blackboard(self, ctx: RunContext[Any]) -> str:
+    async def list_blackboard(self, ctx: RunContext[Any]) -> ToolReturn:
         """List all keys on the shared blackboard.
 
         Args:
@@ -576,18 +619,20 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         keys = team_state.list_blackboard(team_id)
         if not keys:
-            return "<blackboard_keys>(empty)</blackboard_keys>"
-        return "<blackboard_keys>\n" + "\n".join(keys) + "\n</blackboard_keys>"
+            return ToolReturn(return_value="<blackboard_keys>(empty)</blackboard_keys>")
+        return ToolReturn(
+            return_value="<blackboard_keys>\n" + "\n".join(keys) + "\n</blackboard_keys>"
+        )
 
-    async def team_status(self, ctx: RunContext[Any]) -> str:
+    async def team_status(self, ctx: RunContext[Any]) -> ToolReturn:
         """Get the current status of the team.
 
         Args:
@@ -599,17 +644,17 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         from agentpool.capabilities.file_team_state import FileTeamState
 
         state_path = team_state._state_path(team_id)
         if not state_path.exists():
-            return "Team state not found"
+            return ToolReturn(return_value="Team state not found")
 
         state: dict[str, Any] = FileTeamState._read_json(state_path)
         team_name: str = state.get("team_name", "unknown")
@@ -631,7 +676,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             f"Members ({len(members)}):",
             *member_lines,
         ]
-        return "\n".join(lines)
+        return ToolReturn(return_value="\n".join(lines))
 
     # ------------------------------------------------------------------
     # Lead-only tools
@@ -642,7 +687,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         ctx: RunContext[Any],
         name: str,
         members: list[dict[str, str]],
-    ) -> str:
+    ) -> ToolReturn:
         """Create a new team with eligible members (lead-only).
 
         Pass ``members`` as a list of dicts with ``agent`` (registered agent
@@ -662,7 +707,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent_ctx = self._resolve_agent_context(ctx)
         role: str = agent_ctx.session.metadata.get("team_role", "")
         if role != "lead":
-            return "Only lead can use team_create"
+            return ToolReturn(return_value="Only lead can use team_create")
 
         # Config defaults: when LLM passes empty members, use defaults config.
         if not members and self._config.defaults is not None:
@@ -672,13 +717,19 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         for member in members:
             agent_name: str = member.get("agent", "")
             if not agent_ctx.agent_registry.exists(agent_name):
-                return f"Agent '{agent_name}' not found in registry"
+                return ToolReturn(return_value=f"Agent '{agent_name}' not found in registry")
             if agent_name not in self._config.member_eligible:
-                return f"Agent '{agent_name}' is not eligible for team membership"
+                return ToolReturn(
+                    return_value=(f"Agent '{agent_name}' is not eligible for team membership")
+                )
 
         # Bounds: max_members check.
         if len(members) > self._config.bounds.max_members:
-            return f"Team exceeds max_members ({len(members)} > {self._config.bounds.max_members})"
+            return ToolReturn(
+                return_value=(
+                    f"Team exceeds max_members ({len(members)} > {self._config.bounds.max_members})"
+                )
+            )
 
         # Generate team_id and create state.
         team_id = str(uuid.uuid4())
@@ -714,7 +765,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         session_pool = agent_ctx.host.session_pool
         if session_pool is None:
-            return "SessionPool not available"
+            return ToolReturn(return_value="SessionPool not available")
 
         from agentpool.lifecycle.types import DeliveryMode
 
@@ -744,6 +795,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                         member_name=member["name"],
                     ),
                     mode=DeliveryMode.QUEUE,
+                    source="team",
+                    meta={"from": self._agent_name, "team_id": team_id},
                 )
         except Exception as exc:  # noqa: BLE001
             for sid in created_sessions:
@@ -751,7 +804,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     await session_pool.close_session(sid)
             with contextlib.suppress(Exception):
                 team_state.cleanup(team_id)
-            return f"Failed to create team: {exc}"
+            return ToolReturn(return_value=f"Failed to create team: {exc}")
 
         # Write team_id back to session metadata so subsequent tool calls
         # can access the team state without requiring a new session.
@@ -778,7 +831,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             member_count=len(members),
         )
 
-        return f"Team '{name}' created with {len(members)} members. team_id={team_id}"
+        return ToolReturn(
+            return_value=(f"Team '{name}' created with {len(members)} members. team_id={team_id}")
+        )
 
     @staticmethod
     def _schedule_member_cleanup(
@@ -872,7 +927,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         task.add_done_callback(_on_done)
 
-    async def team_delete(self, ctx: RunContext[Any]) -> str:
+    async def team_delete(self, ctx: RunContext[Any]) -> ToolReturn:
         """Delete the current team and close all member sessions (lead-only).
 
         Args:
@@ -884,21 +939,21 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent_ctx = self._resolve_agent_context(ctx)
         role: str = agent_ctx.session.metadata.get("team_role", "")
         if role != "lead":
-            return "Only lead can use team_delete"
+            return ToolReturn(return_value="Only lead can use team_delete")
 
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         from agentpool.capabilities.file_team_state import FileTeamState
 
         state_path = team_state._state_path(team_id)
         if not state_path.exists():
-            return "Team state not found"
+            return ToolReturn(return_value="Team state not found")
         state: dict[str, Any] = FileTeamState._read_json(state_path)
         members: dict[str, dict[str, str]] = state.get("members", {})
 
@@ -916,9 +971,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent_ctx.session.metadata["team_member_sessions"] = []
 
         team_state.cleanup(team_id)
-        return "Team deleted"
+        return ToolReturn(return_value="Team deleted")
 
-    async def delete_blackboard(self, ctx: RunContext[Any], key: str) -> str:
+    async def delete_blackboard(self, ctx: RunContext[Any], key: str) -> ToolReturn:
         """Delete a key from the shared blackboard (lead-only).
 
         Args:
@@ -931,26 +986,26 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent_ctx = self._resolve_agent_context(ctx)
         role: str = agent_ctx.session.metadata.get("team_role", "")
         if role != "lead":
-            return "Only lead can use delete_blackboard"
+            return ToolReturn(return_value="Only lead can use delete_blackboard")
 
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         existing = team_state.read_blackboard(team_id, key)
         if existing is None:
             available = team_state.list_blackboard(team_id)
             keys_str = ", ".join(available) if available else "(empty)"
-            return f"Key '{key}' not found. Available keys: {keys_str}"
+            return ToolReturn(return_value=f"Key '{key}' not found. Available keys: {keys_str}")
 
         team_state.delete_blackboard(team_id, key)
-        return f"Blackboard key '{key}' deleted"
+        return ToolReturn(return_value=f"Blackboard key '{key}' deleted")
 
-    async def shutdown_request(self, ctx: RunContext[Any], member_name: str) -> str:
+    async def shutdown_request(self, ctx: RunContext[Any], member_name: str) -> ToolReturn:
         """Shut down a specific team member (lead-only).
 
         Args:
@@ -963,23 +1018,23 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent_ctx = self._resolve_agent_context(ctx)
         role: str = agent_ctx.session.metadata.get("team_role", "")
         if role != "lead":
-            return "Only lead can use shutdown_request"
+            return ToolReturn(return_value="Only lead can use shutdown_request")
 
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         member_sid = team_state.get_member_session_id(team_id, member_name)
         if member_sid is None:
-            return f"Member '{member_name}' not found"
+            return ToolReturn(return_value=f"Member '{member_name}' not found")
 
         session_pool = agent_ctx.host.session_pool
         if session_pool is None:
-            return "SessionPool not available"
+            return ToolReturn(return_value="SessionPool not available")
 
         await session_pool.close_session(member_sid)
 
@@ -997,7 +1052,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 state["members"] = members
                 FileTeamState._atomic_write(state_path, state)
 
-        return f"Shutdown completed for {member_name}"
+        return ToolReturn(return_value=f"Shutdown completed for {member_name}")
 
     async def team_add_member(  # noqa: PLR0911, PLR0915
         self,
@@ -1007,7 +1062,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         prompt: str = "",
         lifecycle: str = "persistent",
         notify: str | None = None,
-    ) -> str:
+    ) -> ToolReturn:
         """Add a new member to an existing team (lead-only).
 
         Args:
@@ -1027,34 +1082,34 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent_ctx = self._resolve_agent_context(ctx)
         role: str = agent_ctx.session.metadata.get("team_role", "")
         if role != "lead":
-            return "Only lead can use team_add_member"
+            return ToolReturn(return_value="Only lead can use team_add_member")
 
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         # Check agent exists in registry.
         if not agent_ctx.agent_registry.exists(agent):
-            return f"Agent '{agent}' not found in registry"
+            return ToolReturn(return_value=f"Agent '{agent}' not found in registry")
 
         # Check agent is eligible.
         if agent not in self._config.member_eligible:
-            return f"Agent '{agent}' is not eligible"
+            return ToolReturn(return_value=f"Agent '{agent}' is not eligible")
 
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         from agentpool.capabilities.file_team_state import FileTeamState
 
         # Check name not already in team state members.
         state_path = team_state._state_path(team_id)
         if not state_path.exists():
-            return "Team state not found"
+            return ToolReturn(return_value="Team state not found")
         state: dict[str, Any] = FileTeamState._read_json(state_path)
         members: dict[str, dict[str, Any]] = state.get("members", {})
         if name in members:
-            return f"Member '{name}' already exists"
+            return ToolReturn(return_value=f"Member '{name}' already exists")
 
         # Bounds: max_members check (exclude lead from count).
         lead_member_name = agent_ctx.session.metadata.get(
@@ -1063,14 +1118,16 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         )
         non_lead_count = sum(1 for mname in members if mname != lead_member_name)
         if non_lead_count >= self._config.bounds.max_members:
-            return (
-                f"Team exceeds max_members "
-                f"({non_lead_count + 1} > {self._config.bounds.max_members})"
+            return ToolReturn(
+                return_value=(
+                    f"Team exceeds max_members "
+                    f"({non_lead_count + 1} > {self._config.bounds.max_members})"
+                )
             )
 
         session_pool = agent_ctx.host.session_pool
         if session_pool is None:
-            return "SessionPool not available"
+            return ToolReturn(return_value="SessionPool not available")
 
         lead_session_id: str = agent_ctx.session.session_id
 
@@ -1085,7 +1142,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 description=f"Team member: {name}",
             )
         except Exception as exc:  # noqa: BLE001
-            return f"Failed to create member session: {exc}"
+            return ToolReturn(return_value=f"Failed to create member session: {exc}")
 
         # Register member in team state.
         team_state.register_member(
@@ -1108,6 +1165,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             member_session_id,
             initial_prompt,
             mode=DeliveryMode.QUEUE,
+            source="team",
+            meta={"from": self._agent_name, "team_id": team_id},
         )
 
         # Ephemeral lifecycle: schedule auto-close when run completes.
@@ -1145,6 +1204,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     existing_sid,
                     notify,
                     mode=DeliveryMode.QUEUE,
+                    source="team",
+                    meta={"from": self._agent_name, "team_id": team_id},
                 )
 
         # Write to blackboard (non-fatal — audit trail only).
@@ -1172,13 +1233,13 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         team_member_sessions.append(member_session_id)
         agent_ctx.session.metadata["team_member_sessions"] = team_member_sessions
 
-        return f"Member '{name}' added to team (lifecycle={lifecycle})"
+        return ToolReturn(return_value=f"Member '{name}' added to team (lifecycle={lifecycle})")
 
     async def team_remove_member(
         self,
         ctx: RunContext[Any],
         member_name: str,
-    ) -> str:
+    ) -> ToolReturn:
         """Remove a member from the team (lead-only).
 
         Args:
@@ -1191,11 +1252,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent_ctx = self._resolve_agent_context(ctx)
         role: str = agent_ctx.session.metadata.get("team_role", "")
         if role != "lead":
-            return "Only lead can use team_remove_member"
+            return ToolReturn(return_value="Only lead can use team_remove_member")
 
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         # Cannot remove yourself.
         lead_member_name = agent_ctx.session.metadata.get(
@@ -1203,17 +1264,17 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             self._agent_name,
         )
         if member_name == lead_member_name:
-            return "Cannot remove yourself"
+            return ToolReturn(return_value="Cannot remove yourself")
 
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
-            return "Not in a team session"
+            return ToolReturn(return_value="Not in a team session")
 
         from agentpool.capabilities.file_team_state import FileTeamState
 
         member_sid = team_state.get_member_session_id(team_id, member_name)
         if member_sid is None:
-            return f"Member '{member_name}' not found"
+            return ToolReturn(return_value=f"Member '{member_name}' not found")
 
         session_pool = agent_ctx.host.session_pool
         if session_pool is not None:
@@ -1254,7 +1315,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 member_name,
             )
 
-        return f"Member '{member_name}' removed from team"
+        return ToolReturn(return_value=f"Member '{member_name}' removed from team")
 
     @staticmethod
     def _schedule_ephemeral_cleanup(

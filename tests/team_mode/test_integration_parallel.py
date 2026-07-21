@@ -144,8 +144,8 @@ async def _create_team(
     """
     ctx = make_mock_run_context(agent_ctx)
     result = await cap.team_create(ctx, team_name, members)
-    assert "team_id=" in result
-    team_id = result.split("team_id=")[1].strip()
+    assert "team_id=" in result.return_value
+    team_id = result.return_value.split("team_id=")[1].strip()
     agent_ctx.session.metadata["team_id"] = team_id
     agent_ctx.session.metadata["team_name"] = team_name
     cap._session_metadata["team_id"] = team_id
@@ -297,8 +297,8 @@ async def test_multiple_tool_calls_in_one_response(
     results = await _dispatch_parallel_turn(cap, response, ctx)
 
     assert len(results) == 2
-    assert results[0] == "Message sent to worker_1"
-    assert results[1] == "Message sent to reviewer_1"
+    assert results[0].return_value == "Message sent to worker_1"
+    assert results[1].return_value == "Message sent to reviewer_1"
 
     # Cleanup.
     session_pool = team_mode_pool.session_pool
@@ -377,21 +377,21 @@ async def test_parallel_task_assignment(
     results = await _dispatch_parallel_turn(cap, response, ctx)
 
     assert len(results) == 2
-    assert results[0].startswith("Task created: ")
-    assert results[1].startswith("Task created: ")
+    assert results[0].return_value.startswith("Task created: ")
+    assert results[1].return_value.startswith("Task created: ")
 
     # Extract task IDs and verify they are distinct.
-    task_id_1 = results[0].replace("Task created: ", "")
-    task_id_2 = results[1].replace("Task created: ", "")
+    task_id_1 = results[0].return_value.replace("Task created: ", "")
+    task_id_2 = results[1].return_value.replace("Task created: ", "")
     assert task_id_1 != task_id_2
 
     # Verify both tasks appear in task_list.
     list_result = await cap.task_list(ctx)
-    assert "<task_list>" in list_result
-    assert "Analyze dataset" in list_result
-    assert "Review findings" in list_result
-    assert task_id_1 in list_result
-    assert task_id_2 in list_result
+    assert "<task_list>" in list_result.return_value
+    assert "Analyze dataset" in list_result.return_value
+    assert "Review findings" in list_result.return_value
+    assert task_id_1 in list_result.return_value
+    assert task_id_2 in list_result.return_value
 
     # Cleanup.
     session_pool = team_mode_pool.session_pool
