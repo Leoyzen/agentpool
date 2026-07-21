@@ -12,7 +12,6 @@ All tests use ``model: test`` (pydantic-ai TestModel) so NO API key is needed.
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -30,10 +29,6 @@ pytestmark = [
     pytest.mark.skipif(SKIP_NO_BINARY, reason="agentpool binary not on PATH"),
     pytest.mark.skipif(SKIP_WINDOWS, reason="Windows subprocess issues"),
 ]
-
-# POST /init hangs in CI — fire-and-forget agent run blocks on TestModel
-# subprocess. pytest-timeout kills it before xfail can catch. (#260)
-_SKIP_INIT_IN_CI = os.environ.get("CI") == "true"
 
 # Shared parametrize for the subprocess_server fixture.
 _OPENCODE_PARAMS: dict[str, Any] = {
@@ -168,10 +163,6 @@ async def test_get_health(subprocess_server: SubprocessServer) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(
-    _SKIP_INIT_IN_CI,
-    reason="POST /init hangs in CI — fire-and-forget agent run blocks (#260)",
-)
 @pytest.mark.parametrize("subprocess_server", [_OPENCODE_PARAMS], indirect=True)
 async def test_post_init(subprocess_server: SubprocessServer) -> None:
     """C10.2: POST /session/{session_id}/init, verify 200."""
