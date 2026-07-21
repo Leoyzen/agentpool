@@ -298,11 +298,26 @@ async def _event_generator(  # noqa: PLR0915
                     data = _serialize_event(event, wrap_payload=True)
                 else:
                     data = _serialize_event(event)
-                logger.info(
-                    "SSE: Sending event",
-                    event_type=getattr(event, "type", "unknown"),
-                    session_id=_extract_session_id(event) or "-",
-                )
+                _sse_session_id = _extract_session_id(event) or "-"
+                _sse_event_type = getattr(event, "type", "unknown")
+                # Log message.updated events with role and ID for dedup debugging
+                if _sse_event_type == "message.updated":
+                    _props = getattr(event, "properties", None)
+                    _info = getattr(_props, "info", None) if _props else None
+                    _role = getattr(_info, "role", "?") if _info else "?"
+                    _msg_id = getattr(_info, "id", "?") if _info else "?"
+                    logger.info(
+                        "SSE: Sending message.updated",
+                        session_id=_sse_session_id,
+                        role=_role,
+                        message_id=_msg_id,
+                    )
+                else:
+                    logger.info(
+                        "SSE: Sending event",
+                        event_type=_sse_event_type,
+                        session_id=_sse_session_id,
+                    )
                 event_id = state.get_next_event_id()
                 if event_id > last_id:
                     yield {"data": data, "id": str(event_id)}

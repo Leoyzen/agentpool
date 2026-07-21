@@ -197,6 +197,8 @@ async def append_message_to_session(
                 role=getattr(msg.info, "role", "unknown"),
                 list_len=len(messages[session_id]),
                 all_ids=[m.info.id for m in messages[session_id]],
+                parts_count=len(msg.parts),
+                parts_types=[getattr(p, "type", "?") for p in msg.parts],
             )
 
 
