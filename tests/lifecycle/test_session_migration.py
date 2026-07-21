@@ -622,7 +622,7 @@ async def test_route_message_asap_calls_steer() -> None:
     )
 
     assert result == "steer-msg-id"
-    run_handle.steer.assert_called_once_with("steer msg", message_id=None)
+    run_handle.steer.assert_called_once_with("steer msg", message_id=None, emit_user_message=False)
 
     # Cleanup.
     controller._runs.pop(run_id, None)

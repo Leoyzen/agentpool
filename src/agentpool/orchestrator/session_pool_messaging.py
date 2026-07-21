@@ -424,17 +424,10 @@ class SessionPoolMessagingMixin:
         # Publish UserMessageInsertedEvent FIRST (await, not fire-and-forget).
         # This ensures the TUI creates the UserMessage with a timestamp-based
         # message_id BEFORE the agent processes the steer and produces output.
-        # Use self._event_bus (SessionController's EventBus, always set by
+        # Use self.event_bus (SessionPoolMessagingMixin property, always set by
         # SessionPool.__init__) instead of session._event_bus (SessionState's
-        # field, only set by _initialize_lifecycle_and_recovery which is NOT
-        # called for ACP sessions).
-        event_bus = self._event_bus
-        logger.info(
-            "steer_from_background_task: event_bus check",
-            session_id=session_id,
-            has_event_bus=event_bus is not None,
-            session_event_bus=session._event_bus is not None if session else False,
-        )
+        # field, only set by _initialize_lifecycle_and_recovery).
+        event_bus = self.event_bus
         if event_bus is not None:
             with logfire.span(
                 "event.user_message_inserted.emit",

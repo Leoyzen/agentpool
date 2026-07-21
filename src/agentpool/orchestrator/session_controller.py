@@ -13,9 +13,7 @@ import time
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 import anyio
-import logfire
 
-from agentpool.agents.events import UserMessageInsertedEvent
 from agentpool.log import get_logger
 from agentpool.orchestrator.runtime_registry import RuntimeAgentRegistry
 from agentpool.utils.time_utils import get_now
@@ -311,56 +309,6 @@ class SessionState:
         )
         with contextlib.suppress(Exception):
             asyncio.get_running_loop().create_task(comm.publish(state_event))
-
-    def _emit_steer_event(self, message: str) -> None:
-        """Fire-and-forget ``UserMessageInsertedEvent`` for background steer.
-
-        Uses ``asyncio.create_task()`` to publish the event without
-        blocking the synchronous caller. Silently skips when no event
-        loop is running (``RuntimeError``) or no EventBus is available.
-        """
-        from agentpool.utils.identifiers import ascending
-
-        event_bus = self._event_bus
-        if event_bus is None:
-            logger.debug("_emit_steer_event SKIP no EventBus", session_id=self.session_id)
-            return
-
-        async def _publish() -> None:
-            with logfire.span(
-                "event.user_message_inserted.emit",
-                session_id=self.session_id,
-                delivery="steer",
-                source="background_task",
-            ):
-                try:
-                    event = UserMessageInsertedEvent(
-                        session_id=self.session_id,
-                        message_id=ascending("message"),
-                        content=message,
-                        delivery="steer",
-                        source="background_task",
-                    )
-                    logger.info(
-                        "_emit_steer_event PUBLISHING",
-                        session_id=self.session_id,
-                        message_id=event.message_id,
-                        content_preview=message[:100],
-                    )
-                    await event_bus.publish(self.session_id, event)
-                except Exception:  # noqa: BLE001
-                    logger.warning(
-                        "Failed to emit UserMessageInsertedEvent from background task",
-                        exc_info=True,
-                    )
-
-        try:
-            task = asyncio.get_running_loop().create_task(_publish())
-            # Prevent GC from destroying the task before completion.
-            task.add_done_callback(lambda t: None)
-        except RuntimeError:
-            # No running event loop — emission skipped, steer proceeds.
-            pass
 
     def revoke(self, message_id: str) -> bool:
         """Revoke a queued steer message in ``feedback_queue`` by ID.

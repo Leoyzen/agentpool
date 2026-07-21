@@ -379,12 +379,6 @@ async def _process_message(
         # Register user_msg_id in dedup set so EventProcessor skips the
         # EventBus-derived UserMessageInsertedEvent (no double display).
         _register_dedup(state, session_id, user_msg_id)
-        logger.info(
-            "REST handler user message CREATED",
-            session_id=session_id,
-            message_id=user_msg_id,
-            role="user",
-        )
 
         ctx = await _route_message_locked(
             session_id, request, state, user_msg_id, user_msg_with_parts

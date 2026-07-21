@@ -24,7 +24,6 @@ from agentpool.tools import CallDeferred
 
 
 if TYPE_CHECKING:
-
     from upathtools.filesystems import IsolatedMemoryFileSystem, OverlayFileSystem
 
     from agentpool import Agent
