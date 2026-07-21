@@ -44,7 +44,6 @@ from agentpool_server.opencode_server.models import (
 )
 from agentpool_server.opencode_server.opencode_message_bridge import (
     append_message_to_session,
-    get_messages_for_session,
 )
 from agentpool_server.opencode_server.opencode_session_routes import (
     ensure_session,
@@ -348,9 +347,13 @@ class OpenCodeEventBridgeMixin:
         """Create OpenCode-visible child session scaffolding for task navigation.
 
         SessionPool owns the execution session. OpenCode also needs a session
-        model and at least the delegated prompt in message storage so the TUI
-        can open the child task immediately, even before the child stream emits
-        its first token.
+        model so the TUI can open the child task immediately, even before the
+        child stream emits its first token.
+
+        Note: User message creation is NOT done here — the
+        ``UserMessageInsertedEvent`` from ``_route_message()`` is the sole
+        creator of user messages via the EventProcessor. Creating a duplicate
+        user message here would cause double-rendering in the TUI.
         """
         child_session_id = spawn_event.child_session_id
         await ensure_session(
@@ -358,28 +361,6 @@ class OpenCodeEventBridgeMixin:
             child_session_id,
             parent_id=parent_session_id,
         )
-
-        existing_messages = await get_messages_for_session(self.server_state, child_session_id)
-        if existing_messages:
-            return
-
-        prompt = spawn_event.metadata.get("prompt") or spawn_event.description
-        if not prompt:
-            prompt = f"Run {spawn_event.source_name or 'subagent'} task"
-
-        user_msg = UserMessage(
-            id=identifier.ascending("message"),
-            session_id=child_session_id,
-            time=TimeCreated.now(),
-            agent=spawn_event.source_name or "subagent",
-            model=None,
-        )
-        user_msg_with_parts = MessageWithParts(info=user_msg)
-        text_part = user_msg_with_parts.add_text_part(prompt)
-
-        await append_message_to_session(self.server_state, child_session_id, user_msg_with_parts)
-        await self.server_state.broadcast_event(MessageUpdatedEvent.create(user_msg))
-        await self.server_state.broadcast_event(PartUpdatedEvent.create(text_part))
 
     async def _handle_event(  # noqa: PLR0915
         self, session_id: str, envelope: EventEnvelope
