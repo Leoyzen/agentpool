@@ -1,0 +1,93 @@
+---
+title: Search Toolset
+description: Web and news search capabilities
+---
+
+# Search Toolset
+
+The Search toolset provides web and news search capabilities using various search providers.
+
+## Basic Usage
+
+```yaml
+agents:
+  researcher:
+    tools:
+      - type: search
+        provider: tavily
+```
+
+## Supported Providers
+
+### Web Search
+
+- `tavily` - Tavily AI search
+- `brave` - Brave Search
+- `searxng` - SearXNG meta search
+- `serper` - Serper.dev Google search
+- `you` - You.com search
+
+### News Search
+
+- `tavily` - Tavily news search
+- `brave` - Brave News
+- `serper` - Serper news
+- `newsapi` - NewsAPI.org
+
+## Configuration
+
+### Web Search Only
+
+```yaml
+tools:
+  - type: search
+    provider: tavily
+    api_key: ${TAVILY_API_KEY}
+```
+
+### News Search Only
+
+```yaml
+tools:
+  - type: search
+    news_provider: newsapi
+    news_api_key: ${NEWSAPI_KEY}
+```
+
+### Both Web and News
+
+```yaml
+tools:
+  - type: search
+    provider: brave
+    api_key: ${BRAVE_API_KEY}
+    news_provider: newsapi
+    news_api_key: ${NEWSAPI_KEY}
+```
+
+## Available Tools
+
+```python exec="true"
+from agentpool_toolsets.search_toolset import SearchTools
+from agentpool.docs.utils import generate_tool_docs
+
+toolset = SearchTools()
+print(generate_tool_docs(toolset))
+```
+
+## Configuration Reference
+
+/// mknodes
+{{ "agentpool_config.toolsets.SearchToolsetConfig" | schema_to_markdown(display_mode="yaml", header_style="pymdownx", wrapped_in="toolsets", header_level=3) }}
+///
+
+## Environment Variables
+
+Most providers require API keys. You can provide them directly or via environment variables:
+
+| Provider | Environment Variable |
+|----------|---------------------|
+| Tavily | `TAVILY_API_KEY` |
+| Brave | `BRAVE_API_KEY` |
+| Serper | `SERPER_API_KEY` |
+| NewsAPI | `NEWSAPI_KEY` |

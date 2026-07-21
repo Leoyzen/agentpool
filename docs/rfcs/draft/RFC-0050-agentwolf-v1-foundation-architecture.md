@@ -2214,7 +2214,7 @@ Each phase is independently deployable:
 
 - [RFC-0042: Unified Lifecycle Architecture](./RFC-0042-unified-lifecycle-architecture.md) — Six pluggable dimensions within RunLoop
 - [RFC-0041: Run vs Turn Separation](./RFC-0041-loop-run-separation.md) — Phase 1 prerequisite
-- [Lifecycle Analysis](../../design/lifecycle-analysis.md) — Cross-framework research
+- [Lifecycle Analysis](../../adr/lifecycle-analysis.md) — Cross-framework research
 - [pydantic-ai Documentation](https://ai.pydantic.dev/) — Capability/Toolset system
 - [K8s Controller Pattern](https://kubernetes.io/docs/concepts/architecture/controller/) — CRD → Controller analogy
 - [Akka Persistence](https://doc.akka.io/docs/akka/current/typed/persistence.html) — Journal + SnapshotStore model
