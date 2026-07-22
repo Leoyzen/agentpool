@@ -288,13 +288,17 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             mode = DeliveryMode.STEER if urgent else DeliveryMode.QUEUE
             delivered = 0
             lead_sid = agent_ctx.session.session_id
+            msg_body = (
+                f'<team-message from="{self._agent_name}" type="broadcast">'
+                f"\n\n{body}\n\n</team-message>"
+            )
             for member_name in members:
                 target_sid = team_state.get_member_session_id(team_id, member_name)
                 if target_sid is None or target_sid == lead_sid:
                     continue  # Skip self (lead broadcasting to itself).
                 result = await session_pool.send_message(
                     target_sid,
-                    body,
+                    msg_body,
                     mode=mode,
                     source="team",
                     meta={"from": self._agent_name, "team_id": team_id},
@@ -368,9 +372,12 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         from agentpool.lifecycle.types import DeliveryMode
 
         mode = DeliveryMode.STEER if urgent else DeliveryMode.QUEUE
+        msg_body = (
+            f'<team-message from="{self._agent_name}" type="private">\n\n{body}\n\n</team-message>'
+        )
         result = await session_pool.send_message(
             target_sid,
-            body,
+            msg_body,
             mode=mode,
             source="team",
             meta={"from": self._agent_name, "team_id": team_id},
@@ -693,16 +700,14 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
             # Find tasks owned by this member.
             member_tasks = [
-                t for t in all_tasks
-                if t.get("owner") == m_name and t.get("status") != "completed"
+                t for t in all_tasks if t.get("owner") == m_name and t.get("status") != "completed"
             ]
             task_summary = (
                 f"tasks={len(member_tasks)}"
                 if not member_tasks
                 else f"tasks={len(member_tasks)} ("
                 + ", ".join(
-                    f"{t.get('status', '?')}: {t.get('subject', '?')}"
-                    for t in member_tasks
+                    f"{t.get('status', '?')}: {t.get('subject', '?')}" for t in member_tasks
                 )
                 + ")"
             )
@@ -842,9 +847,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 roster_lines: list[str] = []
                 for m in members:
                     role_label = "lead" if m["name"] == lead_member_name else "member"
-                    roster_lines.append(
-                        f"  - {m['name']} (agent={m['agent']}, role={role_label})"
-                    )
+                    roster_lines.append(f"  - {m['name']} (agent={m['agent']}, role={role_label})")
                 roster = "\n".join(roster_lines)
                 base_prompt = self._config.protocol_template.format(
                     team_name=name,
@@ -1276,9 +1279,13 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if self._config.broadcast_on_create:
             roster = ", ".join(updated_members.keys())
             notice_part = f" {notify}" if notify else ""
-            broadcast_msg = (
+            notice_text = (
                 f"[团队通知] 新成员 '{name}' (agent={agent}) 已加入团队。"
                 f"{notice_part}当前成员: {roster}"
+            )
+            broadcast_msg = (
+                f'<team-message from="{self._agent_name}" type="broadcast">'
+                f"\n\n{notice_text}\n\n</team-message>"
             )
             for existing_name, existing_info in updated_members.items():
                 if existing_name in (lead_member_name, name):
