@@ -628,7 +628,25 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         return ToolReturn(return_value=result)
 
-    async def list_blackboard(self, ctx: RunContext[Any]) -> ToolReturn:
+    async def list_blackboard(
+        self,
+        ctx: RunContext[Any],
+        watch: Annotated[
+            bool,
+            Field(
+                description="If True, block until the blackboard keys change "
+                "(new key added or removed) or timeout expires, then return "
+                "the current state. If False, return immediately"
+            ),
+        ] = False,
+        timeout: Annotated[
+            int,
+            Field(
+                description="Maximum seconds to wait when watch=True. "
+                "Returns current state if timeout expires without changes"
+            ),
+        ] = 300,
+    ) -> ToolReturn:
         """List all keys on the shared blackboard.
 
         Returns:
@@ -644,13 +662,53 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             return ToolReturn(return_value="Not in a team session")
 
         keys = team_state.list_blackboard(team_id)
+
+        if watch:
+            initial = set(keys)
+            import time
+
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                await asyncio.sleep(1)
+                current = set(team_state.list_blackboard(team_id))
+                if current != initial:
+                    keys = sorted(current)
+                    break
+            else:
+                return ToolReturn(
+                    return_value=(
+                        "<blackboard_keys> (watch timeout, no changes)\n"
+                        + "\n".join(sorted(keys))
+                        + "\n</blackboard_keys>"
+                    )
+                )
+
         if not keys:
             return ToolReturn(return_value="<blackboard_keys>(empty)</blackboard_keys>")
         return ToolReturn(
             return_value="<blackboard_keys>\n" + "\n".join(keys) + "\n</blackboard_keys>"
         )
 
-    async def team_status(self, ctx: RunContext[Any]) -> ToolReturn:
+    async def team_status(
+        self,
+        ctx: RunContext[Any],
+        watch: Annotated[
+            bool,
+            Field(
+                description="If True, block until team state changes "
+                "(member status, task updates, member joins/leaves) or "
+                "timeout expires, then return current status. If False, "
+                "return immediately"
+            ),
+        ] = False,
+        timeout: Annotated[
+            int,
+            Field(
+                description="Maximum seconds to wait when watch=True. "
+                "Returns current status if timeout expires without changes"
+            ),
+        ] = 300,
+    ) -> ToolReturn:
         """Get the current status of the team.
 
         Returns:
@@ -732,7 +790,24 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             f"Members ({len(members)}):",
             *member_lines,
         ]
-        return ToolReturn(return_value="\n".join(lines))
+        result = "\n".join(lines)
+
+        if watch:
+            import time
+
+            initial_snapshot = state_path.stat().st_mtime
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                await asyncio.sleep(1)
+                if state_path.exists():
+                    current_mtime = state_path.stat().st_mtime
+                    if current_mtime != initial_snapshot:
+                        state = FileTeamState._read_json(state_path)
+                        break
+            else:
+                result += "\n(watch timeout, no changes detected)"
+
+        return ToolReturn(return_value=result)
 
     # ------------------------------------------------------------------
     # Lead-only tools
@@ -744,15 +819,24 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         name: Annotated[str, Field(description="Human-readable team name")],
         members: Annotated[
             list[dict[str, str]],
-            Field(description='List of member dicts, each with "agent" and "name" keys'),
+            Field(
+                description='List of member dicts, each with "agent" '
+                '(registered agent name) and "name" (display name) keys. '
+                "Example: "
+                '[{"agent": "historian", "name": "researcher"}, '
+                '{"agent": "logician", "name": "analyst"}]'
+            ),
         ],
+        prompt: Annotated[
+            str,
+            Field(
+                description="Optional task instructions sent to each member "
+                "after team creation. If empty, only the protocol template "
+                "(role description and tool guide) is sent"
+            ),
+        ] = "",
     ) -> ToolReturn:
         """Create a new team with eligible members (lead-only).
-
-        Pass ``members`` as a list of dicts with ``agent`` (registered agent
-        name) and ``name`` (display name) keys. Only agents listed in
-        ``member_eligible`` can be used. If ``defaults`` is configured and
-        ``members`` is empty, default members from config are used.
 
         Returns:
             Success message with team_id, or error string.
@@ -862,6 +946,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     member_name=member["name"],
                 )
                 full_prompt = f"{base_prompt}\n\n## Team Members\n{roster}"
+                if prompt:
+                    full_prompt += f"\n\n## Task\n{prompt}"
                 await session_pool.send_message(
                     member_session_id,
                     full_prompt,

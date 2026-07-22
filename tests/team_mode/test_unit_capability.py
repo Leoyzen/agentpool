@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -2351,3 +2352,137 @@ async def test_task_update_invalid_task_id_returns_friendly_error(
     assert "nonexistent_task_id" in result.return_value
     assert "Errno" not in result.return_value
     assert "No such file" not in result.return_value
+
+
+@pytest.mark.unit
+async def test_team_create_with_prompt(tmp_path: Any) -> None:
+    """Given: lead agent with prompt parameter.
+
+    When: team_create is called with a prompt.
+    Then: prompt is appended to the initial member message.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    _init_team(str(tmp_path))
+    mock_registry = MagicMock()
+    mock_registry.exists = MagicMock(return_value=True)
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_1")
+    mock_pool.sessions._session_agents = {}
+    mock_pool.event_bus = MagicMock()
+    mock_pool.event_bus.publish = AsyncMock()
+    mock_delegation = MagicMock()
+    mock_delegation.create_child_session = AsyncMock(return_value="child_001")
+    config = _make_enabled_config(
+        member_eligible=["worker", "reviewer"],
+        lead_eligible=["coordinator"],
+        base_dir=str(tmp_path),
+    )
+    ctx = _make_run_context(
+        session_pool=mock_pool,
+        metadata=_make_lead_metadata(),
+        config=config,
+        base_dir=str(tmp_path),
+        agent_registry=mock_registry,
+        delegation=mock_delegation,
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.team_create(
+        ctx,
+        "test_team",
+        [{"agent": "worker", "name": "worker"}],
+        prompt="Analyze the system logs for errors",
+    )
+
+    assert "team_id=" in result.return_value
+    # Check that send_message was called with a prompt containing the task
+    call_args = mock_pool.send_message.call_args
+    sent_body = call_args.args[1]
+    assert "## Task" in sent_body
+    assert "Analyze the system logs for errors" in sent_body
+
+
+@pytest.mark.unit
+async def test_list_blackboard_watch_no_changes(tmp_path: Any) -> None:
+    """Given: team session with blackboard keys.
+
+    When: list_blackboard called with watch=True, timeout=1.
+    Then: returns current keys after timeout (no changes detected).
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(base_dir=str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    await cap.write_blackboard(ctx, "key1", "val1")
+    result = await cap.list_blackboard(ctx, watch=True, timeout=1)
+
+    assert "key1" in result.return_value
+    assert "watch timeout" in result.return_value
+
+
+@pytest.mark.unit
+async def test_list_blackboard_watch_detects_change(tmp_path: Any) -> None:
+    """Given: team session with blackboard keys, watch=True.
+
+    When: another write happens during watch.
+    Then: returns updated keys promptly.
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(base_dir=str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    await cap.write_blackboard(ctx, "key1", "val1")
+
+    # Schedule a write after 1.5s (while watch is polling at 1s intervals)
+    async def _delayed_write() -> None:
+        await asyncio.sleep(1.5)
+        await cap.write_blackboard(ctx, "key2", "val2")
+
+    task = asyncio.create_task(_delayed_write())
+    result = await cap.list_blackboard(ctx, watch=True, timeout=5)
+    await task
+
+    assert "key1" in result.return_value
+    assert "key2" in result.return_value
+    assert "watch timeout" not in result.return_value
+
+
+@pytest.mark.unit
+async def test_team_status_watch_no_changes(tmp_path: Any) -> None:
+    """Given: team session.
+
+    When: team_status called with watch=True, timeout=1.
+    Then: returns current status after timeout (no changes detected).
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        config=config,
+        base_dir=str(tmp_path),
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    # Create team first
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_1")
+    mock_pool.sessions._session_agents = {}
+    mock_pool.event_bus = MagicMock()
+    mock_pool.event_bus.publish = AsyncMock()
+    ctx2 = _make_run_context(
+        session_pool=mock_pool,
+        metadata=_make_lead_metadata(),
+        config=config,
+        base_dir=str(tmp_path),
+    )
+    await cap.team_create(
+        ctx2,
+        "test_team",
+        [{"agent": "worker", "name": "worker"}],
+    )
+
+    result = await cap.team_status(ctx, watch=True, timeout=1)
+    assert "watch timeout" in result.return_value
