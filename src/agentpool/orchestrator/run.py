@@ -46,6 +46,28 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _has_invalid_json_args(part: Any) -> bool:
+    """Check if a ToolCallPart has invalid JSON string arguments.
+
+    Args are invalid when they are a non-empty string that cannot be parsed
+    as JSON. Dict args and None are always valid. Empty strings are treated
+    as valid (equivalent to no args).
+    """
+    import json
+
+    from pydantic_ai.messages import ToolCallPart
+
+    if not isinstance(part, ToolCallPart):
+        return False
+    if not isinstance(part.args, str) or not part.args.strip():
+        return False
+    try:
+        json.loads(part.args)
+    except (json.JSONDecodeError, ValueError):
+        return True
+    return False
+
+
 def inject_cancelled_tool_results(messages: list[ModelMessage]) -> list[ModelMessage]:
     r"""Inject RetryPromptPart for unprocessed tool calls in message history.
 
@@ -62,20 +84,29 @@ def inject_cancelled_tool_results(messages: list[ModelMessage]) -> list[ModelMes
     decision context (it knows it called the tool) while satisfying
     PydanticAI's message history validation.
 
+    Additionally, some models (e.g. deepseek-v4-flash) may generate tool call
+    arguments with invalid JSON. This poisons conversation history — the model
+    API rejects subsequent requests with 400: "Assistant tool call
+    function.arguments must be valid JSON." This function detects such invalid
+    args in the trailing ``ModelResponse`` and replaces them with ``{}`` so the
+    history can be sent to the model API without rejection.
+
+    Only the last ``ModelResponse`` is checked: if invalid JSON existed in an
+    earlier message, the model API would have rejected the request at that
+    point and the conversation could not have continued.
+
     Args:
         messages: The message history to sanitize.
 
     Returns:
-        A new list with cancelled tool results injected if needed.
+        A new list with cancelled tool results injected and invalid JSON args
+        sanitized if needed.
     """
     from pydantic_ai.messages import ModelRequest, ModelResponse, RetryPromptPart, ToolCallPart
 
     if not messages:
         return list(messages)
 
-    # Find the last ModelResponse with unprocessed tool calls.
-    # A tool call is "unprocessed" if there is no subsequent ModelRequest
-    # containing a ToolReturnPart or RetryPromptPart with the same tool_call_id.
     result = list(messages)
 
     # Check if the last message is a ModelResponse with tool calls.
@@ -83,15 +114,37 @@ def inject_cancelled_tool_results(messages: list[ModelMessage]) -> list[ModelMes
     if not isinstance(last_msg, ModelResponse):
         return result
 
-    # Collect tool calls that need results.
+    # Collect tool calls that need results, sanitizing invalid JSON args.
     pending_tool_calls: list[ToolCallPart] = []
+    needs_rebuild = False
+    new_parts: list[Any] = []
     for part in last_msg.parts:
         match part:
             case ToolCallPart(tool_name=tool_name, tool_call_id=call_id) if tool_name and call_id:
-                pending_tool_calls.append(part)
+                if _has_invalid_json_args(part):
+                    # Replace invalid JSON args with {} to prevent model API
+                    # 400 rejection on subsequent requests.
+                    sanitized = ToolCallPart(
+                        tool_name=part.tool_name,
+                        args={},
+                        tool_call_id=part.tool_call_id,
+                    )
+                    new_parts.append(sanitized)
+                    pending_tool_calls.append(sanitized)
+                    needs_rebuild = True
+                else:
+                    new_parts.append(part)
+                    pending_tool_calls.append(part)
+            case _:
+                new_parts.append(part)
 
     if not pending_tool_calls:
         return result
+
+    # If we sanitized any args, replace the last ModelResponse with the
+    # rebuilt version.
+    if needs_rebuild:
+        result[-1] = ModelResponse(parts=new_parts)
 
     # Build a ModelRequest with RetryPromptPart for each pending tool call.
     retry_parts: list[ModelRequest] = [
