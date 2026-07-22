@@ -260,3 +260,85 @@ def test_string_args_parsed_to_dict() -> None:
     assert result is not None
     assert isinstance(result, ToolCallStartEvent)
     assert result.raw_input == {"command": "echo hello"}
+
+
+@pytest.mark.unit
+def test_flush_cancelled_tool_calls_returns_error_events_for_pending() -> None:
+    """flush_cancelled_tool_calls returns ToolCallCompleteEvent with error metadata."""
+    mapper = EventMapper(agent_name="test-agent", message_id="msg-001")
+
+    mapper.map_event(
+        FunctionToolCallEvent(
+            part=ToolCallPart(tool_name="bash", args={"command": "ls -la"}, tool_call_id="tc-001"),
+        ),
+    )
+    mapper.map_event(
+        FunctionToolCallEvent(
+            part=ToolCallPart(
+                tool_name="read", args={"path": "/tmp/test.txt"}, tool_call_id="tc-002"
+            ),
+        ),
+    )
+
+    events = mapper.flush_cancelled_tool_calls()
+
+    assert len(events) == 2
+    assert all(isinstance(e, ToolCallCompleteEvent) for e in events)
+    assert events[0].tool_call_id == "tc-001"
+    assert events[0].tool_name == "bash"
+    assert events[0].metadata == {"is_error": True, "cancelled": True}
+    assert "cancelled" in str(events[0].tool_result).lower()
+    assert events[1].tool_call_id == "tc-002"
+    assert events[1].metadata == {"is_error": True, "cancelled": True}
+
+
+@pytest.mark.unit
+def test_flush_cancelled_tool_calls_clears_pending_state() -> None:
+    """After flushing, _pending_tool_calls and _pending_tool_inputs are cleared."""
+    mapper = EventMapper(agent_name="test-agent", message_id="msg-001")
+
+    mapper.map_event(
+        FunctionToolCallEvent(
+            part=ToolCallPart(tool_name="bash", args={"command": "ls"}, tool_call_id="tc-001"),
+        ),
+    )
+
+    events = mapper.flush_cancelled_tool_calls()
+    assert len(events) == 1
+    assert mapper.flush_cancelled_tool_calls() == []
+    assert mapper._pending_tool_calls == {}
+    assert mapper._pending_tool_inputs == {}
+
+
+@pytest.mark.unit
+def test_flush_cancelled_tool_calls_empty_when_no_pending() -> None:
+    """flush_cancelled_tool_calls returns empty list when no pending tools."""
+    mapper = EventMapper(agent_name="test-agent", message_id="msg-001")
+    assert mapper.flush_cancelled_tool_calls() == []
+
+
+@pytest.mark.unit
+def test_flush_cancelled_tool_calls_after_partial_completion() -> None:
+    """flush_cancelled_tool_calls only returns events for uncompleted tools."""
+    mapper = EventMapper(agent_name="test-agent", message_id="msg-001")
+
+    mapper.map_event(
+        FunctionToolCallEvent(
+            part=ToolCallPart(tool_name="bash", args={"command": "ls"}, tool_call_id="tc-001"),
+        ),
+    )
+    mapper.map_event(
+        FunctionToolCallEvent(
+            part=ToolCallPart(tool_name="read", args={"path": "/tmp"}, tool_call_id="tc-002"),
+        ),
+    )
+    mapper.map_event(
+        FunctionToolResultEvent(
+            part=ToolReturnPart(tool_name="bash", content="file1.txt", tool_call_id="tc-001"),
+        ),
+    )
+
+    events = mapper.flush_cancelled_tool_calls()
+    assert len(events) == 1
+    assert events[0].tool_call_id == "tc-002"
+    assert events[0].tool_name == "read"
