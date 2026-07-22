@@ -941,7 +941,14 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         poll_interval = TeamCommCapability._poll_interval
 
         async def _cleanup_when_idle() -> None:
-            """Poll lead activity; close members after idle timeout."""
+            """Poll lead activity; close members after idle timeout.
+
+            Uses ``last_active_at`` as the primary idle signal but **also
+            checks ``current_run_id``** on both the lead and every member
+            before closing.  This prevents closing sessions that are still
+            actively processing (e.g. a long model call or tool execution
+            that does not update ``last_active_at``).
+            """
             try:
                 while True:
                     await asyncio.sleep(poll_interval)
@@ -963,7 +970,38 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     if idle_seconds < idle_timeout:
                         continue  # Lead still active, keep waiting.
 
-                    # Lead has been idle beyond threshold — close members.
+                    # Idle threshold reached — but before closing, verify
+                    # that neither the lead nor any member has an active
+                    # run.  ``last_active_at`` is only updated by
+                    # ``send_message()``, so a long-running turn (model
+                    # calls, tool execution) can make the lead appear idle
+                    # even though it is actively processing.
+                    if current_session.current_run_id is not None:
+                        logger.debug(
+                            "Lead idle for %.0fs but has active run, deferring member cleanup",
+                            idle_seconds,
+                            lead_session_id=lead_session_id,
+                            run_id=current_session.current_run_id,
+                        )
+                        continue
+
+                    any_member_running = False
+                    for msid in member_session_ids:
+                        member_session = session_pool.sessions.get_session(msid)
+                        if member_session is not None and member_session.current_run_id is not None:
+                            any_member_running = True
+                            break
+
+                    if any_member_running:
+                        logger.debug(
+                            "Lead idle for %.0fs but members still running, deferring cleanup",
+                            idle_seconds,
+                            lead_session_id=lead_session_id,
+                        )
+                        continue
+
+                    # Lead is idle AND no member has an active run —
+                    # safe to close.
                     logger.info(
                         "Lead idle for %.0fs, auto-closing member sessions",
                         idle_seconds,
