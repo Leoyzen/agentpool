@@ -214,7 +214,7 @@ class TestBeforeConsumerLoopModelInfo:
 
 
 class TestBeforeConsumerLoopChildSession:
-    """Child sessions (sub-agents) should also get the correct agent_name."""
+    """Child sessions (sub-agents) should also get the correct agent_name and model."""
 
     @pytest.mark.asyncio
     async def test_child_session_uses_child_agent_name(self) -> None:
@@ -238,6 +238,75 @@ class TestBeforeConsumerLoopChildSession:
         assert ctx is not None
         assert ctx.assistant_msg.info.agent == "researcher"
         assert ctx.assistant_msg.info.agent != "agentpool"
+
+    @pytest.mark.asyncio
+    async def test_child_session_uses_child_agent_model(self) -> None:
+        """Child session assistant message should use the child's model, not the parent's.
+
+        Regression test for #266: child sessions created via create_child_session()
+        bypass route_message(), so _pending_message_metadata is never set.
+        _create_assistant_message fell back to resolve_default_model_info() which
+        returns the parent/default agent's model.
+        """
+        session_pool = Mock()
+        session_pool.sessions = Mock()
+
+        # Create a child agent with a DIFFERENT model from the parent
+        child_agent = Mock()
+        child_agent.model_name = "openai:gpt-4o-mini"
+
+        def _get_session(session_id: str) -> SessionState:
+            return _make_session_state(agent_name="researcher", agent=child_agent)
+
+        session_pool.sessions.get_session = Mock(side_effect=_get_session)
+
+        # Server state returns the PARENT's model (different from child's)
+        server_state = Mock()
+        server_state.working_dir = "/tmp"
+        server_state.resolve_default_model_info = Mock(return_value=("gpt-4o", "openai"))
+
+        integration = _make_integration(session_pool=session_pool, server_state=server_state)
+
+        child_id = "child-session-123"
+        await integration._before_consumer_loop(child_id)
+
+        ctx = integration._contexts.get(child_id)
+        assert ctx is not None
+        # agent_name should be correct (already tested above)
+        assert ctx.assistant_msg.info.agent == "researcher"
+        # model_id should come from the child's agent, not the server default
+        assert ctx.assistant_msg.info.model_id == "gpt-4o-mini"
+        assert ctx.assistant_msg.info.provider_id == "openai"
+        # Explicitly assert it's NOT the parent's model
+        assert ctx.assistant_msg.info.model_id != "gpt-4o"
+
+    @pytest.mark.asyncio
+    async def test_child_session_model_falls_back_when_no_agent(self) -> None:
+        """When SessionState.agent is None, fall back to server default gracefully."""
+        session_pool = Mock()
+        session_pool.sessions = Mock()
+
+        def _get_session(session_id: str) -> SessionState:
+            # No agent instance available — just agent_name
+            return _make_session_state(agent_name="researcher", agent=None)
+
+        session_pool.sessions.get_session = Mock(side_effect=_get_session)
+
+        server_state = Mock()
+        server_state.working_dir = "/tmp"
+        server_state.resolve_default_model_info = Mock(return_value=("gpt-4o", "openai"))
+
+        integration = _make_integration(session_pool=session_pool, server_state=server_state)
+
+        child_id = "child-session-456"
+        await integration._before_consumer_loop(child_id)
+
+        ctx = integration._contexts.get(child_id)
+        assert ctx is not None
+        assert ctx.assistant_msg.info.agent == "researcher"
+        # Falls back to server default when no agent instance is available
+        assert ctx.assistant_msg.info.model_id == "gpt-4o"
+        assert ctx.assistant_msg.info.provider_id == "openai"
 
 
 # =============================================================================

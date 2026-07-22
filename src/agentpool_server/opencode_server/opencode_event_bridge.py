@@ -54,6 +54,7 @@ from agentpool_server.opencode_server.opencode_session_routes import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from agentpool.agents.base_agent import BaseAgent
     from agentpool.orchestrator.core import EventBus, EventEnvelope
     from agentpool_server.opencode_server.state import ServerState
 
@@ -161,6 +162,18 @@ class OpenCodeEventBridgeMixin:
         session_state = self.session_pool.sessions.get_session(session_id)
         if session_state is not None:
             agent_name = session_state.agent_name
+            # For child sessions that bypass route_message(), resolve model
+            # from the session's agent instance instead of the server default
+            # (which is the parent/lead agent's model).  _pending_message_metadata
+            # is only set by route_message() (REST handler path); child sessions
+            # created via create_child_session() never go through that path.
+            if session_state.agent is not None:
+                agent_model_name: str | None = cast(
+                    "BaseAgent[Any, Any]", session_state.agent
+                ).model_name
+                if agent_model_name and ":" in agent_model_name:
+                    provider, model = agent_model_name.split(":", 1)
+                    model_id, provider_id = model, provider
         pending_meta = self._pending_message_metadata.pop(session_id, None)
         if pending_meta is not None:
             pending_model_id = pending_meta.get("model_id")
