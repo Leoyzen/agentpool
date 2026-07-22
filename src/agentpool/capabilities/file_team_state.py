@@ -339,6 +339,7 @@ class FileTeamState:
         value: dict[str, Any],
         expected_version: int | None = None,
         written_by: str = "unknown",
+        mode: str = "overwrite",
     ) -> str:
         """Write a value to the blackboard with optimistic locking.
 
@@ -349,6 +350,8 @@ class FileTeamState:
             expected_version: Expected current version for optimistic
                 locking.  If ``None``, no version check is performed.
             written_by: Name of the writer.
+            mode: ``"overwrite"`` (default) replaces the value entirely;
+                ``"append"`` concatenates to the existing ``text`` field.
 
         Returns:
             ``"Written, version=N"`` on success, or
@@ -372,8 +375,19 @@ class FileTeamState:
                 return f"Conflict: current version is {current_version}"
 
             new_version = current_version + 1
+
+            if mode == "append" and current is not None:
+                old_text = current.get("value", {}).get("text", "")
+                new_text = value.get("text", "")
+                if old_text:
+                    merged_value: dict[str, Any] = {"text": old_text + "\n" + new_text}
+                else:
+                    merged_value = {"text": new_text}
+            else:
+                merged_value = value
+
             entry: dict[str, Any] = {
-                "value": value,
+                "value": merged_value,
                 "version": new_version,
                 "written_by": written_by,
                 "written_at": datetime.datetime.now(datetime.UTC).isoformat(),
@@ -504,7 +518,7 @@ async def start_team_cleanup_task(
     try:
         import logfire
     except ImportError:
-        logfire = None  # type: ignore[assignment]
+        logfire = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
     async def _cleanup_loop() -> None:
         if logfire is not None:

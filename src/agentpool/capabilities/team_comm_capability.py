@@ -565,7 +565,13 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         self,
         ctx: RunContext[Any],
         key: Annotated[str, Field(description="Blackboard key to write")],
-        value: Annotated[str, Field(description="Value to store")],
+        value: Annotated[
+            str,
+            Field(
+                description="Value to store. Can be any text format: "
+                "inline JSON, Markdown, or plain text"
+            ),
+        ],
         expected_version: Annotated[
             int | None,
             Field(
@@ -573,6 +579,15 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 "If None, no version check is performed"
             ),
         ] = None,
+        mode: Annotated[
+            str,
+            Field(
+                description='Write mode: "overwrite" (default) replaces '
+                'the value entirely; "append" concatenates to the '
+                "existing value. Use append for accumulating findings "
+                "or logs across multiple writes"
+            ),
+        ] = "overwrite",
     ) -> ToolReturn:
         """Write a key to the shared blackboard with optimistic locking.
 
@@ -594,6 +609,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             {"text": value},
             expected_version=expected_version,
             written_by=self._agent_name,
+            mode=mode,
         )
 
         # Bounds: max_size_mb check on the resulting blackboard file.

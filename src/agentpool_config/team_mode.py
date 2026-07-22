@@ -262,6 +262,8 @@ def resolve_team_mode(
             pass
 
     # Both non-None: merge agent overrides onto global config.
+    assert global_config is not None
+    assert agent_config is not None
     global_dict = global_config.model_dump()
     agent_dict = agent_config.model_dump()
 

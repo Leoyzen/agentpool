@@ -861,7 +861,8 @@ async def test_task_create_happy_path(tmp_path: Any) -> None:
     """
     _init_team(str(tmp_path))
     ctx = _make_run_context(
-        metadata=_make_lead_metadata(), base_dir=str(tmp_path),
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
     )
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
@@ -880,7 +881,9 @@ async def test_task_create_no_team_id() -> None:
     """
     ctx = _make_run_context(metadata={"team_name": "foo", "team_role": "lead"})
     cap = TeamCommCapability(
-        _make_enabled_config(), "coordinator", {"team_name": "foo", "team_role": "lead"},
+        _make_enabled_config(),
+        "coordinator",
+        {"team_name": "foo", "team_role": "lead"},
     )
 
     result = await cap.task_create(ctx, "Task")
@@ -897,7 +900,8 @@ async def test_task_list_returns_tasks(tmp_path: Any) -> None:
     """
     _init_team(str(tmp_path))
     ctx = _make_run_context(
-        metadata=_make_lead_metadata(), base_dir=str(tmp_path),
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
     )
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
@@ -921,7 +925,8 @@ async def test_task_update_changes_status(tmp_path: Any) -> None:
     """
     _init_team(str(tmp_path))
     ctx = _make_run_context(
-        metadata=_make_lead_metadata(), base_dir=str(tmp_path),
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
     )
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
@@ -1022,6 +1027,48 @@ async def test_write_blackboard_conflict(tmp_path: Any) -> None:
     result = await cap.write_blackboard(ctx, "key1", "val2", expected_version=0)
 
     assert result.return_value == "Conflict: current version is 1"
+
+
+@pytest.mark.unit
+async def test_write_blackboard_append_mode(tmp_path: Any) -> None:
+    """Given: team session with existing blackboard key.
+
+    When: write_blackboard called with mode="append".
+    Then: new value is concatenated to the existing value.
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(base_dir=str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    await cap.write_blackboard(ctx, "findings", "first finding")
+    result = await cap.write_blackboard(ctx, "findings", "second finding", mode="append")
+
+    assert result.return_value == "Written, version=2"
+
+    # Read back and verify append
+    read_result = await cap.read_blackboard(ctx, "findings")
+    assert "first finding" in read_result.return_value
+    assert "second finding" in read_result.return_value
+
+
+@pytest.mark.unit
+async def test_write_blackboard_append_to_empty_key(tmp_path: Any) -> None:
+    """Given: team session, append to a non-existent key.
+
+    When: write_blackboard called with mode="append" on new key.
+    Then: value is written as-is (no existing content to append to).
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(base_dir=str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    result = await cap.write_blackboard(ctx, "new_key", "first entry", mode="append")
+
+    assert result.return_value == "Written, version=1"
+    read_result = await cap.read_blackboard(ctx, "new_key")
+    assert "first entry" in read_result.return_value
 
 
 @pytest.mark.unit
