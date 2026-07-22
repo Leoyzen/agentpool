@@ -1,8 +1,8 @@
 """Compact FastMCP server demonstrating sampling and elicitation in one workflow."""
 
 from fastmcp import Context, FastMCP
-from mcp.types import ModelHint, ModelPreferences, TextContent
 from fastmcp.server.elicitation import AcceptedElicitation
+from mcp.types import ModelHint, ModelPreferences, TextContent
 
 
 mcp = FastMCP("Code Fixer Server")

@@ -15,9 +15,8 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any
 
-from agentpool import Agent, AgentPool, AgentsManifest
+from agentpool import AgentPool, AgentsManifest
 from agentpool.docs.utils import get_config_path, is_pyodide, run
 
 

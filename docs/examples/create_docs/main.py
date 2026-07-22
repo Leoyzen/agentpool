@@ -19,7 +19,7 @@ from pathlib import Path
 from mypy import api
 import rich
 
-from agentpool import AgentPool, AgentsManifest, Agent
+from agentpool import Agent, AgentPool, AgentsManifest
 from agentpool.docs.utils import run
 
 
