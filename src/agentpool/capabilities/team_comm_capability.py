@@ -469,6 +469,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             owner = t.get("owner", "")
             subject = t.get("subject", "")
             description = t.get("description", "")
+            last_note = t.get("last_note", "")
             blocked = t.get("is_unblocked", True)
             blocked_attr = "" if blocked else ' blocked="true"'
             owner_attr = f' owner="{owner}"' if owner else ""
@@ -477,6 +478,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 lines.append(f"    {subject}: {description}")
             else:
                 lines.append(f"    {subject}")
+            if last_note:
+                lines.append(f"    note: {last_note}")
             lines.append("  </task>")
         lines.append("</task_list>")
         return ToolReturn(return_value="\n".join(lines))
@@ -490,6 +493,13 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             Field(description='New status (e.g. "in_progress", "completed"). Empty = no change'),
         ] = "",
         owner: Annotated[str, Field(description="New owner name. Empty = no change")] = "",
+        note: Annotated[
+            str,
+            Field(
+                description="Optional update note describing what was done "
+                "or what changed. Appended to the task's update log"
+            ),
+        ] = "",
     ) -> ToolReturn:
         """Update a task's status or owner on the shared task board.
 
@@ -510,6 +520,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             updates["status"] = status
         if owner:
             updates["owner"] = owner
+        if note:
+            updates["last_note"] = note
+            updates["updated_at"] = datetime.datetime.now(datetime.UTC).isoformat()
+            updates["updated_by"] = self._agent_name
         if not updates:
             return ToolReturn(return_value="No updates specified")
 
@@ -522,10 +536,14 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         owner = updated.get("owner", "")
         subject = updated.get("subject", "")
         description = updated.get("description", "")
+        last_note = updated.get("last_note", "")
         owner_attr = f' owner="{owner}"' if owner else ""
         content = f"{subject}: {description}" if description else subject
+        note_attr = f"\n{last_note}" if last_note else ""
         return ToolReturn(
-            return_value=(f'<task id="{tid}" status="{status}"{owner_attr}>\n{content}\n</task>')
+            return_value=(
+                f'<task id="{tid}" status="{status}"{owner_attr}>\n{content}{note_attr}\n</task>'
+            )
         )
 
     async def read_blackboard(
