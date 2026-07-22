@@ -506,11 +506,23 @@ class OpenCodeEventBridgeMixin:
                     await self._finalize_assistant_time(session_id)
                     # Persist the finalized assistant message to storage.
                     await self._persist_assistant_message(session_id)
-                    # P4: Reset _message_registered so the next turn starts
-                    # fresh. Without this, the next RunStartedEvent finds
-                    # _message_registered=True and triggers a false
-                    # "Finalizing incomplete turn" warning.
-                    self._message_registered[session_id] = False
+                    # NOTE: Do NOT reset _message_registered here. It must
+                    # stay True so the next RunStartedEvent's D1 block fires
+                    # to create a fresh assistant message. Resetting here
+                    # would cause D1 to be skipped → all turns merge into
+                    # one assistant message.
+                    #
+                    # Correct state machine:
+                    #
+                    #   Turn 1: RunStarted → D1 skip (first) → register → True
+                    #           StreamComplete → finalize (keep True)
+                    #   Turn 2: RunStarted → D1 fires (True) → new msg → False
+                    #           → register → True
+                    #           StreamComplete → finalize (keep True)
+                    #
+                    # If we reset to False at StreamComplete:
+                    #   Turn 2: RunStarted → D1 skip (False) → register
+                    #           with OLD msg_id → all turns merge → BUG
                     # P3: Serialize the EventProcessorContext and store it
                     # so that a subsequent _before_consumer_loop (for a
                     # resumed session in the same process) can restore the
@@ -563,9 +575,9 @@ class OpenCodeEventBridgeMixin:
                         )
                     # Persist the aborted assistant message to storage.
                     await self._persist_assistant_message(session_id)
-                    # P4: Reset _message_registered so the next turn starts
-                    # fresh, same as StreamCompleteEvent path.
-                    self._message_registered[session_id] = False
+                    # NOTE: Do NOT reset _message_registered here (same
+                    # reasoning as StreamCompleteEvent path). The next
+                    # RunStartedEvent's D1 block handles the reset.
                     # P3: Serialize context for resume, same as
                     # StreamCompleteEvent path.
                     await self._persist_context_for_resume(session_id)

@@ -266,8 +266,9 @@ async def test_serialization_failure_falls_back_to_fresh_context() -> None:
     # No resume data should have been stored
     assert session_id not in bridge._resume_contexts
 
-    # _message_registered should still have been reset (P4 runs before P3)
-    assert bridge._message_registered.get(session_id) is False
+    # _message_registered should stay True (StreamCompleteEvent no longer
+    # resets it — D1 handles the reset on the next RunStartedEvent)
+    assert bridge._message_registered.get(session_id) is True
 
     # Restore original to avoid affecting other tests
     ctx.serialize = original_serialize

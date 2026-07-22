@@ -1,9 +1,15 @@
-"""Tests for P4: _message_registered reset after StreamCompleteEvent and RunFailedEvent.
+"""Tests for P4: _message_registered lifecycle in the turn state machine.
 
-P4 ensures that ``_message_registered[session_id]`` is reset to ``False``
-after a turn completes (either via StreamCompleteEvent or RunFailedEvent).
-Without this reset, the next RunStartedEvent finds ``_message_registered=True``
-and triggers a false "Finalizing incomplete turn" warning (D1 block).
+P4's original approach (reset _message_registered at StreamCompleteEvent)
+was WRONG because it prevented D1 from firing on the next turn, causing
+all turns to merge into one assistant message.
+
+The correct state machine:
+- StreamCompleteEvent SHALL NOT reset _message_registered.
+- RunStartedEvent's D1 block SHALL reset _message_registered after
+  creating a new assistant message.
+- D1 SHALL fire on turns 2+ (when _message_registered is True from
+  the previous turn).
 """
 
 from __future__ import annotations
@@ -41,22 +47,37 @@ if TYPE_CHECKING:
 
 
 async def _async_iter(items: list[Any]) -> AsyncIterator[Any]:
-    """Yield items from a list as an async iterator."""
     for item in items:
         yield item
 
 
-def _make_test_ctx(
+class _FakeBridge(OpenCodeEventBridgeMixin):
+    def __init__(self) -> None:
+        self.session_pool = MagicMock()
+        self.server_state = MagicMock()
+        self._contexts: dict[str, Any] = {}
+        self._adapters: dict[str, Any] = {}
+        self._message_registered: dict[str, bool] = {}
+        self._child_to_parent: dict[str, str] = {}
+        self._child_spawns: dict[str, Any] = {}
+        self._children_of: dict[str, set[str]] = {}
+        self._resume_contexts: dict[str, dict[str, Any]] = {}
+        self._pending_message_ids: dict[str, str] = {}
+        self._pending_message_metadata: dict[str, dict[str, str | None]] = {}
+        self.set_session_context_data = self._resume_contexts.__setitem__
+        self.get_session_context_data = lambda sid: self._resume_contexts.pop(
+            sid, None
+        )
+
+
+def _make_ctx(
     session_id: str = "sess-p4",
-    *,
-    completed: int | None = None,
     msg_id: str = "msg-assistant-1",
 ) -> EventProcessorContext:
-    """Create an EventProcessorContext with an AssistantMessage for P4 tests."""
     assistant_msg = MessageWithParts.assistant(
         message_id=msg_id,
         session_id=session_id,
-        time=MessageTime(created=1000, completed=completed),
+        time=MessageTime(created=1000),
         agent_name="test-agent",
         model_id="test-model",
         parent_id=session_id,
@@ -73,52 +94,28 @@ def _make_test_ctx(
     )
 
 
-class _FakeBridge(OpenCodeEventBridgeMixin):
-    """Minimal concrete subclass for testing the mixin."""
-
-    def __init__(self) -> None:
-        self.session_pool = MagicMock()
-        self.server_state = MagicMock()
-        self._contexts: dict[str, Any] = {}
-        self._adapters: dict[str, Any] = {}
-        self._message_registered: dict[str, bool] = {}
-        self._child_to_parent: dict[str, str] = {}
-        self._child_spawns: dict[str, Any] = {}
-        self._children_of: dict[str, set[str]] = {}
-        self._resume_contexts: dict[str, dict[str, Any]] = {}
-        self._pending_message_ids: dict[str, str] = {}
-        self._pending_message_metadata: dict[str, dict[str, str | None]] = {}
-        # set_session_context_data stores into _resume_contexts
-        self.set_session_context_data = self._resume_contexts.__setitem__
-        self.get_session_context_data = lambda session_id: self._resume_contexts.pop(
-            session_id, None
-        )
-
-
-def _setup_bridge_for_handle(
+def _setup_bridge(
     session_id: str = "sess-p4",
     *,
-    completed: int | None = None,
-    message_registered: bool = True,
+    message_registered: bool = False,
+    pending_msg_id: str | None = None,
 ) -> tuple[_FakeBridge, EventProcessorContext, list[Any]]:
-    """Set up a _FakeBridge ready for _handle_event calls.
+    if pending_msg_id is not None:
+        initial_msg_id = pending_msg_id
+    else:
+        initial_msg_id = "msg-initial"
+    ctx = _make_ctx(session_id, msg_id=initial_msg_id)
 
-    Returns:
-        A tuple of (bridge, ctx, broadcast_calls) where broadcast_calls is
-        a list that accumulates all events passed to broadcast_event.
-    """
     bridge = _FakeBridge()
-    ctx = _make_test_ctx(session_id, completed=completed)
-
     bridge._contexts[session_id] = ctx
     bridge._message_registered[session_id] = message_registered
+    if pending_msg_id is not None:
+        bridge._pending_message_ids.pop(session_id, None)
 
-    # Adapter mock: convert_event returns empty async iterator
     adapter_mock = MagicMock()
     adapter_mock.convert_event = lambda _e: _async_iter([])
     bridge._adapters[session_id] = adapter_mock
 
-    # Track broadcast_event calls
     broadcast_calls: list[Any] = []
 
     async def fake_broadcast(event: Any) -> None:
@@ -134,53 +131,69 @@ def _setup_bridge_for_handle(
     return bridge, ctx, broadcast_calls
 
 
-@pytest.mark.anyio
-async def test_message_registered_resets_after_stream_complete() -> None:
-    """P4: _message_registered is reset to False after StreamCompleteEvent.
+def _make_envelope(session_id: str, event: Any) -> EventEnvelope:
+    return EventEnvelope(source_session_id=session_id, event=event)
 
-    Given: A session with _message_registered=True (turn in progress).
-    When: StreamCompleteEvent is handled by _handle_event.
-    Then: _message_registered[session_id] is False.
+
+def _patch_mocks():
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _ctx():
+        with (
+            __import__("unittest.mock").mock.patch(
+                "agentpool_server.opencode_server.opencode_event_bridge.set_session_status",
+                new_callable=AsyncMock,
+            ),
+            __import__("unittest.mock").mock.patch(
+                "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
+                new_callable=AsyncMock,
+            ) as mock_append,
+        ):
+            yield mock_append
+
+    return _ctx()
+
+
+# =============================================================================
+# State machine: StreamCompleteEvent SHALL NOT reset _message_registered
+# =============================================================================
+
+
+@pytest.mark.anyio
+async def test_stream_complete_does_not_reset_message_registered() -> None:
+    """StreamCompleteEvent SHALL keep _message_registered=True.
+
+    This is critical: if _message_registered is reset to False here,
+    the next RunStartedEvent's D1 block won't fire, and no new assistant
+    message will be created for turn 2. All subsequent turns would merge
+    into turn 1's assistant message.
     """
     session_id = "sess-p4-sc"
-    bridge, _ctx, _broadcast_calls = _setup_bridge_for_handle(
-        session_id, completed=None, message_registered=True
+    bridge, _ctx, _broadcast = _setup_bridge(
+        session_id, message_registered=True, pending_msg_id="msg-1"
     )
 
     event = StreamCompleteEvent(
         message=ChatMessage(content="done", role="assistant"),
         session_id=session_id,
     )
-    envelope = EventEnvelope(source_session_id=session_id, event=event)
 
-    with (
-        __import__("unittest.mock").mock.patch(
-            "agentpool_server.opencode_server.opencode_event_bridge.set_session_status",
-            new_callable=AsyncMock,
-        ),
-        __import__("unittest.mock").mock.patch(
-            "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
-            new_callable=AsyncMock,
-        ),
-    ):
-        await bridge._handle_event(session_id, envelope)
+    with _patch_mocks():
+        await bridge._handle_event(session_id, _make_envelope(session_id, event))
 
-    assert bridge._message_registered.get(session_id) is False, (
-        "_message_registered should be False after StreamCompleteEvent"
+    assert bridge._message_registered.get(session_id) is True, (
+        "_message_registered must stay True after StreamCompleteEvent "
+        "so D1 fires on the next RunStartedEvent"
     )
 
 
 @pytest.mark.anyio
-async def test_message_registered_resets_after_run_failed() -> None:
-    """P4: _message_registered is reset to False after RunFailedEvent.
-
-    Given: A session with _message_registered=True (turn in progress).
-    When: RunFailedEvent is handled by _handle_event.
-    Then: _message_registered[session_id] is False.
-    """
+async def test_run_failed_does_not_reset_message_registered() -> None:
+    """RunFailedEvent SHALL keep _message_registered=True (same reasoning)."""
     session_id = "sess-p4-rf"
-    bridge, _ctx, _broadcast_calls = _setup_bridge_for_handle(
-        session_id, completed=None, message_registered=True
+    bridge, _ctx, _broadcast = _setup_bridge(
+        session_id, message_registered=True, pending_msg_id="msg-1"
     )
 
     event = RunFailedEvent(
@@ -188,94 +201,101 @@ async def test_message_registered_resets_after_run_failed() -> None:
         exception=RuntimeError("test failure"),
         session_id=session_id,
     )
-    envelope = EventEnvelope(source_session_id=session_id, event=event)
 
-    with (
-        __import__("unittest.mock").mock.patch(
-            "agentpool_server.opencode_server.opencode_event_bridge.set_session_status",
-            new_callable=AsyncMock,
-        ),
-        __import__("unittest.mock").mock.patch(
-            "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
-            new_callable=AsyncMock,
-        ),
-    ):
-        await bridge._handle_event(session_id, envelope)
+    with _patch_mocks():
+        await bridge._handle_event(session_id, _make_envelope(session_id, event))
 
-    assert bridge._message_registered.get(session_id) is False, (
-        "_message_registered should be False after RunFailedEvent"
+    assert bridge._message_registered.get(session_id) is True, (
+        "_message_registered must stay True after RunFailedEvent "
+        "so D1 fires on the next RunStartedEvent"
     )
 
 
-@pytest.mark.anyio
-async def test_no_finalize_incomplete_turn_warning_on_turn2() -> None:
-    """P4: After StreamCompleteEvent resets _message_registered, no D1 warning on turn 2.
+# =============================================================================
+# State machine: D1 SHALL fire on turn 2 after StreamCompleteEvent
+# =============================================================================
 
-    Given: Turn 1 completed via StreamCompleteEvent (resets _message_registered).
-    When: RunStartedEvent arrives for turn 2.
-    Then: The D1 "finalize incomplete turn" block is NOT entered (no warning logged).
+
+@pytest.mark.anyio
+async def test_d1_fires_on_turn2_after_stream_complete() -> None:
+    """D1 block fires on turn 2 after turn 1 completed normally.
+
+    This is the KEY test that the original P4 implementation broke.
+    With the correct state machine:
+    - Turn 1: RunStarted → register → _message_registered=True
+    - Turn 1: StreamComplete → finalize (keep _message_registered=True)
+    - Turn 2: RunStarted → D1 fires (True) → new msg → _message_registered=False
+    - Turn 2: register → _message_registered=True
     """
     import agentpool_server.opencode_server.opencode_event_bridge as bridge_module
 
     session_id = "sess-p4-d1"
-    bridge, _ctx, _broadcast_calls = _setup_bridge_for_handle(
-        session_id, completed=None, message_registered=True
+    bridge, ctx, _broadcast = _setup_bridge(
+        session_id, message_registered=False, pending_msg_id="msg-t1"
     )
 
-    # Step 1: Send StreamCompleteEvent to reset _message_registered
-    sc_event = StreamCompleteEvent(
-        message=ChatMessage(content="done", role="assistant"),
-        session_id=session_id,
-    )
-    sc_envelope = EventEnvelope(source_session_id=session_id, event=sc_event)
+    with _patch_mocks():
+        # Turn 1: RunStarted → register
+        await bridge._handle_event(
+            session_id,
+            _make_envelope(
+                session_id,
+                RunStartedEvent(
+                    run_id="r1", agent_name="a", session_id=session_id
+                ),
+            ),
+        )
+        assert bridge._message_registered[session_id] is True
 
-    with (
-        __import__("unittest.mock").mock.patch(
-            "agentpool_server.opencode_server.opencode_event_bridge.set_session_status",
-            new_callable=AsyncMock,
-        ),
-        __import__("unittest.mock").mock.patch(
-            "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
-            new_callable=AsyncMock,
-        ),
-    ):
-        await bridge._handle_event(session_id, sc_envelope)
+        # Turn 1: StreamComplete → finalize (keep True)
+        await bridge._handle_event(
+            session_id,
+            _make_envelope(
+                session_id,
+                StreamCompleteEvent(
+                    message=ChatMessage(content="done", role="assistant"),
+                    session_id=session_id,
+                ),
+            ),
+        )
+        assert bridge._message_registered[session_id] is True
 
-    # Verify _message_registered is now False
-    assert bridge._message_registered[session_id] is False
+        # Turn 2: set pending ID
+        bridge._pending_message_ids[session_id] = "msg-t2"
 
-    # Step 2: Send RunStartedEvent for turn 2
-    rs_event = RunStartedEvent(
-        run_id="run-2",
-        agent_name="test-agent",
-        session_id=session_id,
-    )
-    rs_envelope = EventEnvelope(source_session_id=session_id, event=rs_event)
+        # Turn 2: RunStarted → D1 should fire
+        with (
+            __import__("unittest.mock").mock.patch.object(
+                bridge_module.logger, "warning"
+            ) as mock_warning,
+        ):
+            await bridge._handle_event(
+                session_id,
+                _make_envelope(
+                    session_id,
+                    RunStartedEvent(
+                        run_id="r2", agent_name="a", session_id=session_id
+                    ),
+                ),
+            )
 
-    with (
-        __import__("unittest.mock").mock.patch(
-            "agentpool_server.opencode_server.opencode_event_bridge.set_session_status",
-            new_callable=AsyncMock,
-        ),
-        __import__("unittest.mock").mock.patch(
-            "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
-            new_callable=AsyncMock,
-        ),
-        __import__("unittest.mock").mock.patch.object(
-            bridge_module.logger, "warning"
-        ) as mock_warning,
-    ):
-        await bridge._handle_event(session_id, rs_envelope)
+        # D1 should NOT log a warning (time.completed was already set
+        # by StreamCompleteEvent, so _finalize_assistant_time is a no-op)
+        d1_warnings = [
+            call
+            for call in mock_warning.call_args_list
+            if call.args
+            and (
+                "incomplete turn" in call.args[0].lower()
+                or "StreamCompleteEvent" in call.args[0]
+            )
+        ]
+        assert len(d1_warnings) == 0, (
+            "D1 should not warn when previous turn completed normally"
+        )
 
-    # The D1 warning should NOT have been logged because
-    # _message_registered was False (P4 reset worked).
-    d1_warnings = [
-        call
-        for call in mock_warning.call_args_list
-        if call.args
-        and ("incomplete turn" in call.args[0].lower() or "StreamCompleteEvent" in call.args[0])
-    ]
-    assert len(d1_warnings) == 0, (
-        "D1 'finalize incomplete turn' warning should NOT be logged "
-        "when _message_registered was properly reset by P4"
-    )
+        # D1 should have created a new assistant message
+        assert ctx.assistant_msg_id == "msg-t2", (
+            f"D1 should have popped pending ID 'msg-t2', got {ctx.assistant_msg_id}"
+        )
+        assert bridge._message_registered[session_id] is True
