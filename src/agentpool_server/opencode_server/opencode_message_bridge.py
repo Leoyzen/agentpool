@@ -111,14 +111,21 @@ async def get_messages_for_session(
     messages: list[MessageWithParts] = getattr(state, "messages", {}).get(session_id, []) or []
 
     # Fast-path: if we have in-memory messages and prefer_in_memory is True,
-    # return them directly. In-memory MessageWithParts retain the ORIGINAL
-    # part IDs (from append_message_to_session), which match the part IDs
-    # delivered via SSE PartUpdatedEvent. DB-reconstructed messages (via
-    # chat_message_to_opencode) get NEW part IDs, causing the TUI to
-    # render both sets as duplicates.
+    # return them directly. For user messages, strip parts to prevent
+    # duplication with SSE PartUpdatedEvent. The TUI has no deduplication
+    # for parts — if both sync() and SSE deliver parts (even with the same
+    # IDs), the TUI renders both. By stripping user message parts from
+    # sync(), SSE becomes the sole source of user message parts.
+    # Assistant message parts are kept (SSE delivers them via streaming
+    # deltas which the TUI accumulates, and sync() provides the final
+    # state — the TUI handles this via tracker.parts).
     cached_session = state.sessions.get(session_id)
     if prefer_in_memory and messages:
-        return _apply_revert_filter(cached_session, messages)
+        filtered = [
+            msg.model_copy(update={"parts": []}) if msg.role == "user" else msg
+            for msg in messages
+        ]
+        return _apply_revert_filter(cached_session, filtered)
 
     session_pool = getattr(state.pool, "session_pool", None)
     if session_pool is not None:
