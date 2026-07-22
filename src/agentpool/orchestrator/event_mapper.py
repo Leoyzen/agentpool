@@ -171,6 +171,36 @@ class EventMapper:
             metadata={"is_error": True} if is_error else None,
         )
 
+    def flush_cancelled_tool_calls(self) -> list[ToolCallCompleteEvent]:
+        """Generate ``ToolCallCompleteEvent`` for all pending tool calls.
+
+        Called when a turn is cancelled mid-tool-execution to ensure
+        downstream consumers receive a completion event for every
+        ``ToolCallStartEvent`` that was emitted. Each event carries
+        ``metadata={"is_error": True, "cancelled": True}``.
+
+        Returns:
+            A list of ``ToolCallCompleteEvent`` instances, one per
+            pending tool call.
+        """
+        events: list[ToolCallCompleteEvent] = []
+        for call_id, tool_name in self._pending_tool_calls.items():
+            tool_input = self._pending_tool_inputs.get(call_id, {})
+            events.append(
+                ToolCallCompleteEvent(
+                    tool_name=tool_name,
+                    tool_call_id=call_id,
+                    tool_input=tool_input,
+                    tool_result="Tool execution was cancelled.",
+                    agent_name=self._agent_name,
+                    message_id=self._message_id,
+                    metadata={"is_error": True, "cancelled": True},
+                ),
+            )
+        self._pending_tool_calls.clear()
+        self._pending_tool_inputs.clear()
+        return events
+
     @staticmethod
     def _is_rich_event(event: object) -> bool:
         """Check if *event* is a RichAgentStreamEvent.
