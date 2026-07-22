@@ -584,11 +584,10 @@ class OpenCodeEventBridgeMixin:
             # state lookup in _before_consumer_loop (which may not have the
             # agent name for sessions created outside the REST handler).
             if isinstance(event, RunStartedEvent) and event.agent_name:
-                info = ctx.assistant_msg.info
-                if isinstance(info, AssistantMessage):
-                    info.agent = event.agent_name
-                    info.mode = event.agent_name
-
+                msg_info = ctx.assistant_msg.info
+                if isinstance(msg_info, AssistantMessage):
+                    msg_info.agent = event.agent_name
+                    msg_info.mode = event.agent_name
             # NOTE: Do NOT overwrite ctx.assistant_msg_id from event.message_id.
             # NativeTurn generates its own UUID for _message_id (uuid4().hex)
             # which is different from the canonical assistant_msg_id generated
