@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
+from mcp import types
 from pydantic_ai.capabilities import HandleDeferredToolCalls
 
 from agentpool.agents.events.events import ElicitationDeferredEvent
@@ -283,7 +284,32 @@ async def _handle_elicitation_deferred(
         await _emit_elicitation_event(ctx, event)
 
         # (c) Register future in ElicitationFutureRegistry.
-        registry.register(call.tool_call_id)
+        future = registry.register(call.tool_call_id)
+
+        # (d) Broadcast the elicitation question to the input provider so
+        # the user can reply via the REST endpoint (POST /question/{id}/reply).
+        # Without this, the pending question is not registered in
+        # _pending_questions_dict and the user gets a 404 when trying to
+        # answer — causing the TUI to hang indefinitely.
+        provider = ctx.deps.input_provider
+        if provider is not None:
+            try:
+                form_params = types.ElicitRequestFormParams(
+                    message=elicitation_params.get("message", ""),
+                    requestedSchema=elicitation_params.get("requestedSchema", {}),
+                    mode=elicitation_params.get("mode", "form"),
+                )
+                await provider.broadcast_elicitation_question(
+                    call.tool_call_id,
+                    form_params,
+                    shared_future=future,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to broadcast elicitation question",
+                    tool_call_id=call.tool_call_id,
+                    exc_info=True,
+                )
 
         logger.debug(
             "Elicitation deferred tool call",
