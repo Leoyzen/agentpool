@@ -21,6 +21,7 @@ def _make_enabled_config(
     lead_eligible: list[str] | None = None,
     protocol_template: str | None = None,
     base_dir: str | None = None,
+    notice_delivery_mode: str = "steer",
 ) -> TeamModeConfig:
     """Create an enabled TeamModeConfig for testing.
 
@@ -29,6 +30,7 @@ def _make_enabled_config(
         lead_eligible: Agent names eligible as leads.
         protocol_template: Custom protocol template string.
         base_dir: Base directory for team state files.
+        notice_delivery_mode: Delivery mode for notifications.
 
     Returns:
         A frozen TeamModeConfig with enabled=True.
@@ -40,6 +42,7 @@ def _make_enabled_config(
         protocol_template=protocol_template
         or "Team={team_name}, Role={role}, Member={member_name}",
         base_dir=base_dir,
+        notice_delivery_mode=notice_delivery_mode,
     )
 
 
@@ -608,8 +611,8 @@ async def test_send_message_member_not_found(tmp_path: Any) -> None:
 
 
 @pytest.mark.unit
-async def test_send_message_urgent_uses_steer(tmp_path: Any) -> None:
-    """Given: team session, urgent=True.
+async def test_send_message_uses_steer_by_default(tmp_path: Any) -> None:
+    """Given: team session, default config (notice_delivery_mode=steer).
 
     When: send_message is called.
     Then: session_pool.send_message called with DeliveryMode.STEER.
@@ -618,12 +621,12 @@ async def test_send_message_urgent_uses_steer(tmp_path: Any) -> None:
 
     _init_team(str(tmp_path))
     mock_pool = MagicMock()
-    mock_pool.send_message = AsyncMock(return_value="msg_urgent")
+    mock_pool.send_message = AsyncMock(return_value="msg_steer")
     ctx = _make_run_context(session_pool=mock_pool, base_dir=str(tmp_path))
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "worker", _make_session_metadata())
 
-    result = await cap.send_message(ctx, "reviewer_agent", "urgent msg", urgent=True)
+    result = await cap.send_message(ctx, "reviewer_agent", "test msg")
 
     assert result.return_value == "Message sent to reviewer_agent"
     call_kwargs = mock_pool.send_message.call_args
@@ -876,7 +879,9 @@ async def test_task_create_no_team_id() -> None:
     Then: returns "Not in a team session".
     """
     ctx = _make_run_context(metadata={"team_name": "foo", "team_role": "lead"})
-    cap = TeamCommCapability(_make_enabled_config(), "coordinator", {"team_name": "foo", "team_role": "lead"})
+    cap = TeamCommCapability(
+        _make_enabled_config(), "coordinator", {"team_name": "foo", "team_role": "lead"},
+    )
 
     result = await cap.task_create(ctx, "Task")
 
@@ -1390,34 +1395,34 @@ async def test_message_size_exceeds_limit() -> None:
 
 
 @pytest.mark.unit
-async def test_auto_urgent(tmp_path: Any) -> None:
-    """Given: message_type in auto_urgent list.
+async def test_send_message_queue_mode(tmp_path: Any) -> None:
+    """Given: config with notice_delivery_mode='queue'.
 
-    When: send_message is called with message_type='escalation'.
-    Then: urgent is forced to True and DeliveryMode.STEER is used.
+    When: send_message is called.
+    Then: DeliveryMode.QUEUE is used.
     """
     from agentpool.lifecycle.types import DeliveryMode
 
     _init_team(str(tmp_path))
     mock_pool = MagicMock()
-    mock_pool.send_message = AsyncMock(return_value="msg_urgent")
+    mock_pool.send_message = AsyncMock(return_value="msg_queue")
     ctx = _make_run_context(
         session_pool=mock_pool,
         base_dir=str(tmp_path),
     )
-    config = _make_enabled_config(base_dir=str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path), notice_delivery_mode="queue")
     cap = TeamCommCapability(config, "worker", _make_session_metadata())
 
     result = await cap.send_message(
         ctx,
         "reviewer_agent",
-        "urgent escalation",
+        "queued msg",
         message_type="escalation",
     )
 
     assert result.return_value == "Message sent to reviewer_agent"
     call_kwargs = mock_pool.send_message.call_args
-    assert call_kwargs.kwargs["mode"] is DeliveryMode.STEER
+    assert call_kwargs.kwargs["mode"] is DeliveryMode.QUEUE
 
 
 # ---- Config default members tests ----

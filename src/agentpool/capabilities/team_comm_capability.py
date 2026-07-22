@@ -54,9 +54,10 @@ import contextlib
 import datetime
 import json
 import tempfile
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, Annotated, Any, cast, override
 import uuid
 
+from pydantic.fields import Field
 from pydantic_ai.tools import (
     RunContext,
     ToolDefinition,
@@ -72,6 +73,7 @@ if TYPE_CHECKING:
 
     from agentpool.capabilities.agent_context import AgentContext
     from agentpool.capabilities.file_team_state import FileTeamState
+    from agentpool.lifecycle.types import DeliveryMode
     from agentpool.tools.base import Tool
     from agentpool_config.team_mode import TeamModeConfig
 
@@ -142,6 +144,17 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             self.register_tool(self.shutdown_request)
             self.register_tool(self.team_add_member)
             self.register_tool(self.team_remove_member)
+
+    @property
+    def _notice_mode(self) -> DeliveryMode:
+        """Resolve delivery mode from config."""
+        from agentpool.lifecycle.types import DeliveryMode
+
+        return (
+            DeliveryMode.STEER
+            if self._config.notice_delivery_mode == "steer"
+            else DeliveryMode.QUEUE
+        )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -226,22 +239,17 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     async def send_message(  # noqa: PLR0911, PLR0915
         self,
         ctx: RunContext[Any],
-        to: str,
-        body: str,
-        urgent: bool = True,
-        message_type: str = "",
+        to: Annotated[
+            str,
+            Field(
+                description='Recipient member name. "*" broadcasts to all '
+                "members (lead-only — returns error for non-lead agents)"
+            ),
+        ],
+        body: Annotated[str, Field(description="Message body text")],
+        message_type: Annotated[str, Field(description="Optional message type tag")] = "",
     ) -> ToolReturn:
         """Send a message to a teammate's inbox.
-
-        Args:
-            ctx: RunContext with AgentContext deps.
-            to: Recipient member name. ``"*"`` broadcasts to all members
-                (lead-only — returns error for non-lead agents).
-            body: Message body text.
-            urgent: If True, deliver via steer (mid-turn injection);
-                otherwise queue for next turn.
-            message_type: Optional message type tag. If the type is in
-                ``config.auto_urgent``, ``urgent`` is forced to ``True``.
 
         Returns:
             Success or error message string.
@@ -255,10 +263,6 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     f"({body_bytes} > {self._config.message_max_bytes} bytes)"
                 )
             )
-
-        # Auto-urgent: force urgent=True for configured message types.
-        if message_type and message_type in self._config.auto_urgent:
-            urgent = True
 
         # Broadcast: lead-only.
         if to == "*":
@@ -286,7 +290,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
             from agentpool.lifecycle.types import DeliveryMode
 
-            mode = DeliveryMode.STEER if urgent else DeliveryMode.QUEUE
+            mode = self._notice_mode
             delivered = 0
             lead_sid = agent_ctx.session.session_id
             msg_body = (
@@ -310,14 +314,14 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 #   session existence to disambiguate.
                 if result is not None:
                     delivered += 1
-                elif not urgent:
+                elif mode is DeliveryMode.QUEUE:
                     target_session = session_pool.sessions.get_session(target_sid)
                     if target_session is not None and not target_session.closing:
                         delivered += 1
                 team_state.write_message(
                     team_id,
                     member_name,
-                    {"from": self._agent_name, "body": body, "urgent": urgent},
+                    {"from": self._agent_name, "body": body},
                 )
             return ToolReturn(return_value=f"Broadcast sent to {delivered} members")
 
@@ -372,7 +376,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         from agentpool.lifecycle.types import DeliveryMode
 
-        mode = DeliveryMode.STEER if urgent else DeliveryMode.QUEUE
+        mode = self._notice_mode
         msg_body = (
             f'<team-message from="{self._agent_name}" type="private">\n\n{body}\n\n</team-message>'
         )
@@ -388,7 +392,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         # - QUEUE mode: None means queued (success) OR failure. Check
         #   session existence to disambiguate.
         if result is None:
-            if urgent:
+            if mode is DeliveryMode.STEER:
                 return ToolReturn(return_value=f"Failed to deliver message to '{to}'")
             # QUEUE mode — verify session still exists.
             target_session = session_pool.sessions.get_session(target_sid)
@@ -399,24 +403,21 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         team_state.write_message(
             team_id,
             to,
-            {"from": self._agent_name, "body": body, "urgent": urgent},
+            {"from": self._agent_name, "body": body},
         )
         return ToolReturn(return_value=f"Message sent to {to}")
 
     async def task_create(
         self,
         ctx: RunContext[Any],
-        subject: str,
-        description: str = "",
-        blocked_by: list[str] | None = None,
+        subject: Annotated[str, Field(description="Short task title")],
+        description: Annotated[str, Field(description="Optional longer description")] = "",
+        blocked_by: Annotated[
+            list[str] | None,
+            Field(description="Optional list of task_ids this task depends on"),
+        ] = None,
     ) -> ToolReturn:
         """Create a task on the shared task board (lead-only).
-
-        Args:
-            ctx: RunContext with AgentContext deps.
-            subject: Short task title.
-            description: Optional longer description.
-            blocked_by: Optional list of task_ids this task depends on.
 
         Returns:
             Success message with task_id, or error string.
@@ -445,9 +446,6 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
     async def task_list(self, ctx: RunContext[Any]) -> ToolReturn:
         """List all tasks on the shared task board.
-
-        Args:
-            ctx: RunContext with AgentContext deps.
 
         Returns:
             JSON array of tasks (pretty-printed), or error string.
@@ -486,17 +484,14 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     async def task_update(
         self,
         ctx: RunContext[Any],
-        task_id: str,
-        status: str = "",
-        owner: str = "",
+        task_id: Annotated[str, Field(description="ID of the task to update")],
+        status: Annotated[
+            str,
+            Field(description='New status (e.g. "in_progress", "completed"). Empty = no change'),
+        ] = "",
+        owner: Annotated[str, Field(description="New owner name. Empty = no change")] = "",
     ) -> ToolReturn:
         """Update a task's status or owner on the shared task board.
-
-        Args:
-            ctx: RunContext with AgentContext deps.
-            task_id: ID of the task to update.
-            status: New status (e.g. "in_progress", "completed"). Empty = no change.
-            owner: New owner name. Empty = no change.
 
         Returns:
             Updated task as JSON, or error string.
@@ -533,12 +528,12 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             return_value=(f'<task id="{tid}" status="{status}"{owner_attr}>\n{content}\n</task>')
         )
 
-    async def read_blackboard(self, ctx: RunContext[Any], key: str) -> ToolReturn:
+    async def read_blackboard(
+        self,
+        ctx: RunContext[Any],
+        key: Annotated[str, Field(description="Blackboard key to read")],
+    ) -> ToolReturn:
         """Read a key from the shared blackboard.
-
-        Args:
-            ctx: RunContext with AgentContext deps.
-            key: Blackboard key to read.
 
         Returns:
             JSON value + metadata, or "Key not found" / error string.
@@ -569,18 +564,17 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     async def write_blackboard(
         self,
         ctx: RunContext[Any],
-        key: str,
-        value: str,
-        expected_version: int | None = None,
+        key: Annotated[str, Field(description="Blackboard key to write")],
+        value: Annotated[str, Field(description="Value to store")],
+        expected_version: Annotated[
+            int | None,
+            Field(
+                description="Expected current version for optimistic locking. "
+                "If None, no version check is performed"
+            ),
+        ] = None,
     ) -> ToolReturn:
         """Write a key to the shared blackboard with optimistic locking.
-
-        Args:
-            ctx: RunContext with AgentContext deps.
-            key: Blackboard key to write.
-            value: Value to store.
-            expected_version: Expected current version for optimistic locking.
-                If None, no version check is performed.
 
         Returns:
             "Written, version=N" on success, or "Conflict: current version is N".
@@ -621,9 +615,6 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     async def list_blackboard(self, ctx: RunContext[Any]) -> ToolReturn:
         """List all keys on the shared blackboard.
 
-        Args:
-            ctx: RunContext with AgentContext deps.
-
         Returns:
             JSON array of key names, or error string.
         """
@@ -645,9 +636,6 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
     async def team_status(self, ctx: RunContext[Any]) -> ToolReturn:
         """Get the current status of the team.
-
-        Args:
-            ctx: RunContext with AgentContext deps.
 
         Returns:
             Formatted status string with team name, members, and status.
@@ -737,8 +725,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     async def team_create(  # noqa: PLR0911, PLR0915
         self,
         ctx: RunContext[Any],
-        name: str,
-        members: list[dict[str, str]],
+        name: Annotated[str, Field(description="Human-readable team name")],
+        members: Annotated[
+            list[dict[str, str]],
+            Field(description='List of member dicts, each with "agent" and "name" keys'),
+        ],
     ) -> ToolReturn:
         """Create a new team with eligible members (lead-only).
 
@@ -746,12 +737,6 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         name) and ``name`` (display name) keys. Only agents listed in
         ``member_eligible`` can be used. If ``defaults`` is configured and
         ``members`` is empty, default members from config are used.
-
-        Args:
-            ctx: RunContext with AgentContext deps.
-            name: Human-readable team name.
-            members: List of member dicts, each with ``agent`` and ``name``
-                keys.
 
         Returns:
             Success message with team_id, or error string.
@@ -1000,9 +985,6 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     async def team_delete(self, ctx: RunContext[Any]) -> ToolReturn:
         """Delete the current team and close all member sessions (lead-only).
 
-        Args:
-            ctx: RunContext with AgentContext deps.
-
         Returns:
             ``"Team deleted"`` on success, or error string.
         """
@@ -1043,12 +1025,12 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         team_state.cleanup(team_id)
         return ToolReturn(return_value="Team deleted")
 
-    async def delete_blackboard(self, ctx: RunContext[Any], key: str) -> ToolReturn:
+    async def delete_blackboard(
+        self,
+        ctx: RunContext[Any],
+        key: Annotated[str, Field(description="Blackboard key to delete")],
+    ) -> ToolReturn:
         """Delete a key from the shared blackboard (lead-only).
-
-        Args:
-            ctx: RunContext with AgentContext deps.
-            key: Blackboard key to delete.
 
         Returns:
             ``"Blackboard key '{key}' deleted"`` on success, or error string.
@@ -1075,12 +1057,12 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         team_state.delete_blackboard(team_id, key)
         return ToolReturn(return_value=f"Blackboard key '{key}' deleted")
 
-    async def shutdown_request(self, ctx: RunContext[Any], member_name: str) -> ToolReturn:
+    async def shutdown_request(
+        self,
+        ctx: RunContext[Any],
+        member_name: Annotated[str, Field(description="Name of the member to shut down")],
+    ) -> ToolReturn:
         """Shut down a specific team member (lead-only).
-
-        Args:
-            ctx: RunContext with AgentContext deps.
-            member_name: Name of the member to shut down.
 
         Returns:
             ``"Shutdown completed for {member_name}"`` on success, or error.
@@ -1127,27 +1109,38 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     async def team_add_member(  # noqa: PLR0911, PLR0915
         self,
         ctx: RunContext[Any],
-        name: str,
-        agent: str,
-        prompt: str = "",
-        lifecycle: str = "persistent",
-        notify: str = "",
+        name: Annotated[
+            str,
+            Field(
+                description="Display name for the new member. If empty, "
+                "falls back to the agent's display_name (or agent name)"
+            ),
+        ],
+        agent: Annotated[str, Field(description="Registered agent name to use as the member")],
+        prompt: Annotated[
+            str,
+            Field(
+                description="Optional initial prompt to send the member. If "
+                "empty, the protocol template is used"
+            ),
+        ] = "",
+        lifecycle: Annotated[
+            str,
+            Field(
+                description='"persistent" (default) or "ephemeral". Ephemeral '
+                "members are auto-closed when their run completes"
+            ),
+        ] = "persistent",
+        notify: Annotated[
+            str,
+            Field(
+                description="Optional notice describing why the new member was "
+                "added or what they can help with, included in the "
+                "auto-broadcast to existing members"
+            ),
+        ] = "",
     ) -> ToolReturn:
         """Add a new member to an existing team (lead-only).
-
-        Args:
-            ctx: RunContext with AgentContext deps.
-            name: Display name for the new member. If empty, falls back
-                to the agent's ``display_name`` (or agent name).
-            agent: Registered agent name to use as the member.
-            prompt: Optional initial prompt to send the member. If empty,
-                the protocol template is used.
-            lifecycle: ``"persistent"`` (default) or ``"ephemeral"``.
-                Ephemeral members are auto-closed when their run completes.
-            notify: Optional notice describing why the new member was
-                added or what they can help with, included in the
-                auto-broadcast to existing members. Example:
-                ``" hydraulic system troubleshooting, ask him for related issues"``.
 
         Returns:
             Success message or error string.
@@ -1308,7 +1301,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 await session_pool.send_message(
                     existing_sid,
                     broadcast_msg,
-                    mode=DeliveryMode.STEER,
+                    mode=self._notice_mode,
                     source="team",
                     meta={"from": self._agent_name, "team_id": team_id},
                 )
@@ -1343,13 +1336,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     async def team_remove_member(
         self,
         ctx: RunContext[Any],
-        member_name: str,
+        member_name: Annotated[str, Field(description="Name of the member to remove")],
     ) -> ToolReturn:
         """Remove a member from the team (lead-only).
-
-        Args:
-            ctx: RunContext with AgentContext deps.
-            member_name: Name of the member to remove.
 
         Returns:
             Success message or error string.

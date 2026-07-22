@@ -160,7 +160,10 @@ class TeamModeConfig(Schema):
         message_max_bytes: Maximum message size in bytes.
         inbox_max_bytes: Maximum inbox size in bytes.
         protocol_template: Template for team protocol instructions.
-        auto_urgent: Message types that default to urgent.
+        notice_delivery_mode: Delivery mode for team notifications
+            (broadcast_on_create, team_add_member notices, send_message).
+            ``"steer"`` (default) injects mid-turn; ``"queue"`` waits
+            for next turn.
         defaults: Optional default team members for team_create.
         broadcast_on_create: Whether to auto-broadcast a notification to
             all team members (excluding the lead) when a new member is
@@ -186,9 +189,9 @@ class TeamModeConfig(Schema):
         default=_DEFAULT_PROTOCOL_TEMPLATE,
         title="Protocol template",
     )
-    auto_urgent: list[str] = Field(
-        default_factory=lambda: ["escalation"],
-        title="Auto-urgent message types",
+    notice_delivery_mode: Literal["steer", "queue"] = Field(
+        default="steer",
+        title="Notice delivery mode",
     )
     defaults: TeamDefaultsConfig | None = Field(
         default=None,

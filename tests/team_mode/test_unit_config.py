@@ -29,7 +29,7 @@ def test_construct_with_all_defaults() -> None:
     assert config.blackboard == BlackboardConfig()
     assert config.message_max_bytes == 65536
     assert config.inbox_max_bytes == 1048576
-    assert config.auto_urgent == ["escalation"]
+    assert config.notice_delivery_mode == "steer"
     assert config.defaults is None
 
 
@@ -59,7 +59,7 @@ def test_construct_with_custom_values() -> None:
         message_max_bytes=32768,
         inbox_max_bytes=524288,
         protocol_template="Custom {team_name} {role} {member_name}",
-        auto_urgent=["escalation", "alert"],
+        notice_delivery_mode="queue",
         defaults=defaults,
     )
 
@@ -77,7 +77,7 @@ def test_construct_with_custom_values() -> None:
     assert config.message_max_bytes == 32768
     assert config.inbox_max_bytes == 524288
     assert config.protocol_template == "Custom {team_name} {role} {member_name}"
-    assert config.auto_urgent == ["escalation", "alert"]
+    assert config.notice_delivery_mode == "queue"
     assert config.defaults is not None
     assert config.defaults.team_name == "squad_alpha"
     assert config.defaults.members[0].name == "coder"

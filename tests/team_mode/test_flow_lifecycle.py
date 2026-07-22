@@ -273,7 +273,6 @@ async def _dispatch_tool(  # noqa: PLR0911
                 ctx,
                 args["to"],
                 args["body"],
-                urgent=args.get("urgent", False),
                 message_type=args.get("message_type", ""),
             )
         case "task_create":
