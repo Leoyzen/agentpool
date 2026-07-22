@@ -47,7 +47,8 @@ Your role is: {role}.
 ## Guidelines
 
 - Keep messages concise and actionable.
-- Update task status promptly when work is completed.
+- Update task status promptly when work is progressing — use \
+`task_update(note="...")` to report progress at any time.
 - Check the blackboard before starting new work to avoid duplication.
 - Report blockers to the lead via `send_message` with message_type="escalation".
 """

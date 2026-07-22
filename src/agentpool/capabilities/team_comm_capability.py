@@ -965,7 +965,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 )
                 full_prompt = f"{base_prompt}\n\n## Team Members\n{roster}"
                 if prompt:
-                    full_prompt += f"\n\n## Task\n{prompt}"
+                    full_prompt += (
+                        f"\n\n## Task\n{prompt}"
+                        "\n\nRemember to report progress regularly using "
+                        '`task_update(note="...")`.'
+                    )
                 await session_pool.send_message(
                     member_session_id,
                     full_prompt,
@@ -1400,6 +1404,12 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             roster_lines.append(f"  - `{m_name}` (agent=`{m_agent}`, role=`{role_label}`)")
         roster = "\n".join(roster_lines)
         initial_prompt = f"{base_prompt}\n\n## Team Members\n{roster}"
+        if prompt:
+            initial_prompt += (
+                f"\n\n## Task\n{prompt}"
+                "\n\nRemember to report progress regularly using "
+                '`task_update(note="...")`.'
+            )
         await session_pool.send_message(
             member_session_id,
             initial_prompt,
