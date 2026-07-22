@@ -110,22 +110,25 @@ async def get_messages_for_session(
     """
     messages: list[MessageWithParts] = getattr(state, "messages", {}).get(session_id, []) or []
 
-    # Fast-path: if we have in-memory messages and prefer_in_memory is True,
-    # return them directly. For user messages, strip parts to prevent
-    # duplication with SSE PartUpdatedEvent. The TUI has no deduplication
-    # for parts — if both sync() and SSE deliver parts (even with the same
-    # IDs), the TUI renders both. By stripping user message parts from
-    # sync(), SSE becomes the sole source of user message parts.
-    # Assistant message parts are kept (SSE delivers them via streaming
-    # deltas which the TUI accumulates, and sync() provides the final
-    # state — the TUI handles this via tracker.parts).
     cached_session = state.sessions.get(session_id)
-    if prefer_in_memory and messages:
-        filtered = [
+
+    # When prefer_in_memory is True (sync/TUI path), strip parts from user
+    # messages to prevent duplication with SSE PartUpdatedEvent. The TUI has
+    # no part deduplication — if both sync() and SSE deliver parts, the TUI
+    # renders both. By stripping user message parts from sync(), SSE becomes
+    # the sole source of user message parts.
+    # This applies to ALL return paths (in-memory and DB fallback).
+    def _strip_user_parts(msgs: list[MessageWithParts]) -> list[MessageWithParts]:
+        if not prefer_in_memory:
+            return msgs
+        return [
             msg.model_copy(update={"parts": []}) if msg.role == "user" else msg
-            for msg in messages
+            for msg in msgs
         ]
-        return _apply_revert_filter(cached_session, filtered)
+
+    # Fast-path: in-memory messages retain original part IDs matching SSE.
+    if prefer_in_memory and messages:
+        return _apply_revert_filter(cached_session, _strip_user_parts(messages))
 
     session_pool = getattr(state.pool, "session_pool", None)
     if session_pool is not None:
@@ -135,8 +138,6 @@ async def get_messages_for_session(
             sp_messages = []
         if sp_messages:
             agent = state.agent
-            # Use safe lookup to avoid recreating a phantom session during
-            # message retrieval if the session was already closed.
             existing_agent = session_pool.sessions.get_session_agent(session_id)
             if existing_agent is not None:
                 agent = existing_agent
@@ -152,8 +153,8 @@ async def get_messages_for_session(
                 )
                 for chat_msg in sp_messages
             ]
-            return _apply_revert_filter(cached_session, converted)
-    return _apply_revert_filter(cached_session, messages)
+            return _apply_revert_filter(cached_session, _strip_user_parts(converted))
+    return _apply_revert_filter(cached_session, _strip_user_parts(messages))
 
 
 async def append_message_to_session(
