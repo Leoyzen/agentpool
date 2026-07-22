@@ -16,25 +16,24 @@ Intended for use as a CI hygiene step and as a pre-commit hook.
 
 from __future__ import annotations
 
+from pathlib import Path
 import re
 import sys
-from pathlib import Path
 from typing import NamedTuple
 
+
 # Headers whose values must be redacted in cassettes.
-SENSITIVE_HEADERS: frozenset[str] = frozenset(
-    {
-        "authorization",
-        "x-api-key",
-        "api-key",
-        "proxy-authorization",
-        "cookie",
-        "set-cookie",
-        "x-auth-token",
-        "x-openai-api-key",
-        "anthropic-api-key",
-    }
-)
+SENSITIVE_HEADERS: frozenset[str] = frozenset({
+    "authorization",
+    "x-api-key",
+    "api-key",
+    "proxy-authorization",
+    "cookie",
+    "set-cookie",
+    "x-auth-token",
+    "x-openai-api-key",
+    "anthropic-api-key",
+})
 
 # Values that are considered safe (already redacted placeholders).
 # Matches: REDACTED, <REDACTED>, REDACTED-..., DUMMY, test-*, fake-*, etc.
@@ -53,6 +52,9 @@ HEADER_KEY_RE = re.compile(
     r"^[ \t-]*([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(.+?)\s*$",
     re.MULTILINE,
 )
+
+# Maximum length of credential value to display in findings output.
+_VALUE_PREVIEW_LEN = 40
 
 
 class Finding(NamedTuple):
@@ -110,9 +112,7 @@ def main() -> int:
         print(f"INFO: {cassettes_dir} does not exist — nothing to scan.")
         return 0
 
-    cassette_files = sorted(
-        [*cassettes_dir.rglob("*.yaml"), *cassettes_dir.rglob("*.yml")]
-    )
+    cassette_files = sorted([*cassettes_dir.rglob("*.yaml"), *cassettes_dir.rglob("*.yml")])
     if not cassette_files:
         print(f"INFO: no cassette files found in {cassettes_dir}.")
         return 0
@@ -134,7 +134,8 @@ def main() -> int:
         rel = finding.file.relative_to(repo_root)
         print(
             f"  {rel}:{finding.line_number}: {finding.header}: "
-            f"{finding.value[:40]}{'...' if len(finding.value) > 40 else ''}",
+            f"{finding.value[:_VALUE_PREVIEW_LEN]}"
+            f"{'...' if len(finding.value) > _VALUE_PREVIEW_LEN else ''}",
             file=sys.stderr,
         )
     print(
