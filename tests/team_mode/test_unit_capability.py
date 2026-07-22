@@ -1860,19 +1860,20 @@ async def test_team_add_member_with_notify(tmp_path: Any) -> None:
     )
 
     assert "added to team" in result.return_value
-    # send_message called: 1 for initial prompt + 2 for notify (translator + reviewer)
+    # send_message called: 1 for initial prompt + 2 for broadcast (translator + reviewer)
     assert mock_pool.send_message.await_count == 3
 
-    # Verify notify was sent to existing members but NOT to lead or new member.
-    notify_calls = [
+    # Verify broadcast was sent to existing members but NOT to lead or new member.
+    # The notify text is embedded in the auto-generated broadcast message.
+    broadcast_calls = [
         c
         for c in mock_pool.send_message.await_args_list
-        if len(c.args) > 1 and c.args[1] == "New member joining"
+        if len(c.args) > 1 and "New member joining" in c.args[1]
     ]
-    notify_targets = {c.args[0] for c in notify_calls}
-    assert "sess_translator" in notify_targets  # existing member received
-    assert "sess_reviewer" in notify_targets  # existing member received
-    assert "child_session_new" not in notify_targets  # new member excluded
+    broadcast_targets = {c.args[0] for c in broadcast_calls}
+    assert "sess_translator" in broadcast_targets  # existing member received
+    assert "sess_reviewer" in broadcast_targets  # existing member received
+    assert "child_session_new" not in broadcast_targets  # new member excluded
 
 
 @pytest.mark.unit
@@ -2124,11 +2125,11 @@ async def test_team_add_member_notify_excludes_lead_and_new_member(tmp_path: Any
     cap, ctx, mock_pool, _mock_delegation, _mock_registry = _make_add_member_setup(tmp_path)
     await cap.team_add_member(ctx, "new_member", "editor", notify="Heads up")
 
-    # Get all send_message calls where content == "Heads up"
+    # Get all send_message calls where content contains "Heads up"
     notify_calls = [
         c
         for c in mock_pool.send_message.await_args_list
-        if len(c.args) > 1 and c.args[1] == "Heads up"
+        if len(c.args) > 1 and "Heads up" in c.args[1]
     ]
     notify_targets = {c.args[0] for c in notify_calls}
     # Lead's session should NOT be in notify targets.

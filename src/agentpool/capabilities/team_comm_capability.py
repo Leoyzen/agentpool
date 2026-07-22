@@ -1115,7 +1115,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent: str,
         prompt: str = "",
         lifecycle: str = "persistent",
-        notify: str | None = None,
+        notify: str = "",
     ) -> ToolReturn:
         """Add a new member to an existing team (lead-only).
 
@@ -1127,8 +1127,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 the protocol template is used.
             lifecycle: ``"persistent"`` (default) or ``"ephemeral"``.
                 Ephemeral members are auto-closed when their run completes.
-            notify: Optional message to broadcast to existing members
-                (excluding lead and the new member).
+            notify: Optional notice describing the new member's purpose,
+                included in the auto-broadcast to existing members.
+                Example: ``"大家有液压系统的问题可以直接找他"``.
 
         Returns:
             Success message or error string.
@@ -1257,20 +1258,14 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             {},
         )
 
-        # Build the broadcast message: custom notify text or auto-generated.
-        should_broadcast = notify is not None and bool(notify)
-        if not should_broadcast and self._config.broadcast_on_create:
-            # Auto-generate a default broadcast with member roster.
+        # Auto-broadcast to existing members (excluding lead and new member).
+        if self._config.broadcast_on_create:
             roster = ", ".join(updated_members.keys())
-            notify_msg = (
+            notice_part = f" {notify}" if notify else ""
+            broadcast_msg = (
                 f"[团队通知] 新成员 '{name}' (agent={agent}) 已加入团队。"
-                f"当前成员: {roster}"
+                f"{notice_part}当前成员: {roster}"
             )
-            should_broadcast = True
-        else:
-            notify_msg = notify or ""
-
-        if should_broadcast:
             for existing_name, existing_info in updated_members.items():
                 if existing_name in (lead_member_name, name):
                     continue
@@ -1279,7 +1274,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     continue
                 await session_pool.send_message(
                     existing_sid,
-                    notify_msg,
+                    broadcast_msg,
                     mode=DeliveryMode.STEER,
                     source="team",
                     meta={"from": self._agent_name, "team_id": team_id},
