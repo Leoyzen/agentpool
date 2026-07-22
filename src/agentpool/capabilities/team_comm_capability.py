@@ -156,6 +156,24 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             else DeliveryMode.QUEUE
         )
 
+    def _wrap_notice_content(self, body: str) -> str | list[Any]:
+        """Wrap message body for delivery based on notice_role config.
+
+        When notice_role is 'system' and delivery is STEER, wraps the
+        body in a SystemPromptPart so it's injected as a system message
+        rather than a user message.
+
+        Returns the plain string for QUEUE mode or notice_role='user'.
+        """
+        if (
+            self._config.notice_role == "system"
+            and self._config.notice_delivery_mode == "steer"
+        ):
+            from pydantic_ai.messages import SystemPromptPart
+
+            return [SystemPromptPart(content=body)]
+        return body
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -303,7 +321,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     continue  # Skip self (lead broadcasting to itself).
                 result = await session_pool.send_message(
                     target_sid,
-                    msg_body,
+                    self._wrap_notice_content(msg_body),
                     mode=mode,
                     source="team",
                     meta={"from": self._agent_name, "team_id": team_id},
@@ -382,7 +400,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         )
         result = await session_pool.send_message(
             target_sid,
-            msg_body,
+            self._wrap_notice_content(msg_body),
             mode=mode,
             source="team",
             meta={"from": self._agent_name, "team_id": team_id},
@@ -1468,7 +1486,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     continue
                 await session_pool.send_message(
                     existing_sid,
-                    broadcast_msg,
+                    self._wrap_notice_content(broadcast_msg),
                     mode=self._notice_mode,
                     source="team",
                     meta={"from": self._agent_name, "team_id": team_id},

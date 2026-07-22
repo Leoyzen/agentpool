@@ -194,6 +194,13 @@ class TeamModeConfig(Schema):
         default="steer",
         title="Notice delivery mode",
     )
+    notice_role: Literal["user", "system"] = Field(
+        default="user",
+        title="Notice message role",
+        description="Role for team notification messages when delivered "
+        "via steer. 'user' injects as a user message (default); "
+        "'system' injects as a system prompt part",
+    )
     defaults: TeamDefaultsConfig | None = Field(
         default=None,
         title="Default team members for team_create",
