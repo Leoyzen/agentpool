@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, assert_never
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from agentpool.agents.events import RunErrorEvent, RunFailedEvent
 from agentpool.log import get_logger
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
@@ -292,16 +291,15 @@ async def _process_message(
     request: MessageRequest,
     state: StateDep,
 ) -> MessageWithParts:
-    """Internal helper to process a message request.
+    """Process a message request and return the assistant message placeholder.
 
-    Three-phase lock split:
-    1. Lock-held: load session, create messages, route
-    2. Lock-free: wait for completion, finalize
-    3. Lock-held: mark session idle (with race guard)
+    Routes the message through SessionPool and returns immediately.
+    Finalization (tokens, cost, time.completed, storage persistence) is
+    handled by the session-scoped event consumer on StreamCompleteEvent /
+    RunFailedEvent. Clients receive results via SSE.
     """
     lock = state.get_session_lock(session_id)
 
-    # Phase 1: Lock-held (fast — load + create + route)
     async with lock:
         session = await get_or_load_session(state, session_id)
         if session is None:
@@ -309,8 +307,6 @@ async def _process_message(
 
         # COMMIT: If session has a revert marker, delete reverted messages
         # BEFORE creating the new user message (DB-first ordering, D10).
-        # This must happen before append_message_to_session, otherwise the
-        # newly-created user message would be truncated by COMMIT.
         await _commit_revert(state, session_id)
 
         agent_name = _resolve_message_agent_name(state, session_id, request.agent)
@@ -351,23 +347,13 @@ async def _process_message(
                     )
                 case _ as unreachable:
                     assert_never(unreachable)
-        # NOTE: append_message_to_session is NOT called here — the
-        # EventProcessor handles that via UserMessageInsertedEvent.
         await persist_message_to_storage(state, user_msg_with_parts, session_id)
 
         ctx = await _route_message_locked(
             session_id, request, state, user_msg_id, user_msg_with_parts
         )
 
-    # Phase 2: Lock-free (slow — wait for agent completion)
-    try:
-        result = await _wait_and_finalize(session_id, state, ctx)
-    finally:
-        # Phase 3: Lock-held (fast — mark idle with race guard)
-        async with lock:
-            await _mark_session_idle_safe(state, session_id, ctx)
-
-    return result
+    return ctx.assistant_msg_with_parts
 
 
 async def _truncate_agent_history(
@@ -736,7 +722,7 @@ async def _route_message_locked(  # noqa: PLR0915
         )
 
     # --- Create context ---
-    ctx = _MessageRunContext(
+    return _MessageRunContext(
         assistant_msg_id=assistant_msg_id,
         assistant_msg=assistant_msg,
         assistant_msg_with_parts=assistant_msg_with_parts,
@@ -748,27 +734,6 @@ async def _route_message_locked(  # noqa: PLR0915
         mark_idle=mark_idle,
         message_id=message_id,
     )
-
-    if message_id is not None:
-        # Subscribe to EventBus locally so the adapter receives events
-        # and accumulates response_text / tokens for finalize().
-        # The session-scoped consumer (_event_consumer_loop) already
-        # broadcasts SSE events; we only feed the adapter context here.
-        event_stream = await session_pool.event_bus.subscribe(session_id)
-
-        async def _feed_adapter() -> None:
-            from agentpool.orchestrator.core import drain_and_merge
-
-            async for event in drain_and_merge(event_stream):
-                if isinstance(event.event, (RunErrorEvent, RunFailedEvent)):
-                    ctx.run_failed = True
-                async for _ in adapter.convert_event(event.event):
-                    pass
-
-        ctx.event_stream = event_stream
-        ctx.adapter_task = asyncio.create_task(_feed_adapter(), name=f"adapter_feed_{session_id}")
-
-    return ctx
 
 
 async def _wait_and_finalize(  # noqa: PLR0915
@@ -967,13 +932,14 @@ async def send_message(
     request: MessageRequest,
     state: StateDep,
 ) -> MessageWithParts:
-    """Send a message and wait for the agent's response.
+    """Send a message to the agent and return the assistant message placeholder.
 
-    This is the synchronous version - waits for completion before returning.
-    Messages to the same session are processed sequentially using per-session locks
-    to prevent race conditions and event interleaving.
+    Routes the message through SessionPool and returns immediately.
+    The assistant message placeholder has time.completed = None — clients
+    receive finalized tokens, cost, and time.completed via SSE events.
 
-    For async processing, use POST /session/{id}/prompt_async instead.
+    Messages to the same session are processed sequentially using per-session
+    locks to prevent race conditions and event interleaving.
     """
     return await _process_message(session_id, request, state)
 

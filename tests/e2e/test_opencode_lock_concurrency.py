@@ -346,13 +346,15 @@ class TestFinalizationAfterLockSplit:
         self,
         subprocess_server_fast: SubprocessServer,
     ) -> None:
-        """After sync POST /message completes, the assistant message must.
+        """After POST /message, the assistant message must have time.completed set.
 
-        have time.completed set — even though finalization runs lock-free.
+        In the async model, POST /message returns immediately with
+        time.completed = None. The event consumer sets time.completed
+        on StreamCompleteEvent. We poll GET /message to verify.
 
         Given: a session with a fast model
-        When: sync POST /message is sent and completes
-        Then: the assistant message in the response has time.completed != None
+        When: POST /message is sent
+        Then: GET /message shows assistant message with time.completed != None
         """
         base_url = subprocess_server_fast.base_url
 
@@ -362,9 +364,13 @@ class TestFinalizationAfterLockSplit:
             resp = await _send_message_sync(base_url, client, session_id, "hello")
             assert resp.status_code in (200, 201)
 
-            assistant_msg = resp.json()
-            time_field = assistant_msg.get("info", {}).get("time", {})
+            # In the async model, time.completed is None in the initial
+            # response. Poll GET /message until the event consumer finalizes.
+            messages = await _wait_for_message_count(base_url, client, session_id, 2, timeout=10.0)
+            assert len(messages) >= 2
 
+            assistant = messages[1]
+            time_field = assistant.get("info", {}).get("time", {})
             assert time_field.get("completed") is not None, (
                 "time.completed not set on assistant message — finalization "
                 "may have been skipped after lock split."
