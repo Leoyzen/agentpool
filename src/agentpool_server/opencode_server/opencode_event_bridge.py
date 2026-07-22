@@ -168,10 +168,8 @@ class OpenCodeEventBridgeMixin:
             # is only set by route_message() (REST handler path); child sessions
             # created via create_child_session() never go through that path.
             if session_state.agent is not None:
-                agent_model_name: str | None = cast(
-                    "BaseAgent[Any, Any]", session_state.agent
-                ).model_name
-                if agent_model_name and ":" in agent_model_name:
+                agent_model_name = cast("BaseAgent[Any, Any]", session_state.agent).model_name
+                if isinstance(agent_model_name, str) and ":" in agent_model_name:
                     provider, model = agent_model_name.split(":", 1)
                     model_id, provider_id = model, provider
         pending_meta = self._pending_message_metadata.pop(session_id, None)
