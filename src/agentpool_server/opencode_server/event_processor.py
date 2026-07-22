@@ -741,6 +741,14 @@ class EventProcessor:
             existing = ctx.get_tool_part(tool_call_id)
             if existing is not None:
                 existing_title = _extract_title_from_tool_state(existing.state)
+                # Update tool input from progress event if existing input is empty.
+                # This happens when the model streams tool call arguments: the
+                # initial ToolCallStartEvent arrives with empty raw_input, and
+                # the EventMapper emits a ToolCallProgressEvent with the complete
+                # tool_input once args are assembled.
+                if event_tool_input and not ctx.get_tool_input(tool_call_id):
+                    ui_input = _convert_params_for_ui(event_tool_input)
+                    ctx.set_tool_input(tool_call_id, ui_input)
                 tool_input = ctx.get_tool_input(tool_call_id) or {}
                 accumulated_output = ctx.get_tool_output(tool_call_id)
                 tool_state = ToolStateRunning(

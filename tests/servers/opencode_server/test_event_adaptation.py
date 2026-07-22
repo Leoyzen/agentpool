@@ -1255,6 +1255,49 @@ class TestToolCallProgressEventConversion:
         assert isinstance(tool_part.state, ToolStateRunning)
 
     @pytest.mark.asyncio
+    async def test_tool_progress_updates_input_from_event_when_existing_empty(
+        self,
+        event_context,
+    ) -> None:
+        """ToolCallProgressEvent with tool_input should populate empty input.
+
+        When a model streams tool call arguments, the initial ToolCallStartEvent
+        may arrive with empty raw_input (args not yet assembled). The
+        EventMapper then emits a ToolCallProgressEvent with the complete
+        tool_input once args are available. The event processor must update
+        the tool part's input from this progress event, otherwise parameters
+        are lost and never displayed in the TUI.
+        """
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        # Step 1: ToolCallStartEvent with empty raw_input (streaming args)
+        start_event = ToolCallStartEvent(
+            tool_call_id="call-stream-001",
+            tool_name="bash",
+            title="Executing: bash",
+            raw_input={},
+        )
+        await _collect_events_v2(adapter.convert_event(start_event))
+
+        # Step 2: ToolCallProgressEvent carries the complete tool_input
+        progress_event = ToolCallProgressEvent(
+            tool_call_id="call-stream-001",
+            title="Running: ls -la",
+            items=[],
+            tool_name="bash",
+            tool_input={"command": "ls -la"},
+        )
+        events = await _collect_events_v2(adapter.convert_event(progress_event))
+
+        part_updated = [e for e in events if isinstance(e, PartUpdatedEvent)]
+        assert len(part_updated) == 1
+        tool_part = part_updated[0].properties.part
+        assert isinstance(tool_part, ToolPart)
+        assert isinstance(tool_part.state, ToolStateRunning)
+        # The input must be populated from the progress event's tool_input
+        assert tool_part.state.input.get("command") == "ls -la"
+
+    @pytest.mark.asyncio
     async def test_tool_progress_creates_new_tool_part_if_not_exists(
         self,
         event_context,
