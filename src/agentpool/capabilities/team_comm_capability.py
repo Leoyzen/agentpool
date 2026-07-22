@@ -725,7 +725,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     # Lead-only tools
     # ------------------------------------------------------------------
 
-    async def team_create(  # noqa: PLR0911
+    async def team_create(  # noqa: PLR0911, PLR0915
         self,
         ctx: RunContext[Any],
         name: str,
@@ -756,7 +756,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if not members and self._config.defaults is not None:
             members = [{"name": m.name, "agent": m.agent} for m in self._config.defaults.members]
 
-        # Eligibility checks.
+        # Eligibility checks + display_name fallback for empty names.
         for member in members:
             agent_name: str = member.get("agent", "")
             if not agent_ctx.agent_registry.exists(agent_name):
@@ -765,6 +765,13 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 return ToolReturn(
                     return_value=(f"Agent '{agent_name}' is not eligible for team membership")
                 )
+            # Fall back to agent's display_name when name is not provided.
+            if not member.get("name"):
+                agent_obj = agent_ctx.agent_registry.get_or_none(agent_name)
+                if agent_obj is not None and agent_obj.display_name:
+                    member["name"] = agent_obj.display_name
+                else:
+                    member["name"] = agent_name
 
         # Bounds: max_members check.
         if len(members) > self._config.bounds.max_members:
@@ -1121,7 +1128,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         Args:
             ctx: RunContext with AgentContext deps.
-            name: Display name for the new member.
+            name: Display name for the new member. If empty, falls back
+                to the agent's ``display_name`` (or agent name).
             agent: Registered agent name to use as the member.
             prompt: Optional initial prompt to send the member. If empty,
                 the protocol template is used.
@@ -1150,6 +1158,14 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         # Check agent is eligible.
         if agent not in self._config.member_eligible:
             return ToolReturn(return_value=f"Agent '{agent}' is not eligible")
+
+        # Fall back to agent's display_name when name is not provided.
+        if not name:
+            agent_obj = agent_ctx.agent_registry.get_or_none(agent)
+            if agent_obj is not None and agent_obj.display_name:
+                name = agent_obj.display_name
+            else:
+                name = agent
 
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
