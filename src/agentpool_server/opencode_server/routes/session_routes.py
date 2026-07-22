@@ -915,6 +915,10 @@ async def get_session_messages(
     if state.event_bridge is not None:
         event_bus = state.event_bridge._event_bus
         if event_bus is not None:
+            logger.info(
+                "Clearing replay buffer for session %s on sync()",
+                session_id,
+            )
             event_bus.clear_replay_buffer(session_id)
 
     # Fast path for subagent/child sessions already in memory:
