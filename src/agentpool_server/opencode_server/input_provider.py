@@ -410,7 +410,7 @@ class OpenCodeInputProvider(InputProvider):
                 {"value": answer} if is_multi else {"value": answer[0] if answer else ""}
             )
             return types.ElicitResult(action="accept", content=content)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.info("Question timed out", question_id=question_id)
             return types.ElicitResult(action="cancel")
         except asyncio.CancelledError:
@@ -601,7 +601,7 @@ class OpenCodeInputProvider(InputProvider):
 
             return types.ElicitResult(action="accept", content=result_content)  # pyright: ignore[reportArgumentType]
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.info("Multi-question timed out", question_id=question_id)
             return types.ElicitResult(action="cancel")
         except asyncio.CancelledError:

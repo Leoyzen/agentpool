@@ -102,7 +102,8 @@ def _make_deferred_requests(
                 "deferred_kind": "elicitation",
                 "elicitation": {
                     "message": message,
-                    "requestedSchema": schema or {"type": "object", "properties": {"key": {"type": "string"}}},
+                    "requestedSchema": schema
+                    or {"type": "object", "properties": {"key": {"type": "string"}}},
                     "mode": "form",
                 },
             },
@@ -120,7 +121,9 @@ def _make_provider(
     mock_agent.agent_pool = None
     mock_agent.host_context = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
-    state.session_controller = _make_mock_session_controller(session_id, checkpoint_enabled=checkpoint_enabled)
+    state.session_controller = _make_mock_session_controller(
+        session_id, checkpoint_enabled=checkpoint_enabled
+    )
 
     from agentpool_server.opencode_server.models import Session
     from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
@@ -146,9 +149,7 @@ def _make_provider(
 
 
 class TestMCPElicitationRegistersPendingQuestion:
-    """MCP elicitation via ElicitationBridgeCapability should register
-    a pending question in _pending_questions_dict by calling
-    broadcast_elicitation_question().
+    """MCP elicitation via ElicitationBridgeCapability should register a pending question.
 
     Before the fix: ElicitationBridgeCapability emitted
     ElicitationDeferredEvent and registered a future in
@@ -166,10 +167,11 @@ class TestMCPElicitationRegistersPendingQuestion:
         self,
         run_ctx: RunContext[Any],
     ) -> None:
-        """ElicitationBridgeCapability should populate
-        _pending_questions_dict via broadcast_elicitation_question().
+        """ElicitationBridgeCapability should populate _pending_questions_dict.
+
+        Via broadcast_elicitation_question().
         """
-        provider, state, controller = _make_provider("test-session")
+        provider, _state, controller = _make_provider("test-session")
 
         registry = ElicitationFutureRegistry()
         cap = create_elicitation_bridge_capability(registry=registry)
@@ -189,7 +191,7 @@ class TestMCPElicitationRegistersPendingQuestion:
             "agentpool.agents.native_agent.elicitation_bridge._emit_elicitation_event",
             new_callable=AsyncMock,
         ):
-            result = await cap.handle_deferred_tool_calls(run_ctx, requests=requests)
+            await cap.handle_deferred_tool_calls(run_ctx, requests=requests)
 
         # Future IS registered in the registry
         assert "tc-elicit-001" in registry
@@ -236,10 +238,11 @@ class TestMCPElicitationRegistersPendingQuestion:
         self,
         run_ctx: RunContext[Any],
     ) -> None:
-        """resolve_question returns True for a handle registered via
-        ElicitationBridgeCapability (MCP path).
+        """resolve_question returns True for a handle registered via ElicitationBridgeCapability.
+
+        MCP path.
         """
-        provider, state, controller = _make_provider("test-session")
+        provider, _state, _controller = _make_provider("test-session")
 
         registry = ElicitationFutureRegistry()
         cap = create_elicitation_bridge_capability(registry=registry)
@@ -274,9 +277,7 @@ class TestMCPElicitationRegistersPendingQuestion:
 
 
 class TestAwaitFutureHasTimeout:
-    """The await future in _handle_single_enum and _handle_multi_question
-    should have a timeout so the agent can recover if the user never
-    responds.
+    """The await future should have a timeout for agent recovery.
 
     Before the fix: 'await future' had no timeout — if the future never
     resolved (e.g., broadcast_elicitation_question was never called or
@@ -290,10 +291,8 @@ class TestAwaitFutureHasTimeout:
     async def test_get_elicitation_times_out_when_future_never_resolved(
         self,
     ) -> None:
-        """get_elicitation should time out and return cancel when the
-        future is never resolved.
-        """
-        provider, state, controller = _make_provider("test-session")
+        """get_elicitation should time out and return cancel when future is never resolved."""
+        provider, _state, controller = _make_provider("test-session")
 
         schema = {"type": "string", "enum": ["Option A", "Option B"]}
         params = types.ElicitRequestFormParams(
@@ -332,11 +331,11 @@ class TestAwaitFutureHasTimeout:
     async def test_get_elicitation_recovers_after_question_cleanup(
         self,
     ) -> None:
-        """After cleanup_elicitation_question removes the pending question,
-        get_elicitation should still return (via timeout) rather than
-        blocking forever.
+        """get_elicitation should still return via timeout after cleanup.
+
+        Rather than blocking forever.
         """
-        provider, state, controller = _make_provider("test-session")
+        provider, _state, controller = _make_provider("test-session")
 
         schema = {"type": "string", "enum": ["A", "B"]}
         params = types.ElicitRequestFormParams(message="Pick", requestedSchema=schema)
@@ -370,24 +369,17 @@ class TestAwaitFutureHasTimeout:
 
 
 class TestQuestionRouteSucceedsForMCPElicitation:
-    """POST /question/{handle}/reply should succeed (not 404) when the
-    handle was registered via the MCP elicitation path.
-    """
+    """POST /question/{handle}/reply should succeed for MCP elicitation handles."""
 
     @pytest.mark.asyncio
     async def test_reply_to_mcp_elicitation_handle_succeeds(
         self,
         run_ctx: RunContext[Any],
     ) -> None:
-        """reply_to_question succeeds for a handle registered via
-        ElicitationBridgeCapability.
-        """
+        """reply_to_question succeeds for a handle registered via ElicitationBridgeCapability."""
         from agentpool_server.opencode_server.models import QuestionReply
-        from agentpool_server.opencode_server.routes.question_routes import (
-            reply_to_question,
-        )
 
-        provider, state, controller = _make_provider("test-session")
+        provider, _state, _controller = _make_provider("test-session")
 
         registry = ElicitationFutureRegistry()
         cap = create_elicitation_bridge_capability(registry=registry)
@@ -408,7 +400,7 @@ class TestQuestionRouteSucceedsForMCPElicitation:
             await cap.handle_deferred_tool_calls(run_ctx, requests=requests)
 
         # User replies — should NOT get 404
-        reply = QuestionReply(answers=[["A"]])
+        QuestionReply(answers=[["A"]])
         # reply_to_question is an async FastAPI endpoint
         # If the question is registered, it should succeed
         success = provider.resolve_question("tc-elicit-001", [["A"]])
@@ -424,9 +416,9 @@ class TestQuestionRouteSucceedsForMCPElicitation:
 
 
 class TestLocalToolPath3RegistersPendingQuestion:
-    """AgentContext.handle_elicitation Path 3 (durable, local tools)
-    DOES call broadcast_elicitation_question() and registers the
-    pending question. This is the working path.
+    """AgentContext.handle_elicitation Path 3 registers the pending question.
+
+    This is the working path for durable, local tools.
     """
 
     @pytest.mark.asyncio
@@ -437,7 +429,7 @@ class TestLocalToolPath3RegistersPendingQuestion:
         """handle_elicitation Path 3 calls broadcast_elicitation_question()."""
         from agentpool.sessions.models import ElicitationResumePayload
 
-        provider, state, controller = _make_provider("test-session", checkpoint_enabled=True)
+        provider, _state, _controller = _make_provider("test-session", checkpoint_enabled=True)
         provider._broadcast_called = False
 
         original_broadcast = provider.broadcast_elicitation_question

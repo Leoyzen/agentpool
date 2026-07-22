@@ -304,7 +304,7 @@ async def _handle_elicitation_deferred(
                     form_params,
                     shared_future=future,
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning(
                     "Failed to broadcast elicitation question",
                     tool_call_id=call.tool_call_id,
