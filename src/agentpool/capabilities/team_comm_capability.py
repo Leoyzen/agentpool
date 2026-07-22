@@ -659,20 +659,63 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         state: dict[str, Any] = FileTeamState._read_json(state_path)
         team_name: str = state.get("team_name", "unknown")
         status: str = state.get("status", "unknown")
-        members: dict[str, dict[str, str]] = state.get("members", {})
+        members: dict[str, dict[str, Any]] = state.get("members", {})
+
+        # Query tasks for member association.
+        all_tasks = team_state.list_tasks(team_id)
+        max_turns = self._config.bounds.max_member_turns
+
+        # Access SessionPool for runtime member state.
+        session_pool = agent_ctx.host.session_pool
 
         member_lines: list[str] = []
-        for name, info in members.items():
+        for m_name, info in members.items():
             sid: str = info.get("session_id", "")
-            agent_name: str = info.get("agent", name)
-            session_display = sid if sid else "unregistered"
-            member_lines.append(f"  - {name} (agent={agent_name}, session={session_display})")
+            agent_name: str = info.get("agent", m_name)
+            turn_count: int = info.get("turn_count", 0)
+
+            # Determine runtime status from SessionPool.
+            if session_pool is not None and sid:
+                member_session = session_pool.sessions.get_session(sid)
+                if member_session is None:
+                    runtime_status = "offline"
+                elif member_session.closing or member_session.is_closing:
+                    runtime_status = "closing"
+                elif member_session.current_run_id is not None:
+                    runtime_status = "busy"
+                else:
+                    runtime_status = "idle"
+            else:
+                runtime_status = "unregistered" if not sid else "unknown"
+
+            # Count inbox messages.
+            inbox_count = len(team_state.read_messages(team_id, m_name))
+
+            # Find tasks owned by this member.
+            member_tasks = [
+                t for t in all_tasks
+                if t.get("owner") == m_name and t.get("status") != "completed"
+            ]
+            task_summary = (
+                f"tasks={len(member_tasks)}"
+                if not member_tasks
+                else f"tasks={len(member_tasks)} ("
+                + ", ".join(
+                    f"{t.get('status', '?')}: {t.get('subject', '?')}"
+                    for t in member_tasks
+                )
+                + ")"
+            )
+
+            member_lines.append(
+                f"  - {m_name} (agent={agent_name}, status={runtime_status}, "
+                f"turns={turn_count}/{max_turns}, inbox={inbox_count}, {task_summary})"
+            )
 
         lines = [
             f"Team: {team_name}",
             f"Status: {status}",
             f"Team ID: {team_id}",
-            f"State dir: {team_state._team_dir(team_id)}",
             f"Members ({len(members)}):",
             *member_lines,
         ]
@@ -787,13 +830,24 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     member_session_id,
                     agent=member["agent"],
                 )
+                # Build initial prompt with member roster so the new
+                # member knows who their teammates are.
+                roster_lines: list[str] = []
+                for m in members:
+                    role_label = "lead" if m["name"] == lead_member_name else "member"
+                    roster_lines.append(
+                        f"  - {m['name']} (agent={m['agent']}, role={role_label})"
+                    )
+                roster = "\n".join(roster_lines)
+                base_prompt = self._config.protocol_template.format(
+                    team_name=name,
+                    role="member",
+                    member_name=member["name"],
+                )
+                full_prompt = f"{base_prompt}\n\n## 当前团队成员\n{roster}"
                 await session_pool.send_message(
                     member_session_id,
-                    self._config.protocol_template.format(
-                        team_name=name,
-                        role="member",
-                        member_name=member["name"],
-                    ),
+                    full_prompt,
                     mode=DeliveryMode.QUEUE,
                     source="team",
                     meta={"from": self._agent_name, "team_id": team_id},
@@ -1152,15 +1206,24 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             agent=agent,
         )
 
-        # Send initial prompt to member.
+        # Send initial prompt to member (with existing member roster).
         from agentpool.lifecycle.types import DeliveryMode
 
         team_name: str = state.get("team_name", "unknown")
-        initial_prompt = prompt or self._config.protocol_template.format(
+        base_prompt = prompt or self._config.protocol_template.format(
             team_name=team_name,
             role="member",
             member_name=name,
         )
+        # Append current member roster so the new member knows their teammates.
+        existing_members: dict[str, dict[str, Any]] = state.get("members", {})
+        roster_lines = []
+        for m_name, m_info in existing_members.items():
+            m_agent = m_info.get("agent", m_name)
+            role_label = "lead" if m_name == lead_member_name else "member"
+            roster_lines.append(f"  - {m_name} (agent={m_agent}, role={role_label})")
+        roster = "\n".join(roster_lines)
+        initial_prompt = f"{base_prompt}\n\n## 当前团队成员\n{roster}"
         await session_pool.send_message(
             member_session_id,
             initial_prompt,
@@ -1184,16 +1247,30 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 base_dir,
             )
 
-        # Notify existing members (excluding lead and the new member).
-        if notify is not None and notify:
-            # Re-read state to get the updated members dict.
-            updated_state: dict[str, Any] = FileTeamState._read_json(
-                team_state._state_path(team_id),
+        # Notify existing members about the new member.
+        # Re-read state to get the updated members dict.
+        updated_state: dict[str, Any] = FileTeamState._read_json(
+            team_state._state_path(team_id),
+        )
+        updated_members: dict[str, dict[str, Any]] = updated_state.get(
+            "members",
+            {},
+        )
+
+        # Build the broadcast message: custom notify text or auto-generated.
+        should_broadcast = notify is not None and bool(notify)
+        if not should_broadcast and self._config.broadcast_on_create:
+            # Auto-generate a default broadcast with member roster.
+            roster = ", ".join(updated_members.keys())
+            notify_msg = (
+                f"[团队通知] 新成员 '{name}' (agent={agent}) 已加入团队。"
+                f"当前成员: {roster}"
             )
-            updated_members: dict[str, dict[str, Any]] = updated_state.get(
-                "members",
-                {},
-            )
+            should_broadcast = True
+        else:
+            notify_msg = notify or ""
+
+        if should_broadcast:
             for existing_name, existing_info in updated_members.items():
                 if existing_name in (lead_member_name, name):
                     continue
@@ -1202,8 +1279,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     continue
                 await session_pool.send_message(
                     existing_sid,
-                    notify,
-                    mode=DeliveryMode.QUEUE,
+                    notify_msg,
+                    mode=DeliveryMode.STEER,
                     source="team",
                     meta={"from": self._agent_name, "team_id": team_id},
                 )

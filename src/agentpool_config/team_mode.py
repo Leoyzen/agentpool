@@ -162,6 +162,10 @@ class TeamModeConfig(Schema):
         protocol_template: Template for team protocol instructions.
         auto_urgent: Message types that default to urgent.
         defaults: Optional default team members for team_create.
+        broadcast_on_create: Whether to auto-broadcast a notification to
+            all team members (excluding the lead) when a new member is
+            added via ``team_add_member``. The broadcast includes the new
+            member's name, agent, and the updated member roster.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -189,6 +193,10 @@ class TeamModeConfig(Schema):
     defaults: TeamDefaultsConfig | None = Field(
         default=None,
         title="Default team members for team_create",
+    )
+    broadcast_on_create: bool = Field(
+        default=True,
+        title="Auto-broadcast on member creation",
     )
 
     @field_validator("ttl_hours")

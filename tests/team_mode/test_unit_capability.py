@@ -1776,7 +1776,10 @@ async def test_team_add_member_success(tmp_path: Any) -> None:
 
     assert result.return_value == "Member 'new_member' added to team (lifecycle=persistent)"
     mock_delegation.create_child_session.assert_awaited_once()
-    mock_pool.send_message.assert_awaited_once()
+    # 1 initial prompt to new_member + 2 broadcast notifications to
+    # existing members (translator_agent, reviewer_agent) since
+    # broadcast_on_create defaults to True.
+    assert mock_pool.send_message.await_count == 3
 
     # Verify agent field in team state is the actual agent type, not the member name.
     from agentpool.capabilities.file_team_state import FileTeamState
