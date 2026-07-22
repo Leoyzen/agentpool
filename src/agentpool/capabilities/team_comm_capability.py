@@ -854,7 +854,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     role="member",
                     member_name=member["name"],
                 )
-                full_prompt = f"{base_prompt}\n\n## 当前团队成员\n{roster}"
+                full_prompt = f"{base_prompt}\n\n## Team Members\n{roster}"
                 await session_pool.send_message(
                     member_session_id,
                     full_prompt,
@@ -1138,9 +1138,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 the protocol template is used.
             lifecycle: ``"persistent"`` (default) or ``"ephemeral"``.
                 Ephemeral members are auto-closed when their run completes.
-            notify: Optional notice describing the new member's purpose,
-                included in the auto-broadcast to existing members.
-                Example: ``"大家有液压系统的问题可以直接找他"``.
+            notify: Optional notice describing why the new member was
+                added or what they can help with, included in the
+                auto-broadcast to existing members. Example:
+                ``" hydraulic system troubleshooting, ask him for related issues"``.
 
         Returns:
             Success message or error string.
@@ -1241,7 +1242,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             role_label = "lead" if m_name == lead_member_name else "member"
             roster_lines.append(f"  - {m_name} (agent={m_agent}, role={role_label})")
         roster = "\n".join(roster_lines)
-        initial_prompt = f"{base_prompt}\n\n## 当前团队成员\n{roster}"
+        initial_prompt = f"{base_prompt}\n\n## Team Members\n{roster}"
         await session_pool.send_message(
             member_session_id,
             initial_prompt,
@@ -1277,11 +1278,16 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         # Auto-broadcast to existing members (excluding lead and new member).
         if self._config.broadcast_on_create:
-            roster = ", ".join(updated_members.keys())
-            notice_part = f" {notify}" if notify else ""
+            roster_lines: list[str] = []
+            for m_name, m_info in updated_members.items():
+                m_agent = m_info.get("agent", m_name)
+                role_tag = " (lead)" if m_name == lead_member_name else ""
+                roster_lines.append(f"  - {m_name} ({m_agent}){role_tag}")
+            roster = "\n".join(roster_lines)
+            notice_line = f"\n\nnote: {notify}" if notify else ""
             notice_text = (
-                f"[团队通知] 新成员 '{name}' (agent={agent}) 已加入团队。"
-                f"{notice_part}当前成员: {roster}"
+                f"New member '{name}' ({agent}) joined the team."
+                f"{notice_line}\n\ncurrent members:\n{roster}"
             )
             broadcast_msg = (
                 f'<team-message from="{self._agent_name}" type="broadcast">'
