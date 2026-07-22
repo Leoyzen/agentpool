@@ -265,3 +265,124 @@ async def test_sse_reconnect(
     assert events[0].get("type") == "server.connected", (
         f"Expected 'server.connected' after reconnect, got '{events[0].get('type')}'"
     )
+
+
+# ---------------------------------------------------------------------------
+# C1.5 — Tool call parameters in SSE events (subprocess e2e)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "subprocess_server_with_tool",
+    [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
+    indirect=True,
+)
+async def test_sse_tool_call_parameters_visible(
+    subprocess_server_with_tool: SubprocessServer,
+) -> None:
+    """C1.5: Send a prompt that triggers a tool call, verify tool input in SSE payload.
+
+    Uses TestModel with ``call_tools: ["bash"]`` and
+    ``tool_args: {"bash": {"command": "echo hello"}}``.
+    The TestModel will emit a tool call to ``bash`` with ``{"command": "echo hello"}``.
+
+    Asserts:
+    - At least one ``message.part.updated`` SSE event contains a ToolPart
+    - The ToolPart's ``state.input`` includes ``command: "echo hello"``
+    - Both running and completed ToolPart states preserve the input
+    """
+    base_url = subprocess_server_with_tool.base_url
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        session_id = await _create_session(base_url, client)
+
+        # D4: Subscribe to SSE BEFORE sending the prompt.
+        # Collect all events in a single iteration pass (httpx stream can only be consumed once).
+        events: list[dict[str, Any]] = []
+        prompt_sent = False
+        async with client.stream("GET", f"{base_url}/event") as sse_response:
+            assert sse_response.status_code == 200
+
+            async for line in sse_response.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data_str = line[len("data:") :].strip()
+                if not data_str:
+                    continue
+                try:
+                    event = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                events.append(event)
+
+                # After receiving server.connected, send the prompt
+                if not prompt_sent and event.get("type") == "server.connected":
+                    prompt_sent = True
+                    message_payload: dict[str, Any] = {
+                        "parts": [{"type": "text", "text": "Run echo hello"}],
+                    }
+                    # Fire and forget — the response is not needed
+                    await client.post(
+                        f"{base_url}/session/{session_id}/message",
+                        json=message_payload,
+                    )
+
+                # Stop after collecting enough events
+                if len(events) >= 50:
+                    break
+                # Only break on idle AFTER prompt was sent and we've seen part events
+                if (
+                    prompt_sent
+                    and event.get("type") == "session.status"
+                    and event.get("properties", {}).get("status", {}).get("type") == "idle"
+                    and any(e.get("type") == "message.part.updated" for e in events)
+                ):
+                    await asyncio.sleep(0.3)
+                    break
+
+    assert len(events) >= 1, "No SSE events received"
+
+    # Filter for message.part.updated events (these carry ToolPart data)
+    part_updated_events = [e for e in events if e.get("type") == "message.part.updated"]
+
+    assert len(part_updated_events) >= 1, (
+        f"No message.part.updated events received. Event types seen: "
+        f"{[e.get('type') for e in events]}"
+    )
+
+    # Find ToolPart events by checking properties.part.type
+    tool_part_events = [
+        e
+        for e in part_updated_events
+        if e.get("properties", {}).get("part", {}).get("type") == "tool"
+    ]
+
+    assert len(tool_part_events) >= 1, (
+        f"No ToolPart events found in {len(part_updated_events)} message.part.updated events. "
+        f"Part types seen: "
+        f"{[e.get('properties', {}).get('part', {}).get('type') for e in part_updated_events]}"
+    )
+
+    # Check that at least one ToolPart has non-empty state.input with command
+    tool_parts_with_input = []
+    for event in tool_part_events:
+        part = event.get("properties", {}).get("part", {})
+        state = part.get("state", {})
+        input_data = state.get("input", {})
+        if input_data.get("command"):
+            tool_parts_with_input.append(event)
+
+    assert len(tool_parts_with_input) >= 1, (
+        f"No ToolPart events with non-empty state.input.command found. "
+        f"ToolPart states: "
+        f"{[e.get('properties', {}).get('part', {}).get('state', {}) for e in tool_part_events]}"
+    )
+
+    # Verify the command value matches what TestModel was configured to send
+    for event in tool_parts_with_input:
+        part = event.get("properties", {}).get("part", {})
+        state = part.get("state", {})
+        input_data = state.get("input", {})
+        assert input_data.get("command") == "echo hello", (
+            f"Expected command='echo hello', got '{input_data.get('command')}'"
+        )

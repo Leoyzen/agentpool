@@ -741,6 +741,14 @@ class EventProcessor:
             existing = ctx.get_tool_part(tool_call_id)
             if existing is not None:
                 existing_title = _extract_title_from_tool_state(existing.state)
+                # Update tool input from progress event if existing input is empty.
+                # This happens when the model streams tool call arguments: the
+                # initial ToolCallStartEvent arrives with empty raw_input, and
+                # the EventMapper emits a ToolCallProgressEvent with the complete
+                # tool_input once args are assembled.
+                if event_tool_input and not ctx.get_tool_input(tool_call_id):
+                    ui_input = _convert_params_for_ui(event_tool_input)
+                    ctx.set_tool_input(tool_call_id, ui_input)
                 tool_input = ctx.get_tool_input(tool_call_id) or {}
                 accumulated_output = ctx.get_tool_output(tool_call_id)
                 tool_state = ToolStateRunning(
@@ -864,12 +872,22 @@ class EventProcessor:
         if msg.cost_info and msg.cost_info.total_cost:
             ctx.update_cost(float(msg.cost_info.total_cost))
 
-        # Update model info from the real inference result
+        # Update model info from the real inference result.
+        # If the model changed (e.g., child session initially showed parent's
+        # model), emit a MessageUpdatedEvent so the TUI receives the correction.
+        model_changed = False
         if isinstance(ctx.assistant_msg.info, AssistantMessage):
-            if msg.model_name is not None:
+            if msg.model_name is not None and ctx.assistant_msg.info.model_id != msg.model_name:
                 ctx.assistant_msg.info.model_id = msg.model_name
-            if msg.provider_name is not None:
+                model_changed = True
+            if (
+                msg.provider_name is not None
+                and ctx.assistant_msg.info.provider_id != msg.provider_name
+            ):
                 ctx.assistant_msg.info.provider_id = msg.provider_name
+                model_changed = True
+            if model_changed:
+                yield MessageUpdatedEvent.create(ctx.assistant_msg.info)
 
         response_time = now_ms()
         start = ctx.stream_start_ms

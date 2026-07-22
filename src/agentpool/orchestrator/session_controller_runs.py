@@ -548,7 +548,10 @@ class SessionControllerRunsMixin:
     def _cleanup_run(self, run_id: str) -> None:
         """Clean up a run after it completes.
 
-        Removes the handle from _runs and signals completion.
+        Removes the handle from _runs and signals completion. If the run
+        was cancelled (``_consume_run`` skipped its ``prompt_queue`` check
+        because ``CancelledError`` is ``BaseException``), drains any
+        messages left in ``prompt_queue`` by starting a new run.
 
         Args:
             run_id: The run ID to clean up.
@@ -560,3 +563,64 @@ class SessionControllerRunsMixin:
             session = self.get_session(run_handle.session_id)
             if session is not None and session.current_run_id == run_id:
                 session.set_current_run_id(None)
+                # After cancel, prompt_queue may have messages that arrived
+                # during the race window (between task.cancel() and
+                # complete_event.set()). _consume_run's prompt_queue check
+                # is skipped because CancelledError is BaseException, not
+                # caught by except Exception. Drain the queue here.
+                self._drain_prompt_queue(session, run_handle)
+
+    def _drain_prompt_queue(
+        self,
+        session: SessionState,
+        old_handle: RunHandle,
+    ) -> None:
+        """Check prompt_queue and start a new run for the first queued message.
+
+        Called from ``_cleanup_run`` when a run was cancelled with messages
+        still in ``prompt_queue``. Creates a new ``RunHandle`` and
+        ``_consume_run`` task for the first queued message. Additional
+        messages are handled by ``_consume_run``'s normal chaining logic.
+
+        In the normal (non-cancel) flow, ``_consume_run`` pops the run
+        from ``_runs`` before returning, so ``_cleanup_run`` sees
+        ``run_handle is None`` and never calls this method.
+
+        Args:
+            session: The session state with a potentially non-empty queue.
+            old_handle: The cancelled run's handle (for agent reference).
+        """
+        # Do not start new runs on a closing/closed session.
+        if session.closing or session.is_closing:
+            return
+        if session.prompt_queue.empty():
+            return
+        try:
+            next_prompt = session.prompt_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return
+        agent = old_handle.agent
+        if agent is None:
+            # Put the message back — cannot process without an agent.
+            session.prompt_queue.put_nowait(next_prompt)
+            return
+        # Reset the agent's _cancelled flag from the cancelled run.
+        agent._cancelled = False
+        new_handle = self._create_per_prompt_handle(session, agent, next_prompt)
+        task = asyncio.create_task(self._consume_run(new_handle, next_prompt))
+        self._background_tasks.add(task)
+
+        def _on_chain_done(
+            t: asyncio.Task[Any],
+            rid: str = new_handle.run_id,
+        ) -> None:
+            self._background_tasks.discard(t)
+            if not t.cancelled() and t.exception() is not None:
+                logger.error(
+                    "Background run task failed for run_id=%s: %s",
+                    rid,
+                    t.exception(),
+                )
+            self._cleanup_run(rid)
+
+        task.add_done_callback(_on_chain_done)
