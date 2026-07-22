@@ -105,7 +105,7 @@ async def _get_session_messages_from_pool(
     Delegates to :func:`get_messages_for_session` which handles feature-flag
     routing and ChatMessage-to-MessageWithParts conversion.
     """
-    return await get_messages_for_session(state, session_id)
+    return await get_messages_for_session(state, session_id, prefer_in_memory=False)
 
 
 class _CommandOutputCapture:
@@ -1779,7 +1779,7 @@ async def share_session(
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    messages = await get_messages_for_session(state, session_id)
+    messages = await get_messages_for_session(state, session_id, prefer_in_memory=False)
 
     if not messages:
         raise HTTPException(status_code=400, detail="No messages to share")

@@ -83,13 +83,18 @@ def _apply_revert_filter(
 async def get_messages_for_session(
     state: ServerState,
     session_id: str,
+    *,
+    prefer_in_memory: bool = True,
 ) -> list[MessageWithParts]:
     """Get messages for a session from SessionPool or fall back to ServerState.
 
-    For subagent/child sessions (identified by ``parent_id``), the in-memory
-    ``state.messages`` cache is consulted first because streaming parts are
-    updated in-place on those objects and may be more recent than the
-    SessionPool snapshot.
+    When ``prefer_in_memory`` is True (default, used by sync/TUI), the
+    in-memory ``state.messages`` cache is preferred because it retains
+    the ORIGINAL part IDs that match SSE PartUpdatedEvent. DB-reconstructed
+    messages get NEW part IDs, causing TUI duplication.
+
+    When ``prefer_in_memory`` is False (used by share/fork), the DB
+    (SessionPool) is preferred because it has the complete history.
 
     A soft-hide filter is applied to all return paths: when
     ``session.revert`` is set, messages at and after the revert point are
@@ -105,11 +110,14 @@ async def get_messages_for_session(
     """
     messages: list[MessageWithParts] = getattr(state, "messages", {}).get(session_id, []) or []
 
-    # Fast-path: subagent sessions are streamed live into memory, so the
-    # in-memory copy is always the most up-to-date.
+    # Fast-path: if we have in-memory messages and prefer_in_memory is True,
+    # return them directly. In-memory MessageWithParts retain the ORIGINAL
+    # part IDs (from append_message_to_session), which match the part IDs
+    # delivered via SSE PartUpdatedEvent. DB-reconstructed messages (via
+    # chat_message_to_opencode) get NEW part IDs, causing the TUI to
+    # render both sets as duplicates.
     cached_session = state.sessions.get(session_id)
-    is_subagent = cached_session is not None and cached_session.parent_id is not None
-    if is_subagent and messages:
+    if prefer_in_memory and messages:
         return _apply_revert_filter(cached_session, messages)
 
     session_pool = getattr(state.pool, "session_pool", None)
