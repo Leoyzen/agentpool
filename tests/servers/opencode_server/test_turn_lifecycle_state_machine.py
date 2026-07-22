@@ -121,7 +121,6 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 import pytest
 
 from agentpool.agents.events.events import (
-    PartStartEvent,
     RunFailedEvent,
     RunStartedEvent,
     StreamCompleteEvent,
@@ -132,7 +131,6 @@ from agentpool_server.opencode_server.event_processor_context import (
     EventProcessorContext,
 )
 from agentpool_server.opencode_server.models import (
-    AssistantMessage,
     MessagePath,
     MessageTime,
     MessageWithParts,
@@ -170,9 +168,7 @@ class _FakeBridge(OpenCodeEventBridgeMixin):
         self._pending_message_ids: dict[str, str] = {}
         self._pending_message_metadata: dict[str, dict[str, str | None]] = {}
         self.set_session_context_data = self._resume_contexts.__setitem__
-        self.get_session_context_data = lambda sid: self._resume_contexts.pop(
-            sid, None
-        )
+        self.get_session_context_data = lambda sid: self._resume_contexts.pop(sid, None)
 
 
 def _make_ctx(
@@ -219,10 +215,7 @@ def _setup_bridge(
     bridge = _FakeBridge()
 
     # Simulate _before_consumer_loop: pop first pending ID for initial context
-    if pending_msg_id is not None:
-        initial_msg_id = pending_msg_id
-    else:
-        initial_msg_id = "msg-initial"
+    initial_msg_id = pending_msg_id if pending_msg_id is not None else "msg-initial"
     ctx = _make_ctx(session_id, msg_id=initial_msg_id)
 
     bridge._contexts[session_id] = ctx
@@ -294,13 +287,11 @@ async def test_turn1_creates_new_assistant_message() -> None:
          ctx.assistant_msg, _message_registered set to True.
     """
     session_id = "sess-t1"
-    bridge, ctx, broadcast_calls = _setup_bridge(
+    bridge, _ctx, _broadcast_calls = _setup_bridge(
         session_id, message_registered=False, pending_msg_id="msg-turn-1"
     )
 
-    event = RunStartedEvent(
-        run_id="run-1", agent_name="test-agent", session_id=session_id
-    )
+    event = RunStartedEvent(run_id="run-1", agent_name="test-agent", session_id=session_id)
 
     with _patch_mocks() as mock_append:
         await bridge._handle_event(session_id, _make_envelope(session_id, event))
@@ -336,9 +327,7 @@ async def test_full_two_turn_flow_assigns_distinct_msg_ids() -> None:
             session_id,
             _make_envelope(
                 session_id,
-                RunStartedEvent(
-                    run_id="run-1", agent_name="agent", session_id=session_id
-                ),
+                RunStartedEvent(run_id="run-1", agent_name="agent", session_id=session_id),
             ),
         )
         turn1_msg_id = ctx.assistant_msg_id
@@ -366,9 +355,7 @@ async def test_full_two_turn_flow_assigns_distinct_msg_ids() -> None:
             session_id,
             _make_envelope(
                 session_id,
-                RunStartedEvent(
-                    run_id="run-2", agent_name="agent", session_id=session_id
-                ),
+                RunStartedEvent(run_id="run-2", agent_name="agent", session_id=session_id),
             ),
         )
 
@@ -376,9 +363,7 @@ async def test_full_two_turn_flow_assigns_distinct_msg_ids() -> None:
         assert turn2_msg_id == "msg-turn-2", (
             f"Turn 2 should have a new assistant_msg_id, got {turn2_msg_id}"
         )
-        assert turn2_msg_id != turn1_msg_id, (
-            "Turn 2 assistant_msg_id must differ from turn 1"
-        )
+        assert turn2_msg_id != turn1_msg_id, "Turn 2 assistant_msg_id must differ from turn 1"
         assert bridge._message_registered[session_id] is True
 
         # StreamCompleteEvent finalizes turn 2
@@ -433,7 +418,7 @@ async def test_d1_fires_on_turn2_after_stream_complete() -> None:
     on turn 2, and no new assistant message is created.
     """
     session_id = "sess-d1"
-    bridge, ctx, _broadcast = _setup_bridge(
+    bridge, _ctx, _broadcast = _setup_bridge(
         session_id, message_registered=False, pending_msg_id="msg-a"
     )
 
@@ -443,9 +428,7 @@ async def test_d1_fires_on_turn2_after_stream_complete() -> None:
             session_id,
             _make_envelope(
                 session_id,
-                RunStartedEvent(
-                    run_id="r1", agent_name="a", session_id=session_id
-                ),
+                RunStartedEvent(run_id="r1", agent_name="a", session_id=session_id),
             ),
         )
         assert bridge._message_registered[session_id] is True
@@ -491,9 +474,7 @@ async def test_d1_finalizes_previous_turn_on_run_started() -> None:
             session_id,
             _make_envelope(
                 session_id,
-                RunStartedEvent(
-                    run_id="r1", agent_name="a", session_id=session_id
-                ),
+                RunStartedEvent(run_id="r1", agent_name="a", session_id=session_id),
             ),
         )
         await bridge._handle_event(
@@ -517,9 +498,7 @@ async def test_d1_finalizes_previous_turn_on_run_started() -> None:
             session_id,
             _make_envelope(
                 session_id,
-                RunStartedEvent(
-                    run_id="r2", agent_name="a", session_id=session_id
-                ),
+                RunStartedEvent(run_id="r2", agent_name="a", session_id=session_id),
             ),
         )
 
@@ -543,7 +522,7 @@ async def test_d1_warns_on_incomplete_turn() -> None:
     import agentpool_server.opencode_server.opencode_event_bridge as bridge_module
 
     session_id = "sess-d1-warn"
-    bridge, ctx, _broadcast = _setup_bridge(
+    bridge, _ctx, _broadcast = _setup_bridge(
         session_id, message_registered=False, pending_msg_id="msg-warn-1"
     )
 
@@ -553,9 +532,7 @@ async def test_d1_warns_on_incomplete_turn() -> None:
             session_id,
             _make_envelope(
                 session_id,
-                RunStartedEvent(
-                    run_id="r1", agent_name="a", session_id=session_id
-                ),
+                RunStartedEvent(run_id="r1", agent_name="a", session_id=session_id),
             ),
         )
         # _message_registered is now True, time.completed is None
@@ -572,9 +549,7 @@ async def test_d1_warns_on_incomplete_turn() -> None:
                 session_id,
                 _make_envelope(
                     session_id,
-                    RunStartedEvent(
-                        run_id="r2", agent_name="a", session_id=session_id
-                    ),
+                    RunStartedEvent(run_id="r2", agent_name="a", session_id=session_id),
                 ),
             )
 
@@ -583,10 +558,7 @@ async def test_d1_warns_on_incomplete_turn() -> None:
             call
             for call in mock_warning.call_args_list
             if call.args
-            and (
-                "incomplete turn" in call.args[0].lower()
-                or "StreamCompleteEvent" in call.args[0]
-            )
+            and ("incomplete turn" in call.args[0].lower() or "StreamCompleteEvent" in call.args[0])
         ]
         assert len(d1_warnings) > 0, (
             "D1 should warn when previous turn's StreamCompleteEvent was missed"
@@ -606,15 +578,13 @@ async def test_run_failed_does_not_break_turn2() -> None:
         session_id, message_registered=False, pending_msg_id="msg-rf-1"
     )
 
-    with _patch_mocks() as mock_append:
+    with _patch_mocks():
         # Turn 1: RunStarted
         await bridge._handle_event(
             session_id,
             _make_envelope(
                 session_id,
-                RunStartedEvent(
-                    run_id="r1", agent_name="a", session_id=session_id
-                ),
+                RunStartedEvent(run_id="r1", agent_name="a", session_id=session_id),
             ),
         )
         assert bridge._message_registered[session_id] is True
@@ -639,9 +609,7 @@ async def test_run_failed_does_not_break_turn2() -> None:
             session_id,
             _make_envelope(
                 session_id,
-                RunStartedEvent(
-                    run_id="r2", agent_name="a", session_id=session_id
-                ),
+                RunStartedEvent(run_id="r2", agent_name="a", session_id=session_id),
             ),
         )
 
@@ -671,9 +639,7 @@ async def test_three_turns_each_get_distinct_msg_ids() -> None:
                 session_id,
                 _make_envelope(
                     session_id,
-                    RunStartedEvent(
-                        run_id=f"r{turn}", agent_name="a", session_id=session_id
-                    ),
+                    RunStartedEvent(run_id=f"r{turn}", agent_name="a", session_id=session_id),
                 ),
             )
             assert ctx.assistant_msg_id == pending_id, (
@@ -685,9 +651,7 @@ async def test_three_turns_each_get_distinct_msg_ids() -> None:
                 _make_envelope(
                     session_id,
                     StreamCompleteEvent(
-                        message=ChatMessage(
-                            content=f"turn {turn} done", role="assistant"
-                        ),
+                        message=ChatMessage(content=f"turn {turn} done", role="assistant"),
                         session_id=session_id,
                     ),
                 ),

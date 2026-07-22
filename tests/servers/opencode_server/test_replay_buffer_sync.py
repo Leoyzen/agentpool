@@ -24,11 +24,9 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 import pytest
 
 from agentpool.agents.events.events import (
-    StreamCompleteEvent,
     UserMessageInsertedEvent,
 )
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventBus, EventEnvelope
+from agentpool.orchestrator.core import EventBus
 from agentpool_server.opencode_server.event_processor_context import (
     EventProcessorContext,
 )
@@ -68,9 +66,7 @@ class _FakeBridge(OpenCodeEventBridgeMixin):
         self._pending_message_ids: dict[str, str] = {}
         self._pending_message_metadata: dict[str, dict[str, str | None]] = {}
         self.set_session_context_data = self._resume_contexts.__setitem__
-        self.get_session_context_data = lambda sid: self._resume_contexts.pop(
-            sid, None
-        )
+        self.get_session_context_data = lambda sid: self._resume_contexts.pop(sid, None)
 
 
 def _make_ctx(session_id: str) -> EventProcessorContext:
@@ -94,7 +90,9 @@ def _make_ctx(session_id: str) -> EventProcessorContext:
     )
 
 
-def _setup_bridge_with_event_bus(session_id: str) -> tuple[_FakeBridge, EventBus, EventProcessorContext]:
+def _setup_bridge_with_event_bus(
+    session_id: str,
+) -> tuple[_FakeBridge, EventBus, EventProcessorContext]:
     """Set up a _FakeBridge with a REAL EventBus (not mocked)."""
     event_bus = EventBus()
     bridge = _FakeBridge()
@@ -201,12 +199,10 @@ async def test_new_subscriber_receives_replay_buffer_events() -> None:
         while not queue.empty():
             envelope = queue.get_nowait()
             received_events.append(envelope.event)
-    except Exception:
+    except asyncio.QueueEmpty:
         pass
 
-    assert len(received_events) >= 1, (
-        "New subscriber should receive event from replay buffer"
-    )
+    assert len(received_events) >= 1, "New subscriber should receive event from replay buffer"
 
 
 @pytest.mark.anyio
@@ -239,7 +235,7 @@ async def test_clear_replay_buffer_prevents_redelivery() -> None:
         while not queue.empty():
             envelope = queue.get_nowait()
             received_events.append(envelope.event)
-    except Exception:
+    except asyncio.QueueEmpty:
         pass
 
     assert len(received_events) == 0, (
@@ -274,12 +270,9 @@ async def test_clear_replay_buffer_only_affects_target_session() -> None:
     buffer_a = event_bus._replay_buffers.get(session_a)
     buffer_b = event_bus._replay_buffers.get(session_b)
 
-    assert buffer_a is None or len(buffer_a) == 0, (
-        "Session A replay buffer should be empty"
-    )
-    assert buffer_b is not None and len(buffer_b) > 0, (
-        "Session B replay buffer should be intact"
-    )
+    assert buffer_a is None or len(buffer_a) == 0, "Session A replay buffer should be empty"
+    assert buffer_b is not None, "Session B replay buffer should not be None"
+    assert len(buffer_b) > 0, "Session B replay buffer should be intact"
 
 
 @pytest.mark.anyio
@@ -317,13 +310,9 @@ async def test_events_after_clear_are_still_delivered() -> None:
         while not queue.empty():
             envelope = queue.get_nowait()
             received.append(envelope.event)
-    except Exception:
+    except asyncio.QueueEmpty:
         pass
 
-    assert len(received) == 1, (
-        f"Should receive exactly 1 event (the new one), got {len(received)}"
-    )
+    assert len(received) == 1, f"Should receive exactly 1 event (the new one), got {len(received)}"
     assert isinstance(received[0], UserMessageInsertedEvent)
-    assert received[0].message_id == "msg-new", (
-        "Should receive the NEW event, not the old one"
-    )
+    assert received[0].message_id == "msg-new", "Should receive the NEW event, not the old one"

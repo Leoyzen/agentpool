@@ -16,12 +16,11 @@ sync() are not re-delivered to new SSE subscribers.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
 
 from agentpool.orchestrator.core import EventBus, EventEnvelope
-from agentpool_server.opencode_server.models.common import TimeCreated
 from agentpool_server.opencode_server.models import (
     MessageUpdatedEvent,
     MessageWithParts,
@@ -29,13 +28,10 @@ from agentpool_server.opencode_server.models import (
     TextPart,
     UserMessage,
 )
+from agentpool_server.opencode_server.models.common import TimeCreated
 
 
 pytestmark = pytest.mark.integration
-
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
 
 
 def _make_user_message(session_id: str = "sess-dup") -> MessageWithParts:
@@ -97,15 +93,11 @@ async def test_first_message_duplicated_without_replay_buffer_clear() -> None:
     # (simulating what happens during the ~880ms before SSE consumer starts)
     await event_bus.publish(
         session_id,
-        _wrap_sse_event(
-            MessageUpdatedEvent.create(user_msg.info), session_id
-        ).event,
+        _wrap_sse_event(MessageUpdatedEvent.create(user_msg.info), session_id).event,
     )
     await event_bus.publish(
         session_id,
-        _wrap_sse_event(
-            PartUpdatedEvent.create(user_msg.parts[0]), session_id
-        ).event,
+        _wrap_sse_event(PartUpdatedEvent.create(user_msg.parts[0]), session_id).event,
     )
 
     # Step 2: TUI's SSE connects AFTER events were published
@@ -117,8 +109,7 @@ async def test_first_message_duplicated_without_replay_buffer_clear() -> None:
     replayed_parts = [
         e.event.event_data
         for e in replayed_events
-        if hasattr(e.event, "event_data")
-        and isinstance(e.event.event_data, PartUpdatedEvent)
+        if hasattr(e.event, "event_data") and isinstance(e.event.event_data, PartUpdatedEvent)
     ]
 
     # Step 3: TUI also calls sync() → loads from DB → gets same parts
@@ -155,15 +146,11 @@ async def test_replay_buffer_clear_prevents_duplication() -> None:
     # Step 1: Events published before TUI connects
     await event_bus.publish(
         session_id,
-        _wrap_sse_event(
-            MessageUpdatedEvent.create(user_msg.info), session_id
-        ).event,
+        _wrap_sse_event(MessageUpdatedEvent.create(user_msg.info), session_id).event,
     )
     await event_bus.publish(
         session_id,
-        _wrap_sse_event(
-            PartUpdatedEvent.create(user_msg.parts[0]), session_id
-        ).event,
+        _wrap_sse_event(PartUpdatedEvent.create(user_msg.parts[0]), session_id).event,
     )
 
     # Step 2: TUI calls sync() → clears replay buffer (the fix)
@@ -178,8 +165,7 @@ async def test_replay_buffer_clear_prevents_duplication() -> None:
     replayed_parts = [
         e.event.event_data
         for e in replayed_events
-        if hasattr(e.event, "event_data")
-        and isinstance(e.event.event_data, PartUpdatedEvent)
+        if hasattr(e.event, "event_data") and isinstance(e.event.event_data, PartUpdatedEvent)
     ]
     assert len(replayed_parts) == 0, (
         "Replay buffer should be empty after clear → no duplicate parts via SSE"
@@ -211,9 +197,7 @@ async def test_live_events_still_delivered_after_replay_buffer_clear() -> None:
     # Publish a NEW event after clear (e.g., second user message)
     await event_bus.publish(
         session_id,
-        _wrap_sse_event(
-            PartUpdatedEvent.create(user_msg.parts[0]), session_id
-        ).event,
+        _wrap_sse_event(PartUpdatedEvent.create(user_msg.parts[0]), session_id).event,
     )
 
     # Live event should be delivered
@@ -248,15 +232,11 @@ async def test_timing_race_consumer_startup_delays_delivery() -> None:
     # t=0: Events published (user message processed by EventProcessor)
     await event_bus.publish(
         session_id,
-        _wrap_sse_event(
-            MessageUpdatedEvent.create(user_msg.info), session_id
-        ).event,
+        _wrap_sse_event(MessageUpdatedEvent.create(user_msg.info), session_id).event,
     )
     await event_bus.publish(
         session_id,
-        _wrap_sse_event(
-            PartUpdatedEvent.create(user_msg.parts[0]), session_id
-        ).event,
+        _wrap_sse_event(PartUpdatedEvent.create(user_msg.parts[0]), session_id).event,
     )
 
     # t=~880ms: Consumer subscribes (simulated)
@@ -266,12 +246,9 @@ async def test_timing_race_consumer_startup_delays_delivery() -> None:
     parts_no_clear = [
         e.event.event_data
         for e in events_no_clear
-        if hasattr(e.event, "event_data")
-        and isinstance(e.event.event_data, PartUpdatedEvent)
+        if hasattr(e.event, "event_data") and isinstance(e.event.event_data, PartUpdatedEvent)
     ]
-    assert len(parts_no_clear) == 1, (
-        "Without fix: replay buffer delivers PartUpdatedEvent"
-    )
+    assert len(parts_no_clear) == 1, "Without fix: replay buffer delivers PartUpdatedEvent"
 
     # With fix: sync() clears replay buffer before consumer subscribes
     event_bus.clear_replay_buffer(session_id)
@@ -280,8 +257,7 @@ async def test_timing_race_consumer_startup_delays_delivery() -> None:
     parts_with_clear = [
         e.event.event_data
         for e in events_with_clear
-        if hasattr(e.event, "event_data")
-        and isinstance(e.event.event_data, PartUpdatedEvent)
+        if hasattr(e.event, "event_data") and isinstance(e.event.event_data, PartUpdatedEvent)
     ]
     assert len(parts_with_clear) == 0, (
         "With fix: replay buffer cleared → no duplicate PartUpdatedEvent"

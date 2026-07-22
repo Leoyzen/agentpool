@@ -65,9 +65,7 @@ class _FakeBridge(OpenCodeEventBridgeMixin):
         self._pending_message_ids: dict[str, str] = {}
         self._pending_message_metadata: dict[str, dict[str, str | None]] = {}
         self.set_session_context_data = self._resume_contexts.__setitem__
-        self.get_session_context_data = lambda sid: self._resume_contexts.pop(
-            sid, None
-        )
+        self.get_session_context_data = lambda sid: self._resume_contexts.pop(sid, None)
 
 
 def _make_ctx(
@@ -100,10 +98,7 @@ def _setup_bridge(
     message_registered: bool = False,
     pending_msg_id: str | None = None,
 ) -> tuple[_FakeBridge, EventProcessorContext, list[Any]]:
-    if pending_msg_id is not None:
-        initial_msg_id = pending_msg_id
-    else:
-        initial_msg_id = "msg-initial"
+    initial_msg_id = pending_msg_id if pending_msg_id is not None else "msg-initial"
     ctx = _make_ctx(session_id, msg_id=initial_msg_id)
 
     bridge = _FakeBridge()
@@ -240,9 +235,7 @@ async def test_d1_fires_on_turn2_after_stream_complete() -> None:
             session_id,
             _make_envelope(
                 session_id,
-                RunStartedEvent(
-                    run_id="r1", agent_name="a", session_id=session_id
-                ),
+                RunStartedEvent(run_id="r1", agent_name="a", session_id=session_id),
             ),
         )
         assert bridge._message_registered[session_id] is True
@@ -273,9 +266,7 @@ async def test_d1_fires_on_turn2_after_stream_complete() -> None:
                 session_id,
                 _make_envelope(
                     session_id,
-                    RunStartedEvent(
-                        run_id="r2", agent_name="a", session_id=session_id
-                    ),
+                    RunStartedEvent(run_id="r2", agent_name="a", session_id=session_id),
                 ),
             )
 
@@ -285,14 +276,9 @@ async def test_d1_fires_on_turn2_after_stream_complete() -> None:
             call
             for call in mock_warning.call_args_list
             if call.args
-            and (
-                "incomplete turn" in call.args[0].lower()
-                or "StreamCompleteEvent" in call.args[0]
-            )
+            and ("incomplete turn" in call.args[0].lower() or "StreamCompleteEvent" in call.args[0])
         ]
-        assert len(d1_warnings) == 0, (
-            "D1 should not warn when previous turn completed normally"
-        )
+        assert len(d1_warnings) == 0, "D1 should not warn when previous turn completed normally"
 
         # D1 should have created a new assistant message
         assert ctx.assistant_msg_id == "msg-t2", (
