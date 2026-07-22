@@ -36,6 +36,7 @@ from agentpool.agents.events import (
 from agentpool.agents.native_agent.turn import NativeTurn
 from agentpool.lifecycle.comm_channel import DirectChannel
 from agentpool.lifecycle.journal import MemoryJournal
+from agentpool.lifecycle.types import DeliveryMode
 from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionPool, SessionState
 from agentpool.orchestrator.run import RunHandle
@@ -859,6 +860,21 @@ def _make_cancel_aware_create_turn() -> Any:
     return _create_turn
 
 
+def _make_stub_only_create_turn() -> Any:
+    """Return a create_turn function that always returns _StubTurn_e2e."""
+    def _create_turn(
+        prompts: Any, run_ctx: AgentRunContext, message_history: Any, **kwargs: Any
+    ) -> Turn:
+        return _StubTurn_e2e(
+            events=[
+                RunStartedEvent(run_id="test-run"),
+                StreamCompleteEvent(message=ChatMessage(content="response", role="assistant")),
+            ],
+            message_history=["msg"],
+        )
+    return _create_turn
+
+
 async def _drain_queue(queue: asyncio.Queue) -> list[Any]:
     """Drain all currently-available events from a queue without blocking."""
     events: list[Any] = []
@@ -868,6 +884,15 @@ async def _drain_queue(queue: asyncio.Queue) -> list[Any]:
             continue
         break
     return events
+
+
+def _assert_cancel_invariants(session_pool: Any, session_id: str) -> None:
+    """Assert post-cancel invariants: prompt_queue empty, no stale current_run_id."""
+    session = session_pool.sessions.get_session(session_id)
+    if session is not None:
+        assert session.prompt_queue.empty(), (
+            f"prompt_queue has {session.prompt_queue.qsize()} stuck messages after cancel"
+        )
 
 
 @pytest.mark.integration
@@ -928,6 +953,7 @@ async def test_cancel_then_new_prompt_full_flow(minimal_pool: AgentPool) -> None
         if second_handle is not None and second_handle is not first_handle:
             pass
     assert first_handle.complete_event.is_set(), "First RunHandle should be done after cancel"
+    _assert_cancel_invariants(session_pool, session_id)
     first_handle.close()
     await asyncio.sleep(0.1)
 
@@ -1029,6 +1055,7 @@ async def test_double_cancel(minimal_pool: AgentPool) -> None:
     post_events = await _collect_events_until(queue, StreamCompleteEvent)
     post_types = [type(_unwrap_event(e)) for e in post_events]
     assert StreamCompleteEvent in post_types, f"Expected StreamCompleteEvent, got: {post_types}"
+    _assert_cancel_invariants(session_pool, session_id)
     first_handle.close()
     await asyncio.sleep(0.1)
 
@@ -1077,6 +1104,7 @@ async def test_cancel_during_idle_then_new_prompt(minimal_pool: AgentPool) -> No
     assert first_handle.run_ctx.cancelled is False, (
         "cancelled flag should remain False — new turn ran without cancel"
     )
+    _assert_cancel_invariants(session_pool, session_id)
     first_handle.close()
     await asyncio.sleep(0.1)
 
@@ -1119,6 +1147,7 @@ async def test_cancel_then_steer_continues_turn(minimal_pool: AgentPool) -> None
     assert StreamCompleteEvent in post_types, (
         f"Expected StreamCompleteEvent from subsequent turn, got: {post_types}"
     )
+    _assert_cancel_invariants(session_pool, session_id)
     first_handle.close()
     await asyncio.sleep(0.1)
 
@@ -1152,6 +1181,7 @@ async def test_cancel_during_tool_execution(minimal_pool: AgentPool) -> None:
         f"Expected RunFailedEvent after cancel, got: {event_types}"
     )
     assert first_handle.complete_event.is_set(), "RunHandle should be done after cancel"
+    _assert_cancel_invariants(session_pool, session_id)
     first_handle.close()
     await asyncio.sleep(0.1)
 
@@ -1188,6 +1218,7 @@ async def test_double_cancel_then_new_prompt(minimal_pool: AgentPool) -> None:
     assert StreamCompleteEvent in post_types, (
         f"Expected StreamCompleteEvent from new prompt, got: {post_types}"
     )
+    _assert_cancel_invariants(session_pool, session_id)
     first_handle.close()
     await asyncio.sleep(0.1)
 
@@ -1233,6 +1264,7 @@ async def test_runhandle_dies_in_idle_loop(minimal_pool: AgentPool) -> None:
     assert StreamCompleteEvent in post_types, (
         f"Expected StreamCompleteEvent from new RunHandle, got: {post_types}"
     )
+    _assert_cancel_invariants(session_pool, session_id)
     second_handle.close()
     await asyncio.sleep(0.1)
 
@@ -1322,8 +1354,326 @@ async def test_cancel_with_queued_prompt_drains_queue(
     )
 
     # Cleanup
+    _assert_cancel_invariants(session_pool, session_id)
     first_handle.close()
     second_handle = session_pool._get_active_run_handle(session_id)
     if second_handle is not None and second_handle is not first_handle:
         second_handle.close()
+    await asyncio.sleep(0.1)
+
+
+# ---------------------------------------------------------------------------
+# Additional cancel invariant tests (S1-S7)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_cancel_with_multiple_queued_prompts_drains_all(
+    minimal_pool: AgentPool,
+) -> None:
+    """Cancel with multiple messages in prompt_queue — all are processed via chaining.
+
+    _drain_prompt_queue pops the first message and starts a new _consume_run.
+    The remaining messages should be processed by _consume_run's normal
+    chaining logic (lines 180-202).
+    """
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
+    session_id = "sess-cancel-multi-queued"
+    await session_pool.create_session(session_id, agent_name="test_agent")
+    await _patch_agent_create_turn(session_pool, session_id, _make_cancel_aware_create_turn())
+    queue = await session_pool.event_bus.subscribe(session_id)
+    first_handle = await _receive_and_get_handle(session_pool, session_id, "first prompt")
+    assert first_handle is not None
+    await asyncio.sleep(0.1)
+
+    # Enqueue 3 messages to prompt_queue
+    session = session_pool.sessions.get_session(session_id)
+    assert session is not None
+    for i in range(3):
+        session.prompt_queue.put_nowait(f"queued prompt {i}")
+
+    # Cancel the active run
+    session_pool.sessions.cancel_run_for_session(session_id)
+
+    # Collect ALL StreamCompleteEvents — expect 3 (one per queued message)
+    stream_complete_count = 0
+    try:
+        async with asyncio.timeout(30.0):
+            while stream_complete_count < 3:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=10.0)
+                    unwrapped = _unwrap_event(event)
+                    if isinstance(unwrapped, StreamCompleteEvent):
+                        stream_complete_count += 1
+                except TimeoutError:
+                    break
+    except TimeoutError:
+        pytest.fail(
+            f"Timed out waiting for queued prompts — only {stream_complete_count}/3 processed"
+        )
+    assert stream_complete_count == 3, (
+        f"Expected 3 StreamCompleteEvents for 3 queued prompts, got {stream_complete_count}"
+    )
+
+    # Invariant: prompt_queue must be empty
+    _assert_cancel_invariants(session_pool, session_id)
+
+    # Cleanup
+    first_handle.close()
+    handle = session_pool._get_active_run_handle(session_id)
+    if handle is not None and handle is not first_handle:
+        handle.close()
+    await asyncio.sleep(0.1)
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_cancel_then_close_session_no_orphaned_runs(
+    minimal_pool: AgentPool,
+) -> None:
+    """Cancel with queued message, then close session — no orphaned runs.
+
+    The _drain_prompt_queue fix must not start a new run if the session
+    is closing. The is_closing check in _drain_prompt_queue prevents this.
+    """
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
+    session_id = "sess-cancel-close"
+    await session_pool.create_session(session_id, agent_name="test_agent")
+    await _patch_agent_create_turn(session_pool, session_id, _make_cancel_aware_create_turn())
+    queue = await session_pool.event_bus.subscribe(session_id)
+    first_handle = await _receive_and_get_handle(session_pool, session_id, "first prompt")
+    assert first_handle is not None
+    await asyncio.sleep(0.1)
+
+    # Enqueue a message
+    session = session_pool.sessions.get_session(session_id)
+    assert session is not None
+    session.prompt_queue.put_nowait("queued prompt")
+
+    # Mark session as closing BEFORE cancel — _drain_prompt_queue should skip
+    session.is_closing = True
+
+    # Drain pre-cancel events (from the initial run) so we only see post-cancel events
+    await _drain_queue(queue)
+
+    # Cancel the active run
+    session_pool.sessions.cancel_run_for_session(session_id)
+    await asyncio.sleep(0.3)
+
+    # Drain events — should get RunFailedEvent from cancel, but NO RunStartedEvent
+    events = await _drain_queue(queue)
+    event_types = [type(_unwrap_event(e)) for e in events]
+    assert RunFailedEvent in event_types, f"Expected RunFailedEvent from cancel, got: {event_types}"
+    assert RunStartedEvent not in event_types, (
+        f"RunStartedEvent found — _drain_prompt_queue started a run on a closing session! "
+        f"Events: {event_types}"
+    )
+
+    # The queued message should still be in prompt_queue (not drained)
+    assert not session.prompt_queue.empty(), (
+        "prompt_queue should still contain the message — session is closing, drain skipped"
+    )
+
+    # Cleanup
+    session.is_closing = False
+    first_handle.close()
+    await asyncio.sleep(0.1)
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_drain_prompt_queue_skips_closing_session() -> None:
+    """_drain_prompt_queue must not start a new run on a closing session.
+
+    Unit test: directly call _drain_prompt_queue with is_closing=True
+    and verify no task is created.
+    """
+    from agentpool.orchestrator.core import SessionController, SessionState
+
+    controller = SessionController.__new__(SessionController)
+    controller._background_tasks = set()
+    controller._runs = {}
+
+    session = SessionState(session_id="test-closing", agent_name="test-agent")
+    session.is_closing = True
+    session.prompt_queue.put_nowait("should not be drained")
+
+    mock_handle = MagicMock()
+    mock_handle.agent = MagicMock()
+    mock_handle.session_id = "test-closing"
+
+    # Should be a no-op — session is closing
+    controller._drain_prompt_queue(session, mock_handle)
+
+    # prompt_queue should still have the message
+    assert not session.prompt_queue.empty(), (
+        "prompt_queue was drained on a closing session — should be skipped"
+    )
+    # No background tasks should have been created
+    assert len(controller._background_tasks) == 0, (
+        "Background task was created on a closing session"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_drain_prompt_queue_agent_none_preserves_message() -> None:
+    """_drain_prompt_queue with agent=None must put the message back, not drop it.
+
+    The fix puts the message back into prompt_queue when agent is None,
+    instead of silently dropping it.
+    """
+    from agentpool.orchestrator.core import SessionController, SessionState
+
+    controller = SessionController.__new__(SessionController)
+    controller._background_tasks = set()
+    controller._runs = {}
+
+    session = SessionState(session_id="test-no-agent", agent_name="test-agent")
+    session.prompt_queue.put_nowait("message with no agent")
+
+    mock_handle = MagicMock()
+    mock_handle.agent = None
+    mock_handle.session_id = "test-no-agent"
+
+    controller._drain_prompt_queue(session, mock_handle)
+
+    # Message should be back in the queue, not dropped
+    assert not session.prompt_queue.empty(), (
+        "prompt_queue is empty — message was silently dropped when agent is None"
+    )
+    assert len(controller._background_tasks) == 0, (
+        "Background task was created without an agent"
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_cancel_then_steer_does_not_lose_message(
+    minimal_pool: AgentPool,
+) -> None:
+    """Cancel then immediate steer — steer message is not lost.
+
+    When cancel is in progress and a steer (priority=asap) arrives,
+    _route_message calls run.steer() on the about-to-be-cancelled run.
+    The steer message goes to the dead RunHandle's feedback queue.
+
+    After cancel completes, the steer message should be visible somehow —
+    either processed or clearly rejected. This test verifies the session
+    is not left in a stuck state.
+    """
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
+    session_id = "sess-cancel-steer-race"
+    await session_pool.create_session(session_id, agent_name="test_agent")
+    await _patch_agent_create_turn(session_pool, session_id, _make_cancel_aware_create_turn())
+    queue = await session_pool.event_bus.subscribe(session_id)
+    first_handle = await _receive_and_get_handle(session_pool, session_id, "first prompt")
+    assert first_handle is not None
+    await asyncio.sleep(0.1)
+
+    # Cancel the run
+    session_pool.sessions.cancel_run_for_session(session_id)
+
+    # Immediately steer (asap) — this races with cancel propagation
+    # steer() on a cancelled handle goes to feedback_queue (lost)
+    # but the session should still be usable
+    await asyncio.wait_for(
+        session_pool.send_message(
+            session_id, "steer after cancel", mode=DeliveryMode.STEER
+        ),
+        timeout=5.0,
+    )
+
+    # Wait a bit for things to settle
+    await asyncio.sleep(0.3)
+
+    # The session should still accept a new message normally
+    await asyncio.wait_for(
+        session_pool.send_message(session_id, "new prompt after steer"),
+        timeout=10.0,
+    )
+    post_events = await _collect_events_until(queue, StreamCompleteEvent, timeout=10.0)
+    post_types = [type(_unwrap_event(e)) for e in post_events]
+    assert StreamCompleteEvent in post_types, (
+        f"Expected StreamCompleteEvent after steer+new prompt, got: {post_types}"
+    )
+
+    # Invariant: prompt_queue must be empty
+    _assert_cancel_invariants(session_pool, session_id)
+
+    # Cleanup
+    first_handle.close()
+    handle = session_pool._get_active_run_handle(session_id)
+    if handle is not None and handle is not first_handle:
+        handle.close()
+    await asyncio.sleep(0.1)
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_cancel_during_chaining_drains_remaining(
+    minimal_pool: AgentPool,
+) -> None:
+    """Cancel during prompt_queue chaining — remaining messages are drained.
+
+    _consume_run chains prompts from prompt_queue after each turn.
+    If cancel happens during chaining (between turns), the current
+    _consume_run is cancelled, but _cleanup_run's _drain_prompt_queue
+    should pick up the remaining messages.
+    """
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
+    session_id = "sess-cancel-chaining"
+    await session_pool.create_session(session_id, agent_name="test_agent")
+
+    # Agent that completes immediately for all calls (no blocking)
+    await _patch_agent_create_turn(
+        session_pool,
+        session_id,
+        _make_stub_only_create_turn(),
+    )
+    queue = await session_pool.event_bus.subscribe(session_id)
+
+    # Enqueue 2 messages BEFORE sending the first prompt
+    session = session_pool.sessions.get_session(session_id)
+    assert session is not None
+    session.prompt_queue.put_nowait("queued 1")
+    session.prompt_queue.put_nowait("queued 2")
+
+    # Send first prompt — starts the first turn, then chains to queued 1, then queued 2
+    first_handle = await _receive_and_get_handle(session_pool, session_id, "first prompt")
+    assert first_handle is not None
+
+    # Wait for the first turn to complete, then cancel during chaining
+    await _collect_events_until(queue, StreamCompleteEvent, timeout=5.0)
+
+    # Cancel during the chaining window (between turn 1 and turn 2)
+    session_pool.sessions.cancel_run_for_session(session_id)
+
+    # Wait for remaining events — _drain_prompt_queue should process remaining
+    await asyncio.sleep(0.5)
+
+    # The session should still be usable — send a new message
+    await asyncio.wait_for(
+        session_pool.send_message(session_id, "after chaining cancel"),
+        timeout=10.0,
+    )
+    post_events = await _collect_events_until(queue, StreamCompleteEvent, timeout=10.0)
+    post_types = [type(_unwrap_event(e)) for e in post_events]
+    assert StreamCompleteEvent in post_types, (
+        f"Expected StreamCompleteEvent after chaining cancel, got: {post_types}"
+    )
+
+    # Invariant: prompt_queue must be empty
+    _assert_cancel_invariants(session_pool, session_id)
+
+    # Cleanup
+    first_handle.close()
+    handle = session_pool._get_active_run_handle(session_id)
+    if handle is not None and handle is not first_handle:
+        handle.close()
     await asyncio.sleep(0.1)

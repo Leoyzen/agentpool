@@ -585,6 +585,9 @@ class SessionControllerRunsMixin:
             session: The session state with a potentially non-empty queue.
             old_handle: The cancelled run's handle (for agent reference).
         """
+        # Do not start new runs on a closing/closed session.
+        if session.closing or session.is_closing:
+            return
         if session.prompt_queue.empty():
             return
         try:
@@ -593,6 +596,8 @@ class SessionControllerRunsMixin:
             return
         agent = old_handle.agent
         if agent is None:
+            # Put the message back — cannot process without an agent.
+            session.prompt_queue.put_nowait(next_prompt)
             return
         # Reset the agent's _cancelled flag from the cancelled run.
         agent._cancelled = False
