@@ -26,6 +26,8 @@ if TYPE_CHECKING:
     from slashed import CommandStore
 
     from acp.schema import AvailableCommand
+    from agentpool.capabilities.agent_context import AgentContext as CapabilityAgentContext
+    from agentpool.capabilities.command_bridge import CommandBridge
 
 
 logger = get_logger(__name__)
@@ -58,6 +60,7 @@ class ACPSessionAgentMgmtMixin:
         _skill_bridge: Any  # ACPSkillBridge
         _skill_change_task: asyncio.Task[None] | None
         _skill_register_lock: asyncio.Lock
+        _command_bridge: CommandBridge | None
         _update_callbacks: list[Callable[[], None]]
         _remote_commands: list[AvailableCommand]
         client_info: Any  # Implementation | None
@@ -118,16 +121,43 @@ class ACPSessionAgentMgmtMixin:
             self._notify_command_update()
             self.log.info("Registered manifest commands", count=cmd_count)
 
-    def _register_skill_commands(self) -> None:
-        """Register pool-level and client-side skills as slash commands.
+    async def _register_skill_commands(self) -> None:
+        """Register commands from CommandBridge and skill commands as slash commands.
 
-        Builds SkillCommand objects from the skills registry, feeds them
-        through ACPSkillBridge, and registers the resulting SlashedCommand
-        objects in command_store with replace=True for idempotent updates.
-        Also removes stale commands that are no longer present or invocable.
+        Discovers commands from ALL CommandResource capabilities via
+        ``CommandBridge.discover_commands()``, converts them to
+        ``SlashedCommand`` objects, and registers them in ``command_store``
+        with ``replace=True``. Also registers skill commands via
+        ``ACPSkillBridge`` for backward compatibility. When a command name
+        exists in both ``CommandBridge`` and ``ACPSkillBridge``, the
+        ``CommandBridge`` version is preferred (more comprehensive).
+        Also removes stale skill commands that are no longer present.
         """
         from agentpool.skills.command import SkillCommand
 
+        # --- Phase 1: Discover commands from CommandBridge ---
+        bridge_names: set[str] = set()
+        if self._command_bridge is not None:
+            from agentpool.capabilities.command_bridge import CommandBridge
+
+            try:
+                entries = await self._command_bridge.discover_commands()
+            except Exception:
+                self.log.exception("Failed to discover commands from CommandBridge")
+                entries = []
+
+            for entry in entries:
+                slashed_cmd = CommandBridge.entry_to_slashed_command(entry, self._command_bridge)
+                if slashed_cmd is not None:
+                    self.command_store.register_command(slashed_cmd, replace=True)
+                    bridge_names.add(entry.name)
+                    self.log.debug(
+                        "Registered CommandBridge command in command_store",
+                        name=entry.name,
+                        source=entry.source,
+                    )
+
+        # --- Phase 2: Register skill commands via ACPSkillBridge (backward compat) ---
         ctx = self.host_context
         skills_registry = ctx.skills_registry
         skills = skills_registry.list_skills()
@@ -152,72 +182,77 @@ class ACPSessionAgentMgmtMixin:
         stale_names = old_names - new_names
         for stale in stale_names:
             self._skill_bridge.handle_change(stale, None)
-            self.command_store.unregister_command(stale)
+            # Don't unregister from command_store if CommandBridge has it
+            if stale not in bridge_names:
+                self.command_store.unregister_command(stale)
             self.log.debug("Unregistered stale skill command", name=stale)
 
         # Add/update commands through the bridge
         for cmd in new_cmds:
             self._skill_bridge.handle_change(cmd.name, cmd)
 
-        # Register all bridge commands in command_store with replace=True
+        # Register all bridge commands in command_store with replace=True,
+        # but skip ones already registered by CommandBridge (de-duplication)
         for slashed_cmd in self._skill_bridge.get_commands():
+            if slashed_cmd.name in bridge_names:
+                self.log.debug(
+                    "Skipping skill command (CommandBridge version preferred)",
+                    name=slashed_cmd.name,
+                )
+                continue
             self.command_store.register_command(slashed_cmd, replace=True)
             self.log.debug(
                 "Registered skill command in command_store",
                 name=slashed_cmd.name,
             )
 
-        if new_cmds or stale_names:
+        if new_cmds or stale_names or bridge_names:
             self._notify_command_update()
             self.log.info(
-                "Synced skill commands",
+                "Synced commands",
+                bridge_count=len(bridge_names),
                 added=len(new_cmds),
                 removed=len(stale_names),
             )
 
     def _start_skill_change_watcher(self) -> None:
-        """Start watching for dynamic skill changes from ExtensionRegistry."""
-        ctx = self.host_context
-        if ctx.extension_registry is None:
+        """Start watching for command/skill/prompt changes via CommandBridge."""
+        if self._command_bridge is None:
             return
         self._skill_change_task = asyncio.create_task(
-            self._watch_skill_changes(), name=f"skill_watcher_{self.session_id}"
+            self._watch_skill_changes(), name=f"command_watcher_{self.session_id}"
         )
 
     async def _watch_skill_changes(self) -> None:
-        """Watch for skill change events and rebuild skill commands.
+        """Watch for command/skill/prompt change events and rebuild commands.
 
-        Subscribes to ExtensionRegistry.merge_change_streams() for the
-        POOL scope. When a skills_changed event arrives, rebuilds skill
-        commands and sends an update to the client.
+        Consumes ``CommandBridge.watch_changes()`` which filters for
+        ``"commands_changed"``, ``"skills_changed"``, and
+        ``"prompts_changed"`` events from the ``ExtensionRegistry``.
+        When any of these events arrive, rebuilds the command list and
+        sends an ``AvailableCommandsUpdate`` to the client.
         """
-        from agentpool.capabilities.extension_registry import Scope, ScopeLevel
-
-        ctx = self.host_context
-        if ctx.extension_registry is None:
-            return
-
-        stream = ctx.extension_registry.merge_change_streams(Scope(level=ScopeLevel.POOL))
-        if stream is None:
-            self.log.debug("No skill change streams to watch")
+        if self._command_bridge is None:
+            self.log.debug("No CommandBridge — change watcher disabled")
             return
 
         try:
-            async for event in stream:
-                if event.kind != "skills_changed":
-                    continue
-                self.log.info("Skill change detected, rebuilding skill commands")
+            async for event in self._command_bridge.watch_changes():
+                self.log.info(
+                    "Command/skill/prompt change detected, rebuilding commands",
+                    kind=event.kind,
+                )
                 try:
                     async with self._skill_register_lock:
-                        self._register_skill_commands()
+                        await self._register_skill_commands()
                     await self.send_available_commands_update()
                 except Exception:
-                    self.log.exception("Failed to rebuild skill commands after change")
+                    self.log.exception("Failed to rebuild commands after change")
         except asyncio.CancelledError:
-            self.log.debug("Skill change watcher cancelled")
+            self.log.debug("Command change watcher cancelled")
             raise
         except Exception:
-            self.log.exception("Skill change watcher error")
+            self.log.exception("Command change watcher error")
 
     async def init_client_skills(self) -> None:
         """Discover and load skills from client-side .claude/skills directory."""
@@ -228,7 +263,7 @@ class ACPSessionAgentMgmtMixin:
             skills = self.host_context.skills_registry.list_skills()
             self.log.info("Collected client-side skills", skill_count=len(skills))
             # Bridge newly discovered skills into command_store
-            self._register_skill_commands()
+            await self._register_skill_commands()
             await self.send_available_commands_update()
         except Exception as e:
             self.log.exception("Failed to discover client-side skills", error=e)
@@ -252,7 +287,7 @@ class ACPSessionAgentMgmtMixin:
 
         # Remove session-specific mutations from old agent before switching
         if isinstance(self.agent, Agent) and self.get_cwd_context in self.agent.sys_prompts.prompts:
-            self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]
 
         # Create new session agent via SessionPool (pool-level agents removed)
         ctx = self.host_context
@@ -270,7 +305,7 @@ class ACPSessionAgentMgmtMixin:
         self.agent.env = self.acp_env
         self.agent._input_provider = self.input_provider
         if isinstance(self.agent, Agent):
-            self.agent.sys_prompts.prompts.append(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            self.agent.sys_prompts.prompts.append(self.get_cwd_context)  # pyright: ignore[reportArgumentType]
 
         # Reconnect signal
         with suppress(Exception):
@@ -315,13 +350,56 @@ class ACPSessionAgentMgmtMixin:
             self.log.info("Registered hub prompts as slash commands", cmd_count=cmd_count)
             await self.send_available_commands_update()  # Send updated command list to client
 
+    def _build_command_agent_context(self) -> CapabilityAgentContext:
+        """Construct a capabilities.AgentContext from the session's current state.
+
+        This is used for ``CommandBridge.execute()`` which expects a
+        :class:`~agentpool.capabilities.agent_context.AgentContext` (not
+        the ``agents.AgentContext`` used by ``command_store``).
+
+        Returns:
+            A minimal ``AgentContext`` with the session's host context,
+            extension registry, and scope information.
+        """
+        from agentpool.capabilities.agent_context import AgentContext as CapabilityAgentContext
+        from agentpool.capabilities.runloop_delegation import RunLoopDelegationService
+        from agentpool.host.context import RunScope
+        from agentpool.host.registry import AgentRegistry
+        from agentpool.orchestrator.session_controller import SessionState
+
+        hctx = self.host_context
+        registry = AgentRegistry()
+        delegation: RunLoopDelegationService = RunLoopDelegationService(
+            registry=registry,
+            host=hctx,
+            session_id=self.session_id,
+        )
+        session = SessionState(
+            session_id=self.session_id,
+            agent_name=self.agent.name,
+        )
+        scope = RunScope(session_id=self.session_id)
+        return CapabilityAgentContext(
+            agent_registry=registry,
+            delegation=delegation,
+            session=session,
+            scope=scope,
+            host=hctx,
+            extension_registry=hctx.extension_registry,
+        )
+
     @logfire.instrument(r"Execute Slash Command {command_text}")
     async def execute_slash_command(self, command_text: str) -> None:
         """Execute any slash command with unified handling.
 
+        Routes execution through ``CommandBridge.execute()`` first. If
+        ``CommandNotFoundError`` is raised, falls back to the existing
+        ``command_store.execute_command()`` path (manifest commands,
+        debug commands, etc.). If ``CommandNotExecutableError`` is raised,
+        sends an error toast to the client.
+
         Args:
             command_text: Full command text (including slash)
-            session: ACP session context
         """
         from agentpool_server.acp_server.session import SLASH_PATTERN
 
@@ -342,7 +420,31 @@ class ACPSessionAgentMgmtMixin:
             await self.notifications.send_agent_text(error_msg)
             return
 
-        # Create context with session data
+        # --- Phase 1: Try CommandBridge.execute() first ---
+        if self._command_bridge is not None:
+            from agentpool.capabilities.command_bridge import (
+                CommandNotExecutableError,
+                CommandNotFoundError,
+            )
+
+            try:
+                agent_ctx = self._build_command_agent_context()
+                result = await self._command_bridge.execute(command_name, args, agent_ctx)
+            except CommandNotFoundError:
+                pass  # Fall through to command_store fallback
+            except CommandNotExecutableError:
+                await self._send_toast(
+                    message=f"Command `/{command_name}` is not executable",
+                    level="error",
+                )
+                await anyio.sleep(0.05)
+                return
+            else:
+                await self.notifications.send_agent_text(result)
+                await anyio.sleep(0.05)  # Allow network buffers to flush
+                return
+
+        # --- Phase 2: Fallback to command_store.execute_command() ---
         agent_context = self.agent.get_context(data=self)
         cmd_ctx = self.command_store.create_context(
             data=agent_context,

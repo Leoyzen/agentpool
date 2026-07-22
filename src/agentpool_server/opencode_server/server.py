@@ -266,6 +266,63 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
 
             state._mcp_tool_change_task = asyncio.create_task(_watch_mcp_tool_changes())
 
+    # Set up OpenCodeCommandBridge for capability command discovery.
+    # This is separate from the skill bridge above — it discovers commands
+    # from ALL CommandResource capabilities (not just skills) via the
+    # ExtensionRegistry, converts them to SlashedCommand instances, and
+    # registers them in the CommandStore for execution.
+    extension_registry = state.pool.extension_registry
+    if extension_registry is not None:
+        from agentpool_server.opencode_server.command_bridge import (
+            OpenCodeCommandBridge,
+        )
+
+        oc_command_bridge = OpenCodeCommandBridge(
+            registry=extension_registry,
+            session_id="opencode-server",
+        )
+        state.command_bridge = oc_command_bridge
+
+        # Watch for command changes via CommandBridge.watch_changes().
+        # Handles "commands_changed", "skills_changed", and "prompts_changed"
+        # events — all three trigger a command list rebuild.
+        async def _watch_command_changes() -> None:
+            """Watch for command change events and rebuild CommandStore."""
+            # Initial discovery happens here (inside the async watcher task).
+            try:
+                initial_commands = await oc_command_bridge.discover_commands()
+                if state.command_store is not None:
+                    for slashed_cmd in initial_commands:
+                        state.command_store.register_command(slashed_cmd, replace=True)
+                    logger.info(
+                        "OpenCode command bridge initial discovery complete",
+                        capability_command_count=len(initial_commands),
+                    )
+            except Exception:
+                logger.exception("Failed to discover initial capability commands")
+
+            async for _event in oc_command_bridge.watch_changes():
+                logger.info(
+                    "Command change detected, rebuilding capability commands",
+                    kind=_event.kind,
+                    capability=_event.capability_name,
+                )
+                try:
+                    new_commands = await oc_command_bridge.discover_commands()
+                    if state.command_store is not None:
+                        # Re-register all capability commands (replace=True
+                        # handles both new and existing entries).
+                        for slashed_cmd in new_commands:
+                            state.command_store.register_command(slashed_cmd, replace=True)
+                        logger.debug(
+                            "Capability commands rebuilt",
+                            command_count=len(new_commands),
+                        )
+                except Exception:
+                    logger.exception("Failed to rebuild capability commands after change")
+
+        state._command_change_task = asyncio.create_task(_watch_command_changes())
+
     # Set up todo change callback to broadcast events
     async def on_todo_change(tracker: TodoTracker) -> None:
         """Broadcast todo updates to all active sessions."""
@@ -418,6 +475,16 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
             except Exception:
                 logger.exception("Error during skill change task cleanup")
             state._skill_change_task = None
+        # Cancel command change watcher
+        if state._command_change_task is not None:
+            state._command_change_task.cancel()
+            try:
+                await state._command_change_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Error during command change task cleanup")
+            state._command_change_task = None
         # Cancel MCP tool change watcher
         if state._mcp_tool_change_task is not None:
             state._mcp_tool_change_task.cancel()

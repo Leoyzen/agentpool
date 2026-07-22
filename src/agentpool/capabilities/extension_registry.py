@@ -365,17 +365,52 @@ class ExtensionRegistry:
     ) -> list[CommandResource]:
         """Get visible capabilities implementing ``CommandResource``.
 
+        Returns capabilities in scope-specificity order (most specific first:
+        turn-level → agent-level → session-level → pool-level). Within each
+        level, capabilities are returned in registration order. This ordering
+        enables ``CommandBridge`` to de-duplicate by name with most-specific
+        scope winning.
+
         Args:
             scope: The scope to query.
 
         Returns:
-            List of capabilities implementing ``CommandResource``.
+            List of capabilities implementing ``CommandResource`` in
+            scope-specificity order (TURN → AGENT → SESSION → POOL).
         """
         from agentpool.capabilities.resource_protocols import CommandResource
 
-        return [
-            cap for cap in self.get_visible_capabilities(scope) if isinstance(cap, CommandResource)
-        ]
+        result: list[CommandResource] = []
+
+        # Turn level (most specific)
+        if scope.level.value >= ScopeLevel.TURN.value:
+            session_map = self._turn.get(scope.session_id, {})
+            agent_map = session_map.get(scope.agent_name, {})
+            result.extend(
+                cap for cap in agent_map.get(scope.turn_id, []) if isinstance(cap, CommandResource)
+            )
+
+        # Agent level
+        if scope.level.value >= ScopeLevel.AGENT.value:
+            agent_map = self._agent.get(scope.session_id, {})
+            result.extend(
+                cap
+                for cap in agent_map.get(scope.agent_name, [])
+                if isinstance(cap, CommandResource)
+            )
+
+        # Session level
+        if scope.level.value >= ScopeLevel.SESSION.value:
+            result.extend(
+                cap
+                for cap in self._session.get(scope.session_id, [])
+                if isinstance(cap, CommandResource)
+            )
+
+        # Pool level (least specific)
+        result.extend(cap for cap in self._pool if isinstance(cap, CommandResource))
+
+        return result
 
     def get_observable_capabilities(
         self,
