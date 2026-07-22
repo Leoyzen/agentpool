@@ -13,6 +13,7 @@ import sys
 sys.path.insert(0, "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/src")
 
 from agentpool.resource_providers.mcp_provider import MCPResourceProvider
+
 from agentpool.skills.uri_resolver import SkillURIResolver
 
 

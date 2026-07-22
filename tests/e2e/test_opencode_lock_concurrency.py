@@ -365,9 +365,21 @@ class TestFinalizationAfterLockSplit:
             assert resp.status_code in (200, 201)
 
             # In the async model, time.completed is None in the initial
-            # response. Poll GET /message until the event consumer finalizes.
+            # response. Poll GET /messages until the event consumer finalizes.
             messages = await _wait_for_message_count(base_url, client, session_id, 2, timeout=10.0)
             assert len(messages) >= 2
+
+            # Poll until time.completed is set (finalization may lag behind message creation)
+            deadline = time.monotonic() + 10.0
+            while time.monotonic() < deadline:
+                assistant = messages[1]
+                time_field = assistant.get("info", {}).get("time", {})
+                if time_field.get("completed") is not None:
+                    break
+                await asyncio.sleep(0.5)
+                messages = await _wait_for_message_count(
+                    base_url, client, session_id, 2, timeout=5.0
+                )
 
             assistant = messages[1]
             time_field = assistant.get("info", {}).get("time", {})
@@ -406,6 +418,18 @@ class TestFinalizationAfterLockSplit:
             )
 
             # Verify assistant has completed time
+            # (finalization may lag behind message creation; poll if needed)
+            deadline = time.monotonic() + 10.0
+            while time.monotonic() < deadline:
+                assistant = messages[1]
+                time_field = assistant.get("info", {}).get("time", {})
+                if time_field.get("completed") is not None:
+                    break
+                await asyncio.sleep(0.5)
+                messages = await _wait_for_message_count(
+                    base_url, client, session_id, 2, timeout=5.0
+                )
+
             assistant = messages[1]
             time_field = assistant.get("info", {}).get("time", {})
             assert time_field.get("completed") is not None, (

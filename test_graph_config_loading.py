@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentpool_config.graph_translation import GraphConfig
 import pytest
 
 from agentpool import AgentPool
+from agentpool_config.graph_translation import GraphConfig
 
 
 if TYPE_CHECKING:

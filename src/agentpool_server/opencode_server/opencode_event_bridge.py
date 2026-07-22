@@ -107,6 +107,7 @@ class OpenCodeEventBridgeMixin:
     if TYPE_CHECKING:
 
         def get_session_context_data(self, session_id: str) -> dict[str, Any] | None: ...
+        def set_session_context_data(self, session_id: str, data: dict[str, Any]) -> None: ...
         async def _create_subagent_tool_part(self, session_id: str, event: Any) -> Any: ...
         async def start_event_consumer(self, session_id: str) -> None: ...
         async def stop_event_consumer(self, session_id: str) -> None: ...
@@ -246,6 +247,31 @@ class OpenCodeEventBridgeMixin:
         if ctx is None:
             return
         await persist_message_to_storage(self.server_state, ctx.assistant_msg, session_id)
+
+    async def _persist_context_for_resume(self, session_id: str) -> None:
+        """Serialize and store the EventProcessorContext for session resume.
+
+        Called after StreamCompleteEvent and RunFailedEvent handlers (after
+        P4's ``_message_registered`` reset). Serializes the current context
+        via ``EventProcessorContext.serialize()`` and stores it via
+        ``set_session_context_data()`` so that a subsequent
+        ``_before_consumer_loop`` call (for a resumed session in the same
+        process) can restore accumulated state.
+
+        If serialization fails, logs an error and continues — the turn must
+        not crash because of a resume-context serialization issue.
+        """
+        ctx = self._contexts.get(session_id)
+        if ctx is None:
+            return
+        try:
+            serialized = ctx.serialize()
+            self.set_session_context_data(session_id, serialized)
+        except Exception:
+            logger.exception(
+                "Failed to serialize EventProcessorContext for resume",
+                session_id=session_id,
+            )
 
     async def _before_consumer_loop(self, session_id: str) -> None:
         """Set up per-session context before the consumer loop starts.
@@ -480,6 +506,28 @@ class OpenCodeEventBridgeMixin:
                     await self._finalize_assistant_time(session_id)
                     # Persist the finalized assistant message to storage.
                     await self._persist_assistant_message(session_id)
+                    # NOTE: Do NOT reset _message_registered here. It must
+                    # stay True so the next RunStartedEvent's D1 block fires
+                    # to create a fresh assistant message. Resetting here
+                    # would cause D1 to be skipped → all turns merge into
+                    # one assistant message.
+                    #
+                    # Correct state machine:
+                    #
+                    #   Turn 1: RunStarted → D1 skip (first) → register → True
+                    #           StreamComplete → finalize (keep True)
+                    #   Turn 2: RunStarted → D1 fires (True) → new msg → False
+                    #           → register → True
+                    #           StreamComplete → finalize (keep True)
+                    #
+                    # If we reset to False at StreamComplete:
+                    #   Turn 2: RunStarted → D1 skip (False) → register
+                    #           with OLD msg_id → all turns merge → BUG
+                    # P3: Serialize the EventProcessorContext and store it
+                    # so that a subsequent _before_consumer_loop (for a
+                    # resumed session in the same process) can restore the
+                    # accumulated state instead of creating a fresh context.
+                    await self._persist_context_for_resume(session_id)
                 case RunFailedEvent(exception=exc):
                     await set_session_status(
                         self.server_state, session_id, SessionStatus(type="idle")
@@ -527,6 +575,12 @@ class OpenCodeEventBridgeMixin:
                         )
                     # Persist the aborted assistant message to storage.
                     await self._persist_assistant_message(session_id)
+                    # NOTE: Do NOT reset _message_registered here (same
+                    # reasoning as StreamCompleteEvent path). The next
+                    # RunStartedEvent's D1 block handles the reset.
+                    # P3: Serialize context for resume, same as
+                    # StreamCompleteEvent path.
+                    await self._persist_context_for_resume(session_id)
                 case _:
                     pass
 
@@ -645,8 +699,17 @@ class OpenCodeEventBridgeMixin:
             # actually starts producing events, not before.
             # UserMessageInsertedEvent creates a user message, not an assistant
             # message, so it must not trigger assistant registration.
+            # StreamCompleteEvent and RunFailedEvent are lifecycle finalizers
+            # that already handled message finalization in the match block
+            # above. They must not trigger re-registration (which would undo
+            # P4's _message_registered reset).
             is_user_message_inserted = isinstance(event, UserMessageInsertedEvent)
-            if not is_user_message_inserted and not self._message_registered.get(session_id, False):
+            is_lifecycle_finalizer = isinstance(event, (StreamCompleteEvent, RunFailedEvent))
+            if (
+                not is_user_message_inserted
+                and not is_lifecycle_finalizer
+                and not self._message_registered.get(session_id, False)
+            ):
                 await append_message_to_session(self.server_state, session_id, ctx.assistant_msg)
                 await self.server_state.broadcast_event(
                     MessageUpdatedEvent.create(ctx.assistant_msg.info)

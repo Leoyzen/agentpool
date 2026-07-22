@@ -1010,9 +1010,13 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
                     )
                 case _ as unreachable:
                     assert_never(unreachable)
-        # NOTE: append_message_to_session is NOT called here — the
-        # EventProcessor handles that via UserMessageInsertedEvent.
-        await persist_message_to_storage(state, user_msg_with_parts, session_id)
+        # NOTE: persist_message_to_storage is NOT called here for the user
+        # message. The EventProcessor handles persistence via
+        # append_message_to_session (triggered by UserMessageInsertedEvent).
+        # Calling persist_message_to_storage here would write to storage
+        # BEFORE the SSE events are sent, causing sync() to return the
+        # message from storage while SSE also delivers it — resulting in
+        # duplicate rendering in the TUI.
 
         # Serialize parts for meta — the EventBus event carries this so
         # the EventProcessor can reconstruct and broadcast the full user

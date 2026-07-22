@@ -347,6 +347,12 @@ class ProtocolChannel:
         This preserves backward compatibility with tests and protocol
         handlers that do not expect ``StateUpdate`` on the EventBus.
 
+        ``UserMessageInsertedEvent`` events during replay (``_replaying``
+        is ``True``) are journaled but NOT published to the EventBus.
+        During crash-recovery replay, these events were already delivered
+        to the EventBus during the original run. Republishing would cause
+        duplicate user message rendering in protocol frontends.
+
         Args:
             event: The event to publish.
 
@@ -367,8 +373,18 @@ class ProtocolChannel:
         # them but do not publish to EventBus. This prevents protocol
         # servers and EventBus subscribers from receiving state machine
         # transitions they don't know how to handle.
-        if not isinstance(event, StateUpdate):
-            await self._event_bus.publish(self._session_id, event)
+        if isinstance(event, StateUpdate):
+            return
+
+        # P2: During replay, skip EventBus publish for
+        # UserMessageInsertedEvent to avoid duplicate user message
+        # rendering. The event was already delivered during the
+        # original run; replay only needs journaling.
+        if self._replaying and type(event).__name__ == "UserMessageInsertedEvent":
+            logger.debug("Skipping EventBus publish for replayed UserMessageInsertedEvent")
+            return
+
+        await self._event_bus.publish(self._session_id, event)
 
     def recv(self) -> Feedback | None:
         """Non-blocking dequeue from the feedback queue.
