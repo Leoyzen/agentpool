@@ -232,9 +232,12 @@ class EventProcessor:
             case ToolCallCompleteEvent(
                 tool_call_id=tool_call_id,
                 tool_result=result,
+                tool_input=event_tool_input,
                 metadata=event_metadata,
             ) if ctx.has_tool_part(tool_call_id):
-                for e in self._process_tool_complete(ctx, tool_call_id, result, event_metadata):
+                for e in self._process_tool_complete(
+                    ctx, tool_call_id, result, event_metadata, event_tool_input
+                ):
                     yield e
 
             case StreamCompleteEvent(message=msg, cancelled=cancelled) if msg:
@@ -797,6 +800,7 @@ class EventProcessor:
         tool_call_id: str,
         result: Any,
         event_metadata: dict[str, Any] | None,
+        event_tool_input: dict[str, Any] | None = None,
     ) -> Iterator[Event]:
         """Process tool call completion.
 
@@ -805,6 +809,8 @@ class EventProcessor:
             tool_call_id: The unique identifier for this tool call.
             result: The result of the tool execution.
             event_metadata: Optional metadata about the tool execution.
+            event_tool_input: Tool input from the complete event, used when
+                context input is empty (e.g. streaming args scenario).
 
         Yields:
             PartUpdatedEvent for the completed tool part.
@@ -814,6 +820,10 @@ class EventProcessor:
             return
 
         result_str = _format_tool_output(result)
+        # Populate context input from event if empty (same pattern as _process_tool_progress)
+        if event_tool_input and not ctx.get_tool_input(tool_call_id):
+            ui_input = _convert_params_for_ui(event_tool_input)
+            ctx.set_tool_input(tool_call_id, ui_input)
         tool_input = ctx.get_tool_input(tool_call_id) or {}
         is_error = isinstance(result, dict) and result.get("error")
         start = ctx.stream_start_ms

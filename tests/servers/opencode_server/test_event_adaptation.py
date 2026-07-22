@@ -370,6 +370,7 @@ class TestToolCallCompleteEventConversion:
         assert isinstance(tool_part, ToolPart)
         assert isinstance(tool_part.state, ToolStateCompleted)
         assert tool_part.state.output == "hello"
+        assert tool_part.state.input.get("command") == "echo hello"
 
     @pytest.mark.asyncio
     async def test_tool_call_complete_with_error_creates_error_tool_part(
@@ -404,6 +405,7 @@ class TestToolCallCompleteEventConversion:
         assert isinstance(tool_part, ToolPart)
         assert isinstance(tool_part.state, ToolStateError)
         assert tool_part.state.error == "Command failed with exit code 1"
+        assert tool_part.state.input.get("command") == "false"
 
 
 # =============================================================================
@@ -1071,6 +1073,7 @@ class TestToolCallCompleteEventConversionV2:
         assert isinstance(tool_part, ToolPart)
         assert isinstance(tool_part.state, ToolStateCompleted)
         assert tool_part.state.output == "hello"
+        assert tool_part.state.input.get("command") == "echo hello"
 
     @pytest.mark.asyncio
     async def test_tool_call_complete_with_error_creates_error_tool_part(
@@ -1105,6 +1108,190 @@ class TestToolCallCompleteEventConversionV2:
         assert isinstance(tool_part, ToolPart)
         assert isinstance(tool_part.state, ToolStateError)
         assert tool_part.state.error == "Command failed with exit code 1"
+        assert tool_part.state.input.get("command") == "false"
+
+    @pytest.mark.asyncio
+    async def test_tool_complete_uses_event_tool_input_when_context_empty(
+        self,
+        event_context,
+    ) -> None:
+        """ToolCallCompleteEvent's tool_input should populate empty context input.
+
+        When a model streams tool call arguments, the initial ToolCallStartEvent
+        may arrive with empty raw_input. The EventMapper populates
+        ToolCallCompleteEvent.tool_input with the real args from
+        _pending_tool_inputs. The event processor must use this event-carried
+        tool_input when context is empty, otherwise the completed tool part
+        shows empty input in the TUI.
+        """
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        # Step 1: ToolCallStartEvent with empty raw_input (streaming args)
+        start_event = ToolCallStartEvent(
+            tool_call_id="call-stream-complete-001",
+            tool_name="bash",
+            title="Running: ls -la",
+            raw_input={},
+        )
+        await _collect_events_v2(adapter.convert_event(start_event))
+
+        # Step 2: ToolCallCompleteEvent carries the real tool_input
+        complete_event = ToolCallCompleteEvent(
+            tool_name="bash",
+            tool_call_id="call-stream-complete-001",
+            tool_input={"command": "ls -la"},
+            tool_result="total 0",
+            agent_name="test-agent",
+            message_id="msg-001",
+        )
+        events = await _collect_events_v2(adapter.convert_event(complete_event))
+
+        part_updated = [e for e in events if isinstance(e, PartUpdatedEvent)]
+        assert len(part_updated) == 1
+        tool_part = part_updated[0].properties.part
+        assert isinstance(tool_part, ToolPart)
+        assert isinstance(tool_part.state, ToolStateCompleted)
+        assert tool_part.state.output == "total 0"
+        # The input must be populated from the complete event's tool_input
+        assert tool_part.state.input.get("command") == "ls -la"
+
+    @pytest.mark.asyncio
+    async def test_tool_complete_carries_forward_input_from_start(
+        self,
+        event_context,
+    ) -> None:
+        """ToolCallCompleteEvent should carry forward input from ToolCallStartEvent.
+
+        When the start event has non-empty raw_input, the complete event
+        should preserve that input in the completed tool state.
+        """
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        start_event = ToolCallStartEvent(
+            tool_call_id="call-carry-forward-001",
+            tool_name="read",
+            title="Running: read file",
+            raw_input={"file_path": "/tmp/test.txt"},
+        )
+        await _collect_events_v2(adapter.convert_event(start_event))
+
+        complete_event = ToolCallCompleteEvent(
+            tool_name="read",
+            tool_call_id="call-carry-forward-001",
+            tool_input={"file_path": "/tmp/test.txt"},
+            tool_result="file contents here",
+            agent_name="test-agent",
+            message_id="msg-001",
+        )
+        events = await _collect_events_v2(adapter.convert_event(complete_event))
+
+        part_updated = [e for e in events if isinstance(e, PartUpdatedEvent)]
+        assert len(part_updated) == 1
+        tool_part = part_updated[0].properties.part
+        assert isinstance(tool_part, ToolPart)
+        assert isinstance(tool_part.state, ToolStateCompleted)
+        assert tool_part.state.output == "file contents here"
+        # Input carried forward from start event (key converted by _convert_params_for_ui)
+        assert tool_part.state.input.get("filePath") == "/tmp/test.txt"
+
+    @pytest.mark.asyncio
+    async def test_full_tool_lifecycle_start_progress_complete(
+        self,
+        event_context,
+    ) -> None:
+        """Full tool lifecycle: Start (empty) → Progress (with input) → Complete.
+
+        This tests the real streaming scenario where:
+        1. ToolCallStartEvent arrives with empty raw_input (model streaming args)
+        2. ToolCallProgressEvent arrives with the complete tool_input
+        3. ToolCallCompleteEvent arrives with the tool result
+
+        The final completed tool part must have:
+        - Correct input (from progress event)
+        - Correct output (from complete event)
+        """
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        # Step 1: Start with empty input (model is still assembling args)
+        start_event = ToolCallStartEvent(
+            tool_call_id="call-lifecycle-001",
+            tool_name="bash",
+            title="Executing: bash",
+            raw_input={},
+        )
+        start_events = await _collect_events_v2(adapter.convert_event(start_event))
+        assert len([e for e in start_events if isinstance(e, PartUpdatedEvent)]) == 1
+
+        # Step 2: Progress carries the complete tool_input
+        progress_event = ToolCallProgressEvent(
+            tool_call_id="call-lifecycle-001",
+            title="Running: echo hello",
+            items=[TextContentItem(text="Output line 1")],
+            tool_name="bash",
+            tool_input={"command": "echo hello"},
+        )
+        progress_events = await _collect_events_v2(adapter.convert_event(progress_event))
+        progress_parts = [e for e in progress_events if isinstance(e, PartUpdatedEvent)]
+        assert len(progress_parts) == 1
+        progress_tool_part = progress_parts[0].properties.part
+        assert isinstance(progress_tool_part, ToolPart)
+        assert isinstance(progress_tool_part.state, ToolStateRunning)
+        assert progress_tool_part.state.input.get("command") == "echo hello"
+
+        # Step 3: Complete with the tool result
+        complete_event = ToolCallCompleteEvent(
+            tool_name="bash",
+            tool_call_id="call-lifecycle-001",
+            tool_input={"command": "echo hello"},
+            tool_result="hello",
+            agent_name="test-agent",
+            message_id="msg-001",
+        )
+        complete_events = await _collect_events_v2(adapter.convert_event(complete_event))
+        complete_parts = [e for e in complete_events if isinstance(e, PartUpdatedEvent)]
+        assert len(complete_parts) == 1
+        final_tool_part = complete_parts[0].properties.part
+        assert isinstance(final_tool_part, ToolPart)
+        assert isinstance(final_tool_part.state, ToolStateCompleted)
+        # Input preserved through the full lifecycle
+        assert final_tool_part.state.input.get("command") == "echo hello"
+        # Output from the complete event
+        assert final_tool_part.state.output == "hello"
+
+    @pytest.mark.asyncio
+    async def test_tool_complete_error_preserves_input(
+        self,
+        event_context,
+    ) -> None:
+        """ToolCallCompleteEvent with error should preserve input in error state."""
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        start_event = ToolCallStartEvent(
+            tool_call_id="call-error-input-001",
+            tool_name="bash",
+            title="Running: false",
+            raw_input={"command": "false"},
+        )
+        await _collect_events_v2(adapter.convert_event(start_event))
+
+        complete_event = ToolCallCompleteEvent(
+            tool_name="bash",
+            tool_call_id="call-error-input-001",
+            tool_input={"command": "false"},
+            tool_result={"error": "Command failed with exit code 1"},
+            agent_name="test-agent",
+            message_id="msg-001",
+        )
+        events = await _collect_events_v2(adapter.convert_event(complete_event))
+
+        part_updated = [e for e in events if isinstance(e, PartUpdatedEvent)]
+        assert len(part_updated) == 1
+        tool_part = part_updated[0].properties.part
+        assert isinstance(tool_part, ToolPart)
+        assert isinstance(tool_part.state, ToolStateError)
+        assert tool_part.state.error == "Command failed with exit code 1"
+        # Input should be preserved even in error state
+        assert tool_part.state.input.get("command") == "false"
 
 
 # =============================================================================
