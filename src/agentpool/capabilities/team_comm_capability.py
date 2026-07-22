@@ -160,8 +160,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         """Wrap message body for delivery based on notice_role config.
 
         When notice_role is 'system' and delivery is STEER, wraps the
-        body in a SystemPromptPart so it's injected as a system message
-        rather than a user message.
+        body in a ModelRequest containing a SystemPromptPart so it's
+        injected as a system message rather than a user message.
 
         Returns the plain string for QUEUE mode or notice_role='user'.
         """
@@ -169,9 +169,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             self._config.notice_role == "system"
             and self._config.notice_delivery_mode == "steer"
         ):
-            from pydantic_ai.messages import SystemPromptPart
+            from pydantic_ai.messages import ModelRequest, SystemPromptPart
 
-            return [SystemPromptPart(content=body)]
+            return [ModelRequest(parts=[SystemPromptPart(content=body)])]
         return body
 
     # ------------------------------------------------------------------
