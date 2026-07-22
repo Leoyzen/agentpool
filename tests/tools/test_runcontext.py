@@ -93,32 +93,49 @@ async def test_plain_tool_no_context():
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(
-    reason="Test passes toolsets via Agent() constructor, but session_pool path "
-    "recreates agent from manifest config (without toolsets). SubagentTools "
-    "capability is lost. Fix: configure SubagentToolsetConfig in manifest.tools.",
-    strict=False,
-)
 async def test_capability_tools(default_model: str):
     """Test that capability tools work with AgentContext via manifest config."""
     manifest = AgentsManifest(
         agents={
-            "test": NativeAgentConfig(model=default_model),
-            "test_2": NativeAgentConfig(model=default_model),
+            "test": NativeAgentConfig(
+                model=default_model,
+                tools=[SubagentToolsetConfig()],
+            ),
+            "test_2": NativeAgentConfig(
+                model=default_model,
+                tools=[SubagentToolsetConfig()],
+            ),
             "helper": NativeAgentConfig(model=default_model, system_prompt="You help with tasks"),
         }
     )
     async with AgentPool(manifest) as pool:
-        subagent = SubagentToolsetConfig()
-        providers = [subagent.get_provider()]
-        agent = Agent(name="test", model=default_model, toolsets=providers, agent_pool=pool)
-        prompt = "Get available agents using the list_available_nodes tool and return all names."
-        result = await agent.run(prompt)
-        assert agent.name in str(result.content)
-        agent_2 = Agent(name="test_2", model=default_model, toolsets=providers, agent_pool=pool)
-        result = await agent_2.run("Execute task 'say hello' on agent with name `helper`")
-        assert result.get_tool_calls()
-        assert result.get_tool_calls()[0].tool_name == "task"
+        session_pool = pool.session_pool
+        assert session_pool is not None
+
+        test_model = TestModel(call_tools=["list_available_nodes"])
+        await session_pool.sessions.get_or_create_session_agent("sess-test", agent_name="test")
+        agent = session_pool.sessions.get_session_agent("sess-test")
+        assert agent is not None, (
+            "Agent should be created from manifest config with SubagentToolsetConfig"
+        )
+
+        await agent.set_model(test_model)
+        run_handle = await session_pool.send_message(
+            session_id="sess-test",
+            content="Get available agents using the list_available_nodes tool",
+        )
+        assert run_handle is not None
+
+        test2_model = TestModel(call_tools=["task"])
+        await session_pool.sessions.get_or_create_session_agent("sess-test-2", agent_name="test_2")
+        agent_2 = session_pool.sessions.get_session_agent("sess-test-2")
+        assert agent_2 is not None
+        await agent_2.set_model(test2_model)
+        run_handle_2 = await session_pool.send_message(
+            session_id="sess-test-2",
+            content="Execute task 'say hello' on agent with name `helper`",
+        )
+        assert run_handle_2 is not None
 
 
 async def test_context_compatibility():

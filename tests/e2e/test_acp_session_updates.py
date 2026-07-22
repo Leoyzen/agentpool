@@ -203,7 +203,8 @@ async def test_user_message_chunk_notification(e2e_config: Path) -> None:
 @pytest.mark.xfail(
     reason=(
         "Tool call via ACP subprocess hangs — pre-existing issue "
-        "(test_tool_call_e2e also times out). See issue #188."
+        "(test_tool_call_e2e also times out). #196 partially fixed "
+        "(user_message_chunk) but tool_call_start/end still missing."
     ),
     strict=False,
     raises=(AssertionError, TimeoutError, Exception),

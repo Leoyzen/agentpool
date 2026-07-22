@@ -1167,7 +1167,7 @@ async def fork_session(  # noqa: D417
 
     # Copy messages in storage via SessionPool
     if session_pool is not None:
-        with contextlib.suppress(KeyError, TypeError):
+        with contextlib.suppress(KeyError, TypeError, ValueError):
             await session_pool.copy_messages(
                 session_id,
                 new_session_id,
@@ -1209,7 +1209,7 @@ async def fork_session(  # noqa: D417
 
 
 @router.post("/{session_id}/init")
-async def init_session(  # noqa: D417,PLR0915
+async def init_session(  # noqa: D417
     session_id: str,
     state: StateDep,
     request: SessionInitRequest | None = None,
@@ -1230,6 +1230,25 @@ async def init_session(  # noqa: D417,PLR0915
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    # The entire init process (repo map generation, README reading, agent
+    # run) runs as a background task so the HTTP response returns
+    # immediately. This prevents timeouts on large repos in CI. (#260)
+    async def _run_init_background() -> None:
+        try:
+            await _do_init(state, session_id, request)
+        except Exception:
+            logger.exception("Init background task failed", session_id=session_id)
+
+    state.create_background_task(_run_init_background(), name=f"init_{session_id}")
+    return True
+
+
+async def _do_init(  # noqa: PLR0915
+    state: StateDep,
+    session_id: str,
+    request: SessionInitRequest | None,
+) -> None:
+    """Execute the full init workflow: repo map, README, agent run."""
     fs = state.fs
     working_dir = state.working_dir
     try:
@@ -1290,10 +1309,8 @@ async def init_session(  # noqa: D417,PLR0915
             except Exception:  # noqa: BLE001
                 pass
 
-        # Fire-and-forget through SessionPool; RunHandle is stored
-        # in SessionController._runs for cancellation tracking.
         await session_pool.send_message(session_id, init_prompt)
-        return True
+        return
 
     # Fallback: run the agent in the background directly
     async def run_init() -> None:
@@ -1314,13 +1331,9 @@ async def init_session(  # noqa: D417,PLR0915
 
             await agent.run(init_prompt)
         finally:
-            # Per-session agent: model changes are session-local, no need
-            # to restore the original model.
             pass
 
     state.create_background_task(run_init(), name=f"init_{session_id}")
-
-    return True
 
 
 @router.get("/{session_id}/todo")
