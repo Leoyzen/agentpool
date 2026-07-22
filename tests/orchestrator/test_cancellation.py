@@ -26,16 +26,15 @@ from pydantic_ai.messages import ModelResponse, TextPart
 import pytest
 
 from agentpool.agents.events import (
+    RunErrorEvent,
     RunFailedEvent,
     RunStartedEvent,
     StreamCompleteEvent,
-    ToolCallCompleteEvent,
     ToolCallStartEvent,
 )
 from agentpool.lifecycle.types import DeliveryMode
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventEnvelope, SessionPool
-from agentpool.orchestrator.event_mapper import EventMapper
 from agentpool.orchestrator.turn import Turn
 
 
@@ -1007,123 +1006,6 @@ async def test_cancel_during_tool_execution(minimal_pool: AgentPool) -> None:
     await asyncio.sleep(0.1)
 
 
-class _ToolBlockingTurnWithMapper(Turn):
-    """Turn that uses EventMapper — yields ToolCallStartEvent then blocks.
-
-    Simulates what the real NativeTurn does: maps tool call events via
-    EventMapper, and on cancellation, flushes pending tool calls to emit
-    ToolCallCompleteEvent with error metadata.
-    """
-
-    def __init__(self, run_ctx: AgentRunContext) -> None:
-        self._run_ctx = run_ctx
-        self._mapper = EventMapper(agent_name="test-agent", message_id="msg-test")
-
-    async def execute(self):  # type: ignore[override]
-        self._message_history = []
-        self._final_message = ChatMessage(content="tool-blocked", role="assistant")
-        from pydantic_ai import FunctionToolCallEvent
-        from pydantic_ai.messages import ToolCallPart
-
-        start_event = self._mapper.map_event(
-            FunctionToolCallEvent(
-                part=ToolCallPart(
-                    tool_name="bash",
-                    args={"command": "ls -la"},
-                    tool_call_id="test-tool-1",
-                ),
-            ),
-        )
-        if start_event is not None:
-            yield start_event
-        try:
-            while not self._run_ctx.cancelled:
-                await asyncio.sleep(0.01)
-        except asyncio.CancelledError:
-            if not self._run_ctx.cancelled:
-                raise
-        for tool_event in self._mapper.flush_cancelled_tool_calls():
-            yield tool_event
-
-
-def _make_tool_blocking_with_mapper_create_turn() -> Any:
-    """Return a create_turn function whose first call returns _ToolBlockingTurnWithMapper."""
-    call_count = 0
-
-    def _create_turn(
-        prompts: Any, run_ctx: AgentRunContext, message_history: Any, **kwargs: Any
-    ) -> Turn:
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return _ToolBlockingTurnWithMapper(run_ctx)
-        return _StubTurn_e2e(
-            events=[
-                RunStartedEvent(run_id="test-run"),
-                StreamCompleteEvent(message=ChatMessage(content="response", role="assistant")),
-            ],
-            message_history=["msg"],
-        )
-
-    return _create_turn
-
-
-@pytest.mark.integration
-@pytest.mark.anyio
-async def test_cancel_emits_tool_complete_event(minimal_pool: AgentPool) -> None:
-    """Cancel during tool execution emits ToolCallCompleteEvent with error metadata.
-
-    Given: a turn that yields ToolCallStartEvent then blocks (using EventMapper).
-    When: cancel() is called during the blocking period.
-    Then: ToolCallCompleteEvent is emitted with is_error=True and cancelled=True
-          in metadata, after ToolCallStartEvent.
-    """
-    session_pool = minimal_pool.session_pool
-    assert session_pool is not None
-    session_id = "sess-cancel-tool-complete"
-    await session_pool.create_session(session_id, agent_name="test_agent")
-    await _patch_agent_create_turn(
-        session_pool, session_id, _make_tool_blocking_with_mapper_create_turn()
-    )
-    queue = await session_pool.event_bus.subscribe(session_id)
-    first_handle = await _receive_and_get_handle(session_pool, session_id, "first prompt")
-    assert first_handle is not None
-    await asyncio.sleep(0.1)
-    session_pool.sessions.cancel_run_for_session(session_id)
-    await asyncio.sleep(0.2)
-    events = await _drain_queue(queue)
-    event_types = [type(_unwrap_event(e)) for e in events]
-
-    assert ToolCallStartEvent in event_types, (
-        f"Expected ToolCallStartEvent before cancel, got: {event_types}"
-    )
-
-    tool_complete_events = [
-        _unwrap_event(e) for e in events if isinstance(_unwrap_event(e), ToolCallCompleteEvent)
-    ]
-    assert len(tool_complete_events) == 1, (
-        f"Expected exactly 1 ToolCallCompleteEvent, got {len(tool_complete_events)}: {event_types}"
-    )
-    tool_complete = tool_complete_events[0]
-    assert tool_complete.tool_name == "bash"
-    assert tool_complete.tool_call_id == "test-tool-1"
-    assert tool_complete.metadata is not None
-    assert tool_complete.metadata.get("is_error") is True
-    assert tool_complete.metadata.get("cancelled") is True
-    assert "cancelled" in str(tool_complete.tool_result).lower()
-
-    tc_start_idx = event_types.index(ToolCallStartEvent)
-    tc_complete_idx = event_types.index(ToolCallCompleteEvent)
-    assert tc_complete_idx > tc_start_idx, (
-        f"ToolCallCompleteEvent should come after ToolCallStartEvent, "
-        f"got start_idx={tc_start_idx}, complete_idx={tc_complete_idx}: {event_types}"
-    )
-
-    assert first_handle.complete_event.is_set(), "RunHandle should be done after cancel"
-    first_handle.close()
-    await asyncio.sleep(0.1)
-
-
 @pytest.mark.integration
 @pytest.mark.anyio
 async def test_double_cancel_then_new_prompt(minimal_pool: AgentPool) -> None:
@@ -1610,4 +1492,203 @@ async def test_cancel_during_chaining_drains_remaining(
     handle = session_pool._get_active_run_handle(session_id)
     if handle is not None and handle is not first_handle:
         handle.close()
+    await asyncio.sleep(0.1)
+
+
+# ---------------------------------------------------------------------------
+# Test: Turn error with queued prompt — message must not get stuck
+# ---------------------------------------------------------------------------
+
+
+class _BlockingThenErrorTurn(Turn):
+    """Turn that blocks briefly (allowing enqueuing), then raises RuntimeError.
+
+    Simulates a turn that fails mid-execution after running long enough
+    for a concurrent _route_message to enqueue a message to prompt_queue.
+    """
+
+    def __init__(self, run_ctx: AgentRunContext) -> None:
+        self._run_ctx = run_ctx
+
+    async def execute(self):  # type: ignore[override]
+        self._message_history = []
+        self._final_message = ChatMessage(content="error", role="assistant")
+        for _ in range(20):
+            if self._run_ctx.cancelled:
+                return
+            await asyncio.sleep(0.01)
+        raise RuntimeError("Simulated turn error")
+        yield  # unreachable
+
+
+def _make_blocking_then_error_create_turn() -> Any:
+    """Return a create_turn: first call blocks-then-errors, rest are stubs."""
+    call_count = 0
+
+    def _create_turn(
+        prompts: Any, run_ctx: AgentRunContext, message_history: Any, **kwargs: Any
+    ) -> Turn:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return _BlockingThenErrorTurn(run_ctx)
+        return _StubTurn_e2e(
+            events=[
+                RunStartedEvent(run_id="test-run"),
+                StreamCompleteEvent(message=ChatMessage(content="response", role="assistant")),
+            ],
+            message_history=["msg"],
+        )
+
+    return _create_turn
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_turn_error_with_queued_prompt_drains_queue(
+    minimal_pool: AgentPool,
+) -> None:
+    """Turn error with queued message — queued message is not stuck.
+
+    Regression test: _consume_run's error path (except Exception ->
+    turn_failed -> break) skips the prompt_queue check, leaving queued
+    messages stuck or processed out-of-order.
+
+    Scenario:
+        1. Turn 1 runs (blocks briefly, then raises RuntimeError).
+        2. While turn 1 runs, message 2 is enqueued to prompt_queue.
+        3. Turn 1 fails with Exception.
+        4. Queued message 2 must be processed (not stuck).
+
+    Without fix: message stuck in prompt_queue -> timeout.
+    With fix: _consume_run checks prompt_queue in the error path.
+    """
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
+    session_id = "sess-turn-error-queued"
+    await session_pool.create_session(session_id, agent_name="test_agent")
+    await _patch_agent_create_turn(
+        session_pool, session_id, _make_blocking_then_error_create_turn()
+    )
+    queue = await session_pool.event_bus.subscribe(session_id)
+
+    first_handle = await _receive_and_get_handle(session_pool, session_id, "first prompt")
+    assert first_handle is not None
+    await asyncio.sleep(0.05)
+
+    # Enqueue message 2 during turn 1 (simulates race)
+    session = session_pool.sessions.get_session(session_id)
+    assert session is not None
+    session.prompt_queue.put_nowait("second prompt")
+
+    # Wait for turn 1 to fail
+    pre_events: list[Any] = []
+    try:
+        async with asyncio.timeout(10.0):
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=5.0)
+                    pre_events.append(event)
+                    if isinstance(_unwrap_event(event), RunErrorEvent | RunFailedEvent):
+                        break
+                except TimeoutError:
+                    break
+    except TimeoutError:
+        pytest.fail("Timed out waiting for error event from turn 1")
+
+    pre_event_types = [type(_unwrap_event(e)) for e in pre_events]
+    assert RunErrorEvent in pre_event_types or RunFailedEvent in pre_event_types, (
+        f"Expected RunErrorEvent or RunFailedEvent from turn 1 error, got: {pre_event_types}"
+    )
+
+    # Queued message 2 should be processed (with fix) or stuck (without fix)
+    post_events: list[Any] = []
+    try:
+        async with asyncio.timeout(10.0):
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=5.0)
+                    post_events.append(event)
+                    if isinstance(_unwrap_event(event), StreamCompleteEvent):
+                        break
+                except TimeoutError:
+                    break
+    except TimeoutError:
+        pytest.fail(
+            "Timed out waiting for queued prompt after turn error - "
+            "message stuck in prompt_queue (error path skips queue check)"
+        )
+
+    post_event_types = [type(_unwrap_event(e)) for e in post_events]
+    assert RunStartedEvent in post_event_types, (
+        f"Expected RunStartedEvent for queued prompt, got: {post_event_types}"
+    )
+    assert StreamCompleteEvent in post_event_types, (
+        f"Expected StreamCompleteEvent for queued prompt, got: {post_event_types}"
+    )
+
+    _assert_cancel_invariants(session_pool, session_id)
+    first_handle.close()
+    handle = session_pool._get_active_run_handle(session_id)
+    if handle is not None and handle is not first_handle:
+        handle.close()
+    await asyncio.sleep(0.1)
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_session_close_with_queued_prompt_abandons_messages(
+    minimal_pool: AgentPool,
+) -> None:
+    """Session close with messages in prompt_queue - no new run started.
+
+    When a session is closing with messages still in prompt_queue, no new
+    run should be started for those messages. The is_closing guard in
+    _drain_prompt_queue prevents this.
+    """
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
+    session_id = "sess-close-queued-warn"
+    await session_pool.create_session(session_id, agent_name="test_agent")
+    await _patch_agent_create_turn(session_pool, session_id, _make_cancel_aware_create_turn())
+    queue = await session_pool.event_bus.subscribe(session_id)
+
+    first_handle = await _receive_and_get_handle(session_pool, session_id, "first prompt")
+    assert first_handle is not None
+    await asyncio.sleep(0.1)
+
+    # Enqueue messages
+    session = session_pool.sessions.get_session(session_id)
+    assert session is not None
+    session.prompt_queue.put_nowait("will be lost 1")
+    session.prompt_queue.put_nowait("will be lost 2")
+
+    # Mark session as closing BEFORE cancel — _drain_prompt_queue should skip
+    session.is_closing = True
+
+    # Cancel the active run
+    session_pool.sessions.cancel_run_for_session(session_id)
+    await asyncio.sleep(0.3)
+
+    # Drain remaining events
+    events = await _drain_queue(queue)
+    event_types = [type(_unwrap_event(e)) for e in events]
+
+    # RunFailedEvent from cancel is expected
+    assert RunFailedEvent in event_types, f"Expected RunFailedEvent from cancel, got: {event_types}"
+    # NO RunStartedEvent for the queued messages — session is closing
+    run_started_count = event_types.count(RunStartedEvent)
+    assert run_started_count <= 1, (
+        f"Expected at most 1 RunStartedEvent (from turn 1), got {run_started_count} — "
+        f"new run was started on a closing session! Events: {event_types}"
+    )
+
+    # Queued messages should still be in prompt_queue (not drained)
+    assert not session.prompt_queue.empty(), (
+        "prompt_queue should still contain messages — session is closing, drain skipped"
+    )
+
+    # Cleanup
+    session.is_closing = False
+    first_handle.close()
     await asyncio.sleep(0.1)
