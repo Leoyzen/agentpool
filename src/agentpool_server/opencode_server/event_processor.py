@@ -1026,6 +1026,10 @@ class EventProcessor:
                     text_val = item["text"]
                     if isinstance(text_val, str) and text_val:
                         user_msg_with_parts.add_text_part(text_val)
+                elif hasattr(item, "content") and isinstance(item.content, str):
+                    # Handle pydantic-ai ModelRequestPart (e.g. SystemPromptPart)
+                    # by extracting its content as text for TUI display.
+                    user_msg_with_parts.add_text_part(item.content)
 
         # Append to session state
         from agentpool_server.opencode_server.opencode_message_bridge import (
