@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
 _LEAD_ONLY_TOOLS: frozenset[str] = frozenset(
     {
+        "task_create",
         "team_create",
         "team_delete",
         "delete_blackboard",
@@ -182,10 +183,10 @@ async def test_member_sees_only_8_universal_tools(
 
     When: ``prepare_tools()`` is called with member session metadata.
 
-    Then: only 8 universal tool definitions are returned.  The 6
-        lead-only tools (team_create, team_delete, delete_blackboard,
-        shutdown_request, team_add_member, team_remove_member) are
-        filtered out entirely.
+    Then: only 7 universal tool definitions are returned.  The 7
+        lead-only tools (task_create, team_create, team_delete,
+        delete_blackboard, shutdown_request, team_add_member,
+        team_remove_member) are filtered out entirely.
     """
     manifest = team_mode_pool.manifest
     team_mode_config: TeamModeConfig | None = manifest.team_mode
@@ -208,12 +209,11 @@ async def test_member_sees_only_8_universal_tools(
     result = await cap.prepare_tools(ctx, tool_defs)
 
     result_names = {td.name for td in result}
-    assert len(result) == 8
+    assert len(result) == 7
     for lead_tool in _LEAD_ONLY_TOOLS:
         assert lead_tool not in result_names
     universal_tools = {
         "send_message",
-        "task_create",
         "task_list",
         "task_update",
         "read_blackboard",

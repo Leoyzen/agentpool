@@ -15,6 +15,7 @@ Universal tools (all members can use):
     - team_status: Get the current status of the team.
 
 Lead-only tools (only agents with ``team_role == "lead"``):
+    - task_create: Create a task on the shared task board.
     - team_create: Create a new team with eligible members.
     - team_delete: Delete the current team and close all member sessions.
     - delete_blackboard: Delete a key from the shared blackboard.
@@ -409,7 +410,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         description: str = "",
         blocked_by: list[str] | None = None,
     ) -> ToolReturn:
-        """Create a task on the shared task board.
+        """Create a task on the shared task board (lead-only).
 
         Args:
             ctx: RunContext with AgentContext deps.
@@ -421,6 +422,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             Success message with task_id, or error string.
         """
         agent_ctx = self._resolve_agent_context(ctx)
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role != "lead":
+            return ToolReturn(return_value="Only lead can use task_create")
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
             return ToolReturn(return_value="Not in a team session")
@@ -1478,6 +1482,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     # safety net.
     _LEAD_ONLY_TOOLS: frozenset[str] = frozenset(
         {
+            "task_create",
             "team_create",
             "team_delete",
             "delete_blackboard",

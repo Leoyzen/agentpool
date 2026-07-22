@@ -857,9 +857,11 @@ async def test_task_create_happy_path(tmp_path: Any) -> None:
     Then: returns "Task created: {task_id}" and task is persisted.
     """
     _init_team(str(tmp_path))
-    ctx = _make_run_context(base_dir=str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(), base_dir=str(tmp_path),
+    )
     config = _make_enabled_config(base_dir=str(tmp_path))
-    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
     result = await cap.task_create(ctx, "Translate docs", "Translate API docs to French")
 
@@ -873,8 +875,8 @@ async def test_task_create_no_team_id() -> None:
     When: task_create is called.
     Then: returns "Not in a team session".
     """
-    ctx = _make_run_context(metadata={"team_name": "foo"})
-    cap = TeamCommCapability(_make_enabled_config(), "worker", {"team_name": "foo"})
+    ctx = _make_run_context(metadata={"team_name": "foo", "team_role": "lead"})
+    cap = TeamCommCapability(_make_enabled_config(), "coordinator", {"team_name": "foo", "team_role": "lead"})
 
     result = await cap.task_create(ctx, "Task")
 
@@ -889,9 +891,11 @@ async def test_task_list_returns_tasks(tmp_path: Any) -> None:
     Then: returns JSON array with at least one task.
     """
     _init_team(str(tmp_path))
-    ctx = _make_run_context(base_dir=str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(), base_dir=str(tmp_path),
+    )
     config = _make_enabled_config(base_dir=str(tmp_path))
-    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
     await cap.task_create(ctx, "Task A")
     await cap.task_create(ctx, "Task B")
@@ -911,9 +915,11 @@ async def test_task_update_changes_status(tmp_path: Any) -> None:
     Then: returns updated task JSON with status="completed".
     """
     _init_team(str(tmp_path))
-    ctx = _make_run_context(base_dir=str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(), base_dir=str(tmp_path),
+    )
     config = _make_enabled_config(base_dir=str(tmp_path))
-    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
     create_result = await cap.task_create(ctx, "Task X")
     task_id = create_result.return_value.replace("Task created: ", "")
@@ -1620,9 +1626,9 @@ async def test_prepare_tools_member_filters_lead_only_tools() -> None:
     """Given: non-lead member with all 14 tool defs.
 
     When: prepare_tools() is called.
-    Then: lead-only tools (team_create, team_delete, delete_blackboard,
-        shutdown_request, team_add_member, team_remove_member) are
-        filtered out.  8 universal tools remain.
+    Then: lead-only tools (task_create, team_create, team_delete,
+        delete_blackboard, shutdown_request, team_add_member,
+        team_remove_member) are filtered out.  7 universal tools remain.
     """
     config = _make_enabled_config()
     cap = TeamCommCapability(config, "worker", _make_session_metadata())
@@ -1632,17 +1638,17 @@ async def test_prepare_tools_member_filters_lead_only_tools() -> None:
     result = await cap.prepare_tools(ctx, tool_defs)
 
     result_names = {td.name for td in result}
+    assert "task_create" not in result_names
     assert "team_create" not in result_names
     assert "team_delete" not in result_names
     assert "delete_blackboard" not in result_names
     assert "shutdown_request" not in result_names
     assert "team_add_member" not in result_names
     assert "team_remove_member" not in result_names
-    assert len(result) == 8
+    assert len(result) == 7
     # Universal tools remain.
     for name in (
         "send_message",
-        "task_create",
         "task_list",
         "task_update",
         "read_blackboard",
