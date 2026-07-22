@@ -872,12 +872,22 @@ class EventProcessor:
         if msg.cost_info and msg.cost_info.total_cost:
             ctx.update_cost(float(msg.cost_info.total_cost))
 
-        # Update model info from the real inference result
+        # Update model info from the real inference result.
+        # If the model changed (e.g., child session initially showed parent's
+        # model), emit a MessageUpdatedEvent so the TUI receives the correction.
+        model_changed = False
         if isinstance(ctx.assistant_msg.info, AssistantMessage):
-            if msg.model_name is not None:
+            if msg.model_name is not None and ctx.assistant_msg.info.model_id != msg.model_name:
                 ctx.assistant_msg.info.model_id = msg.model_name
-            if msg.provider_name is not None:
+                model_changed = True
+            if (
+                msg.provider_name is not None
+                and ctx.assistant_msg.info.provider_id != msg.provider_name
+            ):
                 ctx.assistant_msg.info.provider_id = msg.provider_name
+                model_changed = True
+            if model_changed:
+                yield MessageUpdatedEvent.create(ctx.assistant_msg.info)
 
         response_time = now_ms()
         start = ctx.stream_start_ms
