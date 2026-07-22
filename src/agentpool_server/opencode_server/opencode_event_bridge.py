@@ -245,9 +245,7 @@ class OpenCodeEventBridgeMixin:
         ctx = self._contexts.get(session_id)
         if ctx is None:
             return
-        await persist_message_to_storage(
-            self.server_state, ctx.assistant_msg, session_id
-        )
+        await persist_message_to_storage(self.server_state, ctx.assistant_msg, session_id)
 
     async def _before_consumer_loop(self, session_id: str) -> None:
         """Set up per-session context before the consumer loop starts.
