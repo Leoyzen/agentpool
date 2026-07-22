@@ -42,6 +42,8 @@ from agentpool_server.opencode_server.models import (
     SessionStatus,
     StepStartPart,
     TimeCreated,
+    TokenCache,
+    Tokens,
     UserMessage,
 )
 from agentpool_server.opencode_server.opencode_message_bridge import (
@@ -503,9 +505,6 @@ class OpenCodeEventBridgeMixin:
                     # immediately and never sets time.completed on the
                     # assistant message, so the event bridge must do it here
                     # when StreamCompleteEvent arrives.
-                    await self._finalize_assistant_time(session_id)
-                    # Persist the finalized assistant message to storage.
-                    await self._persist_assistant_message(session_id)
                     # NOTE: Do NOT reset _message_registered here. It must
                     # stay True so the next RunStartedEvent's D1 block fires
                     # to create a fresh assistant message. Resetting here
@@ -523,11 +522,14 @@ class OpenCodeEventBridgeMixin:
                     # If we reset to False at StreamComplete:
                     #   Turn 2: RunStarted → D1 skip (False) → register
                     #           with OLD msg_id → all turns merge → BUG
-                    # P3: Serialize the EventProcessorContext and store it
-                    # so that a subsequent _before_consumer_loop (for a
-                    # resumed session in the same process) can restore the
-                    # accumulated state instead of creating a fresh context.
-                    await self._persist_context_for_resume(session_id)
+                    #
+                    # NOTE: _finalize_assistant_time and _persist_assistant_message
+                    # are called AFTER adapter.convert_event() below, because the
+                    # EventProcessor (invoked by convert_event) populates
+                    # ctx.input_tokens/output_tokens from msg.usage.  Calling
+                    # finalize before convert_event would broadcast
+                    # MessageUpdatedEvent with tokens=0, causing the TUI to
+                    # show no token usage.
                 case RunFailedEvent(exception=exc):
                     await set_session_status(
                         self.server_state, session_id, SessionStatus(type="idle")
@@ -731,6 +733,31 @@ class OpenCodeEventBridgeMixin:
 
             async for oc_event in adapter.convert_event(event):
                 await self.server_state.broadcast_event(oc_event)
+
+            # After adapter.convert_event for StreamCompleteEvent, the
+            # EventProcessor has updated ctx.input_tokens/output_tokens and
+            # ctx.total_cost from msg.usage.  Now finalize the assistant
+            # message with the correct token/cost values so the TUI sees them
+            # via MessageUpdatedEvent.
+            if isinstance(event, StreamCompleteEvent):
+                finalize_ctx = self._contexts.get(session_id)
+                if finalize_ctx is not None:
+                    info = finalize_ctx.assistant_msg.info
+                    if isinstance(info, AssistantMessage):
+                        info.tokens = Tokens(
+                            cache=TokenCache(read=0, write=0),
+                            input=finalize_ctx.input_tokens,
+                            output=finalize_ctx.output_tokens,
+                            reasoning=0,
+                        )
+                        info.cost = finalize_ctx.total_cost
+                await self._finalize_assistant_time(session_id)
+                await self._persist_assistant_message(session_id)
+                # P3: Serialize the EventProcessorContext and store it
+                # so that a subsequent _before_consumer_loop (for a
+                # resumed session in the same process) can restore the
+                # accumulated state instead of creating a fresh context.
+                await self._persist_context_for_resume(session_id)
         except Exception:
             logger.exception(
                 "Event handler failed",
