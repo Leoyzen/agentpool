@@ -713,7 +713,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             )
 
             member_lines.append(
-                f"  - {m_name} (agent={agent_name}, status={runtime_status}, "
+                f"  - `{m_name}` (agent=`{agent_name}`, status=`{runtime_status}`, "
                 f"turns={turn_count}/{max_turns}, inbox={inbox_count}, {task_summary})"
             )
 
@@ -847,7 +847,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 roster_lines: list[str] = []
                 for m in members:
                     role_label = "lead" if m["name"] == lead_member_name else "member"
-                    roster_lines.append(f"  - {m['name']} (agent={m['agent']}, role={role_label})")
+                    roster_lines.append(
+                        f"  - `{m['name']}` (agent=`{m['agent']}`, role=`{role_label}`)"
+                    )
                 roster = "\n".join(roster_lines)
                 base_prompt = self._config.protocol_template.format(
                     team_name=name,
@@ -1240,7 +1242,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         for m_name, m_info in existing_members.items():
             m_agent = m_info.get("agent", m_name)
             role_label = "lead" if m_name == lead_member_name else "member"
-            roster_lines.append(f"  - {m_name} (agent={m_agent}, role={role_label})")
+            roster_lines.append(f"  - `{m_name}` (agent=`{m_agent}`, role=`{role_label}`)")
         roster = "\n".join(roster_lines)
         initial_prompt = f"{base_prompt}\n\n## Team Members\n{roster}"
         await session_pool.send_message(
@@ -1282,11 +1284,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             for m_name, m_info in updated_members.items():
                 m_agent = m_info.get("agent", m_name)
                 role_tag = " (lead)" if m_name == lead_member_name else ""
-                roster_lines.append(f"  - {m_name} ({m_agent}){role_tag}")
+                roster_lines.append(f"  - `{m_name}` (`{m_agent}`){role_tag}")
             roster = "\n".join(roster_lines)
             notice_line = f"\n\nnote: {notify}" if notify else ""
             notice_text = (
-                f"New member '{name}' ({agent}) joined the team."
+                f"New member `{name}` (`{agent}`) joined the team."
                 f"{notice_line}\n\ncurrent members:\n{roster}"
             )
             broadcast_msg = (
