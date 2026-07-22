@@ -756,7 +756,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if not members and self._config.defaults is not None:
             members = [{"name": m.name, "agent": m.agent} for m in self._config.defaults.members]
 
-        # Eligibility checks + display_name fallback for empty names.
+        # Eligibility checks.
         for member in members:
             agent_name: str = member.get("agent", "")
             if not agent_ctx.agent_registry.exists(agent_name):
@@ -765,13 +765,6 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 return ToolReturn(
                     return_value=(f"Agent '{agent_name}' is not eligible for team membership")
                 )
-            # Fall back to agent's display_name when name is not provided.
-            if not member.get("name"):
-                agent_obj = agent_ctx.agent_registry.get_or_none(agent_name)
-                if agent_obj is not None and agent_obj.display_name:
-                    member["name"] = agent_obj.display_name
-                else:
-                    member["name"] = agent_name
 
         # Bounds: max_members check.
         if len(members) > self._config.bounds.max_members:
@@ -837,6 +830,13 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     member_session_id,
                     agent=member["agent"],
                 )
+                # Propagate member display name to the agent instance so
+                # protocol frontends (ACP, OpenCode) show the correct name.
+                member_agent = session_pool.sessions._session_agents.get(
+                    member_session_id,
+                )
+                if member_agent is not None:
+                    member_agent._display_name = member["name"]
                 # Build initial prompt with member roster so the new
                 # member knows who their teammates are.
                 roster_lines: list[str] = []
@@ -1159,14 +1159,6 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if agent not in self._config.member_eligible:
             return ToolReturn(return_value=f"Agent '{agent}' is not eligible")
 
-        # Fall back to agent's display_name when name is not provided.
-        if not name:
-            agent_obj = agent_ctx.agent_registry.get_or_none(agent)
-            if agent_obj is not None and agent_obj.display_name:
-                name = agent_obj.display_name
-            else:
-                name = agent
-
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
             return ToolReturn(return_value="Not in a team session")
@@ -1214,6 +1206,12 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             )
         except Exception as exc:  # noqa: BLE001
             return ToolReturn(return_value=f"Failed to create member session: {exc}")
+
+        # Propagate member display name to the agent instance so protocol
+        # frontends (ACP, OpenCode) show the correct name.
+        member_agent = session_pool.sessions._session_agents.get(member_session_id)
+        if member_agent is not None:
+            member_agent._display_name = name
 
         # Register member in team state.
         team_state.register_member(
