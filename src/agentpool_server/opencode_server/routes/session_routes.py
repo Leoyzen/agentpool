@@ -939,6 +939,11 @@ async def get_session_messages(
     messages = await get_messages_for_session(state, session_id)
     if limit is not None and limit > 0:
         messages = messages[-limit:]
+    logger.info(
+        "sync() returning {count} messages for session {sid}",
+        count=len(messages),
+        sid=session_id,
+    )
     return messages
 
 
