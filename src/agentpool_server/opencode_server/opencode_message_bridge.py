@@ -91,7 +91,8 @@ async def get_messages_for_session(
     When ``prefer_in_memory`` is True (default, used by sync/TUI), the
     in-memory ``state.messages`` cache is preferred because it retains
     the ORIGINAL part IDs that match SSE PartUpdatedEvent. DB-reconstructed
-    messages get NEW part IDs, causing TUI duplication.
+    messages get NEW part IDs, causing TUI duplication. User message parts
+    are stripped so SSE is the sole source (prevents TUI duplication).
 
     When ``prefer_in_memory`` is False (used by share/fork), the DB
     (SessionPool) is preferred because it has the complete history.
@@ -104,6 +105,9 @@ async def get_messages_for_session(
     Args:
         state: The OpenCode server state.
         session_id: The session ID to get messages for.
+        prefer_in_memory: If True, prefer in-memory messages and strip
+            user message parts (for sync/TUI). If False, prefer DB
+            (for share/fork).
 
     Returns:
         List of MessageWithParts for the session.
@@ -111,6 +115,10 @@ async def get_messages_for_session(
     messages: list[MessageWithParts] = getattr(state, "messages", {}).get(session_id, []) or []
 
     cached_session = state.sessions.get(session_id)
+    # Subagent sessions don't go through TUI sync() — their messages are
+    # displayed via the parent's tool call, not via REST sync endpoint.
+    # So no need to strip parts for subagents.
+    is_subagent = cached_session is not None and cached_session.parent_id is not None
 
     # When prefer_in_memory is True (sync/TUI path), strip parts from user
     # messages to prevent duplication with SSE PartUpdatedEvent. The TUI has
@@ -118,13 +126,11 @@ async def get_messages_for_session(
     # renders both. By stripping user message parts from sync(), SSE becomes
     # the sole source of user message parts.
     # This applies to ALL return paths (in-memory and DB fallback).
+    # Subagent sessions are exempt (no TUI sync race).
     def _strip_user_parts(msgs: list[MessageWithParts]) -> list[MessageWithParts]:
-        if not prefer_in_memory:
+        if not prefer_in_memory or is_subagent:
             return msgs
-        return [
-            msg.model_copy(update={"parts": []}) if msg.role == "user" else msg
-            for msg in msgs
-        ]
+        return [msg.model_copy(update={"parts": []}) if msg.role == "user" else msg for msg in msgs]
 
     # Fast-path: in-memory messages retain original part IDs matching SSE.
     if prefer_in_memory and messages:
