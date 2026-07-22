@@ -221,6 +221,8 @@ class HookAwareTurn:
         tool_input: dict[str, Any],
         tool_output: Any,
         tool_call_id: str | None = None,
+        *,
+        status: str = "completed",
     ) -> None:
         """Log a tool execution record to the journal for crash recovery.
 
@@ -238,6 +240,8 @@ class HookAwareTurn:
             tool_input: Input arguments that were passed to the tool.
             tool_output: Output from the tool.
             tool_call_id: Unique ID for this tool call, if available.
+            status: Execution status (``"completed"``, ``"cancelled"``,
+                ``"failed"``, etc.). Defaults to ``"completed"``.
         """
         from agentpool.lifecycle.types import ToolExecutionRecord
 
@@ -270,9 +274,35 @@ class HookAwareTurn:
             tool_name=tool_name,
             args=tool_input,
             result=tool_output,
-            status="completed",
+            status=status,
         )
         journal.log_tool_execution(record)
+
+    def _log_cancelled_tool_executions(
+        self,
+        cancelled_events: list[Any],
+    ) -> None:
+        """Log cancelled tool executions to the journal.
+
+        Called from cancellation paths in ``NativeTurn.execute()`` after
+        ``EventMapper.flush_cancelled_tool_calls()`` to ensure the journal
+        records ``status="cancelled"`` for tools that were in-progress when
+        the turn was cancelled. Without this, crash recovery with the
+        ``"retry"`` strategy cannot distinguish between tools that completed
+        and tools that were interrupted.
+
+        Args:
+            cancelled_events: List of ``ToolCallCompleteEvent`` instances
+                returned by ``flush_cancelled_tool_calls()``.
+        """
+        for event in cancelled_events:
+            self._log_tool_execution(
+                tool_name=event.tool_name,
+                tool_input=event.tool_input,
+                tool_output=event.tool_result,
+                tool_call_id=event.tool_call_id,
+                status="cancelled",
+            )
 
     async def _fire_post_tool_hooks(
         self,
