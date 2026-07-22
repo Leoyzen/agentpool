@@ -462,6 +462,219 @@ async def test_bridged_history_injects_cancelled_tool_results(
 
 
 # ---------------------------------------------------------------------------
+# Test 6: Invalid JSON tool call args are sanitized in bridged history
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_bridged_history_sanitizes_invalid_json_tool_args(
+    minimal_pool: AgentPool,
+) -> None:
+    """Bridged history replaces invalid JSON args with {} and injects RetryPromptPart.
+
+    Given: An agent with conversation history containing a ToolCallPart
+           whose args is an invalid JSON string (e.g. from deepseek-v4-flash).
+    When: A new prompt is sent (bridging conversation to message_history).
+    Then: The ToolCallPart's args are replaced with {} and a RetryPromptPart
+          is injected, so the model API doesn't reject the history with 400.
+    """
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        RetryPromptPart,
+        ToolCallPart,
+        UserPromptPart,
+    )
+
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
+    session_id = "sess-invalid-json-tool-args"
+    await session_pool.create_session(session_id, agent_name="test_agent")
+
+    agent = await session_pool.sessions.get_or_create_session_agent(session_id)
+
+    # Simulate what deepseek-v4-flash produces: invalid JSON string args
+    tool_call = ToolCallPart(
+        tool_name="send_message",
+        args='{"target": "operator", "message": "do',  # truncated/invalid JSON
+        tool_call_id="call_invalid_1",
+    )
+    prior_messages: list[Any] = [
+        ModelRequest(parts=[UserPromptPart(content="send a message")]),
+        ModelResponse(parts=[tool_call]),
+    ]
+    chat_msg1 = ChatMessage(content="send a message", role="user")
+    chat_msg1.messages = [prior_messages[0]]
+    chat_msg2 = ChatMessage(content="", role="assistant")
+    chat_msg2.messages = [prior_messages[1]]
+    agent.conversation.add_chat_messages([chat_msg1, chat_msg2])
+
+    received_history: list[Any] = []
+
+    def _create_turn(
+        prompts: Any, run_ctx: AgentRunContext, message_history: Any, **kwargs: Any
+    ) -> Turn:
+        received_history.extend(message_history)
+        return _StubTurn_e2e(
+            events=[
+                RunStartedEvent(run_id="test-run"),
+                StreamCompleteEvent(message=ChatMessage(content="response", role="assistant")),
+            ],
+            message_history=["msg"],
+        )
+
+    agent.create_turn = _create_turn  # type: ignore[method-assign]
+
+    queue = await session_pool.event_bus.subscribe(session_id)
+
+    await asyncio.wait_for(
+        session_pool.send_message(session_id, "follow up"),
+        timeout=10.0,
+    )
+    await _collect_events_until(queue, StreamCompleteEvent, timeout=10.0)
+
+    # Find the ModelResponse in the bridged history
+    model_responses = [m for m in received_history if isinstance(m, ModelResponse)]
+    assert len(model_responses) >= 1, (
+        f"Expected at least 1 ModelResponse in history, got {len(model_responses)}"
+    )
+
+    # The ToolCallPart should have args={} (sanitized)
+    tool_call_parts = [p for p in model_responses[0].parts if isinstance(p, ToolCallPart)]
+    assert len(tool_call_parts) >= 1, "Expected at least 1 ToolCallPart"
+    sanitized_tc = tool_call_parts[0]
+    assert sanitized_tc.args == {}, (
+        f"Expected args to be {{}} after sanitization, got {sanitized_tc.args!r}"
+    )
+
+    # A RetryPromptPart should be injected for the invalid tool call
+    last_msg = received_history[-1]
+    assert isinstance(last_msg, ModelRequest), (
+        f"Expected last message to be ModelRequest with RetryPromptPart, "
+        f"got {type(last_msg).__name__}"
+    )
+    retry_parts = [p for p in last_msg.parts if isinstance(p, RetryPromptPart)]
+    assert len(retry_parts) >= 1, (
+        "Expected at least 1 RetryPromptPart for the invalid JSON tool call"
+    )
+
+    _assert_cancel_invariants(session_pool, session_id)
+    handle = session_pool._get_active_run_handle(session_id)
+    if handle is not None:
+        handle.close()
+    await asyncio.sleep(0.1)
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_bridged_history_sanitizes_mixed_tool_calls(
+    minimal_pool: AgentPool,
+) -> None:
+    """Mixed valid/invalid tool calls: only invalid args replaced, all get RetryPromptPart.
+
+    Given: A ModelResponse with two ToolCallParts — one valid JSON, one invalid.
+    When: A new prompt is sent.
+    Then: The invalid one's args are replaced with {}, the valid one's args
+          are preserved, and both get RetryPromptParts (both are unprocessed).
+    """
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        RetryPromptPart,
+        ToolCallPart,
+        UserPromptPart,
+    )
+
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
+    session_id = "sess-mixed-tool-args"
+    await session_pool.create_session(session_id, agent_name="test_agent")
+
+    agent = await session_pool.sessions.get_or_create_session_agent(session_id)
+
+    valid_call = ToolCallPart(
+        tool_name="bash",
+        args='{"cmd": "ls"}',
+        tool_call_id="call_valid_1",
+    )
+    invalid_call = ToolCallPart(
+        tool_name="read",
+        args='{"path": "scratch',  # invalid JSON
+        tool_call_id="call_invalid_1",
+    )
+    prior_messages: list[Any] = [
+        ModelRequest(parts=[UserPromptPart(content="run tools")]),
+        ModelResponse(parts=[valid_call, invalid_call]),
+    ]
+    chat_msg1 = ChatMessage(content="run tools", role="user")
+    chat_msg1.messages = [prior_messages[0]]
+    chat_msg2 = ChatMessage(content="", role="assistant")
+    chat_msg2.messages = [prior_messages[1]]
+    agent.conversation.add_chat_messages([chat_msg1, chat_msg2])
+
+    received_history: list[Any] = []
+
+    def _create_turn(
+        prompts: Any, run_ctx: AgentRunContext, message_history: Any, **kwargs: Any
+    ) -> Turn:
+        received_history.extend(message_history)
+        return _StubTurn_e2e(
+            events=[
+                RunStartedEvent(run_id="test-run"),
+                StreamCompleteEvent(message=ChatMessage(content="response", role="assistant")),
+            ],
+            message_history=["msg"],
+        )
+
+    agent.create_turn = _create_turn  # type: ignore[method-assign]
+
+    queue = await session_pool.event_bus.subscribe(session_id)
+
+    await asyncio.wait_for(
+        session_pool.send_message(session_id, "follow up"),
+        timeout=10.0,
+    )
+    await _collect_events_until(queue, StreamCompleteEvent, timeout=10.0)
+
+    model_responses = [m for m in received_history if isinstance(m, ModelResponse)]
+    assert len(model_responses) >= 1
+
+    tool_call_parts = [p for p in model_responses[0].parts if isinstance(p, ToolCallPart)]
+    assert len(tool_call_parts) == 2
+
+    # Find by tool_call_id
+    tc_by_id = {tc.tool_call_id: tc for tc in tool_call_parts}
+    valid_tc = tc_by_id["call_valid_1"]
+    invalid_tc = tc_by_id["call_invalid_1"]
+
+    # Valid args preserved
+    assert valid_tc.args == '{"cmd": "ls"}', (
+        f"Valid args should be preserved, got {valid_tc.args!r}"
+    )
+    # Invalid args replaced with {}
+    assert invalid_tc.args == {}, (
+        f"Invalid args should be replaced with {{}}, got {invalid_tc.args!r}"
+    )
+
+    # Both should have RetryPromptParts (each in a separate ModelRequest)
+    trailing_requests = [
+        m
+        for m in received_history
+        if isinstance(m, ModelRequest) and any(isinstance(p, RetryPromptPart) for p in m.parts)
+    ]
+    assert len(trailing_requests) >= 2, (
+        f"Expected at least 2 ModelRequests with RetryPromptPart, got {len(trailing_requests)}"
+    )
+
+    _assert_cancel_invariants(session_pool, session_id)
+    handle = session_pool._get_active_run_handle(session_id)
+    if handle is not None:
+        handle.close()
+    await asyncio.sleep(0.1)
+
+
+# ---------------------------------------------------------------------------
 # Merged from test_cancelled_cleanup_review.py (suffix: cr)
 # ---------------------------------------------------------------------------
 
