@@ -113,7 +113,7 @@ def run_alembic_migrations(connection: Any) -> None:
     alembic_cfg.attributes["connection"] = connection
     script = ScriptDirectory.from_config(alembic_cfg)
 
-    def upgrade_fn(rev: str, context: EnvironmentContext) -> list:  # type: ignore[type-arg]
+    def upgrade_fn(rev: str, context: EnvironmentContext) -> list[Any]:  # type: ignore[type-arg]
         return script._upgrade_revs("head", rev)
 
     with EnvironmentContext(

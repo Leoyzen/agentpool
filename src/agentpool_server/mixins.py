@@ -53,7 +53,7 @@ class ProtocolEventConsumerMixin(ABC):
         """
         super().__init__()
         self._session_scopes: dict[str, anyio.CancelScope] = {}
-        self._session_groups: dict[str, anyio.abc.TaskGroup] = {}
+        self._session_groups: dict[str, anyio.abc.TaskGroup] = {}  # ty: ignore[unresolved-attribute]
         self._consumer_streams: dict[str, asyncio.Queue[EventEnvelope]] = {}
         self._consumer_locks: dict[str, asyncio.Lock] = {}
         self._consumer_tasks: dict[str, asyncio.Task[None] | None] = {}

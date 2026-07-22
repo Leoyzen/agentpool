@@ -243,7 +243,7 @@ class SignalEmittingGraphRun[StateT, DepsT, OutputT]:
             content = str(content)
         return ChatMessage(
             content=content,
-            role=role,  # type: ignore[arg-type]
+            role=role,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
             session_id=self._session_id,
             metadata={
                 "node_id": task.node_id,

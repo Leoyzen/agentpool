@@ -651,7 +651,7 @@ class OpenCodeInputProvider(InputProvider):
                 requestedSchema={"type": "object", "properties": dict() as props},
                 message=msg,
             ) if len(props) >= 1:
-                questions = [self._property_to_question(k, s) for k, s in list(props.items())[:10]]
+                questions = [self._property_to_question(k, s) for k, s in list(props.items())[:10]]  # ty: ignore[invalid-argument-type]
             case types.ElicitRequestFormParams(message=msg, requestedSchema=schema):
                 logger.info(
                     "Durable elicitation schema not supported for question UI",

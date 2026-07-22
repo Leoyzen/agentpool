@@ -234,7 +234,7 @@ class ACPTurn(HookAwareTurn, Turn):
                                     raw_input=ti,
                                     tool_call_id=tcid,
                                 ):
-                                    await self._fire_pre_tool_hooks(tn, ti, tcid)
+                                    await self._fire_pre_tool_hooks(tn, ti, tcid)  # ty: ignore[invalid-argument-type]
                                 case ToolCallCompleteEvent(
                                     tool_name=tn,
                                     tool_input=ti,

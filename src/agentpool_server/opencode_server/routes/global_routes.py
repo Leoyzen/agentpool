@@ -108,7 +108,7 @@ def _extract_session_id(event: Event) -> str | None:
     # Special-path events: session_id is nested, not at properties.session_id
     match event:
         case SessionCreatedEvent(properties=props):
-            session_id: str | None = props.info.id
+            session_id: str | None = props.info.id  # ty: ignore[unresolved-attribute]
         case SessionUpdatedEvent(properties=props):
             session_id = props.info.id
         case MessageUpdatedEvent(properties=props):

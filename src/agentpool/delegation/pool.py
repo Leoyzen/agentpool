@@ -110,7 +110,7 @@ class AgentPool[TPoolDeps = None]:
             case None:
                 manifest_obj = AgentsManifest()
             case str() | os.PathLike() as path:
-                config_path = to_upath(path)
+                config_path = to_upath(path)  # ty: ignore[invalid-argument-type]
                 path_for_loading = config_path
             case AgentsManifest():
                 manifest_obj = manifest
@@ -126,7 +126,7 @@ class AgentPool[TPoolDeps = None]:
         )
         with ConfigContextManager(config_path):
             if manifest_obj is None:
-                manifest_obj = AgentsManifest.from_file(path_for_loading)  # type: ignore[arg-type]
+                manifest_obj = AgentsManifest.from_file(path_for_loading)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
             logger.debug(
                 "AgentPool.__init__: after manifest load, agents=%s",
                 list(manifest_obj.agents.keys()),

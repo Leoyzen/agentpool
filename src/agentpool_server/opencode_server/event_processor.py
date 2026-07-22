@@ -177,7 +177,11 @@ class EventProcessor:
                 title=title,
             ):
                 for e in self._process_tool_call_start(
-                    ctx, tool_name, tool_call_id, raw_input, title
+                    ctx,
+                    tool_name,  # ty: ignore[invalid-argument-type]
+                    tool_call_id,  # ty: ignore[invalid-argument-type]
+                    raw_input,
+                    title,  # ty: ignore[invalid-argument-type]
                 ):
                     yield e
 

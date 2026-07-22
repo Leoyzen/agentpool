@@ -515,8 +515,8 @@ async def _route_message_locked(  # noqa: PLR0915
         id=assistant_msg_id,
         session_id=session_id,
         parent_id=user_msg_id,
-        model_id=request.model.model_id if request.model else "default",
-        provider_id=request.model.provider_id if request.model else "agentpool",
+        model_id=request.model.model_id if request.model else "default",  # ty: ignore[invalid-argument-type]
+        provider_id=request.model.provider_id if request.model else "agentpool",  # ty: ignore[invalid-argument-type]
         mode=agent_name,
         agent=agent_name,
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),

@@ -45,7 +45,7 @@ class SessionPoolMessagingMixin:
     pool: AgentPool[Any]
 
     @property
-    def event_bus(self) -> EventBus: ...  # type: ignore[empty-body]
+    def event_bus(self) -> EventBus: ...  # type: ignore[empty-body]  # ty: ignore[empty-body]
 
     _message_cache: OrderedDict[str, list[ChatMessage[Any]]]
     _message_cache_maxsize: int

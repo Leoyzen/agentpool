@@ -47,7 +47,7 @@ class SessionPoolRunsMixin:
     pool: AgentPool[Any]
 
     @property
-    def event_bus(self) -> EventBus: ...  # type: ignore[empty-body]
+    def event_bus(self) -> EventBus: ...  # type: ignore[empty-body]  # ty: ignore[empty-body]
 
     def _get_active_run_handle(self, session_id: str) -> RunHandle | None:
         """Get the active RunHandle for a session, if any.

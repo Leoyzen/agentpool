@@ -444,7 +444,7 @@ class MCPClient:
         return FunctionTool.from_callable(
             tool_callable,
             source="mcp",
-            schema_override=schema,  # type: ignore[arg-type]
+            schema_override=schema,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         )
 
     async def call_tool(  # noqa: PLR0915

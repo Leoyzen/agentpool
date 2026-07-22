@@ -299,7 +299,7 @@ class RunHandle:
         ctx = AgentContext(
             agent_registry=registry,
             delegation=delegation,
-            session=self.session,  # type: ignore[arg-type]
+            session=self.session,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
             scope=scope,
             host=self._host_context,
             extension_registry=(

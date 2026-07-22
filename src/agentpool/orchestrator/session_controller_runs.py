@@ -99,8 +99,8 @@ class SessionControllerRunsMixin:
                     session_id=session_id,
                     message_id=message_id or ascending("message"),
                     content=content,
-                    delivery=delivery,  # type: ignore[arg-type]
-                    source=source,  # type: ignore[arg-type]
+                    delivery=delivery,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+                    source=source,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
                     meta=meta,
                 )
                 if self._event_bus is not None:

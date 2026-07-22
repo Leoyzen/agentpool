@@ -317,8 +317,8 @@ def _restore_spawn_topology_from_checkpoint(
     """
     spawn_children: list[str] = session_data.metadata.get("spawn_children", [])
     if not hasattr(state, "checkpoint_spawn_graph"):
-        state.checkpoint_spawn_graph = {}  # type: ignore[attr-defined]
-    state.checkpoint_spawn_graph[session_id] = list(spawn_children)  # type: ignore[attr-defined]
+        state.checkpoint_spawn_graph = {}  # type: ignore[attr-defined]  # ty: ignore[invalid-assignment]
+    state.checkpoint_spawn_graph[session_id] = list(spawn_children)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
     logger.debug(
         "Restored spawn topology from checkpoint",
         session_id=session_id,
@@ -592,7 +592,7 @@ class OpenCodeSessionRoutesMixin:
             run_id = session.current_run_id
             if run_id is not None:
                 run_handle = self.session_pool.sessions._runs.get(run_id)
-                if run_handle is not None and run_handle._run_state in (
+                if run_handle is not None and run_handle._run_state in (  # ty: ignore[unresolved-attribute]
                     RunState.IDLE,
                     RunState.RUNNING,
                 ):

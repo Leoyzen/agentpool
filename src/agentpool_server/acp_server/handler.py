@@ -600,7 +600,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             client_capabilities=self.client_capabilities,
             checkpoint_enabled=session_pool.sessions.store is not None,
         )
-        input_provider = ACPInputProvider(session=session_proxy)  # type: ignore[arg-type]
+        input_provider = ACPInputProvider(session=session_proxy)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
         # Emit user_message_chunk notifications for the user's input before
         # processing the prompt. Per the ACP spec, the server should notify

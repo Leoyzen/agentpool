@@ -40,7 +40,7 @@ class ManagedTaskGroup:
 
     def __init__(self) -> None:
         """Initialize the managed task group with no underlying TaskGroup yet."""
-        self._tg: anyio.abc.TaskGroup | None = None
+        self._tg: anyio.abc.TaskGroup | None = None  # ty: ignore[unresolved-attribute]
         self._pending: list[tuple[_TaskFn, tuple[Any, ...]]] = []
         self._closed: bool = False
         self._active_count: int = 0

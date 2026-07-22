@@ -204,7 +204,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # New shared parameters
         env: ExecutionEnvironment | StrPath | None = None,
         input_provider: InputProvider | None = None,
-        output_type: type[TResult] = str,  # type: ignore[assignment]
+        output_type: type[TResult] = str,  # type: ignore[assignment]  # ty: ignore[invalid-parameter-default]
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
         commands: Sequence[BaseCommand] | None = None,
         hooks: AgentHooks | None = None,
@@ -273,7 +273,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self._session_capabilities: list[Any] = []
         self._tool_mode: Any | None = None
         handlers = resolve_event_handlers(event_handlers)
-        self.event_handler: MultiEventHandler[IndividualEventHandler] = MultiEventHandler(handlers)
+        self.event_handler: MultiEventHandler[IndividualEventHandler] = MultiEventHandler(handlers)  # ty: ignore[invalid-assignment]
         self.hooks = hooks
         self._cancelled = False
         # _background_run_ctx is used only for the background task's internal state.
@@ -920,7 +920,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     self.log.exception("Background run failed")
                     await anyio.sleep(interval)
             self.log.debug("Continuous run completed", iterations=count)
-            return latest  # type: ignore[return-value]
+            return latest  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
 
         await self.stop()  # Cancel any existing background task
         self._cancelled = False  # Reset cancellation flag for backward compat

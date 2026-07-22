@@ -163,7 +163,7 @@ def parallel_if_free_threaded[**P, R](
     is safe for parallel execution on free-threaded builds.
     """
     # For now, just mark it - could be extended later
-    func._parallel_safe = True  # type: ignore[attr-defined]
+    func._parallel_safe = True  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
     return func
 
 

@@ -1400,8 +1400,8 @@ async def run_shell_command(
         id=assistant_msg_id,
         session_id=session_id,
         parent_id="",  # Shell commands don't have a parent user message
-        model_id=request.model.model_id if request.model else "shell",
-        provider_id=request.model.provider_id if request.model else "local",
+        model_id=request.model.model_id if request.model else "shell",  # ty: ignore[invalid-argument-type]
+        provider_id=request.model.provider_id if request.model else "local",  # ty: ignore[invalid-argument-type]
         mode="shell",
         agent=request.agent,
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
