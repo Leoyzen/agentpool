@@ -298,7 +298,7 @@ async def _event_generator(  # noqa: PLR0915
                     data = _serialize_event(event, wrap_payload=True)
                 else:
                     data = _serialize_event(event)
-                logger.info(
+                logger.debug(
                     "SSE: Sending event",
                     event_type=getattr(event, "type", "unknown"),
                     session_id=_extract_session_id(event) or "-",
