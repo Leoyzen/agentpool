@@ -1235,3 +1235,95 @@ async def test_runhandle_dies_in_idle_loop(minimal_pool: AgentPool) -> None:
     )
     second_handle.close()
     await asyncio.sleep(0.1)
+
+
+# ---------------------------------------------------------------------------
+# Test: Cancel with queued prompt — prompt_queue must be drained
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_cancel_with_queued_prompt_drains_queue(
+    minimal_pool: AgentPool,
+) -> None:
+    """Cancel during active run drains prompt_queue — queued message is processed.
+
+    Regression test for the race condition where a message arrives in
+    prompt_queue during the cancel propagation window:
+
+    1. ``_route_message`` enqueues to ``prompt_queue`` (session appears busy).
+    2. ``_consume_run`` is cancelled — ``CancelledError`` is ``BaseException``,
+       not caught by ``except Exception``.
+    3. The ``prompt_queue`` check in ``_consume_run`` (lines 180-202) is SKIPPED.
+    4. ``_cleanup_run`` clears ``current_run_id`` but does NOT check
+       ``prompt_queue``.
+    5. The queued message is stuck forever.
+
+    The fix adds ``prompt_queue`` checking to ``_cleanup_run``, so queued
+    messages are processed even when ``_consume_run`` is cancelled.
+
+    Steps:
+        1. Start a blocking turn.
+        2. Manually enqueue a message to ``prompt_queue`` (simulates race).
+        3. Cancel the run.
+        4. Verify the queued message is processed (events received).
+    """
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
+    session_id = "sess-cancel-queued"
+    await session_pool.create_session(session_id, agent_name="test_agent")
+    await _patch_agent_create_turn(session_pool, session_id, _make_cancel_aware_create_turn())
+    queue = await session_pool.event_bus.subscribe(session_id)
+    first_handle = await _receive_and_get_handle(session_pool, session_id, "first prompt")
+    assert first_handle is not None
+
+    # Wait for the blocking turn to start.
+    await asyncio.sleep(0.1)
+
+    # Manually enqueue a message to prompt_queue — simulates a message
+    # that arrived during the cancel race window via _route_message's
+    # busy path (session appeared busy, complete_event not yet set).
+    session = session_pool.sessions.get_session(session_id)
+    assert session is not None
+    session.prompt_queue.put_nowait("second prompt")
+
+    # Cancel the active run.
+    session_pool.sessions.cancel_run_for_session(session_id)
+
+    # Wait for events from the queued message being processed.
+    post_events: list[Any] = []
+    try:
+        async with asyncio.timeout(10.0):
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=5.0)
+                    post_events.append(event)
+                    unwrapped = _unwrap_event(event)
+                    if isinstance(unwrapped, StreamCompleteEvent):
+                        break
+                except TimeoutError:
+                    break
+    except TimeoutError:
+        pytest.fail(
+            "Timed out waiting for events after cancel with queued prompt — "
+            "message stuck in prompt_queue (race condition bug)"
+        )
+
+    post_event_types = [type(_unwrap_event(e)) for e in post_events]
+
+    # The queued message should have been processed: RunStartedEvent
+    # and StreamCompleteEvent should be in the events.
+    assert RunStartedEvent in post_event_types, (
+        f"Expected RunStartedEvent for queued prompt, got: {post_event_types}"
+    )
+    assert StreamCompleteEvent in post_event_types, (
+        f"Expected StreamCompleteEvent for queued prompt, got: {post_event_types}"
+    )
+
+    # Cleanup
+    first_handle.close()
+    second_handle = session_pool._get_active_run_handle(session_id)
+    if second_handle is not None and second_handle is not first_handle:
+        second_handle.close()
+    await asyncio.sleep(0.1)
