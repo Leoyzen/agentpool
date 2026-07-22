@@ -163,6 +163,21 @@ class SessionState:
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.monotonic)
     last_active_at: float = field(default_factory=time.monotonic)
+    created_at_ns: int = field(default_factory=time.time_ns)
+    """Wall-clock creation timestamp (epoch nanoseconds, ``time.time_ns()``).
+
+    Uses the same clock as session ID generation (``now_ms()`` →
+    ``time.time_ns() // 1_000_000``), ensuring ``time.created`` order
+    matches session ID lexicographic order.  Integer arithmetic avoids
+    the float precision loss in the monotonic→epoch conversion.
+    """
+    last_active_at_ns: int = field(default_factory=time.time_ns)
+    """Wall-clock last-activity timestamp (epoch nanoseconds, ``time.time_ns()``).
+
+    Updated alongside ``last_active_at`` (monotonic) at every activity
+    site.  Used for millisecond-precise ``time.updated`` in OpenCode
+    session models via integer division (``// 1_000_000``).
+    """
     created_at_wall: datetime = field(default_factory=get_now)
     """Wall-clock creation timestamp (UTC datetime) for persistence.
 

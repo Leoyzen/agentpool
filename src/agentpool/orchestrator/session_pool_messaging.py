@@ -224,6 +224,7 @@ class SessionPoolMessagingMixin:
         if session is None:
             return None
         session.last_active_at = time.monotonic()
+        session.last_active_at_ns = time.time_ns()
         if input_provider is not None:
             session.input_provider = input_provider
         agent = await self.sessions.get_or_create_session_agent(

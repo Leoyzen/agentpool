@@ -258,14 +258,10 @@ def _session_state_to_opencode(state: Any) -> Session:
     Returns:
         OpenCode Session model.
     """
-    import time
-
     from agentpool_storage.opencode_provider import helpers
 
-    now_mono = time.monotonic()
-    now_epoch = time.time()
-    created_ms = int((now_epoch - (now_mono - state.created_at)) * 1000)
-    updated_ms = int((now_epoch - (now_mono - state.last_active_at)) * 1000)
+    created_ms = state.created_at_ns // 1_000_000
+    updated_ms = state.last_active_at_ns // 1_000_000
     directory = state.metadata.get("cwd", "")
     project_id = state.metadata.get("project_id", "")
     if not project_id and directory:

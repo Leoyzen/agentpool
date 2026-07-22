@@ -144,6 +144,7 @@ class SessionControllerAgentMixin:
         if session_id in self._sessions:
             state = self._sessions[session_id]
             state.last_active_at = time.monotonic()
+            state.last_active_at_ns = time.time_ns()
             return state, False
 
         effective_policy = lifecycle_policy or (
