@@ -355,7 +355,7 @@ def e2e_config_with_tool(tmp_path: Path) -> Path:
                     "tool_args": {"bash": {"command": "echo hello"}},
                 },
                 "system_prompt": "You are a test assistant with tools.",
-                "tools": [{"name": "bash", "enabled": True}],
+                "tools": [{"type": "bash"}],
             }
         }
     }
@@ -394,7 +394,7 @@ def session_e2e_config_with_tool(tmp_path_factory: pytest.TempPathFactory) -> Pa
                     "tool_args": {"bash": {"command": "echo hello"}},
                 },
                 "system_prompt": "You are a test assistant with tools.",
-                "tools": [{"name": "bash", "enabled": True}],
+                "tools": [{"type": "bash"}],
             }
         },
         "storage": {"providers": [{"type": "memory"}]},
