@@ -348,6 +348,13 @@ class NativeTurn(HookAwareTurn, Turn):
                     #    closes the generator, setting _turn_complete_event
                     #    in start()'s finally block — unblocking legacy
                     #    clients waiting on the PromptResponse.
+                    # Flush pending tool calls so downstream consumers receive
+                    # ToolCallCompleteEvent for in-progress tools, and log them
+                    # to the journal with status="cancelled" for crash recovery.
+                    cancelled_events = mapper.flush_cancelled_tool_calls()
+                    self._log_cancelled_tool_executions(cancelled_events)
+                    for tool_event in cancelled_events:
+                        yield tool_event
                     yield StreamCompleteEvent(
                         message=self._final_message,
                         cancelled=True,
@@ -370,6 +377,13 @@ class NativeTurn(HookAwareTurn, Turn):
                         if agent_run is not None:
                             with contextlib.suppress(Exception):
                                 self._set_message_history(agent_run.all_messages())
+                        # Flush pending tool calls so downstream consumers receive
+                        # ToolCallCompleteEvent for in-progress tools, and log
+                        # them to the journal with status="cancelled".
+                        cancelled_events = mapper.flush_cancelled_tool_calls()
+                        self._log_cancelled_tool_executions(cancelled_events)
+                        for tool_event in cancelled_events:
+                            yield tool_event
                         self._final_message = ChatMessage(
                             content="",
                             role="assistant",
@@ -506,6 +520,13 @@ class NativeTurn(HookAwareTurn, Turn):
                 # exit without yielding StreamCompleteEvent.
                 if self._run_ctx.cancelled:
                     logger.info("Skipping StreamCompleteEvent — run_ctx.cancelled is True")
+                    # Flush pending tool calls so downstream consumers receive
+                    # ToolCallCompleteEvent for in-progress tools, and log
+                    # them to the journal with status="cancelled".
+                    cancelled_events = mapper.flush_cancelled_tool_calls()
+                    self._log_cancelled_tool_executions(cancelled_events)
+                    for tool_event in cancelled_events:
+                        yield tool_event
                     return
 
                 logger.info("Yielding StreamCompleteEvent")
