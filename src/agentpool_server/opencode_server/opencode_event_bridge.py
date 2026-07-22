@@ -31,6 +31,8 @@ from agentpool_server.opencode_server.event_processor_context import (
 )
 from agentpool_server.opencode_server.models import (
     AssistantMessage,
+    MessageAbortedError,
+    MessageAbortedErrorData,
     MessagePath,
     MessageTime,
     MessageUpdatedEvent,
@@ -228,6 +230,22 @@ class OpenCodeEventBridgeMixin:
             info.time.completed = now_ms()
             await self.server_state.broadcast_event(MessageUpdatedEvent.create(info))
             await append_message_to_session(self.server_state, session_id, ctx.assistant_msg)
+
+    async def _persist_assistant_message(self, session_id: str) -> None:
+        """Persist the finalized assistant message to storage.
+
+        Called after _finalize_assistant_time on StreamCompleteEvent and
+        RunFailedEvent. This replaces the storage persistence previously
+        done by _wait_and_finalize in the synchronous POST /message path.
+        """
+        from agentpool_server.opencode_server.routes.message_routes import (
+            persist_message_to_storage,
+        )
+
+        ctx = self._contexts.get(session_id)
+        if ctx is None:
+            return
+        await persist_message_to_storage(self.server_state, ctx.assistant_msg, session_id)
 
     async def _before_consumer_loop(self, session_id: str) -> None:
         """Set up per-session context before the consumer loop starts.
@@ -460,6 +478,8 @@ class OpenCodeEventBridgeMixin:
                     # assistant message, so the event bridge must do it here
                     # when StreamCompleteEvent arrives.
                     await self._finalize_assistant_time(session_id)
+                    # Persist the finalized assistant message to storage.
+                    await self._persist_assistant_message(session_id)
                 case RunFailedEvent(exception=exc):
                     await set_session_status(
                         self.server_state, session_id, SessionStatus(type="idle")
@@ -484,10 +504,29 @@ class OpenCodeEventBridgeMixin:
                     # false-positive warning about a missed
                     # StreamCompleteEvent.
                     await self._finalize_assistant_time(session_id)
+                    # Set aborted error on the assistant message.
+                    ctx = self._contexts.get(session_id)
+                    if ctx is not None and isinstance(ctx.assistant_msg.info, AssistantMessage):
+                        info = ctx.assistant_msg.info
+                        if info.error is None:
+                            if isinstance(exc, asyncio.CancelledError):
+                                reason = "Request cancelled by user"
+                            elif isinstance(exc, Exception):
+                                reason = f"Error: {exc}"
+                            else:
+                                reason = "Run failed"
+                            info.error = MessageAbortedError(
+                                data=MessageAbortedErrorData(message=reason)
+                            )
+                            await self.server_state.broadcast_event(
+                                MessageUpdatedEvent.create(info)
+                            )
                     if isinstance(exc, Exception) and not isinstance(exc, asyncio.CancelledError):
                         await self.server_state.broadcast_event(
                             SessionErrorEvent.from_exception(exc, session_id=session_id)
                         )
+                    # Persist the aborted assistant message to storage.
+                    await self._persist_assistant_message(session_id)
                 case _:
                     pass
 
@@ -545,11 +584,10 @@ class OpenCodeEventBridgeMixin:
             # state lookup in _before_consumer_loop (which may not have the
             # agent name for sessions created outside the REST handler).
             if isinstance(event, RunStartedEvent) and event.agent_name:
-                info = ctx.assistant_msg.info
-                if isinstance(info, AssistantMessage):
-                    info.agent = event.agent_name
-                    info.mode = event.agent_name
-
+                msg_info = ctx.assistant_msg.info
+                if isinstance(msg_info, AssistantMessage):
+                    msg_info.agent = event.agent_name
+                    msg_info.mode = event.agent_name
             # NOTE: Do NOT overwrite ctx.assistant_msg_id from event.message_id.
             # NativeTurn generates its own UUID for _message_id (uuid4().hex)
             # which is different from the canonical assistant_msg_id generated

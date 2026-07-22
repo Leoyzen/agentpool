@@ -89,6 +89,16 @@ def _make_functional_event_bus() -> Mock:
     return bus
 
 
+async def _check_event_stream_for_failure(event_stream: Any, failure_type: type) -> bool:
+    """Check an event stream for a failure event. Returns True if found."""
+    from agentpool.orchestrator.core import drain_and_merge
+
+    async for event in drain_and_merge(event_stream):
+        if isinstance(event.event, failure_type):
+            return True
+    return False
+
+
 async def run_message_phases(
     session_id: str,
     request: MessageRequest,
@@ -96,27 +106,217 @@ async def run_message_phases(
     user_msg_id: str,
     user_msg_with_parts: MessageWithParts,
 ) -> Any:
-    """Run phases 1 and 2 of message processing without the per-session lock.
+    """Run Phase 1 of message processing and wait for completion.
 
     This is the test equivalent of ``_process_message()`` but without the
-    lock (unit tests don't need lock serialization) and without phase 3
-    (``_mark_session_idle_safe`` is a lock concern, not relevant to unit
-    tests).  It runs:
+    per-session lock. In the async model, finalization (tokens, cost,
+    time.completed, storage persistence) is handled by the session-scoped
+    event consumer on StreamCompleteEvent / RunFailedEvent.
 
-    1. ``_route_message_locked`` — setup + route
-    2. ``_wait_and_finalize`` — wait + finalize
+    For tests without a real event consumer (no session_pool_integration),
+    this helper does inline finalization by:
+    1. Subscribing to the EventBus BEFORE routing (so events aren't lost)
+    2. Waiting for the agent run to finish
+    3. Draining collected events and feeding them to the adapter
+    4. Setting tokens, error state, and adding messages to state
 
-    Returns the ``_MessageRunContext`` so callers that need phase 3 can
-    call ``_mark_session_idle_safe`` explicitly.
+    Returns the ``_MessageRunContext``.
     """
     from agentpool_server.opencode_server.routes.message_routes import (
         _route_message_locked,
-        _wait_and_finalize,
     )
 
+    # Subscribe to the event bus BEFORE routing so we don't miss events
+    # published by the background run task.
+    session_pool_for_sub = state.pool.session_pool if state.pool else None
+    early_event_stream: asyncio.Queue[Any] | None = None
+    if session_pool_for_sub is not None and hasattr(session_pool_for_sub, "event_bus"):
+        event_bus = session_pool_for_sub.event_bus
+        if event_bus is not None and hasattr(event_bus, "subscribe"):
+            with contextlib.suppress(Exception):
+                early_event_stream = await event_bus.subscribe(session_id)
+
     ctx = await _route_message_locked(session_id, request, state, user_msg_id, user_msg_with_parts)
-    await _wait_and_finalize(session_id, state, ctx)
+
+    session_pool = ctx.session_pool
+    run_failed = False
+    if session_pool is not None and ctx.message_id is not None:
+        # Wait for the agent run to complete
+        coro = session_pool.wait_for_completion(session_id, timeout=10)
+        if asyncio.iscoroutine(coro):
+            try:
+                await coro
+            except TimeoutError:
+                pass
+            except asyncio.CancelledError:
+                run_failed = True
+        else:
+            # Mock objects — wait_for_completion is not a real coroutine.
+            # In mock setups, ctx.message_id may be the run_handle returned
+            # by session_pool.send_message(). Try awaiting its complete_event.
+            msg_id = ctx.message_id
+            if hasattr(msg_id, "complete_event") and hasattr(msg_id.complete_event, "wait"):
+                wait_coro = msg_id.complete_event.wait()
+                if asyncio.iscoroutine(wait_coro):
+                    try:
+                        await asyncio.wait_for(wait_coro, timeout=0.5)
+                    except TimeoutError:
+                        pass
+                    except asyncio.CancelledError:
+                        run_failed = True
+                    except Exception:  # noqa: BLE001
+                        pass
+
+    # Give event consumer time to process finalization events
+    await asyncio.sleep(0.1)
+
+    # Drain early event stream: feed events to adapter and check for RunFailedEvent
+    if early_event_stream is not None:
+        from agentpool.agents.events.events import RunFailedEvent
+
+        with contextlib.suppress(Exception):
+            found_failure = await _drain_events_and_check_failure(
+                early_event_stream,
+                ctx.adapter,
+                RunFailedEvent,
+            )
+            if found_failure:
+                run_failed = True
+
+    # Unsubscribe the early event stream
+    if (
+        early_event_stream is not None
+        and session_pool is not None
+        and hasattr(session_pool, "event_bus")
+    ):
+        with contextlib.suppress(Exception):
+            await session_pool.event_bus.unsubscribe(session_id, early_event_stream)
+
+    # If no event consumer is running (no session_pool_integration),
+    # do inline finalization so tests can verify message state.
+    integration = ctx.integration
+    if integration is None:
+        await _finalize_assistant_inline(session_id, state, ctx, run_failed=run_failed)
+
     return ctx
+
+
+async def _finalize_assistant_inline(
+    session_id: str,
+    state: ServerState,
+    ctx: Any,
+    *,
+    run_failed: bool = False,
+) -> None:
+    """Inline finalization for tests without an event consumer.
+
+    Simulates what the session-scoped event consumer does on
+    StreamCompleteEvent / RunFailedEvent:
+    1. Finalize the adapter (broadcast StepFinishPart etc.)
+    2. Set tokens/cost/time.completed on the assistant message
+    3. Add the assistant message to state.messages
+    4. If run_failed, set MessageAbortedError and add aborted
+       ChatMessage to the agent's conversation
+
+    Note: EventBus events should already be drained and fed to the adapter
+    by the caller (run_message_phases via _drain_events_and_check_failure).
+    """
+    from agentpool_server.opencode_server.models import (
+        AssistantMessage,
+        MessageAbortedError,
+        MessageAbortedErrorData,
+        Tokens,
+    )
+
+    assistant_msg = ctx.assistant_msg_with_parts
+    info = assistant_msg.info
+    if not isinstance(info, AssistantMessage):
+        return
+
+    adapter = ctx.adapter
+
+    # 1. Finalize adapter — broadcast events via state
+    if not run_failed:
+        for oc_event in adapter.finalize():
+            await state.broadcast_event(oc_event)
+
+    # 3. Set tokens/cost/time.completed
+    if info.time.completed is None:
+        info.time.completed = now_ms()
+        if not run_failed:
+            tokens = Tokens.from_pydantic_ai(adapter.usage)
+            info.tokens = tokens
+            info.cost = float(adapter.cost_info.total_cost) if adapter.cost_info else 0.0
+
+    # 4. Set MessageAbortedError if run failed
+    if run_failed and info.error is None:
+        info.error = MessageAbortedError(
+            data=MessageAbortedErrorData(message="Request cancelled by user")
+        )
+
+    # 5. Add assistant message to state.messages
+    if session_id not in state.messages:
+        state.messages[session_id] = []
+    existing = [
+        m
+        for m in state.messages[session_id]
+        if isinstance(m.info, AssistantMessage) and m.info.id == info.id
+    ]
+    if not existing:
+        state.messages[session_id].append(assistant_msg)
+
+    # 6. If run_failed, add aborted ChatMessage to agent's conversation
+    if run_failed:
+        sp_session_pool = ctx.session_pool
+        if sp_session_pool is not None and hasattr(sp_session_pool, "sessions"):
+            sp_session = sp_session_pool.sessions.get_session(session_id)
+            if sp_session is not None and getattr(sp_session, "agent", None) is not None:
+                from agentpool_server.opencode_server.routes.message_routes import (
+                    opencode_to_chat_message,
+                )
+
+                chat_msg = opencode_to_chat_message(assistant_msg, session_id=session_id)
+                sp_session.agent.conversation.add_chat_messages([chat_msg], extend_last=True)
+
+
+async def _drain_events_and_check_failure(
+    event_stream: Any,
+    adapter: Any,
+    failure_type: type,
+) -> bool:
+    """Drain pending events from EventBus queue, feed to adapter, check for failure.
+
+    Uses get_nowait() to avoid blocking — only drains events already in the queue.
+    Handles both real EventBus (EventEnvelope-wrapped) and mock (raw events).
+    """
+    found_failure = False
+    while True:
+        try:
+            event = event_stream.get_nowait()
+        except Exception:  # noqa: BLE001
+            break
+        # Unwrap EventEnvelope if present (real EventBus wraps events)
+        raw_event = getattr(event, "event", event)
+        # Feed event to adapter
+        if adapter is not None and hasattr(adapter, "convert_event"):
+            async for _ in adapter.convert_event(raw_event):
+                pass
+        if isinstance(raw_event, failure_type):
+            found_failure = True
+    return found_failure
+
+
+async def _drain_event_stream(event_stream: Any, adapter: Any) -> None:
+    """Drain pending events from EventBus queue and feed them to the adapter."""
+    while True:
+        try:
+            event = event_stream.get_nowait()
+        except Exception:  # noqa: BLE001
+            break
+        raw_event = getattr(event, "event", event)
+        if adapter is not None and hasattr(adapter, "convert_event"):
+            async for _ in adapter.convert_event(raw_event):
+                pass
 
 
 # =============================================================================

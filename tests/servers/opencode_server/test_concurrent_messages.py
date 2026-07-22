@@ -358,8 +358,14 @@ class TestConcurrentMessageHandling:
             if isinstance(result, Exception):
                 pytest.fail(f"Exception during processing: {result}")
 
-        # Verify both messages were processed
-        assert len(state.messages[session_id]) == 4  # 2 user + 2 assistant messages
+        # Verify both messages were processed.
+        # In the async model, _process_message only adds user messages —
+        # assistant messages are registered by the event consumer on
+        # StreamCompleteEvent. We verify both user messages were added
+        # and the agent was called twice.
+        assert len(state.messages[session_id]) == 2  # 2 user messages
+        user_msgs = [m for m in state.messages[session_id] if m.info.role == "user"]
+        assert len(user_msgs) == 2
 
         # Verify the agent was called twice
         agent_mock = cast(SlowAgentMock, state.agent)
@@ -434,13 +440,16 @@ class TestConcurrentMessageHandling:
             return_exceptions=True,
         )
 
-        # Verify both sessions processed their messages without errors
+        # Verify both sessions processed their messages without errors.
+        # In the async model, _process_message only adds user messages —
+        # assistant messages are registered by the event consumer on
+        # StreamCompleteEvent.
         for result in results:
             assert not isinstance(result, Exception), f"Unexpected error: {result}"
 
-        # Verify both sessions have their messages
-        assert len(state.messages[session_id_1]) == 2  # user + assistant
-        assert len(state.messages[session_id_2]) == 2  # user + assistant
+        # Verify both sessions have their user messages
+        assert len(state.messages[session_id_1]) == 1  # user message
+        assert len(state.messages[session_id_2]) == 1  # user message
 
     @pytest.mark.asyncio
     async def test_message_ordering_preserved_under_concurrency(
