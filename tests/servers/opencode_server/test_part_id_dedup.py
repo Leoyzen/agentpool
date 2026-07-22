@@ -7,9 +7,12 @@ both (from ``sync.session.sync()`` and SSE ``message.part.updated``),
 the binary search by part ID fails to deduplicate, causing the text to
 appear twice.
 
-Fix: for ``source="protocol"`` messages, EventProcessor only yields
-``MessageUpdatedEvent`` (not ``PartUpdatedEvent``). Parts come from
-``sync.session.sync()`` which loads from DB.
+P1 fix: ``PartUpdatedEvent`` is now ALWAYS yielded regardless of source.
+The TUI has no optimistic mechanism — it relies entirely on SSE events
+for parts. Without ``PartUpdatedEvent``, user messages appear empty after
+the initial sync() (which only runs once per session). Part IDs from
+``_deserialize_part()`` preserve the original IDs from meta, so they
+match DB-stored parts — no duplicate risk for new messages.
 """
 
 from __future__ import annotations
@@ -59,11 +62,10 @@ def _make_ctx(session_id: str = "test-session") -> Any:
 
 @pytest.mark.unit
 async def test_protocol_source_does_not_yield_part_updated_events() -> None:
-    """source=protocol should NOT yield PartUpdatedEvent.
+    """source=protocol now YIELDS PartUpdatedEvent (P1 fix).
 
-    Parts come from sync.session.sync() (DB). Sending PartUpdatedEvent
-    with original part IDs would conflict with DB-reconstructed parts
-    (which have different IDs), causing duplicate text in TUI.
+    P1: PartUpdatedEvent is always yielded regardless of source because
+    the TUI has no optimistic mechanism. Parts come from SSE events.
     """
     processor = EventProcessor()
     ctx = _make_ctx("test-session")
@@ -97,9 +99,10 @@ async def test_protocol_source_does_not_yield_part_updated_events() -> None:
         ):
             events.append(e)  # noqa: PERF401
 
-    # Should yield exactly 1 event: MessageUpdatedEvent (no PartUpdatedEvent)
-    assert len(events) == 1, f"Expected 1 event for protocol source, got {len(events)}: {events}"
-    assert events[0].type == "message.updated", f"Expected message.updated, got {events[0].type}"
+    # P1: Should yield 2 events: MessageUpdatedEvent + PartUpdatedEvent
+    assert len(events) == 2, f"Expected 2 events for protocol source, got {len(events)}: {events}"
+    assert events[0].type == "message.updated"
+    assert events[1].type == "message.part.updated"
 
 
 @pytest.mark.unit
@@ -187,7 +190,7 @@ async def test_protocol_source_part_ids_differ_from_db_reconstruction() -> None:
 
 @pytest.mark.unit
 async def test_protocol_source_no_part_updated_with_text_content() -> None:
-    """source=protocol with text-only content (no meta) should not yield PartUpdatedEvent."""
+    """source=protocol with text-only content (no meta) now yields PartUpdatedEvent (P1 fix)."""
     processor = EventProcessor()
     ctx = _make_ctx("test-session")
     ctx.state = MagicMock()
@@ -208,9 +211,10 @@ async def test_protocol_source_no_part_updated_with_text_content() -> None:
         ):
             events.append(e)  # noqa: PERF401
 
-    # Should yield exactly 1 event: MessageUpdatedEvent only
-    assert len(events) == 1
+    # P1: Should yield 2 events: MessageUpdatedEvent + PartUpdatedEvent
+    assert len(events) == 2
     assert events[0].type == "message.updated"
+    assert events[1].type == "message.part.updated"
 
 
 @pytest.mark.unit
