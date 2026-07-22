@@ -907,6 +907,16 @@ async def get_session_messages(
     Returns:
         List of messages with their parts
     """
+    # Clear EventBus replay buffer so that events published before this sync()
+    # call are not re-delivered to reconnecting SSE subscribers.  Without this,
+    # the TUI would receive duplicate message.part.updated events from the
+    # replay buffer AND from the sync() response, causing the first user
+    # message to render twice.
+    if state.event_bridge is not None:
+        event_bus = state.event_bridge._event_bus
+        if event_bus is not None:
+            event_bus.clear_replay_buffer(session_id)
+
     # Fast path for subagent/child sessions already in memory:
     # Skip get_or_load_session (which may load from storage) because the
     # parent agent is streaming and subagent parts are in memory.
