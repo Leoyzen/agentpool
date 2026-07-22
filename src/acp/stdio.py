@@ -37,7 +37,7 @@ class StdinStream(ByteReceiveStream):
         loop = asyncio.get_running_loop()
         # read1() returns immediately when any data is available (up to max_bytes)
         # unlike read() which blocks until exactly max_bytes are read or EOF
-        data: bytes = await loop.run_in_executor(None, sys.stdin.buffer.read1, max_bytes)  # type: ignore[union-attr]
+        data: bytes = await loop.run_in_executor(None, sys.stdin.buffer.read1, max_bytes)  # type: ignore[union-attr]  # ty: ignore[unresolved-attribute]
         if not data:
             raise anyio.EndOfStream
         return data

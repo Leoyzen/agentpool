@@ -777,8 +777,9 @@ class TestConcurrencyAndLocking:
                 f"(issue B3: Phase 1 blocked by lock)."
             )
 
-            # The queued user message (user2) should have content "queued message"
-            user2_text = _extract_text_part_text(messages[2])
-            assert "queued" in user2_text.lower(), (
-                f"Second user message should contain 'queued message', got: {user2_text!r}"
-            )
+            # User message content is now delivered via SSE (message.part.updated) only,
+            # not via the REST API (user message parts stripped to prevent TUI duplication).
+            # The order assertion above (B3: queued message before assistant response) is
+            # the primary purpose of this test and is covered by the role sequence check.
+            # user2_content = _extract_text_part_text(messages[2])
+            # assert "queued" in user2_content.lower(), (...)

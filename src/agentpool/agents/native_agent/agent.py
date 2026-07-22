@@ -277,7 +277,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # Override conversation with Agent-specific MessageHistory (with storage, etc.)
         resources = list(resources)
         if knowledge:
-            resources.extend(knowledge.get_resources())  # type: ignore[arg-type]
+            resources.extend(knowledge.get_resources())  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         manifest = agent_pool.manifest if agent_pool else AgentsManifest()
         storage = agent_pool.storage if agent_pool else StorageManager()
         self.conversation = MessageHistory(
@@ -715,7 +715,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             Self (same instance, not a copy)
         """
         self.log.debug("Setting result type", output_type=output_type)
-        self._output_type = to_type(output_type)  # type: ignore[assignment]
+        self._output_type = to_type(output_type)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
         return self  # type: ignore
 
     @property
@@ -1338,7 +1338,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             # Use native ToolConfirmationMode values directly
             if mode_id not in VALID_MODES:
                 raise UnknownModeError(mode_id, VALID_MODES)
-            self.tool_confirmation_mode = mode_id  # type: ignore[assignment]
+            self.tool_confirmation_mode = mode_id  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
             await self.update_state(config_id="mode", value_id=mode_id)
 
         elif category_id == "model":

@@ -431,9 +431,9 @@ class Talk[TTransmittedData = Any]:
                 intermediate = await execute(oldtransform_fn, data)
                 return await execute(transformer, intermediate)  # ty: ignore[invalid-return-type]
 
-            new_talk.transform_fn = chainedtransform_fn  # type: ignore[assignment]
+            new_talk.transform_fn = chainedtransform_fn  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
         else:
-            new_talk.transform_fn = transformer  # type: ignore[assignment]
+            new_talk.transform_fn = transformer  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
         return new_talk
 

@@ -621,7 +621,7 @@ class MessageNode[TDeps, TResult](ABC):
             )
             async for _ in signal_run:
                 pass
-        return state.result  # type: ignore[return-value]
+        return state.result  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
 
     async def run_stream(
         self,

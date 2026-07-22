@@ -177,7 +177,11 @@ class EventProcessor:
                 title=title,
             ):
                 for e in self._process_tool_call_start(
-                    ctx, tool_name, tool_call_id, raw_input, title
+                    ctx,
+                    tool_name,  # ty: ignore[invalid-argument-type]
+                    tool_call_id,  # ty: ignore[invalid-argument-type]
+                    raw_input,
+                    title,  # ty: ignore[invalid-argument-type]
                 ):
                     yield e
 
@@ -1033,14 +1037,15 @@ class EventProcessor:
         # Always yield MessageUpdatedEvent so the TUI sees the message info
         yield MessageUpdatedEvent.create(user_message)
 
-        # Only yield PartUpdatedEvent for internal sources.
-        # For protocol sources, parts come from sync.session.sync() (DB).
-        # DB-reconstructed parts have different part IDs than the original
-        # parts in meta, so sending PartUpdatedEvent would cause the TUI
-        # to render both sets of parts — duplicated text.
-        if source != "protocol":
-            for part in user_msg_with_parts.parts:
-                yield PartUpdatedEvent.create(part)
+        # P1: Always yield PartUpdatedEvent for each part, regardless of
+        # source. The TUI has no optimistic mechanism — it relies entirely
+        # on SSE events for parts. Without PartUpdatedEvent, user messages
+        # appear empty after the initial sync() (which only runs once per
+        # session). Part IDs from _deserialize_part() preserve the original
+        # IDs from meta (line 1077), so they match DB-stored parts — no
+        # duplicate risk for new messages.
+        for part in user_msg_with_parts.parts:
+            yield PartUpdatedEvent.create(part)
 
 
 def _deserialize_part(

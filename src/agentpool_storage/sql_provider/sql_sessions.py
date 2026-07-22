@@ -34,11 +34,11 @@ from agentpool_storage.sql_provider.utils import (
 try:
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 except ImportError:
-    pg_insert = None  # type: ignore[assignment]
+    pg_insert = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 try:
     from sqlalchemy.dialects.mysql import insert as mysql_insert
 except ImportError:
-    mysql_insert = None  # type: ignore[assignment]
+    mysql_insert = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
 
 if TYPE_CHECKING:
@@ -297,7 +297,7 @@ class SQLSessionsMixin:
         async with AsyncSession(self.engine) as session:
             # Base query for stats
             query = (
-                select(  # type: ignore[call-overload]
+                select(  # type: ignore[call-overload]  # ty: ignore[no-matching-overload]
                     Message.model,
                     Conversation.agent_name,
                     Message.timestamp,

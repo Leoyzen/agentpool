@@ -455,7 +455,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
 
         # Create ACPTurn and delegate to execute()
         assert self._api is not None
-        _acp_client: ACPClientProtocol = self._api
+        _acp_client: ACPClientProtocol = self._api  # ty: ignore[invalid-assignment]
         turn = ACPTurn(
             acp_client=_acp_client,
             prompts=prompts,
@@ -599,7 +599,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             An ACPTurn instance for single-cycle execution.
         """
         assert self._api is not None
-        _acp_client: ACPClientProtocol = self._api
+        _acp_client: ACPClientProtocol = self._api  # ty: ignore[invalid-assignment]
         return ACPTurn(
             acp_client=_acp_client,
             prompts=prompts,

@@ -22,6 +22,7 @@ from agentpool.agents.events import (
     RunFailedEvent,
     UserMessageInsertedEvent,
 )
+from agentpool.lifecycle.comm_channel import ProtocolChannel
 from agentpool.log import get_logger
 from agentpool.observability.spans import safe_span
 from agentpool.orchestrator.run import RunHandle, inject_cancelled_tool_results
@@ -75,6 +76,16 @@ class SessionControllerRunsMixin:
         Catches all exceptions and logs a warning — emission failures
         must never break the routing path.
 
+        When ``source == "protocol"`` and a ``ProtocolChannel`` is available
+        on the active run handle, the event is published through the
+        channel (which journals before publishing to the EventBus) instead
+        of direct ``EventBus.publish()``. This ensures the event is
+        journaled for crash-recovery replay and avoids double-publish when
+        the channel already publishes to the EventBus.
+
+        For idle sessions (no active run) or non-protocol sources, the
+        event is published directly to the EventBus (existing behavior).
+
         Args:
             session_id: The session the message was inserted into.
             content: Message content (text or multi-modal part list).
@@ -99,17 +110,53 @@ class SessionControllerRunsMixin:
                     session_id=session_id,
                     message_id=message_id or ascending("message"),
                     content=content,
-                    delivery=delivery,  # type: ignore[arg-type]
-                    source=source,  # type: ignore[arg-type]
+                    delivery=delivery,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+                    source=source,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
                     meta=meta,
                 )
-                if self._event_bus is not None:
-                    await self._event_bus.publish(session_id, event)
+                if self._event_bus is None:
+                    return
+
+                # P2: When source is "protocol" and a ProtocolChannel is
+                # available on the active run, route through the channel
+                # so the event is journaled and published to the EventBus
+                # by the channel (avoiding double-publish).
+                if source == "protocol":
+                    comm_channel = self._get_protocol_channel(session_id)
+                    if comm_channel is not None:
+                        await comm_channel.publish(event)
+                        return
+
+                # Fall back: direct EventBus publish (idle session or
+                # non-protocol source).
+                await self._event_bus.publish(session_id, event)
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "Failed to emit UserMessageInsertedEvent",
                     exc_info=True,
                 )
+
+    def _get_protocol_channel(self, session_id: str) -> ProtocolChannel | None:
+        """Return the ProtocolChannel for the active session, if available.
+
+        Checks the session's ``_comm_channel`` field (set by
+        ``SessionController`` when creating a ``RunHandle`` for protocol
+        server sessions). Returns ``None`` if the session is idle, the
+        session is missing, or the CommChannel is not a ProtocolChannel.
+
+        Args:
+            session_id: The session to check.
+
+        Returns:
+            The active ``ProtocolChannel`` instance, or ``None``.
+        """
+        session = self.get_session(session_id)
+        if session is None or session.current_run_id is None:
+            return None
+        comm_channel = session._comm_channel
+        if isinstance(comm_channel, ProtocolChannel):
+            return comm_channel
+        return None
 
     async def _consume_run(self, run_handle: RunHandle, initial_prompt: str | list[Any]) -> None:
         """Drive RunHandle execution to completion, chaining prompts.

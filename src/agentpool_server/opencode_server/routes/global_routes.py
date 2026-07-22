@@ -108,7 +108,7 @@ def _extract_session_id(event: Event) -> str | None:
     # Special-path events: session_id is nested, not at properties.session_id
     match event:
         case SessionCreatedEvent(properties=props):
-            session_id: str | None = props.info.id
+            session_id: str | None = props.info.id  # ty: ignore[unresolved-attribute]
         case SessionUpdatedEvent(properties=props):
             session_id = props.info.id
         case MessageUpdatedEvent(properties=props):
@@ -298,7 +298,7 @@ async def _event_generator(  # noqa: PLR0915
                     data = _serialize_event(event, wrap_payload=True)
                 else:
                     data = _serialize_event(event)
-                logger.info(
+                logger.debug(
                     "SSE: Sending event",
                     event_type=getattr(event, "type", "unknown"),
                     session_id=_extract_session_id(event) or "-",

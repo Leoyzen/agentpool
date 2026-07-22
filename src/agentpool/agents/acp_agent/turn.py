@@ -23,6 +23,7 @@ from agentpool.agents.events import (
 )
 from agentpool.observability.spans import safe_span
 from agentpool.orchestrator.turn import HookAwareTurn, Turn
+from agentpool.utils.pydantic_ai_helpers import flatten_prompts
 
 
 if TYPE_CHECKING:
@@ -193,17 +194,9 @@ class ACPTurn(HookAwareTurn, Turn):
                 # prompts contain structured content blocks (TextContent,
                 # ImageUrl, BinaryContent, etc.) that must be flattened into
                 # the top-level sequence.
-                if not self._prompts:
-                    flattened_prompts: list[Any] = [""]
-                else:
-                    flattened_prompts = []
-                    for p in self._prompts:
-                        if isinstance(p, str):
-                            flattened_prompts.append(p)
-                        elif isinstance(p, list):
-                            flattened_prompts.extend(p)
-                        else:
-                            flattened_prompts.append(p)
+                flattened_prompts: list[Any] = (
+                    flatten_prompts(self._prompts) if self._prompts else [""]
+                )
                 content = convert_to_acp_content(flattened_prompts)
 
                 # --- Phase 1: Send prompt ---
@@ -234,7 +227,7 @@ class ACPTurn(HookAwareTurn, Turn):
                                     raw_input=ti,
                                     tool_call_id=tcid,
                                 ):
-                                    await self._fire_pre_tool_hooks(tn, ti, tcid)
+                                    await self._fire_pre_tool_hooks(tn, ti, tcid)  # ty: ignore[invalid-argument-type]
                                 case ToolCallCompleteEvent(
                                     tool_name=tn,
                                     tool_input=ti,

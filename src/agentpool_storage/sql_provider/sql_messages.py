@@ -37,11 +37,11 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert  # noqa: E402
 try:
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 except ImportError:
-    pg_insert = None  # type: ignore[assignment]
+    pg_insert = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 try:
     from sqlalchemy.dialects.mysql import insert as mysql_insert
 except ImportError:
-    mysql_insert = None  # type: ignore[assignment]
+    mysql_insert = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
 
 class SQLMessagesMixin:

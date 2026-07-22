@@ -352,7 +352,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                     deferred_kind="elicitation",
                     deferred_strategy="block",
                     elicitation_message=elicitation_params.get("message"),
-                    elicitation_schema=elicitation_params.get("requestedSchema"),
+                    elicitation_schema=elicitation_params.get("requestedSchema"),  # ty: ignore[invalid-argument-type]
                     elicitation_mode=elicitation_params.get("mode"),
                 )
                 # Emit event to EventBus for protocol converters.
@@ -360,7 +360,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                     event = ElicitationDeferredEvent(
                         deferred_handle=handle,
                         message=elicitation_params.get("message", ""),
-                        requested_schema=elicitation_params.get("requestedSchema", {}),
+                        requested_schema=elicitation_params.get("requestedSchema", {}),  # ty: ignore[invalid-argument-type]
                         mode=elicitation_params.get("mode", "form"),
                         session_id=run_ctx.session_id,
                         timeout_seconds=run_ctx.elicitation_timeout,

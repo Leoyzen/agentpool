@@ -15,6 +15,7 @@ import logfire
 from agentpool.agents.events import StreamCompleteEvent
 from agentpool.lifecycle.types import DeliveryMode, Feedback
 from agentpool.log import get_logger
+from agentpool.utils.pydantic_ai_helpers import flatten_prompts
 
 
 if TYPE_CHECKING:
@@ -45,7 +46,7 @@ class SessionPoolMessagingMixin:
     pool: AgentPool[Any]
 
     @property
-    def event_bus(self) -> EventBus: ...  # type: ignore[empty-body]
+    def event_bus(self) -> EventBus: ...  # type: ignore[empty-body]  # ty: ignore[empty-body]
 
     _message_cache: OrderedDict[str, list[ChatMessage[Any]]]
     _message_cache_maxsize: int
@@ -134,22 +135,13 @@ class SessionPoolMessagingMixin:
             return
         # Flatten prompts: if any prompt is a list (multimodal content),
         # preserve structure; otherwise join strings.
-        if not prompts:
-            content: str | list[Any] = ""
-        elif len(prompts) == 1:
-            content = prompts[0]
-        else:
-            # Multiple prompts: flatten into a list, extending list items
-            # and appending string items.
-            flattened: list[Any] = []
-            for p in prompts:
-                if isinstance(p, str):
-                    flattened.append(p)
-                elif isinstance(p, list):
-                    flattened.extend(p)
-                else:
-                    flattened.append(p)
-            content = flattened
+        match prompts:
+            case []:
+                content: str | list[Any] = ""
+            case [single]:
+                content = single
+            case _:
+                content = flatten_prompts(prompts)
 
         run_id = session.current_run_id
         if run_id is not None:

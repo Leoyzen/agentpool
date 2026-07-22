@@ -248,13 +248,20 @@ async def test_prompt_async_user_message_renders_once(  # noqa: PLR0915
         f"SSE user message ID ({seen_user_ids[0]}) != REST user message ID ({user_msg_ids_rest[0]})"
     )
 
-    # --- Assertion 4: The user message content matches ---
-    rest_user_msg = user_messages_rest[0]
-    # Check that the prompt text appears in the message parts
-    rest_parts = rest_user_msg.get("parts", [])
-    rest_text_parts = [
-        p for p in rest_parts if p.get("type") == "text" and prompt_text in p.get("text", "")
+    # --- Assertion 4: The user message content appears in SSE (message.part.updated) ---
+    # REST API no longer includes user message parts (stripped to prevent TUI duplication).
+    # SSE message.part.updated is the sole source of user message content.
+    sse_part_updated_events = [
+        event for event in sse_events if event.get("type") == "message.part.updated"
     ]
-    assert len(rest_text_parts) >= 1, (
-        f"Prompt text '{prompt_text}' not found in REST user message parts. Parts: {rest_parts}"
+    sse_user_text_parts = [
+        event.get("properties", {}).get("part", {}).get("text", "")
+        for event in sse_part_updated_events
+        if event.get("properties", {}).get("part", {}).get("type") == "text"
+    ]
+    user_part_found = any(prompt_text in text for text in sse_user_text_parts)
+    assert user_part_found, (
+        f"Prompt text '{prompt_text}' not found in SSE message.part.updated events. "
+        f"Found {len(sse_part_updated_events)} part.updated events. "
+        f"Text parts from SSE: {sse_user_text_parts}"
     )

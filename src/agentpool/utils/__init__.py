@@ -30,7 +30,7 @@ def setup_env(env: jinja2.Environment) -> None:
         pydantic_playground_url,
     )
 
-    env.globals |= dict(agent=Agent)
+    env.globals |= dict(agent=Agent)  # ty: ignore[unsupported-operator]
     env.filters |= {
         "run_agent": run_agent,
         "run_agent_sync": run_agent_sync,

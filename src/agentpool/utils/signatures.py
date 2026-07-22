@@ -287,7 +287,7 @@ def create_bound_callable(  # noqa: PLR0915
     # Preserve introspection attributes
     wrapper.__name__ = getattr(original_callable, "__name__", "wrapper")
     wrapper.__doc__ = getattr(original_callable, "__doc__", None)
-    wrapper.__module__ = getattr(original_callable, "__module__", None)  # type: ignore[assignment]
+    wrapper.__module__ = getattr(original_callable, "__module__", None)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
     wrapper.__wrapped__ = original_callable  # type: ignore[attr-defined]
     wrapper.__agentpool_wrapped__ = original_callable  # type: ignore[attr-defined]
 

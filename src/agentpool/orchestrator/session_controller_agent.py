@@ -369,7 +369,7 @@ class SessionControllerAgentMixin:
 
         host_ctx = self.pool.get_context()
         agent_registry = AgentRegistry(
-            dict.fromkeys(self.pool.manifest.agents),  # type: ignore[arg-type]
+            dict.fromkeys(self.pool.manifest.agents),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         )
         session._host_context = host_ctx
         session._agent_registry = agent_registry

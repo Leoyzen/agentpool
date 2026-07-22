@@ -105,7 +105,7 @@ async def _get_session_messages_from_pool(
     Delegates to :func:`get_messages_for_session` which handles feature-flag
     routing and ChatMessage-to-MessageWithParts conversion.
     """
-    return await get_messages_for_session(state, session_id)
+    return await get_messages_for_session(state, session_id, prefer_in_memory=False)
 
 
 class _CommandOutputCapture:
@@ -907,6 +907,20 @@ async def get_session_messages(
     Returns:
         List of messages with their parts
     """
+    # Clear EventBus replay buffer so that events published before this sync()
+    # call are not re-delivered to reconnecting SSE subscribers.  Without this,
+    # the TUI would receive duplicate message.part.updated events from the
+    # replay buffer AND from the sync() response, causing the first user
+    # message to render twice.
+    if state.event_bridge is not None:
+        event_bus = state.event_bridge._event_bus
+        if event_bus is not None:
+            logger.info(
+                "Clearing replay buffer for session %s on sync()",
+                session_id,
+            )
+            event_bus.clear_replay_buffer(session_id)
+
     # Fast path for subagent/child sessions already in memory:
     # Skip get_or_load_session (which may load from storage) because the
     # parent agent is streaming and subagent parts are in memory.
@@ -925,6 +939,12 @@ async def get_session_messages(
     messages = await get_messages_for_session(state, session_id)
     if limit is not None and limit > 0:
         messages = messages[-limit:]
+    logger.info(
+        "sync() returning {count} messages for session {sid}: {ids}",
+        count=len(messages),
+        sid=session_id,
+        ids=[m.info.id for m in messages],
+    )
     return messages
 
 
@@ -1400,8 +1420,8 @@ async def run_shell_command(
         id=assistant_msg_id,
         session_id=session_id,
         parent_id="",  # Shell commands don't have a parent user message
-        model_id=request.model.model_id if request.model else "shell",
-        provider_id=request.model.provider_id if request.model else "local",
+        model_id=request.model.model_id if request.model else "shell",  # ty: ignore[invalid-argument-type]
+        provider_id=request.model.provider_id if request.model else "local",  # ty: ignore[invalid-argument-type]
         mode="shell",
         agent=request.agent,
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
@@ -1759,7 +1779,7 @@ async def share_session(
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    messages = await get_messages_for_session(state, session_id)
+    messages = await get_messages_for_session(state, session_id, prefer_in_memory=False)
 
     if not messages:
         raise HTTPException(status_code=400, detail="No messages to share")

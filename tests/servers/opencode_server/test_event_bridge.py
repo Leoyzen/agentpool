@@ -327,6 +327,12 @@ class _FakeBridge(OpenCodeEventBridgeMixin):
         self._pending_message_ids: dict[str, str] = {}
         self._pending_message_metadata: dict[str, dict[str, str | None]] = {}
 
+    def set_session_context_data(self, session_id: str, data: dict[str, Any]) -> None:
+        self._resume_contexts[session_id] = data
+
+    def get_session_context_data(self, session_id: str) -> dict[str, Any] | None:
+        return self._resume_contexts.pop(session_id, None)
+
 
 @pytest.mark.anyio
 @pytest.mark.unit

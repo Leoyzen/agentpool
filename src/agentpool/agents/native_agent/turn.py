@@ -37,6 +37,7 @@ from agentpool.orchestrator.event_mapper import (
 from agentpool.orchestrator.turn import HookAwareTurn, Turn
 from agentpool.tasks.exceptions import RunAbortedError
 from agentpool.tools.base import is_terminal_tool
+from agentpool.utils.pydantic_ai_helpers import flatten_prompts
 
 
 if TYPE_CHECKING:
@@ -217,15 +218,7 @@ class NativeTurn(HookAwareTurn, Turn):
                 # String prompts are valid UserContent items. List prompts contain
                 # structured content blocks (TextContent, ImageUrl, etc.) that must
                 # be flattened into the top-level sequence, NOT stringified.
-                flattened: list[Any] = []
-                for p in self._prompts:
-                    if isinstance(p, str):
-                        flattened.append(p)
-                    elif isinstance(p, list):
-                        flattened.extend(p)
-                    else:
-                        # Single content item (ImageUrl, TextContent, etc.)
-                        flattened.append(p)
+                flattened: list[Any] = flatten_prompts(self._prompts)
                 if staged_text is not None:
                     if flattened and isinstance(flattened[0], str):
                         first = f"{staged_text}\n\n{flattened[0]}"
