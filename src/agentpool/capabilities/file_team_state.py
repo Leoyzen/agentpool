@@ -233,7 +233,7 @@ class FileTeamState:
         """
         tasks_dir = self._tasks_dir(team_id)
         tasks_dir.mkdir(parents=True, exist_ok=True)
-        task_id = str(uuid.uuid4())
+        task_id = f"task_{uuid.uuid4().hex[:8]}"
         task_data = {**task, "task_id": task_id}
         if "status" not in task_data:
             task_data["status"] = "pending"

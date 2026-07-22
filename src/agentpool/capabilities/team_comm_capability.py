@@ -775,7 +775,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             )
 
         # Generate team_id and create state.
-        team_id = str(uuid.uuid4())
+        team_id = f"team_{uuid.uuid4().hex[:8]}"
         lead_session_id: str = agent_ctx.session.session_id
 
         from agentpool.capabilities.file_team_state import FileTeamState
