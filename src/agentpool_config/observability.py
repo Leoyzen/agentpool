@@ -33,6 +33,32 @@ class BaseObservabilityConfig(Schema):
         title="Protocol",
     )
 
+    instrument_pydantic_ai: bool = Field(
+        default=False,
+        title="Instrument PydanticAI",
+        description=(
+            "Enable logfire.instrument_pydantic_ai(). "
+            "Disabled by default — manual spans cover critical paths."
+        ),
+    )
+    """Enable PydanticAI auto-instrumentation (creates internal iteration spans)."""
+
+    instrument_mcp: bool = Field(
+        default=False,
+        title="Instrument MCP",
+        description=(
+            "Enable logfire.instrument_mcp(). Disabled by default — manual tool spans cover this."
+        ),
+    )
+    """Enable MCP auto-instrumentation (creates duplicate tool call spans)."""
+
+    instrument_fastapi: bool = Field(
+        default=True,
+        title="Instrument FastAPI",
+        description="Enable logfire.instrument_fastapi() for HTTP server spans.",
+    )
+    """Enable FastAPI auto-instrumentation."""
+
 
 class LogfireObservabilityConfig(BaseObservabilityConfig):
     """Configuration for Logfire endpoint."""

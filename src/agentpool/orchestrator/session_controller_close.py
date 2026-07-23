@@ -196,6 +196,9 @@ class SessionControllerCloseMixin:
                     child_id=child_id,
                 )
 
+        # Clear trace context to release OTel Context reference
+        session.trace_context = None
+
         # Final dict cleanup
         self._session_agents.pop(session_id, None)
         self._sessions.pop(session_id, None)

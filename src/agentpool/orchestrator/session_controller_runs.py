@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 import uuid
 
 import logfire
+from opentelemetry.context import attach, detach
 
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
@@ -451,14 +452,22 @@ class SessionControllerRunsMixin:
                     message_id=message_id,
                     meta=meta,
                 )
-                return self._start_run_handle(
-                    session,
-                    agent,
-                    session_id,
-                    content,
-                    deps=deps,
-                    message_id=message_id,
-                )
+                # Activate session trace context so that
+                # session.start_run_handle span and asyncio.create_task()
+                # inherit the session's trace_id.
+                token = attach(session.trace_context) if session.trace_context is not None else None
+                try:
+                    return self._start_run_handle(
+                        session,
+                        agent,
+                        session_id,
+                        content,
+                        deps=deps,
+                        message_id=message_id,
+                    )
+                finally:
+                    if token is not None:
+                        detach(token)
             run = self._runs.get(session.current_run_id) if session.current_run_id else None
             if run is not None:
                 if resolved == "asap":

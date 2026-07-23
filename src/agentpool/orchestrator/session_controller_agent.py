@@ -298,6 +298,20 @@ class SessionControllerAgentMixin:
             # per session (per-prompt RunHandle migration, task 1.2).
             await self._initialize_lifecycle_and_recovery(session, agent)
 
+            # Initialize session trace context — create a root span
+            # (immediately ended, duration ≈ 0) as a trace anchor.
+            # All subsequent spans in this session's scope will be
+            # children of this root span, sharing the same trace_id.
+            from opentelemetry import trace as otel_trace
+
+            tracer = otel_trace.get_tracer("agentpool.session")
+            root_span = tracer.start_span(
+                "session.lifecycle",
+                attributes={"session.id": session_id},
+            )
+            session.trace_context = otel_trace.set_span_in_context(root_span)
+            root_span.end()
+
             logger.info("Created session agent", session_id=session_id, agent_name=agent_name)
             return agent
 

@@ -23,6 +23,8 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from datetime import datetime
 
+    from opentelemetry.context import Context
+
     from agentpool.delegation import AgentPool
     from agentpool.host.context import HostContext
     from agentpool.host.registry import AgentRegistry
@@ -279,6 +281,16 @@ class SessionState:
     The next RunHandle drains this queue at turn start.
     """
 
+    trace_context: Context | None = None
+    """OTel Context for session-level trace correlation.
+
+    Set once at session creation (write-once) by
+    ``get_or_create_session_agent()`` via a ``session.lifecycle`` root
+    span (immediately ended, duration ≈ 0). All subsequent spans created
+    within this session's scope are children of this root span, sharing
+    the same ``trace_id``. Set to ``None`` at session destruction.
+    """
+
     @property
     def closing(self) -> bool:
         """Alias for is_closing."""
@@ -452,6 +464,21 @@ class SessionController(
             The session state, or None if not found.
         """
         return self._sessions.get(session_id)
+
+    def get_trace_context(self, session_id: str) -> Context | None:
+        """Get the OTel trace context for a session.
+
+        Args:
+            session_id: The session ID to look up.
+
+        Returns:
+            The OTel ``Context`` for the session, or ``None`` if the
+            session does not exist or has no trace context.
+        """
+        session = self._sessions.get(session_id)
+        if session is None:
+            return None
+        return session.trace_context
 
     def get_children(self, session_id: str) -> list[str]:
         """Get child session IDs for a session.
