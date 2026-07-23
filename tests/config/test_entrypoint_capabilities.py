@@ -9,7 +9,7 @@ method instantiates the capability class registered via the
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -48,7 +48,20 @@ _FAKE_REGISTRY: dict[str, type] = {
     "custom_cap": _FakeCustomCapability,
 }
 
-_PATCH_PATH = "agentpool.capabilities.registry.discover_entry_point_capabilities"
+# Patch paths
+_DISCOVER_PATH = "agentpool.capabilities.registry.discover_entry_point_capabilities"
+_ENTRY_POINTS_PATH = "importlib.metadata.entry_points"
+
+
+def _make_fake_entry_points(registry: dict[str, type]) -> list[MagicMock]:
+    """Create fake EntryPoint objects that mimic importlib.metadata.entry_points."""
+    eps: list[MagicMock] = []
+    for name, cls in registry.items():
+        ep = MagicMock()
+        ep.name = name
+        ep.load = MagicMock(return_value=cls)
+        eps.append(ep)
+    return eps
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +113,7 @@ agents:
 
 def test_entrypoint_capability_parsed_from_yaml() -> None:
     """Test that a known entry-point name produces EntryPointCapabilityConfig."""
-    with patch(_PATCH_PATH, return_value=_FAKE_REGISTRY):
+    with patch(_DISCOVER_PATH, return_value=_FAKE_REGISTRY):
         manifest = AgentsManifest.from_yaml(YAML_WITH_ENTRYPOINT_CAP)
     agent = manifest.agents["test_agent"]
     assert isinstance(agent, NativeAgentConfig)
@@ -114,7 +127,7 @@ def test_entrypoint_capability_parsed_from_yaml() -> None:
 
 def test_entrypoint_and_import_path_coexist() -> None:
     """Test that entry-point names and import paths coexist in the same config."""
-    with patch(_PATCH_PATH, return_value=_FAKE_REGISTRY):
+    with patch(_DISCOVER_PATH, return_value=_FAKE_REGISTRY):
         manifest = AgentsManifest.from_yaml(YAML_WITH_ENTRYPOINT_AND_IMPORT)
     agent = manifest.agents["test_agent"]
     assert isinstance(agent, NativeAgentConfig)
@@ -132,7 +145,7 @@ def test_entrypoint_and_import_path_coexist() -> None:
 
 def test_unknown_name_falls_back_to_generic() -> None:
     """Test that names not in entry-point registry fall back to GenericCapabilityConfig."""
-    with patch(_PATCH_PATH, return_value=_FAKE_REGISTRY):
+    with patch(_DISCOVER_PATH, return_value=_FAKE_REGISTRY):
         manifest = AgentsManifest.from_yaml(YAML_WITH_UNKNOWN_SHORT_NAME)
     agent = manifest.agents["test_agent"]
     assert isinstance(agent, NativeAgentConfig)
@@ -145,7 +158,7 @@ def test_unknown_name_falls_back_to_generic() -> None:
 
 def test_empty_registry_falls_back_to_generic() -> None:
     """Test that an empty entry-point registry falls back to GenericCapabilityConfig."""
-    with patch(_PATCH_PATH, return_value={}):
+    with patch(_DISCOVER_PATH, return_value={}):
         manifest = AgentsManifest.from_yaml(YAML_WITH_ENTRYPOINT_CAP)
     agent = manifest.agents["test_agent"]
     assert isinstance(agent, NativeAgentConfig)
@@ -162,7 +175,8 @@ def test_empty_registry_falls_back_to_generic() -> None:
 
 def test_entrypoint_config_builds_capability() -> None:
     """Test that EntryPointCapabilityConfig.build() instantiates the correct class."""
-    with patch(_PATCH_PATH, return_value=_FAKE_REGISTRY):
+    fake_eps = _make_fake_entry_points(_FAKE_REGISTRY)
+    with patch(_ENTRY_POINTS_PATH, return_value=fake_eps):
         config = EntryPointCapabilityConfig(type="mermaid_lint", args={"strict": True})
         result = config.build()
     assert isinstance(result, _FakeMermaidLintCapability)
@@ -171,7 +185,8 @@ def test_entrypoint_config_builds_capability() -> None:
 
 def test_entrypoint_config_build_with_empty_args() -> None:
     """Test that EntryPointCapabilityConfig.build() works with no args."""
-    with patch(_PATCH_PATH, return_value=_FAKE_REGISTRY):
+    fake_eps = _make_fake_entry_points(_FAKE_REGISTRY)
+    with patch(_ENTRY_POINTS_PATH, return_value=fake_eps):
         config = EntryPointCapabilityConfig(type="custom_cap")
         result = config.build()
     assert isinstance(result, _FakeCustomCapability)
@@ -179,12 +194,11 @@ def test_entrypoint_config_build_with_empty_args() -> None:
 
 
 def test_entrypoint_config_build_unknown_raises() -> None:
-    """Test that build() raises for an unknown entry-point name."""
-    from agentpool.capabilities.registry import CapabilityNotFoundError
-
-    with patch(_PATCH_PATH, return_value=_FAKE_REGISTRY):
+    """Test that build() raises ValueError for an unknown entry-point name."""
+    fake_eps = _make_fake_entry_points(_FAKE_REGISTRY)
+    with patch(_ENTRY_POINTS_PATH, return_value=fake_eps):
         config = EntryPointCapabilityConfig(type="nonexistent_cap")
-        with pytest.raises(CapabilityNotFoundError):
+        with pytest.raises(ValueError, match="Unknown entry-point capability"):
             config.build()
 
 
@@ -195,7 +209,8 @@ def test_entrypoint_config_build_unknown_raises() -> None:
 
 def test_build_capability_dispatches_entrypoint() -> None:
     """Test that build_capability() handles EntryPointCapabilityConfig."""
-    with patch(_PATCH_PATH, return_value=_FAKE_REGISTRY):
+    fake_eps = _make_fake_entry_points(_FAKE_REGISTRY)
+    with patch(_ENTRY_POINTS_PATH, return_value=fake_eps):
         config = EntryPointCapabilityConfig(type="mermaid_lint", args={"strict": False})
         result = build_capability(config)
     assert isinstance(result, _FakeMermaidLintCapability)

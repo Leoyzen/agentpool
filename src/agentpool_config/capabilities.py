@@ -115,9 +115,11 @@ class EntryPointCapabilityConfig(BaseModel):
     def build(self) -> Any:
         """Resolve the entry-point name and instantiate the capability.
 
-        Uses a lazy import of ``discover_entry_point_capabilities`` to
-        avoid a circular dependency between ``agentpool_config`` and
-        ``agentpool``.
+        Uses :mod:`importlib.metadata` directly to discover entry points
+        in the ``agentpool.capabilities`` group, avoiding a dependency
+        on the :mod:`agentpool` package (which would violate the
+        import-linter contract that ``agentpool_config`` must not import
+        from ``agentpool``).
 
         Returns:
             Instantiated capability object.
@@ -126,16 +128,20 @@ class EntryPointCapabilityConfig(BaseModel):
             ValueError: If the entry-point name is not registered.
             ImportError: If the capability class cannot be loaded.
         """
-        from agentpool.capabilities.registry import (
-            CapabilityNotFoundError,
-            discover_entry_point_capabilities,
-        )
+        from importlib.metadata import entry_points
 
-        registry = discover_entry_point_capabilities()
-        if self.type not in registry:
-            raise CapabilityNotFoundError(self.type, list(registry.keys()))
-        cls = registry[self.type]
-        return cls(**self.args)
+        eps = entry_points(group="agentpool.capabilities")
+        for ep in eps:
+            if ep.name == self.type:
+                cls = ep.load()
+                return cls(**self.args)
+
+        available = sorted({ep.name for ep in eps})
+        msg = (
+            f"Unknown entry-point capability: {self.type!r}. "
+            f"Available: {', '.join(available) if available else '(none)'}"
+        )
+        raise ValueError(msg)
 
 
 # ---------------------------------------------------------------------------
