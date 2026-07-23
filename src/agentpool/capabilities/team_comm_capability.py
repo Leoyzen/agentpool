@@ -495,6 +495,13 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 "When None (top-level), only lead can create"
             ),
         ] = None,
+        owner: Annotated[
+            str | None,
+            Field(
+                description="Optional team member name to assign as task owner. "
+                "If not set, the task is unassigned and can be claimed later"
+            ),
+        ] = None,
     ) -> ToolReturn:
         """Create a task on the shared task board.
 
@@ -528,6 +535,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         }
         if parent_id is not None:
             task_dict["parent_id"] = parent_id
+        if owner is not None:
+            task_dict["owner"] = owner
 
         try:
             task_id = team_state.create_task(team_id, task_dict)

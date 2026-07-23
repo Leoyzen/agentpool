@@ -874,6 +874,34 @@ async def test_task_create_happy_path(tmp_path: Any) -> None:
 
 
 @pytest.mark.unit
+async def test_task_create_with_owner(tmp_path: Any) -> None:
+    """Given: team session with initialized state.
+
+    When: task_create is called with owner parameter.
+    Then: task is created with the specified owner.
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.task_create(
+        ctx, "Translate docs", "Translate API docs to French", owner="translator_agent"
+    )
+
+    assert result.return_value.startswith("Task created: ")
+    task_id = result.return_value.replace("Task created: ", "")
+    task = cap._get_team_state(  # type: ignore[union-attr]
+        cap._resolve_agent_context(ctx)
+    ).get_task("team_123", task_id)
+    assert task is not None
+    assert task.get("owner") == "translator_agent"
+
+
+@pytest.mark.unit
 async def test_task_create_no_team_id() -> None:
     """Given: session metadata without team_id.
 
