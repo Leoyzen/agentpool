@@ -285,6 +285,24 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 summaries[m_name] = "No active work"
         return summaries
 
+    @staticmethod
+    def _snapshot_task_mtimes(
+        team_state: FileTeamState,
+        team_id: str,
+        task_ids: list[str],
+    ) -> dict[str, float]:
+        """Snapshot mtimes for the given task IDs.
+
+        Returns a mapping of task_id to file mtime (0.0 if file missing).
+        Used by watch loops to detect when specific tasks change.
+        """
+        tasks_dir = team_state._tasks_dir(team_id)
+        mtimes: dict[str, float] = {}
+        for tid in task_ids:
+            path = tasks_dir / f"{tid}.json"
+            mtimes[tid] = path.stat().st_mtime if path.exists() else 0.0
+        return mtimes
+
     # ------------------------------------------------------------------
     # Universal tools
     # ------------------------------------------------------------------
@@ -949,6 +967,15 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 "Returns current state if timeout expires without changes"
             ),
         ] = 300,
+        watch_task_ids: Annotated[
+            list[str] | None,
+            Field(
+                description="When watch=True, only watch for changes to these "
+                "specific task IDs. The watch ends as soon as any listed task "
+                "file is modified. If empty or None, watches for any "
+                "blackboard key change instead"
+            ),
+        ] = None,
     ) -> ToolReturn:
         """List all keys on the shared blackboard.
 
@@ -967,24 +994,42 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         keys = team_state.list_blackboard(team_id)
 
         if watch:
-            initial = set(keys)
             import time
 
             deadline = time.monotonic() + timeout
-            while time.monotonic() < deadline:
-                await asyncio.sleep(1)
-                current = set(team_state.list_blackboard(team_id))
-                if current != initial:
-                    keys = sorted(current)
-                    break
-            else:
-                return ToolReturn(
-                    return_value=(
-                        "<blackboard_keys> (watch timeout, no changes)\n"
-                        + "\n".join(sorted(keys))
-                        + "\n</blackboard_keys>"
+
+            if watch_task_ids:
+                initial_mtimes = self._snapshot_task_mtimes(team_state, team_id, watch_task_ids)
+                while time.monotonic() < deadline:
+                    await asyncio.sleep(1)
+                    current_mtimes = self._snapshot_task_mtimes(team_state, team_id, watch_task_ids)
+                    if current_mtimes != initial_mtimes:
+                        keys = sorted(team_state.list_blackboard(team_id))
+                        break
+                else:
+                    return ToolReturn(
+                        return_value=(
+                            "<blackboard_keys> (watch timeout, no task changes)\n"
+                            + "\n".join(sorted(keys))
+                            + "\n</blackboard_keys>"
+                        )
                     )
-                )
+            else:
+                initial = set(keys)
+                while time.monotonic() < deadline:
+                    await asyncio.sleep(1)
+                    current = set(team_state.list_blackboard(team_id))
+                    if current != initial:
+                        keys = sorted(current)
+                        break
+                else:
+                    return ToolReturn(
+                        return_value=(
+                            "<blackboard_keys> (watch timeout, no changes)\n"
+                            + "\n".join(sorted(keys))
+                            + "\n</blackboard_keys>"
+                        )
+                    )
 
         if not keys:
             return ToolReturn(return_value="<blackboard_keys>(empty)</blackboard_keys>")
@@ -992,7 +1037,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             return_value="<blackboard_keys>\n" + "\n".join(keys) + "\n</blackboard_keys>"
         )
 
-    async def team_status(
+    async def team_status(  # noqa: PLR0915
         self,
         ctx: RunContext[Any],
         watch: Annotated[
@@ -1011,6 +1056,15 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 "Returns current status if timeout expires without changes"
             ),
         ] = 300,
+        watch_task_ids: Annotated[
+            list[str] | None,
+            Field(
+                description="When watch=True, only watch for changes to these "
+                "specific task IDs. The watch ends as soon as any listed task "
+                "file is modified. If empty or None, watches for any team "
+                "state change instead"
+            ),
+        ] = None,
     ) -> ToolReturn:
         """Get the current status of the team.
 
@@ -1098,17 +1152,28 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if watch:
             import time
 
-            initial_snapshot = state_path.stat().st_mtime
             deadline = time.monotonic() + timeout
-            while time.monotonic() < deadline:
-                await asyncio.sleep(1)
-                if state_path.exists():
-                    current_mtime = state_path.stat().st_mtime
-                    if current_mtime != initial_snapshot:
+            if watch_task_ids:
+                initial_mtimes = self._snapshot_task_mtimes(team_state, team_id, watch_task_ids)
+                while time.monotonic() < deadline:
+                    await asyncio.sleep(1)
+                    current_mtimes = self._snapshot_task_mtimes(team_state, team_id, watch_task_ids)
+                    if current_mtimes != initial_mtimes:
                         state = FileTeamState._read_json(state_path)
                         break
+                else:
+                    result += "\n(watch timeout, no task changes detected)"
             else:
-                result += "\n(watch timeout, no changes detected)"
+                initial_snapshot = state_path.stat().st_mtime
+                while time.monotonic() < deadline:
+                    await asyncio.sleep(1)
+                    if state_path.exists():
+                        current_mtime = state_path.stat().st_mtime
+                        if current_mtime != initial_snapshot:
+                            state = FileTeamState._read_json(state_path)
+                            break
+                else:
+                    result += "\n(watch timeout, no changes detected)"
 
         return ToolReturn(return_value=result)
 

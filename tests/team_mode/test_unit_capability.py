@@ -2639,6 +2639,148 @@ async def test_team_status_watch_no_changes(tmp_path: Any) -> None:
     assert "watch timeout" in result.return_value
 
 
+@pytest.mark.unit
+async def test_list_blackboard_watch_task_ids_timeout(tmp_path: Any) -> None:
+    """Given: team with tasks, watch=True with watch_task_ids.
+
+    When: no task changes during timeout.
+    Then: returns current keys with timeout message.
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    create_result = await cap.task_create(ctx, "Task A")
+    task_id = create_result.return_value.replace("Task created: ", "")
+    await cap.write_blackboard(ctx, "key1", "val1")
+
+    result = await cap.list_blackboard(ctx, watch=True, timeout=1, watch_task_ids=[task_id])
+
+    assert "key1" in result.return_value
+    assert "watch timeout" in result.return_value
+
+
+@pytest.mark.unit
+async def test_list_blackboard_watch_task_ids_detects_change(tmp_path: Any) -> None:
+    """Given: team with tasks, watch=True with watch_task_ids.
+
+    When: a watched task is updated during watch.
+    Then: returns promptly without timeout.
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    create_result = await cap.task_create(ctx, "Task A")
+    task_id = create_result.return_value.replace("Task created: ", "")
+    await cap.write_blackboard(ctx, "key1", "val1")
+
+    async def _delayed_update() -> None:
+        await asyncio.sleep(1.5)
+        await cap.task_update(ctx, task_id, status="in_progress")
+
+    task = asyncio.create_task(_delayed_update())
+    result = await cap.list_blackboard(ctx, watch=True, timeout=5, watch_task_ids=[task_id])
+    await task
+
+    assert "key1" in result.return_value
+    assert "watch timeout" not in result.return_value
+
+
+@pytest.mark.unit
+async def test_list_blackboard_watch_task_ids_ignores_unrelated_change(
+    tmp_path: Any,
+) -> None:
+    """Given: team with tasks, watch=True with watch_task_ids targeting task A.
+
+    When: task B changes (not in watch list) and timeout expires.
+    Then: returns with timeout (watched task unchanged).
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    create_a = await cap.task_create(ctx, "Task A")
+    task_a_id = create_a.return_value.replace("Task created: ", "")
+    create_b = await cap.task_create(ctx, "Task B")
+    task_b_id = create_b.return_value.replace("Task created: ", "")
+
+    async def _delayed_update() -> None:
+        await asyncio.sleep(1.5)
+        await cap.task_update(ctx, task_b_id, status="in_progress")
+
+    task = asyncio.create_task(_delayed_update())
+    result = await cap.list_blackboard(ctx, watch=True, timeout=3, watch_task_ids=[task_a_id])
+    await task
+
+    assert "watch timeout" in result.return_value
+
+
+@pytest.mark.unit
+async def test_team_status_watch_task_ids_timeout(tmp_path: Any) -> None:
+    """Given: team with tasks, team_status watch=True with watch_task_ids.
+
+    When: no task changes during timeout.
+    Then: returns current status with timeout message.
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        config=config,
+        base_dir=str(tmp_path),
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    create_result = await cap.task_create(ctx, "Task A")
+    task_id = create_result.return_value.replace("Task created: ", "")
+
+    result = await cap.team_status(ctx, watch=True, timeout=1, watch_task_ids=[task_id])
+    assert "watch timeout" in result.return_value
+
+
+@pytest.mark.unit
+async def test_team_status_watch_task_ids_detects_change(tmp_path: Any) -> None:
+    """Given: team with tasks, team_status watch=True with watch_task_ids.
+
+    When: a watched task is updated during watch.
+    Then: returns promptly without timeout.
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        config=config,
+        base_dir=str(tmp_path),
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    create_result = await cap.task_create(ctx, "Task A")
+    task_id = create_result.return_value.replace("Task created: ", "")
+
+    async def _delayed_update() -> None:
+        await asyncio.sleep(1.5)
+        await cap.task_update(ctx, task_id, status="completed")
+
+    task = asyncio.create_task(_delayed_update())
+    result = await cap.team_status(ctx, watch=True, timeout=5, watch_task_ids=[task_id])
+    await task
+
+    assert "watch timeout" not in result.return_value
+
+
 # ---- Nested subtask + permission tests ----
 
 
