@@ -247,9 +247,14 @@ async def test_e2e_lifecycle_create_message_task_blackboard_delete(
 
     # --- Step 6: Read blackboard ---
     rb_result = await cap.read_blackboard(ctx, "glossary")
-    assert "<blackboard" in rb_result.return_value
-    assert "v1 content" in rb_result.return_value
-    assert 'version="1"' in rb_result.return_value
+    rb_rv = (
+        "\n".join(rb_result.return_value)
+        if isinstance(rb_result.return_value, list)
+        else rb_result.return_value
+    )
+    assert "<blackboard" in rb_rv
+    assert "v1 content" in rb_rv
+    assert 'version="1"' in rb_rv
 
     # --- Step 7: Delete team ---
     del_result = await cap.team_delete(ctx)
@@ -615,9 +620,14 @@ async def test_e2e_task_and_blackboard_lifecycle(tmp_path: Any) -> None:
 
     # Read blackboard
     rb_result = await cap.read_blackboard(ctx, "review_notes")
-    assert "<blackboard" in rb_result.return_value
-    assert "LGTM" in rb_result.return_value
-    assert 'version="1"' in rb_result.return_value
+    rb_rv = (
+        "\n".join(rb_result.return_value)
+        if isinstance(rb_result.return_value, list)
+        else rb_result.return_value
+    )
+    assert "<blackboard" in rb_rv
+    assert "LGTM" in rb_rv
+    assert 'version="1"' in rb_rv
 
     # List blackboard keys
     lb_result = await cap.list_blackboard(ctx)

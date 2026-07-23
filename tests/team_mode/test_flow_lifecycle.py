@@ -413,9 +413,14 @@ async def test_flow_full_lifecycle(tmp_path: Any) -> None:
     assert results[4].return_value == "Written, version=1"
 
     # Turn 6: read_blackboard
-    assert "<blackboard" in results[5].return_value
-    assert "in_progress" in results[5].return_value
-    assert 'version="1"' in results[5].return_value
+    rv5 = (
+        "\n".join(results[5].return_value)
+        if isinstance(results[5].return_value, list)
+        else results[5].return_value
+    )
+    assert "<blackboard" in rv5
+    assert "in_progress" in rv5
+    assert 'version="1"' in rv5
 
     # Turn 7: team_delete
     assert results[6].return_value == "Team deleted"

@@ -227,12 +227,26 @@ class FileTeamState:
     def create_task(self, team_id: str, task: dict[str, Any]) -> str:
         """Create a new task file and return its task_id.
 
+        If ``task`` contains ``parent_id``, validates that the parent
+        task exists in the same team.
+
         Args:
             team_id: Team to add the task to.
-            task: Task payload dict.
+            task: Task payload dict. May contain ``parent_id`` for
+                subtask nesting.
+
+        Raises:
+            ValueError: If ``parent_id`` is set but the parent task
+                does not exist.
         """
         tasks_dir = self._tasks_dir(team_id)
         tasks_dir.mkdir(parents=True, exist_ok=True)
+        parent_id: str | None = task.get("parent_id")
+        if parent_id is not None:
+            parent_path = tasks_dir / f"{parent_id}.json"
+            if not parent_path.exists():
+                msg = f"Parent task not found: {parent_id}"
+                raise ValueError(msg)
         task_id = f"task_{uuid.uuid4().hex[:8]}"
         task_data = {**task, "task_id": task_id}
         if "status" not in task_data:
@@ -242,11 +256,26 @@ class FileTeamState:
         self._atomic_write(tasks_dir / f"{task_id}.json", task_data)
         return task_id
 
+    def get_task(self, team_id: str, task_id: str) -> dict[str, Any] | None:
+        """Return a single task by ID, or ``None`` if not found.
+
+        Args:
+            team_id: Team containing the task.
+            task_id: Task to retrieve.
+        """
+        path = self._tasks_dir(team_id) / f"{task_id}.json"
+        if not path.exists():
+            return None
+        return self._read_json(path)
+
     def list_tasks(self, team_id: str) -> list[dict[str, Any]]:
-        """Return all tasks with computed ``is_unblocked`` field.
+        """Return all tasks with computed ``is_unblocked`` and ``children`` fields.
 
         A task is unblocked when all ``blocked_by`` tasks have
         ``status == "completed"``. Failed dependencies do NOT unblock.
+
+        The ``children`` field is a list of task_ids that have
+        ``parent_id`` equal to this task's ``task_id``.
 
         Args:
             team_id: Team whose tasks to list.
@@ -262,6 +291,17 @@ class FileTeamState:
             tid: str = t.get("task_id", f.stem)
             task_by_id[tid] = t
 
+        # Compute children: for each task, find all tasks whose parent_id == this task_id.
+        for t in tasks:
+            t["children"] = []
+
+        for t in tasks:
+            pid: str | None = t.get("parent_id")
+            if pid is not None and pid in task_by_id:
+                parent = task_by_id[pid]
+                tid: str = t.get("task_id", "")
+                parent.setdefault("children", []).append(tid)
+
         for t in tasks:
             blocked_by: list[str] = t.get("blocked_by", [])
             if not blocked_by:
@@ -272,6 +312,16 @@ class FileTeamState:
                 dep is not None and dep.get("status") == "completed" for dep in deps
             )
         return tasks
+
+    def list_children(self, team_id: str, parent_id: str) -> list[dict[str, Any]]:
+        """Return tasks that are direct children of *parent_id*.
+
+        Args:
+            team_id: Team containing the tasks.
+            parent_id: Parent task ID to filter by.
+        """
+        tasks = self.list_tasks(team_id)
+        return [t for t in tasks if t.get("parent_id") == parent_id]
 
     def update_task(
         self,

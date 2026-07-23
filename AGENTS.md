@@ -470,7 +470,8 @@ team_mode:
 | `write_blackboard` | Write to the shared blackboard |
 | `list_blackboard` | List keys on the shared blackboard |
 | `delete_blackboard` | Delete a key from the shared blackboard |
-| `shutdown_request` | Request a team member to stop its current activity |
+| `shutdown_request` | Shut down (remove) a team member and release its resources |
+| `team_add_member` | Add a new member to an existing team |
 | `team_status` | Check team health, member status, and resource usage |
 
 **Default Members**: When `defaults:` is configured, `team_create` uses these members when the LLM calls it without explicit members. The LLM must still call `team_create` explicitly.

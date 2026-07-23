@@ -6,22 +6,24 @@ are members of or leads of a dynamic team.
 
 Universal tools (all members can use):
     - send_message: Send a message to a teammate's inbox.
-    - task_create: Create a task on the shared task board.
-    - task_list: List all tasks on the shared task board.
-    - task_update: Update a task's status or owner.
+    - task_create: Create a task on the shared task board (lead-only for
+      top-level; any member for subtasks with parent_id).
+    - task_list: List tasks on the shared task board.
+    - task_update: Update a task's status or owner (lead: any task;
+      member: own tasks or unclaimed only).
+    - task_get: Get a single task by ID.
     - read_blackboard: Read a key from the shared blackboard.
     - write_blackboard: Write a key to the shared blackboard.
     - list_blackboard: List all keys on the shared blackboard.
     - team_status: Get the current status of the team.
 
 Lead-only tools (only agents with ``team_role == "lead"``):
-    - task_create: Create a task on the shared task board.
+    - task_create (top-level only): Create a top-level task on the shared task board.
     - team_create: Create a new team with eligible members.
     - team_delete: Delete the current team and close all member sessions.
     - delete_blackboard: Delete a key from the shared blackboard.
-    - shutdown_request: Shut down a specific team member.
+    - shutdown_request: Shut down (remove) a specific team member.
     - team_add_member: Add a new member to an existing team.
-    - team_remove_member: Remove a member from the team.
 
     Lead-only tools are registered for all agents but filtered out for
     non-lead members by ``prepare_tools()`` before the model receives the
@@ -132,6 +134,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             self.register_tool(self.task_create)
             self.register_tool(self.task_list)
             self.register_tool(self.task_update)
+            self.register_tool(self.task_get)
             self.register_tool(self.read_blackboard)
             self.register_tool(self.write_blackboard)
             self.register_tool(self.list_blackboard)
@@ -143,7 +146,6 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             self.register_tool(self.delete_blackboard)
             self.register_tool(self.shutdown_request)
             self.register_tool(self.team_add_member)
-            self.register_tool(self.team_remove_member)
 
     @property
     def _notice_mode(self) -> DeliveryMode:
@@ -238,6 +240,48 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         """Return the team_id from session metadata, or None."""
         team_id: str | None = agent_ctx.session.metadata.get("team_id")
         return team_id
+
+    @staticmethod
+    def _build_member_work_summary(
+        team_state: FileTeamState,
+        team_id: str,
+        members: dict[str, dict[str, Any]],
+    ) -> dict[str, str]:
+        """Build a one-line work-status summary for each member.
+
+        For each member, inspects tasks in the team state and produces:
+        - In-progress tasks: ``"Currently working on: <subject>"``
+        - Only completed tasks: ``"Just completed: <subject>"``
+        - No tasks: ``"No active work"``
+
+        Args:
+            team_state: File team state for reading tasks.
+            team_id: Team whose tasks to inspect.
+            members: Members dict from team state.
+
+        Returns:
+            Mapping of member name to work-status description string.
+        """
+        all_tasks = team_state.list_tasks(team_id)
+        summaries: dict[str, str] = {}
+        for m_name in members:
+            in_progress = [
+                t
+                for t in all_tasks
+                if t.get("owner") == m_name and t.get("status") == "in_progress"
+            ]
+            completed = [
+                t for t in all_tasks if t.get("owner") == m_name and t.get("status") == "completed"
+            ]
+            if in_progress:
+                subjects = ", ".join(t.get("subject", "?") for t in in_progress)
+                summaries[m_name] = f"Currently working on: {subjects}"
+            elif completed:
+                subjects = ", ".join(t.get("subject", "?") for t in completed)
+                summaries[m_name] = f"Just completed: {subjects}"
+            else:
+                summaries[m_name] = "No active work"
+        return summaries
 
     # ------------------------------------------------------------------
     # Universal tools
@@ -423,15 +467,26 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             list[str] | None,
             Field(description="Optional list of task_ids this task depends on"),
         ] = None,
+        parent_id: Annotated[
+            str | None,
+            Field(
+                description="Optional parent task ID to create a subtask. "
+                "When set, any team member can create subtasks. "
+                "When None (top-level), only lead can create"
+            ),
+        ] = None,
     ) -> ToolReturn:
-        """Create a task on the shared task board (lead-only).
+        """Create a task on the shared task board.
+
+        Top-level tasks (``parent_id=None``) are lead-only.  Subtasks
+        (``parent_id`` set) can be created by any team member.
 
         Returns:
             Success message with task_id, or error string.
         """
         agent_ctx = self._resolve_agent_context(ctx)
         role: str = agent_ctx.session.metadata.get("team_role", "")
-        if role != "lead":
+        if parent_id is None and role != "lead":
             return ToolReturn(return_value="Only lead can use task_create")
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
@@ -441,21 +496,51 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if team_state is None:
             return ToolReturn(return_value="Not in a team session")
 
-        task_id = team_state.create_task(
-            team_id,
-            {
-                "subject": subject,
-                "description": description,
-                "blocked_by": blocked_by or [],
-            },
-        )
+        if parent_id is not None:
+            parent = team_state.get_task(team_id, parent_id)
+            if parent is None:
+                return ToolReturn(return_value=f"Parent task not found: {parent_id}")
+
+        task_dict: dict[str, Any] = {
+            "subject": subject,
+            "description": description,
+            "blocked_by": blocked_by or [],
+        }
+        if parent_id is not None:
+            task_dict["parent_id"] = parent_id
+
+        try:
+            task_id = team_state.create_task(team_id, task_dict)
+        except ValueError as exc:
+            return ToolReturn(return_value=str(exc))
         return ToolReturn(return_value=f"Task created: {task_id}")
 
-    async def task_list(self, ctx: RunContext[Any]) -> ToolReturn:
-        """List all tasks on the shared task board.
+    async def task_list(  # noqa: PLR0911
+        self,
+        ctx: RunContext[Any],
+        parent_id: Annotated[
+            str | None,
+            Field(
+                description="Filter to show only subtasks of this parent. "
+                "None = show top-level tasks only (default)"
+            ),
+        ] = None,
+        include_children: Annotated[
+            bool,
+            Field(
+                description="If True, recursively include subtasks nested under each top-level task"
+            ),
+        ] = False,
+    ) -> ToolReturn:
+        """List tasks on the shared task board.
+
+        By default, shows only top-level tasks (no ``parent_id``).
+        When ``parent_id`` is specified, shows only direct children of
+        that task (as a flat list).  When ``include_children=True``,
+        subtasks are nested inside parent tasks in the XML output.
 
         Returns:
-            JSON array of tasks (pretty-printed), or error string.
+            XML task list, or error string.
         """
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
@@ -466,32 +551,97 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if team_state is None:
             return ToolReturn(return_value="Not in a team session")
 
-        tasks = team_state.list_tasks(team_id)
-        if not tasks:
+        all_tasks = team_state.list_tasks(team_id)
+        if not all_tasks:
             return ToolReturn(return_value="<task_list>(empty)</task_list>")
+
+        task_by_id: dict[str, dict[str, Any]] = {t.get("task_id", ""): t for t in all_tasks}
+
+        if parent_id is not None:
+            # Show only direct children of the specified parent (flat list).
+            children = [t for t in all_tasks if t.get("parent_id") == parent_id]
+            if not children:
+                return ToolReturn(return_value="<task_list>(empty)</task_list>")
+            lines = ["<task_list>"]
+            lines.extend(self._format_task_xml(t, indent=2) for t in children)
+            lines.append("</task_list>")
+            return ToolReturn(return_value="\n".join(lines))
+
+        # Show top-level tasks only (no parent_id).
+        top_level = [t for t in all_tasks if t.get("parent_id") is None]
+        if not top_level:
+            return ToolReturn(return_value="<task_list>(empty)</task_list>")
+
         lines = ["<task_list>"]
-        for t in tasks:
-            tid = t.get("task_id", "?")
-            status = t.get("status", "?")
-            owner = t.get("owner", "")
-            subject = t.get("subject", "")
-            description = t.get("description", "")
-            last_note = t.get("last_note", "")
-            blocked = t.get("is_unblocked", True)
-            blocked_attr = "" if blocked else ' blocked="true"'
-            owner_attr = f' owner="{owner}"' if owner else ""
-            lines.append(f'  <task id="{tid}" status="{status}"{owner_attr}{blocked_attr}>')
-            if description:
-                lines.append(f"    {subject}: {description}")
-            else:
-                lines.append(f"    {subject}")
-            if last_note:
-                lines.append(f"    note: {last_note}")
-            lines.append("  </task>")
+        for t in top_level:
+            lines.append(
+                self._format_task_xml(
+                    t,
+                    indent=2,
+                    include_children=include_children,
+                    task_by_id=task_by_id,
+                )
+            )
         lines.append("</task_list>")
         return ToolReturn(return_value="\n".join(lines))
 
-    async def task_update(
+    @staticmethod
+    def _format_task_xml(
+        t: dict[str, Any],
+        *,
+        indent: int = 2,
+        include_children: bool = False,
+        task_by_id: dict[str, dict[str, Any]] | None = None,
+    ) -> str:
+        """Format a task dict as an XML element, optionally nesting subtasks.
+
+        Args:
+            t: Task dict.
+            indent: Number of spaces for indentation.
+            include_children: If True, nest subtask XML inside this task.
+            task_by_id: Lookup map for resolving children by task_id.
+
+        Returns:
+            XML string for the task.
+        """
+        tid = t.get("task_id", "?")
+        status = t.get("status", "?")
+        owner = t.get("owner", "")
+        subject = t.get("subject", "")
+        description = t.get("description", "")
+        last_note = t.get("last_note", "")
+        blocked = t.get("is_unblocked", True)
+        blocked_attr = "" if blocked else ' blocked="true"'
+        owner_attr = f' owner="{owner}"' if owner else ""
+        pad = " " * indent
+
+        parts: list[str] = []
+        parts.append(f'{pad}<task id="{tid}" status="{status}"{owner_attr}{blocked_attr}>')
+        content_line = f"{subject}: {description}" if description else subject
+        parts.append(f"{pad}  {content_line}")
+        if last_note:
+            parts.append(f"{pad}  note: {last_note}")
+
+        if include_children and task_by_id is not None:
+            children_ids: list[str] = t.get("children", [])
+            for child_id in children_ids:
+                child = task_by_id.get(child_id)
+                if child is not None:
+                    child_xml = TeamCommCapability._format_task_xml(
+                        child,
+                        indent=indent + 4,
+                        include_children=True,
+                        task_by_id=task_by_id,
+                    )
+                    # Wrap as <subtask> instead of <task>
+                    child_xml = child_xml.replace("<task ", "<subtask ", 1)
+                    child_xml = child_xml.replace("</task>", "</subtask>", 1)
+                    parts.append(child_xml)
+
+        parts.append(f"{pad}</task>")
+        return "\n".join(parts)
+
+    async def task_update(  # noqa: PLR0911
         self,
         ctx: RunContext[Any],
         task_id: Annotated[str, Field(description="ID of the task to update")],
@@ -510,8 +660,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     ) -> ToolReturn:
         """Update a task's status or owner on the shared task board.
 
+        Lead can update any task.  Members can update only tasks they
+        own or tasks with no owner (to claim them).
+
         Returns:
-            Updated task as JSON, or error string.
+            Updated task as XML, or error string.
         """
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
@@ -534,6 +687,20 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if not updates:
             return ToolReturn(return_value="No updates specified")
 
+        # Permission check: lead bypasses, members need ownership or unclaimed.
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role != "lead":
+            existing = team_state.get_task(team_id, task_id)
+            if existing is None:
+                return ToolReturn(return_value=f"Task not found: {task_id}")
+            current_owner: str = existing.get("owner", "")
+            if current_owner and current_owner != self._agent_name:
+                return ToolReturn(
+                    return_value=(
+                        "Permission denied: you can only update tasks you own or unclaimed tasks"
+                    )
+                )
+
         try:
             updated = team_state.update_task(team_id, task_id, updates)
         except (FileNotFoundError, OSError):
@@ -553,15 +720,84 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             )
         )
 
+    async def task_get(
+        self,
+        ctx: RunContext[Any],
+        task_id: Annotated[str, Field(description="ID of the task to retrieve")],
+        include_children: Annotated[
+            bool,
+            Field(description="If True, include subtasks nested in the output"),
+        ] = False,
+    ) -> ToolReturn:
+        """Get a single task by ID.
+
+        Returns:
+            Task details as XML, or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        task = team_state.get_task(team_id, task_id)
+        if task is None:
+            return ToolReturn(return_value=f"Task not found: {task_id}")
+
+        task_by_id: dict[str, dict[str, Any]] | None = None
+        if include_children:
+            all_tasks = team_state.list_tasks(team_id)
+            task_by_id = {t.get("task_id", ""): t for t in all_tasks}
+            # Ensure the requested task is from the enriched list (has children).
+            enriched = task_by_id.get(task_id)
+            if enriched is not None:
+                task = enriched
+
+        xml = self._format_task_xml(
+            task,
+            indent=0,
+            include_children=include_children,
+            task_by_id=task_by_id,
+        )
+        return ToolReturn(return_value=xml)
+
     async def read_blackboard(
         self,
         ctx: RunContext[Any],
         key: Annotated[str, Field(description="Blackboard key to read")],
+        limit: Annotated[
+            int,
+            Field(
+                description="Maximum number of lines to return (default 200). "
+                "Use a smaller value to reduce context window usage"
+            ),
+        ] = 200,
+        offset: Annotated[
+            int,
+            Field(
+                description="Starting line number, 0-indexed (default 0). "
+                "Ignored when context is provided"
+            ),
+        ] = 0,
+        context: Annotated[
+            int | None,
+            Field(
+                description="If provided, center the output around this line "
+                "number (0-indexed). Returns limit/2 lines before and after "
+                "the specified line. Overrides offset"
+            ),
+        ] = None,
     ) -> ToolReturn:
-        """Read a key from the shared blackboard.
+        """Read a key from the shared blackboard with line-based pagination.
 
         Returns:
-            JSON value + metadata, or "Key not found" / error string.
+            JSON value + metadata + paginated lines, or "Key not found" /
+            error string.  When the result is truncated, a trailing
+            ``<!--- total=N offset=M limit=K has_more=true --->`` hint
+            is appended so the caller knows how to fetch the next page.
         """
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
@@ -575,16 +811,56 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         result = team_state.read_blackboard(team_id, key)
         if result is None:
             return ToolReturn(return_value="Key not found")
-        value_text = result.get("value", {}).get("text", "")
+
+        value_text: str = result.get("value", {}).get("text", "")
         version = result.get("version", 0)
         written_by = result.get("written_by", "unknown")
         written_at = result.get("written_at", "")
-        return ToolReturn(
-            return_value=(
-                f'<blackboard version="{version}" written_by="{written_by}" '
-                f'written_at="{written_at}">\n{value_text}\n</blackboard>'
+
+        lines = value_text.splitlines()
+        total_lines = len(lines)
+
+        if total_lines == 0:
+            return ToolReturn(
+                return_value=[
+                    f'<blackboard version="{version}" written_by="{written_by}" '
+                    f'written_at="{written_at}" total_lines="0">',
+                    "</blackboard>",
+                ],
             )
+
+        # Determine the effective offset and limit.
+        if context is not None:
+            # Center around the context line: limit/2 before, rest after.
+            half = max(limit // 2, 1)
+            eff_offset = max(context - half, 0)
+            eff_limit = limit
+        else:
+            eff_offset = max(offset, 0)
+            eff_limit = max(limit, 1)
+
+        # Clamp offset to valid range.
+        eff_offset = min(eff_offset, total_lines)
+
+        page_lines = lines[eff_offset : eff_offset + eff_limit]
+
+        has_more = eff_offset + eff_limit < total_lines
+
+        header = (
+            f'<blackboard version="{version}" written_by="{written_by}" '
+            f'written_at="{written_at}" total_lines="{total_lines}" '
+            f'offset="{eff_offset}" limit="{eff_limit}">'
         )
+
+        parts: list[str] = [header, *page_lines]
+        if has_more:
+            parts.append(
+                f"<!--- total={total_lines} offset={eff_offset} "
+                f"limit={eff_limit} has_more=true --->"
+            )
+        parts.append("</blackboard>")
+
+        return ToolReturn(return_value=parts)
 
     async def write_blackboard(
         self,
@@ -1226,55 +1502,6 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         team_state.delete_blackboard(team_id, key)
         return ToolReturn(return_value=f"Blackboard key '{key}' deleted")
 
-    async def shutdown_request(
-        self,
-        ctx: RunContext[Any],
-        member_name: Annotated[str, Field(description="Name of the member to shut down")],
-    ) -> ToolReturn:
-        """Shut down a specific team member (lead-only).
-
-        Returns:
-            ``"Shutdown completed for {member_name}"`` on success, or error.
-        """
-        agent_ctx = self._resolve_agent_context(ctx)
-        role: str = agent_ctx.session.metadata.get("team_role", "")
-        if role != "lead":
-            return ToolReturn(return_value="Only lead can use shutdown_request")
-
-        team_id = self._get_team_id(agent_ctx)
-        if team_id is None:
-            return ToolReturn(return_value="Not in a team session")
-
-        team_state = self._get_team_state(agent_ctx)
-        if team_state is None:
-            return ToolReturn(return_value="Not in a team session")
-
-        member_sid = team_state.get_member_session_id(team_id, member_name)
-        if member_sid is None:
-            return ToolReturn(return_value=f"Member '{member_name}' not found")
-
-        session_pool = agent_ctx.host.session_pool
-        if session_pool is None:
-            return ToolReturn(return_value="SessionPool not available")
-
-        await session_pool.close_session(member_sid)
-
-        # Mark member as shutdown in team state (clear session_id so
-        # team_status shows them as offline, not with a stale session).
-        from agentpool.capabilities.file_team_state import FileTeamState
-
-        state_path = team_state._state_path(team_id)
-        if state_path.exists():
-            state: dict[str, Any] = FileTeamState._read_json(state_path)
-            members: dict[str, dict[str, Any]] = state.get("members", {})
-            if member_name in members:
-                members[member_name]["session_id"] = ""
-                members[member_name]["status"] = "shutdown"
-                state["members"] = members
-                FileTeamState._atomic_write(state_path, state)
-
-        return ToolReturn(return_value=f"Shutdown completed for {member_name}")
-
     async def team_add_member(  # noqa: PLR0911, PLR0915
         self,
         ctx: RunContext[Any],
@@ -1404,11 +1631,17 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         )
         # Append current member roster so the new member knows their teammates.
         existing_members: dict[str, dict[str, Any]] = state.get("members", {})
+        work_summaries = self._build_member_work_summary(
+            team_state,
+            team_id,
+            existing_members,
+        )
         roster_lines = []
         for m_name, m_info in existing_members.items():
             m_agent = m_info.get("agent", m_name)
             role_label = "lead" if m_name == lead_member_name else "member"
-            roster_lines.append(f"  - `{m_name}` (agent=`{m_agent}`, role=`{role_label}`)")
+            work = work_summaries.get(m_name, "No active work")
+            roster_lines.append(f"  - `{m_name}` (agent=`{m_agent}`, role=`{role_label}`) — {work}")
         roster = "\n".join(roster_lines)
         initial_prompt = f"{base_prompt}\n\n## Team Members\n{roster}"
         if prompt:
@@ -1508,12 +1741,12 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         return ToolReturn(return_value=f"Member '{name}' added to team (lifecycle={lifecycle})")
 
-    async def team_remove_member(
+    async def shutdown_request(
         self,
         ctx: RunContext[Any],
-        member_name: Annotated[str, Field(description="Name of the member to remove")],
+        member_name: Annotated[str, Field(description="Name of the member to shut down")],
     ) -> ToolReturn:
-        """Remove a member from the team (lead-only).
+        """Shut down (remove) a team member and release its resources (lead-only).
 
         Returns:
             Success message or error string.
@@ -1521,7 +1754,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent_ctx = self._resolve_agent_context(ctx)
         role: str = agent_ctx.session.metadata.get("team_role", "")
         if role != "lead":
-            return ToolReturn(return_value="Only lead can use team_remove_member")
+            return ToolReturn(return_value="Only lead can use shutdown_request")
 
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
@@ -1533,7 +1766,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             self._agent_name,
         )
         if member_name == lead_member_name:
-            return ToolReturn(return_value="Cannot remove yourself")
+            return ToolReturn(return_value="Cannot shut down yourself")
 
         team_state = self._get_team_state(agent_ctx)
         if team_state is None:
@@ -1584,7 +1817,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 member_name,
             )
 
-        return ToolReturn(return_value=f"Member '{member_name}' removed from team")
+        return ToolReturn(return_value=f"Shutdown completed for {member_name}")
 
     @staticmethod
     def _schedule_ephemeral_cleanup(
@@ -1652,7 +1885,6 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             "delete_blackboard",
             "shutdown_request",
             "team_add_member",
-            "team_remove_member",
         },
     )
 
@@ -1667,7 +1899,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         For non-lead members:
             - Lead-only tools (``team_create``, ``team_delete``,
               ``delete_blackboard``, ``shutdown_request``,
-              ``team_add_member``, ``team_remove_member``) are removed
+              ``team_add_member``) are removed
               entirely so the LLM never sees them.
             - ``send_message`` has its ``to`` parameter description
               updated to remove the broadcast (``"*"``) mention, and a

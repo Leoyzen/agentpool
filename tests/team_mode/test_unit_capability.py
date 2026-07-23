@@ -140,9 +140,9 @@ async def test_skeleton_get_tools_returns_14_tools_when_enabled() -> None:
 
     When: get_tools() is called.
     Then: returns 14 tools (send_message, task_create, task_list,
-        task_update, read_blackboard, write_blackboard, list_blackboard,
-        team_status, team_create, team_delete, delete_blackboard,
-        shutdown_request, team_add_member, team_remove_member).
+        task_update, task_get, read_blackboard, write_blackboard,
+        list_blackboard, team_status, team_create, team_delete,
+        delete_blackboard, shutdown_request, team_add_member).
     """
     config = _make_enabled_config()
     cap = TeamCommCapability(config, "worker", _make_session_metadata())
@@ -155,6 +155,7 @@ async def test_skeleton_get_tools_returns_14_tools_when_enabled() -> None:
         "task_create",
         "task_list",
         "task_update",
+        "task_get",
         "read_blackboard",
         "write_blackboard",
         "list_blackboard",
@@ -164,7 +165,6 @@ async def test_skeleton_get_tools_returns_14_tools_when_enabled() -> None:
         "delete_blackboard",
         "shutdown_request",
         "team_add_member",
-        "team_remove_member",
     }
 
 
@@ -972,10 +972,134 @@ async def test_read_blackboard_returns_value(tmp_path: Any) -> None:
 
     await cap.write_blackboard(ctx, "config", "value1")
     result = await cap.read_blackboard(ctx, "config")
+    rv = (
+        "\n".join(result.return_value)
+        if isinstance(result.return_value, list)
+        else result.return_value
+    )
 
-    assert "<blackboard" in result.return_value
-    assert "value1" in result.return_value
-    assert 'version="1"' in result.return_value
+    assert "<blackboard" in rv
+    assert "value1" in rv
+    assert 'version="1"' in rv
+
+
+@pytest.mark.unit
+async def test_read_blackboard_pagination_default_limit(tmp_path: Any) -> None:
+    """Given: blackboard key with 300 lines.
+
+    When: read_blackboard is called with default params.
+    Then: returns first 200 lines with has_more hint.
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(base_dir=str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    lines = [f"line_{i}" for i in range(300)]
+    await cap.write_blackboard(ctx, "log", "\n".join(lines))
+    result = await cap.read_blackboard(ctx, "log")
+    rv = "\n".join(result.return_value)
+
+    assert "line_0" in rv
+    assert "line_199" in rv
+    assert "line_200" not in rv
+    assert "has_more=true" in rv
+    assert 'total_lines="300"' in rv
+    assert 'offset="0"' in rv
+    assert 'limit="200"' in rv
+
+
+@pytest.mark.unit
+async def test_read_blackboard_pagination_offset(tmp_path: Any) -> None:
+    """Given: blackboard key with 300 lines.
+
+    When: read_blackboard is called with offset=200, limit=100.
+    Then: returns lines 200-299 without has_more hint.
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(base_dir=str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    lines = [f"line_{i}" for i in range(300)]
+    await cap.write_blackboard(ctx, "log", "\n".join(lines))
+    result = await cap.read_blackboard(ctx, "log", limit=100, offset=200)
+    rv = "\n".join(result.return_value)
+
+    assert "line_200" in rv
+    assert "line_299" in rv
+    assert "line_199" not in rv
+    assert "has_more" not in rv
+    assert 'offset="200"' in rv
+
+
+@pytest.mark.unit
+async def test_read_blackboard_pagination_context(tmp_path: Any) -> None:
+    """Given: blackboard key with 100 lines.
+
+    When: read_blackboard is called with context=50, limit=20.
+    Then: returns 20 lines centered around line 50 (lines 40-59).
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(base_dir=str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    lines = [f"line_{i}" for i in range(100)]
+    await cap.write_blackboard(ctx, "log", "\n".join(lines))
+    result = await cap.read_blackboard(ctx, "log", limit=20, context=50)
+    rv = "\n".join(result.return_value)
+
+    assert "line_40" in rv
+    assert "line_59" in rv
+    assert "line_39" not in rv
+    assert "line_60" not in rv
+    assert 'offset="40"' in rv
+
+
+@pytest.mark.unit
+async def test_read_blackboard_pagination_context_near_start(tmp_path: Any) -> None:
+    """Given: blackboard key with 100 lines.
+
+    When: read_blackboard is called with context=5, limit=20.
+    Then: offset is clamped to 0, returns lines 0-19.
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(base_dir=str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    lines = [f"line_{i}" for i in range(100)]
+    await cap.write_blackboard(ctx, "log", "\n".join(lines))
+    result = await cap.read_blackboard(ctx, "log", limit=20, context=5)
+    rv = "\n".join(result.return_value)
+
+    assert "line_0" in rv
+    assert "line_19" in rv
+    assert 'offset="0"' in rv
+
+
+@pytest.mark.unit
+async def test_read_blackboard_pagination_no_more(tmp_path: Any) -> None:
+    """Given: blackboard key with 50 lines.
+
+    When: read_blackboard is called with default limit=200.
+    Then: returns all 50 lines, no has_more hint.
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(base_dir=str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    lines = [f"line_{i}" for i in range(50)]
+    await cap.write_blackboard(ctx, "log", "\n".join(lines))
+    result = await cap.read_blackboard(ctx, "log")
+    rv = "\n".join(result.return_value)
+
+    assert "line_0" in rv
+    assert "line_49" in rv
+    assert "has_more" not in rv
+    assert 'total_lines="50"' in rv
 
 
 @pytest.mark.unit
@@ -1049,8 +1173,13 @@ async def test_write_blackboard_append_mode(tmp_path: Any) -> None:
 
     # Read back and verify append
     read_result = await cap.read_blackboard(ctx, "findings")
-    assert "first finding" in read_result.return_value
-    assert "second finding" in read_result.return_value
+    rv = (
+        "\n".join(read_result.return_value)
+        if isinstance(read_result.return_value, list)
+        else read_result.return_value
+    )
+    assert "first finding" in rv
+    assert "second finding" in rv
 
 
 @pytest.mark.unit
@@ -1069,7 +1198,12 @@ async def test_write_blackboard_append_to_empty_key(tmp_path: Any) -> None:
 
     assert result.return_value == "Written, version=1"
     read_result = await cap.read_blackboard(ctx, "new_key")
-    assert "first entry" in read_result.return_value
+    rv = (
+        "\n".join(read_result.return_value)
+        if isinstance(read_result.return_value, list)
+        else read_result.return_value
+    )
+    assert "first entry" in rv
 
 
 @pytest.mark.unit
@@ -1309,7 +1443,9 @@ async def test_shutdown_request_success(tmp_path: Any) -> None:
     """Given: lead agent with initialized team.
 
     When: shutdown_request is called with a valid member name.
-    Then: closes the member's session and returns success.
+
+    Then: closes the member's session and removes the member from the
+        members dict entirely (hard remove).
     """
     _init_team(str(tmp_path))
     mock_pool = MagicMock()
@@ -1326,6 +1462,12 @@ async def test_shutdown_request_success(tmp_path: Any) -> None:
 
     assert result.return_value == "Shutdown completed for translator_agent"
     mock_pool.close_session.assert_awaited_once_with("sess_translator")
+    # Verify member is removed from the members dict entirely (hard remove).
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    team_state = FileTeamState(str(tmp_path))
+    state = team_state._read_json(team_state._state_path("team_123"))
+    assert "translator_agent" not in state.get("members", {})
 
 
 @pytest.mark.unit
@@ -1651,16 +1793,15 @@ def _all_tool_names() -> list[str]:
         "delete_blackboard",
         "shutdown_request",
         "team_add_member",
-        "team_remove_member",
     ]
 
 
 @pytest.mark.unit
 async def test_prepare_tools_lead_returns_all_tools() -> None:
-    """Given: lead agent with all 14 tool defs.
+    """Given: lead agent with all 13 tool defs.
 
     When: prepare_tools() is called.
-    Then: all 14 tool defs returned unchanged.
+    Then: all 13 tool defs returned unchanged.
     """
     config = _make_enabled_config()
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
@@ -1669,19 +1810,19 @@ async def test_prepare_tools_lead_returns_all_tools() -> None:
 
     result = await cap.prepare_tools(ctx, tool_defs)
 
-    assert len(result) == 14
+    assert len(result) == 13
     result_names = {td.name for td in result}
     assert result_names == set(_all_tool_names())
 
 
 @pytest.mark.unit
 async def test_prepare_tools_member_filters_lead_only_tools() -> None:
-    """Given: non-lead member with all 14 tool defs.
+    """Given: non-lead member with all 13 tool defs.
 
     When: prepare_tools() is called.
     Then: lead-only tools (task_create, team_create, team_delete,
-        delete_blackboard, shutdown_request, team_add_member,
-        team_remove_member) are filtered out.  7 universal tools remain.
+        delete_blackboard, shutdown_request, team_add_member)
+        are filtered out.  7 universal tools remain.
     """
     config = _make_enabled_config()
     cap = TeamCommCapability(config, "worker", _make_session_metadata())
@@ -1697,7 +1838,6 @@ async def test_prepare_tools_member_filters_lead_only_tools() -> None:
     assert "delete_blackboard" not in result_names
     assert "shutdown_request" not in result_names
     assert "team_add_member" not in result_names
-    assert "team_remove_member" not in result_names
     assert len(result) == 7
     # Universal tools remain.
     for name in (
@@ -1772,7 +1912,7 @@ async def test_prepare_tools_no_session_metadata_returns_all() -> None:
 
     result = await cap.prepare_tools(ctx, tool_defs)
 
-    assert len(result) == 14
+    assert len(result) == 13
 
 
 # ---- get_instructions role-specific capabilities tests ----
@@ -1819,7 +1959,7 @@ def test_get_instructions_member_includes_individual_messaging_only() -> None:
     assert "Your Capabilities (Lead)" not in result
 
 
-# ---- team_add_member and team_remove_member tests ----
+# ---- team_add_member and shutdown_request tests ----
 
 
 @pytest.mark.unit
@@ -1961,11 +2101,13 @@ async def test_team_add_member_ephemeral(tmp_path: Any) -> None:
 
 
 @pytest.mark.unit
-async def test_team_remove_member_success(tmp_path: Any) -> None:
+async def test_shutdown_request_removes_member(tmp_path: Any) -> None:
     """Given: lead agent with initialized team.
 
-    When: team_remove_member is called with a valid member name.
-    Then: closes the member's session and returns success.
+    When: shutdown_request is called with a valid member name.
+
+    Then: closes the member's session, removes the member from team
+        state, writes audit to blackboard, and returns success.
     """
     _init_team(str(tmp_path))
     mock_pool = MagicMock()
@@ -1978,11 +2120,11 @@ async def test_team_remove_member_success(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    result = await cap.team_remove_member(ctx, "translator_agent")
+    result = await cap.shutdown_request(ctx, "translator_agent")
 
-    assert result.return_value == "Member 'translator_agent' removed from team"
+    assert result.return_value == "Shutdown completed for translator_agent"
     mock_pool.close_session.assert_awaited_once_with("sess_translator")
-    # Verify member removed from team state.
+    # Verify member removed from team state (hard remove, not soft shutdown).
     from agentpool.capabilities.file_team_state import FileTeamState
 
     team_state = FileTeamState(str(tmp_path))
@@ -1996,10 +2138,10 @@ async def test_team_remove_member_success(tmp_path: Any) -> None:
 
 
 @pytest.mark.unit
-async def test_team_remove_member_not_found(tmp_path: Any) -> None:
+async def test_shutdown_request_not_found(tmp_path: Any) -> None:
     """Given: lead agent with initialized team.
 
-    When: team_remove_member is called with unknown member name.
+    When: shutdown_request is called with unknown member name.
     Then: returns "Member '{name}' not found".
     """
     _init_team(str(tmp_path))
@@ -2013,18 +2155,18 @@ async def test_team_remove_member_not_found(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    result = await cap.team_remove_member(ctx, "nonexistent")
+    result = await cap.shutdown_request(ctx, "nonexistent")
 
     assert result.return_value == "Member 'nonexistent' not found"
     mock_pool.close_session.assert_not_awaited()
 
 
 @pytest.mark.unit
-async def test_team_remove_member_is_self(tmp_path: Any) -> None:
-    """Given: lead agent tries to remove themselves.
+async def test_shutdown_request_cannot_shutdown_self(tmp_path: Any) -> None:
+    """Given: lead agent tries to shut down themselves.
 
-    When: team_remove_member is called with lead's own member name.
-    Then: returns "Cannot remove yourself".
+    When: shutdown_request is called with lead's own member name.
+    Then: returns "Cannot shut down yourself".
     """
     _init_team(str(tmp_path))
     mock_pool = MagicMock()
@@ -2037,13 +2179,13 @@ async def test_team_remove_member_is_self(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    result = await cap.team_remove_member(ctx, "coordinator")
+    result = await cap.shutdown_request(ctx, "coordinator")
 
-    assert result.return_value == "Cannot remove yourself"
+    assert result.return_value == "Cannot shut down yourself"
     mock_pool.close_session.assert_not_awaited()
 
 
-# ---- Additional team_add_member / team_remove_member coverage ----
+# ---- Additional team_add_member / shutdown_request coverage ----
 
 
 @pytest.mark.unit
@@ -2095,6 +2237,48 @@ async def test_team_add_member_agent_field_correct(tmp_path: Any) -> None:
     state = team_state._read_json(team_state._state_path("team_123"))
     assert state["members"]["my_member"]["agent"] == "editor"
     assert state["members"]["my_member"]["agent"] != "my_member"  # NOT the member name
+
+
+@pytest.mark.unit
+async def test_team_add_member_roster_includes_work_summary(tmp_path: Any) -> None:
+    """Given: team with existing members who have tasks (in_progress and completed).
+
+    When: team_add_member is called.
+    Then: the initial prompt to the new member includes work-status for each member.
+    """
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    cap, ctx, mock_pool, _mock_delegation, _mock_registry = _make_add_member_setup(tmp_path)
+
+    # Create tasks for existing members.
+    team_state = FileTeamState(str(tmp_path))
+    team_state.create_task(
+        "team_123",
+        {
+            "subject": "Translate chapter 1",
+            "owner": "translator_agent",
+            "status": "in_progress",
+            "content": "",
+        },
+    )
+    team_state.create_task(
+        "team_123",
+        {
+            "subject": "Review draft",
+            "owner": "reviewer_agent",
+            "status": "completed",
+            "content": "",
+        },
+    )
+
+    await cap.team_add_member(ctx, "new_member", "editor")
+
+    # The first send_message call is the initial prompt to the new member.
+    first_call = mock_pool.send_message.await_args_list[0]
+    prompt_text: str = first_call.args[1]
+
+    assert "Currently working on: Translate chapter 1" in prompt_text
+    assert "Just completed: Review draft" in prompt_text
 
 
 @pytest.mark.unit
@@ -2155,17 +2339,17 @@ async def test_team_add_member_team_member_sessions_updated(tmp_path: Any) -> No
 
 
 @pytest.mark.unit
-async def test_team_remove_member_non_ascii_name(tmp_path: Any) -> None:
-    """Removing a member with non-ASCII name should succeed (blackboard key sanitized)."""
+async def test_shutdown_request_non_ascii_name(tmp_path: Any) -> None:
+    """Shutting down a member with non-ASCII name should succeed (blackboard key sanitized)."""
     import re
 
     # First add a member with Chinese name.
     cap, ctx, _mock_pool, _mock_delegation, _mock_registry = _make_add_member_setup(tmp_path)
     await cap.team_add_member(ctx, "推理员", "editor")
 
-    # Then remove it.
-    result = await cap.team_remove_member(ctx, "推理员")
-    assert "removed from team" in result.return_value
+    # Then shut it down.
+    result = await cap.shutdown_request(ctx, "推理员")
+    assert "Shutdown completed" in result.return_value
 
     # Verify blackboard was written with sanitized key.
     from agentpool.capabilities.file_team_state import FileTeamState
@@ -2227,39 +2411,6 @@ async def test_send_message_to_nonexistent_member_no_phantom(tmp_path: Any) -> N
     team_state = FileTeamState(str(tmp_path))
     state = team_state._read_json(team_state._state_path("team_123"))
     assert "ghost_member" not in state.get("members", {})
-
-
-@pytest.mark.unit
-async def test_shutdown_request_marks_member_offline(tmp_path: Any) -> None:
-    """Given: lead with an initialized team.
-
-    When: shutdown_request is called for a member.
-    Then: member's session_id is cleared and status set to 'shutdown'
-        in team state, so team_status shows them as offline.
-    """
-    _init_team(str(tmp_path))
-    mock_pool = MagicMock()
-    mock_pool.close_session = AsyncMock()
-    ctx = _make_run_context(
-        metadata=_make_lead_metadata(),
-        session_pool=mock_pool,
-        base_dir=str(tmp_path),
-    )
-    config = _make_enabled_config(base_dir=str(tmp_path))
-    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
-
-    result = await cap.shutdown_request(ctx, "translator_agent")
-
-    assert result.return_value == "Shutdown completed for translator_agent"
-    mock_pool.close_session.assert_awaited_once_with("sess_translator")
-    # Verify member marked as shutdown in team state.
-    from agentpool.capabilities.file_team_state import FileTeamState
-
-    team_state = FileTeamState(str(tmp_path))
-    state = team_state._read_json(team_state._state_path("team_123"))
-    member = state["members"]["translator_agent"]
-    assert member["session_id"] == ""
-    assert member["status"] == "shutdown"
 
 
 @pytest.mark.unit
@@ -2486,3 +2637,383 @@ async def test_team_status_watch_no_changes(tmp_path: Any) -> None:
 
     result = await cap.team_status(ctx, watch=True, timeout=1)
     assert "watch timeout" in result.return_value
+
+
+# ---- Nested subtask + permission tests ----
+
+
+def _make_member_metadata(team_id: str = "team_123") -> dict[str, Any]:
+    """Create session metadata for a non-lead member agent."""
+    return {
+        "team_id": team_id,
+        "team_name": "alpha_team",
+        "team_role": "member",
+        "team_member_name": "translator_agent",
+    }
+
+
+@pytest.mark.unit
+async def test_member_can_create_subtask(tmp_path: Any) -> None:
+    """Given: non-lead member with a parent task already created by lead.
+
+    When: member calls task_create with parent_id set.
+    Then: subtask is created successfully.
+    """
+    _init_team(str(tmp_path))
+    lead_ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    lead_cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    parent_result = await lead_cap.task_create(lead_ctx, "Parent task")
+    parent_id = parent_result.return_value.replace("Task created: ", "")
+
+    member_ctx = _make_run_context(
+        metadata=_make_member_metadata(),
+        base_dir=str(tmp_path),
+    )
+    member_cap = TeamCommCapability(config, "worker", _make_member_metadata())
+
+    result = await member_cap.task_create(member_ctx, "Subtask", parent_id=parent_id)
+
+    assert result.return_value.startswith("Task created: ")
+
+
+@pytest.mark.unit
+async def test_member_cannot_create_top_level_task(tmp_path: Any) -> None:
+    """Given: non-lead member.
+
+    When: member calls task_create without parent_id (top-level).
+    Then: returns "Only lead can use task_create".
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_member_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "worker", _make_member_metadata())
+
+    result = await cap.task_create(ctx, "Top-level task")
+
+    assert result.return_value == "Only lead can use task_create"
+
+
+@pytest.mark.unit
+async def test_lead_can_create_top_level_and_subtask(tmp_path: Any) -> None:
+    """Given: lead agent.
+
+    When: lead creates a top-level task and then a subtask.
+    Then: both succeed.
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    top_result = await cap.task_create(ctx, "Top task")
+    assert top_result.return_value.startswith("Task created: ")
+    parent_id = top_result.return_value.replace("Task created: ", "")
+
+    sub_result = await cap.task_create(ctx, "Sub task", parent_id=parent_id)
+    assert sub_result.return_value.startswith("Task created: ")
+
+
+@pytest.mark.unit
+async def test_subtask_with_invalid_parent_id(tmp_path: Any) -> None:
+    """Given: any team member.
+
+    When: task_create called with non-existent parent_id.
+    Then: returns "Parent task not found".
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_member_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "worker", _make_member_metadata())
+
+    result = await cap.task_create(ctx, "Orphan subtask", parent_id="task_fake123")
+
+    assert "Parent task not found" in result.return_value
+
+
+@pytest.mark.unit
+async def test_task_list_default_shows_only_top_level(tmp_path: Any) -> None:
+    """Given: team with top-level and subtasks.
+
+    When: task_list called with default params.
+    Then: only top-level tasks are shown.
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    top_result = await cap.task_create(ctx, "Top task")
+    top_id = top_result.return_value.replace("Task created: ", "")
+    await cap.task_create(ctx, "Sub task", parent_id=top_id)
+
+    result = await cap.task_list(ctx)
+
+    assert "Top task" in result.return_value
+    assert "Sub task" not in result.return_value
+
+
+@pytest.mark.unit
+async def test_task_list_include_children_nests_subtasks(tmp_path: Any) -> None:
+    """Given: team with top-level and subtasks.
+
+    When: task_list called with include_children=True.
+    Then: subtasks are nested inside parent tasks as <subtask> elements.
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    top_result = await cap.task_create(ctx, "Top task")
+    top_id = top_result.return_value.replace("Task created: ", "")
+    await cap.task_create(ctx, "Sub task", parent_id=top_id)
+
+    result = await cap.task_list(ctx, include_children=True)
+
+    assert "<task_list>" in result.return_value
+    assert "Top task" in result.return_value
+    assert "<subtask" in result.return_value
+    assert "Sub task" in result.return_value
+    assert "</subtask>" in result.return_value
+
+
+@pytest.mark.unit
+async def test_task_list_parent_id_filter(tmp_path: Any) -> None:
+    """Given: team with top-level and subtasks.
+
+    When: task_list called with parent_id set.
+    Then: only direct children of that parent are shown.
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    top_result = await cap.task_create(ctx, "Top task")
+    top_id = top_result.return_value.replace("Task created: ", "")
+    await cap.task_create(ctx, "Child A", parent_id=top_id)
+    await cap.task_create(ctx, "Child B", parent_id=top_id)
+
+    result = await cap.task_list(ctx, parent_id=top_id)
+
+    assert "<task_list>" in result.return_value
+    assert "Child A" in result.return_value
+    assert "Child B" in result.return_value
+    assert "Top task" not in result.return_value
+
+
+@pytest.mark.unit
+async def test_member_can_update_own_task(tmp_path: Any) -> None:
+    """Given: member owns a task.
+
+    When: member calls task_update on their own task.
+    Then: update succeeds.
+    """
+    _init_team(str(tmp_path))
+    lead_ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    lead_cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    create_result = await lead_cap.task_create(lead_ctx, "Task for member")
+    task_id = create_result.return_value.replace("Task created: ", "")
+
+    # Lead assigns the task to the member.
+    await lead_cap.task_update(lead_ctx, task_id, owner="worker")
+
+    # Member updates their own task.
+    member_ctx = _make_run_context(
+        metadata=_make_member_metadata(),
+        base_dir=str(tmp_path),
+    )
+    # The member's agent_name is "worker" but the _agent_name on the cap
+    # is set at construction. We need the cap's _agent_name to match the owner.
+    member_cap = TeamCommCapability(config, "worker", _make_member_metadata())
+
+    result = await member_cap.task_update(member_ctx, task_id, status="in_progress")
+
+    assert 'status="in_progress"' in result.return_value
+
+
+@pytest.mark.unit
+async def test_member_cannot_update_other_member_task(tmp_path: Any) -> None:
+    """Given: task owned by another member.
+
+    When: a different member calls task_update.
+    Then: returns "Permission denied".
+    """
+    _init_team(str(tmp_path))
+    lead_ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    lead_cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    create_result = await lead_cap.task_create(lead_ctx, "Owned task")
+    task_id = create_result.return_value.replace("Task created: ", "")
+
+    # Lead assigns to "reviewer_agent".
+    await lead_cap.task_update(lead_ctx, task_id, owner="reviewer_agent")
+
+    # "worker" (translator_agent) tries to update a task owned by reviewer_agent.
+    member_ctx = _make_run_context(
+        metadata=_make_member_metadata(),
+        base_dir=str(tmp_path),
+    )
+    member_cap = TeamCommCapability(config, "worker", _make_member_metadata())
+
+    result = await member_cap.task_update(member_ctx, task_id, status="completed")
+
+    assert "Permission denied" in result.return_value
+
+
+@pytest.mark.unit
+async def test_member_can_claim_unclaimed_task(tmp_path: Any) -> None:
+    """Given: task with no owner.
+
+    When: member calls task_update to set owner.
+    Then: update succeeds (member can claim unclaimed tasks).
+    """
+    _init_team(str(tmp_path))
+    lead_ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    lead_cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    create_result = await lead_cap.task_create(lead_ctx, "Unclaimed task")
+    task_id = create_result.return_value.replace("Task created: ", "")
+
+    member_ctx = _make_run_context(
+        metadata=_make_member_metadata(),
+        base_dir=str(tmp_path),
+    )
+    member_cap = TeamCommCapability(config, "worker", _make_member_metadata())
+
+    result = await member_cap.task_update(member_ctx, task_id, owner="worker")
+
+    assert 'owner="worker"' in result.return_value
+
+
+@pytest.mark.unit
+async def test_lead_can_update_any_task(tmp_path: Any) -> None:
+    """Given: task owned by a member.
+
+    When: lead calls task_update.
+    Then: update succeeds (lead bypasses ownership check).
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    create_result = await cap.task_create(ctx, "Task owned by someone")
+    task_id = create_result.return_value.replace("Task created: ", "")
+    await cap.task_update(ctx, task_id, owner="reviewer_agent")
+
+    result = await cap.task_update(ctx, task_id, status="completed")
+
+    assert 'status="completed"' in result.return_value
+
+
+@pytest.mark.unit
+async def test_task_get_returns_task_details(tmp_path: Any) -> None:
+    """Given: team session with an existing task.
+
+    When: task_get is called with a valid task_id.
+    Then: returns task details as XML.
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    create_result = await cap.task_create(ctx, "Get me", "Detailed description")
+    task_id = create_result.return_value.replace("Task created: ", "")
+
+    result = await cap.task_get(ctx, task_id)
+
+    assert "<task" in result.return_value
+    assert "Get me" in result.return_value
+    assert "Detailed description" in result.return_value
+
+
+@pytest.mark.unit
+async def test_task_get_not_found(tmp_path: Any) -> None:
+    """Given: team session.
+
+    When: task_get is called with non-existent task_id.
+    Then: returns "Task not found".
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.task_get(ctx, "task_nonexistent")
+
+    assert "Task not found" in result.return_value
+
+
+@pytest.mark.unit
+async def test_task_get_with_include_children(tmp_path: Any) -> None:
+    """Given: task with subtasks.
+
+    When: task_get called with include_children=True.
+    Then: subtasks are nested inside the task XML.
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    top_result = await cap.task_create(ctx, "Parent task")
+    top_id = top_result.return_value.replace("Task created: ", "")
+    await cap.task_create(ctx, "Child task", parent_id=top_id)
+
+    result = await cap.task_get(ctx, top_id, include_children=True)
+
+    assert "<task" in result.return_value
+    assert "Parent task" in result.return_value
+    assert "<subtask" in result.return_value
+    assert "Child task" in result.return_value
+    assert "</subtask>" in result.return_value

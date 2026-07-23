@@ -283,9 +283,14 @@ async def test_blackboard_write_failure_is_soft_error(
 
     # Verify the blackboard value was NOT overwritten.
     read_result = await cap.read_blackboard(ctx, "status")
-    assert "<blackboard" in read_result.return_value
-    assert "in_progress" in read_result.return_value
-    assert 'version="1"' in read_result.return_value
+    rv = (
+        "\n".join(read_result.return_value)
+        if isinstance(read_result.return_value, list)
+        else read_result.return_value
+    )
+    assert "<blackboard" in rv
+    assert "in_progress" in rv
+    assert 'version="1"' in rv
 
     # Cleanup.
     session_pool = team_mode_pool.session_pool

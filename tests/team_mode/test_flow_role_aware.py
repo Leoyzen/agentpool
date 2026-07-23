@@ -38,7 +38,6 @@ _LEAD_ONLY_TOOLS: frozenset[str] = frozenset(
         "delete_blackboard",
         "shutdown_request",
         "team_add_member",
-        "team_remove_member",
     },
 )
 
@@ -56,7 +55,6 @@ _ALL_TOOL_NAMES: list[str] = [
     "delete_blackboard",
     "shutdown_request",
     "team_add_member",
-    "team_remove_member",
 ]
 
 _BROADCAST_DESC = 'Recipient member name. "*" broadcasts to all members (lead-only).'
@@ -141,15 +139,14 @@ async def _create_lead_session(
 
 
 @pytest.mark.integration
-async def test_lead_sees_all_14_tools(team_mode_pool: AgentPool[Any]) -> None:
-    """Given: lead agent with all 14 team tool definitions.
+async def test_lead_sees_all_13_tools(team_mode_pool: AgentPool[Any]) -> None:
+    """Given: lead agent with all 13 team tool definitions.
 
     When: ``prepare_tools()`` is called with lead session metadata.
 
-    Then: all 14 tool definitions are returned unchanged, including
+    Then: all 13 tool definitions are returned unchanged, including
         the 6 lead-only tools (team_create, team_delete,
-        delete_blackboard, shutdown_request, team_add_member,
-        team_remove_member).
+        delete_blackboard, shutdown_request, team_add_member).
     """
     manifest = team_mode_pool.manifest
     team_mode_config: TeamModeConfig | None = manifest.team_mode
@@ -169,7 +166,7 @@ async def test_lead_sees_all_14_tools(team_mode_pool: AgentPool[Any]) -> None:
     result = await cap.prepare_tools(ctx, tool_defs)
 
     result_names = {td.name for td in result}
-    assert len(result) == 14
+    assert len(result) == 13
     assert result_names == set(_ALL_TOOL_NAMES)
     for lead_tool in _LEAD_ONLY_TOOLS:
         assert lead_tool in result_names
@@ -179,14 +176,14 @@ async def test_lead_sees_all_14_tools(team_mode_pool: AgentPool[Any]) -> None:
 async def test_member_sees_only_8_universal_tools(
     team_mode_pool: AgentPool[Any],
 ) -> None:
-    """Given: non-lead member with all 14 team tool definitions.
+    """Given: non-lead member with all 13 team tool definitions.
 
     When: ``prepare_tools()`` is called with member session metadata.
 
-    Then: only 7 universal tool definitions are returned.  The 7
+    Then: only 7 universal tool definitions are returned.  The 6
         lead-only tools (task_create, team_create, team_delete,
-        delete_blackboard, shutdown_request, team_add_member,
-        team_remove_member) are filtered out entirely.
+        delete_blackboard, shutdown_request, team_add_member)
+        are filtered out entirely.
     """
     manifest = team_mode_pool.manifest
     team_mode_config: TeamModeConfig | None = manifest.team_mode
@@ -331,6 +328,6 @@ async def test_no_metadata_returns_all_tools(
 
     result = await cap.prepare_tools(ctx, tool_defs)
 
-    assert len(result) == 14
+    assert len(result) == 13
     result_names = {td.name for td in result}
     assert result_names == set(_ALL_TOOL_NAMES)

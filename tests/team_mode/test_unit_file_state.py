@@ -594,3 +594,106 @@ def test_cleanup_returns_zero_for_nonexistent_dir(tmp_path: Path) -> None:
         ttl_hours=24,
     )
     assert removed == 0
+
+
+# ------------------------------------------------------------------
+# 27. create_task with parent_id stores it correctly
+# ------------------------------------------------------------------
+
+
+def test_create_task_with_parent_id(initialized_team: FileTeamState) -> None:
+    """Given a parent task, creating a child task with parent_id stores it."""
+    parent_id = initialized_team.create_task(
+        "team-1",
+        {"subject": "parent task"},
+    )
+    child_id = initialized_team.create_task(
+        "team-1",
+        {"subject": "child task", "parent_id": parent_id},
+    )
+    child = initialized_team.get_task("team-1", child_id)
+    assert child is not None
+    assert child["parent_id"] == parent_id
+    assert child["task_id"] == child_id
+
+
+# ------------------------------------------------------------------
+# 28. create_task with invalid parent_id raises ValueError
+# ------------------------------------------------------------------
+
+
+def test_create_task_invalid_parent_id_raises(initialized_team: FileTeamState) -> None:
+    """Given a non-existent parent_id, create_task raises ValueError."""
+    with pytest.raises(ValueError, match="Parent task not found"):
+        initialized_team.create_task(
+            "team-1",
+            {"subject": "orphan", "parent_id": "task_nonexistent"},
+        )
+
+
+# ------------------------------------------------------------------
+# 29. get_task returns task or None
+# ------------------------------------------------------------------
+
+
+def test_get_task_returns_task(initialized_team: FileTeamState) -> None:
+    """Given an existing task, get_task returns it."""
+    task_id = initialized_team.create_task("team-1", {"subject": "find me"})
+    result = initialized_team.get_task("team-1", task_id)
+    assert result is not None
+    assert result["task_id"] == task_id
+    assert result["subject"] == "find me"
+
+
+def test_get_task_returns_none_for_missing(initialized_team: FileTeamState) -> None:
+    """Given a non-existent task_id, get_task returns None."""
+    result = initialized_team.get_task("team-1", "task_nope")
+    assert result is None
+
+
+# ------------------------------------------------------------------
+# 30. list_tasks computes children field
+# ------------------------------------------------------------------
+
+
+def test_list_tasks_computes_children(initialized_team: FileTeamState) -> None:
+    """Given parent and child tasks, list_tasks computes children field."""
+    parent_id = initialized_team.create_task("team-1", {"subject": "parent"})
+    child1_id = initialized_team.create_task(
+        "team-1", {"subject": "child1", "parent_id": parent_id}
+    )
+    child2_id = initialized_team.create_task(
+        "team-1", {"subject": "child2", "parent_id": parent_id}
+    )
+
+    tasks = initialized_team.list_tasks("team-1")
+    parent = next(t for t in tasks if t["task_id"] == parent_id)
+    assert set(parent["children"]) == {child1_id, child2_id}
+
+    child1 = next(t for t in tasks if t["task_id"] == child1_id)
+    assert child1["children"] == []
+
+
+# ------------------------------------------------------------------
+# 31. list_children returns only direct children
+# ------------------------------------------------------------------
+
+
+def test_list_children_returns_direct_children(
+    initialized_team: FileTeamState,
+) -> None:
+    """Given nested tasks, list_children returns only direct children."""
+    parent_id = initialized_team.create_task("team-1", {"subject": "parent"})
+    child_id = initialized_team.create_task("team-1", {"subject": "child", "parent_id": parent_id})
+    initialized_team.create_task("team-1", {"subject": "grandchild", "parent_id": child_id})
+
+    children = initialized_team.list_children("team-1", parent_id)
+    assert len(children) == 1
+    assert children[0]["task_id"] == child_id
+
+    grandchildren = initialized_team.list_children("team-1", child_id)
+    assert len(grandchildren) == 1
+    assert grandchildren[0]["subject"] == "grandchild"
+
+    no_children = initialized_team.list_children("team-1", "task_nope")
+    assert no_children == []
