@@ -73,6 +73,8 @@ from agentpool.log import get_logger
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from pydantic_ai.run import AgentRunResult
+
     from agentpool.capabilities.agent_context import AgentContext
     from agentpool.capabilities.file_team_state import FileTeamState
     from agentpool.lifecycle.types import DeliveryMode
@@ -1741,7 +1743,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         return ToolReturn(return_value=f"Member '{name}' added to team (lifecycle={lifecycle})")
 
-    async def shutdown_request(
+    async def shutdown_request(  # noqa: PLR0911
         self,
         ctx: RunContext[Any],
         member_name: Annotated[str, Field(description="Name of the member to shut down")],
@@ -1777,6 +1779,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         member_sid = team_state.get_member_session_id(team_id, member_name)
         if member_sid is None:
             return ToolReturn(return_value=f"Member '{member_name}' not found")
+
+        # Check for unfinished tasks before closing the session.
+        unfinished = self._get_unfinished_tasks(team_state, team_id, member_name)
 
         session_pool = agent_ctx.host.session_pool
         if session_pool is not None:
@@ -1817,6 +1822,18 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 member_name,
             )
 
+        if unfinished:
+            task_list = ", ".join(
+                f"'{t.get('subject', '?')}' (id={t.get('task_id', '?')})" for t in unfinished
+            )
+            return ToolReturn(
+                return_value=(
+                    f"Shutdown completed for {member_name}. "
+                    f"Warning: member had {len(unfinished)} unfinished "
+                    f"task(s): {task_list}. "
+                    f"Please update task status or reassign to another member."
+                ),
+            )
         return ToolReturn(return_value=f"Shutdown completed for {member_name}")
 
     @staticmethod
@@ -1933,6 +1950,102 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 self._strip_broadcast_from_send_message(td)
             result.append(td)
         return result
+
+    @override
+    async def after_run(  # noqa: PLR0911
+        self,
+        ctx: RunContext[Any],
+        *,
+        result: AgentRunResult[Any],
+    ) -> AgentRunResult[Any]:
+        """Check for unfinished tasks after a member agent's run completes.
+
+        If this is a team member (not lead) with ``in_progress`` tasks,
+        routes a reminder message to the member's own session via the same
+        delivery mechanism as ``send_message``.  Skipped when the session
+        is being closed (shutdown path).  Limited to one reminder per
+        session to avoid infinite loops.
+        """
+        try:
+            agent_ctx = self._resolve_agent_context(ctx)
+        except RuntimeError:
+            return result
+
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return result
+
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role == "lead":
+            return result
+
+        # Skip if session is being closed (shutdown handles notification
+        # via the shutdown_request tool return value instead).
+        if agent_ctx.session.closing or agent_ctx.session.is_closing:
+            return result
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return result
+
+        member_name: str = agent_ctx.session.metadata.get(
+            "team_member_name",
+            self._agent_name,
+        )
+        unfinished = self._get_unfinished_tasks(team_state, team_id, member_name)
+        if not unfinished:
+            return result
+
+        # Avoid infinite loops: max 1 reminder per session.
+        reminder_count: int = agent_ctx.session.metadata.get("_task_reminder_count", 0)
+        if reminder_count >= 1:
+            return result
+
+        task_lines = "\n".join(
+            f"  - '{t.get('subject', '?')}' (id={t.get('task_id', '?')})" for t in unfinished
+        )
+        reminder_body = (
+            f"You have {len(unfinished)} unfinished task(s) still "
+            f"in_progress:\n{task_lines}\n\n"
+            f"Please complete your work and update the task status using "
+            f"task_update(task_id=..., status='completed') or "
+            f"task_update(task_id=..., status='failed') if you encountered "
+            f"issues."
+        )
+        msg_body = (
+            f'<team-message from="system" type="task_reminder">\n\n'
+            f"{reminder_body}\n\n</team-message>"
+        )
+
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is not None:
+            from agentpool.lifecycle.types import DeliveryMode
+
+            # Use QUEUE mode: the run is ending, so STEER would be lost.
+            await session_pool.send_message(
+                agent_ctx.session.session_id,
+                self._wrap_notice_content(msg_body),
+                mode=DeliveryMode.QUEUE,
+                source="team",
+                meta={"from": "system", "team_id": team_id},
+            )
+            agent_ctx.session.metadata["_task_reminder_count"] = reminder_count + 1
+
+        return result
+
+    @staticmethod
+    def _get_unfinished_tasks(
+        team_state: FileTeamState,
+        team_id: str,
+        member_name: str,
+    ) -> list[dict[str, Any]]:
+        """Return tasks owned by *member_name* that are still in_progress."""
+        all_tasks = team_state.list_tasks(team_id)
+        return [
+            t
+            for t in all_tasks
+            if t.get("owner") == member_name and t.get("status") == "in_progress"
+        ]
 
     @staticmethod
     def _strip_broadcast_from_send_message(tool_def: ToolDefinition) -> None:

@@ -3017,3 +3017,313 @@ async def test_task_get_with_include_children(tmp_path: Any) -> None:
     assert "<subtask" in result.return_value
     assert "Child task" in result.return_value
     assert "</subtask>" in result.return_value
+
+
+# ------------------------------------------------------------------
+# after_run — unfinished task reminder harness
+# ------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_after_run_reminder_for_unfinished_tasks(tmp_path: Any) -> None:
+    """Given: team member with an in_progress task.
+
+    When: after_run fires after the member's run completes.
+    Then: routes a reminder message to the member's own session via
+        session_pool.send_message with QUEUE mode.
+    """
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    _init_team(str(tmp_path))
+    team_state = FileTeamState(str(tmp_path))
+    team_state.create_task(
+        "team_123",
+        {
+            "subject": "Translate chapter 1",
+            "owner": "translator_agent",
+            "status": "in_progress",
+            "content": "",
+        },
+    )
+
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    metadata = _make_session_metadata()
+    ctx = _make_run_context(
+        metadata=metadata,
+        session_pool=mock_pool,
+        base_dir=str(tmp_path),
+        session_id="sess_translator",
+    )
+    ctx.deps.session.closing = False
+    ctx.deps.session.is_closing = False
+
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "worker", metadata)
+
+    mock_result = MagicMock()
+    result = await cap.after_run(ctx, result=mock_result)
+
+    assert result is mock_result
+    mock_pool.send_message.assert_awaited_once()
+    # Verify QUEUE mode was used.
+    call_args = mock_pool.send_message.await_args
+    call_kwargs = call_args.kwargs
+    from agentpool.lifecycle.types import DeliveryMode
+
+    assert call_kwargs.get("mode") is DeliveryMode.QUEUE
+    # Verify message content (2nd positional arg) mentions the unfinished task.
+    msg_content: str = call_args.args[1]
+    assert "Translate chapter 1" in msg_content
+    assert "in_progress" in msg_content
+    # Verify reminder count was incremented.
+    assert metadata.get("_task_reminder_count") == 1
+
+
+@pytest.mark.unit
+async def test_after_run_no_reminder_for_lead(tmp_path: Any) -> None:
+    """Given: lead agent with an in_progress task.
+
+    When: after_run fires.
+    Then: no reminder is sent (lead doesn't get task reminders).
+    """
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    _init_team(str(tmp_path))
+    team_state = FileTeamState(str(tmp_path))
+    team_state.create_task(
+        "team_123",
+        {
+            "subject": "Coordinate work",
+            "owner": "coordinator",
+            "status": "in_progress",
+            "content": "",
+        },
+    )
+
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        base_dir=str(tmp_path),
+    )
+    ctx.deps.session.closing = False
+    ctx.deps.session.is_closing = False
+
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    mock_result = MagicMock()
+    await cap.after_run(ctx, result=mock_result)
+
+    mock_pool.send_message.assert_not_awaited()
+
+
+@pytest.mark.unit
+async def test_after_run_no_reminder_when_session_closing(tmp_path: Any) -> None:
+    """Given: team member with unfinished tasks, but session is being closed.
+
+    When: after_run fires.
+    Then: no reminder is sent (shutdown path handles notification instead).
+    """
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    _init_team(str(tmp_path))
+    team_state = FileTeamState(str(tmp_path))
+    team_state.create_task(
+        "team_123",
+        {
+            "subject": "Translate chapter 1",
+            "owner": "translator_agent",
+            "status": "in_progress",
+            "content": "",
+        },
+    )
+
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    metadata = _make_session_metadata()
+    ctx = _make_run_context(
+        metadata=metadata,
+        session_pool=mock_pool,
+        base_dir=str(tmp_path),
+        session_id="sess_translator",
+    )
+    ctx.deps.session.closing = True
+
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "worker", metadata)
+
+    mock_result = MagicMock()
+    await cap.after_run(ctx, result=mock_result)
+
+    mock_pool.send_message.assert_not_awaited()
+
+
+@pytest.mark.unit
+async def test_after_run_no_duplicate_reminder(tmp_path: Any) -> None:
+    """Given: team member already received a reminder (count=1).
+
+    When: after_run fires again.
+    Then: no second reminder is sent (max 1 per session).
+    """
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    _init_team(str(tmp_path))
+    team_state = FileTeamState(str(tmp_path))
+    team_state.create_task(
+        "team_123",
+        {
+            "subject": "Translate chapter 1",
+            "owner": "translator_agent",
+            "status": "in_progress",
+            "content": "",
+        },
+    )
+
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    metadata = _make_session_metadata()
+    metadata["_task_reminder_count"] = 1  # Already reminded once.
+    ctx = _make_run_context(
+        metadata=metadata,
+        session_pool=mock_pool,
+        base_dir=str(tmp_path),
+        session_id="sess_translator",
+    )
+    ctx.deps.session.closing = False
+    ctx.deps.session.is_closing = False
+
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "worker", metadata)
+
+    mock_result = MagicMock()
+    await cap.after_run(ctx, result=mock_result)
+
+    mock_pool.send_message.assert_not_awaited()
+
+
+@pytest.mark.unit
+async def test_after_run_no_reminder_when_no_unfinished_tasks(tmp_path: Any) -> None:
+    """Given: team member with only completed tasks.
+
+    When: after_run fires.
+    Then: no reminder is sent.
+    """
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    _init_team(str(tmp_path))
+    team_state = FileTeamState(str(tmp_path))
+    team_state.create_task(
+        "team_123",
+        {
+            "subject": "Translate chapter 1",
+            "owner": "translator_agent",
+            "status": "completed",
+            "content": "",
+        },
+    )
+
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_id")
+    metadata = _make_session_metadata()
+    ctx = _make_run_context(
+        metadata=metadata,
+        session_pool=mock_pool,
+        base_dir=str(tmp_path),
+        session_id="sess_translator",
+    )
+    ctx.deps.session.closing = False
+    ctx.deps.session.is_closing = False
+
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "worker", metadata)
+
+    mock_result = MagicMock()
+    await cap.after_run(ctx, result=mock_result)
+
+    mock_pool.send_message.assert_not_awaited()
+
+
+# ------------------------------------------------------------------
+# shutdown_request — unfinished task warning in return value
+# ------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_shutdown_request_warns_about_unfinished_tasks(tmp_path: Any) -> None:
+    """Given: lead shuts down a member who has an in_progress task.
+
+    When: shutdown_request is called.
+    Then: return value includes a warning about the unfinished task.
+    """
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    _init_team(str(tmp_path))
+    team_state = FileTeamState(str(tmp_path))
+    team_state.create_task(
+        "team_123",
+        {
+            "subject": "Translate chapter 3",
+            "owner": "translator_agent",
+            "status": "in_progress",
+            "content": "",
+        },
+    )
+
+    mock_pool = MagicMock()
+    mock_pool.close_session = AsyncMock()
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.shutdown_request(ctx, "translator_agent")
+
+    assert "Shutdown completed for translator_agent" in result.return_value
+    assert "Warning" in result.return_value
+    assert "Translate chapter 3" in result.return_value
+    assert "in_progress" not in result.return_value  # status word not in output
+    assert "unfinished" in result.return_value
+    mock_pool.close_session.assert_awaited_once_with("sess_translator")
+
+
+@pytest.mark.unit
+async def test_shutdown_request_no_warning_when_tasks_completed(tmp_path: Any) -> None:
+    """Given: lead shuts down a member whose tasks are all completed.
+
+    When: shutdown_request is called.
+    Then: return value is the standard message with no warning.
+    """
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    _init_team(str(tmp_path))
+    team_state = FileTeamState(str(tmp_path))
+    team_state.create_task(
+        "team_123",
+        {
+            "subject": "Translate chapter 3",
+            "owner": "translator_agent",
+            "status": "completed",
+            "content": "",
+        },
+    )
+
+    mock_pool = MagicMock()
+    mock_pool.close_session = AsyncMock()
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        session_pool=mock_pool,
+        base_dir=str(tmp_path),
+    )
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    result = await cap.shutdown_request(ctx, "translator_agent")
+
+    assert result.return_value == "Shutdown completed for translator_agent"
+    mock_pool.close_session.assert_awaited_once_with("sess_translator")
