@@ -23,6 +23,7 @@ def _make_enabled_config(
     protocol_template: str | None = None,
     base_dir: str | None = None,
     notice_delivery_mode: str = "steer",
+    max_watch_timeout: int = 120,
 ) -> TeamModeConfig:
     """Create an enabled TeamModeConfig for testing.
 
@@ -32,6 +33,7 @@ def _make_enabled_config(
         protocol_template: Custom protocol template string.
         base_dir: Base directory for team state files.
         notice_delivery_mode: Delivery mode for notifications.
+        max_watch_timeout: Max watch timeout in seconds.
 
     Returns:
         A frozen TeamModeConfig with enabled=True.
@@ -44,6 +46,7 @@ def _make_enabled_config(
         or "Team={team_name}, Role={role}, Member={member_name}",
         base_dir=base_dir,
         notice_delivery_mode=notice_delivery_mode,
+        max_watch_timeout=max_watch_timeout,
     )
 
 
@@ -2807,6 +2810,81 @@ async def test_team_status_watch_task_ids_detects_change(tmp_path: Any) -> None:
     await task
 
     assert "watch timeout" not in result.return_value
+
+
+@pytest.mark.unit
+async def test_list_blackboard_watch_timeout_zero_uses_config_max(tmp_path: Any) -> None:
+    """Given: team with blackboard, config max_watch_timeout=1.
+
+    When: list_blackboard called with watch=True, timeout=0 (no limit).
+    Then: uses config max (1s), returns with timeout after ~1s.
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(base_dir=str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path), max_watch_timeout=1)
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    await cap.write_blackboard(ctx, "key1", "val1")
+    result = await cap.list_blackboard(ctx, watch=True, timeout=0)
+
+    assert "key1" in result.return_value
+    assert "watch timeout" in result.return_value
+
+
+@pytest.mark.unit
+async def test_list_blackboard_watch_timeout_capped_by_config(tmp_path: Any) -> None:
+    """Given: team with blackboard, config max_watch_timeout=2.
+
+    When: list_blackboard called with watch=True, timeout=999 (exceeds config).
+    Then: capped at 2s, returns with timeout after ~2s.
+    """
+    _init_team(str(tmp_path))
+    ctx = _make_run_context(base_dir=str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path), max_watch_timeout=2)
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    await cap.write_blackboard(ctx, "key1", "val1")
+    result = await cap.list_blackboard(ctx, watch=True, timeout=999)
+
+    assert "key1" in result.return_value
+    assert "watch timeout" in result.return_value
+
+
+@pytest.mark.unit
+async def test_team_status_watch_timeout_zero_uses_config_max(tmp_path: Any) -> None:
+    """Given: team, config max_watch_timeout=1.
+
+    When: team_status called with watch=True, timeout=0 (no limit).
+    Then: uses config max (1s), returns with timeout after ~1s.
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path), max_watch_timeout=1)
+    ctx = _make_run_context(
+        metadata=_make_lead_metadata(),
+        config=config,
+        base_dir=str(tmp_path),
+    )
+    cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
+
+    mock_pool = MagicMock()
+    mock_pool.send_message = AsyncMock(return_value="msg_1")
+    mock_pool.sessions._session_agents = {}
+    mock_pool.event_bus = MagicMock()
+    mock_pool.event_bus.publish = AsyncMock()
+    ctx2 = _make_run_context(
+        session_pool=mock_pool,
+        metadata=_make_lead_metadata(),
+        config=config,
+        base_dir=str(tmp_path),
+    )
+    await cap.team_create(
+        ctx2,
+        "test_team",
+        [{"agent": "worker", "name": "worker"}],
+    )
+
+    result = await cap.team_status(ctx, watch=True, timeout=0)
+    assert "watch timeout" in result.return_value
 
 
 # ---- Nested subtask + permission tests ----

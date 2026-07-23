@@ -973,6 +973,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             int,
             Field(
                 description="Maximum seconds to wait when watch=True. "
+                "If <= 0, uses the configured max watch timeout (default 120s). "
+                "Always capped by max_watch_timeout config. "
                 "Returns current state if timeout expires without changes"
             ),
         ] = 300,
@@ -1005,7 +1007,12 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if watch:
             import time
 
-            deadline = time.monotonic() + timeout
+            effective_timeout = (
+                min(timeout, self._config.max_watch_timeout)
+                if timeout > 0
+                else self._config.max_watch_timeout
+            )
+            deadline = time.monotonic() + effective_timeout
 
             if watch_task_ids:
                 initial_mtimes = self._snapshot_task_mtimes(team_state, team_id, watch_task_ids)
@@ -1062,6 +1069,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             int,
             Field(
                 description="Maximum seconds to wait when watch=True. "
+                "If <= 0, uses the configured max watch timeout (default 120s). "
+                "Always capped by max_watch_timeout config. "
                 "Returns current status if timeout expires without changes"
             ),
         ] = 300,
@@ -1161,7 +1170,13 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if watch:
             import time
 
-            deadline = time.monotonic() + timeout
+            effective_timeout = (
+                min(timeout, self._config.max_watch_timeout)
+                if timeout > 0
+                else self._config.max_watch_timeout
+            )
+            deadline = time.monotonic() + effective_timeout
+
             if watch_task_ids:
                 initial_mtimes = self._snapshot_task_mtimes(team_state, team_id, watch_task_ids)
                 while time.monotonic() < deadline:

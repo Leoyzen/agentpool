@@ -202,6 +202,14 @@ class TeamModeConfig(Schema):
         default=True,
         title="Auto-broadcast on member creation",
     )
+    max_watch_timeout: int = Field(
+        default=120,
+        ge=1,
+        title="Max watch timeout (seconds)",
+        description="Maximum seconds a watch call (list_blackboard, team_status) "
+        "will block waiting for changes. Acts as a safety cap when the caller "
+        "specifies timeout<=0 (no limit) or a timeout exceeding this value.",
+    )
 
     @field_validator("ttl_hours")
     @classmethod
