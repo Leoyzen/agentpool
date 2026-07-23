@@ -254,19 +254,29 @@ class NativeAgentConfig(BaseAgentConfig):
     def handle_capabilities(cls, data: dict[str, Any]) -> dict[str, Any]:
         """Convert capability dicts to appropriate config models.
 
-        If a dict has a known short-name ``type`` (e.g. ``"loop_detection"``),
-        it is validated against the typed built-in config model. Otherwise it
-        falls back to ``GenericCapabilityConfig`` (import-path based).
+        Resolution order for each capability dict's ``type`` field:
+
+        1. **Built-in short name** (e.g. ``"loop_detection"``) → validated
+           against the typed built-in config model.
+        2. **Entry-point name** (e.g. ``"mermaid_lint"``) → wrapped in
+           :class:`EntryPointCapabilityConfig` for later resolution via the
+           ``agentpool.capabilities`` entry-point group.
+        3. **Python import path** (e.g.
+           ``"pydantic_ai.capabilities.Instrumentation"``) → wrapped in
+           :class:`GenericCapabilityConfig` for ``__import__`` resolution.
         """
         from pydantic import TypeAdapter
 
         from agentpool_config.capabilities import (
             CapabilityConfig,
+            EntryPointCapabilityConfig,
             GenericCapabilityConfig,
             is_known_capability_type,
         )
 
         if capabilities := data.get("capabilities"):
+            # Discover entry-point capabilities once for this validation pass.
+            ep_names: set[str] | None = None
             resolved: list[Any] = []
             _adapter: TypeAdapter[CapabilityConfig] = TypeAdapter(CapabilityConfig)
             for cap in capabilities:
@@ -275,7 +285,21 @@ class NativeAgentConfig(BaseAgentConfig):
                     if is_known_capability_type(raw_type):
                         resolved.append(_adapter.validate_python(cap))
                     else:
-                        resolved.append(GenericCapabilityConfig(**cap))
+                        # Lazily discover entry-point names only when needed.
+                        if ep_names is None:
+                            try:
+                                from agentpool.capabilities.registry import (
+                                    discover_entry_point_capabilities,
+                                )
+
+                                ep_names = set(discover_entry_point_capabilities().keys())
+                            except Exception:  # noqa: BLE001
+                                ep_names = set()
+
+                        if raw_type in ep_names:
+                            resolved.append(EntryPointCapabilityConfig(**cap))
+                        else:
+                            resolved.append(GenericCapabilityConfig(**cap))
                 else:
                     resolved.append(cap)
             data["capabilities"] = resolved
