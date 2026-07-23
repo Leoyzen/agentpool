@@ -1933,7 +1933,13 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         member_name: str,
         base_dir: str,
     ) -> None:
-        """Poll member run state; close session when run completes.
+        """Wait for ephemeral member run to complete, then remove from team state.
+
+        Uses ``complete_event.wait()`` on the RunHandle for event-driven
+        completion detection instead of polling ``current_run_id`` every
+        5 seconds.  The state file is updated BEFORE closing the session
+        so that ``team_status(watch=True)`` detects the change immediately
+        even if ``close_session`` fails.
 
         Args:
             session_pool: The SessionPool managing the member session.
@@ -1944,29 +1950,56 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         """
         from agentpool.capabilities.file_team_state import FileTeamState
 
-        async def _poll_and_close() -> None:
+        async def _wait_and_cleanup() -> None:
             try:
+                # Event-driven: wait for the member's run to complete.
                 while True:
-                    await asyncio.sleep(5.0)
                     session = session_pool.sessions.get_session(member_session_id)
                     if session is None:
                         return  # Already closed
-                    if session.current_run_id is None:
-                        # Run completed — close and remove from team state.
-                        await session_pool.close_session(member_session_id)
-                        team_state = FileTeamState(base_dir)
-                        state_path = team_state._state_path(team_id)
-                        if state_path.exists():
-                            state = team_state._read_json(state_path)
-                            members = state.get("members", {})
-                            members.pop(member_name, None)
-                            state["members"] = members
-                            team_state._atomic_write(state_path, state)
+                    run_id = session.current_run_id
+                    if run_id is None:
+                        break  # Session idle — run already completed
+                    run_handle = session_pool.get_run(run_id)
+                    if run_handle is None:
+                        # Run handle already cleaned up — session should
+                        # be idle or starting a new chained run.
+                        break
+                    await run_handle.complete_event.wait()
+                    # Check if a new chained run started (prompt_queue).
+                    session = session_pool.sessions.get_session(member_session_id)
+                    if session is None:
                         return
+                    if session.current_run_id is not None and session.current_run_id != run_id:
+                        continue  # New chained run — wait for it too
+                    break
+
+                # Run completed — update state file FIRST so that
+                # team_status(watch=True) detects the mtime change
+                # immediately, even if close_session fails below.
+                team_state = FileTeamState(base_dir)
+                state_path = team_state._state_path(team_id)
+                if state_path.exists():
+                    state = team_state._read_json(state_path)
+                    members = state.get("members", {})
+                    members.pop(member_name, None)
+                    state["members"] = members
+                    team_state._atomic_write(state_path, state)
+
+                # Then close the session — suppress errors so a failing
+                # close does not prevent the state file update above.
+                with contextlib.suppress(Exception):
+                    await session_pool.close_session(member_session_id)
             except asyncio.CancelledError:
                 pass
+            except Exception:
+                logger.exception(
+                    "Ephemeral cleanup failed for member %s (session %s)",
+                    member_name,
+                    member_session_id,
+                )
 
-        task = asyncio.create_task(_poll_and_close())
+        task = asyncio.create_task(_wait_and_cleanup())
         _cleanup_tasks.add(task)
 
         def _on_done(t: asyncio.Task[Any]) -> None:
