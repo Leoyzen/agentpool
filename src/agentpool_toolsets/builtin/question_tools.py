@@ -286,7 +286,7 @@ def _format_followup_response(result: Any) -> ToolResult:
                 metadata={"answers": []},
             )
         case _ as unreachable:
-            raise RuntimeError(f"Unknown action: {unreachable}")  # type: ignore[unreachable]
+            raise RuntimeError(f"Unknown action: {unreachable}")
 
 
 class QuestionTools(FunctionToolsetCapability):
