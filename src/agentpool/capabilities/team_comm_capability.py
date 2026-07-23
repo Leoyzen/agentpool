@@ -167,6 +167,55 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         """
         return body
 
+    async def _notify_member(
+        self,
+        agent_ctx: AgentContext,
+        team_id: str,
+        member_name: str,
+        msg_body: str,
+    ) -> None:
+        """Send a best-effort system notification to a team member.
+
+        Used by task_create and task_update to push notifications when
+        tasks are assigned or unblocked, so agents don't have to poll
+        task_list to discover their work.
+
+        Silently skips when the member has no session, when notifying
+        self, or when session_pool is unavailable.
+        """
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is None:
+            return
+        target_sid = team_state.get_member_session_id(team_id, member_name)
+        if target_sid is None:
+            return
+        current_member: str = agent_ctx.session.metadata.get(
+            "team_member_name",
+            self._agent_name,
+        )
+        if member_name == current_member:
+            return
+        wrapped = (
+            f'<team-message from="system" type="task_notification">\n\n'
+            f"{msg_body}\n\n</team-message>"
+        )
+        try:
+            await session_pool.send_message(
+                target_sid,
+                self._wrap_notice_content(wrapped),
+                mode=self._notice_mode,
+                source="team",
+                meta={"from": "system", "team_id": team_id},
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to notify member '%s' for task notification",
+                member_name,
+            )
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -542,6 +591,23 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             task_id = team_state.create_task(team_id, task_dict)
         except ValueError as exc:
             return ToolReturn(return_value=str(exc))
+        # Notify the assigned member about the new task.
+        if owner is not None:
+            current_member: str = agent_ctx.session.metadata.get(
+                "team_member_name",
+                self._agent_name,
+            )
+            if owner != current_member:
+                blocked_str = ""
+                if blocked_by:
+                    blocked_str = f" (blocked by: {', '.join(blocked_by)})"
+                notif_body = (
+                    f"New task assigned to you:\n"
+                    f"- [{task_id}] {subject}{blocked_str}\n"
+                    f"Use task_list to see details and task_get to read "
+                    f"full description."
+                )
+                await self._notify_member(agent_ctx, team_id, owner, notif_body)
         return ToolReturn(return_value=f"Task created: {task_id}")
 
     async def task_list(  # noqa: PLR0911
@@ -740,6 +806,43 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         subject = updated.get("subject", "")
         description = updated.get("description", "")
         last_note = updated.get("last_note", "")
+
+        # --- Push notifications for task changes ---
+        current_member: str = agent_ctx.session.metadata.get(
+            "team_member_name",
+            self._agent_name,
+        )
+        # 1. Notify new owner when a task is assigned (skip if already completed).
+        if "owner" in updates and owner and owner != current_member and status != "completed":
+            notif_body = (
+                f"Task assigned to you:\n"
+                f"- [{tid}] {subject}\n"
+                f"Use task_list to see details and task_get to read "
+                f"full description."
+            )
+            await self._notify_member(agent_ctx, team_id, owner, notif_body)
+        # 2. Notify downstream task owners when a dependency completes.
+        if "status" in updates and updates.get("status") == "completed":
+            all_tasks = team_state.list_tasks(team_id)
+            for t in all_tasks:
+                if tid in t.get("blocked_by", []) and t.get("is_unblocked"):
+                    downstream_owner: str = t.get("owner", "")
+                    if downstream_owner and downstream_owner != current_member:
+                        downstream_subject = t.get("subject", "?")
+                        downstream_id = t.get("task_id", "?")
+                        notif_body = (
+                            f"Task unblocked:\n"
+                            f"- [{downstream_id}] {downstream_subject}\n"
+                            f"Dependency '{subject}' ({tid}) is now complete.\n"
+                            f"Use task_list to see details."
+                        )
+                        await self._notify_member(
+                            agent_ctx,
+                            team_id,
+                            downstream_owner,
+                            notif_body,
+                        )
+
         owner_attr = f' owner="{owner}"' if owner else ""
         content = f"{subject}: {description}" if description else subject
         note_attr = f"\n{last_note}" if last_note else ""
