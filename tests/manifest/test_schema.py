@@ -5,6 +5,9 @@ import pytest
 from agentpool import AgentsManifest
 
 
+pytestmark = pytest.mark.unit
+
+
 def test_schema_generation():
     """Test that JSON schema can be generated from config models."""
     try:

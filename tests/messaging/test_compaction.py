@@ -38,6 +38,9 @@ from agentpool_config.compaction import (
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture
 def sample_messages() -> list[ModelRequest | ModelResponse]:
     """Create a sample conversation for testing."""

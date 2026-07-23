@@ -1,0 +1,316 @@
+interactions:
+- request:
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, br
+      connection:
+      - keep-alive
+      content-length:
+      - '4749'
+      content-type:
+      - application/json
+      host:
+      - api.ai.rootcloud.info
+    method: POST
+    parsed_body:
+      messages:
+      - content: |-
+          You are test_agent.
+
+          You are a helpful test assistant for VCR cassette replay.
+          Working directory: /test
+          <available-skills>
+          <skill name="example-skill" description="A simple example skill that demonstrates the basic structure and functionality. Use when you need to show how skills work or test skill loading." />
+          <skill name="openspec-apply-change" description="Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks." />
+          <skill name="openspec-explore" description="Enter explore mode - a thinking partner for exploring ideas, investigating problems, and clarifying requirements. Use when the user wants to think through something before or during a change." />
+          <skill name="openspec-archive-change" description="Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete." />
+          <skill name="openspec-propose" description="Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and tasks ready for implementation." />
+          <skill name="systematic-debugging" description="Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes" />
+          <skill name="metaskill" description="The meta-skill: create AI agent teams, individual agents, or custom skills for any project. Use when the user wants to generate a complete .claude/ agent team, create a single agent, or create a single skill." />
+          <skill name="uv-package-manager" description="Master the uv package manager for fast Python dependency management, virtual environments, and modern Python project workflows. Use when setting up Python projects, managing dependencies, or optimizing Python development workflows with uv." />
+          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing with git version control, validates improvements through test prompts, and generates visual result cards. Use when user mentions &quot;优化skill&quot;, &quot;skill评分&quot;, &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;, &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;, &quot;提升skill质量&quot;, &quot;skill review&quot;, &quot;skill打分&quot;." />
+          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned with company objectives -- qualitative objectives with measurable key results. Use when setting quarterly OKRs, aligning team goals with company strategy, drafting objectives, or learning how to write effective OKRs." />
+          <skill name="code-review-expert" description="Expert code review of current git changes with a senior engineer lens. Detects SOLID violations, security risks, and proposes actionable improvements." />
+          </available-skills>
+        role: system
+      - content:
+        - text: This will trigger a rate limit.
+          type: text
+        role: user
+      model: svc/deepseek-v4-flash
+      stream: true
+      stream_options:
+        include_usage: true
+      tool_choice: auto
+      tools:
+      - function:
+          description: |-
+            Load a Claude Code Skill and return its instructions.
+
+            Args:
+                ctx: Agent context providing access to pool and skills
+                skill_name: Name of the skill to load, or a skill:// URI.
+                    Use skill:// URI to load a specific reference file:
+                    skill://skill-name/references/file.md
+                arguments: Optional space-separated arguments for substitution
+
+            Returns:
+                The full skill instructions for execution
+          name: load_skill
+          parameters:
+            additionalProperties: false
+            properties:
+              arguments:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+                description: Optional space-separated arguments for substitution
+              skill_name:
+                description: |-
+                  Name of the skill to load, or a skill:// URI.
+                  Use skill:// URI to load a specific reference file:
+                  skill://skill-name/references/file.md
+                type: string
+            required:
+            - skill_name
+            type: object
+        type: function
+      - function:
+          description: |-
+            List all available skills.
+
+            Returns:
+                Formatted list of available skills with descriptions and URI information
+          name: list_skills
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+    uri: http://api.ai.rootcloud.info/v1/chat/completions
+  response:
+    body:
+      string: |+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"I"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" understand"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" the user wants to see"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" how"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" the system handles rate limit issues"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":". Let me try"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" a"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" simple"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" operation that might trigger a rate limit discussion"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"."}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"\n\nActually, looking"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" at this"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" more carefully -"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" the user seems to be testing my"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" behavior. Let me just respond"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" naturally to"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" whatever"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" they're asking."}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" They said \"This"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" will trigger a rate limit\" - perhaps"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" they're"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" anticipating"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" that their"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" request might"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" hit"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" a"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" rate limit on"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" some"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" API?"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"\n\nLet me proceed"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" normally"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" and see what happens"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".","content":"I understand"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" you're interested"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" in seeing"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" how rate limiting"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" works here"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":". I"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" don"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"'t actually"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" have built"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"-in rate limiting on"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" my end, but I'm"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" happy to demonstrate"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" what"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" would"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" happen if we"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" were approaching"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" limits"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":".\n\nHowever"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":", there"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"'s nothing"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" inherently"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" rate-limited"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" about"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" our"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" current"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" interaction. If"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" you're"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" trying"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" to test rate"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" limit handling"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" for"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" a specific scenario, could"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" you clarify what"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" you'd"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" like me to do? For example:\n\n"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"1"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":". **Make"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" many rapid tool"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" calls** - I can"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" attempt"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" multiple"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" sequential operations"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"\n"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"2. **Sim"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"ulate a rate"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" limit scenario"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"** - I can explain"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" how rate"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" limits"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" typically"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" work\n3. **Test actual"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" external"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" API limits"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"** - Some"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" tools"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"/s"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"kills may"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" interact"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" with external services"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" that"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" have rate limits\n\nWhat specific"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" scenario are you looking to"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" explore?"}}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","object":"chat.completion.chunk","created":1784394937,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+        data: {"id":"chatcmpl-94aa239f87a233d2","created":1784394937,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":248,"prompt_tokens":1145,"total_tokens":1393,"completion_tokens_details":{"reasoning_tokens":93}}}
+
+        data: [DONE]
+
+    headers:
+      cache-control:
+      - no-cache
+      connection:
+      - close
+      content-security-policy:
+      - frame-ancestors 'none'
+      content-type:
+      - text/event-stream; charset=utf-8
+      req-arrive-time:
+      - '1784394937776'
+      req-cost-time:
+      - '111'
+      resp-start-time:
+      - '1784394937887'
+      transfer-encoding:
+      - chunked
+    status:
+      code: 200
+      message: OK
+version: 1
+...

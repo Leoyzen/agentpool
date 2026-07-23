@@ -6,8 +6,6 @@ from collections import defaultdict
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, Self
 
-from agentpool.utils.tasks import TaskManager
-
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -59,7 +57,6 @@ class StorageProvider:
     def __init__(self, config: BaseStorageProviderConfig) -> None:
         super().__init__()
         self.config = config
-        self.task_manager = TaskManager()
         self.log_messages = config.log_messages
         self.log_sessions = config.log_sessions
         self.log_commands = config.log_commands
@@ -377,17 +374,34 @@ class StorageProvider:
         session_id: str,
         up_to_message_id: str,
     ) -> int:
-        """Remove all messages after the given message ID.
+        """Delete the message with up_to_message_id and all messages after it.
 
-        Keeps messages up to and including up_to_message_id,
-        removes everything after it. Used by revert_session.
+        Removes the target message and every message whose timestamp is
+        greater than or equal to the target message's timestamp. Used by
+        ``revert_session`` to roll a conversation back to a prior point.
 
         Args:
             session_id: ID of the conversation to truncate
-            up_to_message_id: Keep messages up to and including this ID
+            up_to_message_id: Delete this message and everything after it
 
         Returns:
             The count of removed messages
+
+        Provider contract:
+            Storage providers SHOULD implement this method. If a provider
+            does not implement it, the base class raises ``NotImplementedError``,
+            which is suppressed by the COMMIT phase
+            (``contextlib.suppress(NotImplementedError, KeyError, TypeError)``).
+            When the error is suppressed, the in-memory message list and agent
+            ``ChatMessage`` history are still truncated, but the DB retains
+            stale messages — resulting in DB/in-memory divergence. On the next
+            session reload from DB, the stale messages will reappear because
+            the revert marker has already been cleared.
+
+            To avoid this divergence, providers that do not support
+            ``truncate_messages`` SHOULD override this method to explicitly
+            no-op (return 0) and log a warning, rather than relying on the
+            base class ``NotImplementedError``.
         """
         msg = f"{self.__class__.__name__} does not support truncating messages"
         raise NotImplementedError(msg)

@@ -11,6 +11,9 @@ import anyio
 import pytest
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.mark.anyio
 async def test_safe_auto_resume_sibling_isolation() -> None:
     """Spawn 2 auto-resume tasks in TaskGroup, have one raise, verify other completes."""

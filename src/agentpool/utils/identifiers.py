@@ -3,14 +3,17 @@
 Generates IDs that are lexicographically sortable by creation time.
 Format: {prefix}_{hex_timestamp}{random_base62}
 
-Compatible with OpenCode's identifier format.
+The timestamp portion uses 8 bytes (64 bits) encoded as 16 hex chars,
+combining ``timestamp_ms * 0x1000 + counter`` (fixes C1: float truncation
+and 48-bit overflow for 2025+ timestamps).
 """
 
 from __future__ import annotations
 
 import secrets
-import time
 from typing import Literal
+
+from agentpool.utils.time_utils import now_ms
 
 
 PrefixType = Literal["session", "message", "permission", "user", "part", "pty", "call"]
@@ -26,7 +29,7 @@ PREFIXES: dict[PrefixType, str] = {
 }
 
 BASE62_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-ID_LENGTH = 26  # Characters after prefix (12 hex + 14 base62)
+ID_LENGTH = 30  # Characters after prefix (16 hex + 14 base62)
 
 # State for monotonic ID generation
 _last_timestamp = 0
@@ -85,7 +88,7 @@ def _create(prefix: PrefixType, *, descending: bool = False) -> str:
     """
     global _last_timestamp, _counter  # noqa: PLW0603
 
-    current_timestamp = int(time.time() * 1000)  # milliseconds
+    current_timestamp = now_ms()  # milliseconds, integer (no float truncation)
 
     if current_timestamp != _last_timestamp:
         _last_timestamp = current_timestamp
@@ -96,17 +99,15 @@ def _create(prefix: PrefixType, *, descending: bool = False) -> str:
     now = current_timestamp * 0x1000 + _counter
 
     if descending:
-        now = ~now & 0xFFFFFFFFFFFF  # Invert for descending order (48 bits)
+        now = ~now & 0xFFFFFFFFFFFFFFFF  # Invert for descending order (64 bits)
 
-    # Encode as 6 bytes (48 bits), big-endian
-    time_bytes = bytearray(6)
-    for i in range(6):
-        time_bytes[i] = (now >> (40 - 8 * i)) & 0xFF
+    # Encode as 8 bytes (64 bits), big-endian
+    time_bytes = now.to_bytes(8, "big")
 
     time_hex = time_bytes.hex()
 
-    # Add random suffix (14 chars for 26 total after prefix)
-    random_suffix = _random_base62(ID_LENGTH - 12)
+    # Add random suffix (14 chars for 30 total after prefix)
+    random_suffix = _random_base62(ID_LENGTH - 16)
 
     return f"{PREFIXES[prefix]}_{time_hex}{random_suffix}"
 
@@ -117,6 +118,6 @@ def generate_session_id() -> str:
     Convenience function for the common case.
 
     Returns:
-        A session ID like 'ses_b71310fdf001ZHcn6VSpkaBcHi'
+        A session ID like 'ses_00000663513f9001ZHcn6VSpkaBcHi'
     """
     return ascending("session")

@@ -58,7 +58,9 @@ class MockServerState:
         self.working_dir = "/tmp"
         self.agent = MagicMock()
         self.agent.name = "test-agent"
+        self.agent.model_name = None
         self.pool: Any = None
+        self.session_controller: Any = None
         self.session_status: dict[str, Any] = {}
         self.config = MagicMock()
         # Required by ensure_session() and related helpers in
@@ -79,6 +81,9 @@ class MockServerState:
 
     async def broadcast_event(self, event: Any) -> None:
         self.events.append(event)
+
+    def resolve_default_model_info(self) -> tuple[str, str]:
+        return "default", "agentpool"
 
 
 def _get_last_assistant_message(state: MockServerState, session_id: str) -> Any | None:
@@ -105,6 +110,27 @@ def _get_tool_part_for_child(msg: Any, child_session_id: str) -> ToolPart | None
 def _count_tool_parts(msg: Any) -> int:
     """Count ToolParts in a message."""
     return sum(1 for part in msg.parts if isinstance(part, ToolPart))
+
+
+async def _wait_for(
+    condition: Any,
+    *,
+    timeout: float = 2.0,
+    interval: float = 0.01,
+    description: str = "condition",
+) -> None:
+    """Poll until condition() returns True, raising AssertionError on timeout.
+
+    Replaces fixed ``asyncio.sleep()`` calls with deterministic synchronization.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return
+        await asyncio.sleep(interval)
+    raise AssertionError(f"Timed out waiting for {description} after {timeout}s")
 
 
 # ============================================================================
@@ -504,7 +530,6 @@ async def test_toolpart_transitions_to_error_on_run_error() -> None:
 # ============================================================================
 
 
-@pytest.mark.flaky(reruns=3, reruns_delay=0.5)
 @pytest.mark.anyio
 async def test_nested_subagents_create_recursive_toolparts() -> None:
     """Depth >= 2 subagents cause recursive child consumers and nested ToolParts.
@@ -559,6 +584,16 @@ async def test_nested_subagents_create_recursive_toolparts() -> None:
             session_pool, grandparent_id, parent_id, source_name="worker1", depth=1
         )
 
+        # Wait for grandparent's ToolPart to be created before publishing depth=2
+        await _wait_for(
+            lambda: (
+                _get_last_assistant_message(server_state, grandparent_id) is not None
+                and _count_tool_parts(_get_last_assistant_message(server_state, grandparent_id))
+                >= 1
+            ),
+            description="grandparent ToolPart for parent",
+        )
+
         # Publish depth=2 spawn at parent -> creates child consumer
         # Note: we publish on parent_id because the parent consumer is subscribed there
         # But actually, the parent consumer subscribes with descendants scope to parent_id,
@@ -566,6 +601,15 @@ async def test_nested_subagents_create_recursive_toolparts() -> None:
         # Let's publish on parent_id.
         await _publish_spawn_event(
             session_pool, parent_id, child_id, source_name="worker2", depth=2
+        )
+
+        # Wait for parent's ToolPart to be created before asserting
+        await _wait_for(
+            lambda: (
+                _get_last_assistant_message(server_state, parent_id) is not None
+                and _count_tool_parts(_get_last_assistant_message(server_state, parent_id)) >= 1
+            ),
+            description="parent ToolPart for child",
         )
 
         # Both levels should have created assistant messages and ToolParts
@@ -593,6 +637,24 @@ async def test_nested_subagents_create_recursive_toolparts() -> None:
 
         # Complete the deepest child
         await _publish_child_completion(session_pool, child_id, "deep task done")
+
+        # Wait for parent's ToolPart to transition to Completed before asserting
+        await _wait_for(
+            lambda: (
+                _get_last_assistant_message(server_state, parent_id) is not None
+                and _get_tool_part_for_child(
+                    _get_last_assistant_message(server_state, parent_id), child_id
+                )
+                is not None
+                and isinstance(
+                    _get_tool_part_for_child(
+                        _get_last_assistant_message(server_state, parent_id), child_id
+                    ).state,
+                    ToolStateCompleted,
+                )
+            ),
+            description="parent ToolPart for child to be Completed",
+        )
 
         # The parent (depth=1) ToolPart for child should be Completed
         parent_msg = _get_last_assistant_message(server_state, parent_id)

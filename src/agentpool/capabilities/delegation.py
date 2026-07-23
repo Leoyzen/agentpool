@@ -32,21 +32,56 @@ class AgentNotFoundError(Exception):
 
 @runtime_checkable
 class DelegationService(Protocol):
-    """Limited interface for subagent spawning.
+    """Limited interface for subagent spawning and child session creation.
 
-    .. deprecated::
-        Use ``ctx.host.session_pool.run_agent()`` instead of
-        ``spawn_subagent()``, and ``ctx.agent_registry.list_names()``
-        instead of ``get_available_agents()``. Concrete implementations
-        emit ``DeprecationWarning`` on each call.
+    ``spawn_subagent()`` and ``get_available_agents()`` are deprecated.
+    ``create_child_session()`` is the recommended way to create a
+    persistent child session with ``SpawnSessionStart`` emission.
 
     Implemented by RunLoop (M2 task group 15). Tools access this
     through ``ctx.deps.delegation`` on an ``AgentContext`` instance.
 
-    Only two methods are exposed:
-        - ``spawn_subagent(name, prompt)``: initiate a subagent run.
-        - ``get_available_agents()``: list agent names in scope.
+    Methods:
+        - ``create_child_session(agent_name, ...)``: create a persistent
+          child session with ``SpawnSessionStart`` emission.
+        - ``spawn_subagent(name, prompt)``: deprecated, use
+          ``ctx.host.session_pool.run_agent()`` instead.
+        - ``get_available_agents()``: deprecated, use
+          ``ctx.agent_registry.list_names()`` instead.
     """
+
+    async def create_child_session(
+        self,
+        agent_name: str,
+        *,
+        parent_session_id: str | None = None,
+        description: str = "",
+        **metadata: Any,
+    ) -> str:
+        """Create a persistent child session and emit ``SpawnSessionStart``.
+
+        Unlike ``run_agent()`` (which creates a temporary session,
+        waits for completion, then closes), this creates a session
+        that persists until explicitly closed. The caller is
+        responsible for sending the initial prompt via
+        ``session_pool.send_message()`` and closing the session
+        when done.
+
+        Args:
+            agent_name: Name of the agent for the child session.
+            parent_session_id: Parent session ID. Defaults to the
+                current session ID of the delegation service.
+            description: Optional human-readable description.
+            **metadata: Arbitrary metadata attached to the session
+                (e.g. ``team_id``, ``team_role``, ``team_member_name``).
+
+        Returns:
+            The child session ID.
+
+        Raises:
+            RuntimeError: If SessionPool is not available.
+        """
+        ...
 
     def spawn_subagent(
         self,

@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import pytest
+
 from acp.schema.client_requests import (
     DisableProvidersRequest,
     ListProvidersRequest,
     SetProvidersRequest,
 )
+
+
+pytestmark = pytest.mark.unit
 
 
 class TestListProvidersRequest:

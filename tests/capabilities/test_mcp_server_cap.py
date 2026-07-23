@@ -24,6 +24,9 @@ from agentpool.capabilities.resource_protocols import (
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 if TYPE_CHECKING:
     from typing import Self
 

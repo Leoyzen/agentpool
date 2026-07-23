@@ -15,6 +15,9 @@ from agentpool.tools.base import Tool
 from agentpool.tools.exceptions import ToolError
 
 
+pytestmark = pytest.mark.unit
+
+
 class TestInvalidCombinations:
     """Invalid combos must raise at Tool instantiation."""
 

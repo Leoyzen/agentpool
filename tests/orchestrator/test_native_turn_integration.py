@@ -33,6 +33,8 @@ from agentpool.agents.events.events import (
     StreamCompleteEvent,
 )
 from agentpool.agents.native_agent.turn import NativeTurn
+from agentpool.lifecycle.comm_channel import DirectChannel
+from agentpool.lifecycle.journal import MemoryJournal
 from agentpool.orchestrator.core import EventBus
 from agentpool.orchestrator.run import RunHandle
 from agentpool.tasks.exceptions import RunAbortedError
@@ -72,6 +74,7 @@ async def test_native_turn_events_reach_event_bus_consumer() -> None:
             session_id="test-integration-session",
             agent_name="test-integration",
         )
+        session._comm_channel = DirectChannel(MemoryJournal())
 
         run_ctx = AgentRunContext(
             session_id="test-integration-session",
@@ -306,3 +309,64 @@ def test_native_turn_run_error_event_includes_run_id() -> None:
     assert "run_id=self._run_ctx.run_id" in source, (
         "NativeTurn.execute() must include run_id in RunErrorEvent yields"
     )
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: RunAbortedError must set run_ctx.cancelled = True
+#
+# When the user cancels an elicitation question (e.g. via OpenCode TUI
+# POST /question/{id}/reject), the QuestionTool raises RunAbortedError.
+# NativeTurn.execute() catches it and yields StreamCompleteEvent(cancelled=True).
+# But if run_ctx.cancelled is NOT set, _handle_turn_result() returns "proceed"
+# instead of "continue", causing the RunLoop to drain queued messages and
+# continue executing instead of going idle.
+#
+# In ACP this is masked because the ACP client sends a separate session/cancel
+# notification that calls run_handle.cancel() → run_ctx.cancelled = True.
+# In OpenCode the TUI only rejects the question future, never calling cancel().
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_aborted_error_sets_run_ctx_cancelled() -> None:
+    """NativeTurn must set run_ctx.cancelled = True on RunAbortedError.
+
+    Without this, _handle_turn_result() sees run_ctx.cancelled == False and
+    returns "proceed" instead of "continue", causing the RunLoop to continue
+    executing after the user cancelled an elicitation.
+    """
+    agent = Agent(
+        name="test-abort-cancelled",
+        model=TestModel(custom_output_text="hello"),
+    )
+    async with agent:
+        mock_agentlet = MagicMock()
+        mock_run = AsyncMock()
+        mock_run.__aenter__ = AsyncMock(side_effect=RunAbortedError("test abort"))
+        mock_run.__aexit__ = AsyncMock(return_value=None)
+        mock_agentlet.iter = MagicMock(return_value=mock_run)
+
+        run_ctx = AgentRunContext(session_id="test-abort-cancelled-session")
+        turn = NativeTurn(
+            agent=agent,
+            prompts=["test"],
+            run_ctx=run_ctx,
+            message_history=[],
+        )
+
+        events: list[Any] = []
+        with patch.object(agent, "get_agentlet", AsyncMock(return_value=mock_agentlet)):
+            events.extend([event async for event in turn.execute()])
+
+        # Must yield StreamCompleteEvent(cancelled=True)
+        stream_complete = [e for e in events if isinstance(e, StreamCompleteEvent)]
+        assert len(stream_complete) == 1
+        assert stream_complete[0].cancelled is True
+
+        # CRITICAL: run_ctx.cancelled must be True so _handle_turn_result()
+        # detects the cancellation and returns "continue" (not "proceed").
+        assert run_ctx.cancelled is True, (
+            "run_ctx.cancelled must be True after RunAbortedError so that "
+            "_handle_turn_result() returns 'continue' and the RunLoop goes "
+            "idle instead of continuing to execute queued messages."
+        )

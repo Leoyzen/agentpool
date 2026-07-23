@@ -48,6 +48,7 @@ from acp.schema import (
     TurnCompleteUpdate,
     Usage,
     UsageUpdate,
+    UserMessageChunk,
 )
 from acp.utils import generate_tool_title, infer_tool_kind, to_acp_content_blocks
 from agentpool.agents.events import (
@@ -74,6 +75,7 @@ from agentpool.agents.events import (
     ToolCallProgressEvent,
     ToolCallStartEvent,
     ToolResultMetadataEvent,
+    UserMessageInsertedEvent,
 )
 from agentpool.log import get_logger
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
@@ -82,16 +84,36 @@ from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from acp.schema import TextContentBlock
     from acp.schema.tool_call import ToolCallContent, ToolCallKind
     from agentpool.agents.events import RichAgentStreamEvent
 
 logger = get_logger(__name__)
 
 
+@dataclass(frozen=True)
+class ACPUserMessageMeta:
+    """Protocol-specific metadata for ACP user messages.
+
+    Carries serialized ContentBlock data so the ACPEventConverter can
+    reconstruct the full user message from the EventBus event without
+    the protocol handler broadcasting separately.
+    """
+
+    content_blocks: list[dict[str, Any]]
+    """Serialized ContentBlock data as dicts.
+
+    Each dict is the ``model_dump()`` output of an ACP ContentBlock.
+    The converter deserializes each dict back to the appropriate
+    ContentBlock type.
+    """
+
+
 # Type alias for all session updates the converter can yield
 ACPSessionUpdate = (
     AgentMessageChunk
     | AgentThoughtChunk
+    | UserMessageChunk
     | ToolCallStart
     | ToolCallProgress
     | AgentPlanUpdate
@@ -272,6 +294,60 @@ class ACPEventConverter:
         self._subagent_tool_call_ids.clear()
         self.cleanup()
 
+    @staticmethod
+    def build_user_message_chunks(
+        text: str,
+        *,
+        message_id: str | None = None,
+    ) -> list[UserMessageChunk]:
+        """Build UserMessageChunk notifications for a user's text input.
+
+        Args:
+            text: The user's input text.
+            message_id: Optional message ID for correlating chunks.
+
+        Returns:
+            List of UserMessageChunk session update objects.
+        """
+        if not text:
+            return []
+        mid = message_id or str(uuid.uuid4())
+        return [UserMessageChunk.text(text, message_id=mid)]
+
+    @staticmethod
+    def _content_to_text_blocks(content: str | list[Any]) -> list[TextContentBlock]:
+        """Convert ``UserMessageInsertedEvent.content`` to text content blocks.
+
+        Handles both plain string content and multi-modal part lists:
+        - ``str`` → single ``TextContentBlock``
+        - ``list`` → iterate, extract text from dicts with ``"type": "text"``
+          or bare strings; skip non-text items (images, etc.) in v1.
+
+        Args:
+            content: The event content — plain text or multi-modal part list.
+
+        Returns:
+            List of ``TextContentBlock`` instances (may be empty).
+        """
+        from acp.schema import TextContentBlock
+
+        if isinstance(content, str):
+            if not content:
+                return []
+            return [TextContentBlock(text=content)]
+        if isinstance(content, list):
+            blocks: list[TextContentBlock] = []
+            for item in content:
+                if isinstance(item, str):
+                    if item:
+                        blocks.append(TextContentBlock(text=item))
+                elif isinstance(item, dict) and item.get("type") == "text":
+                    text = item.get("text", "")
+                    if text:
+                        blocks.append(TextContentBlock(text=text))
+            return blocks
+        return []
+
     def cleanup(self) -> None:
         """Clean up converter state.
 
@@ -438,6 +514,38 @@ class ACPEventConverter:
                 | PartDeltaEvent(delta=TextPartDelta(content_delta=delta))
             ):
                 yield AgentMessageChunk.text(delta, message_id=self._get_message_id(event))
+
+            # User message inserted (steer/followup display)
+            case UserMessageInsertedEvent(
+                message_id=mid,
+                content=event_content,
+                meta=event_meta,
+            ):
+                # Use meta.content_blocks if available, otherwise fall back
+                # to text-only content.
+                if isinstance(event_meta, ACPUserMessageMeta):
+                    from acp.schema import TextContentBlock
+
+                    blocks: list[Any] = []
+                    for block_dict in event_meta.content_blocks:
+                        block_type = block_dict.get("type", "")
+                        if block_type == "text":
+                            text = block_dict.get("text", "")
+                            if text:
+                                blocks.append(TextContentBlock(text=text))
+                    for block in blocks:
+                        yield UserMessageChunk(
+                            content=block,
+                            message_id=mid or None,
+                        )
+                else:
+                    # Fall back to text-only content.
+                    blocks = self._content_to_text_blocks(event_content)
+                    for block in blocks:
+                        yield UserMessageChunk(
+                            content=block,
+                            message_id=mid or None,
+                        )
 
             # Thinking/reasoning
             case (

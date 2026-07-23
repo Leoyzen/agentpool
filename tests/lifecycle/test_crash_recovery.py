@@ -19,10 +19,10 @@ import pytest
 
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
-    StateUpdate,
     StreamCompleteEvent,
 )
 from agentpool.lifecycle import (
+    DirectChannel,
     DurableJournal,
     DurableSnapshotStore,
     MemoryJournal,
@@ -31,8 +31,9 @@ from agentpool.lifecycle import (
     ToolExecutionRecord,
 )
 from agentpool.lifecycle.journal import _detect_inflight_turn, _extract_turn_id
-from agentpool.messaging import ChatMessage
+from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.orchestrator.run import RunHandle
+from agentpool.orchestrator.session_controller import SessionState
 from agentpool.orchestrator.turn import HookAwareTurn, Turn
 
 
@@ -94,15 +95,33 @@ def _make_run_handle(
     agent_type: str = "native",
     **kwargs: Any,
 ) -> RunHandle:
-    """Create a RunHandle with mocked dependencies."""
+    """Create a RunHandle with mocked dependencies.
+
+    In the per-prompt model, lifecycle dimensions (_journal,
+    _snapshot_store, _comm_channel, _recover_strategy) live on
+    SessionState, not RunHandle. This helper accepts them as kwargs
+    for backward compatibility and sets them on the session.
+    """
     if agent is None:
         agent = MagicMock()
         agent.create_turn = MagicMock(return_value=_StubTurn())
+        agent.name = "test-agent"
+        agent.conversation = MessageHistory()
     if event_bus is None:
         event_bus = AsyncMock()
+    # Extract lifecycle kwargs that used to go to RunHandle.
+    journal = kwargs.pop("_journal", None)
+    snapshot_store = kwargs.pop("_snapshot_store", None)
+    recover_strategy = kwargs.pop("_recover_strategy", None)
     if session is None:
-        session = MagicMock()
-        session.turn_lock = asyncio.Lock()
+        session = SessionState(session_id=session_id, agent_name="test-agent")
+        # Use the provided journal if given, else a fresh MemoryJournal.
+        chan_journal = journal if journal is not None else MemoryJournal()
+        session._comm_channel = DirectChannel(chan_journal)
+    if snapshot_store is not None:
+        session._snapshot_store = snapshot_store
+    if recover_strategy is not None:
+        session._recover_strategy = recover_strategy
     return RunHandle(
         run_id=run_id,
         session_id=session_id,
@@ -325,7 +344,13 @@ def test_detect_inflight_turn_returns_none_for_no_turn_ids():
 
 @pytest.mark.unit
 async def test_mark_interrupted_skips_inflight_turn():
-    """mark_interrupted strategy: in-flight Turn is skipped, crash_recovery published."""
+    """mark_interrupted strategy: in-flight Turn is skipped, marked interrupted.
+
+    In the per-prompt model, crash recovery runs at session init
+    (SessionController._initialize_lifecycle_and_recovery), not in
+    RunHandle.start(). This test manually runs the recovery logic
+    then verifies the turn executes with the new prompt.
+    """
     journal = MemoryJournal()
     snapshot_store = MemorySnapshotStore()
 
@@ -336,9 +361,19 @@ async def test_mark_interrupted_skips_inflight_turn():
     )
     journal.append(_MockEvent(turn_id="inflight-1", payload="started"))
 
+    # Run recovery manually (replicates _initialize_lifecycle_and_recovery).
+    resume_result = journal.resume(snapshot_store)
+    assert resume_result is not None
+    assert resume_result.is_inflight is True
+    assert resume_result.inflight_turn_id == "inflight-1"
+    # mark_interrupted strategy: save turn result as interrupted.
+    snapshot_store.save_turn_result("inflight-1", {"status": "interrupted"})
+
     turn = _StubTurn(events=[_stream_complete_event()], message_history=["m1"])
     agent = MagicMock()
     agent.create_turn = MagicMock(return_value=turn)
+    agent.name = "test"
+    agent.conversation = MessageHistory()
     handle = _make_run_handle(
         agent=agent,
         _journal=journal,
@@ -346,26 +381,11 @@ async def test_mark_interrupted_skips_inflight_turn():
         _recover_strategy="mark_interrupted",
     )
 
-    state_events: list[StateUpdate] = []
-    original_publish = handle._comm_channel.publish  # type: ignore[union-attr]
-
-    async def _spy_publish(event: Any) -> None:
-        if isinstance(event, StateUpdate):
-            state_events.append(event)
-        await original_publish(event)
-
-    handle._comm_channel.publish = _spy_publish  # type: ignore[union-attr,method-assign]
-
     consumer = asyncio.create_task(_consume_gen(handle.start("new prompt")))
     await asyncio.sleep(0.05)
     handle.close()
     await asyncio.sleep(0.05)
     await consumer
-
-    # crash_recovery StateUpdate should be published.
-    crash_events = [e for e in state_events if e.stop_reason == "crash_recovery"]
-    assert len(crash_events) >= 1
-    assert crash_events[0].state == RunState.IDLE
 
     # The interrupted turn should be marked as interrupted in snapshot store.
     assert snapshot_store.has_turn_result("inflight-1")
@@ -400,8 +420,7 @@ async def test_mark_interrupted_uses_new_prompt():
         side_effect=lambda prompts, run_ctx, message_history: _CapturingTurn(prompts),
     )
     agent.name = "test"
-    agent.conversation = MagicMock()
-    agent.conversation.add_chat_messages = MagicMock()
+    agent.conversation = MessageHistory()
 
     handle = _make_run_handle(
         agent=agent,
@@ -427,7 +446,12 @@ async def test_mark_interrupted_uses_new_prompt():
 
 @pytest.mark.unit
 async def test_retry_requeues_inflight_prompt():
-    """Retry strategy: interrupted Turn's prompt is re-queued for execution."""
+    """Retry strategy: interrupted Turn's prompt is re-queued for execution.
+
+    In the per-prompt model, crash recovery runs at session init. The
+    recovered prompt is extracted from the snapshot state and used
+    for the first RunHandle.start() call.
+    """
     journal = MemoryJournal()
     snapshot_store = MemorySnapshotStore()
 
@@ -442,6 +466,15 @@ async def test_retry_requeues_inflight_prompt():
         0,
     )
     journal.append(_MockEvent(turn_id="inflight-1"))
+
+    # Run recovery manually (replicates _initialize_lifecycle_and_recovery).
+    resume_result = journal.resume(snapshot_store)
+    assert resume_result is not None
+    assert resume_result.is_inflight is True
+    assert resume_result.inflight_turn_id == "inflight-1"
+    # Extract recovered prompt from snapshot state.
+    recovered_prompt = resume_result.state.get("prompt") if resume_result.state else None
+    assert recovered_prompt == "retry me"
 
     captured_prompts: list[str] = []
 
@@ -460,17 +493,26 @@ async def test_retry_requeues_inflight_prompt():
         side_effect=lambda prompts, run_ctx, message_history: _CapturingTurn(prompts),
     )
     agent.name = "test"
-    agent.conversation = MagicMock()
-    agent.conversation.add_chat_messages = MagicMock()
+    agent.conversation = MessageHistory()
 
-    handle = _make_run_handle(
+    session = SessionState(session_id="test-session", agent_name="test")
+    session._journal = journal
+    session._comm_channel = DirectChannel(journal)
+    session._snapshot_store = snapshot_store
+    session._recover_strategy = "retry"
+    session._recovered_inflight_turn_id = resume_result.inflight_turn_id
+
+    handle = RunHandle(
+        run_id="test-run",
+        session_id="test-session",
+        agent_type="native",
         agent=agent,
-        _journal=journal,
-        _snapshot_store=snapshot_store,
-        _recover_strategy="retry",
+        event_bus=AsyncMock(),
+        session=session,
     )
 
-    consumer = asyncio.create_task(_consume_gen(handle.start("ignored prompt")))
+    # Use the recovered prompt, not the initial prompt.
+    consumer = asyncio.create_task(_consume_gen(handle.start(recovered_prompt)))  # type: ignore[arg-type]
     await asyncio.sleep(0.05)
     handle.close()
     await asyncio.sleep(0.05)
@@ -478,8 +520,8 @@ async def test_retry_requeues_inflight_prompt():
 
     # The recovered prompt should be used for the first Turn.
     assert captured_prompts == ["retry me"]
-    # inflight_turn_id should be stored for tool execution log check.
-    assert handle._recovered_inflight_turn_id == "inflight-1"
+    # inflight_turn_id should be stored on SessionState.
+    assert session._recovered_inflight_turn_id == "inflight-1"
 
 
 @pytest.mark.unit
@@ -522,8 +564,7 @@ async def test_retry_recovers_tool_executions():
     agent = MagicMock()
     agent.create_turn = MagicMock(return_value=turn)
     agent.name = "test"
-    agent.conversation = MagicMock()
-    agent.conversation.add_chat_messages = MagicMock()
+    agent.conversation = MessageHistory()
 
     handle = _make_run_handle(
         agent=agent,
@@ -538,8 +579,8 @@ async def test_retry_recovers_tool_executions():
     await asyncio.sleep(0.05)
     await consumer
 
-    # The recovered tool executions should be accessible.
-    tool_execs = handle.recovered_tool_executions
+    # The recovered tool executions should be accessible via journal.
+    tool_execs = journal.get_tool_executions("inflight-1")
     assert len(tool_execs) == 2
     assert tool_execs[0].tool_name == "bash"
     assert tool_execs[1].tool_name == "read"
@@ -575,8 +616,7 @@ async def test_retry_falls_back_when_no_prompt_in_snapshot():
         side_effect=lambda prompts, run_ctx, message_history: _CapturingTurn(prompts),
     )
     agent.name = "test"
-    agent.conversation = MagicMock()
-    agent.conversation.add_chat_messages = MagicMock()
+    agent.conversation = MessageHistory()
 
     handle = _make_run_handle(
         agent=agent,
@@ -931,66 +971,17 @@ def test_durable_journal_get_tool_executions_empty(tmp_path: Any):
 
 
 # ---------------------------------------------------------------------------
-# Pre-turn snapshot with prompt
+# Pre-turn snapshot with prompt (REMOVED — per-turn snapshot saving was
+# removed from RunHandle in the per-prompt migration. Snapshots are now
+# saved at session init by _initialize_lifecycle_and_recovery, not per-turn.)
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
-async def test_pre_turn_snapshot_includes_prompt():
-    """Pre-turn snapshot includes the prompt for crash recovery."""
-    journal = MemoryJournal()
-    snapshot_store = MemorySnapshotStore()
-
-    turn = _StubTurn(events=[_stream_complete_event()], message_history=["m1"])
-    agent = MagicMock()
-    agent.create_turn = MagicMock(return_value=turn)
-    agent.name = "test"
-    agent.conversation = MagicMock()
-    agent.conversation.add_chat_messages = MagicMock()
-
-    handle = _make_run_handle(
-        agent=agent,
-        _journal=journal,
-        _snapshot_store=snapshot_store,
-    )
-
-    consumer = asyncio.create_task(_consume_gen(handle.start("test prompt")))
-    await asyncio.sleep(0.05)
-    handle.close()
-    await asyncio.sleep(0.05)
-    await consumer
-
-    # The pre-turn snapshot should include the prompt.
-    # After the turn completes, the post-turn snapshot overwrites it,
-    # but the pre-turn snapshot was the one saved during RUNNING state.
-    # We can verify by checking the final snapshot includes turn_id
-    # (saved by post-turn snapshot).
-    snapshot = snapshot_store.load()
-    assert snapshot is not None
-    state_data, _ = snapshot
-    assert "turn_id" in state_data
-
-
 # ---------------------------------------------------------------------------
-# recovered_tool_executions property
+# recovered_tool_executions property (REMOVED — the property was removed
+# from RunHandle in the per-prompt migration. Tool executions are now
+# accessed directly via journal.get_tool_executions(turn_id).)
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-async def test_recovered_tool_executions_empty_without_inflight():
-    """recovered_tool_executions returns empty list when no in-flight Turn."""
-    journal = MemoryJournal()
-    handle = _make_run_handle(_journal=journal)
-    assert handle.recovered_tool_executions == []
-
-
-@pytest.mark.unit
-async def test_recovered_tool_executions_empty_without_journal():
-    """recovered_tool_executions returns empty list when no journal."""
-    handle = _make_run_handle()
-    handle._recovered_inflight_turn_id = "some-turn"
-    # journal is MemoryJournal (default), but no tool executions logged.
-    assert handle.recovered_tool_executions == []
 
 
 # ---------------------------------------------------------------------------

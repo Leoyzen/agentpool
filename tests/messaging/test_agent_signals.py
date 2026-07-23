@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+
 from pydantic_ai.models.test import TestModel
 import pytest
 
 from agentpool import Agent
 from agentpool.messaging.message_utils import build_message_index, get_message_chain
+
+
+pytestmark = pytest.mark.unit
 
 
 async def test_message_chain():
@@ -52,8 +57,10 @@ async def test_run_result_has_parent_id():
     # The returned message should have parent_id pointing to user message
     assert result.parent_id is not None
     # Wait for forwarding to complete
-    await agent_a.task_manager.complete_tasks()
-    await agent_b.task_manager.complete_tasks()
+    if agent_a._pending_tasks:
+        await asyncio.gather(*agent_a._pending_tasks, return_exceptions=True)
+    if agent_b._pending_tasks:
+        await asyncio.gather(*agent_b._pending_tasks, return_exceptions=True)
     # B's messages should have parent_id tracking the chain
     if agent_b.conversation.chat_messages:
         b_user_msg = next(
@@ -84,9 +91,12 @@ async def test_message_chain_through_routing():
     # When A starts the chain
     await agent_a.run("Start message")
     # Wait for all routing to complete
-    await agent_a.task_manager.complete_tasks()
-    await agent_b.task_manager.complete_tasks()
-    await agent_c.task_manager.complete_tasks()
+    if agent_a._pending_tasks:
+        await asyncio.gather(*agent_a._pending_tasks, return_exceptions=True)
+    if agent_b._pending_tasks:
+        await asyncio.gather(*agent_b._pending_tasks, return_exceptions=True)
+    if agent_c._pending_tasks:
+        await asyncio.gather(*agent_c._pending_tasks, return_exceptions=True)
     # All agents should share the same session_id
     assert (
         agent_a.conversation.chat_messages[0].session_id

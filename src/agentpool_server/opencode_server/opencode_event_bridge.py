@@ -13,11 +13,14 @@ import asyncio
 from typing import TYPE_CHECKING, Any, cast
 
 from agentpool.agents.events.events import (
+    CustomEvent,
+    PartStartEvent,
     RunErrorEvent,
     RunFailedEvent,
     RunStartedEvent,
     SpawnSessionStart,
     StreamCompleteEvent,
+    UserMessageInsertedEvent,
 )
 from agentpool.log import get_logger
 from agentpool.utils import identifiers as identifier
@@ -27,6 +30,9 @@ from agentpool_server.opencode_server.event_processor_context import (
     EventProcessorContext,
 )
 from agentpool_server.opencode_server.models import (
+    AssistantMessage,
+    MessageAbortedError,
+    MessageAbortedErrorData,
     MessagePath,
     MessageTime,
     MessageUpdatedEvent,
@@ -34,12 +40,14 @@ from agentpool_server.opencode_server.models import (
     PartUpdatedEvent,
     SessionErrorEvent,
     SessionStatus,
+    StepStartPart,
     TimeCreated,
+    TokenCache,
+    Tokens,
     UserMessage,
 )
 from agentpool_server.opencode_server.opencode_message_bridge import (
     append_message_to_session,
-    get_messages_for_session,
 )
 from agentpool_server.opencode_server.opencode_session_routes import (
     ensure_session,
@@ -50,6 +58,7 @@ from agentpool_server.opencode_server.opencode_session_routes import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from agentpool.agents.base_agent import BaseAgent
     from agentpool.orchestrator.core import EventBus, EventEnvelope
     from agentpool_server.opencode_server.state import ServerState
 
@@ -95,10 +104,12 @@ class OpenCodeEventBridgeMixin:
     _children_of: dict[str, set[str]]
     _resume_contexts: dict[str, dict[str, Any]]
     _pending_message_ids: dict[str, str]
+    _pending_message_metadata: dict[str, dict[str, str | None]]
 
     if TYPE_CHECKING:
 
         def get_session_context_data(self, session_id: str) -> dict[str, Any] | None: ...
+        def set_session_context_data(self, session_id: str, data: dict[str, Any]) -> None: ...
         async def _create_subagent_tool_part(self, session_id: str, event: Any) -> Any: ...
         async def start_event_consumer(self, session_id: str) -> None: ...
         async def stop_event_consumer(self, session_id: str) -> None: ...
@@ -133,6 +144,136 @@ class OpenCodeEventBridgeMixin:
             The subscription scope string.
         """
         return "session"
+
+    def _create_assistant_message(self, session_id: str) -> tuple[str, MessageWithParts]:
+        """Create a fresh assistant message for a new turn.
+
+        Resolves the canonical message_id from pending IDs (set by the REST
+        handler), agent/model info from session state and pending metadata,
+        and constructs a ``MessageWithParts.assistant`` instance.
+
+        Args:
+            session_id: The session to create the message for.
+
+        Returns:
+            A tuple of (assistant_msg_id, assistant_msg).
+        """
+        assistant_msg_id = self._pending_message_ids.pop(session_id, None)
+        if assistant_msg_id is None:
+            assistant_msg_id = identifier.ascending("message")
+
+        agent_name = "agentpool"
+        model_id, provider_id = self.server_state.resolve_default_model_info()
+        session_state = self.session_pool.sessions.get_session(session_id)
+        if session_state is not None:
+            agent_name = session_state.agent_name
+            # For child sessions that bypass route_message(), resolve model
+            # from the session's agent instance instead of the server default
+            # (which is the parent/lead agent's model).  _pending_message_metadata
+            # is only set by route_message() (REST handler path); child sessions
+            # created via create_child_session() never go through that path.
+            if session_state.agent is not None:
+                agent_model_name = cast("BaseAgent[Any, Any]", session_state.agent).model_name
+                if isinstance(agent_model_name, str) and ":" in agent_model_name:
+                    provider, model = agent_model_name.split(":", 1)
+                    model_id, provider_id = model, provider
+        pending_meta = self._pending_message_metadata.pop(session_id, None)
+        if pending_meta is not None:
+            pending_model_id = pending_meta.get("model_id")
+            if pending_model_id is not None:
+                model_id = pending_model_id
+            pending_provider_id = pending_meta.get("provider_id")
+            if pending_provider_id is not None:
+                provider_id = pending_provider_id
+
+        assistant_msg = MessageWithParts.assistant(
+            message_id=assistant_msg_id,
+            session_id=session_id,
+            time=MessageTime(created=now_ms()),
+            agent_name=agent_name,
+            model_id=model_id,
+            parent_id=session_id,
+            provider_id=provider_id,
+            path=MessagePath(
+                cwd=self.server_state.working_dir,
+                root=self.server_state.working_dir,
+            ),
+            mode=agent_name,
+        )
+        return assistant_msg_id, assistant_msg
+
+    async def _finalize_assistant_time(
+        self,
+        session_id: str,
+        *,
+        warn: bool = False,
+    ) -> None:
+        """Finalize time.completed on the assistant message if not already set.
+
+        Used by StreamCompleteEvent, RunFailedEvent, and D1 reset to ensure
+        the assistant message's time.completed is set before the turn ends
+        or a new turn begins.
+
+        Args:
+            session_id: The session whose assistant message to finalize.
+            warn: If True, log a warning when finalizing an incomplete turn
+                (indicates StreamCompleteEvent was missed — D2 red flag).
+        """
+        ctx = self._contexts.get(session_id)
+        if ctx is None:
+            return
+        info = ctx.assistant_msg.info
+        if isinstance(info, AssistantMessage) and info.time.completed is None:
+            if warn:
+                logger.warning(
+                    "Finalizing incomplete turn — StreamCompleteEvent missed",
+                    session_id=session_id,
+                    previous_message_id=ctx.assistant_msg_id,
+                )
+            info.time.completed = now_ms()
+            await self.server_state.broadcast_event(MessageUpdatedEvent.create(info))
+            await append_message_to_session(self.server_state, session_id, ctx.assistant_msg)
+
+    async def _persist_assistant_message(self, session_id: str) -> None:
+        """Persist the finalized assistant message to storage.
+
+        Called after _finalize_assistant_time on StreamCompleteEvent and
+        RunFailedEvent. This replaces the storage persistence previously
+        done by _wait_and_finalize in the synchronous POST /message path.
+        """
+        from agentpool_server.opencode_server.routes.message_routes import (
+            persist_message_to_storage,
+        )
+
+        ctx = self._contexts.get(session_id)
+        if ctx is None:
+            return
+        await persist_message_to_storage(self.server_state, ctx.assistant_msg, session_id)
+
+    async def _persist_context_for_resume(self, session_id: str) -> None:
+        """Serialize and store the EventProcessorContext for session resume.
+
+        Called after StreamCompleteEvent and RunFailedEvent handlers (after
+        P4's ``_message_registered`` reset). Serializes the current context
+        via ``EventProcessorContext.serialize()`` and stores it via
+        ``set_session_context_data()`` so that a subsequent
+        ``_before_consumer_loop`` call (for a resumed session in the same
+        process) can restore accumulated state.
+
+        If serialization fails, logs an error and continues — the turn must
+        not crash because of a resume-context serialization issue.
+        """
+        ctx = self._contexts.get(session_id)
+        if ctx is None:
+            return
+        try:
+            serialized = ctx.serialize()
+            self.set_session_context_data(session_id, serialized)
+        except Exception:
+            logger.exception(
+                "Failed to serialize EventProcessorContext for resume",
+                session_id=session_id,
+            )
 
     async def _before_consumer_loop(self, session_id: str) -> None:
         """Set up per-session context before the consumer loop starts.
@@ -176,19 +317,8 @@ class OpenCodeEventBridgeMixin:
         # D14: Use the canonical message_id from the REST handler if available
         # instead of generating an independent one. This resolves the dual
         # assistant_msg_id split-message issue.
-        assistant_msg_id = self._pending_message_ids.pop(session_id, None)
-        if assistant_msg_id is None:
-            assistant_msg_id = identifier.ascending("message")
-        assistant_msg = MessageWithParts.assistant(
-            message_id=assistant_msg_id,
-            session_id=session_id,
-            time=MessageTime(created=now_ms()),
-            agent_name="agentpool",
-            model_id="default",
-            parent_id=session_id,
-            provider_id="agentpool",
-            path=MessagePath(cwd=self.server_state.working_dir, root=self.server_state.working_dir),
-        )
+        assistant_msg_id, assistant_msg = self._create_assistant_message(session_id)
+
         ctx = EventProcessorContext(
             session_id=session_id,
             assistant_msg_id=assistant_msg_id,
@@ -274,9 +404,13 @@ class OpenCodeEventBridgeMixin:
         """Create OpenCode-visible child session scaffolding for task navigation.
 
         SessionPool owns the execution session. OpenCode also needs a session
-        model and at least the delegated prompt in message storage so the TUI
-        can open the child task immediately, even before the child stream emits
-        its first token.
+        model so the TUI can open the child task immediately, even before the
+        child stream emits its first token.
+
+        Note: User message creation is NOT done here — the
+        ``UserMessageInsertedEvent`` from ``_route_message()`` is the sole
+        creator of user messages via the EventProcessor. Creating a duplicate
+        user message here would cause double-rendering in the TUI.
         """
         child_session_id = spawn_event.child_session_id
         await ensure_session(
@@ -285,29 +419,9 @@ class OpenCodeEventBridgeMixin:
             parent_id=parent_session_id,
         )
 
-        existing_messages = await get_messages_for_session(self.server_state, child_session_id)
-        if existing_messages:
-            return
-
-        prompt = spawn_event.metadata.get("prompt") or spawn_event.description
-        if not prompt:
-            prompt = f"Run {spawn_event.source_name or 'subagent'} task"
-
-        user_msg = UserMessage(
-            id=identifier.ascending("message"),
-            session_id=child_session_id,
-            time=TimeCreated.now(),
-            agent=spawn_event.source_name or "subagent",
-            model=None,
-        )
-        user_msg_with_parts = MessageWithParts(info=user_msg)
-        text_part = user_msg_with_parts.add_text_part(prompt)
-
-        await append_message_to_session(self.server_state, child_session_id, user_msg_with_parts)
-        await self.server_state.broadcast_event(MessageUpdatedEvent.create(user_msg))
-        await self.server_state.broadcast_event(PartUpdatedEvent.create(text_part))
-
-    async def _handle_event(self, session_id: str, envelope: EventEnvelope) -> None:
+    async def _handle_event(  # noqa: PLR0915
+        self, session_id: str, envelope: EventEnvelope
+    ) -> None:
         """Handle a single event from the EventBus.
 
         Distinguishes parent vs child events (via the child-to-parent mapping),
@@ -386,21 +500,150 @@ class OpenCodeEventBridgeMixin:
                     await set_session_status(
                         self.server_state, session_id, SessionStatus(type="idle")
                     )
+                    # D3: Finalize assistant message time.completed if not
+                    # already set. The prompt_async path returns 204
+                    # immediately and never sets time.completed on the
+                    # assistant message, so the event bridge must do it here
+                    # when StreamCompleteEvent arrives.
+                    # NOTE: Do NOT reset _message_registered here. It must
+                    # stay True so the next RunStartedEvent's D1 block fires
+                    # to create a fresh assistant message. Resetting here
+                    # would cause D1 to be skipped → all turns merge into
+                    # one assistant message.
+                    #
+                    # Correct state machine:
+                    #
+                    #   Turn 1: RunStarted → D1 skip (first) → register → True
+                    #           StreamComplete → finalize (keep True)
+                    #   Turn 2: RunStarted → D1 fires (True) → new msg → False
+                    #           → register → True
+                    #           StreamComplete → finalize (keep True)
+                    #
+                    # If we reset to False at StreamComplete:
+                    #   Turn 2: RunStarted → D1 skip (False) → register
+                    #           with OLD msg_id → all turns merge → BUG
+                    #
+                    # NOTE: _finalize_assistant_time and _persist_assistant_message
+                    # are called AFTER adapter.convert_event() below, because the
+                    # EventProcessor (invoked by convert_event) populates
+                    # ctx.input_tokens/output_tokens from msg.usage.  Calling
+                    # finalize before convert_event would broadcast
+                    # MessageUpdatedEvent with tokens=0, causing the TUI to
+                    # show no token usage.
                 case RunFailedEvent(exception=exc):
                     await set_session_status(
                         self.server_state, session_id, SessionStatus(type="idle")
                     )
+                    # C3 fallback: If the agent crashed before any event
+                    # triggered C3 registration, the assistant message was
+                    # never appended to session state or broadcast via SSE.
+                    # Register it now so _finalize_assistant_time can
+                    # finalize and broadcast it.
+                    if not self._message_registered.get(session_id, False):
+                        ctx = self._contexts.get(session_id)
+                        if ctx is not None:
+                            await append_message_to_session(
+                                self.server_state, session_id, ctx.assistant_msg
+                            )
+                            await self.server_state.broadcast_event(
+                                MessageUpdatedEvent.create(ctx.assistant_msg.info)
+                            )
+                            self._message_registered[session_id] = True
+                    # D3: Finalize time.completed for failed runs too,
+                    # so the next turn's D1 reset doesn't log a
+                    # false-positive warning about a missed
+                    # StreamCompleteEvent.
+                    await self._finalize_assistant_time(session_id)
+                    # Set aborted error on the assistant message.
+                    ctx = self._contexts.get(session_id)
+                    if ctx is not None and isinstance(ctx.assistant_msg.info, AssistantMessage):
+                        info = ctx.assistant_msg.info
+                        if info.error is None:
+                            if isinstance(exc, asyncio.CancelledError):
+                                reason = "Request cancelled by user"
+                            elif isinstance(exc, Exception):
+                                reason = f"Error: {exc}"
+                            else:
+                                reason = "Run failed"
+                            info.error = MessageAbortedError(
+                                data=MessageAbortedErrorData(message=reason)
+                            )
+                            await self.server_state.broadcast_event(
+                                MessageUpdatedEvent.create(info)
+                            )
                     if isinstance(exc, Exception) and not isinstance(exc, asyncio.CancelledError):
                         await self.server_state.broadcast_event(
                             SessionErrorEvent.from_exception(exc, session_id=session_id)
                         )
+                    # Persist the aborted assistant message to storage.
+                    await self._persist_assistant_message(session_id)
+                    # NOTE: Do NOT reset _message_registered here (same
+                    # reasoning as StreamCompleteEvent path). The next
+                    # RunStartedEvent's D1 block handles the reset.
+                    # P3: Serialize context for resume, same as
+                    # StreamCompleteEvent path.
+                    await self._persist_context_for_resume(session_id)
                 case _:
                     pass
+
+            # C4: CustomEvent wraps SSE broadcast events (e.g.
+            # SessionCreatedEvent) republished from the OpenCodeEventBridge.
+            # These are not real agent events and must NOT trigger assistant
+            # message registration. Only skip bridge-wrapped CustomEvents
+            # (source="opencode_event_bridge"); tool-emitted CustomEvents
+            # (source=None or tool name) may carry meaningful payload and
+            # should fall through to adapter processing.
+            if isinstance(event, CustomEvent) and event.source == "opencode_event_bridge":
+                return
 
             ctx = self._contexts.get(session_id)
             if ctx is None:
                 return
 
+            # D1: On RunStartedEvent for a subsequent turn (consumer already
+            # running from turn 1), reset per-turn state so turn 2 gets a
+            # fresh assistant message ID instead of reusing turn 1's.
+            # _before_consumer_loop() only runs once (consumer start is
+            # idempotent), so turns 2+ need this explicit reset.
+            if isinstance(event, RunStartedEvent) and self._message_registered.get(
+                session_id, False
+            ):
+                # D2/D3: Finalize previous turn's assistant message if
+                # StreamCompleteEvent was missed or not yet processed. This
+                # prevents the previous turn's time.completed from being lost
+                # when the D1 reset creates a new message. The warning makes
+                # the D2 red flag (running turn killed by new turn) visible.
+                await self._finalize_assistant_time(session_id, warn=True)
+
+                assistant_msg_id, assistant_msg = self._create_assistant_message(session_id)
+                ctx.assistant_msg_id = assistant_msg_id
+                ctx.assistant_msg = assistant_msg
+                # Reset per-turn mutable tracking state
+                ctx.response_text = ""
+                ctx.text_part = None
+                ctx.reasoning_part = None
+                ctx.tool_parts.clear()
+                ctx.tool_outputs.clear()
+                ctx.tool_inputs.clear()
+                ctx.subagent_tool_parts.clear()
+                ctx.is_errored = False
+                ctx.input_tokens = 0
+                ctx.output_tokens = 0
+                ctx.total_cost = 0.0
+                ctx.stream_start_ms = now_ms()
+
+                self._message_registered[session_id] = False
+
+            # Update assistant message with real agent info from RunStartedEvent.
+            # RunStartedEvent is the first event in a run and carries the real
+            # agent_name from the RunLoop. This is more reliable than the session
+            # state lookup in _before_consumer_loop (which may not have the
+            # agent name for sessions created outside the REST handler).
+            if isinstance(event, RunStartedEvent) and event.agent_name:
+                msg_info = ctx.assistant_msg.info
+                if isinstance(msg_info, AssistantMessage):
+                    msg_info.agent = event.agent_name
+                    msg_info.mode = event.agent_name
             # NOTE: Do NOT overwrite ctx.assistant_msg_id from event.message_id.
             # NativeTurn generates its own UUID for _message_id (uuid4().hex)
             # which is different from the canonical assistant_msg_id generated
@@ -410,12 +653,78 @@ class OpenCodeEventBridgeMixin:
             # handler's ID, so the UI cannot associate parts with the message.
             # The canonical assistant_msg_id from the REST handler is correct.
 
-            # Register assistant message on first non-spawn event
-            if not self._message_registered.get(session_id, False):
+            # Steer split: When a steer UserMessageInsertedEvent was received
+            # during an active turn, the next PartStartEvent (from the new
+            # ModelRequestNode after steer drain) triggers a logical turn split.
+            # This finalizes the current assistant message (A1) and creates a
+            # new one (A2) with a fresh message ID, so the steer user message
+            # sorts between A1 and A2 in the TUI's lexicographic message ID
+            # ordering. Without this split, the steer user message would sort
+            # after the entire assistant message (which reuses one ID for both
+            # pre-steer and post-steer content).
+            if (
+                isinstance(event, PartStartEvent)
+                and ctx._steer_received
+                and self._message_registered.get(session_id, False)
+            ):
+                await self._finalize_assistant_time(session_id)
+
+                assistant_msg_id, assistant_msg = self._create_assistant_message(session_id)
+                ctx.assistant_msg_id = assistant_msg_id
+                ctx.assistant_msg = assistant_msg
+                # Reset per-turn mutable tracking state (same as D1 reset)
+                ctx.response_text = ""
+                ctx.text_part = None
+                ctx.reasoning_part = None
+                ctx.tool_parts.clear()
+                ctx.tool_outputs.clear()
+                ctx.tool_inputs.clear()
+                ctx.subagent_tool_parts.clear()
+                ctx.is_errored = False
+                ctx.input_tokens = 0
+                ctx.output_tokens = 0
+                ctx.total_cost = 0.0
+                ctx.stream_start_ms = now_ms()
+
+                self._message_registered[session_id] = False
+                ctx._steer_received = False
+
+            # Set _steer_received flag when a steer user message arrives during
+            # an active turn. The next PartStartEvent will trigger the split.
+            if isinstance(event, UserMessageInsertedEvent) and event.delivery == "steer":
+                ctx._steer_received = True
+
+            # Register assistant message on first non-spawn, non-custom,
+            # non-user-message-inserted event.
+            # C3: The event bridge is the sole broadcast point for the assistant
+            # message. This ensures the message is visible only when the agent
+            # actually starts producing events, not before.
+            # UserMessageInsertedEvent creates a user message, not an assistant
+            # message, so it must not trigger assistant registration.
+            # StreamCompleteEvent and RunFailedEvent are lifecycle finalizers
+            # that already handled message finalization in the match block
+            # above. They must not trigger re-registration (which would undo
+            # P4's _message_registered reset).
+            is_user_message_inserted = isinstance(event, UserMessageInsertedEvent)
+            is_lifecycle_finalizer = isinstance(event, (StreamCompleteEvent, RunFailedEvent))
+            if (
+                not is_user_message_inserted
+                and not is_lifecycle_finalizer
+                and not self._message_registered.get(session_id, False)
+            ):
                 await append_message_to_session(self.server_state, session_id, ctx.assistant_msg)
                 await self.server_state.broadcast_event(
                     MessageUpdatedEvent.create(ctx.assistant_msg.info)
                 )
+                # C3: Also broadcast a StepStartPart so the frontend sees the
+                # step-start indicator when the agent actually begins work.
+                step_start_part = StepStartPart(
+                    id=identifier.ascending("part"),
+                    message_id=ctx.assistant_msg_id,
+                    session_id=session_id,
+                )
+                ctx.assistant_msg.parts.append(step_start_part)
+                await self.server_state.broadcast_event(PartUpdatedEvent.create(step_start_part))
                 self._message_registered[session_id] = True
 
             adapter = self._adapters.get(session_id)
@@ -424,6 +733,32 @@ class OpenCodeEventBridgeMixin:
 
             async for oc_event in adapter.convert_event(event):
                 await self.server_state.broadcast_event(oc_event)
+
+            # After adapter.convert_event for StreamCompleteEvent, the
+            # EventProcessor has updated ctx.input_tokens/output_tokens and
+            # ctx.total_cost from msg.usage.  Now finalize the assistant
+            # message with the correct token/cost values so the TUI sees them
+            # via MessageUpdatedEvent.
+            if isinstance(event, StreamCompleteEvent):
+                finalize_ctx = self._contexts.get(session_id)
+                if finalize_ctx is not None and isinstance(
+                    finalize_ctx.assistant_msg.info, AssistantMessage
+                ):
+                    info = finalize_ctx.assistant_msg.info
+                    info.tokens = Tokens(
+                        cache=TokenCache(read=0, write=0),
+                        input=finalize_ctx.input_tokens,
+                        output=finalize_ctx.output_tokens,
+                        reasoning=0,
+                    )
+                    info.cost = finalize_ctx.total_cost
+                await self._finalize_assistant_time(session_id)
+                await self._persist_assistant_message(session_id)
+                # P3: Serialize the EventProcessorContext and store it
+                # so that a subsequent _before_consumer_loop (for a
+                # resumed session in the same process) can restore the
+                # accumulated state instead of creating a fresh context.
+                await self._persist_context_for_resume(session_id)
         except Exception:
             logger.exception(
                 "Event handler failed",

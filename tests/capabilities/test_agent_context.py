@@ -21,6 +21,9 @@ from agentpool.capabilities.delegation import AgentNotFoundError, DelegationServ
 from agentpool.host.context import HostContext, RunScope
 
 
+pytestmark = pytest.mark.unit
+
+
 # =============================================================================
 # Test doubles
 # =============================================================================
@@ -28,6 +31,16 @@ from agentpool.host.context import HostContext, RunScope
 
 class _StubDelegationService:
     """Minimal implementation of DelegationService protocol for testing."""
+
+    async def create_child_session(
+        self,
+        agent_name: str,
+        *,
+        parent_session_id: str | None = None,
+        description: str = "",
+        **metadata: Any,
+    ) -> str:
+        return "child_session_001"
 
     async def spawn_subagent(self, name: str, prompt: str) -> AsyncIterator[Any]:
         if name == "missing":
@@ -202,3 +215,35 @@ def test_agent_not_found_error_message() -> None:
     """AgentNotFoundError includes agent name in message."""
     err = AgentNotFoundError("nonexistent")
     assert "nonexistent" in str(err)
+
+
+# =============================================================================
+# TeamModeConfig integration tests
+# =============================================================================
+
+
+@pytest.mark.unit
+def test_agent_context_team_mode_config_defaults_none() -> None:
+    """AgentContext.team_mode_config defaults to None when not provided."""
+    ctx = _make_agent_context()
+    assert ctx.team_mode_config is None
+
+
+@pytest.mark.unit
+def test_agent_context_team_mode_config_accepts_instance() -> None:
+    """AgentContext accepts a TeamModeConfig instance."""
+    from agentpool_config.team_mode import TeamModeConfig
+
+    config = TeamModeConfig(enabled=True, member_eligible=["translator"])
+    ctx = AgentContext(
+        agent_registry=_make_agent_registry(),
+        delegation=_StubDelegationService(),
+        session=_make_session_state(),
+        scope=RunScope(),
+        host=_make_host_context(),
+        extension_registry=None,
+        team_mode_config=config,
+    )
+    assert ctx.team_mode_config is not None
+    assert ctx.team_mode_config.enabled is True
+    assert "translator" in ctx.team_mode_config.member_eligible

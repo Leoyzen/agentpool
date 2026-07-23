@@ -30,10 +30,14 @@ from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
 from agentpool.messaging.messages import TokenCost
 from agentpool.observability.spans import safe_span
-from agentpool.orchestrator.event_mapper import EventMapper
+from agentpool.orchestrator.event_mapper import (
+    EventMapper,
+    normalize_thinking_parts_in_messages,
+)
 from agentpool.orchestrator.turn import HookAwareTurn, Turn
 from agentpool.tasks.exceptions import RunAbortedError
 from agentpool.tools.base import is_terminal_tool
+from agentpool.utils.pydantic_ai_helpers import flatten_prompts
 
 
 if TYPE_CHECKING:
@@ -117,6 +121,17 @@ class NativeTurn(HookAwareTurn, Turn):
     def _hook_prompt(self) -> str:
         """The user prompt for this turn."""
         return str(self._prompts)
+
+    def _set_message_history(self, messages: list[ModelMessage]) -> None:
+        """Store message history with ThinkingPart normalization.
+
+        Wraps ``self._message_history = ...`` to ensure raw CoT providers
+        (vLLM, gpt-oss, etc.) have their reasoning text copied from
+        ``provider_details['raw_content']`` into ``ThinkingPart.content``
+        before the history is persisted.  See issue #155.
+        """
+        normalize_thinking_parts_in_messages(messages)
+        self._message_history = messages
 
     async def execute(self) -> AsyncGenerator[RichAgentStreamEvent[Any]]:  # noqa: PLR0915, PLR0911
         """Execute one reactive cycle of the pydantic-ai agent loop.
@@ -203,12 +218,7 @@ class NativeTurn(HookAwareTurn, Turn):
                 # String prompts are valid UserContent items. List prompts contain
                 # structured content blocks (TextContent, ImageUrl, etc.) that must
                 # be flattened into the top-level sequence, NOT stringified.
-                flattened: list[Any] = []
-                for p in self._prompts:
-                    if isinstance(p, str):
-                        flattened.append(p)
-                    else:
-                        flattened.extend(p)
+                flattened: list[Any] = flatten_prompts(self._prompts)
                 if staged_text is not None:
                     if flattened and isinstance(flattened[0], str):
                         first = f"{staged_text}\n\n{flattened[0]}"
@@ -290,14 +300,20 @@ class NativeTurn(HookAwareTurn, Turn):
                             finally:
                                 self._agent._iteration_task = None
 
-                        self._message_history = agent_run.all_messages()
+                        self._set_message_history(agent_run.all_messages())
                         logger.info("After while loop — building final message")
 
                 except RunAbortedError as exc:
                     logger.info("RunAbortedError caught", reason=str(exc))
+                    # Set run_ctx.cancelled so _handle_turn_result() detects
+                    # the cancellation and returns "continue" (go idle) instead
+                    # of "proceed" (drain queued messages and continue executing).
+                    # Without this, the RunLoop continues after the user cancels
+                    # an elicitation question (e.g. OpenCode TUI question reject).
+                    self._run_ctx.cancelled = True
                     if agent_run is not None:
                         try:
-                            self._message_history = agent_run.all_messages()
+                            self._set_message_history(agent_run.all_messages())
                         except Exception:  # noqa: BLE001
                             logger.debug(
                                 "Could not retrieve agent_run messages after RunAbortedError",
@@ -325,6 +341,13 @@ class NativeTurn(HookAwareTurn, Turn):
                     #    closes the generator, setting _turn_complete_event
                     #    in start()'s finally block — unblocking legacy
                     #    clients waiting on the PromptResponse.
+                    # Flush pending tool calls so downstream consumers receive
+                    # ToolCallCompleteEvent for in-progress tools, and log them
+                    # to the journal with status="cancelled" for crash recovery.
+                    cancelled_events = mapper.flush_cancelled_tool_calls()
+                    self._log_cancelled_tool_executions(cancelled_events)
+                    for tool_event in cancelled_events:
+                        yield tool_event
                     yield StreamCompleteEvent(
                         message=self._final_message,
                         cancelled=True,
@@ -335,7 +358,7 @@ class NativeTurn(HookAwareTurn, Turn):
                     logger.info("UndrainedPendingMessagesError caught", error=str(exc))
                     if agent_run is not None:
                         with contextlib.suppress(Exception):
-                            self._message_history = agent_run.all_messages()
+                            self._set_message_history(agent_run.all_messages())
 
                 except asyncio.CancelledError:
                     if self._run_ctx.cancelled:
@@ -346,7 +369,14 @@ class NativeTurn(HookAwareTurn, Turn):
                         # turn's partial messages are preserved for the next turn.
                         if agent_run is not None:
                             with contextlib.suppress(Exception):
-                                self._message_history = agent_run.all_messages()
+                                self._set_message_history(agent_run.all_messages())
+                        # Flush pending tool calls so downstream consumers receive
+                        # ToolCallCompleteEvent for in-progress tools, and log
+                        # them to the journal with status="cancelled".
+                        cancelled_events = mapper.flush_cancelled_tool_calls()
+                        self._log_cancelled_tool_executions(cancelled_events)
+                        for tool_event in cancelled_events:
+                            yield tool_event
                         self._final_message = ChatMessage(
                             content="",
                             role="assistant",
@@ -370,7 +400,7 @@ class NativeTurn(HookAwareTurn, Turn):
                     if "ignored GeneratorExit" in str(exc):
                         if agent_run is not None:
                             with contextlib.suppress(Exception):
-                                self._message_history = agent_run.all_messages()
+                                self._set_message_history(agent_run.all_messages())
                         return
                     raise
 
@@ -483,6 +513,13 @@ class NativeTurn(HookAwareTurn, Turn):
                 # exit without yielding StreamCompleteEvent.
                 if self._run_ctx.cancelled:
                     logger.info("Skipping StreamCompleteEvent — run_ctx.cancelled is True")
+                    # Flush pending tool calls so downstream consumers receive
+                    # ToolCallCompleteEvent for in-progress tools, and log
+                    # them to the journal with status="cancelled".
+                    cancelled_events = mapper.flush_cancelled_tool_calls()
+                    self._log_cancelled_tool_executions(cancelled_events)
+                    for tool_event in cancelled_events:
+                        yield tool_event
                     return
 
                 logger.info("Yielding StreamCompleteEvent")

@@ -143,7 +143,6 @@ def _mock_session_pool(agent: Agent, run_ctx: AgentRunContext) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-@pytest.mark.flaky(reruns=3, reruns_delay=0.5)
 async def test_inject_prompt_from_different_task_with_session_pool(
     slow_agent: Agent[None],
 ) -> None:

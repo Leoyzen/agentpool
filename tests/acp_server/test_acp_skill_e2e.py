@@ -74,8 +74,8 @@ def _mock_skills_on_pool(pool: AgentPool, skills: list[Skill]) -> None:
 def _make_mock_acp_agent() -> MagicMock:
     """Create a mock ACP agent suitable for ACPSession construction."""
     mock_acp_agent = MagicMock()
-    mock_acp_agent.tasks = MagicMock()
-    mock_acp_agent.tasks.create_task = MagicMock(return_value=MagicMock())
+    mock_acp_agent._task_group = MagicMock()
+    mock_acp_agent._task_group.start_soon = MagicMock()
     mock_acp_agent._mcp_manager = MagicMock()
     return mock_acp_agent
 
@@ -135,7 +135,7 @@ def mock_acp_agent() -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_e2e_pool_skills_in_available_commands_update(
     pool_and_agent: tuple[AgentPool, Agent],
     mock_client: AsyncMock,
@@ -163,7 +163,7 @@ async def test_e2e_pool_skills_in_available_commands_update(
     assert "skill-b" in command_names, f"skill-b missing from {command_names}"
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_e2e_init_client_skills_sends_update(
     pool_and_agent: tuple[AgentPool, Agent],
     mock_client: AsyncMock,
@@ -194,7 +194,7 @@ async def test_e2e_init_client_skills_sends_update(
     assert "client-skill" in command_names, f"client-skill missing from {command_names}"
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_e2e_skills_changed_event_triggers_update(
     pool_and_agent: tuple[AgentPool, Agent],
     mock_client: AsyncMock,
@@ -270,7 +270,7 @@ async def test_e2e_skills_changed_event_triggers_update(
     await session.close()
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_e2e_execute_skill_command_injects_instructions(
     pool_and_agent: tuple[AgentPool, Agent],
     mock_client: AsyncMock,
@@ -309,7 +309,7 @@ async def test_e2e_execute_skill_command_injects_instructions(
     assert "test-args" in staged_text, f"User args not found in staged content: {staged_text}"
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_e2e_session_close_cancels_watcher_task(
     pool_and_agent: tuple[AgentPool, Agent],
     mock_client: AsyncMock,
@@ -341,7 +341,7 @@ async def test_e2e_session_close_cancels_watcher_task(
     assert session._skill_change_task is None, "Watcher task should be None after close()"
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_e2e_non_invocable_skills_never_in_commands(
     pool_and_agent: tuple[AgentPool, Agent],
     mock_client: AsyncMock,

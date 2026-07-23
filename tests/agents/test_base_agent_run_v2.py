@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 from pydantic_ai.models.test import TestModel
@@ -14,11 +14,15 @@ import pytest
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunErrorEvent, RunStartedEvent, StreamCompleteEvent
 from agentpool.agents.native_agent.agent import Agent
-from agentpool.lifecycle import RunState
+from agentpool.lifecycle import DirectChannel, MemoryJournal
 from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventBus
+from agentpool.orchestrator.core import EventBus, SessionState
 from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentPool
 
 
 pytestmark = pytest.mark.unit
@@ -55,9 +59,9 @@ def _stream_complete_event() -> StreamCompleteEvent[Any]:
 
 
 def _make_session() -> Any:
-    """Create a mock SessionState with a real turn_lock."""
-    session = MagicMock()
-    session.turn_lock = asyncio.Lock()
+    """Create a real SessionState with a DirectChannel for event publishing."""
+    session = SessionState(session_id="test-session", agent_name="test_agent")
+    session._comm_channel = DirectChannel(MemoryJournal())
     return session
 
 
@@ -102,8 +106,10 @@ async def test_create_run_returns_run_handle_without_executing() -> None:
     )
 
     assert isinstance(handle, RunHandle)
-    assert handle._run_state == RunState.IDLE
-    assert handle._closing is False
+    # In the per-prompt model, RunHandle has no _run_state or _closing.
+    # complete_event not set means the handle is ready but not complete.
+    assert handle.complete_event.is_set() is False
+    assert handle.is_running is True
 
 
 @pytest.mark.unit
@@ -230,7 +236,8 @@ async def test_create_run_stream_closes_handle_after_completion() -> None:
         pass
 
     assert len(captured) == 1
-    assert captured[0]._closing is True
+    # In the per-prompt model, close() sets complete_event instead of _closing.
+    assert captured[0].complete_event.is_set() is True
 
 
 # ---------------------------------------------------------------------------
@@ -239,7 +246,7 @@ async def test_create_run_stream_closes_handle_after_completion() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_stream_breaks_on_stream_complete() -> None:
+async def test_run_stream_breaks_on_stream_complete(minimal_pool: AgentPool) -> None:
     """_run_stream_run_turn must break on StreamCompleteEvent in active-run path.
 
     Without the break, the while-True loop blocks indefinitely on
@@ -248,13 +255,7 @@ async def test_run_stream_breaks_on_stream_complete() -> None:
     """
     from agentpool.orchestrator.core import SessionController
 
-    mock_pool = MagicMock()
-    mock_pool.main_agent = MagicMock()
-    mock_pool.main_agent.name = "main-agent"
-    mock_pool.manifest = MagicMock()
-    mock_pool.manifest.agents = {}
-
-    controller = SessionController(pool=mock_pool)
+    controller = SessionController(pool=minimal_pool)
     event_bus = EventBus()
     controller._event_bus = event_bus
 

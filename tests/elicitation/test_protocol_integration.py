@@ -42,7 +42,7 @@ from agentpool.ui.base import InputProvider
 # ============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_deferred_tool_requests_in_output_type_with_capabilities() -> None:
     """Agent with capabilities has DeferredToolRequests in output_type.
 
@@ -71,7 +71,7 @@ async def test_deferred_tool_requests_in_output_type_with_capabilities() -> None
     assert "DeferredToolRequests" in type_names
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_no_deferred_tool_requests_without_capabilities() -> None:
     """Output_type logic excludes DeferredToolRequests when no capabilities.
 
@@ -124,7 +124,7 @@ class _FakePool:
         self.session_pool = None
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_session_state_checkpoint_enabled_with_store() -> None:
     """SessionController with a store sets checkpoint_enabled=True.
 
@@ -148,7 +148,7 @@ async def test_session_state_checkpoint_enabled_with_store() -> None:
     assert state.checkpoint_enabled is True
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_session_state_checkpoint_disabled_without_store() -> None:
     """SessionController without a store sets checkpoint_enabled=False.
 
@@ -174,7 +174,7 @@ async def test_session_state_checkpoint_disabled_without_store() -> None:
 # ============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_acp_session_proxy_checkpoint_enabled_propagates() -> None:
     """ACPInputProvider.supports_durable_elicitation reflects checkpoint_enabled.
 
@@ -199,7 +199,7 @@ async def test_acp_session_proxy_checkpoint_enabled_propagates() -> None:
     assert provider.supports_durable_elicitation is True
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_acp_session_proxy_checkpoint_disabled_propagates() -> None:
     """ACPInputProvider.supports_durable_elicitation is False when checkpoint disabled.
 
@@ -250,7 +250,7 @@ class _DurableInputProvider(InputProvider):
         return types.ElicitResult(action="accept", content={})
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_elicitation_bridge_handler_with_real_deferred_requests() -> None:
     """Bridge handler processes real DeferredToolRequests end-to-end.
 
@@ -364,7 +364,7 @@ async def test_elicitation_bridge_handler_with_real_deferred_requests() -> None:
 # ============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_acp_event_converter_with_real_event_bus() -> None:
     """ACPEventConverter produces correct notification for ElicitationDeferredEvent.
 
@@ -435,7 +435,7 @@ async def test_acp_event_converter_with_real_event_bus() -> None:
 # ============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_handle_elicitation_raises_call_deferred_with_durable_provider() -> None:
     """handle_elicitation raises CallDeferred for MCP tools (in_mcp_callback=True).
 
@@ -470,7 +470,7 @@ async def test_handle_elicitation_raises_call_deferred_with_durable_provider() -
     assert "requestedSchema" in elicitation
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_handle_elicitation_returns_cached_response_on_recovery() -> None:
     """handle_elicitation returns cached response during crash recovery.
 

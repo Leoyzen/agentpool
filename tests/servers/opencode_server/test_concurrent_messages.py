@@ -242,6 +242,44 @@ def concurrent_test_state(tmp_project_dir, slow_mock_agent):
     state.todos = {}
     state.input_providers = {}
     state.pending_questions = {}
+
+    # Simulate EventProcessor: wrap send_message to also add user messages
+    # to state. In production, EventProcessor._process_user_message_inserted
+    # receives UserMessageInsertedEvent from the EventBus and calls
+    # append_message_to_session. The EventProcessor isn't running in tests,
+    # so we simulate it here.
+    original_send_message = state.pool.session_pool.send_message
+
+    async def _wrapping_send_message(*args: Any, **kwargs: Any) -> Any:
+        result = await original_send_message(*args, **kwargs)
+        message_id = kwargs.get("message_id")
+        content = kwargs.get("content")
+        sid = kwargs.get("session_id", "")
+        if message_id is not None and content is not None:
+            import time as _time
+
+            from agentpool_server.opencode_server.models.common import TimeCreated
+            from agentpool_server.opencode_server.models.message import (
+                MessageWithParts,
+                UserMessage,
+            )
+            from agentpool_server.opencode_server.opencode_message_bridge import (
+                append_message_to_session,
+            )
+
+            user_message = UserMessage(
+                id=message_id,
+                session_id=sid,
+                time=TimeCreated(created=int(_time.time() * 1000)),
+            )
+            user_msg_with_parts = MessageWithParts(info=user_message)
+            if isinstance(content, str) and content:
+                user_msg_with_parts.add_text_part(content)
+            await append_message_to_session(state, sid, user_msg_with_parts)
+        return result
+
+    state.pool.session_pool.send_message = _wrapping_send_message
+
     return state
 
 
@@ -289,7 +327,7 @@ class TestConcurrentMessageHandling:
             all_events.append(event)
             await original_broadcast(event)
 
-        state.broadcast_event = tracking_broadcast  # type: ignore[method-assign]
+        state.broadcast_event = tracking_broadcast  # type: ignore[method-assign]  # ty: ignore[invalid-assignment]
 
         # Send two messages concurrently to the same session
         # This should NOT cause concurrent processing
@@ -320,8 +358,14 @@ class TestConcurrentMessageHandling:
             if isinstance(result, Exception):
                 pytest.fail(f"Exception during processing: {result}")
 
-        # Verify both messages were processed
-        assert len(state.messages[session_id]) == 4  # 2 user + 2 assistant messages
+        # Verify both messages were processed.
+        # In the async model, _process_message only adds user messages —
+        # assistant messages are registered by the event consumer on
+        # StreamCompleteEvent. We verify both user messages were added
+        # and the agent was called twice.
+        assert len(state.messages[session_id]) == 2  # 2 user messages
+        user_msgs = [m for m in state.messages[session_id] if m.info.role == "user"]
+        assert len(user_msgs) == 2
 
         # Verify the agent was called twice
         agent_mock = cast(SlowAgentMock, state.agent)
@@ -354,7 +398,7 @@ class TestConcurrentMessageHandling:
                 status_types_seen.append(event.properties.status.type)
             await original_broadcast(event)
 
-        state.broadcast_event = tracking_broadcast  # type: ignore[method-assign]
+        state.broadcast_event = tracking_broadcast  # type: ignore[method-assign]  # ty: ignore[invalid-assignment]
 
         # Process a message
         await _process_message(session_id, sample_message_request, state)
@@ -396,13 +440,16 @@ class TestConcurrentMessageHandling:
             return_exceptions=True,
         )
 
-        # Verify both sessions processed their messages without errors
+        # Verify both sessions processed their messages without errors.
+        # In the async model, _process_message only adds user messages —
+        # assistant messages are registered by the event consumer on
+        # StreamCompleteEvent.
         for result in results:
             assert not isinstance(result, Exception), f"Unexpected error: {result}"
 
-        # Verify both sessions have their messages
-        assert len(state.messages[session_id_1]) == 2  # user + assistant
-        assert len(state.messages[session_id_2]) == 2  # user + assistant
+        # Verify both sessions have their user messages
+        assert len(state.messages[session_id_1]) == 1  # user message
+        assert len(state.messages[session_id_2]) == 1  # user message
 
     @pytest.mark.asyncio
     async def test_message_ordering_preserved_under_concurrency(

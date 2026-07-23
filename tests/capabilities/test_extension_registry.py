@@ -25,6 +25,9 @@ from agentpool.capabilities.extension_registry import (
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 # ---- Test Helpers ----
 
 

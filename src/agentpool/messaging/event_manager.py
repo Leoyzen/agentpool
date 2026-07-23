@@ -7,7 +7,6 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import wraps
-import inspect
 from typing import TYPE_CHECKING, Any, Self
 
 from anyenv.signals import Signal
@@ -17,7 +16,6 @@ from pydantic import SecretStr
 
 from agentpool.log import get_logger
 from agentpool.utils.inspection import execute, get_fn_name
-from agentpool.utils.tasks import TaskManager
 from agentpool.utils.time_utils import get_now
 
 
@@ -65,7 +63,7 @@ class EventManager:
             parent: Optional parent event manager
             source_name: Optional name of the source node (agent/team) for SubAgentEvent wrapping
         """
-        self.task_manager = TaskManager()
+        self._event_tasks: set[asyncio.Task[Any]] = set()
         self.configs = configs or []
         self.enabled = enable_events
         self._sources: dict[str, EventSource] = {}
@@ -227,7 +225,7 @@ class EventManager:
             timezone=timezone,
             skip_missed=skip_missed,
         )
-        return await self.add_source(config)  # type: ignore[return-value]
+        return await self.add_source(config)  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
 
     async def add_email_watch(
         self,
@@ -294,8 +292,11 @@ class EventManager:
             await source.__aenter__()
             self._sources[config.name] = source
             # Start processing events
-            name = f"event_processor_{config.name}"
-            self.task_manager.create_task(self._process_events(source), name=name)
+            task = asyncio.create_task(
+                self._process_events(source), name=f"event_processor_{config.name}"
+            )
+            self._event_tasks.add(task)
+            task.add_done_callback(self._event_tasks.discard)
             logger.debug("Added event source", name=config.name)
         except Exception as e:
             msg = "Failed to add event source"
@@ -355,15 +356,23 @@ class EventManager:
         for name in list(self._sources):
             await self.remove_source(name)
 
+        # Cancel and wait for all event processing tasks, then clear.
+        if self._event_tasks:
+            for task in self._event_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*self._event_tasks, return_exceptions=True)
+        self._event_tasks.clear()
+
     def track[T](
         self,
         event_name: str | None = None,
         **event_metadata: Any,
-    ) -> (
-        Callable[[Callable[..., Coroutine[Any, Any, T]]], Callable[..., Coroutine[Any, Any, T]]]
-        | Callable[[Callable[..., T]], Callable[..., T]]
-    ):
+    ) -> Callable[[Callable[..., Coroutine[Any, Any, T]]], Callable[..., Coroutine[Any, Any, T]]]:
         """Track function calls as events.
+
+        Only async functions are supported. The decorated function's result
+        becomes the event data.
 
         Args:
             event_name: Optional name for the event (defaults to function name)
@@ -376,12 +385,13 @@ class EventManager:
                 return results  # This result becomes event data
         """
 
-        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-
+        def decorator(
+            func: Callable[..., Coroutine[Any, Any, T]],
+        ) -> Callable[..., Coroutine[Any, Any, T]]:
             name = event_name or get_fn_name(func)
 
             @wraps(func)
-            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            async def async_wrapper(*args: Any, **kwargs: Any) -> T:
                 start_time = get_now()
                 meta = {"args": args, "kwargs": kwargs, **event_metadata}
                 try:
@@ -400,27 +410,7 @@ class EventManager:
                 else:
                     return result
 
-            @wraps(func)
-            def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-                start_time = get_now()
-                meta = {"args": args, "kwargs": kwargs, **event_metadata}
-                try:
-                    result = func(*args, **kwargs)
-                    if self.enabled:
-                        meta |= {"status": "success", "duration": get_now() - start_time}
-                        event = EventData.create(name, content=result, metadata=meta)
-                        self.task_manager.run_background(self.emit_event(event))
-                except Exception as e:
-                    if self.enabled:
-                        dur = get_now() - start_time
-                        meta |= {"status": "error", "error": str(e), "duration": dur}
-                        event = EventData.create(name, content=str(e), metadata=meta)
-                        self.task_manager.run_background(self.emit_event(event))
-                    raise
-                else:
-                    return result
-
-            return async_wrapper if inspect.iscoroutinefunction(func) else sync_wrapper
+            return async_wrapper
 
         return decorator
 

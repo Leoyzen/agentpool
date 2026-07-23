@@ -1,0 +1,1790 @@
+"""TeamCommCapability — capability for dynamic team communication.
+
+This capability provides the protocol instructions and team communication
+tools (send_message, task_create, read_blackboard, etc.) to agents that
+are members of or leads of a dynamic team.
+
+Universal tools (all members can use):
+    - send_message: Send a message to a teammate's inbox.
+    - task_create: Create a task on the shared task board.
+    - task_list: List all tasks on the shared task board.
+    - task_update: Update a task's status or owner.
+    - read_blackboard: Read a key from the shared blackboard.
+    - write_blackboard: Write a key to the shared blackboard.
+    - list_blackboard: List all keys on the shared blackboard.
+    - team_status: Get the current status of the team.
+
+Lead-only tools (only agents with ``team_role == "lead"``):
+    - task_create: Create a task on the shared task board.
+    - team_create: Create a new team with eligible members.
+    - team_delete: Delete the current team and close all member sessions.
+    - delete_blackboard: Delete a key from the shared blackboard.
+    - shutdown_request: Shut down a specific team member.
+    - team_add_member: Add a new member to an existing team.
+    - team_remove_member: Remove a member from the team.
+
+    Lead-only tools are registered for all agents but filtered out for
+    non-lead members by ``prepare_tools()`` before the model receives the
+    tool list.  Runtime permission checks in each tool body remain as a
+    safety net.
+
+Per-session instantiation:
+    The factory creates a shared instance with ``session_metadata=None``
+    during ``_compile_agent_capabilities()``. When a session with a
+    ``team_id`` in its metadata is created, ``create_session_agent()``
+    replaces the shared instance with a per-session instance carrying
+    the actual session metadata.
+
+Role-aware tool schema:
+    ``prepare_tools()`` modifies tool definitions based on
+    ``team_role`` from session metadata:
+
+    - **Non-lead members**: Lead-only tools are removed entirely.
+      ``send_message`` has its ``to`` parameter description updated to
+      omit the broadcast (``"*"``) mention, and a ``pattern`` constraint
+      is added to reject ``"*"`` at the schema level.
+
+    - **Lead agents**: All tool definitions are returned unchanged.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import datetime
+import json
+import tempfile
+from typing import TYPE_CHECKING, Annotated, Any, cast, override
+import uuid
+
+from pydantic.fields import Field
+from pydantic_ai.tools import (
+    RunContext,
+    ToolDefinition,
+    ToolReturn,
+)
+
+from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentpool.log import get_logger
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from agentpool.capabilities.agent_context import AgentContext
+    from agentpool.capabilities.file_team_state import FileTeamState
+    from agentpool.lifecycle.types import DeliveryMode
+    from agentpool.tools.base import Tool
+    from agentpool_config.team_mode import TeamModeConfig
+
+
+logger = get_logger(__name__)
+
+# Strong references to cleanup tasks so asyncio does not garbage-collect them
+# while they are awaiting ``RunHandle.complete_event``.
+_cleanup_tasks: set[asyncio.Task[Any]] = set()
+
+
+class TeamCommCapability(FunctionToolsetCapability[Any]):
+    """Capability providing team communication protocol instructions and tools.
+
+    Inherits from :class:`FunctionToolsetCapability` and overrides
+    ``get_instructions()`` and ``get_tools()`` to respect the
+    :class:`TeamModeConfig` enabled flag and session metadata availability.
+
+    Attributes:
+        _config: The resolved team mode configuration.
+        _agent_name: Name of the agent this capability is attached to.
+        _session_metadata: Per-session metadata (team_name, team_role, etc.).
+    """
+
+    # Auto-cleanup tuning (override in tests).
+    _idle_timeout: float = 300.0
+    _poll_interval: float = 30.0
+
+    def __init__(
+        self,
+        config: TeamModeConfig,
+        agent_name: str,
+        session_metadata: dict[str, Any] | None = None,
+        agent_descriptions: dict[str, str] | None = None,
+    ) -> None:
+        """Initialize the team communication capability.
+
+        Args:
+            config: The resolved team mode configuration (global + agent overlay).
+            agent_name: Name of the agent this capability belongs to.
+            session_metadata: Optional per-session metadata containing
+                ``team_name``, ``team_role``, ``team_member_name``, etc.
+                When ``None`` or empty, ``get_instructions()`` returns ``None``.
+            agent_descriptions: Optional mapping of agent name to short
+                description for eligible agents. Used in ``get_instructions()``
+                so the LLM knows what each agent does.
+        """
+        super().__init__(name="team_comm")
+        self._config = config
+        self._agent_name = agent_name
+        self._session_metadata: dict[str, Any] = session_metadata or {}
+        self._agent_descriptions: dict[str, str] = agent_descriptions or {}
+        # Register universal tools (all members can use)
+        if config.enabled:
+            self.register_tool(self.send_message)
+            self.register_tool(self.task_create)
+            self.register_tool(self.task_list)
+            self.register_tool(self.task_update)
+            self.register_tool(self.read_blackboard)
+            self.register_tool(self.write_blackboard)
+            self.register_tool(self.list_blackboard)
+            self.register_tool(self.team_status)
+            # Register lead-only tools — filtered out for non-lead members
+            # by prepare_tools() before the model receives the tool list.
+            self.register_tool(self.team_create)
+            self.register_tool(self.team_delete)
+            self.register_tool(self.delete_blackboard)
+            self.register_tool(self.shutdown_request)
+            self.register_tool(self.team_add_member)
+            self.register_tool(self.team_remove_member)
+
+    @property
+    def _notice_mode(self) -> DeliveryMode:
+        """Resolve delivery mode from config."""
+        from agentpool.lifecycle.types import DeliveryMode
+
+        return (
+            DeliveryMode.STEER
+            if self._config.notice_delivery_mode == "steer"
+            else DeliveryMode.QUEUE
+        )
+
+    def _wrap_notice_content(self, body: str) -> str:
+        """Return the message body for delivery.
+
+        Team notices are always delivered as user messages.
+        """
+        return body
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_agent_context(self, ctx: RunContext[Any]) -> AgentContext:
+        """Extract AgentContext from a pydantic-ai RunContext.
+
+        In production, PydanticAI wraps our AgentContext inside
+        ``agents.context.AgentContext.data``. This method unwraps it.
+
+        Args:
+            ctx: The RunContext passed to a tool function.
+
+        Returns:
+            The AgentContext from ``ctx.deps`` (or ``ctx.deps.data``).
+
+        Raises:
+            RuntimeError: If ``ctx.deps`` is None or AgentContext is not found.
+        """
+        from agentpool.capabilities.agent_context import AgentContext
+
+        deps = ctx.deps
+        if deps is None:
+            msg = "TeamCommCapability requires AgentContext as deps. Got: None"
+            raise RuntimeError(msg)
+        # In production, deps is agents.context.AgentContext (PydanticAI runtime
+        # context). Our capabilities.agent_context.AgentContext is stored at
+        # deps.data, set by NativeTurn (turn.py: agent_deps.data = run_ctx.deps).
+        from agentpool.agents.context import AgentContext as RuntimeAgentContext
+
+        if isinstance(deps, RuntimeAgentContext):
+            inner = deps.data
+            if inner is None:
+                msg = "TeamCommCapability requires AgentContext at deps.data. Got: None"
+                raise RuntimeError(msg)
+            return cast(AgentContext, inner)
+        # In tests, deps may be directly our AgentContext or a MagicMock(spec=AgentContext).
+        if isinstance(deps, AgentContext):
+            return deps
+        return cast(AgentContext, deps)
+
+    def _get_team_state(self, agent_ctx: AgentContext) -> FileTeamState | None:
+        """Create a FileTeamState for the current team, or None if not in a team.
+
+        Args:
+            agent_ctx: The per-turn agent context.
+
+        Returns:
+            A FileTeamState rooted at the configured base_dir, or None
+            if no ``team_id`` is present in session metadata.
+        """
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        team_id: str | None = agent_ctx.session.metadata.get("team_id")
+        if team_id is None:
+            return None
+        # Prefer base_dir from session metadata (set by team_create) so
+        # that team_status and other tools always find the state even if
+        # team_mode_config is None in the per-turn AgentContext.
+        base_dir: str = agent_ctx.session.metadata.get(
+            "team_base_dir",
+            "",
+        )
+        if not base_dir:
+            base_dir = (
+                agent_ctx.team_mode_config.effective_base_dir
+                if agent_ctx.team_mode_config is not None
+                else tempfile.gettempdir()
+            )
+        return FileTeamState(base_dir)
+
+    def _get_team_id(self, agent_ctx: AgentContext) -> str | None:
+        """Return the team_id from session metadata, or None."""
+        team_id: str | None = agent_ctx.session.metadata.get("team_id")
+        return team_id
+
+    # ------------------------------------------------------------------
+    # Universal tools
+    # ------------------------------------------------------------------
+
+    async def send_message(  # noqa: PLR0911, PLR0915
+        self,
+        ctx: RunContext[Any],
+        to: Annotated[
+            str,
+            Field(
+                description='Recipient member name. "*" broadcasts to all '
+                "members (lead-only — returns error for non-lead agents)"
+            ),
+        ],
+        body: Annotated[str, Field(description="Message body text")],
+        message_type: Annotated[str, Field(description="Optional message type tag")] = "",
+    ) -> ToolReturn:
+        """Send a message to a teammate's inbox.
+
+        Returns:
+            Success or error message string.
+        """
+        # Message size enforcement.
+        body_bytes = len(body.encode())
+        if body_bytes > self._config.message_max_bytes:
+            return ToolReturn(
+                return_value=(
+                    f"Message exceeds max size "
+                    f"({body_bytes} > {self._config.message_max_bytes} bytes)"
+                )
+            )
+
+        # Broadcast: lead-only.
+        if to == "*":
+            agent_ctx = self._resolve_agent_context(ctx)
+            role: str = agent_ctx.session.metadata.get("team_role", "")
+            if role != "lead":
+                return ToolReturn(return_value="Broadcast is lead-only")
+
+            team_state = self._get_team_state(agent_ctx)
+            if team_state is None:
+                return ToolReturn(return_value="Not in a team session")
+
+            team_id: str = agent_ctx.session.metadata["team_id"]
+            session_pool = agent_ctx.host.session_pool
+            if session_pool is None:
+                return ToolReturn(return_value="SessionPool not available")
+
+            from agentpool.capabilities.file_team_state import FileTeamState
+
+            state_path = team_state._state_path(team_id)
+            if not state_path.exists():
+                return ToolReturn(return_value="Team state not found")
+            state: dict[str, Any] = FileTeamState._read_json(state_path)
+            members: dict[str, dict[str, str]] = state.get("members", {})
+
+            from agentpool.lifecycle.types import DeliveryMode
+
+            mode = self._notice_mode
+            delivered = 0
+            lead_sid = agent_ctx.session.session_id
+            msg_body = (
+                f'<team-message from="{self._agent_name}" type="broadcast">'
+                f"\n\n{body}\n\n</team-message>"
+            )
+            for member_name in members:
+                target_sid = team_state.get_member_session_id(team_id, member_name)
+                if target_sid is None or target_sid == lead_sid:
+                    continue  # Skip self (lead broadcasting to itself).
+                result = await session_pool.send_message(
+                    target_sid,
+                    self._wrap_notice_content(msg_body),
+                    mode=mode,
+                    source="team",
+                    meta={"from": self._agent_name, "team_id": team_id},
+                )
+                # Distinguish None-as-queued from None-as-failure:
+                # - STEER: None = failure.
+                # - QUEUE: None = queued (success) OR failure. Check
+                #   session existence to disambiguate.
+                if result is not None:
+                    delivered += 1
+                elif mode is DeliveryMode.QUEUE:
+                    target_session = session_pool.sessions.get_session(target_sid)
+                    if target_session is not None and not target_session.closing:
+                        delivered += 1
+                team_state.write_message(
+                    team_id,
+                    member_name,
+                    {"from": self._agent_name, "body": body},
+                )
+            return ToolReturn(return_value=f"Broadcast sent to {delivered} members")
+
+        agent_ctx = self._resolve_agent_context(ctx)
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        team_id = agent_ctx.session.metadata["team_id"]
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is None:
+            return ToolReturn(return_value="SessionPool not available")
+
+        # Check member exists BEFORE bounds check to avoid creating
+        # phantom entries in team state for non-existent members.
+        target_sid = team_state.get_member_session_id(team_id, to)
+        if target_sid is None:
+            return ToolReturn(return_value=f"Member '{to}' not found or no session registered")
+
+        # Bounds: max_member_turns and inbox_max_bytes checks.
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        state_path = team_state._state_path(team_id)
+        if state_path.exists():
+            current_state: dict[str, Any] = FileTeamState._read_json(state_path)
+            members_state: dict[str, dict[str, Any]] = current_state.get("members", {})
+            member_info: dict[str, Any] = members_state.get(to, {})
+            turn_count: int = member_info.get("turn_count", 0)
+            if turn_count >= self._config.bounds.max_member_turns:
+                return ToolReturn(
+                    return_value=(
+                        f"Member '{to}' has exceeded max turns "
+                        f"({turn_count} >= {self._config.bounds.max_member_turns})"
+                    )
+                )
+
+            existing_messages = team_state.read_messages(team_id, to)
+            inbox_size = sum(len(json.dumps(m).encode()) for m in existing_messages)
+            body_bytes_len = len(body.encode())
+            if inbox_size + body_bytes_len > self._config.inbox_max_bytes:
+                return ToolReturn(
+                    return_value=(
+                        f"Inbox exceeds max size ({inbox_size + body_bytes_len} > "
+                        f"{self._config.inbox_max_bytes} bytes)"
+                    )
+                )
+
+            member_info["turn_count"] = turn_count + 1
+            members_state[to] = member_info
+            current_state["members"] = members_state
+            FileTeamState._atomic_write(state_path, current_state)
+
+        from agentpool.lifecycle.types import DeliveryMode
+
+        mode = self._notice_mode
+        msg_body = (
+            f'<team-message from="{self._agent_name}" type="private">\n\n{body}\n\n</team-message>'
+        )
+        result = await session_pool.send_message(
+            target_sid,
+            self._wrap_notice_content(msg_body),
+            mode=mode,
+            source="team",
+            meta={"from": self._agent_name, "team_id": team_id},
+        )
+        # Distinguish None-as-queued from None-as-failure:
+        # - STEER mode: None always means failure (session not found/closing).
+        # - QUEUE mode: None means queued (success) OR failure. Check
+        #   session existence to disambiguate.
+        if result is None:
+            if mode is DeliveryMode.STEER:
+                return ToolReturn(return_value=f"Failed to deliver message to '{to}'")
+            # QUEUE mode — verify session still exists.
+            target_session = session_pool.sessions.get_session(target_sid)
+            if target_session is None or target_session.closing or target_session.is_closing:
+                return ToolReturn(return_value=f"Failed to deliver message to '{to}'")
+
+        # Persist to inbox for audit trail.
+        team_state.write_message(
+            team_id,
+            to,
+            {"from": self._agent_name, "body": body},
+        )
+        return ToolReturn(return_value=f"Message sent to {to}")
+
+    async def task_create(
+        self,
+        ctx: RunContext[Any],
+        subject: Annotated[str, Field(description="Short task title")],
+        description: Annotated[str, Field(description="Optional longer description")] = "",
+        blocked_by: Annotated[
+            list[str] | None,
+            Field(description="Optional list of task_ids this task depends on"),
+        ] = None,
+    ) -> ToolReturn:
+        """Create a task on the shared task board (lead-only).
+
+        Returns:
+            Success message with task_id, or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role != "lead":
+            return ToolReturn(return_value="Only lead can use task_create")
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        task_id = team_state.create_task(
+            team_id,
+            {
+                "subject": subject,
+                "description": description,
+                "blocked_by": blocked_by or [],
+            },
+        )
+        return ToolReturn(return_value=f"Task created: {task_id}")
+
+    async def task_list(self, ctx: RunContext[Any]) -> ToolReturn:
+        """List all tasks on the shared task board.
+
+        Returns:
+            JSON array of tasks (pretty-printed), or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        tasks = team_state.list_tasks(team_id)
+        if not tasks:
+            return ToolReturn(return_value="<task_list>(empty)</task_list>")
+        lines = ["<task_list>"]
+        for t in tasks:
+            tid = t.get("task_id", "?")
+            status = t.get("status", "?")
+            owner = t.get("owner", "")
+            subject = t.get("subject", "")
+            description = t.get("description", "")
+            last_note = t.get("last_note", "")
+            blocked = t.get("is_unblocked", True)
+            blocked_attr = "" if blocked else ' blocked="true"'
+            owner_attr = f' owner="{owner}"' if owner else ""
+            lines.append(f'  <task id="{tid}" status="{status}"{owner_attr}{blocked_attr}>')
+            if description:
+                lines.append(f"    {subject}: {description}")
+            else:
+                lines.append(f"    {subject}")
+            if last_note:
+                lines.append(f"    note: {last_note}")
+            lines.append("  </task>")
+        lines.append("</task_list>")
+        return ToolReturn(return_value="\n".join(lines))
+
+    async def task_update(
+        self,
+        ctx: RunContext[Any],
+        task_id: Annotated[str, Field(description="ID of the task to update")],
+        status: Annotated[
+            str,
+            Field(description='New status (e.g. "in_progress", "completed"). Empty = no change'),
+        ] = "",
+        owner: Annotated[str, Field(description="New owner name. Empty = no change")] = "",
+        note: Annotated[
+            str,
+            Field(
+                description="Optional update note describing what was done "
+                "or what changed. Appended to the task's update log"
+            ),
+        ] = "",
+    ) -> ToolReturn:
+        """Update a task's status or owner on the shared task board.
+
+        Returns:
+            Updated task as JSON, or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        updates: dict[str, Any] = {}
+        if status:
+            updates["status"] = status
+        if owner:
+            updates["owner"] = owner
+        if note:
+            updates["last_note"] = note
+            updates["updated_at"] = datetime.datetime.now(datetime.UTC).isoformat()
+            updates["updated_by"] = self._agent_name
+        if not updates:
+            return ToolReturn(return_value="No updates specified")
+
+        try:
+            updated = team_state.update_task(team_id, task_id, updates)
+        except (FileNotFoundError, OSError):
+            return ToolReturn(return_value=f"Task not found: {task_id}")
+        tid = updated.get("task_id", "?")
+        status = updated.get("status", "?")
+        owner = updated.get("owner", "")
+        subject = updated.get("subject", "")
+        description = updated.get("description", "")
+        last_note = updated.get("last_note", "")
+        owner_attr = f' owner="{owner}"' if owner else ""
+        content = f"{subject}: {description}" if description else subject
+        note_attr = f"\n{last_note}" if last_note else ""
+        return ToolReturn(
+            return_value=(
+                f'<task id="{tid}" status="{status}"{owner_attr}>\n{content}{note_attr}\n</task>'
+            )
+        )
+
+    async def read_blackboard(
+        self,
+        ctx: RunContext[Any],
+        key: Annotated[str, Field(description="Blackboard key to read")],
+    ) -> ToolReturn:
+        """Read a key from the shared blackboard.
+
+        Returns:
+            JSON value + metadata, or "Key not found" / error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        result = team_state.read_blackboard(team_id, key)
+        if result is None:
+            return ToolReturn(return_value="Key not found")
+        value_text = result.get("value", {}).get("text", "")
+        version = result.get("version", 0)
+        written_by = result.get("written_by", "unknown")
+        written_at = result.get("written_at", "")
+        return ToolReturn(
+            return_value=(
+                f'<blackboard version="{version}" written_by="{written_by}" '
+                f'written_at="{written_at}">\n{value_text}\n</blackboard>'
+            )
+        )
+
+    async def write_blackboard(
+        self,
+        ctx: RunContext[Any],
+        key: Annotated[str, Field(description="Blackboard key to write")],
+        value: Annotated[
+            str,
+            Field(
+                description="Value to store. Can be any text format: "
+                "inline JSON, Markdown, or plain text"
+            ),
+        ],
+        expected_version: Annotated[
+            int | None,
+            Field(
+                description="Expected current version for optimistic locking. "
+                "If None, no version check is performed"
+            ),
+        ] = None,
+        mode: Annotated[
+            str,
+            Field(
+                description='Write mode: "overwrite" (default) replaces '
+                'the value entirely; "append" concatenates to the '
+                "existing value. Use append for accumulating findings "
+                "or logs across multiple writes"
+            ),
+        ] = "overwrite",
+    ) -> ToolReturn:
+        """Write a key to the shared blackboard with optimistic locking.
+
+        Returns:
+            "Written, version=N" on success, or "Conflict: current version is N".
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        result = team_state.write_blackboard(
+            team_id,
+            key,
+            {"text": value},
+            expected_version=expected_version,
+            written_by=self._agent_name,
+            mode=mode,
+        )
+
+        # Bounds: max_size_mb check on the resulting blackboard file.
+        if result.startswith("Written"):
+            key_path = team_state._validate_key(key, team_state._blackboard_dir(team_id))
+            file_size = key_path.stat().st_size
+            max_size = self._config.blackboard.max_size_mb * 1024 * 1024
+            if file_size > max_size:
+                return ToolReturn(
+                    return_value=(
+                        f"Blackboard write exceeds max size "
+                        f"({file_size / 1024 / 1024:.1f}MB > "
+                        f"{self._config.blackboard.max_size_mb}MB)"
+                    )
+                )
+
+        return ToolReturn(return_value=result)
+
+    async def list_blackboard(
+        self,
+        ctx: RunContext[Any],
+        watch: Annotated[
+            bool,
+            Field(
+                description="If True, block until the blackboard keys change "
+                "(new key added or removed) or timeout expires, then return "
+                "the current state. If False, return immediately"
+            ),
+        ] = False,
+        timeout: Annotated[
+            int,
+            Field(
+                description="Maximum seconds to wait when watch=True. "
+                "Returns current state if timeout expires without changes"
+            ),
+        ] = 300,
+    ) -> ToolReturn:
+        """List all keys on the shared blackboard.
+
+        Returns:
+            JSON array of key names, or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        keys = team_state.list_blackboard(team_id)
+
+        if watch:
+            initial = set(keys)
+            import time
+
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                await asyncio.sleep(1)
+                current = set(team_state.list_blackboard(team_id))
+                if current != initial:
+                    keys = sorted(current)
+                    break
+            else:
+                return ToolReturn(
+                    return_value=(
+                        "<blackboard_keys> (watch timeout, no changes)\n"
+                        + "\n".join(sorted(keys))
+                        + "\n</blackboard_keys>"
+                    )
+                )
+
+        if not keys:
+            return ToolReturn(return_value="<blackboard_keys>(empty)</blackboard_keys>")
+        return ToolReturn(
+            return_value="<blackboard_keys>\n" + "\n".join(keys) + "\n</blackboard_keys>"
+        )
+
+    async def team_status(
+        self,
+        ctx: RunContext[Any],
+        watch: Annotated[
+            bool,
+            Field(
+                description="If True, block until team state changes "
+                "(member status, task updates, member joins/leaves) or "
+                "timeout expires, then return current status. If False, "
+                "return immediately"
+            ),
+        ] = False,
+        timeout: Annotated[
+            int,
+            Field(
+                description="Maximum seconds to wait when watch=True. "
+                "Returns current status if timeout expires without changes"
+            ),
+        ] = 300,
+    ) -> ToolReturn:
+        """Get the current status of the team.
+
+        Returns:
+            Formatted status string with team name, members, and status.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        state_path = team_state._state_path(team_id)
+        if not state_path.exists():
+            return ToolReturn(return_value="Team state not found")
+
+        state: dict[str, Any] = FileTeamState._read_json(state_path)
+        team_name: str = state.get("team_name", "unknown")
+        status: str = state.get("status", "unknown")
+        members: dict[str, dict[str, Any]] = state.get("members", {})
+
+        # Query tasks for member association.
+        all_tasks = team_state.list_tasks(team_id)
+        max_turns = self._config.bounds.max_member_turns
+
+        # Access SessionPool for runtime member state.
+        session_pool = agent_ctx.host.session_pool
+
+        member_lines: list[str] = []
+        for m_name, info in members.items():
+            sid: str = info.get("session_id", "")
+            agent_name: str = info.get("agent", m_name)
+            turn_count: int = info.get("turn_count", 0)
+
+            # Determine runtime status from SessionPool.
+            if session_pool is not None and sid:
+                member_session = session_pool.sessions.get_session(sid)
+                if member_session is None:
+                    runtime_status = "offline"
+                elif member_session.closing or member_session.is_closing:
+                    runtime_status = "closing"
+                elif member_session.current_run_id is not None:
+                    runtime_status = "busy"
+                else:
+                    runtime_status = "idle"
+            else:
+                runtime_status = "unregistered" if not sid else "unknown"
+
+            # Count inbox messages.
+            inbox_count = len(team_state.read_messages(team_id, m_name))
+
+            # Find tasks owned by this member.
+            member_tasks = [
+                t for t in all_tasks if t.get("owner") == m_name and t.get("status") != "completed"
+            ]
+            task_summary = (
+                f"tasks={len(member_tasks)}"
+                if not member_tasks
+                else f"tasks={len(member_tasks)} ("
+                + ", ".join(
+                    f"{t.get('status', '?')}: {t.get('subject', '?')}" for t in member_tasks
+                )
+                + ")"
+            )
+
+            member_lines.append(
+                f"  - `{m_name}` (agent=`{agent_name}`, status=`{runtime_status}`, "
+                f"turns={turn_count}/{max_turns}, inbox={inbox_count}, {task_summary})"
+            )
+
+        lines = [
+            f"Team: {team_name}",
+            f"Status: {status}",
+            f"Team ID: {team_id}",
+            f"Members ({len(members)}):",
+            *member_lines,
+        ]
+        result = "\n".join(lines)
+
+        if watch:
+            import time
+
+            initial_snapshot = state_path.stat().st_mtime
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                await asyncio.sleep(1)
+                if state_path.exists():
+                    current_mtime = state_path.stat().st_mtime
+                    if current_mtime != initial_snapshot:
+                        state = FileTeamState._read_json(state_path)
+                        break
+            else:
+                result += "\n(watch timeout, no changes detected)"
+
+        return ToolReturn(return_value=result)
+
+    # ------------------------------------------------------------------
+    # Lead-only tools
+    # ------------------------------------------------------------------
+
+    async def team_create(  # noqa: PLR0911, PLR0915
+        self,
+        ctx: RunContext[Any],
+        name: Annotated[str, Field(description="Human-readable team name")],
+        members: Annotated[
+            list[dict[str, str]],
+            Field(
+                description='List of member dicts, each with "agent" '
+                '(registered agent name) and "name" (display name) keys. '
+                "Example: "
+                '[{"agent": "historian", "name": "researcher"}, '
+                '{"agent": "logician", "name": "analyst"}]'
+            ),
+        ],
+        prompt: Annotated[
+            str,
+            Field(
+                description="Optional task instructions sent to each member "
+                "after team creation. If empty, only the protocol template "
+                "(role description and tool guide) is sent"
+            ),
+        ] = "",
+    ) -> ToolReturn:
+        """Create a new team with eligible members (lead-only).
+
+        Returns:
+            Success message with team_id, or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role != "lead":
+            return ToolReturn(return_value="Only lead can use team_create")
+
+        # Config defaults: when LLM passes empty members, use defaults config.
+        if not members and self._config.defaults is not None:
+            members = [{"name": m.name, "agent": m.agent} for m in self._config.defaults.members]
+
+        # Eligibility checks.
+        for member in members:
+            agent_name: str = member.get("agent", "")
+            if not agent_ctx.agent_registry.exists(agent_name):
+                return ToolReturn(return_value=f"Agent '{agent_name}' not found in registry")
+            if agent_name not in self._config.member_eligible:
+                return ToolReturn(
+                    return_value=(f"Agent '{agent_name}' is not eligible for team membership")
+                )
+
+        # Bounds: max_members check.
+        if len(members) > self._config.bounds.max_members:
+            return ToolReturn(
+                return_value=(
+                    f"Team exceeds max_members ({len(members)} > {self._config.bounds.max_members})"
+                )
+            )
+
+        # Generate team_id and create state.
+        team_id = f"team_{uuid.uuid4().hex[:8]}"
+        lead_session_id: str = agent_ctx.session.session_id
+
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        base_dir = (
+            agent_ctx.team_mode_config.effective_base_dir
+            if agent_ctx.team_mode_config is not None
+            else tempfile.gettempdir()
+        )
+        team_state = FileTeamState(base_dir)
+        team_state.init(
+            team_id,
+            name,
+            [{"name": m["name"], "agent": m["agent"]} for m in members],
+        )
+
+        # Register the lead as a member so other members can send_message
+        # to the lead by name.  The lead's member name comes from session
+        # metadata (set by the factory), falling back to the agent name.
+        lead_member_name = agent_ctx.session.metadata.get(
+            "team_member_name",
+            self._agent_name,
+        )
+        team_state.register_member(team_id, lead_member_name, lead_session_id)
+
+        # Record started_at timestamp for wall-clock enforcement.
+        state = team_state._read_json(team_state._state_path(team_id))
+        state["started_at"] = datetime.datetime.now(datetime.UTC).isoformat()
+        team_state._atomic_write(team_state._state_path(team_id), state)
+
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is None:
+            return ToolReturn(return_value="SessionPool not available")
+
+        from agentpool.lifecycle.types import DeliveryMode
+
+        created_sessions: list[str] = []
+        try:
+            for member in members:
+                member_session_id = await agent_ctx.delegation.create_child_session(
+                    member["agent"],
+                    parent_session_id=lead_session_id,
+                    team_id=team_id,
+                    team_role="member",
+                    team_member_name=member["name"],
+                    description=f"Team member: {member['name']}",
+                )
+                created_sessions.append(member_session_id)
+                team_state.register_member(
+                    team_id,
+                    member["name"],
+                    member_session_id,
+                    agent=member["agent"],
+                )
+                # Propagate member display name to the agent instance so
+                # protocol frontends (ACP, OpenCode) show the correct name.
+                member_agent = session_pool.sessions._session_agents.get(
+                    member_session_id,
+                )
+                if member_agent is not None:
+                    member_agent._display_name = member["name"]
+                # Build initial prompt with member roster so the new
+                # member knows who their teammates are.
+                roster_lines: list[str] = []
+                for m in members:
+                    role_label = "lead" if m["name"] == lead_member_name else "member"
+                    roster_lines.append(
+                        f"  - `{m['name']}` (agent=`{m['agent']}`, role=`{role_label}`)"
+                    )
+                roster = "\n".join(roster_lines)
+                base_prompt = self._config.protocol_template.format(
+                    team_name=name,
+                    role="member",
+                    member_name=member["name"],
+                )
+                full_prompt = f"{base_prompt}\n\n## Team Members\n{roster}"
+                if prompt:
+                    full_prompt += (
+                        f"\n\n## Task\n{prompt}"
+                        "\n\nRemember to report progress regularly using "
+                        '`task_update(note="...")`.'
+                    )
+                await session_pool.send_message(
+                    member_session_id,
+                    full_prompt,
+                    mode=DeliveryMode.QUEUE,
+                    source="team",
+                    meta={"from": self._agent_name, "team_id": team_id},
+                )
+        except Exception as exc:  # noqa: BLE001
+            for sid in created_sessions:
+                with contextlib.suppress(Exception):
+                    await session_pool.close_session(sid)
+            with contextlib.suppress(Exception):
+                team_state.cleanup(team_id)
+            return ToolReturn(return_value=f"Failed to create team: {exc}")
+
+        # Write team_id back to session metadata so subsequent tool calls
+        # can access the team state without requiring a new session.
+        agent_ctx.session.metadata["team_id"] = team_id
+        agent_ctx.session.metadata["team_name"] = name
+        agent_ctx.session.metadata["team_base_dir"] = base_dir
+        # Store member session IDs so the auto-cleanup callback (and
+        # team_delete) can close them without re-reading team state.
+        agent_ctx.session.metadata["team_member_sessions"] = list(created_sessions)
+
+        # Schedule auto-cleanup: when the lead's RunHandle terminates
+        # (complete_event fires), close all member sessions to prevent
+        # leaks.  This covers the scenario where the lead's run finishes
+        # but ``close_session(lead)`` is not called (e.g. protocol server
+        # keeps the lead session alive for follow-ups).
+        self._schedule_member_cleanup(agent_ctx, lead_session_id, list(created_sessions))
+
+        team_dir = team_state._team_dir(team_id)
+        logger.info(
+            "Team created — state at %s",
+            str(team_dir),
+            team_id=team_id,
+            team_name=name,
+            member_count=len(members),
+        )
+
+        return ToolReturn(
+            return_value=(f"Team '{name}' created with {len(members)} members. team_id={team_id}")
+        )
+
+    @staticmethod
+    def _schedule_member_cleanup(
+        agent_ctx: AgentContext,
+        lead_session_id: str,
+        member_session_ids: list[str],
+    ) -> None:
+        """Schedule a background task to close member sessions when the lead goes idle.
+
+        Polls ``session.last_active_at`` every 30 seconds.  When the lead
+        has been inactive for longer than ``idle_timeout`` (default 300s),
+        closes every member session whose ID is still recorded in
+        ``session.metadata["team_member_sessions"]`` (``team_delete``
+        clears this list to signal manual cleanup was already performed).
+
+        This approach correctly handles protocol-server sessions (e.g.
+        OpenCode) where the lead's RunLoop stays alive between turns —
+        the cleanup fires based on wall-clock inactivity, not on
+        ``complete_event`` which may never fire.
+
+        Args:
+            agent_ctx: The lead agent's per-turn context.
+            lead_session_id: The lead session ID.
+            member_session_ids: Member session IDs to close on idle.
+        """
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is None:
+            return
+
+        import time
+
+        # Configurable via class attributes so tests can override.
+        idle_timeout = TeamCommCapability._idle_timeout
+        poll_interval = TeamCommCapability._poll_interval
+
+        async def _cleanup_when_idle() -> None:
+            """Poll lead activity; close members after idle timeout.
+
+            Uses ``last_active_at`` as the primary idle signal but **also
+            checks ``current_run_id``** on both the lead and every member
+            before closing.  This prevents closing sessions that are still
+            actively processing (e.g. a long model call or tool execution
+            that does not update ``last_active_at``).
+            """
+            try:
+                while True:
+                    await asyncio.sleep(poll_interval)
+                    # Check if team_delete already cleaned up.
+                    current_session = session_pool.sessions.get_session(
+                        lead_session_id,
+                    )
+                    if current_session is None:
+                        return  # Lead session closed — cascade handled it.
+                    remaining = current_session.metadata.get(
+                        "team_member_sessions",
+                    )
+                    if not remaining:
+                        return  # team_delete already closed members.
+
+                    # Check idle time via last_active_at.
+                    now = time.monotonic()
+                    idle_seconds = now - current_session.last_active_at
+                    if idle_seconds < idle_timeout:
+                        continue  # Lead still active, keep waiting.
+
+                    # Idle threshold reached — but before closing, verify
+                    # that neither the lead nor any member has an active
+                    # run.  ``last_active_at`` is only updated by
+                    # ``send_message()``, so a long-running turn (model
+                    # calls, tool execution) can make the lead appear idle
+                    # even though it is actively processing.
+                    if current_session.current_run_id is not None:
+                        logger.debug(
+                            "Lead idle for %.0fs but has active run, deferring member cleanup",
+                            idle_seconds,
+                            lead_session_id=lead_session_id,
+                            run_id=current_session.current_run_id,
+                        )
+                        continue
+
+                    any_member_running = False
+                    for msid in member_session_ids:
+                        member_session = session_pool.sessions.get_session(msid)
+                        if member_session is not None and member_session.current_run_id is not None:
+                            any_member_running = True
+                            break
+
+                    if any_member_running:
+                        logger.debug(
+                            "Lead idle for %.0fs but members still running, deferring cleanup",
+                            idle_seconds,
+                            lead_session_id=lead_session_id,
+                        )
+                        continue
+
+                    # Lead is idle AND no member has an active run —
+                    # safe to close.
+                    logger.info(
+                        "Lead idle for %.0fs, auto-closing member sessions",
+                        idle_seconds,
+                        lead_session_id=lead_session_id,
+                    )
+                    for msid in member_session_ids:
+                        try:
+                            await session_pool.close_session(msid)
+                        except Exception:
+                            logger.exception(
+                                "Failed to auto-close member session",
+                                member_session_id=msid,
+                                lead_session_id=lead_session_id,
+                            )
+                    # Clear list so cascade close is a no-op.
+                    current_session.metadata["team_member_sessions"] = []
+                    return  # Cleanup done, exit loop.
+            except asyncio.CancelledError:
+                pass  # Pool shutdown — exit gracefully.
+
+        task = asyncio.create_task(_cleanup_when_idle())
+        _cleanup_tasks.add(task)
+
+        def _on_done(t: asyncio.Task[Any]) -> None:
+            _cleanup_tasks.discard(t)
+            if not t.cancelled() and t.exception() is not None:
+                logger.error(
+                    "Member session cleanup task failed: %s",
+                    t.exception(),
+                    lead_session_id=lead_session_id,
+                )
+
+        task.add_done_callback(_on_done)
+
+    async def team_delete(self, ctx: RunContext[Any]) -> ToolReturn:
+        """Delete the current team and close all member sessions (lead-only).
+
+        Returns:
+            ``"Team deleted"`` on success, or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role != "lead":
+            return ToolReturn(return_value="Only lead can use team_delete")
+
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        state_path = team_state._state_path(team_id)
+        if not state_path.exists():
+            return ToolReturn(return_value="Team state not found")
+        state: dict[str, Any] = FileTeamState._read_json(state_path)
+        members: dict[str, dict[str, str]] = state.get("members", {})
+
+        session_pool = agent_ctx.host.session_pool
+        lead_session_id = agent_ctx.session.session_id
+        if session_pool is not None:
+            for member_info in members.values():
+                sid: str = member_info.get("session_id", "")
+                if sid and sid != lead_session_id:
+                    await session_pool.close_session(sid)
+
+        # Clear member session IDs from metadata so the auto-cleanup
+        # callback (scheduled in team_create) knows manual cleanup was
+        # already performed and skips double-closing.
+        agent_ctx.session.metadata["team_member_sessions"] = []
+
+        team_state.cleanup(team_id)
+        return ToolReturn(return_value="Team deleted")
+
+    async def delete_blackboard(
+        self,
+        ctx: RunContext[Any],
+        key: Annotated[str, Field(description="Blackboard key to delete")],
+    ) -> ToolReturn:
+        """Delete a key from the shared blackboard (lead-only).
+
+        Returns:
+            ``"Blackboard key '{key}' deleted"`` on success, or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role != "lead":
+            return ToolReturn(return_value="Only lead can use delete_blackboard")
+
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        existing = team_state.read_blackboard(team_id, key)
+        if existing is None:
+            available = team_state.list_blackboard(team_id)
+            keys_str = ", ".join(available) if available else "(empty)"
+            return ToolReturn(return_value=f"Key '{key}' not found. Available keys: {keys_str}")
+
+        team_state.delete_blackboard(team_id, key)
+        return ToolReturn(return_value=f"Blackboard key '{key}' deleted")
+
+    async def shutdown_request(
+        self,
+        ctx: RunContext[Any],
+        member_name: Annotated[str, Field(description="Name of the member to shut down")],
+    ) -> ToolReturn:
+        """Shut down a specific team member (lead-only).
+
+        Returns:
+            ``"Shutdown completed for {member_name}"`` on success, or error.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role != "lead":
+            return ToolReturn(return_value="Only lead can use shutdown_request")
+
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        member_sid = team_state.get_member_session_id(team_id, member_name)
+        if member_sid is None:
+            return ToolReturn(return_value=f"Member '{member_name}' not found")
+
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is None:
+            return ToolReturn(return_value="SessionPool not available")
+
+        await session_pool.close_session(member_sid)
+
+        # Mark member as shutdown in team state (clear session_id so
+        # team_status shows them as offline, not with a stale session).
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        state_path = team_state._state_path(team_id)
+        if state_path.exists():
+            state: dict[str, Any] = FileTeamState._read_json(state_path)
+            members: dict[str, dict[str, Any]] = state.get("members", {})
+            if member_name in members:
+                members[member_name]["session_id"] = ""
+                members[member_name]["status"] = "shutdown"
+                state["members"] = members
+                FileTeamState._atomic_write(state_path, state)
+
+        return ToolReturn(return_value=f"Shutdown completed for {member_name}")
+
+    async def team_add_member(  # noqa: PLR0911, PLR0915
+        self,
+        ctx: RunContext[Any],
+        name: Annotated[
+            str,
+            Field(
+                description="Display name for the new member. If empty, "
+                "falls back to the agent's display_name (or agent name)"
+            ),
+        ],
+        agent: Annotated[str, Field(description="Registered agent name to use as the member")],
+        prompt: Annotated[
+            str,
+            Field(
+                description="Optional initial prompt to send the member. If "
+                "empty, the protocol template is used"
+            ),
+        ] = "",
+        lifecycle: Annotated[
+            str,
+            Field(
+                description='"persistent" (default) or "ephemeral". Ephemeral '
+                "members are auto-closed when their run completes"
+            ),
+        ] = "persistent",
+        notify: Annotated[
+            str,
+            Field(
+                description="Optional notice describing why the new member was "
+                "added or what they can help with, included in the "
+                "auto-broadcast to existing members"
+            ),
+        ] = "",
+    ) -> ToolReturn:
+        """Add a new member to an existing team (lead-only).
+
+        Returns:
+            Success message or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role != "lead":
+            return ToolReturn(return_value="Only lead can use team_add_member")
+
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        # Check agent exists in registry.
+        if not agent_ctx.agent_registry.exists(agent):
+            return ToolReturn(return_value=f"Agent '{agent}' not found in registry")
+
+        # Check agent is eligible.
+        if agent not in self._config.member_eligible:
+            return ToolReturn(return_value=f"Agent '{agent}' is not eligible")
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        # Check name not already in team state members.
+        state_path = team_state._state_path(team_id)
+        if not state_path.exists():
+            return ToolReturn(return_value="Team state not found")
+        state: dict[str, Any] = FileTeamState._read_json(state_path)
+        members: dict[str, dict[str, Any]] = state.get("members", {})
+        if name in members:
+            return ToolReturn(return_value=f"Member '{name}' already exists")
+
+        # Bounds: max_members check (exclude lead from count).
+        lead_member_name = agent_ctx.session.metadata.get(
+            "team_member_name",
+            self._agent_name,
+        )
+        non_lead_count = sum(1 for mname in members if mname != lead_member_name)
+        if non_lead_count >= self._config.bounds.max_members:
+            return ToolReturn(
+                return_value=(
+                    f"Team exceeds max_members "
+                    f"({non_lead_count + 1} > {self._config.bounds.max_members})"
+                )
+            )
+
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is None:
+            return ToolReturn(return_value="SessionPool not available")
+
+        lead_session_id: str = agent_ctx.session.session_id
+
+        # Create child session for the new member.
+        try:
+            member_session_id = await agent_ctx.delegation.create_child_session(
+                agent,
+                parent_session_id=lead_session_id,
+                team_id=team_id,
+                team_role="member",
+                team_member_name=name,
+                description=f"Team member: {name}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            return ToolReturn(return_value=f"Failed to create member session: {exc}")
+
+        # Propagate member display name to the agent instance so protocol
+        # frontends (ACP, OpenCode) show the correct name.
+        member_agent = session_pool.sessions._session_agents.get(member_session_id)
+        if member_agent is not None:
+            member_agent._display_name = name
+
+        # Register member in team state.
+        team_state.register_member(
+            team_id,
+            name,
+            member_session_id,
+            agent=agent,
+        )
+
+        # Send initial prompt to member (with existing member roster).
+        from agentpool.lifecycle.types import DeliveryMode
+
+        team_name: str = state.get("team_name", "unknown")
+        base_prompt = prompt or self._config.protocol_template.format(
+            team_name=team_name,
+            role="member",
+            member_name=name,
+        )
+        # Append current member roster so the new member knows their teammates.
+        existing_members: dict[str, dict[str, Any]] = state.get("members", {})
+        roster_lines = []
+        for m_name, m_info in existing_members.items():
+            m_agent = m_info.get("agent", m_name)
+            role_label = "lead" if m_name == lead_member_name else "member"
+            roster_lines.append(f"  - `{m_name}` (agent=`{m_agent}`, role=`{role_label}`)")
+        roster = "\n".join(roster_lines)
+        initial_prompt = f"{base_prompt}\n\n## Team Members\n{roster}"
+        if prompt:
+            initial_prompt += (
+                f"\n\n## Task\n{prompt}"
+                "\n\nRemember to report progress regularly using "
+                '`task_update(note="...")`.'
+            )
+        await session_pool.send_message(
+            member_session_id,
+            initial_prompt,
+            mode=DeliveryMode.QUEUE,
+            source="team",
+            meta={"from": self._agent_name, "team_id": team_id},
+        )
+
+        # Ephemeral lifecycle: schedule auto-close when run completes.
+        if lifecycle == "ephemeral":
+            base_dir = (
+                agent_ctx.team_mode_config.effective_base_dir
+                if agent_ctx.team_mode_config is not None
+                else tempfile.gettempdir()
+            )
+            self._schedule_ephemeral_cleanup(
+                session_pool,
+                member_session_id,
+                team_id,
+                name,
+                base_dir,
+            )
+
+        # Notify existing members about the new member.
+        # Re-read state to get the updated members dict.
+        updated_state: dict[str, Any] = FileTeamState._read_json(
+            team_state._state_path(team_id),
+        )
+        updated_members: dict[str, dict[str, Any]] = updated_state.get(
+            "members",
+            {},
+        )
+
+        # Auto-broadcast to existing members (excluding lead and new member).
+        if self._config.broadcast_on_create:
+            roster_lines: list[str] = []
+            for m_name, m_info in updated_members.items():
+                m_agent = m_info.get("agent", m_name)
+                role_tag = " (lead)" if m_name == lead_member_name else ""
+                roster_lines.append(f"  - `{m_name}` (`{m_agent}`){role_tag}")
+            roster = "\n".join(roster_lines)
+            notice_line = f"\n\nnote: {notify}" if notify else ""
+            notice_text = (
+                f"New member `{name}` (`{agent}`) joined the team."
+                f"{notice_line}\n\ncurrent members:\n{roster}"
+            )
+            broadcast_msg = (
+                f'<team-message from="{self._agent_name}" type="broadcast">'
+                f"\n\n{notice_text}\n\n</team-message>"
+            )
+            for existing_name, existing_info in updated_members.items():
+                if existing_name in (lead_member_name, name):
+                    continue
+                existing_sid: str = existing_info.get("session_id", "")
+                if not existing_sid:
+                    continue
+                await session_pool.send_message(
+                    existing_sid,
+                    self._wrap_notice_content(broadcast_msg),
+                    mode=self._notice_mode,
+                    source="team",
+                    meta={"from": self._agent_name, "team_id": team_id},
+                )
+
+        # Write to blackboard (non-fatal — audit trail only).
+        import re
+
+        safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+        try:
+            team_state.write_blackboard(
+                team_id,
+                f"member_update/{safe_name}",
+                {"action": "added", "agent": agent, "lifecycle": lifecycle, "name": name},
+                written_by=self._agent_name,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to write member_update to blackboard for '%s'",
+                name,
+            )
+
+        # Append member_session_id to session metadata.
+        team_member_sessions: list[str] = agent_ctx.session.metadata.get(
+            "team_member_sessions",
+            [],
+        )
+        team_member_sessions.append(member_session_id)
+        agent_ctx.session.metadata["team_member_sessions"] = team_member_sessions
+
+        return ToolReturn(return_value=f"Member '{name}' added to team (lifecycle={lifecycle})")
+
+    async def team_remove_member(
+        self,
+        ctx: RunContext[Any],
+        member_name: Annotated[str, Field(description="Name of the member to remove")],
+    ) -> ToolReturn:
+        """Remove a member from the team (lead-only).
+
+        Returns:
+            Success message or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role != "lead":
+            return ToolReturn(return_value="Only lead can use team_remove_member")
+
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        # Cannot remove yourself.
+        lead_member_name = agent_ctx.session.metadata.get(
+            "team_member_name",
+            self._agent_name,
+        )
+        if member_name == lead_member_name:
+            return ToolReturn(return_value="Cannot remove yourself")
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        member_sid = team_state.get_member_session_id(team_id, member_name)
+        if member_sid is None:
+            return ToolReturn(return_value=f"Member '{member_name}' not found")
+
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is not None:
+            await session_pool.close_session(member_sid)
+
+        # Remove from team state: read, delete member, write back.
+        state_path = team_state._state_path(team_id)
+        if state_path.exists():
+            state: dict[str, Any] = FileTeamState._read_json(state_path)
+            members_dict: dict[str, dict[str, Any]] = state.get("members", {})
+            members_dict.pop(member_name, None)
+            state["members"] = members_dict
+            FileTeamState._atomic_write(state_path, state)
+
+        # Remove from session metadata team_member_sessions.
+        team_member_sessions: list[str] = agent_ctx.session.metadata.get(
+            "team_member_sessions",
+            [],
+        )
+        if member_sid in team_member_sessions:
+            team_member_sessions.remove(member_sid)
+            agent_ctx.session.metadata["team_member_sessions"] = team_member_sessions
+
+        # Write to blackboard (non-fatal — audit trail only).
+        import re
+
+        safe_member_name = re.sub(r"[^a-zA-Z0-9_]", "_", member_name)
+        try:
+            team_state.write_blackboard(
+                team_id,
+                f"member_update/{safe_member_name}",
+                {"action": "removed", "name": member_name},
+                written_by=self._agent_name,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to write member_update to blackboard for '%s'",
+                member_name,
+            )
+
+        return ToolReturn(return_value=f"Member '{member_name}' removed from team")
+
+    @staticmethod
+    def _schedule_ephemeral_cleanup(
+        session_pool: Any,
+        member_session_id: str,
+        team_id: str,
+        member_name: str,
+        base_dir: str,
+    ) -> None:
+        """Poll member run state; close session when run completes.
+
+        Args:
+            session_pool: The SessionPool managing the member session.
+            member_session_id: Session ID of the ephemeral member.
+            team_id: Team ID for state cleanup.
+            member_name: Member name for state cleanup.
+            base_dir: Base directory for FileTeamState.
+        """
+        from agentpool.capabilities.file_team_state import FileTeamState
+
+        async def _poll_and_close() -> None:
+            try:
+                while True:
+                    await asyncio.sleep(5.0)
+                    session = session_pool.sessions.get_session(member_session_id)
+                    if session is None:
+                        return  # Already closed
+                    if session.current_run_id is None:
+                        # Run completed — close and remove from team state.
+                        await session_pool.close_session(member_session_id)
+                        team_state = FileTeamState(base_dir)
+                        state_path = team_state._state_path(team_id)
+                        if state_path.exists():
+                            state = team_state._read_json(state_path)
+                            members = state.get("members", {})
+                            members.pop(member_name, None)
+                            state["members"] = members
+                            team_state._atomic_write(state_path, state)
+                        return
+            except asyncio.CancelledError:
+                pass
+
+        task = asyncio.create_task(_poll_and_close())
+        _cleanup_tasks.add(task)
+
+        def _on_done(t: asyncio.Task[Any]) -> None:
+            _cleanup_tasks.discard(t)
+
+        task.add_done_callback(_on_done)
+
+    # ------------------------------------------------------------------
+    # AbstractCapability overrides
+    # ------------------------------------------------------------------
+
+    # Tool names that only lead agents may use.  Non-lead members never
+    # see these tools — ``prepare_tools`` filters them out before the
+    # model receives the tool list, so the LLM cannot attempt to call
+    # them.  The runtime permission checks in each tool body remain as a
+    # safety net.
+    _LEAD_ONLY_TOOLS: frozenset[str] = frozenset(
+        {
+            "task_create",
+            "team_create",
+            "team_delete",
+            "delete_blackboard",
+            "shutdown_request",
+            "team_add_member",
+            "team_remove_member",
+        },
+    )
+
+    @override
+    async def prepare_tools(
+        self,
+        ctx: RunContext[Any],
+        tool_defs: list[ToolDefinition],
+    ) -> list[ToolDefinition]:
+        """Filter and modify tool definitions based on the agent's team role.
+
+        For non-lead members:
+            - Lead-only tools (``team_create``, ``team_delete``,
+              ``delete_blackboard``, ``shutdown_request``,
+              ``team_add_member``, ``team_remove_member``) are removed
+              entirely so the LLM never sees them.
+            - ``send_message`` has its ``to`` parameter description
+              updated to remove the broadcast (``"*"``) mention, and a
+              ``pattern`` constraint is added to reject ``"*"`` at the
+              schema level.
+
+        For lead agents, all tool definitions are returned unchanged.
+
+        Args:
+            ctx: The PydanticAI run context (unused — role is read from
+                ``self._session_metadata``).
+            tool_defs: The full list of tool definitions for this step.
+
+        Returns:
+            Filtered/modified tool definitions.
+        """
+        # No session metadata = compile-time shared instance; no role
+        # filtering to apply.
+        if not self._session_metadata:
+            return tool_defs
+
+        role: str = self._session_metadata.get("team_role", "")
+        if role == "lead":
+            return tool_defs
+
+        result: list[ToolDefinition] = []
+        for td in tool_defs:
+            if td.name in self._LEAD_ONLY_TOOLS:
+                continue
+            if td.name == "send_message":
+                self._strip_broadcast_from_send_message(td)
+            result.append(td)
+        return result
+
+    @staticmethod
+    def _strip_broadcast_from_send_message(tool_def: ToolDefinition) -> None:
+        """Remove broadcast (``to="*"``) from the send_message tool schema.
+
+        Mutates ``tool_def`` in place:
+            - Updates the ``to`` parameter description to omit the
+              broadcast mention.
+            - Adds a ``pattern`` constraint that rejects ``"*"``.
+
+        Args:
+            tool_def: The ``send_message`` ToolDefinition to modify.
+        """
+        schema = tool_def.parameters_json_schema
+        props = schema.get("properties", {})
+        to_prop = props.get("to")
+        if to_prop is not None and isinstance(to_prop, dict):
+            to_prop["description"] = "Recipient member name."
+            to_prop["pattern"] = r"^[^*]+$"
+
+    @override
+    def get_instructions(self) -> str | None:
+        """Render the team protocol template using session metadata.
+
+        Returns ``None`` when:
+            - ``config.enabled`` is ``False``, OR
+            - ``session_metadata`` is empty/``None``
+
+        When both conditions are met, renders ``config.protocol_template``
+        via ``str.format()`` with ``team_name``, ``role``, and ``member_name``
+        extracted from session metadata (with sensible defaults).
+        """
+        if not self._config.enabled or not self._session_metadata:
+            return None
+        role: str = self._session_metadata.get("team_role", "unknown")
+        base = self._config.protocol_template.format(
+            team_name=self._session_metadata.get("team_name", "unknown"),
+            role=role,
+            member_name=self._session_metadata.get(
+                "team_member_name",
+                self._agent_name,
+            ),
+        )
+
+        # Role-specific capabilities section.
+        if role == "lead":
+            base += (
+                "\n\n## Your Capabilities (Lead)\n\n"
+                "- You can broadcast to all members via `send_message` with "
+                '`to="*"`.\n'
+                "- You can create and delete teams, delete blackboard keys, "
+                "and shut down members.\n"
+            )
+        else:
+            base += (
+                "\n\n## Your Capabilities (Member)\n\n"
+                "- Use `send_message` to send messages to individual members "
+                "by name.\n"
+                '- Broadcast (`to="*"`) is not available to you — send '
+                "individual messages to each member instead.\n"
+            )
+
+        # Append eligible agent names + descriptions so the LLM knows
+        # which agents can be used as team members in team_create.
+        eligible = self._config.member_eligible
+        if eligible:
+            base += (
+                "\n\n## Eligible Agents\n\n"
+                "The following agents can be used as team members in `team_create`:\n"
+            )
+            for name in eligible:
+                desc = self._agent_descriptions.get(name)
+                if desc:
+                    base += f"- `{name}`: {desc}\n"
+                else:
+                    base += f"- `{name}`\n"
+        return base
+
+    @override
+    async def get_tools(self) -> Sequence[Tool[Any]]:
+        """Return the list of team communication tools.
+
+        Returns an empty list when ``config.enabled`` is ``False``.
+        """
+        if not self._config.enabled:
+            return []
+        return self._tools

@@ -20,14 +20,16 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
 
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent
+from agentpool import Agent, AgentPool
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events.events import StreamCompleteEvent
 from agentpool.agents.native_agent.turn import NativeTurn
+from agentpool.lifecycle import DirectChannel, MemoryJournal
 from agentpool.orchestrator.core import EventBus, SessionState
 from agentpool.orchestrator.run import RunHandle
 from tests._controller_helpers import send_via_controller
@@ -184,7 +186,7 @@ async def test_no_staged_content_does_not_break_native_turn() -> None:
 
 
 @pytest.mark.asyncio
-async def test_receive_request_empty_list_not_converted_to_string() -> None:
+async def test_receive_request_empty_list_not_converted_to_string(minimal_pool: AgentPool) -> None:
     """receive_request must not convert empty list [] to string "[]".
 
     When the ACP handler sends only a slash command, non_command_content
@@ -192,17 +194,9 @@ async def test_receive_request_empty_list_not_converted_to_string() -> None:
     followup()/steer() without stringification. The initial prompt
     is routed through followup() (D17), and start() is called with "".
     """
-    from unittest.mock import MagicMock
-
     from agentpool.orchestrator.core import SessionController
 
-    mock_pool = MagicMock()
-    mock_pool.main_agent = MagicMock()
-    mock_pool.main_agent.name = "main-agent"
-    mock_pool.manifest = MagicMock()
-    mock_pool.manifest.agents = {}
-
-    controller = SessionController(pool=mock_pool)
+    controller = SessionController(pool=minimal_pool)
     event_bus = EventBus()
     controller._event_bus = event_bus
 
@@ -240,13 +234,16 @@ async def test_receive_request_empty_list_not_converted_to_string() -> None:
 
     await _aio.sleep(0.1)
 
-    # D17: start() is called with "" (empty string), not the content.
-    # The content was routed through followup() before start().
+    # Per-prompt model: content is passed directly to _consume_run(initial_prompt)
+    # as-is, NOT stringified. Empty list should remain empty list.
     assert len(captured_content) > 0, " _consume_run was never called"
-    assert captured_content[0] == "", (
-        f"Expected empty string for start() initial_prompt, got {captured_content[0]!r}"
+    assert captured_content[0] == [], (
+        f"Expected [] for start() initial_prompt, got {captured_content[0]!r}"
     )
-    assert captured_content[0] != "[]", "Empty list was converted to '[]' — this is the bug"
+    # Verify empty list was NOT stringified to '[]'
+    assert not isinstance(captured_content[0], str), (
+        f"List content was converted to string '{captured_content[0]}' — this is the bug"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -299,14 +296,15 @@ async def test_staged_content_reaches_model_through_runhandle_pipeline() -> None
             scope="session",
         )
 
-        # Step 3: Start run — D17 pattern: initial prompt via followup()
-        # before start(""). With DirectChannel, followup("") appends to
-        # _message_queue, and start("") enters _idle_loop() which finds
-        # it without blocking.
-        run_handle.followup("")
+        # Step 3: Set up com_channel on session so _execute_turn() works,
+        # then start the run.
+        session._comm_channel = DirectChannel(MemoryJournal())
 
         async def _drive_run() -> None:
-            async for _ in run_handle.start(""):
+            # Pass a real prompt so start() creates a turn.
+            # In the D17 pattern this was "" with content via followup(),
+            # but followup() is removed — prompts pass directly to start().
+            async for _ in run_handle.start("run the skill"):
                 pass
 
         drive_task = asyncio.create_task(_drive_run())
@@ -347,12 +345,19 @@ async def test_staged_content_reaches_model_through_runhandle_pipeline() -> None
         )
 
         # Step 6: Verify the model received skill instructions
-        # (message history should contain the skill text)
-        history = run_handle._message_history
+        # Step 6: Verify the model received skill instructions
+        # staged_content is consumed by NativeTurn and appears in the
+        # pydantic-ai model messages. The conversation stores ChatMessages
+        # with .messages containing ModelRequest/ModelResponse objects.
+        # Check for the skill text in the model-visible parts.
+        chat_msgs = agent.conversation.get_history()
         all_text = " ".join(
             str(getattr(part, "content", ""))
-            for msg in history
-            for part in getattr(msg, "parts", [])
+            for chat_msg in chat_msgs
+            if hasattr(chat_msg, "messages")
+            for model_msg in chat_msg.messages
+            if hasattr(model_msg, "parts")
+            for part in model_msg.parts
         )
         assert skill_instructions in all_text, (
             f"Skill instructions '{skill_instructions}' not found in "

@@ -22,6 +22,7 @@ from agentpool.agents.events import (
     ToolCallCompleteEvent,
     ToolCallStartEvent,
 )
+from agentpool.lifecycle import DirectChannel, MemoryJournal
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionPool
 
@@ -29,6 +30,7 @@ from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionPool
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from agentpool import AgentPool
     from agentpool.agents.context import AgentRunContext
 
 
@@ -45,15 +47,20 @@ def _unwrap_event(event: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def mock_pool() -> MagicMock:
-    """Return a mocked AgentPool."""
-    pool = MagicMock()
-    pool.main_agent = MagicMock()
-    pool.main_agent.name = "main-agent"
-    pool.manifest = MagicMock()
-    pool.manifest.agents = {}
-    return pool
+async def _attach_agent(
+    pool: SessionPool,
+    session_id: str,
+    agent: MagicMock,
+    real_pool: AgentPool,
+) -> None:
+    """Attach a mock agent to an existing session."""
+    state, _ = await pool.sessions.get_or_create_session(session_id)
+    state.agent = agent
+    pool.sessions._session_agents[session_id] = agent
+    real_pool.get_agent = MagicMock(return_value=agent)  # type: ignore[assignment]
+    # Set up lifecycle dimensions for RunHandle._execute_turn()
+    # session._comm_channel must be set before start() accesses it.
+    state._comm_channel = DirectChannel(MemoryJournal())
 
 
 @pytest.fixture
@@ -120,18 +127,6 @@ def mock_agent_with_text(text: str = "response") -> MagicMock:
     return agent
 
 
-async def _attach_agent(
-    pool: SessionPool,
-    session_id: str,
-    agent: MagicMock,
-) -> None:
-    """Attach a mock agent to an existing session."""
-    state, _ = await pool.sessions.get_or_create_session(session_id)
-    state.agent = agent
-    pool.sessions._session_agents[session_id] = agent
-    pool.pool.get_agent.return_value = agent  # type: ignore[attr-defined]
-
-
 # ---------------------------------------------------------------------------
 # 6.13: Full user session lifecycle
 # ---------------------------------------------------------------------------
@@ -139,7 +134,7 @@ async def _attach_agent(
 
 @pytest.mark.anyio
 async def test_full_session_lifecycle_create_prompt_events_close(
-    mock_pool: MagicMock,
+    minimal_pool: AgentPool,
     mock_agent_full_lifecycle: MagicMock,
 ) -> None:
     """6.13: create_session → process_prompt → verify events → close_session.
@@ -148,8 +143,8 @@ async def test_full_session_lifecycle_create_prompt_events_close(
     entire lifecycle and that all expected event types are delivered in
     order via the EventBus.
     """
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
 
     # Create session
     state = await session_pool.create_session("sess-lifecycle", agent_name="agent-a")
@@ -157,7 +152,7 @@ async def test_full_session_lifecycle_create_prompt_events_close(
     assert session_pool.sessions.get_session("sess-lifecycle") is state
 
     # Attach mock agent so turn can run
-    await _attach_agent(session_pool, "sess-lifecycle", mock_agent_full_lifecycle)
+    await _attach_agent(session_pool, "sess-lifecycle", mock_agent_full_lifecycle, minimal_pool)
 
     # Subscribe to events before processing
     queue = await session_pool.event_bus.subscribe("sess-lifecycle")
@@ -194,12 +189,87 @@ async def test_full_session_lifecycle_create_prompt_events_close(
     with pytest.raises((asyncio.TimeoutError, asyncio.QueueShutDown)):
         await asyncio.wait_for(queue.get(), timeout=0.5)
 
-    await session_pool.shutdown()
+    # session_pool lifecycle managed by minimal_pool fixture
+
+
+@pytest.mark.anyio
+async def test_multi_turn_same_session_both_complete_via_consume_run(
+    minimal_pool: AgentPool,
+    mock_agent_with_text: MagicMock,
+) -> None:
+    """E1/E2: Two consecutive messages through _start_run_handle must both complete.
+
+    Unlike test_full_session_lifecycle which uses run_stream (single-turn
+    correct path), this test uses _route_message → _start_run_handle →
+    _consume_run — the same path used by the opencode server's route_message().
+
+    Current behavior: _consume_run breaks on StreamCompleteEvent + aclose()
+    → RunHandle killed after turn 1 → turn 2's followup message is lost.
+    """
+    from agentpool.lifecycle.types import DeliveryMode
+    from tests._controller_helpers import send_via_controller
+
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
+    controller = session_pool.sessions
+
+    session_id = "sess-multiturn-e2e"
+    await session_pool.create_session(session_id, agent_name="test_agent")
+
+    # Patch the agent to use our mock create_turn
+    agent = await controller.get_or_create_session_agent(session_id)
+    assert agent is not None
+    agent.create_turn = mock_agent_with_text.create_turn  # type: ignore[method-assign]
+
+    queue = await session_pool.event_bus.subscribe(session_id)
+
+    # Turn 1 via _route_message (opencode server path)
+    await send_via_controller(
+        controller,
+        session_id,
+        "turn 1",
+        mode=DeliveryMode.QUEUE,
+    )
+    events_t1: list[Any] = []
+    while True:
+        try:
+            envelope = await asyncio.wait_for(queue.get(), timeout=10.0)
+        except TimeoutError:
+            break
+        events_t1.append(envelope.event)
+        if isinstance(envelope.event, StreamCompleteEvent):
+            break
+
+    assert any(isinstance(e, StreamCompleteEvent) for e in events_t1), (
+        "Turn 1 should produce a StreamCompleteEvent"
+    )
+
+    # Turn 2 via _route_message — the critical one
+    await send_via_controller(
+        controller,
+        session_id,
+        "turn 2",
+        mode=DeliveryMode.QUEUE,
+    )
+    events_t2: list[Any] = []
+    while True:
+        try:
+            envelope = await asyncio.wait_for(queue.get(), timeout=10.0)
+        except TimeoutError:
+            break
+        events_t2.append(envelope.event)
+        if isinstance(envelope.event, StreamCompleteEvent):
+            break
+
+    assert any(isinstance(e, StreamCompleteEvent) for e in events_t2), (
+        "Turn 2 should produce a StreamCompleteEvent — "
+        "if missing, _consume_run killed the generator (issue E1)"
+    )
 
 
 @pytest.mark.anyio
 async def test_full_lifecycle_session_state_transitions(
-    mock_pool: MagicMock,
+    minimal_pool: AgentPool,
     mock_agent_full_lifecycle: MagicMock,
 ) -> None:
     """6.13: Verify SessionPool state transitions during lifecycle.
@@ -207,11 +277,11 @@ async def test_full_lifecycle_session_state_transitions(
     Ensures that session state moves correctly from active to closing to
     closed, and that turn timing metrics are recorded.
     """
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
 
     await session_pool.create_session("sess-state", agent_name="agent-b")
-    await _attach_agent(session_pool, "sess-state", mock_agent_full_lifecycle)
+    await _attach_agent(session_pool, "sess-state", mock_agent_full_lifecycle, minimal_pool)
 
     # Pre-run: session exists and is not closing
     pre_state = session_pool.sessions.get_session("sess-state")
@@ -229,7 +299,7 @@ async def test_full_lifecycle_session_state_transitions(
     post_state = session_pool.sessions.get_session("sess-state")
     assert post_state is None
 
-    await session_pool.shutdown()
+    # session_pool lifecycle managed by minimal_pool fixture
 
 
 # ---------------------------------------------------------------------------
@@ -239,15 +309,15 @@ async def test_full_lifecycle_session_state_transitions(
 
 @pytest.mark.anyio
 async def test_multi_agent_concurrent_sessions_no_contamination(
-    mock_pool: MagicMock,
+    minimal_pool: AgentPool,
 ) -> None:
     """6.14: Create 2+ sessions with different agents and process concurrently.
 
     Verifies that events from different sessions do not cross over and that
     each session receives only its own events.
     """
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
 
     # Create two agents with distinct response text
     agent_a = MagicMock()
@@ -279,8 +349,8 @@ async def test_multi_agent_concurrent_sessions_no_contamination(
     # Create sessions and attach different agents
     await session_pool.create_session("sess-a", agent_name="agent-a")
     await session_pool.create_session("sess-b", agent_name="agent-b")
-    await _attach_agent(session_pool, "sess-a", agent_a)
-    await _attach_agent(session_pool, "sess-b", agent_b)
+    await _attach_agent(session_pool, "sess-a", agent_a, minimal_pool)
+    await _attach_agent(session_pool, "sess-b", agent_b, minimal_pool)
 
     # Subscribe to both sessions
     queue_a = await session_pool.event_bus.subscribe("sess-a")
@@ -336,20 +406,20 @@ async def test_multi_agent_concurrent_sessions_no_contamination(
     # Cleanup
     await session_pool.close_session("sess-a")
     await session_pool.close_session("sess-b")
-    await session_pool.shutdown()
+    # session_pool lifecycle managed by minimal_pool fixture
 
 
 @pytest.mark.anyio
 async def test_concurrent_sessions_event_bus_isolation(
-    mock_pool: MagicMock,
+    minimal_pool: AgentPool,
 ) -> None:
     """6.14: Per-session event isolation holds under concurrent load.
 
     Subscribes multiple queues per session and verifies that each
     subscriber receives only events for its own session.
     """
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
 
     agent = MagicMock()
 
@@ -369,8 +439,8 @@ async def test_concurrent_sessions_event_bus_isolation(
 
     await session_pool.create_session("sess-x")
     await session_pool.create_session("sess-y")
-    await _attach_agent(session_pool, "sess-x", agent)
-    await _attach_agent(session_pool, "sess-y", agent)
+    await _attach_agent(session_pool, "sess-x", agent, minimal_pool)
+    await _attach_agent(session_pool, "sess-y", agent, minimal_pool)
 
     # Multiple subscribers per session
     qx1 = await session_pool.event_bus.subscribe("sess-x")
@@ -409,7 +479,7 @@ async def test_concurrent_sessions_event_bus_isolation(
 
     await session_pool.close_session("sess-x")
     await session_pool.close_session("sess-y")
-    await session_pool.shutdown()
+    # session_pool lifecycle managed by minimal_pool fixture
 
 
 # ---------------------------------------------------------------------------
@@ -606,7 +676,7 @@ async def test_cross_protocol_event_ordering_preserved_under_load() -> None:
 
 @pytest.mark.anyio
 async def test_cross_protocol_with_session_pool_integration(
-    mock_pool: MagicMock,
+    minimal_pool: AgentPool,
     mock_agent_full_lifecycle: MagicMock,
 ) -> None:
     """6.15: Full integration test: SessionPool + EventBus with protocol subscribers.
@@ -615,11 +685,11 @@ async def test_cross_protocol_with_session_pool_integration(
     EventBus, runs a full turn, and verifies both protocols receive the
     complete event stream in order.
     """
-    session_pool = SessionPool(mock_pool)
-    await session_pool.start()
+    session_pool = minimal_pool.session_pool
+    assert session_pool is not None
 
     await session_pool.create_session("sess-integrated", agent_name="agent-a")
-    await _attach_agent(session_pool, "sess-integrated", mock_agent_full_lifecycle)
+    await _attach_agent(session_pool, "sess-integrated", mock_agent_full_lifecycle, minimal_pool)
 
     # Simulate two protocol handlers subscribing
     acp_queue = await session_pool.event_bus.subscribe("sess-integrated")
@@ -678,4 +748,4 @@ async def test_cross_protocol_with_session_pool_integration(
     with pytest.raises((asyncio.TimeoutError, asyncio.QueueShutDown)):
         await asyncio.wait_for(opencode_queue.get(), timeout=0.5)
 
-    await session_pool.shutdown()
+    # session_pool lifecycle managed by minimal_pool fixture

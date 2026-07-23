@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Any, Literal
+import uuid
 
 import anyio
 
@@ -462,6 +463,8 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         self,
         session_id: str,
         prompt: Sequence[ContentBlock],
+        *,
+        delivery: str | None = None,
     ) -> PromptResponse:
         """Process a prompt through the SessionPool.
 
@@ -472,10 +475,15 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         Args:
             session_id: The ACP session identifier.
             prompt: ACP content blocks from the prompt request.
+            delivery: Optional delivery hint extracted from ACP ``_meta``.
+                ``"steer"`` → inject mid-turn (``asap``), ``"followup"`` →
+                queue for next turn (``when_idle``), ``None`` → default
+                (``when_idle``).
 
         Returns:
             A ``PromptResponse`` with the stop reason.
         """
+        from agentpool.lifecycle.types import DeliveryMode
         from agentpool_server.acp_server.converters import from_acp_content
 
         session_pool = self._host_context.session_pool
@@ -592,16 +600,39 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             client_capabilities=self.client_capabilities,
             checkpoint_enabled=session_pool.sessions.store is not None,
         )
-        input_provider = ACPInputProvider(session=session_proxy)  # type: ignore[arg-type]
+        input_provider = ACPInputProvider(session=session_proxy)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+
+        # Emit user_message_chunk notifications for the user's input before
+        # processing the prompt. Per the ACP spec, the server should notify
+        # the client of the user's message chunks.
+        # Generate a message_id for the user message. The EventBus
+        # UserMessageInsertedEvent (published by _route_message) is the
+        # sole publication point — the ACPEventConverter reconstructs
+        # the content blocks from meta.
+        message_id = str(uuid.uuid4())
+
+        # Build ACP meta from content blocks for the EventBus event.
+        from agentpool_server.acp_server.event_converter import ACPUserMessageMeta
+
+        content_block_dicts = [block.model_dump() for block in prompt]
+        acp_meta = ACPUserMessageMeta(content_blocks=content_block_dicts)
+
+        # Map delivery hint to DeliveryMode for send_message().
+        delivery_mode = DeliveryMode.STEER if delivery == "steer" else DeliveryMode.QUEUE
 
         stop_reason: StopReason = "end_turn"
         try:
-            message_id = await session_pool.send_message(
-                session_id, contents, input_provider=input_provider
+            returned_id = await session_pool.send_message(
+                session_id,
+                contents,
+                mode=delivery_mode,
+                input_provider=input_provider,
+                message_id=message_id,
+                meta=acp_meta,
             )
             # Legacy clients (no turn_complete support) block until the run finishes
             # so they don't need session/update turn_complete notifications.
-            if message_id is not None and not (
+            if returned_id is not None and not (
                 self.client_capabilities is not None and self.client_capabilities.turn_complete
             ):
                 # Get run handle reference before waiting (cleaned up after completion).
@@ -616,7 +647,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                 # When client sends session/cancel, cancel_session() calls
                 # cancel_run_for_session() which sets run_ctx.cancelled.
                 # The start() loop then publishes RunFailedEvent, which sets
-                # _turn_complete_event. We detect the cancelled flag to
+                # complete_event. We detect the cancelled flag to
                 # return stopReason="cancelled".
                 if run_handle is not None and run_handle.cancelled:
                     stop_reason = "cancelled"
@@ -643,7 +674,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         session/prompt request with stopReason: "cancelled". This is achieved
         without calling ``run_handle.fail()``: the ``start()`` loop detects
         the cancellation, publishes ``RunFailedEvent``, and sets
-        ``_turn_complete_event`` — which ``handle_prompt()`` is waiting on.
+        ``complete_event`` — which ``handle_prompt()`` is waiting on.
         The ``cancelled`` flag on ``run_ctx`` is set by ``cancel()``, so
         ``handle_prompt()`` can detect it and return the correct stop_reason.
 
@@ -670,10 +701,10 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         session_pool.sessions.cancel_run_for_session(session_id)
 
         # The start() loop detects the cancelled flag, publishes
-        # RunFailedEvent (which sets _turn_complete_event), and the
+        # RunFailedEvent (which sets complete_event), and the
         # event consumer converts it to session/update with
         # stop_reason="cancelled". handle_prompt() unblocks on
-        # _turn_complete_event and returns the cancelled stop_reason.
+        # complete_event and returns the cancelled stop_reason.
         # No explicit fail() call is needed here.
 
         # Note: Event consumer is NOT stopped here. It will continue running
@@ -766,6 +797,50 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         from acp.schema import PromptResponse
 
         return PromptResponse(stop_reason=stop_reason)
+
+    async def _emit_user_message_chunks(
+        self,
+        session_id: str,
+        prompt: Sequence[ContentBlock],
+        *,
+        message_id: str | None = None,
+    ) -> None:
+        """Emit ``user_message_chunk`` SessionUpdate notifications for user input.
+
+        Per the ACP spec, the server should emit ``user_message_chunk``
+        notifications when a user message is processed. This method
+        converts the user's content blocks to ``UserMessageChunk``
+        session updates and sends them to the client before the agent
+        begins processing.
+
+        Args:
+            session_id: The ACP session identifier.
+            prompt: ACP content blocks from the prompt request.
+            message_id: Optional message ID for correlating chunks. If
+                provided, all chunks share this ID. If ``None``, each
+                call to ``build_user_message_chunks`` generates its own.
+        """
+        from acp.schema import SessionNotification, TextContentBlock
+
+        for block in prompt:
+            if not isinstance(block, TextContentBlock):
+                continue
+            text = block.text
+            if not text:
+                continue
+            chunks = ACPEventConverter.build_user_message_chunks(text, message_id=message_id)
+            for chunk in chunks:
+                notification = SessionNotification(
+                    session_id=session_id,
+                    update=chunk,
+                )
+                try:
+                    await self.client.session_update(notification)
+                except (ConnectionResetError, BrokenPipeError, anyio.ClosedResourceError):
+                    logger.debug(
+                        "Failed to send user_message_chunk",
+                        session_id=session_id,
+                    )
 
 
 class _ACPSessionProxy:

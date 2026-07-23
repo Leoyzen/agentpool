@@ -17,6 +17,9 @@ import pytest
 from agentpool_server.opencode_server.state import ServerState
 
 
+pytestmark = pytest.mark.integration
+
+
 # =============================================================================
 # Fixtures
 # =============================================================================

@@ -295,7 +295,7 @@ class ToolInterceptCapability(AbstractCapability[Any]):
         if run_ctx is not None:
             node = run_ctx.node if hasattr(run_ctx, "node") else None
             if node is not None:
-                return str(node.tool_confirmation_mode)
+                return str(node.tool_confirmation_mode)  # ty: ignore[unresolved-attribute]
         agent = self.hook_manager._agent
         if hasattr(agent, "tool_confirmation_mode"):
             return str(agent.tool_confirmation_mode)

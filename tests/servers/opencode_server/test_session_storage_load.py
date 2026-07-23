@@ -18,6 +18,9 @@ from agentpool_server.opencode_server.models import Session, SessionUpdatedEvent
 from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
 
 
+pytestmark = pytest.mark.integration
+
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -50,6 +53,8 @@ def mock_state_and_broadcast(
     from agentpool_server.opencode_server.state import ServerState
 
     agent = Mock()
+
+    agent.model_name = None  # resolve_default_model_info() fallback
     agent.name = "test-agent"
     agent.session_id = None  # No session currently loaded — forces cold load
     agent.load_session = AsyncMock(return_value=session_data)

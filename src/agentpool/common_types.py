@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 from typing import (
     TYPE_CHECKING,
@@ -79,6 +79,9 @@ class MCPServerStatus:
 
     server_version: str | None = None
     """Self-reported server version."""
+
+    tools: list[str] = field(default_factory=list)
+    """List of tool names exposed by this server (empty if not connected)."""
 
 
 NodeName = str

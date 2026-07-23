@@ -29,6 +29,9 @@ from agentpool.sessions.models import PendingDeferredCall
 from agentpool.storage.manager import StorageManager
 
 
+pytestmark = pytest.mark.unit
+
+
 if TYPE_CHECKING:
     from agentpool.agents.events.events import ToolCallDeferredEvent
 

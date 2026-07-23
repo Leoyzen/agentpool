@@ -16,6 +16,11 @@ import subprocess
 import sys
 import warnings
 
+import pytest
+
+
+pytestmark = pytest.mark.integration
+
 
 def print_section(title: str) -> None:
     """Print a section header."""

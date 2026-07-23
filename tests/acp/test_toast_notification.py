@@ -9,6 +9,9 @@ import pytest
 from agentpool.agents.events import ToastInfo
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.mark.unit
 class TestSendToast:
     """Tests for _send_toast method in ACPSession."""

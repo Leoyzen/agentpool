@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from asyncio import Lock
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 import os
@@ -110,7 +111,7 @@ class AgentPool[TPoolDeps = None]:
             case None:
                 manifest_obj = AgentsManifest()
             case str() | os.PathLike() as path:
-                config_path = to_upath(path)
+                config_path = to_upath(path)  # ty: ignore[invalid-argument-type]
                 path_for_loading = config_path
             case AgentsManifest():
                 manifest_obj = manifest
@@ -126,7 +127,7 @@ class AgentPool[TPoolDeps = None]:
         )
         with ConfigContextManager(config_path):
             if manifest_obj is None:
-                manifest_obj = AgentsManifest.from_file(path_for_loading)  # type: ignore[arg-type]
+                manifest_obj = AgentsManifest.from_file(path_for_loading)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
             logger.debug(
                 "AgentPool.__init__: after manifest load, agents=%s",
                 list(manifest_obj.agents.keys()),
@@ -226,6 +227,7 @@ class AgentPool[TPoolDeps = None]:
             # Graph topology attributes preserved for future re-implementation
             self._graph: Any | None = None
             self._graph_config: Any | None = None
+            self._team_cleanup_task: asyncio.Task[None] | None = None
 
     def get_context(self) -> HostContext:
         """Return cached HostContext, creating it on first call.
@@ -313,6 +315,18 @@ class AgentPool[TPoolDeps = None]:
                 self._session_pool.event_bus._max_queue_size = cfg.max_queue_size
                 await self._session_pool.start()
 
+                # Start team cleanup background task if team mode is enabled
+                team_mode = self.manifest.team_mode
+                if team_mode is not None and team_mode.enabled:
+                    from agentpool.capabilities.file_team_state import (
+                        start_team_cleanup_task,
+                    )
+
+                    self._team_cleanup_task = await start_team_cleanup_task(
+                        base_dir=team_mode.effective_base_dir,
+                        ttl_hours=team_mode.ttl_hours,
+                    )
+
             except Exception as e:
                 await self.cleanup()
                 msg = "Failed to initialize agent pool"
@@ -333,6 +347,10 @@ class AgentPool[TPoolDeps = None]:
         async with self._enter_lock:
             self._running_count -= 1
             if self._running_count == 0:
+                # Cancel team cleanup background task
+                if self._team_cleanup_task is not None:
+                    self._team_cleanup_task.cancel()
+                    self._team_cleanup_task = None
                 # Stop all protocol server event consumers first
                 await self._stop_all_consumers()
                 # Stop AgentFactory hot-swap listeners (M3 Todo 11)

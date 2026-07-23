@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
+
 from agentpool import AgentPool, AgentsManifest
+
+
+pytestmark = pytest.mark.integration
 
 
 class TestAsyncSubagentTask:

@@ -26,12 +26,14 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-from agentpool.lifecycle import RunState
 from agentpool.lifecycle.types import DeliveryMode
 from agentpool.orchestrator.core import SessionPool
 from agentpool.sessions.models import SessionData
 from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 from agentpool_server.opencode_server.state import ServerState
+
+
+pytestmark = pytest.mark.integration
 
 
 # =============================================================================
@@ -141,6 +143,7 @@ async def session_pool(
 def server_state(tmp_project_dir: Any) -> ServerState:
     """Create a minimal ServerState for testing."""
     agent = Mock()
+    agent.model_name = None  # resolve_default_model_info() fallback
     agent.name = "test-agent"
     agent.storage = Mock()
     return ServerState(working_dir=str(tmp_project_dir), agent=agent)
@@ -346,14 +349,15 @@ class TestMessageRouting:
         assert run_handle_1 is not None
 
         # Second message should be queued (session is busy).
-        # D14: receive_request now returns str (message_id) for both new runs
-        # and steer/followup. A non-None return means the message was accepted.
+        # Issue #253: followup messages return None instead of message_id
+        # to avoid duplicate session_created broadcasts. A None return means
+        # the message was queued successfully (not rejected).
         run_handle_2 = await integration.route_message(
             session_id="test-session-005",
             content="Second message",
             mode=DeliveryMode.QUEUE,
         )
-        assert run_handle_2 is not None  # Queued successfully (followup returned message_id)
+        assert run_handle_2 is None  # Queued successfully (followup returns None per #253)
 
     @pytest.mark.asyncio
     async def test_route_message_with_asap_priority_injects(
@@ -622,7 +626,9 @@ class TestSessionAbort:
 
         # Give the background task time to start and transition to running
         await asyncio.sleep(0.05)
-        assert actual_handle._run_state == RunState.RUNNING
+        # In the per-prompt model, RunHandle has no _run_state.
+        # is_running returns True when complete_event is not set.
+        assert actual_handle.is_running is True
 
         await integration.abort_session("test-session-011")
 

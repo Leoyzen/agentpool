@@ -11,6 +11,9 @@ from agentpool.agents.native_agent import Agent
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
 
+pytestmark = pytest.mark.unit
+
+
 class SimpleInstructionProvider(FunctionToolsetCapability):
     """Simple provider that returns static instructions."""
 
@@ -59,7 +62,7 @@ async def agent_with_instruction_providers():
     return agent
 
 
-@pytest.mark.requires_openai_key
+@pytest.mark.real_model
 class TestNativeAgentInstructions:
     """Test NativeAgent integration with provider instructions."""
 

@@ -16,6 +16,9 @@ import pytest
 from agentpool import Agent
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture
 def mock_agent() -> Agent[Any]:
     """Create an agent with TestModel for capability chain testing."""

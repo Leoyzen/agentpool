@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -15,16 +14,13 @@ from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 from agentpool_storage.sql_provider import SQLModelProvider
 
 
+pytestmark = pytest.mark.integration
+
+
 if TYPE_CHECKING:
     from pathlib import Path
 
-
-@pytest.fixture
-def mock_pool() -> MagicMock:
-    """Create a mock pool with manifest."""
-    pool = MagicMock()
-    pool.manifest.name = "test_pool"
-    return pool
+    from agentpool import AgentPool
 
 
 @pytest.fixture
@@ -45,10 +41,10 @@ class TestSessionHierarchy:
     """Tests for session parent-child hierarchy."""
 
     async def test_create_with_parent_id(
-        self, mock_pool: MagicMock, memory_store: MemoryStorageProvider
+        self, minimal_pool: AgentPool, memory_store: MemoryStorageProvider
     ) -> None:
         """Test that parent_id is persisted correctly via create_session."""
-        session_pool = SessionPool(pool=mock_pool, store=memory_store)
+        session_pool = SessionPool(pool=minimal_pool, store=memory_store)
         await session_pool.start()
 
         # Create parent session directly in store
@@ -74,10 +70,10 @@ class TestSessionHierarchy:
         assert loaded.parent_id == "parent_1"
 
     async def test_list_by_parent_id_memory(
-        self, mock_pool: MagicMock, memory_store: MemoryStorageProvider
+        self, minimal_pool: AgentPool, memory_store: MemoryStorageProvider
     ) -> None:
         """Test filtering sessions by parent_id with memory store."""
-        session_pool = SessionPool(pool=mock_pool, store=memory_store)
+        session_pool = SessionPool(pool=minimal_pool, store=memory_store)
         await session_pool.start()
 
         # Create root and parent sessions directly
@@ -117,10 +113,10 @@ class TestSessionHierarchy:
         assert "parent_1" not in children
 
     async def test_list_by_parent_id_sql(
-        self, mock_pool: MagicMock, sql_store: SQLModelProvider
+        self, minimal_pool: AgentPool, sql_store: SQLModelProvider
     ) -> None:
         """Test filtering sessions by parent_id with SQL store."""
-        session_pool = SessionPool(pool=mock_pool, store=sql_store)
+        session_pool = SessionPool(pool=minimal_pool, store=sql_store)
 
         async with sql_store:
             await session_pool.start()
@@ -159,10 +155,10 @@ class TestSessionHierarchy:
             assert "parent_1" not in children
 
     async def test_create_with_invalid_parent(
-        self, mock_pool: MagicMock, memory_store: MemoryStorageProvider
+        self, minimal_pool: AgentPool, memory_store: MemoryStorageProvider
     ) -> None:
         """Test that creating with non-existent parent_id succeeds (permissive)."""
-        session_pool = SessionPool(pool=mock_pool, store=memory_store)
+        session_pool = SessionPool(pool=minimal_pool, store=memory_store)
         await session_pool.start()
 
         # Create child with fake parent_id
@@ -184,10 +180,10 @@ class TestSessionHierarchy:
         assert loaded.parent_id == "nonexistent_parent_id"
 
     async def test_list_by_parent_id_with_no_children(
-        self, mock_pool: MagicMock, memory_store: MemoryStorageProvider
+        self, minimal_pool: AgentPool, memory_store: MemoryStorageProvider
     ) -> None:
         """Test filtering by parent_id returns empty list when no children exist."""
-        session_pool = SessionPool(pool=mock_pool, store=memory_store)
+        session_pool = SessionPool(pool=minimal_pool, store=memory_store)
         await session_pool.start()
 
         # Create parent but no children
@@ -201,10 +197,10 @@ class TestSessionHierarchy:
         assert len(children) == 0
 
     async def test_nested_hierarchy(
-        self, mock_pool: MagicMock, memory_store: MemoryStorageProvider
+        self, minimal_pool: AgentPool, memory_store: MemoryStorageProvider
     ) -> None:
         """Test multi-level hierarchy (grandparent -> parent -> child)."""
-        session_pool = SessionPool(pool=mock_pool, store=memory_store)
+        session_pool = SessionPool(pool=minimal_pool, store=memory_store)
         await session_pool.start()
 
         # Create grandparent session directly

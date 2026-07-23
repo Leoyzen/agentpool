@@ -109,6 +109,39 @@ class ServerState:
         self._sse_event_counter += 1
         return self._sse_event_counter
 
+    @staticmethod
+    def parse_model_info(model_name: str | None) -> tuple[str, str]:
+        """Parse a model string into (model_id, provider_id).
+
+        Splits on the first colon (e.g. ``"openai:gpt-4o"`` →
+        ``("gpt-4o", "openai")``). Falls back to ``("default",
+        "agentpool")`` when the model name is ``None`` or missing a
+        provider prefix.
+
+        Args:
+            model_name: The full model string (e.g. ``"openai:gpt-4o"``).
+
+        Returns:
+            Tuple of ``(model_id, provider_id)``.
+        """
+        if model_name and ":" in model_name:
+            provider, model = model_name.split(":", 1)
+            return model, provider
+        return "default", "agentpool"
+
+    def resolve_default_model_info(self) -> tuple[str, str]:
+        """Resolve default (model_id, provider_id) from the configured agent.
+
+        Parses ``self.agent.model_name`` (e.g. ``"openai:gpt-4o"``) by
+        splitting on the first colon. Falls back to ``("default",
+        "agentpool")`` when the model name is ``None`` or missing a
+        provider prefix.
+
+        Returns:
+            Tuple of ``(model_id, provider_id)``.
+        """
+        return self.parse_model_info(self.agent.model_name)
+
     def __post_init__(self) -> None:
         """Initialize derived state."""
         self.lsp_manager = LSPManager(env=self.agent.env)

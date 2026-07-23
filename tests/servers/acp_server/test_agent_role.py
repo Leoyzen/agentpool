@@ -5,61 +5,79 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import yamling
 
 from acp.exceptions import RequestError
 from acp.schema import SessionConfigOption
+from agentpool import AgentPool, AgentsManifest
 from agentpool_server.acp_server.acp_agent import (
     AgentPoolACPAgent,
     get_agent_role_config_option,
 )
 
 
+pytestmark = pytest.mark.unit
+
+
+MULTI_AGENT_CONFIG = """\
+agents:
+  agent_a:
+    type: native
+    model: test
+    system_prompt: "Agent A"
+  agent_b:
+    type: native
+    model: test
+    system_prompt: "Agent B"
+"""
+
+
 class TestGetAgentRoleConfigOption:
     """Test get_agent_role_config_option."""
 
-    def test_single_agent_no_role(self):
+    def test_single_agent_no_role(self, minimal_pool: AgentPool):
         """Single agent pool should not expose agent_role option."""
-        pool = MagicMock()
-        pool.manifest.agents = {"solo": MagicMock(name="solo")}
         agent = MagicMock()
-        agent.name = "solo"
-        agent.host_context = pool
+        agent.name = "test_agent"
+        agent.host_context = minimal_pool.get_context()
 
         result = get_agent_role_config_option(agent)
         assert result is None
 
     def test_multi_agent_has_role(self):
         """Multi-agent pool should expose agent_role option."""
-        pool = MagicMock()
-        agent_a = MagicMock()
-        agent_a.name = "agent_a"
-        agent_a.display_name = None
-        agent_b = MagicMock()
-        agent_b.name = "agent_b"
-        agent_b.display_name = "Agent B"
-        pool.manifest.agents = {"agent_a": agent_a, "agent_b": agent_b}
-        agent = MagicMock()
-        agent.name = "agent_a"
-        agent.host_context = pool
+        manifest_dict = yamling.load_yaml(MULTI_AGENT_CONFIG, verify_type=dict)
+        manifest_obj = AgentsManifest.model_validate(manifest_dict)
 
-        result = get_agent_role_config_option(agent)
-        assert result is not None
-        assert isinstance(result, SessionConfigOption)
-        assert result.id == "agent_role"
-        assert result.current_value == "agent_a"
-        options = result.options
-        assert len(options) == 2
-        assert all(hasattr(o, "value") for o in options)
-        choice_values = {o.value for o in options}  # type: ignore[union-attr]
-        assert "agent_a" in choice_values
-        assert "agent_b" in choice_values
-        # Verify display_name fallback and description
-        option_a = next(o for o in options if o.value == "agent_a")  # type: ignore[union-attr]
-        assert option_a.name == "agent_a"  # type: ignore[union-attr]
-        assert option_a.description == "Switch to agent_a agent"  # type: ignore[union-attr]
-        option_b = next(o for o in options if o.value == "agent_b")  # type: ignore[union-attr]
-        assert option_b.name == "Agent B"  # type: ignore[union-attr]
-        assert option_b.description == "Switch to agent_b agent"  # type: ignore[union-attr]
+        import asyncio
+
+        async def _run_test():
+            async with AgentPool(manifest_obj) as pool:
+                agent = MagicMock()
+                agent.name = "agent_a"
+                agent.display_name = None
+                agent.host_context = pool.get_context()
+
+                result = get_agent_role_config_option(agent)
+                assert result is not None
+                assert isinstance(result, SessionConfigOption)
+                assert result.id == "agent_role"
+                assert result.current_value == "agent_a"
+                options = result.options
+                assert len(options) == 2
+                assert all(hasattr(o, "value") for o in options)
+                choice_values = {o.value for o in options}  # type: ignore[union-attr]
+                assert "agent_a" in choice_values
+                assert "agent_b" in choice_values
+                # Verify display_name fallback and description
+                option_a = next(o for o in options if o.value == "agent_a")  # type: ignore[union-attr]
+                assert option_a.name == "agent_a"  # type: ignore[union-attr]
+                assert option_a.description == "Switch to agent_a agent"  # type: ignore[union-attr]
+                option_b = next(o for o in options if o.value == "agent_b")  # type: ignore[union-attr]
+                assert option_b.name == "agent_b"  # type: ignore[union-attr]
+                assert option_b.description == "Switch to agent_b agent"  # type: ignore[union-attr]
+
+        asyncio.run(_run_test())
 
     def test_no_pool_returns_none(self):
         """Agent without pool should not expose agent_role."""
@@ -74,19 +92,17 @@ class TestSwapSessionAgent:
     """Test _swap_session_agent on AgentPoolACPAgent."""
 
     @pytest.fixture
-    def mock_acp_agent(self):
-        """Create a mock ACP agent with session manager."""
-        pool = MagicMock()
+    def mock_acp_agent(self, minimal_pool: AgentPool):
+        """Create a mock ACP agent with real pool context."""
         default_agent = MagicMock()
-        default_agent.name = "default"
-        default_agent.host_context = pool
-        pool.manifest.agents = {"default": default_agent}
+        default_agent.name = "test_agent"
+        default_agent.host_context = minimal_pool.get_context()
 
         client = MagicMock()
         acp_agent = AgentPoolACPAgent(client=client, default_agent=default_agent)
         # Mock provider_router
         acp_agent.provider_router = MagicMock()
-        return acp_agent, pool
+        return acp_agent, minimal_pool
 
     async def test_role_swap_success(self, mock_acp_agent):
         """Swap to valid agent should succeed."""
@@ -94,7 +110,7 @@ class TestSwapSessionAgent:
 
         session = MagicMock()
         session.agent = MagicMock()
-        session.agent.name = "default"
+        session.agent.name = "test_agent"
         session._task_lock = MagicMock()
         session._task_lock.locked.return_value = False
         session.switch_active_agent = AsyncMock()
@@ -125,7 +141,7 @@ class TestSwapSessionAgent:
 
         session = MagicMock()
         session.agent = MagicMock()
-        session.agent.name = "default"
+        session.agent.name = "test_agent"
         session._task_lock = MagicMock()
         session._task_lock.locked.return_value = False
         session.is_busy = False
@@ -141,7 +157,7 @@ class TestSwapSessionAgent:
 
         session = MagicMock()
         session.agent = MagicMock()
-        session.agent.name = "default"
+        session.agent.name = "test_agent"
         session._task_lock = MagicMock()
         session._task_lock.locked.return_value = False
         session.is_busy = False

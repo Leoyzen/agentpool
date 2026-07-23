@@ -9,6 +9,9 @@ import pytest
 from agentpool.host.registry import AgentRegistry
 
 
+pytestmark = pytest.mark.unit
+
+
 def _make_agent(name: str = "test_agent") -> MagicMock:
     """Create a MagicMock standing in for a BaseAgent."""
     mock = MagicMock()

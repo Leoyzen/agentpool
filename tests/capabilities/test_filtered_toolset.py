@@ -13,6 +13,9 @@ from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.tools.base import Tool
 
 
+pytestmark = pytest.mark.unit
+
+
 def _make_test_tool(name: str) -> Tool[Any]:
     """Create a minimal Tool for testing."""
 

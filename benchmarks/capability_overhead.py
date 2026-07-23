@@ -27,13 +27,13 @@ import time
 import tracemalloc
 from typing import Any
 
+from agentpool.resource_providers import StaticResourceProvider
 from pydantic_ai.models.test import TestModel
 
 from agentpool import Agent
 from agentpool.hooks import AgentHooks
 from agentpool.hooks.base import Hook, HookInput, HookResult
 from agentpool.mcp_server.manager import MCPManager
-from agentpool.resource_providers import StaticResourceProvider
 from agentpool.tools import Tool, ToolManager
 
 

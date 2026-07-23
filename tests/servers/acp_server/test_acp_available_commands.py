@@ -73,8 +73,8 @@ def mock_acp_agent_for_session(
     """Provide a mock ACP agent suitable for ACPSession construction."""
     _, _agent = pool_and_agent
     mock_acp_agent = MagicMock()
-    mock_acp_agent.tasks = MagicMock()
-    mock_acp_agent.tasks.create_task = MagicMock(return_value=MagicMock())
+    mock_acp_agent._task_group = MagicMock()
+    mock_acp_agent._task_group.start_soon = MagicMock()
     return mock_acp_agent
 
 
@@ -218,9 +218,9 @@ def _setup_mock_session(acp_agent: AgentPoolACPAgent, session_id: str) -> MagicM
 
     # Inject into session manager
     acp_agent.session_manager._acp_sessions[session_id] = mock_session
-    # Replace tasks with a mock to avoid type issues
-    acp_agent.tasks = MagicMock()
-    acp_agent.tasks.create_task = MagicMock(return_value=MagicMock())
+    # Replace task group with a mock to capture start_soon calls
+    acp_agent._task_group = MagicMock()
+    acp_agent._task_group.start_soon = MagicMock()
     return mock_session
 
 
@@ -228,14 +228,18 @@ async def _run_scheduled_and_verify(acp_agent: object, mock_session: MagicMock) 
     """Run scheduled tasks and verify send_available_commands_update was called."""
     import inspect
 
-    tasks: Any = acp_agent.tasks  # type: ignore[attr-defined]
+    task_group: Any = acp_agent._task_group  # type: ignore[attr-defined]
     scheduled: list[Any] = []
-    for call in tasks.create_task.call_args_list:
-        coro = call.args[0] if call.args else call.kwargs.get("coro")
-        if coro is not None and inspect.iscoroutine(coro):
-            scheduled.append(coro)
+    for call in task_group.start_soon.call_args_list:
+        fn = call.args[0] if call.args else None
+        args = call.args[1:]
+        if fn is None or not callable(fn):
+            continue
+        result = fn(*args)
+        if inspect.isawaitable(result):
+            scheduled.append(result)
 
-    # Execute all scheduled coroutines
+    # Execute all scheduled awaitables
     if scheduled:
         await asyncio.gather(*scheduled, return_exceptions=True)
     return mock_session.send_available_commands_update.called

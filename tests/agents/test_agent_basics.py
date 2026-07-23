@@ -117,8 +117,11 @@ async def test_agent_forwarding():
     helper_agent.message_sent.connect(messages.append)
     message = "Hello, agent!"  # Send message and wait for forwarding
     await main_agent.run(message)
-    await main_agent.task_manager.complete_tasks()
-    await helper_agent.task_manager.complete_tasks()
+    # Wait for all forwarded messages to be processed
+    if main_agent._pending_tasks:
+        await asyncio.gather(*main_agent._pending_tasks, return_exceptions=True)
+    if helper_agent._pending_tasks:
+        await asyncio.gather(*helper_agent._pending_tasks, return_exceptions=True)
 
     # Verify both agents responded
     assert len(messages) == 2

@@ -322,27 +322,11 @@ class Talk[TTransmittedData = Any]:
                         case BaseAgent():
                             target.staged_content.add_text(str(message.content))
 
-                if self.delay is not None or self.priority != 0:
-                    coro = add_context()
-                    target.task_manager.run_background(
-                        coro, priority=self.priority, delay=self.delay
-                    )
-                else:
-                    await add_context()
+                await add_context()
                 return None
 
             case "forward":
-                if self.delay is not None or self.priority != 0:
-
-                    async def delayed_emit() -> None:
-                        await target.connections.route_message(message)
-
-                    coro = delayed_emit()
-                    target.task_manager.run_background(
-                        coro, priority=self.priority, delay=self.delay
-                    )
-                else:
-                    await target.connections.route_message(message)
+                await target.connections.route_message(message)
                 return None
 
     async def trigger(
@@ -447,9 +431,9 @@ class Talk[TTransmittedData = Any]:
                 intermediate = await execute(oldtransform_fn, data)
                 return await execute(transformer, intermediate)  # ty: ignore[invalid-return-type]
 
-            new_talk.transform_fn = chainedtransform_fn  # type: ignore[assignment]
+            new_talk.transform_fn = chainedtransform_fn  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
         else:
-            new_talk.transform_fn = transformer  # type: ignore[assignment]
+            new_talk.transform_fn = transformer  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
         return new_talk
 

@@ -317,8 +317,8 @@ def _restore_spawn_topology_from_checkpoint(
     """
     spawn_children: list[str] = session_data.metadata.get("spawn_children", [])
     if not hasattr(state, "checkpoint_spawn_graph"):
-        state.checkpoint_spawn_graph = {}  # type: ignore[attr-defined]
-    state.checkpoint_spawn_graph[session_id] = list(spawn_children)  # type: ignore[attr-defined]
+        state.checkpoint_spawn_graph = {}  # type: ignore[attr-defined]  # ty: ignore[invalid-assignment]
+    state.checkpoint_spawn_graph[session_id] = list(spawn_children)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
     logger.debug(
         "Restored spawn topology from checkpoint",
         session_id=session_id,
@@ -336,11 +336,14 @@ class OpenCodeSessionRoutesMixin:
         session_pool: The SessionPool instance (provided by main class).
         server_state: The OpenCode server state (provided by main class).
         _pending_message_ids: Pending canonical message IDs (provided by main class).
+        _pending_message_metadata: Pending model metadata from REST handlers
+            (provided by main class).
     """
 
     session_pool: SessionPool
     server_state: ServerState
     _pending_message_ids: dict[str, str]
+    _pending_message_metadata: dict[str, dict[str, str | None]]
     _session_groups: dict[str, Any]
     _resume_contexts: dict[str, dict[str, Any]]
 
@@ -441,6 +444,10 @@ class OpenCodeSessionRoutesMixin:
         input_provider: Any | None = None,
         agent_name: str | None = None,
         message_id: str | None = None,
+        model_id: str | None = None,
+        provider_id: str | None = None,
+        assistant_msg_id: str | None = None,
+        meta: Any = None,
         **kwargs: Any,
     ) -> str | None:
         """Route a message through SessionPool.receive_request().
@@ -458,9 +465,25 @@ class OpenCodeSessionRoutesMixin:
             priority: "when_idle" to queue, "asap" to inject into active turn.
             input_provider: Optional input provider for the agent.
             agent_name: Agent to bind if the session must be created.
-            message_id: Optional canonical message ID from the REST handler.
-                Stored as pending so ``_before_consumer_loop`` can reuse it
-                instead of generating an independent ``assistant_msg_id``.
+            message_id: Optional user message ID from the REST handler.
+                Passed to ``send_message()`` so it flows to
+                ``UserMessageInsertedEvent`` for dedup with the protocol
+                handler's own emission.
+            model_id: Optional model ID from the REST handler (for agent/model
+                propagation). Stored as pending so ``_before_consumer_loop`` can
+                set it on the assistant message instead of hardcoding
+                "default".
+            provider_id: Optional provider ID from the REST handler. Same
+                propagation path as ``model_id``.
+            assistant_msg_id: Optional canonical assistant message ID from the
+                REST handler. Stored as pending so ``_before_consumer_loop``
+                can reuse it instead of generating an independent
+                ``assistant_msg_id`` (D14). Falls back to ``message_id`` if
+                not provided.
+            meta: Protocol-specific metadata to carry through to
+                ``UserMessageInsertedEvent``. When set, the event consumer
+                uses it to reconstruct the full user message (e.g. OpenCode
+                parts) instead of falling back to text-only content.
             **kwargs: Additional arguments passed to the turn runner.
                 Supports ``deferred_tool_results`` for checkpoint replay.
 
@@ -478,10 +501,20 @@ class OpenCodeSessionRoutesMixin:
                     source="opencode_route_message",
                 )
 
-        # Store the canonical message_id so _before_consumer_loop can reuse it
-        # instead of generating an independent assistant_msg_id (D14).
-        if message_id is not None:
-            self._pending_message_ids[session_id] = message_id
+        # Store the canonical assistant_msg_id so _before_consumer_loop can
+        # reuse it instead of generating an independent assistant_msg_id (D14).
+        # Falls back to message_id for backward compatibility.
+        pending_id = assistant_msg_id if assistant_msg_id is not None else message_id
+        if pending_id is not None:
+            self._pending_message_ids[session_id] = pending_id
+        # Store model metadata so _before_consumer_loop can propagate the
+        # real agent/model onto the assistant message instead of hardcoding
+        # "agentpool"/"default"/"agentpool".
+        self._pending_message_metadata[session_id] = {
+            "message_id": message_id,
+            "model_id": model_id,
+            "provider_id": provider_id,
+        }
 
         session_state = self.session_pool.sessions.get_session(session_id)
         if session_state is None:
@@ -507,6 +540,7 @@ class OpenCodeSessionRoutesMixin:
             mode=delivery_mode,
             input_provider=input_provider,
             message_id=message_id,
+            meta=meta,
         )
 
     async def abort_session(self, session_id: str) -> None:
@@ -558,7 +592,7 @@ class OpenCodeSessionRoutesMixin:
             run_id = session.current_run_id
             if run_id is not None:
                 run_handle = self.session_pool.sessions._runs.get(run_id)
-                if run_handle is not None and run_handle._run_state in (
+                if run_handle is not None and run_handle._run_state in (  # ty: ignore[unresolved-attribute]
                     RunState.IDLE,
                     RunState.RUNNING,
                 ):

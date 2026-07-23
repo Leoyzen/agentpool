@@ -24,12 +24,12 @@ text and conversations.
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, Any, Self
 import uuid
 
 import httpx
 
+from agentpool.utils.time_utils import now_ms
 from agentpool_commands.text_sharing.base import ShareResult, TextSharer
 
 
@@ -111,7 +111,7 @@ class OpenCodeSharer(TextSharer):
         session_id = str(uuid.uuid4())
         message_id = str(uuid.uuid4())
         part_id = str(uuid.uuid4())
-        current_time = int(time.time() * 1000)
+        current_time = now_ms()
         # Create share (returns secret and URL)
         url = f"{self.api_url}/share_create"
         try:
@@ -227,7 +227,7 @@ class OpenCodeSharer(TextSharer):
         if not messages:
             raise ValueError("Must provide at least one message")
         session_id = str(uuid.uuid4())
-        current_time = int(time.time() * 1000)
+        current_time = now_ms()
         # Create share
         url = f"{self.api_url}/share_create"
         try:

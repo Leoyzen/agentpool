@@ -11,6 +11,9 @@ from agentpool_server.acp_server.provider_router import ProviderRouter
 from agentpool_server.shared.model_utils import build_model_state_for_acp
 
 
+pytestmark = pytest.mark.unit
+
+
 class MockManifest:
     """Mock manifest for testing."""
 

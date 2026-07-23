@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -371,7 +372,7 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
                 logger.info(
                     "Broadcasting file.watcher.updated", event_type=event_type, path=file_path
                 )
-                event = FileWatcherUpdatedEvent.create(file=file_path, event=event_type)  # type: ignore[arg-type]
+                event = FileWatcherUpdatedEvent.create(file=file_path, event=event_type)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
                 await state.broadcast_event(event)
 
         logger.info("Setting up project FileWatcher", working_dir=state.working_dir)
@@ -540,7 +541,11 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
                 media_type=response.headers.get("content-type"),
             )
 
-    logfire.instrument_fastapi(app)
+    if os.environ.get("LOGFIRE_DISABLE", "").lower() != "true":
+        try:
+            logfire.instrument_fastapi(app)
+        except Exception:  # noqa: BLE001
+            logger.warning("Failed to instrument FastAPI app with Logfire", exc_info=True)
     return app
 
 

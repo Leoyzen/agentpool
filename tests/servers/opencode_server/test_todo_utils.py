@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
+
 from agentpool.utils.todos import TodoTracker
 from agentpool_server.opencode_server.models.session import Todo
 from agentpool_server.opencode_server.todo_utils import build_opencode_todos
+
+
+pytestmark = pytest.mark.integration
 
 
 def test_build_opencode_todos_uses_real_tracker_entries_only() -> None:

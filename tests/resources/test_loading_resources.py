@@ -8,6 +8,9 @@ from agentpool import AgentPool
 from agentpool.models import AgentsManifest
 
 
+pytestmark = pytest.mark.integration
+
+
 UnionFileSystem.register_fs(clobber=True)
 
 MANIFEST_CONFIG = """

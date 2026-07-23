@@ -16,12 +16,24 @@ import anyio
 
 from agentpool.log import get_logger
 from agentpool.orchestrator.runtime_registry import RuntimeAgentRegistry
+from agentpool.utils.time_utils import get_now
 
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
+    from datetime import datetime
 
     from agentpool.delegation import AgentPool
+    from agentpool.host.context import HostContext
+    from agentpool.host.registry import AgentRegistry
+    from agentpool.lifecycle.protocols import (
+        CommChannel,
+        EventTransport,
+        Journal,
+        SnapshotStore,
+        TriggerSource,
+    )
+    from agentpool.lifecycle.types import Feedback, ResumeResult
     from agentpool.models.pending_interaction import PendingPermission
     from agentpool.orchestrator.event_bus import EventBus
     from agentpool_storage.protocols import SessionPersistence
@@ -151,6 +163,31 @@ class SessionState:
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.monotonic)
     last_active_at: float = field(default_factory=time.monotonic)
+    created_at_ns: int = field(default_factory=time.time_ns)
+    """Wall-clock creation timestamp (epoch nanoseconds, ``time.time_ns()``).
+
+    Uses the same clock as session ID generation (``now_ms()`` →
+    ``time.time_ns() // 1_000_000``), ensuring ``time.created`` order
+    matches session ID lexicographic order.  Integer arithmetic avoids
+    the float precision loss in the monotonic→epoch conversion.
+    """
+    last_active_at_ns: int = field(default_factory=time.time_ns)
+    """Wall-clock last-activity timestamp (epoch nanoseconds, ``time.time_ns()``).
+
+    Updated alongside ``last_active_at`` (monotonic) at every activity
+    site.  Used for millisecond-precise ``time.updated`` in OpenCode
+    session models via integer division (``// 1_000_000``).
+    """
+    created_at_wall: datetime = field(default_factory=get_now)
+    """Wall-clock creation timestamp (UTC datetime) for persistence.
+
+    ``created_at`` and ``last_active_at`` use ``time.monotonic()`` for
+    elapsed-time calculations (idle detection, session age).  They must
+    NOT be passed to ``datetime.fromtimestamp()`` — that function treats
+    its argument as a Unix epoch timestamp, producing a 1970 datetime.
+    This field stores the real wall-clock creation time so that
+    ``_state_to_data()`` can persist a correct ``created_at``.
+    """
     closed_at: float | None = None
     is_per_session_agent: bool = False
     turn_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -167,6 +204,81 @@ class SessionState:
     checkpoint_enabled: bool = False
     """Whether durable elicitation/checkpointing is enabled for this session."""
 
+    # ------------------------------------------------------------------
+    # Lifecycle dimensions (per-prompt RunHandle migration)
+    # ------------------------------------------------------------------
+    # SessionState owns the 6 lifecycle dimensions previously held by
+    # RunHandle. These persist across RunHandles for the session's
+    # lifetime and are only closed during session close.
+    _journal: Journal | None = None
+    _snapshot_store: SnapshotStore | None = None
+    _comm_channel: CommChannel | None = None
+    _event_transport: EventTransport | None = None
+    _trigger_source: TriggerSource | None = None
+    _lifecycle_session_id: str = "default"
+    _recover_strategy: str = "mark_interrupted"
+    """Crash recovery strategy: ``"mark_interrupted"`` or ``"retry"``.
+
+    Only active when both ``lifecycle.journal`` and ``lifecycle.snapshot``
+    are durable.
+    """
+    _resume_result: ResumeResult | None = None
+    """Result of crash recovery (``journal.resume()``), stored at session init.
+
+    Set once in ``get_or_create_session_agent()`` when recovery runs.
+    ``None`` for fresh starts or when no durable journal is configured.
+    """
+    _recovered_inflight_turn_id: str | None = None
+    """Turn ID of the in-flight Turn detected during crash recovery.
+
+    Set on SessionState during recovery in ``get_or_create_session_agent()``.
+    Used by the ``"retry"`` strategy to check
+    ``journal.get_tool_executions(turn_id)`` before re-executing.
+    """
+
+    # ------------------------------------------------------------------
+    # HostContext injection (moved from RunHandle)
+    # ------------------------------------------------------------------
+    _host_context: HostContext | None = None
+    """HostContext for constructing per-turn AgentContext.
+
+    When set, RunHandle constructs an ``AgentContext`` per turn and
+    injects it into ``run_ctx.deps`` so capabilities like
+    ``SubagentCapability`` can access the delegation service.
+    """
+    _agent_registry: AgentRegistry | None = None
+    """Read-only registry of compiled agents for delegation."""
+    _event_bus: EventBus | None = None
+    """EventBus reference for direct event publication from SessionState.
+
+    Set by ``SessionController._initialize_lifecycle_and_recovery()``
+    alongside the other lifecycle dimensions. Enables
+    ``steer_from_background_task()`` to fire-and-forget
+    ``UserMessageInsertedEvent`` without a controller reference.
+    """
+    _resume_deferred_tool_results: Any = None
+    """Deferred tool results from checkpoint, forwarded to ``agent.create_turn()``
+    via ``**pydantic_ai_kwargs`` during resume. Only set by
+    ``_create_run_handle()`` when resuming from a checkpoint."""
+
+    # ------------------------------------------------------------------
+    # Queues for per-prompt message routing
+    # ------------------------------------------------------------------
+    prompt_queue: asyncio.Queue[str | list[Any]] = field(default_factory=asyncio.Queue)
+    """Queue of followup prompts for the next RunHandle.
+
+    When a RunHandle is active, followup messages are enqueued here.
+    After the RunHandle terminates, ``_consume_run()`` drains this
+    queue (holding ``_request_lock``) and creates a new RunHandle for
+    each prompt in FIFO order.
+    """
+    feedback_queue: asyncio.Queue[Feedback] = field(default_factory=asyncio.Queue)
+    """Queue of steer messages for delivery to the next RunHandle.
+
+    When no RunHandle is active, steer messages are enqueued here.
+    The next RunHandle drains this queue at turn start.
+    """
+
     @property
     def closing(self) -> bool:
         """Alias for is_closing."""
@@ -175,6 +287,75 @@ class SessionState:
     @closing.setter
     def closing(self, value: bool) -> None:
         self.is_closing = value
+
+    # ------------------------------------------------------------------
+    # Per-prompt RunHandle: message routing helpers
+    # ------------------------------------------------------------------
+
+    def set_current_run_id(self, run_id: str | None) -> None:
+        """Set ``current_run_id`` and publish a ``StateUpdate`` on transition.
+
+        In the per-prompt model, ``RunState`` is eliminated. The state
+        machine is expressed by ``current_run_id`` (None = idle,
+        non-None = running). This helper publishes ``StateUpdate``
+        events when ``current_run_id`` transitions, replacing the old
+        ``RunHandle._transition()`` mechanism.
+
+        Args:
+            run_id: The new run ID, or ``None`` to mark idle.
+        """
+        old = self.current_run_id
+        self.current_run_id = run_id
+        if old == run_id:
+            return
+        # Publish StateUpdate via CommChannel when available.
+        from agentpool.agents.events import StateUpdate
+        from agentpool.lifecycle.types import RunState
+
+        comm = self._comm_channel
+        if comm is None:
+            return
+        new_state = RunState.RUNNING if run_id is not None else RunState.IDLE
+        comm.on_state_change(new_state)
+        state_event = StateUpdate(
+            session_id=self._lifecycle_session_id,
+            state=new_state,
+            stop_reason=None,
+        )
+        with contextlib.suppress(Exception):
+            asyncio.get_running_loop().create_task(comm.publish(state_event))
+
+    def revoke(self, message_id: str) -> bool:
+        """Revoke a queued steer message in ``feedback_queue`` by ID.
+
+        In the per-prompt model, CommChannel's feedback queue is unused.
+        Steer messages pending between turns live in
+        ``SessionState.feedback_queue``. This method cancels any
+        pending steer with the given ``message_id``.
+
+        Args:
+            message_id: The ID of the message to revoke.
+
+        Returns:
+            ``True`` if revoked or already gone (idempotent), ``False``
+            if the message was not found in the queue.
+        """
+        # Drain and re-enqueue, skipping the target message_id.
+        found = False
+        remaining: list[Feedback] = []
+        while not self.feedback_queue.empty():
+            try:
+                fb = self.feedback_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if fb.message_id == message_id:
+                found = True
+                # Do not re-enqueue — revoked.
+            else:
+                remaining.append(fb)
+        for fb in remaining:
+            self.feedback_queue.put_nowait(fb)
+        return found
 
 
 # Mixin imports placed after SessionState/exception definitions to avoid

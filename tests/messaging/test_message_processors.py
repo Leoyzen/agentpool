@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import pytest
+
+
+pytestmark = pytest.mark.unit
+
 
 if TYPE_CHECKING:
     from pydantic_ai import RunContext

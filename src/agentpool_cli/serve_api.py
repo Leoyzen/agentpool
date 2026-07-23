@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Annotated, Any
 
@@ -68,11 +69,23 @@ def api_command(
     # show_messages is disabled: agent instances are no longer created at pool level.
     # Session-level event monitoring is available via EventBus instead.
 
-    server = OpenAIAPIServer(pool, cors=cors, docs=docs)
-
     # Get log level from the global context
     log_level = ctx.obj.get("log_level", "info") if ctx.obj else "info"
-    uvicorn.run(server.app, host=host, port=port, log_level=log_level.lower())
+
+    async def run_server() -> None:
+        async with pool:
+            server = OpenAIAPIServer(pool, cors=cors, docs=docs)
+            config = uvicorn.Config(server.app, host=host, port=port, log_level=log_level.lower())
+            uv_server = uvicorn.Server(config)
+            await uv_server.serve()
+
+    try:
+        asyncio.run(run_server())
+    except KeyboardInterrupt:
+        logger.info("API server shutdown requested")
+    except Exception as e:
+        logger.exception("API server error")
+        raise t.Exit(1) from e
 
 
 if __name__ == "__main__":

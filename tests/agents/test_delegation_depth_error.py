@@ -7,6 +7,9 @@ import pytest
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 
 
+pytestmark = pytest.mark.unit
+
+
 def test_max_delegation_depth_value() -> None:
     """MAX_DELEGATION_DEPTH should be 10."""
     assert MAX_DELEGATION_DEPTH == 10

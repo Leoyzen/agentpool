@@ -134,11 +134,11 @@ async def test_load_session_schedules_commands_update(
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)
     mock_acp_agent._initialized = True
 
-    with patch.object(mock_acp_agent.tasks, "create_task") as mock_create_task:
+    with patch.object(mock_acp_agent._task_group, "start_soon") as mock_start_soon:
         await mock_acp_agent.load_session(load_session_request)
 
         # Should schedule send_available_commands_update and load_rules
-        assert mock_create_task.call_count == 2
+        assert mock_start_soon.call_count == 2
 
 
 @pytest.mark.unit

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
+from agentpool.agents.events.events import UserMessageInsertedEvent
 from agentpool.messaging.messages import ChatMessage
 from agentpool.orchestrator.core import SessionPool
 from agentpool_server.opencode_server.models import (
@@ -23,10 +24,12 @@ from agentpool_server.opencode_server.session_pool_integration import (
 from agentpool_server.opencode_server.state import ServerState
 
 
+pytestmark = pytest.mark.integration
+
+
 @pytest.fixture
 def mock_agent_pool() -> Mock:
     """Create a mock AgentPool for SessionPool construction."""
-    from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
     from agentpool.messaging.messages import ChatMessage
 
     pool = Mock()
@@ -89,6 +92,7 @@ async def session_pool(mock_agent_pool: Mock, mock_session_store: Mock) -> Sessi
 def server_state(tmp_path: Any, mock_agent_pool: Mock) -> ServerState:
     """Create a minimal ServerState for testing."""
     agent = Mock()
+    agent.model_name = None  # resolve_default_model_info() fallback
     agent.name = "test-agent"
     agent.storage = Mock()
     agent.host_context = mock_agent_pool
@@ -258,6 +262,92 @@ async def test_multiple_requests_share_one_consumer(
 
 
 @pytest.mark.asyncio
+@pytest.mark.xfail(
+    reason="D1: start_event_consumer() is idempotent — _before_consumer_loop() "
+    "only runs once. _message_registered stays True after turn 1, so "
+    "turn 2 reuses turn 1's assistant_msg_id instead of generating a new one. "
+    "This is a protocol-server-side issue independent of the per-prompt RunHandle "
+    "migration. Fix: reset _message_registered on RunStartedEvent in the "
+    "OpenCode event bridge.",
+    strict=False,
+    raises=AssertionError,
+)
+@pytest.mark.known_bug
+async def test_consumer_resets_message_registered_for_new_turn(
+    session_pool: SessionPool,
+    server_state: ServerState,
+) -> None:
+    """D1: Consumer should reset _message_registered for each new turn.
+
+    The session-scoped consumer's _before_consumer_loop() creates a fresh
+    EventProcessorContext with _message_registered=False. But since
+    start_event_consumer() is idempotent, _before_consumer_loop() only
+    runs ONCE. On turn 2, _message_registered is still True from turn 1,
+    so _handle_event skips assistant message registration — turn 2 reuses
+    turn 1's assistant_msg_id.
+
+    This test verifies that after publishing events for two turns through
+    the same consumer, _message_registered is reset between turns.
+    """
+    integration = OpenCodeSessionPoolIntegration(
+        session_pool=session_pool,
+        server_state=server_state,
+    )
+
+    session_id = "test-d1-reset"
+    await integration.create_session(session_id=session_id, agent_name="test-agent")
+    await integration.start_event_consumer(session_id)
+
+    # Simulate turn 1: publish RunStartedEvent + StreamCompleteEvent
+    await session_pool.event_bus.publish(
+        session_id,
+        RunStartedEvent(
+            run_id="run-1",
+            session_id=session_id,
+            agent_name="test-agent",
+        ),
+    )
+    await asyncio.sleep(0.1)
+
+    # After turn 1's first event, _message_registered should be True
+    assert integration._message_registered.get(session_id, False), (
+        "Turn 1 should have registered the assistant message"
+    )
+
+    # Simulate turn 1 completion
+    await session_pool.event_bus.publish(
+        session_id,
+        StreamCompleteEvent(
+            message=ChatMessage(content="turn 1 response", role="assistant"),
+        ),
+    )
+    await asyncio.sleep(0.1)
+
+    # Simulate turn 2: publish another RunStartedEvent
+    await session_pool.event_bus.publish(
+        session_id,
+        RunStartedEvent(
+            run_id="run-2",
+            session_id=session_id,
+            agent_name="test-agent",
+        ),
+    )
+    await asyncio.sleep(0.1)
+
+    # D1 bug: _message_registered is still True from turn 1.
+    # After a fix, it should be reset to False on RunStartedEvent
+    # so that _handle_event creates a new assistant message for turn 2.
+    assert not integration._message_registered.get(session_id, False), (
+        "_message_registered should be reset to False for turn 2 so "
+        "that a new assistant message is registered. Currently it stays "
+        "True from turn 1 (issue D1: consumer loop idempotency)."
+    )
+
+    # Clean up
+    await integration._stop_event_consumer(session_id)
+
+
+@pytest.mark.asyncio
 async def test_consumer_handles_spawn_session_start(
     session_pool: SessionPool,
     server_state: ServerState,
@@ -305,6 +395,20 @@ async def test_consumer_handles_spawn_session_start(
     assert "test-parent-session" in integration._session_groups
     assert "test-child-session" in server_state.sessions
     assert server_state.sessions["test-child-session"].parent_id == "test-parent-session"
+
+    # Publish UserMessageInsertedEvent for child session (simulates what
+    # _route_message() does in production when the child agent's run starts).
+    await session_pool.event_bus.publish(
+        "test-child-session",
+        UserMessageInsertedEvent(
+            session_id="test-child-session",
+            message_id="msg_child_prompt",
+            content="Inspect child task",
+            delivery="initial",
+            source="protocol",
+        ),
+    )
+    await asyncio.sleep(0.1)
 
     child_messages = await get_messages_for_session(server_state, "test-child-session")
     assert child_messages

@@ -7,6 +7,7 @@ state, enabling stateless recursive processing.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import FunctionToolCallEvent
@@ -31,6 +32,7 @@ from agentpool.agents.events import (
     ToolCallDeferredEvent,
     ToolCallProgressEvent,
     ToolCallStartEvent,
+    UserMessageInsertedEvent,
 )
 from agentpool.agents.events.infer_info import derive_rich_tool_info
 from agentpool.log import get_logger
@@ -39,10 +41,13 @@ from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.converters import _convert_params_for_ui
 from agentpool_server.opencode_server.models import (
+    MessageUpdatedEvent,
+    Part,
     PartDeltaEvent,
     PartUpdatedEvent,
     SessionErrorEvent,
     SessionStatusEvent,
+    TimeCreated,
     TokenCache,
     Tokens,
 )
@@ -50,7 +55,13 @@ from agentpool_server.opencode_server.models import (
 # Cross-layer import: McpToolsChangedEvent is an OpenCode SSE event that
 # EventProcessor creates from core-layer ChangeEvent(kind="tools_changed").
 from agentpool_server.opencode_server.models.events import McpToolsChangedEvent
+from agentpool_server.opencode_server.models.message import (
+    AssistantMessage,
+    MessageWithParts,
+    UserMessage,
+)
 from agentpool_server.opencode_server.models.parts import (
+    FilePart,
     ReasoningPart,
     StepFinishPart,
     TextPart,
@@ -77,8 +88,25 @@ if TYPE_CHECKING:
     from agentpool_server.opencode_server.models.events import Event
     from agentpool_server.opencode_server.models.parts import ToolState
     from agentpool_server.opencode_server.models.session import SessionStatusType
-
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class OpenCodeUserMessageMeta:
+    """Protocol-specific metadata for OpenCode user messages.
+
+    Carries serialized Part data (TextPart, FilePart, etc.) so the
+    EventProcessor can reconstruct the full user message from the
+    EventBus event without the protocol handler broadcasting separately.
+    """
+
+    parts: list[dict[str, Any]]
+    """Serialized Part data (TextPart, FilePart, etc.) as dicts.
+
+    Each dict is the ``model_dump()`` output of an OpenCode Part model.
+    The EventProcessor deserializes each dict back to the appropriate
+    Part type using the ``type`` discriminator field.
+    """
 
 
 class EventProcessor:
@@ -149,7 +177,11 @@ class EventProcessor:
                 title=title,
             ):
                 for e in self._process_tool_call_start(
-                    ctx, tool_name, tool_call_id, raw_input, title
+                    ctx,
+                    tool_name,  # ty: ignore[invalid-argument-type]
+                    tool_call_id,  # ty: ignore[invalid-argument-type]
+                    raw_input,
+                    title,  # ty: ignore[invalid-argument-type]
                 ):
                     yield e
 
@@ -224,6 +256,18 @@ class EventProcessor:
                     error_name=run_error_event.code or "RunError",
                     error_message=run_error_event.message,
                 )
+
+            case UserMessageInsertedEvent(
+                message_id=mid,
+                content=event_content,
+                timestamp=ts,
+                meta=event_meta,
+                source=event_source,
+            ):
+                async for e in self._process_user_message_inserted(
+                    ctx, mid, event_content, ts, event_meta, event_source
+                ):
+                    yield e
 
     def _process_text_start(
         self,
@@ -701,6 +745,14 @@ class EventProcessor:
             existing = ctx.get_tool_part(tool_call_id)
             if existing is not None:
                 existing_title = _extract_title_from_tool_state(existing.state)
+                # Update tool input from progress event if existing input is empty.
+                # This happens when the model streams tool call arguments: the
+                # initial ToolCallStartEvent arrives with empty raw_input, and
+                # the EventMapper emits a ToolCallProgressEvent with the complete
+                # tool_input once args are assembled.
+                if event_tool_input and not ctx.get_tool_input(tool_call_id):
+                    ui_input = _convert_params_for_ui(event_tool_input)
+                    ctx.set_tool_input(tool_call_id, ui_input)
                 tool_input = ctx.get_tool_input(tool_call_id) or {}
                 accumulated_output = ctx.get_tool_output(tool_call_id)
                 tool_state = ToolStateRunning(
@@ -824,6 +876,23 @@ class EventProcessor:
         if msg.cost_info and msg.cost_info.total_cost:
             ctx.update_cost(float(msg.cost_info.total_cost))
 
+        # Update model info from the real inference result.
+        # If the model changed (e.g., child session initially showed parent's
+        # model), emit a MessageUpdatedEvent so the TUI receives the correction.
+        model_changed = False
+        if isinstance(ctx.assistant_msg.info, AssistantMessage):
+            if msg.model_name is not None and ctx.assistant_msg.info.model_id != msg.model_name:
+                ctx.assistant_msg.info.model_id = msg.model_name
+                model_changed = True
+            if (
+                msg.provider_name is not None
+                and ctx.assistant_msg.info.provider_id != msg.provider_name
+            ):
+                ctx.assistant_msg.info.provider_id = msg.provider_name
+                model_changed = True
+            if model_changed:
+                yield MessageUpdatedEvent.create(ctx.assistant_msg.info)
+
         response_time = now_ms()
         start = ctx.stream_start_ms
 
@@ -883,6 +952,147 @@ class EventProcessor:
         )
         ctx.assistant_msg.parts.append(step_finish)
         yield PartUpdatedEvent.create(step_finish)
+
+    async def _process_user_message_inserted(
+        self,
+        ctx: EventProcessorContext,
+        message_id: str,
+        content: str | list[Any],
+        timestamp: float,
+        meta: Any = None,
+        source: str = "protocol",
+    ) -> AsyncIterator[Event]:
+        """Process a UserMessageInsertedEvent into OpenCode SSE events.
+
+        Creates a ``UserMessage`` with parts from the event, appends it to
+        the session state, and yields ``MessageUpdatedEvent`` and
+        ``PartUpdatedEvent`` for each part.
+
+        When ``meta`` is an :class:`OpenCodeUserMessageMeta`, uses
+        ``meta.parts`` to deserialize rich parts (TextPart, FilePart, etc.).
+        When ``meta`` is ``None``, falls back to text-only ``content`` →
+        ``TextPart``.
+
+        For ``source="protocol"`` messages (from REST handler), only
+        ``MessageUpdatedEvent`` is yielded — parts come from the TUI's
+        ``sync.session.sync()`` which loads from DB. Sending
+        ``PartUpdatedEvent`` with original part IDs would conflict with
+        the DB-reconstructed parts (which have different IDs from
+        ``chat_message_to_opencode``), causing duplicate text rendering.
+
+        For internal sources (``"background_task"``, ``"internal"``),
+        both ``MessageUpdatedEvent`` and ``PartUpdatedEvent`` are yielded
+        because there is no ``sync()`` to load parts from DB.
+
+        Args:
+            ctx: The event processor context.
+            message_id: Unique ID for the inserted user message.
+            content: Message content — plain text or multi-modal part list.
+            timestamp: Wall-clock time the event was created (epoch seconds).
+            meta: Optional protocol-specific metadata carrying serialized
+                Part data for rich user message reconstruction.
+            source: Where the message originated — ``"protocol"``,
+                ``"background_task"``, or ``"internal"``.
+
+        Yields:
+            ``MessageUpdatedEvent`` for the user message, followed by
+            ``PartUpdatedEvent`` for each part (internal sources only).
+        """
+        # Convert epoch seconds to milliseconds for OpenCode's TimeCreated
+        created_ms = int(timestamp * 1000)
+
+        user_message = UserMessage(
+            id=message_id,
+            session_id=ctx.session_id,
+            time=TimeCreated(created=created_ms),
+        )
+        user_msg_with_parts = MessageWithParts(info=user_message)
+
+        # Reconstruct parts from meta or fall back to text-only content.
+        if isinstance(meta, OpenCodeUserMessageMeta):
+            for part_dict in meta.parts:
+                part = _deserialize_part(part_dict, user_message.id, ctx.session_id)
+                if part is not None:
+                    user_msg_with_parts.parts.append(part)
+        elif isinstance(content, str):
+            if content:
+                user_msg_with_parts.add_text_part(content)
+        elif isinstance(content, list):
+            for item in content:
+                if isinstance(item, str):
+                    if item:
+                        user_msg_with_parts.add_text_part(item)
+                elif isinstance(item, dict) and "text" in item:
+                    text_val = item["text"]
+                    if isinstance(text_val, str) and text_val:
+                        user_msg_with_parts.add_text_part(text_val)
+                elif hasattr(item, "parts") and isinstance(item.parts, list):
+                    # Handle ModelRequest containing SystemPromptPart etc.
+                    for part in item.parts:
+                        if hasattr(part, "content") and isinstance(part.content, str):
+                            user_msg_with_parts.add_text_part(part.content)
+                elif hasattr(item, "content") and isinstance(item.content, str):
+                    # Handle pydantic-ai ModelRequestPart (e.g. SystemPromptPart)
+                    # by extracting its content as text for TUI display.
+                    user_msg_with_parts.add_text_part(item.content)
+
+        # Append to session state
+        from agentpool_server.opencode_server.opencode_message_bridge import (
+            append_message_to_session,
+        )
+
+        await append_message_to_session(ctx.state, ctx.session_id, user_msg_with_parts)
+
+        # Always yield MessageUpdatedEvent so the TUI sees the message info
+        yield MessageUpdatedEvent.create(user_message)
+
+        # P1: Always yield PartUpdatedEvent for each part, regardless of
+        # source. The TUI has no optimistic mechanism — it relies entirely
+        # on SSE events for parts. Without PartUpdatedEvent, user messages
+        # appear empty after the initial sync() (which only runs once per
+        # session). Part IDs from _deserialize_part() preserve the original
+        # IDs from meta (line 1077), so they match DB-stored parts — no
+        # duplicate risk for new messages.
+        for part in user_msg_with_parts.parts:
+            yield PartUpdatedEvent.create(part)
+
+
+def _deserialize_part(
+    part_dict: dict[str, Any],
+    message_id: str,
+    session_id: str,
+) -> Part | None:
+    """Deserialize a Part dict back to the appropriate Part type.
+
+    Uses the ``type`` discriminator field to select the correct Part
+    subclass. Overrides ``id``, ``message_id``, and ``session_id`` to
+    ensure the part belongs to the given message and session.
+
+    Args:
+        part_dict: The serialized Part data (from ``model_dump()``).
+        message_id: The message ID to assign to the part.
+        session_id: The session ID to assign to the part.
+
+    Returns:
+        The deserialized Part, or ``None`` if the type is unknown.
+    """
+    part_type = part_dict.get("type", "")
+    # Map type discriminator to Part subclass.
+    type_to_cls: dict[str, type[Part]] = {
+        "text": TextPart,
+        "file": FilePart,
+    }
+    cls = type_to_cls.get(part_type)
+    if cls is None:
+        return None
+    # Override identity fields to ensure consistency.
+    data = {
+        **part_dict,
+        "id": part_dict.get("id", identifier.ascending("part")),
+        "message_id": message_id,
+        "session_id": session_id,
+    }
+    return cls.model_validate(data)
 
 
 def _extract_title_from_tool_state(state: ToolState) -> str:

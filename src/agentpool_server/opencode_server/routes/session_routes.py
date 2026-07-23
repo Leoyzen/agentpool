@@ -105,7 +105,7 @@ async def _get_session_messages_from_pool(
     Delegates to :func:`get_messages_for_session` which handles feature-flag
     routing and ChatMessage-to-MessageWithParts conversion.
     """
-    return await get_messages_for_session(state, session_id)
+    return await get_messages_for_session(state, session_id, prefer_in_memory=False)
 
 
 class _CommandOutputCapture:
@@ -568,21 +568,27 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
                 await state.mark_session_idle(session_id)
             # Load conversation history from agent via SessionController
             agent = await session_pool.sessions.get_or_create_session_agent(session_id)
-            await set_messages_for_session(
-                state,
-                session_id,
-                [
-                    chat_message_to_opencode(
-                        chat_msg,
-                        session_id=session_id,
-                        working_dir=state.working_dir,
-                        agent_name=agent.name,
-                        model_id=chat_msg.model_name or "sonnet",
-                        provider_id=chat_msg.provider_name or "claude-code",
-                    )
-                    for chat_msg in agent.conversation.chat_messages
-                ],
-            )
+            # Defense-in-depth: skip replacement if messages already exist
+            # (concurrent request may have already loaded and appended).
+            # See issue #192.
+            existing_msgs = state.messages.get(session_id, [])
+            if not existing_msgs:
+                default_model_id, default_provider_id = state.resolve_default_model_info()
+                await set_messages_for_session(
+                    state,
+                    session_id,
+                    [
+                        chat_message_to_opencode(
+                            chat_msg,
+                            session_id=session_id,
+                            working_dir=state.working_dir,
+                            agent_name=agent.name,
+                            model_id=chat_msg.model_name or default_model_id,
+                            provider_id=chat_msg.provider_name or default_provider_id,
+                        )
+                        for chat_msg in agent.conversation.chat_messages
+                    ],
+                )
             state.ensure_input_provider(session_id)
             await state.broadcast_event(SessionUpdatedEvent.create(session))
             return session
@@ -592,12 +598,22 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
         await get_messages_for_session(state, session_id) if is_subagent_session else []
     )
     if session_pool is not None:
+        # Avoid auto-creating a session for nonexistent session IDs.
+        # If the session is not in memory (state.sessions or SessionController)
+        # and not in the persistent store (checked above), it doesn't exist.
+        # Return early instead of calling get_or_create_session_agent which
+        # would auto-create the session as a side effect (and may raise).
+        if cached_session is None and (
+            state.session_controller is None
+            or state.session_controller.get_session(session_id) is None
+        ):
+            return None
         agent = await session_pool.sessions.get_or_create_session_agent(session_id)
     else:
         agent = state.agent
     data = await agent.load_session(session_id)
     if data is None:
-        return None
+        return cached_session
 
     session = session_data_to_opencode(data)
     state.sessions[session_id] = session
@@ -606,21 +622,27 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
         await state.mark_session_idle(session_id)
 
     if not (is_subagent_session and existing_messages):
-        await set_messages_for_session(
-            state,
-            session_id,
-            [
-                chat_message_to_opencode(
-                    chat_msg,
-                    session_id=session_id,
-                    working_dir=state.working_dir,
-                    agent_name=agent.name,
-                    model_id=chat_msg.model_name or "sonnet",
-                    provider_id=chat_msg.provider_name or "claude-code",
-                )
-                for chat_msg in agent.conversation.chat_messages
-            ],
-        )
+        # Defense-in-depth: also skip if any messages already exist in memory
+        # (concurrent request may have already loaded and appended).
+        # See issue #192.
+        all_existing_msgs = state.messages.get(session_id, [])
+        if not all_existing_msgs:
+            default_model_id, default_provider_id = state.resolve_default_model_info()
+            await set_messages_for_session(
+                state,
+                session_id,
+                [
+                    chat_message_to_opencode(
+                        chat_msg,
+                        session_id=session_id,
+                        working_dir=state.working_dir,
+                        agent_name=agent.name,
+                        model_id=chat_msg.model_name or default_model_id,
+                        provider_id=chat_msg.provider_name or default_provider_id,
+                    )
+                    for chat_msg in agent.conversation.chat_messages
+                ],
+            )
 
     state.ensure_input_provider(session_id)
     await state.broadcast_event(SessionUpdatedEvent.create(session))
@@ -885,6 +907,20 @@ async def get_session_messages(
     Returns:
         List of messages with their parts
     """
+    # Clear EventBus replay buffer so that events published before this sync()
+    # call are not re-delivered to reconnecting SSE subscribers.  Without this,
+    # the TUI would receive duplicate message.part.updated events from the
+    # replay buffer AND from the sync() response, causing the first user
+    # message to render twice.
+    if state.event_bridge is not None:
+        event_bus = state.event_bridge._event_bus
+        if event_bus is not None:
+            logger.info(
+                "Clearing replay buffer for session %s on sync()",
+                session_id,
+            )
+            event_bus.clear_replay_buffer(session_id)
+
     # Fast path for subagent/child sessions already in memory:
     # Skip get_or_load_session (which may load from storage) because the
     # parent agent is streaming and subagent parts are in memory.
@@ -903,6 +939,12 @@ async def get_session_messages(
     messages = await get_messages_for_session(state, session_id)
     if limit is not None and limit > 0:
         messages = messages[-limit:]
+    logger.info(
+        "sync() returning {count} messages for session {sid}: {ids}",
+        count=len(messages),
+        sid=session_id,
+        ids=[m.info.id for m in messages],
+    )
     return messages
 
 
@@ -1015,7 +1057,13 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
         sp_session = state.session_controller.get_session(session_id)
 
     if sp_session is not None:
-        # Native agents: interrupt the per-session agent
+        # Native agents: interrupt the per-session agent.
+        # interrupt() internally calls cancel_run_for_session() which
+        # calls run_handle.cancel() — so we MUST NOT call
+        # session_pool.cancel_run() again for per-session agents.
+        # A double cancel() kills the start() generator because the
+        # second cancel throws CancelledError at _idle_event.wait()
+        # inside _idle_loop(), which is OUTSIDE the except handler.
         if sp_session.is_per_session_agent and state.session_controller is not None:
             session_agent = state.session_controller.get_session_agent(session_id)
             if session_agent is not None:
@@ -1024,10 +1072,14 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
                     # Give a moment for the cancellation to propagate
                     await asyncio.sleep(0.1)
                 except Exception:  # noqa: BLE001
-                    pass
-
-        # Cancel the active run via SessionPool
-        if sp_session.current_run_id is not None:
+                    logger.warning(
+                        "interrupt() failed for session %s during abort",
+                        session_id,
+                        exc_info=True,
+                    )
+        # Non-per-session (shared) agents: can't interrupt the shared
+        # agent, so only cancel the RunHandle.
+        elif sp_session.current_run_id is not None:
             session_pool = state.pool.session_pool
             if session_pool is not None:
                 with contextlib.suppress(ValueError):
@@ -1368,8 +1420,8 @@ async def run_shell_command(
         id=assistant_msg_id,
         session_id=session_id,
         parent_id="",  # Shell commands don't have a parent user message
-        model_id=request.model.model_id if request.model else "shell",
-        provider_id=request.model.provider_id if request.model else "local",
+        model_id=request.model.model_id if request.model else "shell",  # ty: ignore[invalid-argument-type]
+        provider_id=request.model.provider_id if request.model else "local",  # ty: ignore[invalid-argument-type]
         mode="shell",
         agent=request.agent,
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
@@ -1502,12 +1554,15 @@ async def summarize_session(  # noqa: PLR0915
     session_id: str,
     state: StateDep,
     request: SummarizeRequest | None = None,
-) -> MessageWithParts:
+) -> bool:
     """Summarize the session conversation.
 
     First runs the compaction pipeline to condense older messages,
     then streams an LLM-generated summary/continuation prompt to the user.
     The summary message is marked with summary=true for UI display.
+
+    Returns:
+        True if summarization completed successfully.
     """
     from pydantic_ai.messages import (
         PartDeltaEvent as PydanticPartDeltaEvent,
@@ -1516,7 +1571,7 @@ async def summarize_session(  # noqa: PLR0915
         TextPartDelta,
     )
 
-    from agentpool.agents.events import StreamCompleteEvent
+    from agentpool.agents.events import StreamCompleteEvent, UserMessageInsertedEvent
     from agentpool.messaging.compaction import compact_conversation, summarizing_context
 
     session = await get_or_load_session(state, session_id)
@@ -1531,8 +1586,11 @@ async def summarize_session(  # noqa: PLR0915
     # Lock ordering: route-level lock first, then turn_lock.
     async with state.get_session_lock(session_id):
         # Determine model to use
-        model_id = request.model_id if request and request.model_id else "default"
-        provider_id = request.provider_id if request and request.provider_id else "agentpool"
+        default_model_id, default_provider_id = state.resolve_default_model_info()
+        model_id = request.model_id if request and request.model_id else default_model_id
+        provider_id = (
+            request.provider_id if request and request.provider_id else default_provider_id
+        )
 
         now = now_ms()
         # Create assistant message for the summary (marked with summary=true)
@@ -1637,6 +1695,9 @@ async def summarize_session(  # noqa: PLR0915
                                 else 0
                             )
 
+                        case UserMessageInsertedEvent():
+                            pass  # User message insertions not relevant to summary generation
+
             except Exception as e:  # noqa: BLE001
                 response_text = f"Error generating summary: {e}"
             finally:
@@ -1699,7 +1760,7 @@ async def summarize_session(  # noqa: PLR0915
         finally:
             await state.mark_session_idle(session_id)
 
-        return assistant_msg_with_parts
+        return True
 
 
 @router.post("/{session_id}/share")
@@ -1718,7 +1779,7 @@ async def share_session(
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    messages = await get_messages_for_session(state, session_id)
+    messages = await get_messages_for_session(state, session_id, prefer_in_memory=False)
 
     if not messages:
         raise HTTPException(status_code=400, detail="No messages to share")
@@ -1753,6 +1814,81 @@ async def share_session(
     return updated_session
 
 
+_IDLE_WAIT_TIMEOUT: float = 10.0
+"""Maximum seconds to wait for a running turn to finish after requesting cancel."""
+
+
+async def _ensure_session_idle(state: ServerState, session_id: str) -> None:
+    """Ensure a session is idle before proceeding with STAGE/CLEAR operations.
+
+    If the session has an active run (``current_run_id`` is set), this helper:
+    1. Cancels the running turn via ``cancel_run``.
+    2. Waits up to :data:`_IDLE_WAIT_TIMEOUT` seconds for the run to complete.
+    3. Broadcasts a ``SessionStatusEvent`` with status ``"idle"`` on success.
+    4. On timeout or cancel failure, logs a warning and force-clears
+       ``current_run_id`` so the caller can proceed.
+
+    If the session is already idle (``current_run_id`` is ``None``), this
+    is a no-op.
+    """
+    if state.session_controller is None:
+        return
+
+    session_state = state.session_controller.get_session(session_id)
+    if session_state is None:
+        return
+
+    run_id = session_state.current_run_id
+    if run_id is None:
+        return
+
+    session_pool = state.pool.session_pool
+
+    # Step 1: Request cancellation of the running turn.
+    cancel_succeeded = False
+    if session_pool is not None:
+        try:
+            session_pool.cancel_run(run_id)
+            cancel_succeeded = True
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "cancel_run(%s) failed for session %s — force-clearing current_run_id",
+                run_id,
+                session_id,
+                exc_info=True,
+            )
+
+    # Step 2: Wait for the run to complete (only if cancel was initiated).
+    if cancel_succeeded and session_pool is not None:
+        try:
+            await asyncio.wait_for(
+                session_pool.wait_for_completion(session_id),
+                timeout=_IDLE_WAIT_TIMEOUT,
+            )
+        except TimeoutError:
+            logger.warning(
+                "Run %s for session %s did not complete within %.1fs"
+                " — force-clearing current_run_id",
+                run_id,
+                session_id,
+                _IDLE_WAIT_TIMEOUT,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "wait_for_completion(%s) raised for session %s — force-clearing current_run_id",
+                run_id,
+                session_id,
+                exc_info=True,
+            )
+
+    # Step 3: Broadcast idle status so clients update their UI.
+    idle_status = SessionStatus(type="idle")
+    await state.broadcast_event(SessionStatusEvent.create(session_id, idle_status))
+
+    # Step 4: Always force-clear current_run_id so the caller can proceed.
+    session_state.current_run_id = None
+
+
 class RevertRequest(OpenCodeBaseModel):
     """Request body for reverting a message."""
 
@@ -1761,20 +1897,57 @@ class RevertRequest(OpenCodeBaseModel):
 
 
 @router.post("/{session_id}/revert")
-async def revert_session(session_id: str, request: RevertRequest, state: StateDep) -> Session:
-    """Revert file changes and messages from a specific message.
+async def revert_session(session_id: str, request: RevertRequest, state: StateDep) -> Session:  # noqa: PLR0915
+    """STAGE: set a revert marker, roll back files, and broadcast hide events.
 
-    Removes messages from the revert point onwards and restores files to their
-    state before the specified message's changes.
+    This is the soft-marker model — messages are NOT deleted from the database
+    or in-memory cache. Instead:
+
+    1. Ensure the session is idle (auto-cancel any active run).
+    2. Clear queued prompts and feedback so the reverted state is stable.
+    3. Roll back file changes to before the specified message.
+    4. Set a ``SessionRevert`` marker on the session (persisted via metadata).
+    5. Broadcast ``message.removed`` / ``part.removed`` events so the frontend
+       soft-hides the reverted messages without deleting them.
+
+    If a previous STAGE is already in effect (``session.revert`` is set),
+    the old ``FileOpsTracker.reverted_changes`` are cleared before the new
+    STAGE overwrites the marker.
     """
     from agentpool_server.opencode_server.models import MessageRemovedEvent, PartRemovedEvent
+
+    # 3.1: Ensure session is idle before proceeding.
+    await _ensure_session_idle(state, session_id)
 
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Get messages for this session
-    messages = await get_messages_for_session(state, session_id)
+    # 3.2: Clear prompt and feedback queues AFTER idle check, BEFORE setting marker.
+    if state.session_controller is not None:
+        session_state = state.session_controller.get_session(session_id)
+        if session_state is not None:
+            while True:
+                try:
+                    session_state.prompt_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+            while True:
+                try:
+                    session_state.feedback_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+
+    # Get ALL messages for this session, bypassing the revert filter.
+    # We need the full unfiltered list so we can find any message ID, even
+    # ones past the current revert point (for double-STAGE support).
+    # state.messages is the in-memory cache that stores all messages without
+    # any revert filtering.
+    messages: list[MessageWithParts] = state.messages.get(session_id, [])
+    if not messages:
+        # Fall back to get_messages_for_session if state.messages is empty
+        # (e.g., cold-start scenario where messages are only in the DB).
+        messages = await get_messages_for_session(state, session_id)
     if not messages:
         raise HTTPException(status_code=400, detail="No messages to revert")
 
@@ -1788,34 +1961,26 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
     if revert_index is None:
         raise HTTPException(status_code=404, detail=f"Message {request.message_id} not found")
 
-    # Split messages: keep messages before revert point, remove from revert point onwards
-    messages_to_keep = messages[:revert_index]
-    messages_to_remove = messages[revert_index:]
+    # Messages from the revert point onwards are soft-hidden (not deleted).
+    messages_to_hide = messages[revert_index:]
 
-    if not messages_to_remove:
+    if not messages_to_hide:
         raise HTTPException(status_code=400, detail="No messages to revert")
 
-    # Persist truncation via SessionPool
-    session_pool = getattr(state.pool, "session_pool", None)
-    if session_pool is not None:
-        with contextlib.suppress(KeyError, TypeError):
-            await session_pool.truncate_messages(session_id, request.message_id)
+    # 3.9: Double-STAGE handling — if a previous STAGE is in effect, clear
+    # the old reverted_changes before proceeding with the new STAGE.
+    file_ops = state.pool.file_ops
+    if session.revert is not None:
+        file_ops.reverted_changes.clear()
 
-    # Store removed messages for unrevert
-    state.reverted_messages[session_id] = messages_to_remove
-    # Update message list - keep only messages before revert point
-    await set_messages_for_session(state, session_id, messages_to_keep)
-    # Emit message.removed and part.removed events for all removed messages
-    for msg in messages_to_remove:
-        # Emit message.removed event
+    # 3.7: Broadcast message.removed and part.removed events for soft-hiding.
+    # These tell the frontend to hide the messages, but they remain in the DB.
+    for msg in messages_to_hide:
         await state.broadcast_event(MessageRemovedEvent.create(session_id, msg.info.id))
-
-        # Emit part.removed events for all parts
         for part in msg.parts:
             await state.broadcast_event(PartRemovedEvent.create(session_id, msg.info.id, part.id))
 
-    # Also revert file changes if any
-    file_ops = state.pool.file_ops
+    # 3.5: Roll back file changes (kept from original implementation).
     if file_ops.changes and (
         revert_ops := file_ops.get_revert_operations(since_message_id=request.message_id)
     ):
@@ -1831,17 +1996,28 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
                 raise HTTPException(status_code=500, detail=detail) from e
         file_ops.remove_changes_since(request.message_id)
 
-    # Update session with revert info
+    # 3.6: Set the revert marker on the session and persist via metadata.
     session = state.sessions[session_id]
     revert_info = SessionRevert(message_id=request.message_id, part_id=request.part_id)
     updated_session = session.model_copy(update={"revert": revert_info})
     state.sessions[session_id] = updated_session
 
+    # Persist the session (including the revert marker in metadata) via the
+    # session store, if available.
+    session_pool = state.pool.session_pool
+    if session_pool is not None and session_pool.sessions.store is not None:
+        pool_id = state.pool.manifest.config_file_path
+        session_data = opencode_to_session_data(
+            updated_session,
+            agent_name=state.agent.name,
+            pool_id=pool_id,
+        )
+        await session_pool.sessions.store.save_session(session_data)
+
     # Broadcast session update
     await state.broadcast_event(SessionUpdatedEvent.create(updated_session))
 
     # Broadcast session.diff event with current file diffs
-    file_ops = state.pool.file_ops
     diffs = [FileDiff.from_file_change(change) for change in file_ops.changes]
     await state.broadcast_event(SessionDiffEvent.create(session_id, diffs))
 
@@ -1850,36 +2026,31 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
 
 @router.post("/{session_id}/unrevert")
 async def unrevert_session(session_id: str, state: StateDep) -> Session:
-    """Restore all reverted messages and file changes.
+    """CLEAR: clear the revert marker and restore file changes.
 
-    Re-applies the messages and changes that were previously reverted.
+    This is the soft-marker model — messages were never deleted, so CLEAR
+    simply:
+
+    1. Ensure the session is idle (auto-cancel any active run).
+    2. Restore file changes that were rolled back during STAGE.
+    3. Clear the ``SessionRevert`` marker from the session.
+    4. Broadcast a ``SessionUpdatedEvent`` so the frontend unhides messages.
+
+    No message restoration is needed — messages remained in ``state.messages``
+    and the database throughout the STAGE.
     """
-    from agentpool_server.opencode_server.models import MessageUpdatedEvent, PartUpdatedEvent
+    # 4.1: Ensure session is idle before proceeding.
+    await _ensure_session_idle(state, session_id)
 
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Restore reverted messages
-    reverted_messages = state.reverted_messages.get(session_id, [])
-    if not reverted_messages:
+    # 4.2 / 4.8: If there's no revert marker, there's nothing to clear.
+    if session.revert is None:
         raise HTTPException(status_code=400, detail="No reverted messages to restore")
 
-    # Restore messages to conversation
-    await set_messages_for_session(state, session_id, reverted_messages)
-
-    # Emit message.updated and part.updated events for restored messages
-    for msg in reverted_messages:
-        # Emit message.updated event
-        await state.broadcast_event(MessageUpdatedEvent.create(msg.info))
-        # Emit part.updated events for all parts
-        for part in msg.parts:
-            await state.broadcast_event(PartUpdatedEvent.create(part))
-
-    # Clear reverted messages
-    state.reverted_messages.pop(session_id, None)
-
-    # Also unrevert file changes if any
+    # 4.3: Restore file changes that were rolled back during STAGE.
     file_ops = state.pool.file_ops
     if file_ops.reverted_changes:
         unrevert_ops = file_ops.get_unrevert_operations()
@@ -1895,10 +2066,21 @@ async def unrevert_session(session_id: str, state: StateDep) -> Session:
                 raise HTTPException(status_code=500, detail=detail) from e
         file_ops.restore_reverted_changes()
 
-    # Clear revert info from session
+    # 4.4: Clear the revert marker and broadcast session update.
     updated_session = session.model_copy(update={"revert": None})
     state.sessions[session_id] = updated_session
-    # Broadcast session update
+
+    # Persist the cleared marker via the session store.
+    session_pool = state.pool.session_pool
+    if session_pool is not None and session_pool.sessions.store is not None:
+        pool_id = state.pool.manifest.config_file_path
+        session_data = opencode_to_session_data(
+            updated_session,
+            agent_name=state.agent.name,
+            pool_id=pool_id,
+        )
+        await session_pool.sessions.store.save_session(session_data)
+
     await state.broadcast_event(SessionUpdatedEvent.create(updated_session))
     return updated_session
 

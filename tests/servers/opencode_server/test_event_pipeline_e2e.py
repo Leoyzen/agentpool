@@ -27,6 +27,7 @@ from agentpool.agents.events import (
     RunStartedEvent,
     StreamCompleteEvent,
     ToolCallCompleteEvent,
+    ToolCallProgressEvent,
     ToolCallStartEvent,
 )
 from agentpool.messaging import ChatMessage
@@ -46,6 +47,9 @@ from agentpool_server.opencode_server.session_pool_integration import (
     OpenCodeSessionPoolIntegration,
 )
 from agentpool_server.opencode_server.state import ServerState
+
+
+pytestmark = pytest.mark.integration
 
 
 if TYPE_CHECKING:
@@ -97,6 +101,7 @@ async def _async_wait(seconds: float = 0.1) -> None:
 def server_state(tmp_path: Any) -> ServerState:
     """Create a minimal ServerState with a mock agent for testing."""
     agent = Mock()
+    agent.model_name = None  # resolve_default_model_info() fallback
     agent.name = "test-agent"
     agent.storage = Mock()
     agent.host_context = Mock()
@@ -299,6 +304,14 @@ class TestEventPipelineE2E:
             "ToolCallStart should produce ToolPart with ToolStateRunning"
         )
 
+        # Assert state.input is populated (not empty)
+        running = running_states[0]
+        running_state = running.properties.part.state
+        assert isinstance(running_state, ToolStateRunning)
+        assert running_state.input.get("command") == "ls", (
+            f"ToolStateRunning.input should contain command='ls', got {running_state.input!r}"
+        )
+
         # Last should be completed state
         completed_states = [
             t
@@ -307,6 +320,118 @@ class TestEventPipelineE2E:
         ]
         assert len(completed_states) >= 1, (
             "ToolCallComplete should produce ToolPart with ToolStateCompleted"
+        )
+
+        # Assert completed state also preserves input
+        completed = completed_states[0]
+        completed_state = completed.properties.part.state
+        assert isinstance(completed_state, ToolStateCompleted)
+        assert completed_state.input.get("command") == "ls", (
+            f"ToolStateCompleted.input should preserve command='ls', got {completed_state.input!r}"
+        )
+
+        await integration._stop_event_consumer(session_id)
+
+    @pytest.mark.asyncio
+    async def test_tool_call_empty_input_then_progress_full_pipeline(
+        self,
+        session_pool: SessionPool,
+        server_state: ServerState,
+    ) -> None:
+        """ToolCallStartEvent(raw_input={}) → ToolCallProgressEvent(tool_input) → SSE.
+
+        Simulates the real model streaming flow where args arrive empty
+        at PartStartEvent time and are populated later via FunctionToolCallEvent.
+        The event_processor must update tool_input from the progress event
+        when the initial input is empty.
+
+        Regression test for the bug where tool parameters were lost because
+        _process_tool_progress ignored event_tool_input when the tool part
+        already existed with empty input.
+        """
+        integration = OpenCodeSessionPoolIntegration(
+            session_pool=session_pool,
+            server_state=server_state,
+        )
+        session_id = "e2e-tool-empty-input"
+
+        await integration.create_session(session_id=session_id, agent_name="test-agent")
+        await _async_wait(0.1)
+
+        sse_queue = await session_pool.event_bus.subscribe("__global_sse__", scope="all")
+
+        # Step 1: ToolCallStartEvent with EMPTY raw_input (simulates streamed args)
+        tool_start = ToolCallStartEvent(
+            tool_call_id="call-e2e-empty-001",
+            tool_name="bash",
+            raw_input={},
+            title="Running bash",
+        )
+        await session_pool.event_bus.publish(session_id, tool_start)
+        await _async_wait(0.15)
+
+        # Step 2: ToolCallProgressEvent carries the actual tool_input
+        tool_progress = ToolCallProgressEvent(
+            tool_call_id="call-e2e-empty-001",
+            tool_name="bash",
+            tool_input={"command": "echo hello"},
+        )
+        await session_pool.event_bus.publish(session_id, tool_progress)
+        await _async_wait(0.15)
+
+        # Step 3: ToolCallCompleteEvent
+        tool_complete = ToolCallCompleteEvent(
+            tool_call_id="call-e2e-empty-001",
+            tool_name="bash",
+            tool_input={"command": "echo hello"},
+            tool_result="hello",
+            agent_name="test-agent",
+            message_id="msg-e2e-empty",
+        )
+        await session_pool.event_bus.publish(session_id, tool_complete)
+        await _async_wait(0.15)
+
+        # Collect SSE events with ToolPart
+        oc_events = _extract_opencode_events(sse_queue)
+
+        tool_part_events = [
+            e
+            for e in oc_events
+            if isinstance(e, PartUpdatedEvent) and isinstance(e.properties.part, ToolPart)
+        ]
+
+        assert len(tool_part_events) >= 2, (
+            f"Expected at least 2 ToolPart events (start + complete), got {len(tool_part_events)}"
+        )
+
+        # Find the running state event (after progress, before complete)
+        running_states = [
+            t for t in tool_part_events if isinstance(t.properties.part.state, ToolStateRunning)
+        ]
+        assert len(running_states) >= 1, (
+            "ToolCallStart/Progress should produce ToolPart with ToolStateRunning"
+        )
+
+        # KEY ASSERTION: state.input must be populated from the progress event
+        running = running_states[-1]  # Last running state (after progress)
+        running_state = running.properties.part.state
+        assert isinstance(running_state, ToolStateRunning)
+        assert running_state.input.get("command") == "echo hello", (
+            f"ToolStateRunning.input should be populated from ToolCallProgressEvent, "
+            f"got {running_state.input!r}"
+        )
+
+        # Completed state should also preserve input
+        completed_states = [
+            t for t in tool_part_events if isinstance(t.properties.part.state, ToolStateCompleted)
+        ]
+        assert len(completed_states) >= 1
+        completed = completed_states[0]
+        completed_state = completed.properties.part.state
+        assert isinstance(completed_state, ToolStateCompleted)
+        assert completed_state.input.get("command") == "echo hello", (
+            f"ToolStateCompleted.input should preserve command='echo hello', "
+            f"got {completed_state.input!r}"
         )
 
         await integration._stop_event_consumer(session_id)

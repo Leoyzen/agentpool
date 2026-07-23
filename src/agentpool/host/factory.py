@@ -161,6 +161,39 @@ class AgentFactory:
 
         return AgentRegistry()
 
+    @staticmethod
+    def _build_agent_descriptions(
+        host_context: HostContext,
+        eligible: list[str],
+    ) -> dict[str, str]:
+        """Extract short descriptions for eligible agents from the manifest.
+
+        Uses ``description`` field if set, otherwise falls back to the first
+        non-empty line of ``system_prompt`` (for string prompts).
+        """
+        from agentpool.models.agents import NativeAgentConfig
+
+        descriptions: dict[str, str] = {}
+        agents = host_context.manifest.agents
+        for name in eligible:
+            agent_cfg = agents.get(name)
+            if agent_cfg is None:
+                continue
+            desc: str = ""
+            # Prefer explicit description field.
+            if agent_cfg.description:
+                desc = agent_cfg.description.strip()
+            # Fallback: first non-empty line of system_prompt (string only).
+            if not desc and isinstance(agent_cfg, NativeAgentConfig):
+                sp = agent_cfg.system_prompt
+                if isinstance(sp, str):
+                    for line in sp.strip().splitlines():
+                        if line.strip():
+                            desc = line.strip()
+                            break
+            descriptions[name] = desc
+        return descriptions
+
     def _compile_agent_capabilities(
         self,
         agent_name: str,
@@ -211,6 +244,27 @@ class AgentFactory:
         #    ResourceSource collection and hot-swap can discover them.
         if isinstance(cfg, NativeAgentConfig):
             caps.extend(cfg.get_tool_providers())
+
+        # 4. Team communication capability — shared instance with session_metadata=None.
+        #    Per-session instance with actual metadata is created in create_session_agent().
+        from agentpool_config.team_mode import resolve_team_mode
+
+        global_tm = host_context.manifest.team_mode
+        agent_tm = cfg.team_mode
+        resolved_tm = resolve_team_mode(global_tm, agent_tm)
+        if resolved_tm is not None and resolved_tm.enabled:
+            eligible = resolved_tm.lead_eligible + resolved_tm.member_eligible
+            if agent_name in eligible:
+                from agentpool.capabilities.team_comm_capability import TeamCommCapability
+
+                agent_descs = self._build_agent_descriptions(host_context, eligible)
+                caps.append(
+                    TeamCommCapability(
+                        resolved_tm,
+                        agent_name,
+                        agent_descriptions=agent_descs,
+                    )
+                )
 
         # MCP servers are NOT compiled here — they are handled by MCPManager
         # which creates MCPCapability instances. MCPCapability is now
@@ -355,8 +409,58 @@ class AgentFactory:
             if isinstance(agent, _NativeAgent):
                 agent._extra_capabilities = list(caps)
 
+        # Per-session TeamCommCapability with actual session metadata.
+        from agentpool_config.team_mode import resolve_team_mode
+
+        global_tm = host_context.manifest.team_mode
+        agent_tm = cfg.team_mode
+        resolved_tm = resolve_team_mode(global_tm, agent_tm)
+        if resolved_tm is not None and resolved_tm.enabled:
+            eligible = resolved_tm.lead_eligible + resolved_tm.member_eligible
+            if agent_name in eligible:
+                from agentpool.agents.native_agent import Agent as _NativeAgent2
+                from agentpool.capabilities.team_comm_capability import TeamCommCapability
+
+                # Set team_role metadata so tools can check lead/member permissions.
+                # Protocol servers don't set this — factory is the right place.
+                if agent_name in resolved_tm.lead_eligible:
+                    session.metadata.setdefault("team_role", "lead")
+                else:
+                    session.metadata.setdefault("team_role", "member")
+                session.metadata.setdefault("team_member_name", agent_name)
+
+                agent_descs = self._build_agent_descriptions(host_context, eligible)
+                team_cap = TeamCommCapability(
+                    resolved_tm,
+                    agent_name,
+                    session.metadata,
+                    agent_descriptions=agent_descs,
+                )
+                if isinstance(agent, _NativeAgent2):
+                    # Replace shared TeamCommCapability with per-session
+                    # instance, or append if not already present (compile
+                    # step may not have added the shared instance).
+                    new_caps: list[AbstractCapability[Any]] = []
+                    replaced = False
+                    for c in agent._extra_capabilities:
+                        if isinstance(c, TeamCommCapability):
+                            new_caps.append(team_cap)
+                            replaced = True
+                        else:
+                            new_caps.append(c)
+                    if not replaced:
+                        new_caps.append(team_cap)
+                    agent._extra_capabilities = new_caps
+
         # Start hot-swap listeners for capabilities with on_change().
         await self._start_hot_swap_listeners(agent_name, agent, caps)
+
+        # Set the agent's home session context so that run_stream() without
+        # an explicit session_id reuses this session (and this agent instance)
+        # instead of generating a new one. This preserves instance-level
+        # state mutations such as _temporary_tools, /register-tool, and
+        # override(tools=...) — see issue #204.
+        agent.set_session_context(session_id)
 
         # Pass lifecycle config from agent config to the agent instance
         # so the RunLoop can create durable dimensions when configured.

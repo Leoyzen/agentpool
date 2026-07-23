@@ -12,6 +12,9 @@ from agentpool.messaging.graph_adapter import AgentPoolState, MessageNodeStep
 from agentpool.messaging.messagenode import MessageNode
 
 
+pytestmark = pytest.mark.unit
+
+
 class GraphMessageNode(MessageNode[Any, str]):
     """A concrete MessageNode that uses graph-based execution.
 

@@ -115,11 +115,11 @@ async def test_resume_session_schedules_commands_update(
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)
     mock_acp_agent._initialized = True
 
-    with patch.object(mock_acp_agent.tasks, "create_task") as mock_create_task:
+    with patch.object(mock_acp_agent._task_group, "start_soon") as mock_start_soon:
         await mock_acp_agent.resume_session(resume_session_request)
 
         # Should schedule send_available_commands_update and load_rules
-        assert mock_create_task.call_count == 2
+        assert mock_start_soon.call_count == 2
 
 
 @pytest.mark.unit
@@ -488,7 +488,7 @@ async def test_resume_calls_session_manager_resume_not_create(
     mock_acp_agent.session_manager.create_session = AsyncMock()
     mock_acp_agent._initialized = True
 
-    with patch.object(mock_acp_agent.tasks, "create_task"):
+    with patch.object(mock_acp_agent._task_group, "start_soon"):
         await mock_acp_agent.resume_session(resume_session_request)
 
     mock_acp_agent.session_manager.resume_session.assert_awaited_once()
@@ -509,7 +509,7 @@ async def test_resume_passes_mcp_servers_to_session_manager(mock_acp_agent, mock
         mcp_servers=mcp_servers,
     )
 
-    with patch.object(mock_acp_agent.tasks, "create_task"):
+    with patch.object(mock_acp_agent._task_group, "start_soon"):
         await mock_acp_agent.resume_session(request)
 
     mock_acp_agent.session_manager.resume_session.assert_awaited_once()
@@ -526,7 +526,7 @@ async def test_resume_passes_through_to_session_manager_correctly(
     mock_acp_agent.session_manager.resume_session = AsyncMock(return_value=mock_session)
     mock_acp_agent._initialized = True
 
-    with patch.object(mock_acp_agent.tasks, "create_task"):
+    with patch.object(mock_acp_agent._task_group, "start_soon"):
         await mock_acp_agent.resume_session(resume_session_request)
 
     mock_acp_agent.session_manager.resume_session.assert_awaited_once_with(
@@ -551,7 +551,7 @@ async def test_load_session_calls_session_manager_resume_not_create(mock_acp_age
 
     request = LoadSessionRequest(session_id="test-session-id", cwd="/tmp")
 
-    with patch.object(mock_acp_agent.tasks, "create_task"):
+    with patch.object(mock_acp_agent._task_group, "start_soon"):
         await mock_acp_agent.load_session(request)
 
     mock_acp_agent.session_manager.resume_session.assert_awaited_once()
@@ -568,7 +568,7 @@ async def test_load_session_still_replays_history_after_resume(mock_acp_agent, m
 
     request = LoadSessionRequest(session_id="test-session-id", cwd="/tmp")
 
-    with patch.object(mock_acp_agent.tasks, "create_task"):
+    with patch.object(mock_acp_agent._task_group, "start_soon"):
         await mock_acp_agent.load_session(request)
 
     mock_session.notifications.replay.assert_awaited_once()
@@ -592,7 +592,7 @@ async def test_session_data_preserved_after_resume(
             "session_store",
             new_callable=lambda: property(lambda self: mock_store),
         ),
-        patch.object(mock_acp_agent.tasks, "create_task"),
+        patch.object(mock_acp_agent._task_group, "start_soon"),
     ):
         await mock_acp_agent.resume_session(resume_session_request)
 

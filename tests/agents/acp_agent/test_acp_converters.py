@@ -26,6 +26,9 @@ from agentpool.agents.acp_agent.acp_converters import (
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 class TestACPMessageAccumulator:
     """Tests for ACPMessageAccumulator class."""
 

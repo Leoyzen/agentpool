@@ -36,8 +36,11 @@ from agentpool_server.opencode_server.models.message import (
     MessageAbortedError,
     MessageWithParts,
 )
-from agentpool_server.opencode_server.routes.message_routes import _process_message_locked
 from agentpool_server.opencode_server.state import ServerState
+from tests.servers.opencode_server.conftest import run_message_phases
+
+
+pytestmark = pytest.mark.integration
 
 
 class CancellableAgentMock:
@@ -136,7 +139,7 @@ def cancellable_mock_agent():
     session_pool.send_message = AsyncMock(return_value=run_handle)
     # Ensure get_messages returns [] so get_messages_for_session falls back to state.messages
     session_pool.get_messages = AsyncMock(return_value=[])
-    # Set up a mock event_bus so _process_message_locked can subscribe
+    # Set up a mock event_bus so run_message_phases can subscribe
     session_pool.event_bus = Mock()
     from tests._helpers.mock_stream import EmptyReceiveStream
 
@@ -169,7 +172,7 @@ def cancelled_test_state(tmp_project_dir, cancellable_mock_agent):
     state.todos = {}
     state.input_providers = {}
     state.pending_questions = {}
-    # No session_pool_integration — _process_message_locked will use the
+    # No session_pool_integration — run_message_phases will use the
     # fallback path via session_pool.sessions.get_or_create_session.
     return state
 
@@ -200,7 +203,7 @@ def _setup_session(state: ServerState, session_id: str) -> None:
     state.sessions[session_id] = session
     state.messages[session_id] = []
     # Session status is no longer tracked via state.session_status.
-    # _process_message_locked uses set_session_status() which needs
+    # run_message_phases uses set_session_status() which needs
     # session_pool_integration with _status_bridges.
     state.agent.session_id = session_id
 
@@ -249,7 +252,7 @@ class TestCancelledMessageHandling:
         state.messages[session_id].append(user_msg_with_parts)
 
         # Process message — agent will raise CancelledError
-        await _process_message_locked(
+        await run_message_phases(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
 
@@ -284,7 +287,7 @@ class TestCancelledMessageHandling:
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
         state.messages[session_id].append(user_msg_with_parts)
 
-        await _process_message_locked(
+        await run_message_phases(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
 
@@ -306,10 +309,13 @@ class TestCancelledMessageHandling:
         cancelled_test_state: ServerState,
         sample_message_request: MessageRequest,
     ) -> None:
-        """Cancelled assistant message must broadcast MessageUpdatedEvent.
+        """Cancelled assistant message must be persisted with error state.
 
-        The TUI listens for `message.updated` events to update its local state.
-        Without this broadcast, the TUI never learns the message was finalized.
+        The event bridge (via _finalize_assistant_time on RunFailedEvent)
+        handles the SSE broadcast. _wait_and_finalize is responsible for
+        persisting the aborted assistant message to state and storage.
+        This test verifies the persist path; the broadcast is tested in
+        integration tests with a real event bridge.
         """
         state = cancelled_test_state
         session_id = "test-session-cancel-event"
@@ -328,38 +334,42 @@ class TestCancelledMessageHandling:
 
         state.broadcast_event = tracking_broadcast  # type: ignore[method-assign]
 
-        await _process_message_locked(
+        await run_message_phases(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
 
-        # Find the assistant message ID
+        # Find the assistant message in state
         assistant_msgs = [
             msg for msg in state.messages[session_id] if isinstance(msg.info, AssistantMessage)
         ]
         assert len(assistant_msgs) == 1
-        assistant_id = assistant_msgs[0].info.id
+        assistant_info = assistant_msgs[0].info
+        assert isinstance(assistant_info, AssistantMessage)
 
-        # Find MessageUpdatedEvents for this assistant with time.completed set
-        update_events: list[MessageUpdatedEvent] = []
-        for e in all_events:
-            if not isinstance(e, MessageUpdatedEvent):
-                continue
-            info = e.properties.info
-            if not isinstance(info, AssistantMessage):
-                continue
-            if info.id == assistant_id and info.time.completed is not None:
-                update_events.append(e)
-
-        assert len(update_events) >= 1, (
-            "Must broadcast at least one MessageUpdatedEvent with the assistant message "
-            "that has time.completed set — TUI relies on this to update its pending state"
+        # The assistant message must have time.completed set (persisted by
+        # _wait_and_finalize) and carry the aborted error.
+        assert assistant_info.time.completed is not None, (
+            "Persisted assistant message must have time.completed set"
+        )
+        assert assistant_info.error is not None, (
+            "Persisted assistant message for a cancelled run must carry the error"
         )
 
-        # Verify the broadcast event carries the aborted error
-        final_info = update_events[-1].properties.info
-        assert isinstance(final_info, AssistantMessage)
-        assert final_info.error is not None, (
-            "The final MessageUpdatedEvent for a cancelled message must carry the error"
+        # _wait_and_finalize must NOT broadcast MessageUpdatedEvent for the
+        # assistant message — that is the event bridge's responsibility via
+        # _finalize_assistant_time(). Broadcasting here would cause duplicate
+        # SSE events (issue #263).
+        assistant_broadcasts = [
+            e
+            for e in all_events
+            if isinstance(e, MessageUpdatedEvent)
+            and isinstance(e.properties.info, AssistantMessage)
+            and e.properties.info.id == assistant_info.id
+        ]
+        assert len(assistant_broadcasts) == 0, (
+            "_wait_and_finalize must not broadcast MessageUpdatedEvent for the assistant "
+            "message — the event bridge handles this via _finalize_assistant_time() "
+            "(issue #263: duplicate SSE broadcasts)"
         )
 
     @pytest.mark.asyncio
@@ -380,7 +390,7 @@ class TestCancelledMessageHandling:
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
         state.messages[session_id].append(user_msg_with_parts)
 
-        await _process_message_locked(
+        await run_message_phases(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
 
@@ -412,7 +422,7 @@ class TestCancelledMessageHandling:
         # First message: gets cancelled
         user_msg_id_1, user_msg_1 = _create_user_message(session_id, sample_message_request)
         state.messages[session_id].append(user_msg_1)
-        await _process_message_locked(
+        await run_message_phases(
             session_id, sample_message_request, state, user_msg_id_1, user_msg_1
         )
 
@@ -424,7 +434,7 @@ class TestCancelledMessageHandling:
         )
         user_msg_id_2, user_msg_2 = _create_user_message(session_id, second_request)
         state.messages[session_id].append(user_msg_2)
-        await _process_message_locked(session_id, second_request, state, user_msg_id_2, user_msg_2)
+        await run_message_phases(session_id, second_request, state, user_msg_id_2, user_msg_2)
 
         # Simulate the TUI's pending memo logic
         all_messages = state.messages[session_id]
@@ -468,7 +478,7 @@ class TestCancelledMessageHandling:
         state.messages[session_id].append(user_msg_with_parts)
 
         # Process message — agent will raise CancelledError
-        await _process_message_locked(
+        await run_message_phases(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
 

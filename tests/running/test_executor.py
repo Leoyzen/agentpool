@@ -16,6 +16,9 @@ from agentpool.running.executor import (
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 async def test_function_sorting():
     """Test function sorting by dependencies and definition order."""
 

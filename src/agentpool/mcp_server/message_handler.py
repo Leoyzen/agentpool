@@ -46,9 +46,9 @@ class MCPMessageHandler:
         match message:
             # requests
             case RequestResponder() as responder:
-                await self.on_request(responder)
+                await self.on_request(responder)  # ty: ignore[invalid-argument-type]
                 # Handle specific requests
-                root = responder.request.root
+                root = responder.request.root  # ty: ignore[unresolved-attribute]
                 match root:
                     case mcp.types.PingRequest():
                         await self.on_ping(root)

@@ -204,7 +204,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # New shared parameters
         env: ExecutionEnvironment | StrPath | None = None,
         input_provider: InputProvider | None = None,
-        output_type: type[TResult] = str,  # type: ignore[assignment]
+        output_type: type[TResult] = str,  # type: ignore[assignment]  # ty: ignore[invalid-parameter-default]
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
         commands: Sequence[BaseCommand] | None = None,
         hooks: AgentHooks | None = None,
@@ -273,7 +273,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self._session_capabilities: list[Any] = []
         self._tool_mode: Any | None = None
         handlers = resolve_event_handlers(event_handlers)
-        self.event_handler: MultiEventHandler[IndividualEventHandler] = MultiEventHandler(handlers)
+        self.event_handler: MultiEventHandler[IndividualEventHandler] = MultiEventHandler(handlers)  # ty: ignore[invalid-assignment]
         self.hooks = hooks
         self._cancelled = False
         # _background_run_ctx is used only for the background task's internal state.
@@ -533,13 +533,29 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         for tool in await self._get_all_tools():
             tool.enabled = True
 
-    async def _get_mcp_server_info(self) -> dict[str, Any]:
-        """Get information about configured MCP servers.
+    async def _get_mcp_server_info(self) -> dict[str, MCPServerStatus]:
+        """Get MCP server status by merging agent-scoped and pool-level managers.
 
-        MCP server status is not directly available from capabilities.
-        Subclasses can override to provide agent-specific MCP server info.
+        ``self.mcp`` is always set on ``MessageNode`` (either shared with
+        the pool or a dedicated agent-scoped ``MCPManager``). When
+        ``self.host_context`` is available AND ``self.mcp is not
+        self.host_context.mcp`` (identity check — agent has its own
+        servers), pool-level servers from ``host_context.mcp`` are merged
+        in, with agent-scoped keys taking precedence on collision.
+
+        Returns:
+            Dict mapping ``client_id`` to ``MCPServerStatus``.
         """
-        return {}
+        result = await self.mcp.get_server_status()
+        # Merge pool-level servers when the agent has its own MCPManager
+        # (not shared with the pool). Agent-scoped takes precedence on
+        # key collision.
+        host_ctx = self.host_context
+        if host_ctx is not None and self.mcp is not host_ctx.mcp:
+            pool_status = await host_ctx.mcp.get_server_status()
+            pool_status.update(result)
+            result = pool_status
+        return result
 
     async def get_resource(self, name: str) -> Any:
         """Get a specific MCP resource by name or URI.
@@ -904,7 +920,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     self.log.exception("Background run failed")
                     await anyio.sleep(interval)
             self.log.debug("Continuous run completed", iterations=count)
-            return latest  # type: ignore[return-value]
+            return latest  # type: ignore[return-value]  # ty: ignore[invalid-return-type]
 
         await self.stop()  # Cancel any existing background task
         self._cancelled = False  # Reset cancellation flag for backward compat
@@ -927,7 +943,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
     def is_busy(self) -> bool:
         """Check if agent is currently processing tasks."""
-        return bool(self.task_manager._pending_tasks or self._background_task)
+        return bool(self._pending_tasks or self._background_task)
 
     async def wait(self) -> ChatMessage[TResult]:
         """Wait for background execution to complete."""
@@ -1062,9 +1078,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             )
             if effective_session_id is not None:
                 combined = "\n".join(str(p) for p in prompts)
-                self.task_manager.fire_and_forget(
-                    session_pool.followup(effective_session_id, combined)
-                )
+                self.fire_and_forget(session_pool.followup(effective_session_id, combined))
                 return
 
         # Standalone agents: use injection_manager
@@ -1113,7 +1127,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 run_ctx.session_id if run_ctx else self._events.session_id
             )
             if effective_session_id is not None:
-                self.task_manager.fire_and_forget(session_pool.steer(effective_session_id, message))
+                self.fire_and_forget(session_pool.steer(effective_session_id, message))
                 return
             # FALLBACK: effective_session_id is None but session_pool exists.
             # This happens when BackgroundTaskProvider calls inject_prompt
@@ -1123,9 +1137,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             sessions = session_pool.sessions.find_sessions_by_agent_name(self.name)
             if sessions:
                 most_recent = max(sessions, key=lambda s: s.last_active_at)
-                self.task_manager.fire_and_forget(
-                    session_pool.steer(most_recent.session_id, message)
-                )
+                self.fire_and_forget(session_pool.steer(most_recent.session_id, message))
                 return
 
         # Standalone agents: use injection_manager
@@ -1164,7 +1176,15 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             and not _in_turn_context.get()
         ):
             session_pool = self.host_context.session_pool
-            effective_session_id = session_id or generate_session_id()
+            # Fall back to the agent's home session (set via set_session_context
+            # during AgentFactory.create_session_agent) before generating a new
+            # session_id. This ensures that instance-level state mutations
+            # (_temporary_tools, /register-tool, override(tools=...)) are
+            # preserved when run_stream() is called without an explicit
+            # session_id — see issue #204.
+            effective_session_id = (
+                session_id or getattr(self._events, "session_id", None) or generate_session_id()
+            )
             existing_session = session_pool.sessions.get_session(effective_session_id)
             if existing_session is None or existing_session.agent_name == self.name:
                 return self._pool_stream_iter(

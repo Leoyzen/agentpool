@@ -220,7 +220,7 @@ class GraphStreamingAdapter:
                             await self._event_queue.put(
                                 PartStartEvent.text(
                                     index=i,
-                                    content=f"Starting step {task.node_id}",
+                                    content=f"Starting step {task.node_id}",  # ty: ignore[unresolved-attribute]
                                 )
                             )
                     case EndMarker() as end_marker:

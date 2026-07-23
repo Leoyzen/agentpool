@@ -24,8 +24,6 @@ from agentpool.tools import CallDeferred
 
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-
     from upathtools.filesystems import IsolatedMemoryFileSystem, OverlayFileSystem
 
     from agentpool import Agent
@@ -174,9 +172,6 @@ class AgentRunContext:
     queued_steer_messages: list[str | list[Any]] = field(default_factory=list)
     """Steer messages queued during post-iteration wait window."""
 
-    steer_callback: Callable[[str, str], Awaitable[str | None]] | None = None
-    """Set by RunHandle.start(), allows tools to call steer() via run_ctx."""
-
     turn_id: str | None = None
     """Unique identifier for the current Turn, set by RunHandle.start().
 
@@ -185,26 +180,23 @@ class AgentRunContext:
     share the same ``turn_id`` for idempotent crash recovery.
     """
 
+    opencode_message_id: str | None = None
+    """OpenCode message ID for the current user message.
+
+    Set by the OpenCode server when routing a user message. This is the
+    same ID space as ``request.message_id`` in the revert endpoint, so
+    ``FileOpsTracker.record_change()`` uses this field (with ``turn_id``
+    as fallback) as the ``message_id`` for file change tracking. Without
+    this, file rollback would silently fail because ``turn_id`` (UUID)
+    and the OpenCode message ID are different ID spaces.
+    """
+
     async def complete_background_task(self, child_session_id: str, message: str) -> None:
         """Signal that a background child task has completed.
 
-        Calls steer_callback first (if set), then pops and sets the done_event.
-        Ordering is critical: steer BEFORE signal to prevent NativeTurn
-        from waking before the steer message is queued.
+        Pops and sets the done_event for the child session. Steer
+        injection is handled separately by ``SessionPool.steer_from_background_task()``.
         """
-        if self.steer_callback is not None:
-            try:
-                await self.steer_callback(self.session_id, message)
-            except Exception:
-                logger.exception(
-                    "steer_callback raised in complete_background_task",
-                    child_session_id=child_session_id,
-                )
-        else:
-            logger.warning(
-                "complete_background_task called without steer_callback",
-                child_session_id=child_session_id,
-            )
         event = self.child_done_events.pop(child_session_id, None)
         if event is not None:
             event.set()
@@ -360,7 +352,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                     deferred_kind="elicitation",
                     deferred_strategy="block",
                     elicitation_message=elicitation_params.get("message"),
-                    elicitation_schema=elicitation_params.get("requestedSchema"),
+                    elicitation_schema=elicitation_params.get("requestedSchema"),  # ty: ignore[invalid-argument-type]
                     elicitation_mode=elicitation_params.get("mode"),
                 )
                 # Emit event to EventBus for protocol converters.
@@ -368,7 +360,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                     event = ElicitationDeferredEvent(
                         deferred_handle=handle,
                         message=elicitation_params.get("message", ""),
-                        requested_schema=elicitation_params.get("requestedSchema", {}),
+                        requested_schema=elicitation_params.get("requestedSchema", {}),  # ty: ignore[invalid-argument-type]
                         mode=elicitation_params.get("mode", "form"),
                         session_id=run_ctx.session_id,
                         timeout_seconds=run_ctx.elicitation_timeout,

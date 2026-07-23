@@ -179,7 +179,7 @@ class AcpMcpConnection:
                 }
                 with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
                     await response_stream.send(
-                        SessionMessage(message=JSONRPCMessage.model_validate(error_response))  # type: ignore[arg-type]
+                        SessionMessage(message=JSONRPCMessage.model_validate(error_response))  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
                     )
             return None
 
@@ -198,7 +198,7 @@ class AcpMcpConnection:
                 }
             try:
                 await response_stream.send(
-                    SessionMessage(message=JSONRPCMessage.model_validate(response))  # type: ignore[arg-type]
+                    SessionMessage(message=JSONRPCMessage.model_validate(response))  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
                 )
             except ValidationError:
                 logger.exception(
@@ -217,7 +217,7 @@ class AcpMcpConnection:
                     }
                     with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
                         await response_stream.send(
-                            SessionMessage(message=JSONRPCMessage.model_validate(fallback))  # type: ignore[arg-type]
+                            SessionMessage(message=JSONRPCMessage.model_validate(fallback))  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
                         )
             except (anyio.BrokenResourceError, anyio.ClosedResourceError):
                 logger.debug(

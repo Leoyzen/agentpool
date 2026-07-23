@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import pytest
 import structlog
 
 from acp.schema import AgentCapabilities
 from acp.schema.mcp import AcpMcpServer, HttpMcpServer, StdioMcpServer
 from agentpool.agents.acp_agent.helpers import filter_servers_by_capabilities
+
+
+pytestmark = pytest.mark.unit
 
 
 def test_acp_server_filtered_when_acp_false() -> None:

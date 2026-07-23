@@ -10,6 +10,9 @@ from agentpool.models.manifest import AgentsManifest
 from agentpool_server import A2AServer, AggregatingServer, AGUIServer
 
 
+pytestmark = pytest.mark.integration
+
+
 # Test constants
 TEST_PORT_BASE = 9000
 SERVER_COUNT = 2

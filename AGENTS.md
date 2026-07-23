@@ -54,18 +54,34 @@ uv sync --extra coding --extra server
 ```
 
 ### Testing
+
+See [`tests/AGENTS.md`](tests/AGENTS.md) for the complete testing guide — layered pyramid, VCR workflow, mandatory layers by feature type, and best practices.
+
+Quick reference:
+- Tests use pytest (not in classes), fixtures in `tests/conftest.py`
+- 4-layer pyramid: Unit (L1) → Integration (L2) → VCR (L3) → E2E (L4)
+- `ALLOW_MODEL_REQUESTS = False` gate blocks all real model calls by default
+- VCR cassettes at `tests/cassettes/` — record with `--record-mode=once`, replay in CI
+- Markers: `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.vcr`, `@pytest.mark.e2e`, `@pytest.mark.slow`, `@pytest.mark.snapshot`, `@pytest.mark.real_model`, `@pytest.mark.real_mcp`, `@pytest.mark.flaky`, `@pytest.mark.incompatible_with_thinking`, `@pytest.mark.security`
+
 ```bash
-# Run all tests (excludes slow and acp_snapshot by default)
+# Run all tests (excludes slow, snapshot, e2e, real_model, real_mcp by default)
 uv run pytest
 
 # Run with coverage
 uv run pytest --cov-report=xml --cov=src/agentpool/ --cov-report=term-missing
 
-# Run specific test markers
-uv run pytest -m unit          # Unit tests only
-uv run pytest -m integration   # Integration tests only
+# Run specific test layers
+uv run pytest -m unit          # L1 unit tests only
+uv run pytest -m integration   # L2 integration tests only
+uv run pytest -m vcr           # L3 VCR cassette replay tests
+uv run pytest -m "e2e and not slow"  # L4a smoke e2e tests (~30s, PR-blocking)
+uv run pytest -m e2e           # L4 full e2e suite (nightly)
 uv run pytest -m slow          # Include slow tests
-uv run pytest -m acp_snapshot  # ACP snapshot tests
+uv run pytest -m snapshot      # Syrupy snapshot tests
+
+# Run VCR tests with recording (requires OPENAI_API_KEY)
+uv run pytest tests/vcr/ --record-mode=once
 
 # Run single test file
 uv run pytest tests/test_specific.py
@@ -75,6 +91,9 @@ uv run pytest -vv
 
 # Run tests in parallel
 uv run pytest -n auto
+
+# CI hygiene: verify all test files have layer markers
+python tests/check_markers.py
 ```
 
 ### Code Quality
@@ -401,6 +420,77 @@ Teams are compiled into pydantic-graph workflows:
 - **YAML configuration**: Define teams in manifest with mode and members
 
 See the Graph Architecture section below for full details.
+
+#### Team Mode
+
+Team mode extends AgentPool with LLM-driven dynamic team creation and coordination at runtime through tool calls. Unlike static `graph:` or `teams:` pipelines, team mode lets the model decide team composition, member roles, and coordination strategy based on the task.
+
+**Configuration**: Add a `team_mode:` section at the top level of your YAML manifest:
+
+```yaml
+team_mode:
+  enabled: true                              # Required: enable team mode
+  lead_eligible:                             # Agents allowed to be team leads
+    - coordinator
+  member_eligible:                           # Agents allowed as team members
+    - coordinator
+    - researcher
+    - writer
+  defaults:                                 # Optional: default members for team_create
+    team_name: "default_team"
+    members:
+      - name: "lead"
+        agent: "coordinator"
+      - name: "researcher"
+        agent: "researcher"
+  bounds:                                    # Optional: resource constraints
+    max_members: 6
+    max_parallel_members: 3
+    max_member_turns: 50
+    max_wall_clock_minutes: 180
+  blackboard:                                # Optional: shared team memory
+    write_policy: "lead_only"
+    max_size_mb: 50
+  auto_urgent:                               # Topics treated as urgent
+    - escalation
+    - pricing_approval
+```
+
+**12 Team Mode Tools**: Once team mode is enabled, the lead agent gets these tools:
+
+| Tool | Description |
+|---|---|
+| `team_create` | Create a new team with members from eligible agents |
+| `team_delete` | Dissolve a team and release its resources |
+| `send_message` | Send a message to a specific team member |
+| `task_create` | Assign a task to a team member |
+| `task_list` | List all tasks and their statuses |
+| `task_update` | Update a task's status or description |
+| `read_blackboard` | Read the team's shared blackboard (persistent across turns) |
+| `write_blackboard` | Write to the shared blackboard |
+| `list_blackboard` | List keys on the shared blackboard |
+| `delete_blackboard` | Delete a key from the shared blackboard |
+| `shutdown_request` | Request a team member to stop its current activity |
+| `team_status` | Check team health, member status, and resource usage |
+
+**Default Members**: When `defaults:` is configured, `team_create` uses these members when the LLM calls it without explicit members. The LLM must still call `team_create` explicitly.
+
+**Relationship to `graph:` and `teams:`**:
+
+Team mode coexists with the existing static team approaches. They serve different use cases:
+
+- `graph:` / `teams:`: Static DAGs for known pipelines and predictable workflows. Best when you know the exact agent topology ahead of time.
+- `team_mode:`: Dynamic LLM-driven teams for ad hoc collaboration. Best when the task demands runtime decisions about who does what.
+
+You can combine both in the same config: use `graph:` for fixed preprocessing pipelines and `team_mode:` for the downstream agent that coordinates collaborators dynamically.
+
+**Key Constraints**:
+
+- Native agents only (ACP agents are not supported as team members).
+- No cross-team blackboard sharing between teams.
+- No multi-user authentication (all team actions run under the same session context).
+
+**Full Example Configs** are available at `site/examples/team-translation/config.yml`, `site/examples/team-sales/config.yml`, and `site/examples/team-dev-squad/config.yml`.
 
 #### Tool System
 Tools follow PydanticAI's tool pattern with AgentPool extensions:
@@ -987,9 +1077,11 @@ src/agentpool/lifecycle/
 
 **Observability**: Logfire + OpenTelemetry integration
 - Structured logging with context via `logfire.configure()`
-- Auto-instrumentation: `logfire.instrument_pydantic_ai()`, `logfire.instrument_mcp()`, `logfire.instrument_fastapi(app)`
+- Auto-instrumentation is configurable via `observability.provider.instrument_pydantic_ai`, `instrument_mcp`, `instrument_fastapi` (all default to `False`/`False`/`True`)
 - Manual instrumentation: `@logfire.instrument` decorator and `with logfire.span(...)` context manager
-- Trace agent execution end-to-end across async task boundaries and subagent delegation
+- Structlog logs are captured via custom `_otel_log_processor` in `log.py` (sends OTel log records without creating spans)
+- Session-level trace context: each session creates a `session.lifecycle` root span (immediately ended) stored on `SessionState.trace_context`; all spans within a session share the same `trace_id`
+- `ObservabilityRegistry` exposes `is_configured()` and `config` property for servers to check before enabling middleware
 - Export to any OTLP-compatible backend (SigNoz, Jaeger, Honeycomb, etc.) via OTEL env vars
 - Disabled in tests via env vars (see conftest.py)
 - See [Telemetry & Span Instrumentation](#telemetry--span-instrumentation) for mandatory practices
@@ -1040,9 +1132,13 @@ The project targets Python 3.13+ and **SHOULD** leverage 3.12+ features where th
 ### Testing
 - Tests use pytest (not in classes)
 - Fixtures in `tests/conftest.py`
+- 4-layer pyramid: Unit (L1) → Integration (L2) → VCR (L3) → E2E (L4) — see `tests/AGENTS.md` for full guide
 - TestModel from pydantic-ai for agent testing
+- `ALLOW_MODEL_REQUESTS = False` gate blocks all real model calls by default
+- VCR cassettes at `tests/cassettes/` — record with `--record-mode=once`, replay in CI
+- New protocol handlers REQUIRE VCR + Protocol VCR tests; bug fixes REQUIRE a reproducing test
 - Disable observability in tests (see conftest.py)
-- Markers: `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.slow`
+- Markers: `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.vcr`, `@pytest.mark.e2e`, `@pytest.mark.slow`, `@pytest.mark.snapshot`, `@pytest.mark.real_model`, `@pytest.mark.real_mcp`, `@pytest.mark.flaky`, `@pytest.mark.incompatible_with_thinking`, `@pytest.mark.security`
 
 ### Import Patterns
 ```python

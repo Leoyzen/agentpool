@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/phil65/agentpool/refs/heads/main/schema/config-schema.json
+# Team tools (team_create, send_message, task_create, etc.) are auto-wired
+# by the factory for agents in lead_eligible/member_eligible.
+agents:
+  tech_lead:
+    type: native
+    model: openai:gpt-4o
+    system_prompt: |
+      You are the tech lead. Design architecture, assign tasks, review code,
+      and ensure the team delivers quality software. Use the team_create
+      tool to form your squad, then delegate work to frontend and backend
+      developers.
+
+  frontend_dev:
+    type: native
+    model: openai:gpt-4o
+    system_prompt: |
+      You are a frontend developer. Build user interfaces using React,
+      TypeScript, and modern CSS. Implement designs, write tests, and
+      optimize for performance and accessibility.
+
+  backend_dev:
+    type: native
+    model: openai:gpt-4o
+    system_prompt: |
+      You are a backend developer. Build APIs, manage databases, and
+      implement server-side logic. Write robust, well-tested code and
+      ensure system reliability and scalability.
+
+team_mode:
+  enabled: true
+  lead_eligible:
+    - tech_lead
+  member_eligible:
+    - tech_lead
+    - frontend_dev
+    - backend_dev
+  bounds:
+    max_members: 8
+    max_wall_clock_minutes: 120
+  ttl_hours: 24

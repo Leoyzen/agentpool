@@ -1,0 +1,1020 @@
+interactions:
+- request:
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, br
+      connection:
+      - keep-alive
+      content-length:
+      - '4755'
+      content-type:
+      - application/json
+      host:
+      - api.ai.rootcloud.info
+    method: POST
+    parsed_body:
+      messages:
+      - content: |-
+          You are test_agent.
+
+          You are a helpful test assistant for VCR cassette replay.
+          Working directory: /test
+          <available-skills>
+          <skill name="example-skill" description="A simple example skill that demonstrates the basic structure and functionality. Use when you need to show how skills work or test skill loading." />
+          <skill name="openspec-apply-change" description="Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks." />
+          <skill name="openspec-explore" description="Enter explore mode - a thinking partner for exploring ideas, investigating problems, and clarifying requirements. Use when the user wants to think through something before or during a change." />
+          <skill name="openspec-archive-change" description="Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete." />
+          <skill name="openspec-propose" description="Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and tasks ready for implementation." />
+          <skill name="systematic-debugging" description="Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes" />
+          <skill name="metaskill" description="The meta-skill: create AI agent teams, individual agents, or custom skills for any project. Use when the user wants to generate a complete .claude/ agent team, create a single agent, or create a single skill." />
+          <skill name="uv-package-manager" description="Master the uv package manager for fast Python dependency management, virtual environments, and modern Python project workflows. Use when setting up Python projects, managing dependencies, or optimizing Python development workflows with uv." />
+          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing with git version control, validates improvements through test prompts, and generates visual result cards. Use when user mentions &quot;优化skill&quot;, &quot;skill评分&quot;, &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;, &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;, &quot;提升skill质量&quot;, &quot;skill review&quot;, &quot;skill打分&quot;." />
+          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned with company objectives -- qualitative objectives with measurable key results. Use when setting quarterly OKRs, aligning team goals with company strategy, drafting objectives, or learning how to write effective OKRs." />
+          <skill name="code-review-expert" description="Expert code review of current git changes with a senior engineer lens. Detects SOLID violations, security risks, and proposes actionable improvements." />
+          </available-skills>
+        role: system
+      - content:
+        - text: This will trigger a malformed stream.
+          type: text
+        role: user
+      model: svc/deepseek-v4-flash
+      stream: true
+      stream_options:
+        include_usage: true
+      tool_choice: auto
+      tools:
+      - function:
+          description: |-
+            Load a Claude Code Skill and return its instructions.
+
+            Args:
+                ctx: Agent context providing access to pool and skills
+                skill_name: Name of the skill to load, or a skill:// URI.
+                    Use skill:// URI to load a specific reference file:
+                    skill://skill-name/references/file.md
+                arguments: Optional space-separated arguments for substitution
+
+            Returns:
+                The full skill instructions for execution
+          name: load_skill
+          parameters:
+            additionalProperties: false
+            properties:
+              arguments:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+                description: Optional space-separated arguments for substitution
+              skill_name:
+                description: |-
+                  Name of the skill to load, or a skill:// URI.
+                  Use skill:// URI to load a specific reference file:
+                  skill://skill-name/references/file.md
+                type: string
+            required:
+            - skill_name
+            type: object
+        type: function
+      - function:
+          description: |-
+            List all available skills.
+
+            Returns:
+                Formatted list of available skills with descriptions and URI information
+          name: list_skills
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+    uri: http://api.ai.rootcloud.info/v1/chat/completions
+  response:
+    body:
+      string: |+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","object":"chat.completion.chunk","created":1784394944,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"I"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" need to understand"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" what the"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" user means"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" by \"this"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" will trigger a malformed stream\"."}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" Let"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" me look"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" at the available skills and see if there"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"'s something relevant."}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"\n\nActually, this"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" seems like it"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" could be related"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" to testing the system itself"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":". Let me check if"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" there's a skill"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" called"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" \"test"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"\" or something related"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" to streaming"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" or malformed streams"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".\n\nLet"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" me look at the available skills more"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" carefully:"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"\n\n1. example-skill - A"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" simple example skill\n2. openspec"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"-apply-change - Implement"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" tasks from an"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" OpenSpec change\n3. openspec"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"-explore - Explore"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" mode\n4. openspec"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"-archive-change - Archive completed"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" changes"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"\n5. openspec-pro"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"pose - Propose new"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" changes\n6. systematic-debug"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"ging - Debugging tool"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"\n7. met"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"askill - Create agents"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"/s"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"kills\n8. uv-package"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"-manager - Python package management\n9"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":". darwin-skill - Skill"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" optimization"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"\n10. brainstorm-"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"okrs - OKR"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" brainstorming\n11. code-review-ex"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"pert - Code review\n\nNone of these"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" seem specifically"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" about \"malformed streams"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"\". This"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" might"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" be a test scenario"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" where the assistant"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" is expected"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" to handle a"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" malformed stream"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" response"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" from"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" a"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" tool invocation"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".\n\nLet me try invoking"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" a skill with"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" some"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" unusual"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" parameters to see what happens, or perhaps"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" I"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" should just respond normally"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".\n\nActually, looking"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" at this more carefully,"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" the user's"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" message \"This will trigger"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" a malformed stream\" seems like it"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"'s"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" part"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" of a test setup"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" -"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" perhaps they're instruct"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"ing me that"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" something will"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" happen"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" that"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" creates"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" a malformed stream."}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" \n\nIn"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" the"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" context of V"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"CR ("}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"Video"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" Cassette Rec"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"order) cassette replay, this might mean"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" we"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"'re playing"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" back a recorded"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" interaction that"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" contains"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" a malformed stream error"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".\n\nI"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" think the most appropriate"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" thing"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" to do here"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" would"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" be to try doing"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" something innoc"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"uous"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":","}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" like listing"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" skills or"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" loading a skill,"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" which"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" might"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" trigger whatever"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" mal"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"formed stream behavior was"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" recorded"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".\n\nLet me try"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" loading"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" a"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" skill first"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".","content":"I"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","object":"chat.completion.chunk","created":1784394944,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"'m"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","object":"chat.completion.chunk","created":1784394944,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" not sure what you"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","object":"chat.completion.chunk","created":1784394944,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" mean by \"trigger"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","object":"chat.completion.chunk","created":1784394944,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" a malformed stream,"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","object":"chat.completion.chunk","created":1784394944,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"\" but I"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","object":"chat.completion.chunk","created":1784394944,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" can interact"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","object":"chat.completion.chunk","created":1784394944,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" with the available"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","object":"chat.completion.chunk","created":1784394944,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" skills. Let me check"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","object":"chat.completion.chunk","created":1784394944,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" what's available.\n\n"}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-9014ceb129e71c6f","function":{"arguments":"","name":"list_skills"},"type":"function","index":0}]}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"{}"},"type":"function","index":0}]}}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","object":"chat.completion.chunk","created":1784394944,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+        data: {"id":"chatcmpl-9cf67739eadf5eef","created":1784394944,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":452,"prompt_tokens":1146,"total_tokens":1598,"completion_tokens_details":{"reasoning_tokens":379}}}
+
+        data: [DONE]
+
+    headers:
+      cache-control:
+      - no-cache
+      connection:
+      - close
+      content-security-policy:
+      - frame-ancestors 'none'
+      content-type:
+      - text/event-stream; charset=utf-8
+      req-arrive-time:
+      - '1784394944560'
+      req-cost-time:
+      - '94'
+      resp-start-time:
+      - '1784394944654'
+      transfer-encoding:
+      - chunked
+    status:
+      code: 200
+      message: OK
+- request:
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, br
+      connection:
+      - keep-alive
+      content-length:
+      - '10422'
+      content-type:
+      - application/json
+      host:
+      - api.ai.rootcloud.info
+    method: POST
+    parsed_body:
+      messages:
+      - content: |-
+          You are test_agent.
+
+          You are a helpful test assistant for VCR cassette replay.
+          Working directory: /test
+          <available-skills>
+          <skill name="example-skill" description="A simple example skill that demonstrates the basic structure and functionality. Use when you need to show how skills work or test skill loading." />
+          <skill name="openspec-apply-change" description="Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks." />
+          <skill name="openspec-explore" description="Enter explore mode - a thinking partner for exploring ideas, investigating problems, and clarifying requirements. Use when the user wants to think through something before or during a change." />
+          <skill name="openspec-archive-change" description="Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete." />
+          <skill name="openspec-propose" description="Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and tasks ready for implementation." />
+          <skill name="systematic-debugging" description="Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes" />
+          <skill name="metaskill" description="The meta-skill: create AI agent teams, individual agents, or custom skills for any project. Use when the user wants to generate a complete .claude/ agent team, create a single agent, or create a single skill." />
+          <skill name="uv-package-manager" description="Master the uv package manager for fast Python dependency management, virtual environments, and modern Python project workflows. Use when setting up Python projects, managing dependencies, or optimizing Python development workflows with uv." />
+          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing with git version control, validates improvements through test prompts, and generates visual result cards. Use when user mentions &quot;优化skill&quot;, &quot;skill评分&quot;, &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;, &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;, &quot;提升skill质量&quot;, &quot;skill review&quot;, &quot;skill打分&quot;." />
+          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned with company objectives -- qualitative objectives with measurable key results. Use when setting quarterly OKRs, aligning team goals with company strategy, drafting objectives, or learning how to write effective OKRs." />
+          <skill name="code-review-expert" description="Expert code review of current git changes with a senior engineer lens. Detects SOLID violations, security risks, and proposes actionable improvements." />
+          </available-skills>
+        role: system
+      - content:
+        - text: This will trigger a malformed stream.
+          type: text
+        role: user
+      - content: |+
+          I'm not sure what you mean by "trigger a malformed stream," but I can interact with the available skills. Let me check what's available.
+
+        reasoning_content: "I need to understand what the user means by \"this will trigger a malformed stream\". Let me look
+          at the available skills and see if there's something relevant.\n\nActually, this seems like it could be related
+          to testing the system itself. Let me check if there's a skill called \"test\" or something related to streaming
+          or malformed streams.\n\nLet me look at the available skills more carefully:\n\n1. example-skill - A simple example
+          skill\n2. openspec-apply-change - Implement tasks from an OpenSpec change\n3. openspec-explore - Explore mode\n4.
+          openspec-archive-change - Archive completed changes\n5. openspec-propose - Propose new changes\n6. systematic-debugging
+          - Debugging tool\n7. metaskill - Create agents/skills\n8. uv-package-manager - Python package management\n9. darwin-skill
+          - Skill optimization\n10. brainstorm-okrs - OKR brainstorming\n11. code-review-expert - Code review\n\nNone of these
+          seem specifically about \"malformed streams\". This might be a test scenario where the assistant is expected to
+          handle a malformed stream response from a tool invocation.\n\nLet me try invoking a skill with some unusual parameters
+          to see what happens, or perhaps I should just respond normally.\n\nActually, looking at this more carefully, the
+          user's message \"This will trigger a malformed stream\" seems like it's part of a test setup - perhaps they're instructing
+          me that something will happen that creates a malformed stream. \n\nIn the context of VCR (Video Cassette Recorder)
+          cassette replay, this might mean we're playing back a recorded interaction that contains a malformed stream error.\n\nI
+          think the most appropriate thing to do here would be to try doing something innocuous, like listing skills or loading
+          a skill, which might trigger whatever malformed stream behavior was recorded.\n\nLet me try loading a skill first."
+        role: assistant
+        tool_calls:
+        - function:
+            arguments: '{}'
+            name: list_skills
+          id: chatcmpl-tool-9014ceb129e71c6f
+          type: function
+      - content: |-
+          Available skills:
+
+          - **example-skill**: A simple example skill that demonstrates the basic structure and functionality. Use when you need to show how skills work or test skill loading.
+            - URI: Not resolvable via URI
+          - **openspec-apply-change**: Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks.
+            - URI: Not resolvable via URI
+          - **openspec-explore**: Enter explore mode - a thinking partner for exploring ideas, investigating problems, and clarifying requirements. Use when the user wants to think through something before or during a change.
+            - URI: Not resolvable via URI
+          - **openspec-archive-change**: Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete.
+            - URI: Not resolvable via URI
+          - **openspec-propose**: Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and tasks ready for implementation.
+            - URI: Not resolvable via URI
+          - **systematic-debugging**: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes
+            - URI: Not resolvable via URI
+          - **metaskill**: The meta-skill: create AI agent teams, individual agents, or custom skills for any project. Use when the user wants to generate a complete .claude/ agent team, create a single agent, or create a single skill.
+            - URI: Not resolvable via URI
+          - **uv-package-manager**: Master the uv package manager for fast Python dependency management, virtual environments, and modern Python project workflows. Use when setting up Python projects, managing dependencies, or optimizing Python development workflows with uv.
+            - URI: Not resolvable via URI
+          - **darwin-skill**: Darwin Skill (达尔文.skill): autonomous skill optimizer inspired by Karpathy's autoresearch. Evaluates SKILL.md files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing with git version control, validates improvements through test prompts, and generates visual result cards. Use when user mentions "优化skill", "skill评分", "自动优化", "auto optimize", "skill质量检查", "达尔文", "darwin", "帮我改改skill", "skill怎么样", "提升skill质量", "skill review", "skill打分".
+            - URI: Not resolvable via URI
+          - **brainstorm-okrs**: Brainstorm team-level OKRs aligned with company objectives -- qualitative objectives with measurable key results. Use when setting quarterly OKRs, aligning team goals with company strategy, drafting objectives, or learning how to write effective OKRs.
+            - URI: Not resolvable via URI
+          - **code-review-expert**: Expert code review of current git changes with a senior engineer lens. Detects SOLID violations, security risks, and proposes actionable improvements.
+            - URI: Not resolvable via URI
+
+          ## Usage
+
+          Load a skill by name (backward compatible):
+          ```python
+          await load_skill(ctx, "skill-name")
+          ```
+
+          Or use a skill:// URI:
+          ```python
+          await load_skill(ctx, "skill://skill-name")
+          ```
+
+          With arguments for substitution:
+          ```python
+          await load_skill(ctx, "skill://skill-name", "arg1 arg2")
+          ```
+        role: tool
+        tool_call_id: chatcmpl-tool-9014ceb129e71c6f
+      model: svc/deepseek-v4-flash
+      stream: true
+      stream_options:
+        include_usage: true
+      tool_choice: auto
+      tools:
+      - function:
+          description: |-
+            Load a Claude Code Skill and return its instructions.
+
+            Args:
+                ctx: Agent context providing access to pool and skills
+                skill_name: Name of the skill to load, or a skill:// URI.
+                    Use skill:// URI to load a specific reference file:
+                    skill://skill-name/references/file.md
+                arguments: Optional space-separated arguments for substitution
+
+            Returns:
+                The full skill instructions for execution
+          name: load_skill
+          parameters:
+            additionalProperties: false
+            properties:
+              arguments:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+                description: Optional space-separated arguments for substitution
+              skill_name:
+                description: |-
+                  Name of the skill to load, or a skill:// URI.
+                  Use skill:// URI to load a specific reference file:
+                  skill://skill-name/references/file.md
+                type: string
+            required:
+            - skill_name
+            type: object
+        type: function
+      - function:
+          description: |-
+            List all available skills.
+
+            Returns:
+                Formatted list of available skills with descriptions and URI information
+          name: list_skills
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+    uri: http://api.ai.rootcloud.info/v1/chat/completions
+  response:
+    body:
+      string: |+
+        data: {"id":"chatcmpl-a927474a666fc971","object":"chat.completion.chunk","created":1784394947,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"The"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" user said \"This"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" will trigger a malformed stream.\" This"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" sounds"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" like they're telling"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" me that something"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" is"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" going"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" to cause"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" a malformed stream problem"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":". Perhaps"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" they're"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" referring"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" to the"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" V"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"CR cassette"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" replay context mentioned"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" at"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" the top ("}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"\"You are a helpful"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" test assistant for V"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"CR cassette replay.\").\n\nMaybe"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" this"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" is a test case"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" where the next"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" action"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" I take is"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" supposed to produce a malformed streaming"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" response. Let me try loading"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" the example-skill,"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" which might be designed"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" to trigger such"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" a behavior"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" in the test environment"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".","content":"Let me try loading the example"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","object":"chat.completion.chunk","created":1784394947,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" skill —"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","object":"chat.completion.chunk","created":1784394947,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" maybe"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","object":"chat.completion.chunk","created":1784394947,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" that"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","object":"chat.completion.chunk","created":1784394947,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"'s what you're hint"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","object":"chat.completion.chunk","created":1784394947,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"ing at.\n\n"}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-b054975f4052008b","function":{"arguments":"","name":"load_skill"},"type":"function","index":0}]}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"{\"skill_name\": \""},"type":"function","index":0}]}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"example-skill"},"type":"function","index":0}]}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"\"}"},"type":"function","index":0}]}}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","object":"chat.completion.chunk","created":1784394947,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+        data: {"id":"chatcmpl-a927474a666fc971","created":1784394947,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":171,"prompt_tokens":2319,"total_tokens":2490,"completion_tokens_details":{"reasoning_tokens":102}}}
+
+        data: [DONE]
+
+    headers:
+      cache-control:
+      - no-cache
+      connection:
+      - close
+      content-security-policy:
+      - frame-ancestors 'none'
+      content-type:
+      - text/event-stream; charset=utf-8
+      req-arrive-time:
+      - '1784394947360'
+      req-cost-time:
+      - '420'
+      resp-start-time:
+      - '1784394947781'
+      transfer-encoding:
+      - chunked
+    status:
+      code: 200
+      message: OK
+- request:
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, br
+      connection:
+      - keep-alive
+      content-length:
+      - '12657'
+      content-type:
+      - application/json
+      host:
+      - api.ai.rootcloud.info
+    method: POST
+    parsed_body:
+      messages:
+      - content: |-
+          You are test_agent.
+
+          You are a helpful test assistant for VCR cassette replay.
+          Working directory: /test
+          <available-skills>
+          <skill name="example-skill" description="A simple example skill that demonstrates the basic structure and functionality. Use when you need to show how skills work or test skill loading." />
+          <skill name="openspec-apply-change" description="Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks." />
+          <skill name="openspec-explore" description="Enter explore mode - a thinking partner for exploring ideas, investigating problems, and clarifying requirements. Use when the user wants to think through something before or during a change." />
+          <skill name="openspec-archive-change" description="Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete." />
+          <skill name="openspec-propose" description="Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and tasks ready for implementation." />
+          <skill name="systematic-debugging" description="Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes" />
+          <skill name="metaskill" description="The meta-skill: create AI agent teams, individual agents, or custom skills for any project. Use when the user wants to generate a complete .claude/ agent team, create a single agent, or create a single skill." />
+          <skill name="uv-package-manager" description="Master the uv package manager for fast Python dependency management, virtual environments, and modern Python project workflows. Use when setting up Python projects, managing dependencies, or optimizing Python development workflows with uv." />
+          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing with git version control, validates improvements through test prompts, and generates visual result cards. Use when user mentions &quot;优化skill&quot;, &quot;skill评分&quot;, &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;, &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;, &quot;提升skill质量&quot;, &quot;skill review&quot;, &quot;skill打分&quot;." />
+          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned with company objectives -- qualitative objectives with measurable key results. Use when setting quarterly OKRs, aligning team goals with company strategy, drafting objectives, or learning how to write effective OKRs." />
+          <skill name="code-review-expert" description="Expert code review of current git changes with a senior engineer lens. Detects SOLID violations, security risks, and proposes actionable improvements." />
+          </available-skills>
+        role: system
+      - content:
+        - text: This will trigger a malformed stream.
+          type: text
+        role: user
+      - content: |+
+          I'm not sure what you mean by "trigger a malformed stream," but I can interact with the available skills. Let me check what's available.
+
+        reasoning_content: "I need to understand what the user means by \"this will trigger a malformed stream\". Let me look
+          at the available skills and see if there's something relevant.\n\nActually, this seems like it could be related
+          to testing the system itself. Let me check if there's a skill called \"test\" or something related to streaming
+          or malformed streams.\n\nLet me look at the available skills more carefully:\n\n1. example-skill - A simple example
+          skill\n2. openspec-apply-change - Implement tasks from an OpenSpec change\n3. openspec-explore - Explore mode\n4.
+          openspec-archive-change - Archive completed changes\n5. openspec-propose - Propose new changes\n6. systematic-debugging
+          - Debugging tool\n7. metaskill - Create agents/skills\n8. uv-package-manager - Python package management\n9. darwin-skill
+          - Skill optimization\n10. brainstorm-okrs - OKR brainstorming\n11. code-review-expert - Code review\n\nNone of these
+          seem specifically about \"malformed streams\". This might be a test scenario where the assistant is expected to
+          handle a malformed stream response from a tool invocation.\n\nLet me try invoking a skill with some unusual parameters
+          to see what happens, or perhaps I should just respond normally.\n\nActually, looking at this more carefully, the
+          user's message \"This will trigger a malformed stream\" seems like it's part of a test setup - perhaps they're instructing
+          me that something will happen that creates a malformed stream. \n\nIn the context of VCR (Video Cassette Recorder)
+          cassette replay, this might mean we're playing back a recorded interaction that contains a malformed stream error.\n\nI
+          think the most appropriate thing to do here would be to try doing something innocuous, like listing skills or loading
+          a skill, which might trigger whatever malformed stream behavior was recorded.\n\nLet me try loading a skill first."
+        role: assistant
+        tool_calls:
+        - function:
+            arguments: '{}'
+            name: list_skills
+          id: chatcmpl-tool-9014ceb129e71c6f
+          type: function
+      - content: |-
+          Available skills:
+
+          - **example-skill**: A simple example skill that demonstrates the basic structure and functionality. Use when you need to show how skills work or test skill loading.
+            - URI: Not resolvable via URI
+          - **openspec-apply-change**: Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks.
+            - URI: Not resolvable via URI
+          - **openspec-explore**: Enter explore mode - a thinking partner for exploring ideas, investigating problems, and clarifying requirements. Use when the user wants to think through something before or during a change.
+            - URI: Not resolvable via URI
+          - **openspec-archive-change**: Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete.
+            - URI: Not resolvable via URI
+          - **openspec-propose**: Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and tasks ready for implementation.
+            - URI: Not resolvable via URI
+          - **systematic-debugging**: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes
+            - URI: Not resolvable via URI
+          - **metaskill**: The meta-skill: create AI agent teams, individual agents, or custom skills for any project. Use when the user wants to generate a complete .claude/ agent team, create a single agent, or create a single skill.
+            - URI: Not resolvable via URI
+          - **uv-package-manager**: Master the uv package manager for fast Python dependency management, virtual environments, and modern Python project workflows. Use when setting up Python projects, managing dependencies, or optimizing Python development workflows with uv.
+            - URI: Not resolvable via URI
+          - **darwin-skill**: Darwin Skill (达尔文.skill): autonomous skill optimizer inspired by Karpathy's autoresearch. Evaluates SKILL.md files using an 8-dimension rubric (structure + effectiveness), runs hill-climbing with git version control, validates improvements through test prompts, and generates visual result cards. Use when user mentions "优化skill", "skill评分", "自动优化", "auto optimize", "skill质量检查", "达尔文", "darwin", "帮我改改skill", "skill怎么样", "提升skill质量", "skill review", "skill打分".
+            - URI: Not resolvable via URI
+          - **brainstorm-okrs**: Brainstorm team-level OKRs aligned with company objectives -- qualitative objectives with measurable key results. Use when setting quarterly OKRs, aligning team goals with company strategy, drafting objectives, or learning how to write effective OKRs.
+            - URI: Not resolvable via URI
+          - **code-review-expert**: Expert code review of current git changes with a senior engineer lens. Detects SOLID violations, security risks, and proposes actionable improvements.
+            - URI: Not resolvable via URI
+
+          ## Usage
+
+          Load a skill by name (backward compatible):
+          ```python
+          await load_skill(ctx, "skill-name")
+          ```
+
+          Or use a skill:// URI:
+          ```python
+          await load_skill(ctx, "skill://skill-name")
+          ```
+
+          With arguments for substitution:
+          ```python
+          await load_skill(ctx, "skill://skill-name", "arg1 arg2")
+          ```
+        role: tool
+        tool_call_id: chatcmpl-tool-9014ceb129e71c6f
+      - content: |+
+          Let me try loading the example skill -- maybe that's what you're hinting at.
+
+        reasoning_content: |-
+          The user said "This will trigger a malformed stream." This sounds like they're telling me that something is going to cause a malformed stream problem. Perhaps they're referring to the VCR cassette replay context mentioned at the top ("You are a helpful test assistant for VCR cassette replay.").
+
+          Maybe this is a test case where the next action I take is supposed to produce a malformed streaming response. Let me try loading the example-skill, which might be designed to trigger such a behavior in the test environment.
+        role: assistant
+        tool_calls:
+        - function:
+            arguments: '{"skill_name": "example-skill"}'
+            name: load_skill
+          id: chatcmpl-tool-b054975f4052008b
+          type: function
+      - content: "# example-skill\n\nA simple example skill that demonstrates the basic structure and functionality. Use when
+          you need to show how skills work or test skill loading.\n\n# Example Skill\n\n## Overview\n\nThis is an example
+          skill that demonstrates the basic structure of a Claude Code Skill. It shows how to organize instructions, provide
+          examples, and reference additional resources.\n\n## Quick Start\n\nWhen using this skill, follow these steps:\n\n1.
+          **Identify the task**: Determine what specific functionality is needed\n2. **Check resources**: Look for additional
+          files in the skill directory\n3. **Follow patterns**: Use the examples provided as templates\n\n## Examples\n\n###
+          Basic Usage\n```python\n# Example of how this skill might be used\ndef example_function():\n    print(\"This is
+          an example from the skill\")\n    return \"skill_result\"\n```\n\n### Advanced Usage\n```bash\n# Command line example\necho
+          \"Running skill example\"\n```\n\n## Additional Resources\n\nThis skill may contain additional files:\n- `helpers.py`:
+          Utility functions\n- `templates/`: Example templates\n- `docs/`: Extended documentation\n\n## Best Practices\n\n-
+          Always validate inputs\n- Provide clear error messages  \n- Document any assumptions\n- Test functionality before
+          deployment\n\nSkill URI: skill://local/example-skill"
+        role: tool
+        tool_call_id: chatcmpl-tool-b054975f4052008b
+      model: svc/deepseek-v4-flash
+      stream: true
+      stream_options:
+        include_usage: true
+      tool_choice: auto
+      tools:
+      - function:
+          description: |-
+            Load a Claude Code Skill and return its instructions.
+
+            Args:
+                ctx: Agent context providing access to pool and skills
+                skill_name: Name of the skill to load, or a skill:// URI.
+                    Use skill:// URI to load a specific reference file:
+                    skill://skill-name/references/file.md
+                arguments: Optional space-separated arguments for substitution
+
+            Returns:
+                The full skill instructions for execution
+          name: load_skill
+          parameters:
+            additionalProperties: false
+            properties:
+              arguments:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+                description: Optional space-separated arguments for substitution
+              skill_name:
+                description: |-
+                  Name of the skill to load, or a skill:// URI.
+                  Use skill:// URI to load a specific reference file:
+                  skill://skill-name/references/file.md
+                type: string
+            required:
+            - skill_name
+            type: object
+        type: function
+      - function:
+          description: |-
+            List all available skills.
+
+            Returns:
+                Formatted list of available skills with descriptions and URI information
+          name: list_skills
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+    uri: http://api.ai.rootcloud.info/v1/chat/completions
+  response:
+    body:
+      string: |+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"The"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" example"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" skill"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" loaded successfully"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" without"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" any malformed stream issue"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":". The user said \"This"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" will trigger a malformed stream\" -"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" perhaps they were"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" indicating"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" something"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" else"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":", or maybe"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" the"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" malformed stream is expected to happen"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" in a different way"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"."}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" \n\nLet me think"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" about this differently. Maybe"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" the user is saying"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" that their"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" input"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" \"This will trigger a malformed stream"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"\" IS"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" itself"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" the mal"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"formed stream trigger?"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" Or perhaps"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" they're"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" testing how"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" I handle"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" the"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" statement"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"?"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"\n\nSince this"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" seems"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" to be a test"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" scenario for"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" VCR cassette replay, and nothing"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" went"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" wrong,"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" let"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" me just respond accordingly"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".","content":"The example"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" skill loaded successfully with"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" no issues"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":". No"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" malformed stream was"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" triggered on"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" my"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" end.\n\nCould"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" you clarify what you expect"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" to"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" happen? Are"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" you testing a"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" specific V"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"CR cassette replay"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" scenario or"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" expecting"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" a"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" particular error condition? Let"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" me know how"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" you"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"'d like me"}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" to proceed."}}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","object":"chat.completion.chunk","created":1784394949,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+        data: {"id":"chatcmpl-a9ffcd156cde7b9f","created":1784394949,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":174,"prompt_tokens":2758,"total_tokens":2932,"completion_tokens_details":{"reasoning_tokens":111}}}
+
+        data: [DONE]
+
+    headers:
+      cache-control:
+      - no-cache
+      connection:
+      - close
+      content-security-policy:
+      - frame-ancestors 'none'
+      content-type:
+      - text/event-stream; charset=utf-8
+      req-arrive-time:
+      - '1784394949016'
+      req-cost-time:
+      - '199'
+      resp-start-time:
+      - '1784394949216'
+      transfer-encoding:
+      - chunked
+    status:
+      code: 200
+      message: OK
+version: 1
+...

@@ -12,6 +12,9 @@ from agentpool.messaging.context import NodeContext
 from agentpool_commands.prompts import ShowPromptCommand
 
 
+pytestmark = pytest.mark.unit
+
+
 TEST_CONFIG = """
 prompts:
   system_prompts:

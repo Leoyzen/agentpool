@@ -52,7 +52,7 @@ async def convert_prompts(prompts: Sequence[PromptCompatible]) -> list[UserConte
             case os.PathLike() | UPath():
                 from agentpool.mime_utils import guess_type
 
-                path_obj = to_upath(p)
+                path_obj = to_upath(p)  # ty: ignore[invalid-argument-type]
                 mime_type = guess_type(str(path_obj))
 
                 match mime_type:

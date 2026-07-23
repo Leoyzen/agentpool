@@ -12,6 +12,9 @@ from datetime import timedelta
 import pytest
 
 
+pytestmark = pytest.mark.unit
+
+
 def tool_conf(**kwargs: object) -> str:
     """Get Tool config instance.
 

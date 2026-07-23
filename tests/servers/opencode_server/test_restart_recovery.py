@@ -15,6 +15,9 @@ from agentpool_server.opencode_server.state import ServerState
 from agentpool_storage.opencode_provider import helpers
 
 
+pytestmark = pytest.mark.integration
+
+
 if TYPE_CHECKING:
     from pathlib import Path
     from unittest.mock import Mock

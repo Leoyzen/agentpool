@@ -21,7 +21,7 @@ from agentpool.agents.events import (
     PartDeltaEvent,
     StreamCompleteEvent,
 )
-from agentpool.lifecycle import RunState
+from agentpool.lifecycle import DirectChannel, MemoryJournal
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.turn import Turn
@@ -165,6 +165,13 @@ async def test_run_handle_steer_for_acp_path() -> None:
     event_bus = AsyncMock()
     session = MagicMock()
     session.turn_lock = asyncio.Lock()
+    session.parent_session_id = None
+    session.input_provider = None
+    # Per-prompt model: CommChannel lives on SessionState
+    journal = MemoryJournal()
+    comm = DirectChannel(journal=journal)
+    session._comm_channel = comm
+    session._active_steer_callback = None
 
     handle = RunHandle(
         run_id="test-run",
@@ -186,7 +193,7 @@ async def test_run_handle_steer_for_acp_path() -> None:
     await asyncio.sleep(0.05)
 
     # Turn should be running (blocked on release_event inside _BlockingTurn)
-    assert handle._run_state == RunState.RUNNING
+    assert not handle.complete_event.is_set()
     # ACP path does not set active_agent_run (only NativeTurn does)
     assert handle.active_agent_run is None
 
@@ -198,11 +205,9 @@ async def test_run_handle_steer_for_acp_path() -> None:
     # Release the turn so it can complete
     release_event.set()
     await asyncio.sleep(0.05)
-    handle.close()
-    await asyncio.sleep(0.05)
     await consumer_task
 
-    assert handle._run_state == RunState.DONE
+    assert handle.complete_event.is_set()
 
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,8 @@ from agentpool.common_types import PathReference
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from fsspec.asyn import AsyncFileSystem
     from pydantic_ai import FileUrl, MultiModalContent, UserContent
     from pydantic_ai.messages import ToolCallPartDelta
@@ -203,3 +205,27 @@ def uri_to_path_reference(
         return None
     name = format_uri_as_link(uri)
     return PathReference(path=path, fs=fs, mime_type=mime_type, display_name=name)
+
+
+def flatten_prompts(prompts: Sequence[str | list[Any] | Any]) -> list[Any]:
+    """Flatten a sequence of prompt items into a single list.
+
+    List items are extended into the result, preserving structured content
+    blocks (TextContent, ImageUrl, etc.) as top-level elements. All other
+    items (strings, single content objects) are appended as-is.
+
+    Args:
+        prompts: Sequence of prompt items, each either a string, a list
+            of content items, or a single content item.
+
+    Returns:
+        Flattened list of content items.
+    """
+    result: list[Any] = []
+    for p in prompts:
+        match p:
+            case list():
+                result.extend(p)
+            case _:
+                result.append(p)
+    return result

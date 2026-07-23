@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -14,6 +13,7 @@ from sqlmodel import select
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, TokenCost
 from agentpool.storage import deserialize_messages
+from agentpool.utils.time_utils import parse_iso_timestamp
 from agentpool_storage.models import ConversationData
 from agentpool_storage.sql_provider.models import Conversation
 
@@ -113,7 +113,7 @@ def run_alembic_migrations(connection: Any) -> None:
     alembic_cfg.attributes["connection"] = connection
     script = ScriptDirectory.from_config(alembic_cfg)
 
-    def upgrade_fn(rev: str, context: EnvironmentContext) -> list:  # type: ignore[type-arg]
+    def upgrade_fn(rev: str, context: EnvironmentContext) -> list[Any]:
         return script._upgrade_revs("head", rev)
 
     with EnvironmentContext(
@@ -168,7 +168,7 @@ def build_message_query(query: SessionQuery) -> SelectOfScalar[Any]:
     """Build SQLModel query from SessionQuery."""
     from agentpool_storage.sql_provider.models import Message
 
-    stmt = select(Message).order_by(Message.timestamp)  # type: ignore
+    stmt = select(Message).order_by(Message.timestamp, Message.id)  # type: ignore
 
     conditions: list[Any] = []
     if query.name:
@@ -178,7 +178,7 @@ def build_message_query(query: SessionQuery) -> SelectOfScalar[Any]:
     if query.since and (cutoff := query.get_time_cutoff()):
         conditions.append(Message.timestamp >= cutoff)
     if query.until:
-        conditions.append(Message.timestamp <= datetime.fromisoformat(query.until))
+        conditions.append(Message.timestamp <= parse_iso_timestamp(query.until))
     if query.contains:
         conditions.append(Message.content.contains(query.contains))  # type: ignore
     if query.roles:

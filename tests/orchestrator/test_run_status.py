@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from enum import Enum
 
+import pytest
+
 from agentpool.lifecycle import RunOutcome, RunState
+
+
+pytestmark = pytest.mark.unit
 
 
 def test_run_state_defines_exactly_3_states() -> None:

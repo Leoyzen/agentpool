@@ -16,6 +16,9 @@ from agentpool_config.storage import SQLStorageConfig
 from agentpool_storage.sql_provider import SQLModelProvider
 
 
+pytestmark = pytest.mark.unit
+
+
 if TYPE_CHECKING:
     from pathlib import Path
 

@@ -5,6 +5,9 @@ import pytest
 from agentpool import Agent
 
 
+pytestmark = pytest.mark.unit
+
+
 async def test_conversation_history_management():
     """Test that conversation history is maintained correctly."""
     async with Agent(model="test") as agent:

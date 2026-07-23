@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
+
 from agentpool.agents.context import AgentRunContext
+
+
+pytestmark = pytest.mark.unit
 
 
 def test_agent_run_context_depth_default() -> None:

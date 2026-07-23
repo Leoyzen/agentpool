@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
 
 from agentpool import Agent, AgentPool, AgentsManifest
+
+
+pytestmark = pytest.mark.integration
 
 
 if TYPE_CHECKING:
@@ -119,9 +123,12 @@ async def test_agent_forwarding(basic_config: Path):
 
         await agent1.run("test")
         # Wait for all forwarded messages to be processed
-        await agent1.task_manager.complete_tasks()
-        await agent2.task_manager.complete_tasks()
-        await agent3.task_manager.complete_tasks()
+        if agent1._pending_tasks:
+            await asyncio.gather(*agent1._pending_tasks, return_exceptions=True)
+        if agent2._pending_tasks:
+            await asyncio.gather(*agent2._pending_tasks, return_exceptions=True)
+        if agent3._pending_tasks:
+            await asyncio.gather(*agent3._pending_tasks, return_exceptions=True)
         assert responded_agents == {"agent1", "agent2", "agent3"}
 
 
@@ -142,7 +149,8 @@ async def test_partial_chain(partial_config: Path):
         agent2.message_sent.connect(lambda _: responded_agents.add("agent2"))
 
         await agent1.run("test")
-        await agent2.task_manager.complete_tasks()
+        if agent2._pending_tasks:
+            await asyncio.gather(*agent2._pending_tasks, return_exceptions=True)
         assert responded_agents == {"agent1", "agent2"}
 
 

@@ -36,7 +36,7 @@ from agentpool.log import get_logger
 from agentpool.sessions.models import ProjectData, SessionData
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 from agentpool.utils.thread_helpers import run_in_thread
-from agentpool.utils.time_utils import datetime_to_ms, get_now, ms_to_datetime
+from agentpool.utils.time_utils import datetime_to_ms, get_now, ms_to_datetime, parse_iso_timestamp
 from agentpool_config.storage import OpenCodeStorageConfig
 from agentpool_server.opencode_server.models import (
     AssistantMessage,
@@ -462,11 +462,21 @@ class OpenCodeStorageProvider(StorageProvider):
                         part_file.write_text(anyenv.dump_json(dct, indent=True), encoding="utf-8")
 
                     elif isinstance(part, ThinkingPart):
+                        reasoning_metadata: dict[str, Any] = {}
+                        if part.id is not None:
+                            reasoning_metadata["thinking_id"] = part.id
+                        if part.provider_name is not None:
+                            reasoning_metadata["provider_name"] = part.provider_name
+                        if part.signature is not None:
+                            reasoning_metadata["signature"] = part.signature
+                        if part.provider_details is not None:
+                            reasoning_metadata["provider_details"] = part.provider_details
                         reasoning_part = OpenCodeReasoningPart(
                             id=part_id,
                             session_id=session_id,
                             message_id=message_id,
                             text=part.content,
+                            metadata=reasoning_metadata or None,
                             time=TimeStartEndOptional(start=now_ms),
                         )
                         part_file = parts_dir / f"{part_id}.json"
@@ -512,7 +522,7 @@ class OpenCodeStorageProvider(StorageProvider):
                 if query.since and cutoff and chat_msg.timestamp < cutoff:
                     continue
                 if query.until:
-                    until_dt = datetime.fromisoformat(query.until)
+                    until_dt = parse_iso_timestamp(query.until)
                     if chat_msg.timestamp > until_dt:
                         continue
                 if query.contains and query.contains not in chat_msg.content:
@@ -732,9 +742,9 @@ class OpenCodeStorageProvider(StorageProvider):
             chat_msg = helpers.to_chat_message(msg=oc_msg, parts=parts)
             messages.append(chat_msg)
 
-        # Sort by timestamp
+        # Sort by timestamp, then by message_id for deterministic ordering
         now = get_now()
-        messages.sort(key=lambda m: m.timestamp or now)
+        messages.sort(key=lambda m: (m.timestamp or now, m.message_id))
         if not include_ancestors or not messages:
             return messages
         # Get ancestor chain if first message has parent_id

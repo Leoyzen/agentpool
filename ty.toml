@@ -1,0 +1,180 @@
+# ty — Astral's Python type checker
+# https://docs.astral.sh/ty/reference/configuration/
+
+[environment]
+python-version = "3.13"
+python-platform = "all"
+
+[analysis]
+# Replace mypy's ignore_missing_imports with ty's replace-imports-with-any.
+# These modules are treated as `typing.Any`, suppressing both import errors
+# and type errors from untyped third-party libraries.
+replace-imports-with-any = [
+  "fsspec.**",
+  "grep_ast.**",
+  "tree_sitter.**",
+  "tree_sitter_language_pack.**",
+  "rustworkx.**",
+  "zstandard.**",
+  "telegram.**",
+  "slack_sdk.**",
+  "slackify_markdown.**",
+  "copykitten.**",
+  "promptlayer.**",
+  "langfuse.**",
+  "braintrust.**",
+  "composio.**",
+  "ast_grep_py.**",
+  "fasta2a.**",
+  "mcp_run.**",
+  "pyarrow.**",
+  "anyvoice.**",
+  "clawd_code_sdk.**",
+  "fastmcp.prompts.**",
+  "fastmcp.tools.**",
+  "apprise.**",
+  # TODO: ty has ~81% false-positive rate on pydantic-ai due to unsupported
+  # PEP 696 TypeVar defaults (ty#592), ParamSpec+Concatenate (ty#1535),
+  # TypedDict narrowing (ty#154), kwargs tracking (ty#1332), etc.
+  # Tracked in pydantic-ai#3970. Remove these once ty upstream fixes land.
+  "pydantic_ai.**",
+  "pydantic_graph.**",
+]
+# Respect existing `# type: ignore` comments for mypy compatibility.
+respect-type-ignore-comments = true
+
+[rules]
+# --- Suppressed rules (known false positives or migration period) ---
+unused-type-ignore-comment = "ignore"  # Migration: don't warn about stale ignores
+invalid-type-form = "ignore"  # Known FP in complex generics
+not-subscriptable = "ignore"  # Known FP with dynamic types
+# ty can't infer `Never` from exhaustiveness checking when the union element
+# is `Any` (e.g. pydantic-ai's ModelResponse). Tracked as ty limitation.
+type-assertion-failure = "ignore"
+# ty doesn't recognize asyncio.Queue / contextlib.contextmanager patterns.
+invalid-context-manager = "ignore"
+# ty doesn't recognize Pydantic model fields as constructor kwargs — it treats
+# `index=`, `part=`, `delta=` etc. as unknown arguments. This is a ty bug
+# with Pydantic model __init__ inference. Remove once ty#1429 is fixed.
+unknown-argument = "ignore"
+
+# --- Warn-level rules ---
+division-by-zero = "warn"  # Default is ignore; enable as warning
+possibly-missing-import = "warn"  # Imports that might be missing
+possibly-unresolved-reference = "warn"  # Approximates mypy warn_return_any
+unresolved-import = "warn"  # Import resolution failures
+
+# --- Error-level rules (approximate mypy strict) ---
+missing-type-argument = "error"  # Approximates mypy disallow_any_generics
+
+[terminal]
+# Migration period: warnings don't cause non-zero exit code.
+# Change to `true` once ty output is stable and clean.
+error-on-warning = false
+
+[src]
+# Explicitly include both src and tests directories.
+include = ["src", "tests"]
+
+# --- Per-file overrides ---
+
+# Test files: relax type checking to reduce noise.
+# Tests use dynamic fixtures, mocks, and untyped assertions that
+# would generate excessive false positives under strict checking.
+[[overrides]]
+include = ["tests/**", "**/test_*.py", "**/conftest.py"]
+
+[overrides.rules]
+unresolved-attribute = "ignore"
+missing-type-argument = "warn"
+possibly-unresolved-reference = "ignore"
+# Test files use monkeypatching, mocks, dynamic kwargs, and loose typing
+# that ty cannot verify — suppress these false positives uniformly.
+invalid-assignment = "ignore"  # monkeypatch: obj.method = mock_func
+unknown-argument = "ignore"  # dynamic kwargs to event constructors
+not-iterable = "ignore"  # contextlib.aclosing not recognized
+invalid-method-override = "ignore"  # test subclass override signatures
+unsupported-operator = "ignore"  # `in` on custom types
+invalid-argument-type = "ignore"  # mocks/wrongs types passed to constructors
+invalid-return-type = "ignore"  # mock return types don't match signatures
+missing-argument = "ignore"  # partial mock constructors
+missing-typed-dict-key = "ignore"  # test dict literals missing optional keys
+call-non-callable = "ignore"  # mock objects treated as non-callable
+call-top-callable = "ignore"  # top-level callable safety check
+invalid-yield = "ignore"  # async generator mock patterns
+invalid-await = "ignore"  # mock awaitable patterns
+
+# SQLAlchemy files: ty can't understand column expression types
+# (.where(), .asc(), column comparisons). Suppress broadly.
+[[overrides]]
+include = [
+  "src/agentpool_storage/sql_provider/**",
+  "src/agentpool/lifecycle/journal.py",
+]
+
+[overrides.rules]
+invalid-argument-type = "ignore"  # .where() column expressions
+unresolved-attribute = "ignore"  # .asc() on column objects
+
+# Wrapper/decorator files: ty doesn't follow __wrapped__, __signature__,
+# __agentpool_wrapped__ dynamic attributes set on wrapper functions.
+[[overrides]]
+include = [
+  "src/agentpool/tools/tool_wrapping.py",
+  "src/agentpool/utils/signatures.py",
+  "src/agentpool/talk/talk.py",
+  "src/agentpool/running/discovery.py",
+  "src/agentpool/mcp_server/client.py",
+]
+
+[overrides.rules]
+unresolved-attribute = "ignore"  # __wrapped__, __signature__, __name__ on unions
+
+# ACP schema files: ty doesn't understand functools.partial type narrowing.
+[[overrides]]
+include = [
+  "src/acp/schema/session_updates.py",
+  "src/acp/schema/tool_call.py",
+  "src/acp/agent/connection.py",
+  "src/acp/client/connection.py",
+]
+
+[overrides.rules]
+invalid-argument-type = "ignore"  # partial() application
+
+# ACP tool_call_reporter: ty can't narrow the content union type.
+[[overrides]]
+include = ["src/acp/tool_call_reporter.py"]
+
+[overrides.rules]
+invalid-argument-type = "ignore"  # list.extend/append with union types
+invalid-assignment = "ignore"  # content union assignment
+
+# Config files: ty can't verify dict-spread (**{...}) value types against
+# Pydantic model fields, nor anyio Timeout constructor signatures.
+[[overrides]]
+include = [
+  "src/agentpool_config/graph_translation.py",
+  "src/agentpool_config/mcp_server.py",
+]
+
+[overrides.rules]
+invalid-argument-type = "ignore"  # dict-spread to Pydantic, Timeout init
+
+# CLI ui: anyio's _parallel_safe attribute not recognized by ty.
+[[overrides]]
+include = ["src/agentpool_cli/ui.py"]
+
+[overrides.rules]
+unresolved-attribute = "ignore"  # _parallel_safe on anyio decorator
+
+# ACP input_provider & session_agent_mgmt: ty sees `object` instead of
+# the actual session/proxy type after protocol dispatch.
+[[overrides]]
+include = [
+  "src/agentpool_server/acp_server/input_provider.py",
+  "src/agentpool_server/acp_server/session_agent_mgmt.py",
+]
+
+[overrides.rules]
+unresolved-attribute = "ignore"  # .get() on object after dispatch

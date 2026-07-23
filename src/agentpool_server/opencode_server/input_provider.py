@@ -25,6 +25,11 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+#: Default timeout (in seconds) for elicitation questions.
+#: If the user does not respond within this period, the elicitation
+#: is automatically cancelled and the agent receives a "cancel" result.
+ELICITATION_TIMEOUT_SECONDS: int = 300
+
 
 @dataclass
 class PendingPermission:
@@ -393,7 +398,9 @@ class OpenCodeInputProvider(InputProvider):
         )
         # Wait for answer
         try:
-            answers = await future  # list[list[str]]
+            answers = await asyncio.wait_for(
+                future, timeout=ELICITATION_TIMEOUT_SECONDS
+            )  # list[list[str]]
             answer = answers[0] if answers else []  # Get first question's answer
             # ElicitResult content must be a dict, not a plain value
             # Wrap the answer in a dict with a "value" key
@@ -403,6 +410,9 @@ class OpenCodeInputProvider(InputProvider):
                 {"value": answer} if is_multi else {"value": answer[0] if answer else ""}
             )
             return types.ElicitResult(action="accept", content=content)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        except TimeoutError:
+            logger.info("Question timed out", question_id=question_id)
+            return types.ElicitResult(action="cancel")
         except asyncio.CancelledError:
             logger.info("Question cancelled", question_id=question_id)
             return types.ElicitResult(action="cancel")
@@ -572,7 +582,9 @@ class OpenCodeInputProvider(InputProvider):
 
         # Wait for answers
         try:
-            answers = await future  # list[list[str]] - indexed by question
+            answers = await asyncio.wait_for(
+                future, timeout=ELICITATION_TIMEOUT_SECONDS
+            )  # list[list[str]] - indexed by question
 
             # Map answers back to property keys
             # answers[i] corresponds to questions[i] which corresponds to original_keys[i]
@@ -589,6 +601,9 @@ class OpenCodeInputProvider(InputProvider):
 
             return types.ElicitResult(action="accept", content=result_content)  # pyright: ignore[reportArgumentType]
 
+        except TimeoutError:
+            logger.info("Multi-question timed out", question_id=question_id)
+            return types.ElicitResult(action="cancel")
         except asyncio.CancelledError:
             logger.info("Multi-question cancelled", question_id=question_id)
             return types.ElicitResult(action="cancel")
@@ -636,7 +651,7 @@ class OpenCodeInputProvider(InputProvider):
                 requestedSchema={"type": "object", "properties": dict() as props},
                 message=msg,
             ) if len(props) >= 1:
-                questions = [self._property_to_question(k, s) for k, s in list(props.items())[:10]]
+                questions = [self._property_to_question(k, s) for k, s in list(props.items())[:10]]  # ty: ignore[invalid-argument-type]
             case types.ElicitRequestFormParams(message=msg, requestedSchema=schema):
                 logger.info(
                     "Durable elicitation schema not supported for question UI",

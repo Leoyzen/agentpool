@@ -1,0 +1,1 @@
+"""Team mode tests package."""

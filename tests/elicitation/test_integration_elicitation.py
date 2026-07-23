@@ -100,7 +100,7 @@ def elicitation_payload() -> ElicitationResumePayload:
 # ============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_in_process_resume_resolves_future_and_completes_tool(
     run_ctx: RunContext[Any],
 ) -> None:
@@ -168,7 +168,7 @@ async def test_in_process_resume_resolves_future_and_completes_tool(
 # ============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_crash_recovery_resume_uses_cached_elicitation_responses(
     agent_ctx: AgentContext,
     elicitation_deferred_call: PendingDeferredCall,
@@ -232,7 +232,7 @@ async def test_crash_recovery_resume_uses_cached_elicitation_responses(
 # ============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_session_close_rejects_pending_futures() -> None:
     """close_session rejects all pending elicitation futures with SessionClosedError.
 
@@ -268,7 +268,7 @@ async def test_session_close_rejects_pending_futures() -> None:
 # ============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_mixed_elicitation_and_deferred_tool_results_routing(
     run_ctx: RunContext[Any],
     elicitation_deferred_call: PendingDeferredCall,
@@ -343,7 +343,7 @@ async def test_mixed_elicitation_and_deferred_tool_results_routing(
 # ============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_acp_converter_outputs_toolcallstart_for_elicitation_event() -> None:
     """ACP event converter emits ToolCallStart with elicitation params in field_meta.
 
@@ -388,7 +388,7 @@ async def test_acp_converter_outputs_toolcallstart_for_elicitation_event() -> No
 # ============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_end_to_end_durable_elicitation_checkpoint_and_resume(
     run_ctx: RunContext[Any],
 ) -> None:
@@ -482,7 +482,7 @@ async def test_end_to_end_durable_elicitation_checkpoint_and_resume(
 # ============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_concurrent_elicitation_deferrals_across_sessions() -> None:
     """Concurrent elicitation deferrals across sessions are isolated.
 
@@ -530,7 +530,7 @@ async def test_concurrent_elicitation_deferrals_across_sessions() -> None:
 # ============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_opencode_processor_creates_toolpart_for_elicitation_event() -> None:
     """OpenCode event processor creates ToolPart with elicitation metadata.
 
@@ -607,7 +607,7 @@ async def test_opencode_processor_creates_toolpart_for_elicitation_event() -> No
 # ============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 def test_acp_capability_gated_elicitation_fallback_to_request_permission() -> None:
     """ACP input provider falls back to request_permission when elicitation/create unsupported.
 
@@ -628,7 +628,7 @@ def test_acp_capability_gated_elicitation_fallback_to_request_permission() -> No
     assert provider.supports_durable_elicitation is True
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 async def test_acp_capability_gated_form_but_not_url() -> None:
     """ACP capability gating: form supported but not URL only allows form durable.
 

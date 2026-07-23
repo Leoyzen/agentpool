@@ -12,6 +12,9 @@ from agentpool.models.manifest import AgentsManifest
 from agentpool_server.a2a_server import A2AServer
 
 
+pytestmark = pytest.mark.integration
+
+
 pytestmark = pytest.mark.skipif(not find_spec("fasta2a"), reason="fasta2a not installed")
 
 

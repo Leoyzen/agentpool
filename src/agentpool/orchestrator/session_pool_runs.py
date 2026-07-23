@@ -18,6 +18,7 @@ from agentpool.agents.events import (
 )
 from agentpool.log import get_logger
 from agentpool.orchestrator.run import RunHandle
+from agentpool.utils.pydantic_ai_helpers import flatten_prompts
 
 
 if TYPE_CHECKING:
@@ -47,7 +48,7 @@ class SessionPoolRunsMixin:
     pool: AgentPool[Any]
 
     @property
-    def event_bus(self) -> EventBus: ...  # type: ignore[empty-body]
+    def event_bus(self) -> EventBus: ...  # type: ignore[empty-body]  # ty: ignore[empty-body]
 
     def _get_active_run_handle(self, session_id: str) -> RunHandle | None:
         """Get the active RunHandle for a session, if any.
@@ -109,20 +110,14 @@ class SessionPoolRunsMixin:
 
         Raises:
             SessionBusyError: If the session already has an active run
-                that is not ``DONE``.
+                that is not completed.
         """
-        from agentpool.lifecycle import (
-            MemoryJournal,
-            ProtocolChannel,
-            ProtocolTrigger,
-        )
-        from agentpool.lifecycle.types import RunState
         from agentpool.orchestrator.session_controller import SessionBusyError
 
         # Staleness check: prevent silently overwriting an active run.
         if session.current_run_id is not None and session.current_run_id in self.sessions._runs:
             existing = self.sessions._runs[session.current_run_id]
-            if existing._run_state != RunState.DONE:
+            if not existing.complete_event.is_set():
                 raise SessionBusyError(session_id, session.current_run_id)
 
         event_bus = self.event_bus
@@ -130,25 +125,8 @@ class SessionPoolRunsMixin:
         if cached_elicitation_responses is not None:
             run_ctx.cached_elicitation_responses = cached_elicitation_responses
 
-        trigger = ProtocolTrigger()
-        comm_channel: ProtocolChannel | None = None
-        if event_bus is not None:
-            journal = MemoryJournal()
-            comm_channel = ProtocolChannel(
-                journal=journal,
-                event_bus=event_bus,
-                session_id=session_id,
-            )
-
-        # Wire _host_context and _agent_registry, matching the pattern
-        # in SessionController._start_run_handle() (session_controller.py:950-972).
-        from agentpool.host.registry import AgentRegistry
-
-        host_ctx = self.pool.get_context()
-        agent_registry = AgentRegistry(
-            dict.fromkeys(self.pool.manifest.agents),  # type: ignore[arg-type]
-        )
-
+        # Use lifecycle dimensions from SessionState (per-prompt migration).
+        # _host_context and _agent_registry are also sourced from SessionState.
         run_handle = RunHandle(
             run_id=uuid.uuid4().hex,
             session_id=session_id,
@@ -157,10 +135,8 @@ class SessionPoolRunsMixin:
             event_bus=event_bus,
             session=session,
             run_ctx=run_ctx,
-            _trigger_source=trigger,
-            _comm_channel=comm_channel,
-            _host_context=host_ctx,
-            _agent_registry=agent_registry,
+            _host_context=session._host_context,
+            _agent_registry=session._agent_registry,
         )
         if message_history is not None:
             # Handle both list[ModelMessage] and MessageHistory objects.
@@ -175,6 +151,16 @@ class SessionPoolRunsMixin:
                 run_handle._message_history = model_msgs
             else:
                 run_handle._message_history = list(message_history)
+        else:
+            # Bridge from agent.conversation (per-prompt migration, task 1.5).
+            model_messages: list[ModelMessage] = []
+            conversation = agent.conversation
+            if conversation is not None:
+                for chat_msg in conversation.get_history():
+                    model_messages.extend(chat_msg.messages)
+            from agentpool.orchestrator.run import inject_cancelled_tool_results
+
+            run_handle._message_history = inject_cancelled_tool_results(model_messages)
         if deferred_tool_results is not None:
             run_handle._resume_deferred_tool_results = deferred_tool_results
         self.sessions._runs[run_handle.run_id] = run_handle
@@ -316,22 +302,13 @@ class SessionPoolRunsMixin:
             return
         # Flatten prompts: if any prompt is a list (multimodal content),
         # preserve structure; otherwise join strings.
-        if not prompts:
-            content: str | list[Any] = ""
-        elif len(prompts) == 1:
-            content = prompts[0]
-        else:
-            # Multiple prompts: flatten into a list, extending list items
-            # and appending string items.
-            flattened: list[Any] = []
-            for p in prompts:
-                if isinstance(p, str):
-                    flattened.append(p)
-                elif isinstance(p, list):
-                    flattened.extend(p)
-                else:
-                    flattened.append(p)
-            content = flattened
+        match prompts:
+            case []:
+                content: str | list[Any] = ""
+            case [single]:
+                content = single
+            case _:
+                content = flatten_prompts(prompts)
 
         run_id = session.current_run_id
         if run_id is not None:

@@ -32,6 +32,7 @@ from agentpool_config.skills import SkillsConfig
 from agentpool_config.storage import StorageConfig
 from agentpool_config.system_prompts import PromptLibraryConfig
 from agentpool_config.task import Job
+from agentpool_config.team_mode import TeamModeConfig
 from agentpool_config.teams import TeamConfig
 
 
@@ -228,6 +229,17 @@ class AgentsManifest(Schema):
     """Mapping of team IDs to their configurations.
 
     Docs: https://phil65.github.io/agentpool/YAML%20Configuration/team_configuration/
+    """
+
+    team_mode: TeamModeConfig | None = Field(
+        default=None,
+        title="Team mode configuration",
+    )
+    """Global team mode configuration for dynamic team creation.
+
+    When set, enables ad-hoc team formation, inter-agent messaging,
+    and blackboard state sharing. Per-agent overrides can be set
+    via ``agents.<name>.team_mode``.
     """
 
     storage: StorageConfig = Field(

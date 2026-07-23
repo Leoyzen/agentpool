@@ -97,6 +97,18 @@ class DirectChannel:
         return self._queue
 
     @property
+    def journal(self) -> Journal:
+        """The Journal instance owned by this channel.
+
+        Exposed so callers (notably ``RunHandle.__post_init__``) can
+        reuse the same Journal instance instead of constructing a new
+        one, which would break crash recovery (``journal.resume()``
+        reads from an empty journal while events are written to a
+        different instance).
+        """
+        return self._journal
+
+    @property
     def publishes_to_event_bus(self) -> bool:
         """DirectChannel does not publish to the EventBus.
 
@@ -294,6 +306,18 @@ class ProtocolChannel:
         """
         return True
 
+    @property
+    def journal(self) -> Journal:
+        """The Journal instance owned by this channel.
+
+        Exposed so callers (notably ``RunHandle.__post_init__``) can
+        reuse the same Journal instance instead of constructing a new
+        one, which would break crash recovery (``journal.resume()``
+        reads from an empty journal while events are written to a
+        different instance).
+        """
+        return self._journal
+
     def attach(self, run_loop: Any) -> None:
         """Store a reference to the RunLoop for feedback routing.
 
@@ -323,6 +347,12 @@ class ProtocolChannel:
         This preserves backward compatibility with tests and protocol
         handlers that do not expect ``StateUpdate`` on the EventBus.
 
+        ``UserMessageInsertedEvent`` events during replay (``_replaying``
+        is ``True``) are journaled but NOT published to the EventBus.
+        During crash-recovery replay, these events were already delivered
+        to the EventBus during the original run. Republishing would cause
+        duplicate user message rendering in protocol frontends.
+
         Args:
             event: The event to publish.
 
@@ -343,8 +373,18 @@ class ProtocolChannel:
         # them but do not publish to EventBus. This prevents protocol
         # servers and EventBus subscribers from receiving state machine
         # transitions they don't know how to handle.
-        if not isinstance(event, StateUpdate):
-            await self._event_bus.publish(self._session_id, event)
+        if isinstance(event, StateUpdate):
+            return
+
+        # P2: During replay, skip EventBus publish for
+        # UserMessageInsertedEvent to avoid duplicate user message
+        # rendering. The event was already delivered during the
+        # original run; replay only needs journaling.
+        if self._replaying and type(event).__name__ == "UserMessageInsertedEvent":
+            logger.debug("Skipping EventBus publish for replayed UserMessageInsertedEvent")
+            return
+
+        await self._event_bus.publish(self._session_id, event)
 
     def recv(self) -> Feedback | None:
         """Non-blocking dequeue from the feedback queue.

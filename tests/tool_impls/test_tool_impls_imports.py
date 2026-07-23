@@ -11,6 +11,9 @@ import importlib
 import pytest
 
 
+pytestmark = pytest.mark.unit
+
+
 TOOL_IMPLS_MODULES = [
     "agentpool.tool_impls.agent_cli",
     "agentpool.tool_impls.bash",

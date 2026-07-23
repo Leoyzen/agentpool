@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from agentpool.utils.time_utils import get_now
+from agentpool.utils.time_utils import get_now, parse_iso_timestamp
 from agentpool_config.storage import MemoryStorageConfig
 from agentpool_storage.base import StorageProvider
 from agentpool_storage.models import ConversationData
@@ -13,6 +12,7 @@ from agentpool_storage.models import ConversationData
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from datetime import datetime
 
     from agentpool.common_types import JsonValue
     from agentpool.messaging import ChatMessage
@@ -63,11 +63,7 @@ class MemoryStorageProvider(StorageProvider):
                     continue
 
             # Skip if after until time
-            if (
-                query.until
-                and msg.timestamp
-                and msg.timestamp > datetime.fromisoformat(query.until)
-            ):
+            if query.until and msg.timestamp and msg.timestamp > parse_iso_timestamp(query.until):
                 continue
 
             # Skip if content doesn't match search
@@ -157,9 +153,9 @@ class MemoryStorageProvider(StorageProvider):
         """Get all messages for a session."""
         messages = [msg for msg in self.messages if msg.session_id == session_id]
 
-        # Sort by timestamp
+        # Sort by timestamp, then by message_id for deterministic ordering
         now = get_now()
-        messages.sort(key=lambda m: m.timestamp or now)
+        messages.sort(key=lambda m: (m.timestamp or now, m.message_id))
 
         if not include_ancestors or not messages:
             return messages
@@ -244,7 +240,7 @@ class MemoryStorageProvider(StorageProvider):
             conv_messages = [m for m in self.messages if m.session_id == source_session_id]
             if conv_messages:
                 now = get_now()
-                conv_messages.sort(key=lambda m: m.timestamp or now)
+                conv_messages.sort(key=lambda m: (m.timestamp or now, m.message_id))
                 fork_point_id = conv_messages[-1].message_id
 
         # Create new conversation

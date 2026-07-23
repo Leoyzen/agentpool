@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 import logging
 from logging.handlers import RotatingFileHandler
 import sys
@@ -33,6 +33,41 @@ def _pydantic_processor(
     for key, value in event_dict.items():
         if isinstance(value, BaseModel):
             event_dict[key] = value.model_dump(exclude_defaults=True)
+    return event_dict
+
+
+def _otel_log_processor(
+    logger: Any, method_name: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
+    """Emit OTel log record without creating a span.
+
+    Replaces ``logfire.StructlogProcessor()`` which creates a span per log
+    message (causing 298K+ spans/24h from SSE events alone). This processor
+    calls ``logfire.log()`` to send an OTel log record with structured
+    attributes from the event dict, then returns the event dict unchanged
+    so downstream renderers (ConsoleRenderer, JSONRenderer) receive the
+    full dict for output formatting.
+
+    Args:
+        logger: The structlog logger (unused).
+        method_name: The log method name (e.g., "info", "debug").
+        event_dict: The structured event dictionary.
+
+    Returns:
+        The event dict, unchanged, for downstream processors.
+    """
+    level = str(event_dict.get("level", method_name))
+    msg = event_dict.get("event", method_name)
+    # Build attributes from a COPY — do not mutate event_dict.
+    # The renderer downstream needs the "event" key for output formatting.
+    attributes: dict[str, Any] = {k: v for k, v in event_dict.items() if k != "event"}
+    with suppress(Exception):
+        # Never let observability break logging
+        logfire.log(
+            level=level,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+            msg_template=str(msg),
+            attributes=attributes,
+        )
     return event_dict
 
 
@@ -94,11 +129,11 @@ def _configure_file_logging(level: LogLevel, log_file: str, max_lines: int = 100
         structlog.stdlib.add_logger_name,
         structlog.stdlib.PositionalArgumentsFormatter(),
         _pydantic_processor,
-        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.TimeStamper(fmt="iso", utc=False),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         structlog.processors.UnicodeDecoder(),
-        logfire.StructlogProcessor(),  # Capture logs for observability
+        _otel_log_processor,  # Capture logs for observability (no spans)
         structlog.dev.ConsoleRenderer(
             colors=False, exception_formatter=structlog.dev.plain_traceback
         ),
@@ -136,7 +171,7 @@ def _configure_console_logging(
         structlog.stdlib.add_log_level,
         structlog.stdlib.PositionalArgumentsFormatter(),
         _pydantic_processor,
-        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.TimeStamper(fmt="iso", utc=False),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.UnicodeDecoder(),
     ]
@@ -146,8 +181,8 @@ def _configure_console_logging(
         processors.insert(1, structlog.stdlib.add_logger_name)
         processors.append(structlog.processors.format_exc_info)
 
-    # Add logfire processor before final renderer to capture logs for observability
-    processors.append(logfire.StructlogProcessor())
+    # Add OTel log processor before final renderer to capture logs for observability
+    processors.append(_otel_log_processor)
 
     # Add final renderer
     if use_console_renderer:
@@ -183,7 +218,7 @@ def get_logger(name: str, log_level: LogLevel | None = None) -> structlog.stdlib
                 structlog.stdlib.add_log_level,
                 _pydantic_processor,
                 structlog.processors.StackInfoRenderer(),
-                logfire.StructlogProcessor(),
+                _otel_log_processor,
                 structlog.dev.ConsoleRenderer(
                     colors=False, exception_formatter=structlog.dev.plain_traceback
                 ),

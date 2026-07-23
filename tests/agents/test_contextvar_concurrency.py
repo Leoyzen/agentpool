@@ -7,6 +7,11 @@ import asyncio
 from pathlib import Path
 import sys
 
+import pytest
+
+
+pytestmark = pytest.mark.unit
+
 
 # Add src to path for imports
 sys_path = Path(__file__).parent.parent.parent / "src"

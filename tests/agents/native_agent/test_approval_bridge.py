@@ -29,6 +29,9 @@ from agentpool.agents.native_agent.approval_bridge import (
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture
 def mock_agent() -> Agent[Any]:
     """Create an agent with mocked internals for approval bridge testing."""

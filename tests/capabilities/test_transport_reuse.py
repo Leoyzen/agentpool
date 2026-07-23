@@ -16,6 +16,9 @@ from agentpool.mcp_server.session_pool import SessionConnectionPool
 from agentpool_config.mcp_server import StdioMCPServerConfig
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.mark.anyio
 async def test_two_caps_same_config_share_transport() -> None:
     """Two McpServerCap instances with same config share one transport."""

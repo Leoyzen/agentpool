@@ -10,6 +10,9 @@ from agentpool import Agent, ChatMessage
 from agentpool.delegation.base_team import BaseTeam
 
 
+pytestmark = pytest.mark.unit
+
+
 async def test_team_parallel_execution():
     """Test that team runs all agents in parallel and collects responses."""
     # Create three agents that append their name to input

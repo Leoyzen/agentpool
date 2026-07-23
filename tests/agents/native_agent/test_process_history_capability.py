@@ -17,6 +17,9 @@ from agentpool.agents.native_agent.process_history_capability import (
 )
 
 
+pytestmark = pytest.mark.unit
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

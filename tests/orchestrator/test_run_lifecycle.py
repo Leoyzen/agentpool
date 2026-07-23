@@ -10,15 +10,14 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import MagicMock
 
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent
+from agentpool import Agent, AgentPool
 from agentpool.agents.base_agent import _current_run_ctx_var
 from agentpool.agents.context import AgentRunContext
-from agentpool.lifecycle import RunOutcome, RunState
+from agentpool.lifecycle import RunOutcome
 from agentpool.orchestrator.core import SessionPool
 from agentpool.orchestrator.metrics import MetricsCollector
 from agentpool.orchestrator.run import RunHandle
@@ -33,42 +32,41 @@ pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
 
 def test_run_handle_defaults() -> None:
-    """RunHandle starts in pending state with fresh context."""
+    """RunHandle starts with fresh context and complete_event unset."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     assert handle.run_id == "r1"
     assert handle.session_id == "s1"
     assert handle.agent_type == "native"
-    assert handle._run_state == RunState.IDLE
+    assert handle.is_running  # complete_event not set → is_running
     assert handle.run_ctx.current_task is None
     assert not handle.complete_event.is_set()
 
 
 @pytest.mark.anyio
 async def test_start_transitions_to_running() -> None:
-    """start() transitions status to running and stores the task."""
+    """start() is_running is True for a fresh RunHandle and stores the task."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     task: asyncio.Task[Any] = asyncio.create_task(asyncio.sleep(0))
-    handle._start_task(task)
+    handle.run_ctx.current_task = task
     assert handle.is_running
     assert handle.run_ctx.current_task is task
     await task
 
 
 def test_start_without_task() -> None:
-    """start() works when no task is provided."""
+    """RunHandle is_running when no task is provided."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
-    handle._start_task()
     assert handle.is_running
     assert handle.run_ctx.current_task is None
 
 
 def test_complete_transitions_and_sets_event() -> None:
-    """complete() transitions to completed and sets complete_event."""
+    """complete() sets outcome=COMPLETED and sets complete_event."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     handle.complete()
-    assert handle._run_state == RunState.DONE
     assert handle.outcome == RunOutcome.COMPLETED
     assert handle.complete_event.is_set()
+    assert not handle.is_running
 
 
 def test_complete_invokes_cleanup_callback() -> None:
@@ -92,10 +90,9 @@ def test_complete_invokes_cleanup_callback() -> None:
 
 
 def test_fail_transitions_and_sets_event() -> None:
-    """fail() transitions to failed and sets complete_event."""
+    """fail() sets outcome=FAILED and sets complete_event."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     handle.fail()
-    assert handle._run_state == RunState.DONE
     assert handle.outcome == RunOutcome.FAILED
     assert handle.complete_event.is_set()
 
@@ -105,7 +102,6 @@ def test_fail_with_exception_sets_cancelled() -> None:
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     exc = RuntimeError("boom")
     handle.fail(exc)
-    assert handle._run_state == RunState.DONE
     assert handle.outcome == RunOutcome.FAILED
     assert handle.run_ctx.cancelled is True
 
@@ -134,12 +130,11 @@ async def test_cancel_sets_cancelled_flag() -> None:
     """cancel() sets run_ctx.cancelled without calling cleanup."""
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     task = asyncio.create_task(asyncio.sleep(10))
-    handle._start_task(task)
+    handle.run_ctx.current_task = task
 
     handle.cancel()
     assert handle.run_ctx.cancelled is True
-    # Status should remain running; cleanup is deferred
-    assert handle.is_running
+    # complete_event not set by cancel — only by close/complete/fail
     assert not handle.complete_event.is_set()
 
     task.cancel()
@@ -162,7 +157,7 @@ async def test_cancel_does_not_call_cleanup_callback() -> None:
         _cleanup_callback=cleanup,
     )
     task = asyncio.create_task(asyncio.sleep(10))
-    handle._start_task(task)
+    handle.run_ctx.current_task = task
 
     handle.cancel()
     assert cleanup_calls == []
@@ -188,7 +183,7 @@ async def test_cancel_done_task_is_safe() -> None:
     handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
     task = asyncio.create_task(asyncio.sleep(0))
     await task
-    handle._start_task(task)
+    handle.run_ctx.current_task = task
 
     handle.cancel()
     assert handle.run_ctx.cancelled is True
@@ -201,14 +196,9 @@ async def test_cancel_done_task_is_safe() -> None:
 
 
 @pytest.fixture
-def mock_pool_for_metrics() -> MagicMock:
-    """Return a mocked AgentPool with a main_agent."""
-    pool = MagicMock()
-    pool.main_agent = MagicMock()
-    pool.main_agent.name = "main-agent"
-    pool.manifest = MagicMock()
-    pool.manifest.agents = {}
-    return pool
+def mock_pool_for_metrics(minimal_pool: AgentPool) -> AgentPool:
+    """Return the real AgentPool for metrics testing."""
+    return minimal_pool
 
 
 class TestMetricsCollectorActiveRuns:
@@ -216,7 +206,7 @@ class TestMetricsCollectorActiveRuns:
 
     @pytest.mark.anyio
     async def test_get_metrics_returns_zero_initially(
-        self, mock_pool_for_metrics: MagicMock
+        self, mock_pool_for_metrics: AgentPool
     ) -> None:
         """MetricsCollector should use SessionPool.active_runs for active_turns."""
         session_pool = SessionPool(mock_pool_for_metrics)
@@ -229,7 +219,7 @@ class TestMetricsCollectorActiveRuns:
 
     @pytest.mark.anyio
     async def test_get_metrics_counts_native_vs_non_native(
-        self, mock_pool_for_metrics: MagicMock
+        self, mock_pool_for_metrics: AgentPool
     ) -> None:
         """active_runs_by_agent_type should count native and non-native runs."""
         session_pool = SessionPool(mock_pool_for_metrics)
@@ -242,7 +232,6 @@ class TestMetricsCollectorActiveRuns:
             run_id="run-1",
             session_id="sess-native",
             agent_type="native",
-            _run_state=RunState.RUNNING,
         )
         session_pool.sessions._runs["run-1"] = handle_native
 
@@ -252,7 +241,6 @@ class TestMetricsCollectorActiveRuns:
             run_id="run-2",
             session_id="sess-non-native",
             agent_type="non-native",
-            _run_state=RunState.RUNNING,
         )
         session_pool.sessions._runs["run-2"] = handle_non_native
 

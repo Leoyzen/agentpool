@@ -37,11 +37,11 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert  # noqa: E402
 try:
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 except ImportError:
-    pg_insert = None  # type: ignore[assignment]
+    pg_insert = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 try:
     from sqlalchemy.dialects.mysql import insert as mysql_insert
 except ImportError:
-    mysql_insert = None  # type: ignore[assignment]
+    mysql_insert = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
 
 class SQLMessagesMixin:
@@ -92,7 +92,7 @@ class SQLMessagesMixin:
             "provider_response_id": message.provider_response_id,
             "messages": serialize_messages(message.messages),
             "finish_reason": message.finish_reason,
-            "timestamp": get_now(),
+            "timestamp": message.timestamp,
         }
 
         async with AsyncSession(self.engine) as session:
@@ -146,7 +146,7 @@ class SQLMessagesMixin:
             result = await session.execute(
                 select(Message)
                 .where(Message.session_id == session_id)
-                .order_by(Message.timestamp.asc())  # type: ignore
+                .order_by(Message.timestamp.asc(), Message.id.asc())  # type: ignore
             )
             messages = [to_chat_message(m) for m in result.scalars().all()]
 
@@ -284,6 +284,55 @@ class SQLMessagesMixin:
             # Then delete
             await session.execute(
                 delete(Message).where(Message.session_id == session_id)  # type: ignore[arg-type]
+            )
+            await session.commit()
+            return count
+
+    async def truncate_messages(self, session_id: str, up_to_message_id: str) -> int:
+        """Delete the message with up_to_message_id and all messages after it.
+
+        Finds the boundary message by ``session_id`` + ``up_to_message_id``,
+        reads its timestamp, then deletes every message in the session whose
+        timestamp is greater than or equal to that boundary timestamp.
+
+        Args:
+            session_id: ID of the conversation to truncate.
+            up_to_message_id: ID of the message that marks the truncation
+                boundary. This message and everything after it is deleted.
+
+        Returns:
+            The count of deleted messages. Returns 0 when the boundary
+            message does not exist in the session.
+        """
+        from sqlalchemy import delete, func
+
+        async with AsyncSession(self.engine) as session:
+            # Find the boundary message to get its timestamp.
+            boundary_result = await session.execute(
+                select(Message.timestamp).where(
+                    Message.id == up_to_message_id,
+                    Message.session_id == session_id,
+                )
+            )
+            boundary_timestamp = boundary_result.scalar_one_or_none()
+            if boundary_timestamp is None:
+                return 0
+
+            # Count the messages that will be deleted.
+            count_result = await session.execute(
+                select(func.count()).where(
+                    Message.session_id == session_id,
+                    Message.timestamp >= boundary_timestamp,
+                )
+            )
+            count = count_result.scalar() or 0
+
+            # Delete the boundary message and everything after it.
+            await session.execute(
+                delete(Message).where(
+                    Message.session_id == session_id,  # type: ignore[arg-type]
+                    Message.timestamp >= boundary_timestamp,  # type: ignore[arg-type]
+                )
             )
             await session.commit()
             return count

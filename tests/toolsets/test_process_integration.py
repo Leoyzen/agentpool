@@ -15,6 +15,9 @@ from agentpool_config.toolsets import (
 )
 
 
+pytestmark = pytest.mark.integration
+
+
 def get_echo_command(message: str) -> tuple[str, list[str]]:
     """Get platform-appropriate echo command."""
     if platform.system() == "Windows":

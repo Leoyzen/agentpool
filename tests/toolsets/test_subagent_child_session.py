@@ -33,6 +33,9 @@ from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 from agentpool_toolsets.builtin.subagent_tools import SubagentTools
 
 
+pytestmark = pytest.mark.integration
+
+
 def _stream_empty(queue: asyncio.Queue[Any]) -> bool:
     return queue.empty()
 

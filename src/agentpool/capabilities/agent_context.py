@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from agentpool.host.context import HostContext, RunScope
     from agentpool.host.registry import AgentRegistry
     from agentpool.orchestrator.session_controller import SessionState
+    from agentpool_config.team_mode import TeamModeConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +37,7 @@ class AgentContext:
         scope: Run scope (config_id, tenant_id, user_id, session_id).
         host: Infrastructure handles (mcp, storage, skills, etc.).
         extension_registry: ExtensionRegistry for scoped capability access.
+        team_mode_config: Global team mode config from manifest, if enabled.
     """
 
     agent_registry: AgentRegistry
@@ -44,3 +46,4 @@ class AgentContext:
     scope: RunScope
     host: HostContext
     extension_registry: ExtensionRegistry | None = None
+    team_mode_config: TeamModeConfig | None = None
