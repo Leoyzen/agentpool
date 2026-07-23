@@ -3,9 +3,9 @@
 Tests cover:
 - _otel_log_processor (no span creation, structured attributes preserved)
 - ObservabilityRegistry config fields and API
-- SessionState.trace_context field and lifecycle
-- SessionController.get_trace_context() accessor
-- close_session() clears trace_context
+- Per-run trace context (run.message root span on RunHandle)
+- SessionState no longer has trace_context (replaced by per-run spans)
+- Conditional auto-instrumentation (instrument_pydantic_ai, instrument_mcp, instrument_fastapi)
 """
 
 from __future__ import annotations
@@ -200,100 +200,75 @@ class TestObservabilityRegistry:
 
 
 @pytest.mark.unit
-class TestSessionTraceContext:
-    """Tests for SessionState.trace_context and SessionController.get_trace_context()."""
+class TestPerRunTrace:
+    """Tests for per-run trace context (run.message root span).
 
-    def test_session_state_has_trace_context_field(self):
-        """SessionState has trace_context field with default None."""
+    Each RunHandle gets its own trace via a ``run.message`` root span
+    created in ``_start_run_handle``. The span context is attached in
+    ``_consume_run`` so all run-internal spans share the same trace_id.
+    """
+
+    def test_run_handle_has_run_span_fields(self):
+        """RunHandle has _run_span and _run_context fields (default None)."""
+        from agentpool.orchestrator.run import RunHandle
+
+        handle = RunHandle(run_id="test", session_id="s1", agent_type="native")
+        assert handle._run_span is None
+        assert handle._run_context is None
+
+    def test_session_state_no_longer_has_trace_context(self):
+        """SessionState no longer has trace_context field (removed in per-run design)."""
         from agentpool.orchestrator.session_controller import SessionState
 
         state = SessionState(session_id="test", agent_name="test")
-        assert state.trace_context is None
+        assert not hasattr(state, "trace_context")
 
-    def test_session_state_trace_context_can_be_set(self):
-        """SessionState.trace_context can be set to a Context object."""
-        from opentelemetry import trace
-        from opentelemetry.context import Context
-
-        from agentpool.orchestrator.session_controller import SessionState
-
-        state = SessionState(session_id="test", agent_name="test")
-        tracer = trace.get_tracer("test")
-        span = tracer.start_span("test.span")
-        ctx = trace.set_span_in_context(span)
-        span.end()
-
-        state.trace_context = ctx
-        assert state.trace_context is not None
-        assert isinstance(state.trace_context, Context)
-
-    def test_get_trace_context_returns_none_for_missing_session(self):
-        """SessionController.get_trace_context() returns None for unknown session."""
+    def test_session_controller_no_longer_has_get_trace_context(self):
+        """SessionController no longer has get_trace_context method."""
         from agentpool.orchestrator.session_controller import SessionController
 
-        # Create a minimal mock — we just need _sessions dict
-        controller = object.__new__(SessionController)
-        controller._sessions = {}
+        assert not hasattr(SessionController, "get_trace_context")
 
-        result = controller.get_trace_context("nonexistent")
-        assert result is None
-
-    def test_get_trace_context_returns_context_for_existing_session(self):
-        """SessionController.get_trace_context() returns context for existing session."""
+    def test_run_message_span_creates_new_trace(self):
+        """run.message span creates a new trace (not inheriting caller context)."""
         from opentelemetry import trace
-
-        from agentpool.orchestrator.session_controller import (
-            SessionController,
-            SessionState,
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import (
+            SimpleSpanProcessor,
+        )
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
         )
 
-        tracer = trace.get_tracer("test")
-        span = tracer.start_span("test.span")
-        ctx = trace.set_span_in_context(span)
-        span.end()
+        # Use a real TracerProvider (not the default no-op) so spans get real trace IDs
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
 
-        state = SessionState(session_id="s1", agent_name="test")
-        state.trace_context = ctx
+        default_provider = trace.get_tracer_provider()
+        trace.set_tracer_provider(provider)
+        try:
+            tracer = trace.get_tracer("test")
+            # Create a parent span to verify run.message does NOT inherit it
+            parent = tracer.start_span("parent")
+            parent_ctx = trace.set_span_in_context(parent)
 
-        controller = object.__new__(SessionController)
-        controller._sessions = {"s1": state}
+            from opentelemetry.context import Context, attach, detach
 
-        result = controller.get_trace_context("s1")
-        assert result is ctx
+            token = attach(parent_ctx)
+            try:
+                # Pass empty Context to create a new trace (not inheriting parent)
+                run_span = tracer.start_span("run.message", context=Context())
 
-    def test_get_trace_context_returns_none_when_trace_context_is_none(self):
-        """get_trace_context() returns None when session exists but trace_context is None."""
-        from agentpool.orchestrator.session_controller import (
-            SessionController,
-            SessionState,
-        )
+                # run_span should have a different trace_id than parent
+                parent_ctx_info = parent.get_span_context()
+                run_ctx_info = run_span.get_span_context()
+                assert parent_ctx_info.trace_id != run_ctx_info.trace_id
+                assert run_ctx_info.trace_id != 0  # valid trace
 
-        state = SessionState(session_id="s1", agent_name="test")
-        # trace_context is None by default
-
-        controller = object.__new__(SessionController)
-        controller._sessions = {"s1": state}
-
-        result = controller.get_trace_context("s1")
-        assert result is None
-
-    def test_close_session_clears_trace_context(self):
-        """close_session() sets trace_context to None."""
-        from opentelemetry import trace
-
-        from agentpool.orchestrator.session_controller import (
-            SessionState,
-        )
-
-        tracer = trace.get_tracer("test")
-        span = tracer.start_span("test.span")
-        ctx = trace.set_span_in_context(span)
-        span.end()
-
-        state = SessionState(session_id="s1", agent_name="test")
-        state.trace_context = ctx
-
-        # Simulate the cleanup that happens in _close_session_unlocked
-        state.trace_context = None
-
-        assert state.trace_context is None
+                run_span.end()
+                parent.end()
+            finally:
+                detach(token)
+        finally:
+            trace.set_tracer_provider(default_provider)
