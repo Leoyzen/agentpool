@@ -35,7 +35,12 @@ if TYPE_CHECKING:
     from agentpool_config.team_mode import TeamModeConfig
 
 
-def _make_manifest(tmp_path: Any) -> AgentsManifest:
+def _make_manifest(
+    tmp_path: Any,
+    *,
+    idle_timeout: float = 300.0,
+    poll_interval: float = 30.0,
+) -> AgentsManifest:
     """Create a manifest with team_mode enabled and TestModel agents."""
     yaml_str = """
 agents:
@@ -57,8 +62,14 @@ team_mode:
   member_eligible: [worker, reviewer]
   lead_eligible: [coordinator]
   base_dir: {base_dir}
+  idle_timeout: {idle_timeout}
+  poll_interval: {poll_interval}
 """
-    yaml_str = yaml_str.format(base_dir=str(tmp_path))
+    yaml_str = yaml_str.format(
+        base_dir=str(tmp_path),
+        idle_timeout=idle_timeout,
+        poll_interval=poll_interval,
+    )
     config_dict = yamling.load_yaml(yaml_str, verify_type=dict)
     return AgentsManifest(**config_dict)
 
@@ -145,9 +156,7 @@ async def test_member_sessions_closed_when_lead_idle_and_no_active_runs(
         but only when no session has an active run.
     """
     # Use short intervals for testing.
-    TeamCommCapability._idle_timeout = 0.5
-    TeamCommCapability._poll_interval = 0.1
-    manifest = _make_manifest(tmp_path)
+    manifest = _make_manifest(tmp_path, idle_timeout=0.5, poll_interval=0.1)
     team_mode_config: TeamModeConfig | None = manifest.team_mode
     assert team_mode_config is not None
 
@@ -254,9 +263,7 @@ async def test_cleanup_deferred_when_lead_has_active_run(
         actively processing (e.g. a long model call or tool execution
         that doesn't update ``last_active_at``).
     """
-    TeamCommCapability._idle_timeout = 0.5
-    TeamCommCapability._poll_interval = 0.1
-    manifest = _make_manifest(tmp_path)
+    manifest = _make_manifest(tmp_path, idle_timeout=0.5, poll_interval=0.1)
     team_mode_config: TeamModeConfig | None = manifest.team_mode
     assert team_mode_config is not None
 
@@ -341,9 +348,7 @@ async def test_cleanup_deferred_when_member_has_active_run(
         still processing.  The cleanup will fire on a future poll once
         all member runs complete.
     """
-    TeamCommCapability._idle_timeout = 0.5
-    TeamCommCapability._poll_interval = 0.1
-    manifest = _make_manifest(tmp_path)
+    manifest = _make_manifest(tmp_path, idle_timeout=0.5, poll_interval=0.1)
     team_mode_config: TeamModeConfig | None = manifest.team_mode
     assert team_mode_config is not None
 

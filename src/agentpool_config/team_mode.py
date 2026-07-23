@@ -210,6 +210,22 @@ class TeamModeConfig(Schema):
         "will block waiting for changes. Acts as a safety cap when the caller "
         "specifies timeout<=0 (no limit) or a timeout exceeding this value.",
     )
+    idle_timeout: float = Field(
+        default=600.0,
+        gt=0,
+        title="Idle timeout (seconds)",
+        description="Seconds of lead inactivity before auto-closing team member "
+        "sessions. The cleanup polls every ``poll_interval`` seconds and closes "
+        "members when the lead has been inactive (no send_message) for longer "
+        "than this value, provided no session has an active run.",
+    )
+    poll_interval: float = Field(
+        default=30.0,
+        gt=0,
+        title="Cleanup poll interval (seconds)",
+        description="Interval at which the idle-cleanup loop checks lead "
+        "activity. Lower values mean faster detection but more CPU overhead.",
+    )
 
     @field_validator("ttl_hours")
     @classmethod

@@ -1388,8 +1388,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             return_value=(f"Team '{name}' created with {len(members)} members. team_id={team_id}")
         )
 
-    @staticmethod
     def _schedule_member_cleanup(
+        self,
         agent_ctx: AgentContext,
         lead_session_id: str,
         member_session_ids: list[str],
@@ -1418,9 +1418,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         import time
 
-        # Configurable via class attributes so tests can override.
-        idle_timeout = TeamCommCapability._idle_timeout
-        poll_interval = TeamCommCapability._poll_interval
+        # Configurable via TeamModeConfig (YAML) or class attributes (tests).
+        idle_timeout = self._config.idle_timeout
+        poll_interval = self._config.poll_interval
 
         async def _cleanup_when_idle() -> None:
             """Poll lead activity; close members after idle timeout.
