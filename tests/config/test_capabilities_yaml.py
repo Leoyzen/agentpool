@@ -6,6 +6,7 @@ import pytest
 
 from agentpool import AgentsManifest, NativeAgentConfig
 from agentpool_config.capabilities import (
+    EntryPointCapabilityConfig,
     GenericCapabilityConfig,
     LoopDetectionCapabilityConfig,
     TokenBudgetCapabilityConfig,
@@ -58,6 +59,7 @@ agents:
 _CAPABILITY_CONFIG_TYPES = (
     LoopDetectionCapabilityConfig,
     TokenBudgetCapabilityConfig,
+    EntryPointCapabilityConfig,
     GenericCapabilityConfig,
 )
 

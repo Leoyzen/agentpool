@@ -3,8 +3,15 @@
 Typed config models for each of the 6 built-in capabilities, forming a
 discriminated union that validates YAML inputs at load time.
 
-Backward-compatible: if ``type`` is a Python import path (not one of the
-known short names), the original ``GenericCapabilityConfig`` is used.
+Three resolution paths:
+
+1. **Built-in short names** (``loop_detection``, ``token_budget``, etc.)
+   validated against typed config models.
+2. **Entry-point names** (e.g. ``mermaid_lint``) resolved via the
+   ``agentpool.capabilities`` entry-point group using
+   :class:`EntryPointCapabilityConfig`.
+3. **Python import paths** (e.g. ``pydantic_ai.capabilities.Instrumentation``)
+   resolved via :class:`GenericCapabilityConfig` using ``__import__``.
 """
 
 from __future__ import annotations
@@ -85,6 +92,53 @@ class MemoryCapabilityConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Entry-point-based config
+# ---------------------------------------------------------------------------
+
+
+class EntryPointCapabilityConfig(BaseModel):
+    """Configuration for a capability loaded via entry-point name.
+
+    Used when ``type`` matches a name registered in the
+    ``agentpool.capabilities`` entry-point group (e.g. ``"mermaid_lint"``).
+    The entry-point registry maps short names to capability classes,
+    enabling external packages to register capabilities without requiring
+    users to know the full Python import path.
+    """
+
+    type: str
+    """Entry-point name registered under ``agentpool.capabilities``."""
+
+    args: dict[str, Any] = Field(default_factory=dict)
+    """Arguments to pass to the capability constructor."""
+
+    def build(self) -> Any:
+        """Resolve the entry-point name and instantiate the capability.
+
+        Uses a lazy import of ``discover_entry_point_capabilities`` to
+        avoid a circular dependency between ``agentpool_config`` and
+        ``agentpool``.
+
+        Returns:
+            Instantiated capability object.
+
+        Raises:
+            ValueError: If the entry-point name is not registered.
+            ImportError: If the capability class cannot be loaded.
+        """
+        from agentpool.capabilities.registry import (
+            CapabilityNotFoundError,
+            discover_entry_point_capabilities,
+        )
+
+        registry = discover_entry_point_capabilities()
+        if self.type not in registry:
+            raise CapabilityNotFoundError(self.type, list(registry.keys()))
+        cls = registry[self.type]
+        return cls(**self.args)
+
+
+# ---------------------------------------------------------------------------
 # Generic / import-path-based config (backward compatible)
 # ---------------------------------------------------------------------------
 
@@ -148,7 +202,7 @@ BuiltinCapabilityConfig = Annotated[
     Field(discriminator="type"),
 ]
 
-CapabilityConfig = BuiltinCapabilityConfig | GenericCapabilityConfig
+CapabilityConfig = BuiltinCapabilityConfig | EntryPointCapabilityConfig | GenericCapabilityConfig
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +241,8 @@ def build_capability(config: CapabilityConfig) -> Any:  # noqa: PLR0911, RET503
     """
     match config:
         case GenericCapabilityConfig():
+            return config.build()
+        case EntryPointCapabilityConfig():
             return config.build()
         case LoopDetectionCapabilityConfig():
             return _import_and_instantiate(IMPORT_MAP["loop_detection"], config)

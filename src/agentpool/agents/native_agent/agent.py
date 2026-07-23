@@ -949,6 +949,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             from pydantic import BaseModel as _BaseModel
 
             from agentpool_config.capabilities import (
+                EntryPointCapabilityConfig,
                 GenericCapabilityConfig,
                 build_capability,
             )
@@ -956,7 +957,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             for cap in self.config.capabilities:
                 if cap is None:
                     continue
-                if isinstance(cap, GenericCapabilityConfig):
+                if isinstance(cap, (GenericCapabilityConfig, EntryPointCapabilityConfig)):
                     tool_capabilities.append(cap.build())
                 elif isinstance(cap, _BaseModel):
                     from typing import cast as _cast
