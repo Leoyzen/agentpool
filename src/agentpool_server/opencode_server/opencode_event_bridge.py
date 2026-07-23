@@ -741,16 +741,17 @@ class OpenCodeEventBridgeMixin:
             # via MessageUpdatedEvent.
             if isinstance(event, StreamCompleteEvent):
                 finalize_ctx = self._contexts.get(session_id)
-                if finalize_ctx is not None:
+                if finalize_ctx is not None and isinstance(
+                    finalize_ctx.assistant_msg.info, AssistantMessage
+                ):
                     info = finalize_ctx.assistant_msg.info
-                    if isinstance(info, AssistantMessage):
-                        info.tokens = Tokens(
-                            cache=TokenCache(read=0, write=0),
-                            input=finalize_ctx.input_tokens,
-                            output=finalize_ctx.output_tokens,
-                            reasoning=0,
-                        )
-                        info.cost = finalize_ctx.total_cost
+                    info.tokens = Tokens(
+                        cache=TokenCache(read=0, write=0),
+                        input=finalize_ctx.input_tokens,
+                        output=finalize_ctx.output_tokens,
+                        reasoning=0,
+                    )
+                    info.cost = finalize_ctx.total_cost
                 await self._finalize_assistant_time(session_id)
                 await self._persist_assistant_message(session_id)
                 # P3: Serialize the EventProcessorContext and store it
