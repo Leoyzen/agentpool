@@ -59,6 +59,7 @@ dependencies = [
   "pydantic>=2.10.0",
   "pydantic-ai-slim[openai,google,anthropic,mistral,retries]==2.9.0",
   "pydantic-graph",
+  "pydantic-xml>=2.6.0",
   # Only add below (Copier)
   "pydocket>=0.16.1",
   "python-dotenv>=1.0.1",
@@ -102,6 +103,7 @@ subagent = "agentpool.capabilities.subagent_capability:SubagentCapability"
 skill = "agentpool.capabilities.skill_manager_cap:SkillManagerCap"
 combined = "agentpool.capabilities.combined_toolset:CombinedToolsetCapability"
 code_mode = "agentpool.capabilities.code_mode_capability:CodeModeCapability"
+question = "agentpool_toolsets.builtin.question_tools:QuestionTools"
 
 [project.entry-points."fsspec.specs"]
 acp = "acp.filesystem:ACPFileSystem"

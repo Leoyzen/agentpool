@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 import uuid
 
 import logfire
+from opentelemetry.context import attach, detach
 
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
@@ -173,80 +174,90 @@ class SessionControllerRunsMixin:
             run_handle: The initial run handle whose ``start()`` to consume.
             initial_prompt: The first user prompt (text or structured content).
         """
-        with safe_span(
-            "session.consume_run",
-            session_id=run_handle.session_id,
-            run_id=run_handle.run_id,
-        ):
-            session = self.get_session(run_handle.session_id)
-            current_prompt: str | list[Any] = initial_prompt
-            current_handle = run_handle
-            while True:
-                gen = current_handle.start(current_prompt)
-                turn_failed = False
-                try:
-                    async for _event in gen:
-                        pass
-                except Exception as exc:
-                    logger.exception(
-                        "RunHandle.start() raised for run_id=%s session_id=%s",
-                        current_handle.run_id,
-                        current_handle.session_id,
-                    )
-                    error_event = RunErrorEvent(
-                        message=f"{type(exc).__name__}: {exc}",
-                        run_id=current_handle.run_id,
-                        agent_name=(
-                            current_handle.agent.name
-                            if current_handle.agent is not None
-                            else current_handle.agent_type
-                        ),
-                    )
-                    if self._event_bus is not None:
-                        await self._event_bus.publish(current_handle.session_id, error_event)
-                        await self._event_bus.publish(
+        # Attach the per-run trace context so all spans within this run
+        # (turn.native, tools, notifications, etc.) are children of
+        # run.message and share the same trace_id.
+        ctx_token = attach(run_handle._run_context) if run_handle._run_context is not None else None
+        try:
+            with safe_span(
+                "session.consume_run",
+                session_id=run_handle.session_id,
+                run_id=run_handle.run_id,
+            ):
+                session = self.get_session(run_handle.session_id)
+                current_prompt: str | list[Any] = initial_prompt
+                current_handle = run_handle
+                while True:
+                    gen = current_handle.start(current_prompt)
+                    turn_failed = False
+                    try:
+                        async for _event in gen:
+                            pass
+                    except Exception as exc:
+                        logger.exception(
+                            "RunHandle.start() raised for run_id=%s session_id=%s",
+                            current_handle.run_id,
                             current_handle.session_id,
-                            RunFailedEvent(
-                                run_id=current_handle.run_id,
-                                session_id=current_handle.session_id,
-                                exception=exc,
+                        )
+                        error_event = RunErrorEvent(
+                            message=f"{type(exc).__name__}: {exc}",
+                            run_id=current_handle.run_id,
+                            agent_name=(
+                                current_handle.agent.name
+                                if current_handle.agent is not None
+                                else current_handle.agent_type
                             ),
                         )
-                    turn_failed = True
+                        if self._event_bus is not None:
+                            await self._event_bus.publish(current_handle.session_id, error_event)
+                            await self._event_bus.publish(
+                                current_handle.session_id,
+                                RunFailedEvent(
+                                    run_id=current_handle.run_id,
+                                    session_id=current_handle.session_id,
+                                    exception=exc,
+                                ),
+                            )
+                        turn_failed = True
 
-                # Generator terminated naturally — clean up this RunHandle.
-                self._runs.pop(current_handle.run_id, None)
+                    # Generator terminated naturally — clean up this RunHandle.
+                    self._runs.pop(current_handle.run_id, None)
 
-                if turn_failed:
-                    # On error, do NOT chain — mark idle and break.
-                    if session is not None:
-                        async with session._request_lock:
-                            if session.current_run_id == current_handle.run_id:
-                                session.set_current_run_id(None)
-                    break
-
-                # Check prompt_queue for chained prompts (holding _request_lock
-                # to prevent _route_message() from racing).
-                if session is None:
-                    break
-                async with session._request_lock:
-                    if session.current_run_id == current_handle.run_id:
-                        session.set_current_run_id(None)
-                    if session.prompt_queue.empty():
-                        break  # No more prompts, session goes idle.
-                    try:
-                        next_prompt = session.prompt_queue.get_nowait()
-                    except asyncio.QueueEmpty:
+                    if turn_failed:
+                        # On error, do NOT chain — mark idle and break.
+                        if session is not None:
+                            async with session._request_lock:
+                                if session.current_run_id == current_handle.run_id:
+                                    session.set_current_run_id(None)
                         break
-                    # Messages in prompt_queue were already displayed by
-                    # _route_message() — no need to emit again.
-                    # Create a new RunHandle for the next prompt.
-                    agent = current_handle.agent
-                    if agent is None:
+
+                    # Check prompt_queue for chained prompts (holding _request_lock
+                    # to prevent _route_message() from racing).
+                    if session is None:
                         break
-                    current_handle = self._create_per_prompt_handle(session, agent, next_prompt)
-                    current_prompt = next_prompt
-                    # Loop continues — execute the next turn.
+                    async with session._request_lock:
+                        if session.current_run_id == current_handle.run_id:
+                            session.set_current_run_id(None)
+                        if session.prompt_queue.empty():
+                            break  # No more prompts, session goes idle.
+                        try:
+                            next_prompt = session.prompt_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                        # Messages in prompt_queue were already displayed by
+                        # _route_message() — no need to emit again.
+                        # Create a new RunHandle for the next prompt.
+                        agent = current_handle.agent
+                        if agent is None:
+                            break
+                        current_handle = self._create_per_prompt_handle(session, agent, next_prompt)
+                        current_prompt = next_prompt
+                        # Loop continues — execute the next turn.
+        finally:
+            if ctx_token is not None:
+                detach(ctx_token)
+            if run_handle._run_span is not None:
+                run_handle._run_span.end()
 
     def _create_per_prompt_handle(
         self,
@@ -356,6 +367,26 @@ class SessionControllerRunsMixin:
             _host_context=session._host_context,
             _agent_registry=session._agent_registry,
         )
+
+        # Create per-run root span as a new trace root (not inheriting
+        # the caller's context). This ensures each run gets its own
+        # trace_id, independent of the HTTP request that triggered it.
+        from opentelemetry import trace as otel_trace
+        from opentelemetry.context import Context
+
+        tracer = otel_trace.get_tracer("agentpool.run")
+        run_span = tracer.start_span(
+            "run.message",
+            context=Context(),  # Empty context → new trace, no parent
+            attributes={
+                "session.id": session_id,
+                "run.id": run_handle.run_id,
+                "agent.type": agent.AGENT_TYPE,
+            },
+        )
+        run_handle._run_span = run_span
+        run_handle._run_context = otel_trace.set_span_in_context(run_span)
+
         self._runs[run_handle.run_id] = run_handle
         session.set_current_run_id(run_handle.run_id)
 
@@ -456,6 +487,8 @@ class SessionControllerRunsMixin:
                     message_id=message_id,
                     meta=meta,
                 )
+                # Per-run trace context is created in _start_run_handle
+                # and attached in _consume_run — no need to attach here.
                 return self._start_run_handle(
                     session,
                     agent,

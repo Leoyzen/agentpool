@@ -244,6 +244,14 @@ class RunHandle:
     """Deferred tool results from checkpoint, forwarded to ``agent.create_turn()``
     via ``**pydantic_ai_kwargs`` during resume. Only set by
     ``_create_run_handle()`` when resuming from a checkpoint."""
+    _run_span: Any = None
+    """Per-run root OTel span (``run.message``). Created in ``_start_run_handle``
+    as a new trace root (not inheriting the caller's context). Stored here so
+    ``_consume_run`` can end it when the run completes."""
+    _run_context: Any = None
+    """OTel Context containing ``_run_span``. Attached in ``_consume_run`` so
+    all spans within the run (turn.native, tools, notifications) are children
+    of ``run.message`` and share the same trace_id."""
 
     @property
     def is_running(self) -> bool:

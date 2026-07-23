@@ -21,6 +21,16 @@ class ObservabilityRegistry:
 
     def __init__(self) -> None:
         self._configured = False
+        self._config: BaseObservabilityConfig | None = None
+
+    @property
+    def config(self) -> BaseObservabilityConfig | None:
+        """Return the stored provider config, or None if not configured."""
+        return self._config
+
+    def is_configured(self) -> bool:
+        """Return whether observability has been configured."""
+        return self._configured
 
     def configure_observability(self, observability_config: ObservabilityConfig) -> None:
         """Configure Logfire for single backend export.
@@ -41,6 +51,8 @@ class ObservabilityRegistry:
             logger.debug("Provider is disabled", provider=config.type)
             return
 
+        self._config = config
+
         _setup_otel_environment(config)  # Configure OTEL env variables based on provider
         logfire.configure(
             service_name=config.service_name,
@@ -48,9 +60,11 @@ class ObservabilityRegistry:
             console=False,
             send_to_logfire=(config.type == "logfire"),
         )
-        logfire.instrument_pydantic_ai()
-        logfire.instrument_mcp()
-        # Note: structlog logs are captured via StructlogProcessor in log.py
+        if config.instrument_pydantic_ai:
+            logfire.instrument_pydantic_ai()
+        if config.instrument_mcp:
+            logfire.instrument_mcp()
+        # Note: structlog logs are captured via _otel_log_processor in log.py
 
         self._configured = True
         logger.info("Configured observability", provider=config.type)

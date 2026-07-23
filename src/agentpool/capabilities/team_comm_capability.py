@@ -156,22 +156,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             else DeliveryMode.QUEUE
         )
 
-    def _wrap_notice_content(self, body: str) -> str | list[Any]:
-        """Wrap message body for delivery based on notice_role config.
+    def _wrap_notice_content(self, body: str) -> str:
+        """Return the message body for delivery.
 
-        When notice_role is 'system' and delivery is STEER, wraps the
-        body in a ModelRequest containing a SystemPromptPart so it's
-        injected as a system message rather than a user message.
-
-        Returns the plain string for QUEUE mode or notice_role='user'.
+        Team notices are always delivered as user messages.
         """
-        if (
-            self._config.notice_role == "system"
-            and self._config.notice_delivery_mode == "steer"
-        ):
-            from pydantic_ai.messages import ModelRequest, SystemPromptPart
-
-            return [ModelRequest(parts=[SystemPromptPart(content=body)])]
         return body
 
     # ------------------------------------------------------------------

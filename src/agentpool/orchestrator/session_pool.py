@@ -812,6 +812,7 @@ class SessionPool(
 
                         if session is not None:
                             session.last_active_at = time.monotonic()
+                            session.last_active_at_ns = time.time_ns()
 
                         total_resolved = len(elicitation_call_ids)
                         await self.event_bus.publish(
@@ -867,6 +868,7 @@ class SessionPool(
                 # Update live session if one exists
                 if session is not None:
                     session.last_active_at = time.monotonic()
+                    session.last_active_at_ns = time.time_ns()
 
                 # Emit SessionResumeEvent
                 total_resolved = len(non_elicitation_pending_ids) + len(elicitation_call_ids)

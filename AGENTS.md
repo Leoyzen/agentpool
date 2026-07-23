@@ -1077,9 +1077,11 @@ src/agentpool/lifecycle/
 
 **Observability**: Logfire + OpenTelemetry integration
 - Structured logging with context via `logfire.configure()`
-- Auto-instrumentation: `logfire.instrument_pydantic_ai()`, `logfire.instrument_mcp()`, `logfire.instrument_fastapi(app)`
+- Auto-instrumentation is configurable via `observability.provider.instrument_pydantic_ai`, `instrument_mcp`, `instrument_fastapi` (all default to `False`/`False`/`True`)
 - Manual instrumentation: `@logfire.instrument` decorator and `with logfire.span(...)` context manager
-- Trace agent execution end-to-end across async task boundaries and subagent delegation
+- Structlog logs are captured via custom `_otel_log_processor` in `log.py` (sends OTel log records without creating spans)
+- Session-level trace context: each session creates a `session.lifecycle` root span (immediately ended) stored on `SessionState.trace_context`; all spans within a session share the same `trace_id`
+- `ObservabilityRegistry` exposes `is_configured()` and `config` property for servers to check before enabling middleware
 - Export to any OTLP-compatible backend (SigNoz, Jaeger, Honeycomb, etc.) via OTEL env vars
 - Disabled in tests via env vars (see conftest.py)
 - See [Telemetry & Span Instrumentation](#telemetry--span-instrumentation) for mandatory practices
