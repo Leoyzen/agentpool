@@ -113,11 +113,12 @@ def _create(prefix: PrefixType, *, descending: bool = False) -> str:
 
 
 def generate_session_id() -> str:
-    """Generate a unique, chronologically sortable session ID.
+    """Generate a unique, reverse-chronologically sortable session ID.
 
-    Convenience function for the common case.
+    Uses ``descending()`` to match OpenCode's ``SessionID.create()``
+    convention: newer sessions have lexicographically smaller IDs.
 
     Returns:
-        A session ID like 'ses_00000663513f9001ZHcn6VSpkaBcHi'
+        A session ID like 'ses_fffff9ceaec006feZHcn6VSpkaBcHi'
     """
-    return ascending("session")
+    return descending("session")

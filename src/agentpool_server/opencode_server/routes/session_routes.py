@@ -803,7 +803,7 @@ async def list_sessions(  # noqa: PLR0915
 async def create_session(state: StateDep, request: SessionCreateRequest | None = None) -> Session:
     """Create a new session and persist to storage."""
     now = now_ms()
-    session_id = identifier.ascending("session")
+    session_id = identifier.descending("session")
     base_path = state.base_path
     project_id = helpers.compute_project_id(base_path)
     agent_name = _resolve_session_create_agent(state, request.agent if request else None)
@@ -1154,7 +1154,7 @@ async def fork_session(  # noqa: D417
 
     # Create the new forked session
     now = now_ms()
-    new_session_id = identifier.ascending("session")
+    new_session_id = identifier.descending("session")
     # Use provided directory or inherit from original session
     fork_directory = directory if directory else original_session.directory
     forked_session = Session(

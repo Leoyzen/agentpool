@@ -219,15 +219,19 @@ def test_generate_session_id_has_ses_prefix() -> None:
 
 
 def test_generate_session_ids_are_sortable() -> None:
-    """Multiple generate_session_id() calls produce chronologically sortable IDs."""
+    """Multiple generate_session_id() calls produce reverse-chronologically sortable IDs.
+
+    Uses ``descending()`` to match OpenCode's ``SessionID.create()`` convention:
+    newer sessions have lexicographically smaller IDs.
+    """
     ids: list[str] = []
     for _ in range(10):
         ids.append(generate_session_id())
         time.sleep(0.001)  # Small delay to ensure different timestamps
 
-    # IDs should be in ascending order (later IDs sort after earlier ones)
-    sorted_ids = sorted(ids)
-    assert ids == sorted_ids, f"IDs not sortable: {ids} vs {sorted_ids}"
+    # IDs should be in descending order (later IDs sort before earlier ones)
+    sorted_ids = sorted(ids, reverse=True)
+    assert ids == sorted_ids, f"IDs not reverse-sortable: {ids} vs {sorted_ids}"
 
 
 def test_generate_session_id_unique() -> None:
