@@ -287,6 +287,73 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             )
         return FileTeamState(base_dir)
 
+    async def _create_member_session(
+        self,
+        agent_ctx: AgentContext,
+        agent_name: str,
+        parent_session_id: str,
+        description: str,
+        **metadata: Any,
+    ) -> str:
+        """Create a child session for a team member via SessionPool.
+
+        Uses ``SessionPool.create_child_session()`` (generates ``ses_``
+        prefixed sortable ID) and eagerly registers the agent via
+        ``get_or_create_session_agent()``.  Emits ``SpawnSessionStart``
+        so protocol servers (OpenCode, ACP) discover the child session.
+
+        Args:
+            agent_ctx: Per-turn agent context.
+            agent_name: Name of the agent for the child session.
+            parent_session_id: Parent session ID.
+            description: Human-readable description.
+            **metadata: Additional metadata (team_id, team_role, etc.).
+
+        Returns:
+            The child session ID.
+
+        Raises:
+            RuntimeError: If SessionPool is not available.
+        """
+        from agentpool.agents.events.events import SpawnSessionStart
+
+        session_pool = agent_ctx.host.session_pool
+        if session_pool is None:
+            msg = "SessionPool not available for member session creation"
+            raise RuntimeError(msg)
+
+        state = await session_pool.create_child_session(
+            parent_session_id=parent_session_id,
+            agent_name=agent_name,
+            agent_type="native",
+            **metadata,
+        )
+        child_sid = state.session_id
+
+        # Eagerly register agent so receive_request / run_stream can
+        # find it without a separate get_or_create_session_agent call.
+        await session_pool.sessions.get_or_create_session_agent(
+            child_sid,
+            agent_name,
+        )
+
+        # Emit SpawnSessionStart so protocol servers discover the child.
+        event_bus = session_pool.event_bus
+        if event_bus is not None:
+            spawn_event = SpawnSessionStart(
+                child_session_id=child_sid,
+                parent_session_id=parent_session_id,
+                tool_call_id="",
+                spawn_mechanism="spawn",
+                source_name=agent_name,
+                source_type="agent",
+                depth=1,
+                description=description,
+            )
+            await event_bus.publish(parent_session_id, spawn_event)
+
+        return child_sid
+
     def _get_team_id(self, agent_ctx: AgentContext) -> str | None:
         """Return the team_id from session metadata, or None."""
         team_id: str | None = agent_ctx.session.metadata.get("team_id")
@@ -1408,13 +1475,14 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         created_sessions: list[str] = []
         try:
             for member in members:
-                member_session_id = await agent_ctx.delegation.create_child_session(
+                member_session_id = await self._create_member_session(
+                    agent_ctx,
                     member["agent"],
                     parent_session_id=lead_session_id,
+                    description=f"Team member: {member['name']}",
                     team_id=team_id,
                     team_role="member",
                     team_member_name=member["name"],
-                    description=f"Team member: {member['name']}",
                 )
                 created_sessions.append(member_session_id)
                 team_state.register_member(
@@ -1793,13 +1861,14 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         # Create child session for the new member.
         try:
-            member_session_id = await agent_ctx.delegation.create_child_session(
+            member_session_id = await self._create_member_session(
+                agent_ctx,
                 agent,
                 parent_session_id=lead_session_id,
+                description=f"Team member: {name}",
                 team_id=team_id,
                 team_role="member",
                 team_member_name=name,
-                description=f"Team member: {name}",
             )
         except Exception as exc:  # noqa: BLE001
             return ToolReturn(return_value=f"Failed to create member session: {exc}")
