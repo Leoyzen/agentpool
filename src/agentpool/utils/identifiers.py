@@ -92,13 +92,29 @@ def _create(prefix: PrefixType, *, descending: bool = False) -> str:
 
     current_timestamp = now_ms()  # milliseconds, integer (no float truncation)
 
-    if current_timestamp != _last_timestamp:
+    if current_timestamp > _last_timestamp:
+        # Clock advanced normally — reset counter for new millisecond.
         _last_timestamp = current_timestamp
         _counter = 0
+    elif current_timestamp < _last_timestamp:
+        # Clock went backward (NTP adjustment, leap second, etc.).
+        # Keep the last timestamp and continue incrementing the counter
+        # so IDs remain monotonically increasing despite the clock jump.
+        # The counter has 12 bits (0x1000 = 4096 values per ms), which
+        # is enough for ~4096 IDs per ms — far exceeding typical usage.
+        pass
+    # If equal, same millisecond — counter increments naturally.
+
     _counter += 1
 
+    # If counter overflows 12 bits (4096 IDs in one ms), bump timestamp.
+    counter_max = 0xFFF
+    if _counter > counter_max:
+        _last_timestamp += 1
+        _counter = 1
+
     # Combine timestamp and counter
-    now = current_timestamp * 0x1000 + _counter
+    now = _last_timestamp * 0x1000 + _counter
 
     if descending:
         now = ~now & 0xFFFFFFFFFFFFFFFF  # Invert for descending order (64 bits)

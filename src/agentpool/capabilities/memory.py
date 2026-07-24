@@ -1,22 +1,28 @@
 """Memory capability — persistent memory across turns.
 
 Stores and retrieves key-value memories via ``after_node_run`` (persist)
-and ``before_model_request`` (inject). Memories are scoped per session.
+and injects them via ``get_instructions`` (dynamic callable). Memories
+are scoped per session.
+
+The injection uses a callable returned from ``get_instructions`` so that
+the memory content is marked ``dynamic=True`` by pydantic-ai — this
+avoids mutating the system prompt in-place (which would invalidate the
+prefix cache on every turn).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import inspect
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai.capabilities import AbstractCapability
-from pydantic_ai.messages import ModelMessage, ModelRequest
 
 
 if TYPE_CHECKING:
     from pydantic_ai import RunContext
     from pydantic_ai.capabilities import AgentNode, NodeResult
-    from pydantic_ai.models import ModelRequestContext
+    from pydantic_ai.capabilities.abstract import AgentInstructions  # type: ignore[attr-defined]
 
 
 @dataclass
@@ -64,19 +70,26 @@ class MemoryCapability(AbstractCapability[Any]):
             self._store.update(new_memories)
         return result
 
-    async def before_model_request(
-        self,
-        ctx: RunContext[Any],
-        request_context: ModelRequestContext,
-    ) -> ModelRequestContext:
+    def get_instructions(self) -> AgentInstructions[Any] | None:
+        """Return a dynamic callable that injects memory content.
+
+        The callable receives ``RunContext`` (with ``.messages``) at run
+        time and calls ``_inject_fn(store, messages)`` to produce the
+        memory text. This text is marked ``dynamic=True`` by pydantic-ai,
+        which is correct — memory content may change between turns.
+
+        Returns ``None`` when there is no store or no inject function.
+        """
         if not self._store or self._inject_fn is None:
-            return request_context
-        injected = await self._inject_fn(self._store, request_context.messages)
-        if not injected:
-            return request_context
-        messages: list[ModelMessage] = request_context.messages
-        _inject_into_system_prompt(messages, injected)
-        return request_context
+            return None
+
+        async def _inject_memory(ctx: RunContext[Any]) -> str | None:
+            result = self._inject_fn(self._store, ctx.messages)
+            if inspect.isawaitable(result):
+                result = await result
+            return result if result else None
+
+        return _inject_memory
 
     async def for_run(self, ctx: RunContext[Any]) -> MemoryCapability:
         cap = MemoryCapability()
@@ -85,29 +98,3 @@ class MemoryCapability(AbstractCapability[Any]):
         cap._extract_fn = self._extract_fn
         cap._inject_fn = self._inject_fn
         return cap
-
-
-def _inject_into_system_prompt(messages: list[ModelMessage], injected: str) -> bool:
-    """Append ``injected`` text to the first ``SystemPromptPart`` found.
-
-    Pydantic AI stores system prompts as ``SystemPromptPart`` objects
-    inside ``ModelRequest.parts``, not as a ``system_prompt`` attribute
-    on the message itself. This helper iterates parts to find and update
-    the correct one.
-
-    Returns ``True`` if injection was applied, ``False`` otherwise.
-    """
-    for msg in messages:
-        if not _is_model_request(msg):
-            continue
-        for part in msg.parts:
-            if part.part_kind == "system-prompt":
-                if injected not in part.content:
-                    part.content = f"{part.content}\n\n{injected}"
-                return True
-    return False
-
-
-def _is_model_request(msg: ModelMessage) -> bool:
-    """Type-narrow ``ModelMessage`` to ``ModelRequest`` with kind check."""
-    return msg.kind == "request" and isinstance(msg, ModelRequest)

@@ -17,11 +17,18 @@ def get_now(tz_mode: TimeZoneMode = "utc") -> datetime:
 
 
 def now_ms() -> int:
-    """Return current time in milliseconds as integer (always monotonic).
+    """Return current wall-clock time in milliseconds as integer.
 
     Uses ``time.time_ns()`` (integer nanoseconds) with floor division to avoid
     the float truncation bug in ``int(time.time() * 1000)`` which can produce
     non-monotonic results at microsecond boundaries (off by 1ms).
+
+    !!! warning "Not monotonic"
+        ``time.time_ns()`` reads the system real-time clock (CLOCK_REALTIME),
+        which can be adjusted by NTP. Small backward jumps (1-100ms) are
+        common on macOS/Linux. Callers that require monotonic ordering
+        (e.g., ID generation in ``identifiers.py``) must handle backward
+        clock jumps themselves.
     """
     return time.time_ns() // 1_000_000
 

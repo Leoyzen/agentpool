@@ -12,7 +12,6 @@ from pathlib import PurePosixPath
 from typing import Any, Self
 from unittest.mock import MagicMock
 
-from pydantic_ai.messages import ModelRequest, SystemPromptPart, UserPromptPart
 import pytest
 
 from agentpool.capabilities.resource_protocols import (
@@ -108,10 +107,16 @@ async def test_skill_with_mcp_instructions_and_remote_skills() -> None:
         children=[mcp_child],  # type: ignore[arg-type]
     )
 
-    # get_instructions returns metadata for local skills
+    # get_instructions returns [metadata_str, dynamic_callable]
     instructions = cap.get_instructions()
     assert instructions is not None
-    assert 'name="my-skill"' in instructions
+    assert isinstance(instructions, list)
+    # First element is static metadata string
+    metadata = instructions[0]
+    assert isinstance(metadata, str)
+    assert 'name="my-skill"' in metadata
+    # Second element is the dynamic callable
+    assert callable(instructions[1])
 
     # list_skills returns both local and remote
     all_skills = await cap.list_skills()
@@ -170,7 +175,11 @@ async def test_partial_failure_mcp_fails_skill_still_works() -> None:
     # Local skill instructions still available
     instructions = cap.get_instructions()
     assert instructions is not None
-    assert 'name="resilient-skill"' in instructions
+    assert isinstance(instructions, list)
+    metadata = instructions[0]
+    assert isinstance(metadata, str)
+    assert 'name="resilient-skill"' in metadata
+    assert callable(instructions[1])
 
     # list_skills doesn't crash — returns local only
     skills = await cap.list_skills()
@@ -185,11 +194,11 @@ async def test_partial_failure_mcp_fails_skill_still_works() -> None:
     assert await cap.skill_exists("resilient-skill")
 
 
-# ---- Test 4: before_model_request injects local skill with MCP child present ----
+# ---- Test 4: get_instructions returns [metadata, callable] with dynamic content ----
 
 
-async def test_before_model_request_with_mcp_child() -> None:
-    """before_model_request injects local skill instructions even with MCP children."""
+async def test_get_instructions_dynamic_callable_produces_skill_content() -> None:
+    """get_instructions returns [metadata, callable]; callable produces <skill_content>."""
     local_skill = Skill(
         name="injected-skill",
         description="Skill to inject",
@@ -203,13 +212,98 @@ async def test_before_model_request_with_mcp_child() -> None:
         children=[mcp_child],  # type: ignore[arg-type]
     )
 
-    sys_part = SystemPromptPart(content="Base prompt.")
-    req = ModelRequest(parts=[sys_part, UserPromptPart("Hello.")])
-    ctx_mock = MagicMock()
-    rc = MagicMock()
-    rc.messages = [req]
+    result = cap.get_instructions()
+    assert result is not None
+    assert isinstance(result, list)
+    assert len(result) == 2
 
-    await cap.before_model_request(ctx_mock, rc)  # type: ignore[arg-type]
+    # Static metadata
+    metadata = result[0]
+    assert isinstance(metadata, str)
+    assert "<available-skills>" in metadata
+    assert 'name="injected-skill"' in metadata
 
-    assert "Injected instructions content." in sys_part.content
-    assert "Base prompt." in sys_part.content
+    # Dynamic callable — no matcher, so all skills are injected (backward compat)
+    dynamic_fn = result[1]
+    assert callable(dynamic_fn)
+
+    # Build a mock RunContext with messages
+    ctx = MagicMock()
+    ctx.messages = []
+
+    content = await dynamic_fn(ctx)
+    assert content is not None
+    assert "Injected instructions content." in content
+    assert '<skill_content name="injected-skill">' in content
+
+
+async def test_get_instructions_with_matcher_fn() -> None:
+    """get_instructions callable respects matcher_fn for skill selection."""
+    skill_a = Skill(
+        name="skill-a",
+        description="Skill A",
+        skill_path=PurePosixPath("skill://local/skill-a"),
+        instructions="Content A.",
+    )
+    skill_b = Skill(
+        name="skill-b",
+        description="Skill B",
+        skill_path=PurePosixPath("skill://local/skill-b"),
+        instructions="Content B.",
+    )
+
+    def matcher(messages: list[object]) -> list[str]:
+        return ["skill-a"]  # Only match skill-a
+
+    cap = SkillManagerCap(
+        local_skills={"skill-a": skill_a, "skill-b": skill_b},
+        matcher_fn=matcher,
+    )
+
+    result = cap.get_instructions()
+    assert result is not None
+    assert isinstance(result, list)
+
+    ctx = MagicMock()
+    ctx.messages = []
+
+    content = await result[1](ctx)
+    assert content is not None
+    assert "Content A." in content
+    assert "Content B." not in content
+
+
+async def test_get_instructions_with_always_active() -> None:
+    """get_instructions callable includes always_active skills even with matcher."""
+    skill_a = Skill(
+        name="skill-a",
+        description="Skill A",
+        skill_path=PurePosixPath("skill://local/skill-a"),
+        instructions="Content A.",
+    )
+    skill_b = Skill(
+        name="skill-b",
+        description="Skill B",
+        skill_path=PurePosixPath("skill://local/skill-b"),
+        instructions="Content B.",
+    )
+
+    def matcher(messages: list[object]) -> list[str]:
+        return ["skill-a"]
+
+    cap = SkillManagerCap(
+        local_skills={"skill-a": skill_a, "skill-b": skill_b},
+        matcher_fn=matcher,
+        always_active={"skill-b"},
+    )
+
+    result = cap.get_instructions()
+    assert result is not None
+
+    ctx = MagicMock()
+    ctx.messages = []
+
+    content = await result[1](ctx)
+    assert content is not None
+    assert "Content A." in content
+    assert "Content B." in content  # always_active bypasses matcher

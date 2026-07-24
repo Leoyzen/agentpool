@@ -983,6 +983,10 @@ async def get_session_children(
         # Graceful fallback if store doesn't support list_sessions or query fails
         pass
 
+    # Sort by creation time (ascending) so left/right navigation in the
+    # OpenCode UI shows child sessions in creation order.
+    children.sort(key=lambda s: s.time.created)
+
     return children
 
 

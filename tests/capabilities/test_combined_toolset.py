@@ -678,3 +678,98 @@ async def test_mixed_capabilities_some_with_tools_some_without() -> None:
 
     # on_change should be None (no child provides it)
     assert combined.on_change() is None
+
+
+# ---- get_instructions with callables (prefix cache fix) ----
+
+
+class _CallableInstrCap(AbstractCapability[AgentDepsT]):
+    """Capability that returns a callable from get_instructions."""
+
+    def __init__(self, *, name: str = "callable_cap") -> None:
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def get_toolset(self) -> None:
+        return None
+
+    def get_instructions(self) -> Any:
+        def _dynamic(ctx: Any) -> str:
+            return "dynamic content"
+
+        return _dynamic
+
+
+class _ListInstrCap(AbstractCapability[AgentDepsT]):
+    """Capability that returns [str, callable] from get_instructions."""
+
+    def __init__(self, *, name: str = "list_cap") -> None:
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def get_toolset(self) -> None:
+        return None
+
+    def get_instructions(self) -> Any:
+        def _dynamic(ctx: Any) -> str:
+            return "dynamic"
+
+        return ["static", _dynamic]
+
+
+def test_get_instructions_handles_callable_from_child() -> None:
+    """get_instructions() preserves callables from children (not silently dropped)."""
+    cap = _CallableInstrCap(name="dyn_cap")
+    combined = CombinedToolsetCapability([cap])
+
+    result = combined.get_instructions()
+    assert result is not None
+    # Should be a list containing the callable
+    assert isinstance(result, list)
+    assert len(result) == 1
+    assert callable(result[0])
+
+
+def test_get_instructions_handles_mixed_str_and_callable() -> None:
+    """get_instructions() returns list when children return mixed str and callable."""
+    cap_str = _FakeCap(name="str_cap", instructions="static text")
+    cap_callable = _CallableInstrCap(name="dyn_cap")
+    combined = CombinedToolsetCapability([cap_str, cap_callable])
+
+    result = combined.get_instructions()
+    assert result is not None
+    assert isinstance(result, list)
+    assert len(result) == 2
+    assert result[0] == "static text"
+    assert callable(result[1])
+
+
+def test_get_instructions_handles_list_from_child() -> None:
+    """get_instructions() flattens list returns from children."""
+    cap_list = _ListInstrCap(name="list_cap")
+    cap_str = _FakeCap(name="str_cap", instructions="extra")
+    combined = CombinedToolsetCapability([cap_list, cap_str])
+
+    result = combined.get_instructions()
+    assert result is not None
+    assert isinstance(result, list)
+    assert len(result) == 3  # "static", callable, "extra"
+    assert result[0] == "static"
+    assert callable(result[1])
+    assert result[2] == "extra"
+
+
+def test_get_instructions_all_str_returns_joined_string() -> None:
+    """get_instructions() returns joined string when all children return str (backward compat)."""
+    cap1 = _FakeCap(name="cap1", instructions="A")
+    cap2 = _FakeCap(name="cap2", instructions="B")
+    combined = CombinedToolsetCapability([cap1, cap2])
+
+    result = combined.get_instructions()
+    assert result == "A\n\nB"
