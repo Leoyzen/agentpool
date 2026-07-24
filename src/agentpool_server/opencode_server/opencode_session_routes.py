@@ -12,6 +12,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from agentpool.log import get_logger
+from agentpool.utils.identifiers import extract_timestamp_ms
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.models import (
     SessionCreatedEvent,
@@ -208,7 +209,7 @@ async def _create_and_persist_session(
     )
     from agentpool_storage.opencode_provider import helpers
 
-    now = now_ms()
+    now = extract_timestamp_ms(session_id) or now_ms()
     if parent_id is not None:
         parent_session = state.sessions.get(parent_id)
         if parent_session:

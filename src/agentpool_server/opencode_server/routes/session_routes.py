@@ -15,6 +15,7 @@ from slashed import CommandContext
 from agentpool.log import get_logger
 from agentpool.repomap import RepoMap, find_src_files
 from agentpool.utils import identifiers as identifier
+from agentpool.utils.identifiers import extract_timestamp_ms
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.command_validation import validate_command
 from agentpool_server.opencode_server.converters import (
@@ -802,8 +803,8 @@ async def list_sessions(  # noqa: PLR0915
 @router.post("")
 async def create_session(state: StateDep, request: SessionCreateRequest | None = None) -> Session:
     """Create a new session and persist to storage."""
-    now = now_ms()
     session_id = identifier.descending("session")
+    now = extract_timestamp_ms(session_id) or now_ms()
     base_path = state.base_path
     project_id = helpers.compute_project_id(base_path)
     agent_name = _resolve_session_create_agent(state, request.agent if request else None)
@@ -1153,8 +1154,8 @@ async def fork_session(  # noqa: D417
         messages_to_copy = list(original_messages)
 
     # Create the new forked session
-    now = now_ms()
     new_session_id = identifier.descending("session")
+    now = extract_timestamp_ms(new_session_id) or now_ms()
     # Use provided directory or inherit from original session
     fork_directory = directory if directory else original_session.directory
     forked_session = Session(
