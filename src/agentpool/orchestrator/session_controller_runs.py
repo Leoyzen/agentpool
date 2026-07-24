@@ -221,12 +221,10 @@ class SessionControllerRunsMixin:
                         turn_failed = True
 
                         # Notify parent (lead) session if this is a team
-                        # member that crashed.  The lead gets a concise
-                        # message routed through the unified
-                        # ``_route_message`` path so it appears in the
-                        # conversation history and the lead's LLM can act
-                        # on it in the next turn.
-                        if session is not None:
+                        # member that crashed.  Skip when the session is
+                        # being closed (team_delete, shutdown_request, etc.)
+                        # — that's a normal shutdown, not a crash.
+                        if session is not None and not session.is_closing:
                             await self._notify_lead_of_member_crash(session, exc)
 
                     # Generator terminated naturally — clean up this RunHandle.

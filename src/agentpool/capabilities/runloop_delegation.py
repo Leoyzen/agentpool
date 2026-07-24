@@ -97,9 +97,8 @@ class RunLoopDelegationService:
         Raises:
             RuntimeError: If SessionPool is not available.
         """
-        import uuid
-
         from agentpool.agents.events.events import SpawnSessionStart
+        from agentpool.utils.identifiers import generate_session_id
 
         session_pool = self._host.session_pool
         if session_pool is None:
@@ -107,7 +106,7 @@ class RunLoopDelegationService:
             raise RuntimeError(msg)
 
         parent = parent_session_id or self._session_id
-        child_session_id = str(uuid.uuid4())
+        child_session_id = generate_session_id()
 
         await session_pool.create_session(
             child_session_id,
