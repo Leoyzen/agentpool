@@ -159,7 +159,7 @@ class SessionControllerRunsMixin:
             return comm_channel
         return None
 
-    async def _consume_run(self, run_handle: RunHandle, initial_prompt: str | list[Any]) -> None:
+    async def _consume_run(self, run_handle: RunHandle, initial_prompt: str | list[Any]) -> None:  # noqa: PLR0915
         """Drive RunHandle execution to completion, chaining prompts.
 
         In the per-prompt model, each RunHandle executes exactly one turn
@@ -247,6 +247,8 @@ class SessionControllerRunsMixin:
                     async with session._request_lock:
                         if session.current_run_id == current_handle.run_id:
                             session.set_current_run_id(None)
+                        if session.is_closing:
+                            break  # Session is closing — don't chain.
                         if session.prompt_queue.empty():
                             break  # No more prompts, session goes idle.
                         try:
