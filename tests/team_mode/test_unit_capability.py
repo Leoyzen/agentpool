@@ -1851,9 +1851,11 @@ async def test_prepare_tools_member_filters_lead_only_tools() -> None:
     """Given: non-lead member with all 13 tool defs.
 
     When: prepare_tools() is called.
-    Then: lead-only tools (task_create, team_create, team_delete,
+    Then: lead-only tools (team_create, team_delete,
         delete_blackboard, shutdown_request, team_add_member)
-        are filtered out.  7 universal tools remain.
+        are filtered out.  8 universal tools remain (task_create
+        is available to members but restricted to subtask creation
+        by runtime permission checks).
     """
     config = _make_enabled_config()
     cap = TeamCommCapability(config, "worker", _make_session_metadata())
@@ -1863,16 +1865,16 @@ async def test_prepare_tools_member_filters_lead_only_tools() -> None:
     result = await cap.prepare_tools(ctx, tool_defs)
 
     result_names = {td.name for td in result}
-    assert "task_create" not in result_names
     assert "team_create" not in result_names
     assert "team_delete" not in result_names
     assert "delete_blackboard" not in result_names
     assert "shutdown_request" not in result_names
     assert "team_add_member" not in result_names
-    assert len(result) == 7
-    # Universal tools remain.
+    assert len(result) == 8
+    # Universal tools remain (task_create included for subtask creation).
     for name in (
         "send_message",
+        "task_create",
         "task_list",
         "task_update",
         "read_blackboard",

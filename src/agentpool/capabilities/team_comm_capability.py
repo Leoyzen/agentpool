@@ -2125,7 +2125,6 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     # safety net.
     _LEAD_ONLY_TOOLS: frozenset[str] = frozenset(
         {
-            "task_create",
             "team_create",
             "team_delete",
             "delete_blackboard",
