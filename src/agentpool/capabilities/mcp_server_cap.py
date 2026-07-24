@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 
     from pydantic_ai.toolsets import AbstractToolset
 
+    from agentpool.capabilities.agent_context import AgentContext
     from agentpool.mcp_server.client import MCPClient
     from agentpool.mcp_server.session_pool import SessionConnectionPool
     from agentpool_config.mcp_server import MCPServerConfig
@@ -488,7 +489,8 @@ class McpServerCap(
         """List MCP prompts as commands.
 
         Maps MCP prompts to ``CommandEntry`` descriptors. Each prompt
-        becomes a command with ``source="remote"``.
+        becomes a command with ``source="remote"`` and a ``handler``
+        that calls ``get_prompt`` on the MCP server.
 
         Returns:
             Sequence of ``CommandEntry`` descriptors.
@@ -499,15 +501,45 @@ class McpServerCap(
         except Exception:  # noqa: BLE001
             logger.warning("Failed to list prompts for commands", exc_info=True)
             return []
-        return [
-            CommandEntry(
-                name=p.name,
-                description=p.description or "",
-                skill_uri=f"skill://{self._name}/{p.name}",
-                source="remote",
+        entries: list[CommandEntry] = []
+        for p in prompts:
+            prompt_name = p.name
+
+            async def _prompt_handler(
+                user_input: str,
+                ctx: AgentContext,
+                _name: str = prompt_name,
+            ) -> str:
+                """Call the MCP prompt and return the result as a string."""
+                del ctx  # MCP prompt execution does not need AgentContext.
+                mcp_client = await self._ensure_client()
+                arguments: dict[str, str] | None = None
+                if user_input:
+                    parts = user_input.split()
+                    if parts:
+                        arguments = {str(i): v for i, v in enumerate(parts)}
+                result = await mcp_client.get_prompt(_name, arguments)
+                # Extract text from GetPromptResult messages.
+                texts: list[str] = []
+                for msg in result.messages:
+                    content = msg.content
+                    text: str | None = getattr(content, "text", None)
+                    if text is not None:
+                        texts.append(text)
+                    else:
+                        texts.append(str(content))
+                return "\n".join(texts) if texts else ""
+
+            entries.append(
+                CommandEntry(
+                    name=p.name,
+                    description=p.description or "",
+                    skill_uri=f"skill://{self._name}/{p.name}",
+                    source="remote",
+                    handler=_prompt_handler,
+                )
             )
-            for p in prompts
-        ]
+        return entries
 
     async def get_command(self, name: str) -> CommandEntry | None:
         """Get a specific command by name.
@@ -527,11 +559,39 @@ class McpServerCap(
             return None
         for p in prompts:
             if p.name == name:
+                prompt_name = p.name
+
+                async def _prompt_handler(
+                    user_input: str,
+                    ctx: AgentContext,
+                    _pname: str = prompt_name,
+                ) -> str:
+                    """Call the MCP prompt and return the result as a string."""
+                    del ctx  # MCP prompt execution does not need AgentContext.
+                    mcp_client = await self._ensure_client()
+                    arguments: dict[str, str] | None = None
+                    if user_input:
+                        parts = user_input.split()
+                        if parts:
+                            arguments = {str(i): v for i, v in enumerate(parts)}
+                    result = await mcp_client.get_prompt(_pname, arguments)
+                    # Extract text from GetPromptResult messages.
+                    texts: list[str] = []
+                    for msg in result.messages:
+                        content = msg.content
+                        text: str | None = getattr(content, "text", None)
+                        if text is not None:
+                            texts.append(text)
+                        else:
+                            texts.append(str(content))
+                    return "\n".join(texts) if texts else ""
+
                 return CommandEntry(
                     name=p.name,
                     description=p.description or "",
                     skill_uri=f"skill://{self._name}/{p.name}",
                     source="remote",
+                    handler=_prompt_handler,
                 )
         return None
 

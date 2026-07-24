@@ -242,8 +242,12 @@ In M3, the old `ResourceProvider` hierarchy was replaced with native pydantic-ai
 - `AggregatedResourceSource` — Composes multiple `ResourceSource` instances, routes by URI scheme.
 - `AgentContext` (`capabilities/agent_context.py`) — Frozen dataclass carrying `agent_registry`, `delegation`, `session`, `scope`, `resources`, `host`. Constructed by RunLoop per-turn.
 - `DelegationService` (`capabilities/delegation.py`) — Protocol exposing `spawn_subagent(name, prompt)` and `get_available_agents()`. Limits tools to operations they need without exposing `AgentPool`.
-- `ChangeEvent` (`capabilities/change_event.py`) — Frozen dataclass for capability change notifications (`on_change()` stream).
+- `ChangeEvent` (`capabilities/change_event.py`) — Frozen dataclass for capability change notifications (`on_change()` stream). `kind` accepts `"commands_changed"` in addition to `"tools_changed"`, `"prompts_changed"`, `"resources_changed"`, `"skills_changed"`.
+- `CommandResource` (`capabilities/resource_protocols.py`) — `@runtime_checkable Protocol` for capabilities that produce slash commands. Implements `list_commands() -> Sequence[CommandEntry]` and `async get_command(name) -> CommandEntry | None`. `CommandEntry` carries an optional `handler: Callable[[str, AgentContext], Awaitable[str]]` for direct execution.
+- `CommandBridge` (`capabilities/command_bridge.py`) — Connects `ExtensionRegistry` to protocol servers (ACP, OpenCode). Discovers commands from all `CommandResource` capabilities, de-duplicates by name (TURN → AGENT → SESSION → POOL), executes via `CommandEntry.handler`, and watches for `"commands_changed"`/`"skills_changed"`/`"prompts_changed"` events. Per-session lifecycle with `Scope(SESSION)`.
 - Entry-point registry (`capabilities/registry.py`) — Discovers custom capabilities via `agentpool.capabilities` entry-point group.
+
+**Command Registration via Capabilities:** Capabilities implementing `CommandResource` can publish slash commands visible to ACP and OpenCode clients. `CommandBridge` discovers these via `ExtensionRegistry.get_command_resources(scope)`, converts them to protocol-specific command formats, and routes execution back through `CommandEntry.handler`. See `examples/custom_command_capability.py` for a complete example.
 
 **Deleted alongside ResourceProviders:**
 - `src/agentpool/tools/factory.py` (194 LOC, 6 `ToolsetFactory` classes) — became dead code after all providers migrated.

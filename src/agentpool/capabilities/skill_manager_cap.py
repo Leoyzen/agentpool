@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from pydantic_ai.capabilities import AbstractCapability
     from pydantic_ai.models import ModelRequestContext
 
+    from agentpool.capabilities.agent_context import AgentContext
     from agentpool.capabilities.mcp_server_cap import McpServerCap
     from agentpool.skills.skill import Skill
     from agentpool.skills.skill_tool_manager import SkillToolManager
@@ -548,16 +549,37 @@ class SkillManagerCap(
         for name, skill in self._local_skills.items():
             if not skill.user_invocable:
                 continue
+
+            # Capture ``name`` and ``skill`` by value for the closure.
+            skill_obj = skill
+
+            async def _skill_handler(
+                user_input: str,
+                ctx: AgentContext,
+                _skill: Skill = skill_obj,
+            ) -> str:
+                """Load skill instructions and concatenate with user input."""
+                del ctx  # Skill execution does not need AgentContext.
+                try:
+                    instructions = _skill.load_instructions()
+                except (ValueError, OSError):
+                    return user_input
+                if not instructions:
+                    return user_input
+                return f"{instructions}\n\n{user_input}"
+
             entries.append(
                 CommandEntry(
                     name=name,
                     description=skill.description,
                     skill_uri=f"skill://{name}",
                     source="local",
+                    handler=_skill_handler,
                 )
             )
 
         # Remote commands from child McpServerCap instances.
+        # PASS THROUGH — do NOT re-wrap or override child handlers.
         for child in self._children:
             if isinstance(child, CommandResource):
                 try:
@@ -587,11 +609,30 @@ class SkillManagerCap(
         if name in self._local_skills:
             skill = self._local_skills[name]
             if skill.user_invocable:
+                # Capture ``skill`` by value for the closure.
+                skill_obj = skill
+
+                async def _skill_handler(
+                    user_input: str,
+                    ctx: AgentContext,
+                    _skill: Skill = skill_obj,
+                ) -> str:
+                    """Load skill instructions and concatenate with user input."""
+                    del ctx  # Skill execution does not need AgentContext.
+                    try:
+                        instructions = _skill.load_instructions()
+                    except (ValueError, OSError):
+                        return user_input
+                    if not instructions:
+                        return user_input
+                    return f"{instructions}\n\n{user_input}"
+
                 return CommandEntry(
                     name=name,
                     description=skill.description,
                     skill_uri=f"skill://{name}",
                     source="local",
+                    handler=_skill_handler,
                 )
 
         # Remote.

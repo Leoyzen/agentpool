@@ -254,6 +254,13 @@ async def _execute_slashed_command(  # noqa: PLR0915
         try:
             await command.execute(cmd_ctx, args, {})
         except Exception as e:
+            # Let CommandNotFoundError propagate so execute_command can
+            # fall back to MCP prompts for commands no longer in the
+            # CommandBridge index.
+            from agentpool.capabilities.command_bridge import CommandNotFoundError
+
+            if isinstance(e, CommandNotFoundError):
+                raise
             raise HTTPException(status_code=500, detail=f"Command execution failed: {e}") from e
 
         # Get command output
@@ -2136,7 +2143,21 @@ async def execute_command(  # noqa: PLR0915
                     "Both slashed command and prompt exist for '%s'. Using slashed command.",
                     request.command,
                 )
-            return await _execute_slashed_command(state, session_id, request)
+            try:
+                return await _execute_slashed_command(state, session_id, request)
+            except Exception as exc:
+                # If CommandBridge raised CommandNotFoundError, fall through
+                # to MCP prompts (the command may have been removed from the
+                # bridge's index but still exists as an MCP prompt).
+                from agentpool.capabilities.command_bridge import CommandNotFoundError
+
+                if isinstance(exc, CommandNotFoundError):
+                    logger.info(
+                        "Command not in CommandBridge index, falling back to MCP prompts",
+                        command=request.command,
+                    )
+                else:
+                    raise
 
         # Fall back to MCP prompts (existing code remains unchanged)
         session_agent = state.agent

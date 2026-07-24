@@ -82,6 +82,18 @@ def _make_mock_session(
     session._skill_change_task = None
     session._skill_register_lock = asyncio.Lock()
     session._remote_commands = []
+
+    # Create CommandBridge if extension_registry is provided
+    if extension_registry is not None:
+        from agentpool.capabilities.command_bridge import CommandBridge
+        from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+
+        session._command_bridge = CommandBridge(
+            registry=extension_registry,
+            scope=Scope(level=ScopeLevel.SESSION, session_id="test-session-id"),
+        )
+    else:
+        session._command_bridge = None
     session._update_callbacks = []
     session.log = MagicMock()
     session.fs = MagicMock()
@@ -212,7 +224,7 @@ async def test_pool_and_client_skills_coexist_without_duplicates() -> None:
     client_skill = _make_skill(name="client-skill", description="Client-level skill")
     # Pool skill pre-registered via _register_skill_commands in __post_init__
     session = _make_mock_session(skills_list=[pool_skill, client_skill])
-    session._register_skill_commands()
+    await session._register_skill_commands()
 
     # Both skills should be in command_store
     assert session.command_store.get_command("pool-skill") is not None
@@ -220,7 +232,7 @@ async def test_pool_and_client_skills_coexist_without_duplicates() -> None:
 
     # Re-register with same skills (simulating init_client_skills re-registering)
     # _register_skill_commands uses replace=True, so no duplicates
-    session._register_skill_commands()
+    await session._register_skill_commands()
 
     pool_cmds = [c for c in session.command_store.list_commands() if c.name == "pool-skill"]
     client_cmds = [c for c in session.command_store.list_commands() if c.name == "client-skill"]
@@ -246,7 +258,7 @@ async def test_watch_skill_changes_calls_register_on_skills_changed_event() -> N
     mock_ext_registry.merge_change_streams.return_value = mock_stream
 
     session = _make_mock_session(extension_registry=mock_ext_registry)
-    session._register_skill_commands = MagicMock()
+    session._register_skill_commands = AsyncMock()
     session.send_available_commands_update = AsyncMock()
 
     await session._watch_skill_changes()
@@ -257,7 +269,7 @@ async def test_watch_skill_changes_calls_register_on_skills_changed_event() -> N
 
 @pytest.mark.unit
 async def test_watch_skill_changes_ignores_non_skills_changed_events() -> None:
-    """T8.2: _watch_skill_changes() ignores non-skills_changed events."""
+    """T8.2: _watch_skill_changes() ignores non-relevant events."""
     tools_event = ChangeEvent(capability_name="test-cap", kind="tools_changed")
     resources_event = ChangeEvent(capability_name="test-cap", kind="resources_changed")
     skills_event = ChangeEvent(capability_name="test-cap", kind="skills_changed")
@@ -267,7 +279,7 @@ async def test_watch_skill_changes_ignores_non_skills_changed_events() -> None:
     mock_ext_registry.merge_change_streams.return_value = mock_stream
 
     session = _make_mock_session(extension_registry=mock_ext_registry)
-    session._register_skill_commands = MagicMock()
+    session._register_skill_commands = AsyncMock()
     session.send_available_commands_update = AsyncMock()
 
     await session._watch_skill_changes()
@@ -304,7 +316,7 @@ async def test_watch_skill_changes_handles_none_stream_no_crash() -> None:
     mock_ext_registry.merge_change_streams.return_value = None
 
     session = _make_mock_session(extension_registry=mock_ext_registry)
-    session._register_skill_commands = MagicMock()
+    session._register_skill_commands = AsyncMock()
 
     # Should return without error
     await session._watch_skill_changes()
@@ -327,7 +339,7 @@ async def test_concurrent_register_skill_commands_serialized_by_lock() -> None:
     # _register_skill_commands itself is sync. We test that calling
     # it multiple times with replace=True doesn't produce duplicates.
     for _ in range(5):
-        session._register_skill_commands()
+        await session._register_skill_commands()
 
     cmds = [c for c in session.command_store.list_commands() if c.name == "concurrent-skill"]
     assert len(cmds) == 1
@@ -350,7 +362,7 @@ async def test_execute_slash_command_finds_and_executes_skill() -> None:
         instructions="Do something useful",
     )
     session = _make_mock_session(skills_list=[skill])
-    session._register_skill_commands()
+    await session._register_skill_commands()
 
     # Mock command_store.execute_command to verify it's called
     session.command_store.execute_command = AsyncMock()
