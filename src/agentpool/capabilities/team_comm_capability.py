@@ -778,9 +778,17 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if note:
             updates["last_note"] = note
             updates["updated_at"] = datetime.datetime.now(datetime.UTC).isoformat()
-            updates["updated_by"] = self._agent_name
+            updates["updated_by"] = agent_ctx.session.metadata.get(
+                "team_member_name",
+                self._agent_name,
+            )
         if not updates:
             return ToolReturn(return_value="No updates specified")
+
+        current_member: str = agent_ctx.session.metadata.get(
+            "team_member_name",
+            self._agent_name,
+        )
 
         # Permission check: lead bypasses, members need ownership or unclaimed.
         role: str = agent_ctx.session.metadata.get("team_role", "")
@@ -789,7 +797,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             if existing is None:
                 return ToolReturn(return_value=f"Task not found: {task_id}")
             current_owner: str = existing.get("owner", "")
-            if current_owner and current_owner != self._agent_name:
+            if current_owner and current_owner != current_member:
                 return ToolReturn(
                     return_value=(
                         "Permission denied: you can only update tasks you own or unclaimed tasks"
@@ -808,10 +816,6 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         last_note = updated.get("last_note", "")
 
         # --- Push notifications for task changes ---
-        current_member: str = agent_ctx.session.metadata.get(
-            "team_member_name",
-            self._agent_name,
-        )
         # 1. Notify new owner when a task is assigned (skip if already completed).
         if "owner" in updates and owner and owner != current_member and status != "completed":
             notif_body = (

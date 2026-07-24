@@ -3091,16 +3091,14 @@ async def test_member_can_update_own_task(tmp_path: Any) -> None:
     create_result = await lead_cap.task_create(lead_ctx, "Task for member")
     task_id = create_result.return_value.replace("Task created: ", "")
 
-    # Lead assigns the task to the member.
-    await lead_cap.task_update(lead_ctx, task_id, owner="worker")
+    # Lead assigns the task to the member (using member name from metadata).
+    await lead_cap.task_update(lead_ctx, task_id, owner="translator_agent")
 
     # Member updates their own task.
     member_ctx = _make_run_context(
         metadata=_make_member_metadata(),
         base_dir=str(tmp_path),
     )
-    # The member's agent_name is "worker" but the _agent_name on the cap
-    # is set at construction. We need the cap's _agent_name to match the owner.
     member_cap = TeamCommCapability(config, "worker", _make_member_metadata())
 
     result = await member_cap.task_update(member_ctx, task_id, status="in_progress")
