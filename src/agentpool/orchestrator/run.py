@@ -355,17 +355,21 @@ class RunHandle:
 
         # Drain any steer messages that arrived while the session was idle.
         # These were enqueued to SessionState.feedback_queue by
-        # SessionPool.steer_from_background_task() when no RunHandle was active.
-        # self.steer() will queue them to queued_steer_messages (since
-        # active_agent_run is not yet set), and _execute_turn() will
-        # pick them up when the turn starts.
+        # SessionPool.steer_from_background_task() when no RunHandle was active,
+        # or by steer() fallback during a race window.
+        # We write directly to queued_steer_messages (NOT via self.steer())
+        # because steer() would re-enqueue to feedback_queue when
+        # active_agent_run is not yet set, creating an infinite loop.
+        # NativeTurn.execute() will drain queued_steer_messages into
+        # agent_run via drain_queued_steer_messages() after setting
+        # active_agent_run.
         while not session.feedback_queue.empty():
             try:
                 fb = session.feedback_queue.get_nowait()
-                content: str | list[Any] = (
-                    fb.content_blocks if fb.content_blocks is not None else fb.content
-                )
-                self.steer(content, message_id=fb.message_id, emit_user_message=False)
+                if fb.content_blocks is not None:
+                    self.run_ctx.queued_steer_messages.append(fb.content_blocks)
+                else:
+                    self.run_ctx.queued_steer_messages.append(fb.content)
             except asyncio.QueueEmpty:
                 break
 
@@ -600,7 +604,9 @@ class RunHandle:
         Called by ``SessionState`` when a RunHandle is active. Directly
         calls ``agent_run.enqueue()`` to inject the message into
         PydanticAI's pending message drain. If no ``agent_run`` is
-        active, queues the message on ``run_ctx.queued_steer_messages``.
+        active, re-enqueues the message to ``session.feedback_queue``
+        so it survives across RunHandle boundaries and is drained by
+        the next RunHandle's ``start()``.
 
         Args:
             message: The steer message (plain text or structured content
@@ -643,10 +649,18 @@ class RunHandle:
                 agent_run.enqueue(*fb.content_blocks, priority="asap")
             else:
                 agent_run.enqueue(fb.content, priority="asap")
+        elif self.session is not None:
+            # No active agent_run — re-enqueue to session.feedback_queue so
+            # the message survives across RunHandle boundaries. The next
+            # RunHandle's start() will drain feedback_queue into
+            # queued_steer_messages, and NativeTurn.execute() will drain
+            # those into agent_run via drain_queued_steer_messages().
+            self.session.feedback_queue.put_nowait(fb)
         elif fb.content_blocks is not None:
-            # No active agent_run — queue for this turn's steer messages.
+            # No session (standalone execution) — fallback to queued list.
             self.run_ctx.queued_steer_messages.append(fb.content_blocks)
         else:
+            # No session (standalone execution) — fallback to queued list.
             self.run_ctx.queued_steer_messages.append(fb.content)
 
         # Fire-and-forget UserMessageInsertedEvent publication.
@@ -654,6 +668,38 @@ class RunHandle:
             self._schedule_user_message_emission(message, "steer", message_id=fb.message_id)
 
         return fb.message_id
+
+    def drain_queued_steer_messages(self) -> None:
+        """Drain ``queued_steer_messages`` into the active ``agent_run``.
+
+        Called by ``NativeTurn.execute()`` immediately after setting
+        ``active_agent_run``. Delivers any steer messages that arrived
+        before ``active_agent_run`` was set (e.g., during ``start()``
+        ``feedback_queue`` drain or during the race window between
+        turn end and RunHandle cleanup).
+
+        Each message is enqueued to ``agent_run`` with ``priority="asap"``
+        so PydanticAI's ``PendingMessageDrainCapability`` injects it
+        into the current model request.
+
+        After draining, ``queued_steer_messages`` is cleared.
+
+        !!! note "No-op when inactive"
+            If ``active_agent_run`` is ``None``, this method is a no-op.
+            Messages remain in ``queued_steer_messages`` for a later drain.
+        """
+        agent_run = self.active_agent_run
+        if agent_run is None:
+            return
+        queued = self.run_ctx.queued_steer_messages
+        if not queued:
+            return
+        self.run_ctx.queued_steer_messages = []
+        for msg in queued:
+            if isinstance(msg, list):
+                agent_run.enqueue(*msg, priority="asap")
+            else:
+                agent_run.enqueue(msg, priority="asap")
 
     def followup(
         self,
