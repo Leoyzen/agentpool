@@ -11,6 +11,7 @@ https://modelcontextprotocol.io/specification/draft/client/elicitation
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 
@@ -748,3 +749,50 @@ def to_claude_answers(
                     answers[question_text] = str(value)
 
     return {"questions": questions, "answers": answers}
+
+
+# =============================================================================
+# Normalization for MCP wire format
+# =============================================================================
+
+
+def _normalize_elicit_content_value(value: Any) -> str | int | float | bool | list[str]:
+    """Coerce a single value to a primitive type accepted by ``mcp.types.ElicitResult.content``.
+
+    Nested dicts, lists of non-strings, and other complex values are serialized
+    to JSON strings. ``None`` values are converted to empty strings, since the
+    MCP wire protocol (Zod schema) rejects ``null`` even though the Python SDK
+    type annotation permits it.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (str, int, float)):
+        return value
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return [str(item) for item in value]
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def normalize_elicit_content(
+    content: dict[str, Any] | None,
+) -> dict[str, str | int | float | bool | list[str]] | None:
+    """Normalize elicitation content to MCP's strict primitive-only schema.
+
+    Args:
+        content: A dict with arbitrary values, typically from ACP's
+            ``ElicitationCreateResponse.content`` or ``ElicitationResumePayload.content``.
+
+    Returns:
+        A dict whose values are all primitives accepted by the MCP wire protocol
+        (``str | int | float | bool | list[str]``), or ``None`` if the input was
+        ``None``.  ``None`` values in the input are converted to empty strings
+        because the Zod schema on the wire rejects ``null``.
+    """
+    if content is None:
+        return None
+    return {key: _normalize_elicit_content_value(value) for key, value in content.items()}

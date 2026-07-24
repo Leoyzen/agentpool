@@ -64,8 +64,17 @@ def _make_elicitation_handler() -> Any:
 
     The handler reads the current InputProvider from the ContextVar
     and delegates to ``InputProvider.get_elicitation()``.
+
+    **Critical**: This handler must NEVER return ``mcp.types.ElicitResult``
+    (``MCPElicitResult``) directly. FastMCP's ``create_elicitation_callback``
+    wrapper checks ``isinstance(result, fastmcp.client.elicitation.ElicitResult)``
+    — and since ``MCPElicitResult`` is NOT a subclass of fastmcp's
+    ``ElicitResult``, the wrapper would wrap the entire ``MCPElicitResult``
+    object as ``content``, producing ``{"content": {"_meta": null, "content": null}}``
+    on the wire. This causes Zod validation errors on the MCP server side.
     """
     from fastmcp.client.elicitation import ElicitResult
+    from mcp.types import ElicitResult as MCPElicitResult, ErrorData
 
     async def _handler[T](
         message: str,
@@ -80,7 +89,19 @@ def _make_elicitation_handler() -> Any:
             )
             return ElicitResult(action="decline")
         result = await provider.get_elicitation(params)
-        return cast("T | dict[str, Any] | ElicitResult", result)
+        # Extract content from MCPElicitResult before returning to fastmcp.
+        # See docstring for why MCPElicitResult must never reach the wrapper.
+        match result:
+            case MCPElicitResult(action="accept", content=content):
+                return cast("T | dict[str, Any]", content)
+            case MCPElicitResult(action="cancel"):
+                return ElicitResult(action="cancel")
+            case MCPElicitResult(action="decline"):
+                return ElicitResult(action="decline")
+            case ErrorData():
+                return ElicitResult(action="decline")
+            case _:
+                return ElicitResult(action="decline")
 
     return _handler
 

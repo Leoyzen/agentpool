@@ -21,6 +21,7 @@ from agentpool.agents.prompt_injection import PromptInjectionManager
 from agentpool.log import get_logger
 from agentpool.messaging.context import NodeContext
 from agentpool.tools import CallDeferred
+from agentpool.ui.elicitation import normalize_elicit_content
 
 
 if TYPE_CHECKING:
@@ -170,7 +171,13 @@ class AgentRunContext:
     """Per-child-session done events for tracking subagent completion."""
 
     queued_steer_messages: list[str | list[Any]] = field(default_factory=list)
-    """Steer messages queued during post-iteration wait window."""
+    """Steer messages queued during ``start()`` ``feedback_queue`` drain.
+
+    Populated by ``RunHandle.start()`` when draining ``session.feedback_queue``
+    (before ``active_agent_run`` is set). Drained by
+    ``RunHandle.drain_queued_steer_messages()`` which is called by
+    ``NativeTurn.execute()`` after setting ``active_agent_run``.
+    """
 
     turn_id: str | None = None
     """Unique identifier for the current Turn, set by RunHandle.start().
@@ -531,7 +538,10 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         # ElicitationResumePayload path.
         match payload.action:
             case "accept":
-                return MCPElicitResult(action="accept", content=payload.content)
+                return MCPElicitResult(
+                    action="accept",
+                    content=normalize_elicit_content(payload.content),
+                )
             case "decline":
                 return MCPElicitResult(action="decline")
             case "cancel":

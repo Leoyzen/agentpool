@@ -172,6 +172,8 @@ async def test_run_handle_steer_for_acp_path() -> None:
     comm = DirectChannel(journal=journal)
     session._comm_channel = comm
     session._active_steer_callback = None
+    # Provide a real feedback_queue for steer() fallback (fix A)
+    session.feedback_queue = asyncio.Queue()
 
     handle = RunHandle(
         run_id="test-run",
@@ -197,10 +199,14 @@ async def test_run_handle_steer_for_acp_path() -> None:
     # ACP path does not set active_agent_run (only NativeTurn does)
     assert handle.active_agent_run is None
 
-    # Steer while running — should queue to queued_steer_messages
+    # Steer while running — should re-enqueue to session.feedback_queue (fix A)
     result = handle.steer("steered message")
     assert result is not None
-    assert "steered message" in handle.run_ctx.queued_steer_messages
+    # With fix A, steer() fallback writes to session.feedback_queue (not queued_steer_messages)
+    assert not session.feedback_queue.empty()
+    fb = session.feedback_queue.get_nowait()
+    assert fb.content == "steered message"
+    assert fb.is_steer is True
 
     # Release the turn so it can complete
     release_event.set()

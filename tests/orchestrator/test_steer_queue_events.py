@@ -242,10 +242,11 @@ async def test_inflight_steer_multiple_messages() -> None:
 
 
 async def test_queued_steer_delivered_to_next_turn() -> None:
-    """Steer during a running turn with no active_agent_run is queued.
+    """Steer during a running turn with no active_agent_run is re-enqueued to feedback_queue.
 
     Checks:
-    - steer() with no active_agent_run falls back to queued_steer_messages
+    - steer() with no active_agent_run falls back to session.feedback_queue
+    - Message survives across RunHandle boundaries via feedback_queue
     """
     block_event = anyio.Event()
     turn_count = 0
@@ -281,10 +282,14 @@ async def test_queued_steer_delivered_to_next_turn() -> None:
         handle.steer("queued steer")
         await anyio.sleep(0.02)
 
-        # The steer message should be in queued_steer_messages.
-        assert any("queued steer" in str(m) for m in handle.run_ctx.queued_steer_messages), (
-            "steer message should be queued in run_ctx.queued_steer_messages"
+        # With fix A, the steer message should be in session.feedback_queue
+        # (not queued_steer_messages, which is never drained).
+        assert handle.session is not None
+        assert not handle.session.feedback_queue.empty(), (
+            "steer message should be re-enqueued to session.feedback_queue"
         )
+        fb = handle.session.feedback_queue.get_nowait()
+        assert fb.content == "queued steer"
 
         # Release turn 1 to complete.
         block_event.set()
@@ -294,12 +299,10 @@ async def test_queued_steer_delivered_to_next_turn() -> None:
         await anyio.sleep(0.05)
 
     # In the per-prompt model, start() executes exactly one turn and
-    # terminates. The queued steer message lives on run_ctx but is not
-    # automatically drained into a second turn on the same handle.
-    # This is by design — SessionController._consume_run() creates a
-    # new RunHandle for the next prompt, draining SessionState queues.
+    # terminates. The steer message survives in feedback_queue and will
+    # be drained by the next RunHandle's start() into queued_steer_messages,
+    # then delivered to agent_run via drain_queued_steer_messages().
     assert turn_count == 1, (
         "Only one turn executes in the per-prompt model; queued steer "
-        "must be drained via SessionState.feedback_queue when a new "
-        "RunHandle is created by SessionController."
+        "survives via feedback_queue and is delivered by the next RunHandle."
     )

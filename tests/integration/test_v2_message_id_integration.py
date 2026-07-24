@@ -319,11 +319,11 @@ async def test_receive_request_returns_str_or_none() -> None:
 
 @pytest.mark.anyio
 async def test_content_blocks_flows_without_stringification() -> None:
-    """List content sent via steer() reaches run_ctx.queued_steer_messages.
+    """List content sent via steer() reaches session.feedback_queue without stringification.
 
-    In the per-prompt model, ``steer()`` with no active agent_run puts
-    content blocks into ``run_ctx.queued_steer_messages``. The list is
-    preserved as-is (not stringified).
+    With fix A, ``steer()`` with no active agent_run re-enqueues content
+    blocks to ``session.feedback_queue``. The list is preserved as-is
+    (not stringified).
     """
     handle = _make_handle()
 
@@ -334,13 +334,14 @@ async def test_content_blocks_flows_without_stringification() -> None:
     msg_id = handle.steer(blocks, message_id="content-blocks-001")
     assert msg_id == "content-blocks-001"
 
-    # With no active agent_run, the blocks should be in queued_steer_messages.
-    assert len(handle.run_ctx.queued_steer_messages) == 1
-    queued = handle.run_ctx.queued_steer_messages[0]
-    assert queued == blocks
-    assert isinstance(queued, list)
-    assert queued[0] == {"type": "text", "text": "hello"}
-    assert queued[1] == {"type": "image", "url": "http://example.com/img.png"}
+    # With fix A, the blocks should be in session.feedback_queue (not queued_steer_messages).
+    assert handle.session is not None
+    assert not handle.session.feedback_queue.empty()
+    fb = handle.session.feedback_queue.get_nowait()
+    assert fb.content_blocks == blocks
+    assert isinstance(fb.content_blocks, list)
+    assert fb.content_blocks[0] == {"type": "text", "text": "hello"}
+    assert fb.content_blocks[1] == {"type": "image", "url": "http://example.com/img.png"}
 
 
 # ---------------------------------------------------------------------------

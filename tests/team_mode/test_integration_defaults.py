@@ -71,14 +71,24 @@ async def test_team_create_with_config_default_members(tmp_path: Any) -> None:
     mock_pool = MagicMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
     mock_pool.close_session = AsyncMock()
+    mock_pool.sessions = MagicMock()
+    mock_pool.sessions.get_or_create_session_agent = AsyncMock()
+    mock_pool.event_bus = None
 
     mock_registry = MagicMock()
     mock_registry.exists = MagicMock(return_value=True)
 
     child_ids = iter(["child_translator", "child_reviewer"])
+
+    def _make_child_state() -> Any:
+        state = MagicMock()
+        state.session_id = next(child_ids)
+        return state
+
+    mock_pool.create_child_session = AsyncMock(side_effect=lambda **kw: _make_child_state())
     mock_delegation = MagicMock()
     mock_delegation.create_child_session = AsyncMock(
-        side_effect=lambda *a, **kw: next(child_ids),
+        side_effect=lambda *a, **kw: next(child_ids, "child_session"),
     )
 
     lead_metadata: dict[str, Any] = {
@@ -104,8 +114,8 @@ async def test_team_create_with_config_default_members(tmp_path: Any) -> None:
     assert "translator" in state["members"]
     assert "reviewer" in state["members"]
 
-    # Delegation and session pool should have been called for each member.
-    assert mock_delegation.create_child_session.await_count == 2
+    # SessionPool.create_child_session should have been called for each member.
+    assert mock_pool.create_child_session.await_count == 2
     assert mock_pool.send_message.await_count == 2
 
 
@@ -123,6 +133,10 @@ async def test_team_create_config_default_members_graceful_degradation(
     mock_pool = MagicMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
     mock_pool.close_session = AsyncMock()
+    mock_pool.sessions = MagicMock()
+    mock_pool.sessions.get_or_create_session_agent = AsyncMock()
+    mock_pool.event_bus = None
+    mock_pool.create_child_session = AsyncMock(side_effect=RuntimeError("Session creation failed"))
 
     mock_registry = MagicMock()
     mock_registry.exists = MagicMock(return_value=True)
@@ -159,14 +173,24 @@ async def test_team_create_config_default_members_then_delete(tmp_path: Any) -> 
     mock_pool = MagicMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
     mock_pool.close_session = AsyncMock()
+    mock_pool.sessions = MagicMock()
+    mock_pool.sessions.get_or_create_session_agent = AsyncMock()
+    mock_pool.event_bus = None
 
     mock_registry = MagicMock()
     mock_registry.exists = MagicMock(return_value=True)
 
     child_ids = iter(["child_translator", "child_reviewer"])
+
+    def _make_child_state() -> Any:
+        state = MagicMock()
+        state.session_id = next(child_ids)
+        return state
+
+    mock_pool.create_child_session = AsyncMock(side_effect=lambda **kw: _make_child_state())
     mock_delegation = MagicMock()
     mock_delegation.create_child_session = AsyncMock(
-        side_effect=lambda *a, **kw: next(child_ids),
+        side_effect=lambda *a, **kw: next(child_ids, "child_session"),
     )
 
     lead_metadata: dict[str, Any] = {

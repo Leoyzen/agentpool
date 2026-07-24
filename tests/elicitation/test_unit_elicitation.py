@@ -36,6 +36,7 @@ from agentpool.agents.native_agent.elicitation_strategy import (
 from agentpool.sessions.models import ElicitationResumePayload, PendingDeferredCall
 from agentpool.tools import CallDeferred
 from agentpool.ui.base import InputProvider
+from agentpool.ui.elicitation import normalize_elicit_content
 
 
 # ============================================================================
@@ -1124,3 +1125,114 @@ async def test_handle_elicitation_empty_checkpoint_when_no_active_run(
     mock_checkpoint.checkpoint.assert_awaited_once()
     checkpoint_kwargs = mock_checkpoint.checkpoint.call_args.kwargs
     assert checkpoint_kwargs["message_history"] == []
+
+
+@pytest.mark.unit
+def test_normalize_elicit_content_flattens_nested_values() -> None:
+    """Nested dicts and non-string lists are serialized to JSON strings."""
+    content = {
+        "plain": "text",
+        "count": 42,
+        "enabled": True,
+        "ratio": 3.14,
+        "tags": ["a", "b"],
+        "nested": {"annotations": []},
+        "mixed_list": [1, 2, 3],
+    }
+    normalized = normalize_elicit_content(content)
+    assert normalized is not None
+    assert normalized["plain"] == "text"
+    assert normalized["count"] == 42
+    assert normalized["enabled"] is True
+    assert normalized["ratio"] == 3.14
+    assert normalized["tags"] == ["a", "b"]
+    assert normalized["nested"] == '{"annotations": []}'
+    assert normalized["mixed_list"] == "[1, 2, 3]"
+    result = ElicitResult(action="accept", content=normalized)
+    assert result.action == "accept"
+
+
+@pytest.mark.unit
+async def test_handle_elicitation_resume_payload_normalizes_nested_content(
+    agent_ctx: AgentContext, form_params: ElicitRequestFormParams
+) -> None:
+    """Resume path must not crash when payload.content contains nested dicts.
+
+    Regression for: request_comment URL-mode annotation returns content like
+    {"content": {...}} and the resume path constructs mcp.types.ElicitResult
+    directly from ElicitationResumePayload.content.
+    """
+    import asyncio
+
+    from agentpool.agents.native_agent.elicitation_bridge import (
+        ElicitationFutureRegistry,
+    )
+    from agentpool.sessions.models import ElicitationResumePayload
+
+    provider = MagicMock(spec=InputProvider)
+    provider.supports_durable_elicitation = True
+    agent_ctx.input_provider = provider
+    agent_ctx.in_mcp_callback = False
+    agent_ctx.tool_call_id = "tc-nested-1"
+
+    registry = ElicitationFutureRegistry()
+    agent_ctx.run_ctx.elicitation_registry = registry
+
+    payload = ElicitationResumePayload(
+        deferred_handle="tc-nested-1",
+        action="accept",
+        content={"content": {"annotations": ["note"]}, "score": 0.9},
+    )
+
+    async def resolve_later() -> None:
+        await asyncio.sleep(0.05)
+        registry.resolve("tc-nested-1", payload)
+
+    task = asyncio.create_task(resolve_later())
+    result = await agent_ctx.handle_elicitation(form_params)
+    await task
+
+    assert result.action == "accept"
+    assert result.content is not None
+    assert result.content["content"] == '{"annotations": ["note"]}'
+    assert result.content["score"] == 0.9
+
+
+@pytest.mark.unit
+def test_normalize_elicit_content_none_returns_none() -> None:
+    """normalize_elicit_content(None) returns None."""
+    assert normalize_elicit_content(None) is None
+
+
+@pytest.mark.unit
+def test_normalize_elicit_content_empty_dict() -> None:
+    """normalize_elicit_content({}) returns {} and validates."""
+    normalized = normalize_elicit_content({})
+    assert normalized == {}
+    result = ElicitResult(action="accept", content=normalized)
+    assert result.content == {}
+
+
+@pytest.mark.unit
+def test_normalize_elicit_content_none_values_become_empty_string() -> None:
+    """None values in content are converted to empty strings.
+
+    The MCP wire protocol (Zod schema) rejects ``null`` even though the
+    Python SDK type annotation permits it.  This is a regression test for
+    the ``content._meta: null`` / ``content.content: null`` validation
+    error from the ACP client.
+    """
+    content = {
+        "_meta": None,
+        "content": None,
+        "text": "hello",
+    }
+    normalized = normalize_elicit_content(content)
+    assert normalized is not None
+    assert normalized["_meta"] == ""
+    assert normalized["content"] == ""
+    assert normalized["text"] == "hello"
+    result = ElicitResult(action="accept", content=normalized)
+    assert result.content is not None
+    assert result.content["_meta"] == ""
+    assert result.content["content"] == ""

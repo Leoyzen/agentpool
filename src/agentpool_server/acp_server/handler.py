@@ -375,10 +375,12 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         else:
             match response.action:
                 case "accept":
+                    from agentpool.ui.elicitation import normalize_elicit_content
+
                     payload = ElicitationResumePayload(
                         deferred_handle=event.deferred_handle,
                         action="accept",
-                        content=response.content or {},
+                        content=normalize_elicit_content(response.content),
                     )
                 case "decline":
                     payload = ElicitationResumePayload(

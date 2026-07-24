@@ -454,6 +454,26 @@ def _make_run_context(
 
     cfg = config or _make_enabled_config(base_dir=base_dir)
 
+    # Ensure mock pool has needed async methods for _create_member_session.
+    # Only set up if not already configured (avoids overriding explicit test setups).
+    if session_pool is not None:
+        if not isinstance(session_pool.create_child_session, AsyncMock):
+            _child_state = MagicMock()
+            _child_state.session_id = "child_session"
+            session_pool.create_child_session = AsyncMock(return_value=_child_state)
+        if not isinstance(
+            getattr(session_pool.sessions, "get_or_create_session_agent", None),
+            AsyncMock,
+        ):
+            session_pool.sessions = MagicMock()
+            session_pool.sessions.get_or_create_session_agent = AsyncMock()
+        # event_bus: set to None unless explicitly configured as MagicMock with publish
+        _eb = session_pool.event_bus
+        if not (
+            isinstance(_eb, MagicMock) and isinstance(getattr(_eb, "publish", None), AsyncMock)
+        ):
+            session_pool.event_bus = None
+
     agent_ctx = MagicMock(spec=AgentContext)
     agent_ctx.session.metadata = metadata if metadata is not None else _make_session_metadata()
     agent_ctx.host.session_pool = session_pool
@@ -515,6 +535,13 @@ def _make_add_member_setup(
     mock_pool = MagicMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
     mock_pool.close_session = AsyncMock()
+    # Mock create_child_session to return a state with session_id
+    mock_child_state = MagicMock()
+    mock_child_state.session_id = "child_session_new"
+    mock_pool.create_child_session = AsyncMock(return_value=mock_child_state)
+    mock_pool.sessions = MagicMock()
+    mock_pool.sessions.get_or_create_session_agent = AsyncMock()
+    mock_pool.event_bus = None  # Skip SpawnSessionStart emission in unit tests
     mock_delegation = MagicMock()
     mock_delegation.create_child_session = AsyncMock(return_value="child_session_new")
     ctx = _make_run_context(
@@ -1350,7 +1377,7 @@ async def test_team_create_success(tmp_path: Any) -> None:
 
     assert "Team 'my_team' created with 2 members" in result.return_value
     assert "team_id=" in result.return_value
-    assert mock_delegation.create_child_session.await_count == 2
+    assert mock_pool.create_child_session.await_count == 2
     assert mock_pool.send_message.await_count == 2
 
 
@@ -1691,7 +1718,7 @@ async def test_team_create_uses_config_default_members(tmp_path: Any) -> None:
     result = await cap.team_create(ctx, "my_team", [])
 
     assert "Team 'my_team' created with 2 members" in result.return_value
-    assert mock_delegation.create_child_session.await_count == 2
+    assert mock_pool.create_child_session.await_count == 2
     assert mock_pool.send_message.await_count == 2
 
 
@@ -1753,6 +1780,10 @@ async def test_team_create_empty_members_no_defaults(tmp_path: Any) -> None:
     mock_registry.exists = MagicMock(return_value=True)
     mock_pool = MagicMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
+    mock_pool.create_child_session = AsyncMock()
+    mock_pool.sessions = MagicMock()
+    mock_pool.sessions.get_or_create_session_agent = AsyncMock()
+    mock_pool.event_bus = None
     mock_delegation = MagicMock()
     mock_delegation.create_child_session = AsyncMock(return_value="child_001")
     ctx = _make_run_context(
@@ -1768,7 +1799,7 @@ async def test_team_create_empty_members_no_defaults(tmp_path: Any) -> None:
     result = await cap.team_create(ctx, "empty_team", [])
 
     assert "Team 'empty_team' created with 0 members" in result.return_value
-    assert mock_delegation.create_child_session.await_count == 0
+    assert mock_pool.create_child_session.await_count == 0
 
 
 # ---- prepare_tools role-based filtering tests ----
@@ -2002,12 +2033,12 @@ async def test_team_add_member_success(tmp_path: Any) -> None:
     When: team_add_member is called with a valid agent name.
     Then: returns success message and creates child session.
     """
-    cap, ctx, mock_pool, mock_delegation, _mock_registry = _make_add_member_setup(tmp_path)
+    cap, ctx, mock_pool, _mock_delegation, _mock_registry = _make_add_member_setup(tmp_path)
 
     result = await cap.team_add_member(ctx, "new_member", "editor")
 
     assert result.return_value == "Member 'new_member' added to team (lifecycle=persistent)"
-    mock_delegation.create_child_session.assert_awaited_once()
+    mock_pool.create_child_session.assert_awaited_once()
     # 1 initial prompt to new_member + 2 broadcast notifications to
     # existing members (translator_agent, reviewer_agent) since
     # broadcast_on_create defaults to True.
@@ -2463,6 +2494,12 @@ async def test_team_status_shows_added_member_no_team_mode_config(tmp_path: Any)
     mock_registry.exists = MagicMock(return_value=True)
     mock_pool = MagicMock()
     mock_pool.send_message = AsyncMock(return_value="msg_id")
+    mock_child_state = MagicMock()
+    mock_child_state.session_id = "child_new"
+    mock_pool.create_child_session = AsyncMock(return_value=mock_child_state)
+    mock_pool.sessions = MagicMock()
+    mock_pool.sessions.get_or_create_session_agent = AsyncMock()
+    mock_pool.event_bus = None
     mock_delegation = MagicMock()
     mock_delegation.create_child_session = AsyncMock(return_value="child_new")
     metadata = _make_lead_metadata()
@@ -2552,7 +2589,11 @@ async def test_team_create_with_prompt(tmp_path: Any) -> None:
     mock_registry.exists = MagicMock(return_value=True)
     mock_pool = MagicMock()
     mock_pool.send_message = AsyncMock(return_value="msg_1")
-    mock_pool.sessions._session_agents = {}
+    mock_pool.sessions = MagicMock()
+    mock_pool.sessions.get_or_create_session_agent = AsyncMock()
+    mock_child_state = MagicMock()
+    mock_child_state.session_id = "child_001"
+    mock_pool.create_child_session = AsyncMock(return_value=mock_child_state)
     mock_pool.event_bus = MagicMock()
     mock_pool.event_bus.publish = AsyncMock()
     mock_delegation = MagicMock()

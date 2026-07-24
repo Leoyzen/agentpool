@@ -242,6 +242,10 @@ class NativeTurn(HookAwareTurn, Turn):
                     ) as agent_run:
                         if self._run_ctx._run_handle is not None:
                             self._run_ctx._run_handle.active_agent_run = agent_run
+                            # Drain steer messages that arrived before
+                            # active_agent_run was set (e.g., during
+                            # start() feedback_queue drain or race window).
+                            self._run_ctx._run_handle.drain_queued_steer_messages()
 
                         node = agent_run.next_node
 

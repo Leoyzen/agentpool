@@ -218,12 +218,42 @@ class MCPClient:
 
         This callback is registered once at connection time, but delegates to
         _current_elicitation_handler which can be swapped per tool call.
+
+        **Critical**: This method must NEVER return ``mcp.types.ElicitResult``
+        (``MCPElicitResult``). FastMCP's ``create_elicitation_callback`` wrapper
+        checks ``isinstance(result, fastmcp.client.elicitation.ElicitResult)``
+        — and since ``MCPElicitResult`` is NOT a subclass of fastmcp's
+        ``ElicitResult``, the wrapper would wrap the entire ``MCPElicitResult``
+        object as ``content``, producing ``{"content": {"_meta": null, "content": null}}``
+        on the wire. This causes Zod validation errors on the MCP server side.
         """
         from fastmcp.client.elicitation import ElicitResult
+        from mcp.types import ElicitResult as MCPElicitResult
 
         # Try current handler first (set per call_tool)
         if self._current_elicitation_handler:
-            return await self._current_elicitation_handler(message, response_type, params, context)
+            result = await self._current_elicitation_handler(
+                message, response_type, params, context
+            )
+            # Safety net: if the per-call handler accidentally returns
+            # MCPElicitResult (which is NOT fastmcp's ElicitResult),
+            # extract the content or convert to fastmcp ElicitResult
+            # before returning to fastmcp's wrapper.
+            if isinstance(result, MCPElicitResult) and not isinstance(result, ElicitResult):
+                logger.warning(
+                    "Elicitation handler returned MCPElicitResult instead of"
+                    " raw content or fastmcp ElicitResult — converting",
+                    action=result.action,
+                    content=result.content,
+                )
+                match result.action:
+                    case "accept":
+                        return result.content
+                    case "decline" | "cancel":
+                        return ElicitResult(action=result.action)
+                    case _:
+                        return ElicitResult(action="decline")
+            return result
         # No handler available - decline by default
         return ElicitResult(action="decline")
 

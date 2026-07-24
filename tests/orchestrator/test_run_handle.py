@@ -221,13 +221,18 @@ async def test_steer_with_agent_run_emits_user_message_inserted_event() -> None:
 
 @pytest.mark.unit
 async def test_steer_while_running_without_agent_run() -> None:
-    """Given a running RunHandle without active_agent_run, steer() queues to run_ctx."""
+    """Given a running RunHandle without active_agent_run, steer() re-enqueues to feedback_queue."""
     handle = _make_run_handle()
     handle.active_agent_run = None
 
     result = handle.steer("queue me")
     assert result is not None
-    assert "queue me" in handle.run_ctx.queued_steer_messages
+    # With fix A, steer() fallback writes to session.feedback_queue (not queued_steer_messages)
+    assert handle.session is not None
+    assert not handle.session.feedback_queue.empty()
+    fb = handle.session.feedback_queue.get_nowait()
+    assert fb.content == "queue me"
+    assert fb.is_steer is True
 
 
 @pytest.mark.unit
@@ -267,13 +272,18 @@ async def test_steer_with_list_content_blocks() -> None:
 
 @pytest.mark.unit
 async def test_steer_with_list_content_blocks_queued() -> None:
-    """steer() with list message and no agent_run queues content_blocks."""
+    """steer() with list message and no agent_run re-enqueues content_blocks to feedback_queue."""
     handle = _make_run_handle()
     handle.active_agent_run = None
     blocks: list[Any] = ["text", {"type": "image"}]
     result = handle.steer(blocks, message_id="list-msg-queued")
     assert result == "list-msg-queued"
-    assert blocks in handle.run_ctx.queued_steer_messages
+    # With fix A, steer() fallback writes to session.feedback_queue (not queued_steer_messages)
+    assert handle.session is not None
+    assert not handle.session.feedback_queue.empty()
+    fb = handle.session.feedback_queue.get_nowait()
+    assert fb.content_blocks == blocks
+    assert fb.is_steer is True
 
 
 # ---------------------------------------------------------------------------
@@ -1501,17 +1511,24 @@ async def test_multiple_steer_messages_drained_fifo_from_feedback_queue() -> Non
 
 @pytest.mark.unit
 async def test_empty_prompt_drains_feedback_queue_but_messages_unprocessed() -> None:
-    """Empty prompt drains feedback_queue but queued_steer_messages are never processed.
+    """Empty prompt drains feedback_queue into queued_steer_messages but no turn executes.
 
-    Known limitation: when initial_prompt is empty, start() drains
-    feedback_queue into queued_steer_messages but returns immediately
-    without executing a turn. The steer messages are technically in
-    queued_steer_messages but no turn processes them.
+    When initial_prompt is empty, start() drains feedback_queue into
+    queued_steer_messages (for the next RunHandle to pick up) but returns
+    immediately without executing a turn. The steer messages are in
+    queued_steer_messages but no turn processes them in THIS RunHandle.
 
-    This test documents the current behavior. If this is considered a bug,
-    the fix would be to either:
-    1. Not drain feedback_queue when there's no prompt, OR
-    2. Re-enqueue the messages back to feedback_queue for the next RunHandle
+    However, the messages are NOT permanently lost — they remain in
+    queued_steer_messages for this RunHandle's lifetime. If the same
+    run_ctx is reused (e.g., by SessionController chaining), a subsequent
+    turn with a non-empty prompt would drain them via
+    drain_queued_steer_messages(). In the per-prompt model, a new
+    RunHandle is created instead, so the messages in this run_ctx are
+    discarded — but the source feedback_queue was already drained.
+
+    To avoid permanent loss, the caller (SessionController) should check
+    queued_steer_messages after start() returns and re-enqueue any
+    unprocessed messages back to feedback_queue for the next RunHandle.
     """
     from agentpool.lifecycle import DirectChannel, Feedback, MemoryJournal
     from agentpool.orchestrator.session_controller import SessionState

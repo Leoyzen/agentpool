@@ -127,6 +127,13 @@ def _make_mock_pool() -> MagicMock:
     pool = MagicMock()
     pool.send_message = AsyncMock(return_value="msg_id_001")
     pool.close_session = AsyncMock()
+    # Mock create_child_session for _create_member_session path
+    mock_child_state = MagicMock()
+    mock_child_state.session_id = "child_session_001"
+    pool.create_child_session = AsyncMock(return_value=mock_child_state)
+    pool.sessions = MagicMock()
+    pool.sessions.get_or_create_session_agent = AsyncMock()
+    pool.event_bus = None  # Skip SpawnSessionStart emission in unit tests
     return pool
 
 

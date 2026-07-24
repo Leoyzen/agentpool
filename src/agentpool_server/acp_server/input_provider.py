@@ -12,6 +12,7 @@ from acp import AllowedOutcome, DeniedOutcome, PermissionOption
 from acp.utils import DEFAULT_PERMISSION_OPTIONS
 from agentpool.log import get_logger
 from agentpool.ui.base import InputProvider
+from agentpool.ui.elicitation import normalize_elicit_content
 
 
 if TYPE_CHECKING:
@@ -327,11 +328,22 @@ class ACPInputProvider(InputProvider):
     @staticmethod
     def _map_elicitation_create_response(
         response: ElicitationCreateResponse,
+        mode: Literal["form", "url"] = "form",
     ) -> types.ElicitResult:
-        """Map elicitation/create response action to ElicitResult."""
+        """Map elicitation/create response action to ElicitResult.
+
+        For URL mode, ``content`` is omitted per the MCP elicitation spec.
+        For form mode, ``content`` is normalized to the primitive-only schema
+        required by ``mcp.types.ElicitResult``.
+        """
         match response.action:
             case "accept":
-                return types.ElicitResult(action="accept", content=response.content or {})
+                if mode == "url":
+                    return types.ElicitResult(action="accept")
+                return types.ElicitResult(
+                    action="accept",
+                    content=normalize_elicit_content(response.content) or {},
+                )
             case "decline":
                 return types.ElicitResult(action="decline")
             case "cancel":
@@ -397,7 +409,7 @@ class ACPInputProvider(InputProvider):
                 url=params.url,
                 elicitation_id=elicit_id,
             )
-            return self._map_elicitation_create_response(response)
+            return self._map_elicitation_create_response(response, mode="url")
 
         # Fallback: request_permission
         tool_call_id = f"elicit_url_{elicit_id}"
@@ -440,7 +452,7 @@ class ACPInputProvider(InputProvider):
                 mode="form",
                 requested_schema=schema,
             )
-            return self._map_elicitation_create_response(response)
+            return self._map_elicitation_create_response(response, mode="form")
         return await self._get_form_elicitation_fallback(params, schema)
 
     async def _get_form_elicitation_fallback(
